@@ -1,7 +1,19 @@
 
 
+import os.path
+import requests
+import json
+import random
+import unicodedata
+import datetime
+from time import sleep
+from scipy.stats import poisson, skellam
+from scipy.optimize import fsolve
+import numpy as np
+import statsapi as mlb
+from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 
-with open('scrapeops_cred.txt', 'r') as infile:
+with open('./creds/scrapeops_cred.json', 'r') as infile:
     creds = json.load(infile)
 apikey = creds['apikey']
 scrapeops_logger = ScrapeOpsRequests(
