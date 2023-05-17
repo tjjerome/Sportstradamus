@@ -14,15 +14,11 @@ TODO:
 
 import os.path
 import pandas as pd
-import requests
 import numpy as np
-import unicodedata
 import datetime
 import traceback
-import json
 import pickle
 import random
-import pdb
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
@@ -30,13 +26,11 @@ from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
 from time import sleep
 from scipy.stats import poisson, skellam
-from scipy.optimize import fsolve
 import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
-
+from helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
 
 
 
