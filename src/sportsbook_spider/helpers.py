@@ -111,3 +111,12 @@ mlb_pitchers['LA'] = mlb_pitchers.get('LAD')
 mlb_pitchers['ANA'] = mlb_pitchers.get('LAA')
 mlb_pitchers['ARI'] = mlb_pitchers.get('AZ')
 mlb_pitchers['WAS'] = mlb_pitchers.get('WSH')
+
+
+def get_loc(stats):
+    sat = 0.035
+    baseline = np.array([0, 0.5, 0.5, 0.5, 0])
+    stats[stats == -1000] = baseline[stats == -1000]
+    weights = np.array([0.75, 0.9, 0.5, 1, 0.75])
+    weights = sat/np.dot(np.array([.1, .2, .1, .1, .06]), weights) * weights
+    return np.clip(np.dot(weights, (stats-baseline)), -sat, sat)
