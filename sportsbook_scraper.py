@@ -9,15 +9,14 @@ Original file is located at
 TODO:
 
 
-*   Tune "Good Bet" flag
+*   Integrate Feedback
+*   No line movement odds
 *   Expand combo stats
 *   1H, 2H, and Live Bets
 *   Tennis/Golf/Racing
 *   Add eSports (maybe from GGBET?)
 *   Move to Google Apps Script
 """
-
-#!pip install MLB-StatsAPI nba_api nfl_data_py
 
 import os.path
 import pandas as pd
@@ -44,82 +43,36 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 
-# Authorize the gspread API
-SCOPES = [
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/drive.file'
-]
-creds = None
-# The file token.json stores the user's access and refresh tokens, and is
-# created automatically when the authorization flow completes for the first
-# time.
-if os.path.exists('token.json'):
-    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-# If there are no (valid) credentials available, let the user log in.
-if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'credentials.json', SCOPES)
-        creds = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open('token.json', 'w') as token:
-        token.write(creds.to_json())
-gc = gspread.authorize(creds)
+
+with open('nordvpn_cred.txt', 'r') as infile:
+    creds = json.load(infile)
+apikey = creds['apikey']
+scrapeops_logger = ScrapeOpsRequests(
+    scrapeops_api_key=apikey,
+    spider_name='Sportsbooks',
+    job_name='Odds'
+)
+
+requests = scrapeops_logger.RequestsWrapper()
 
 
 class Scrape:
-    def __init__(self, credfile):
-        with open(credfile, 'r') as infile:
-            self.creds = json.load(infile)
-        apikey = self.creds['apikey']
-        user = self.creds['user']
-        passw = self.creds['passw']
+    def __init__(self, apikey):
         self.headers = requests.get(
             f"http://headers.scrapeops.io/v1/browser-headers?api_key={apikey}").json()['result']
-        self.proxies = [
-            {
-                'http': f'{user}:{passw}@atlanta.us.socks.nordhold.net:1080',
-                'https': f'{user}:{passw}@atlanta.us.socks.nordhold.net:1080'},
-            {
-                'http': f'{user}:{passw}@dallas.us.socks.nordhold.net:1080',
-                'https': f'{user}:{passw}@dallas.us.socks.nordhold.net:1080'},
-            {
-                'http': f'{user}:{passw}@los-angeles.us.socks.nordhold.net:1080',
-                'https': f'{user}:{passw}@los-angeles.us.socks.nordhold.net:1080'},
-            {
-                'http': f'{user}:{passw}@us.socks.nordhold.net:1080',
-                'https': f'{user}:{passw}@us.socks.nordhold.net:1080'}]
 
         self.header = random.choice(self.headers)
-        self.proxy = random.choice(self.proxies)
 
-        self.scrapeops_logger = ScrapeOpsRequests(
-            scrapeops_api_key=apikey,
-            spider_name='Sportsbooks',
-            job_name='Odds'
-        )
-
-        self.requests = self.scrapeops_logger.RequestsWrapper()
-        self.h_weights = np.ones([1, len(self.headers)])
-        self.p_weights = np.ones([1, len(self.proxies)])
+        self.weights = np.ones([len(self.headers)])
 
     def _new_headers(self):
         for i in range(len(self.headers)):
             if self.headers[i] == self.header:
-                self.h_weights[i] = 0
+                self.weights[i] = 0
             else:
-                self.h_weights[i] += 1
+                self.weights[i] += 1
 
-        for i in range(len(self.proxies)):
-            if self.proxies[i] == self.proxy:
-                self.p_weights[i] = 0
-            else:
-                self.p_weights[i] += 1
-
-        self.header = random.choices(self.headers, weights=self.h_weights)[0]
-        self.proxy = random.choices(self.proxies, weights=self.p_weights)[0]
+        self.header = random.choices(self.headers, weights=self.weights)[0]
 
     def get(self, url, max_attempts=5, headers={}, params={}):
         for i in range(1, max_attempts+1):
@@ -127,22 +80,22 @@ class Scrape:
                 self._new_headers()
                 sleep(random.uniform(3, 5))
             try:
-                response = self.requests.get(
-                    url, headers=self.header | headers, params=params, proxies=self.proxy)
+                response = requests.get(
+                    url, headers=self.header | headers, params=params)
                 if response.status_code == 200:
                     return response.json()
                 else:
                     print("Attempt " + str(i) +
                           ", Error " + str(response.status_code))
-            except:
-                pdb.set_trace()
-                print("Attempt " + str(i) + ", Proxy Login Error")
+            except Exception as exc:
+                print("Attempt " + str(i) + ",")
+                print(exc)
 
         print("Max Attempts Reached")
         return None
 
 
-requests = Scrape('nordvpn_cred.txt')
+scraper = Scrape(apikey)
 
 
 def remove_accents(input_str):
@@ -156,6 +109,12 @@ def odds_to_prob(odds):
     else:
         odds = -odds
         return odds/(odds+100)
+
+
+def get_ev(line, over, under):
+    line = np.ceil(float(line) - 1)
+    p = under/(over+under)
+    return fsolve(lambda x: p - poisson.cdf(line, x), line)[0]
 
 
 mlb_games = mlb.schedule(start_date=datetime.date.today(),
@@ -193,15 +152,14 @@ def get_dk(events, categories):
     markets = []
     games = {}
     for cat in tqdm(categories):
-        dk_api = requests.get(
+        dk_api = scraper.get(
             f"https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/{events}/categories/{cat}?format=json")
 
         if not dk_api:
-            print(str(len(players)) + " lines found")
-            return players
+            continue
 
         if 'errorStatus' in dk_api:
-            # print(dk_api['errorStatus']['developerMessage'])
+            print(dk_api['errorStatus']['developerMessage'])
             continue
 
         for i in dk_api['eventGroup']['events']:
@@ -216,7 +174,7 @@ def get_dk(events, categories):
             subcategoryIds.append(i['subcategoryId'])
 
         for ids in subcategoryIds:
-            dk_api = requests.get(
+            dk_api = scraper.get(
                 f"https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/{events}/categories/{cat}/subcategories/{ids}?format=json")
             if not dk_api:
                 #print(str(len(players)) + " lines found")
@@ -253,15 +211,11 @@ def get_dk(events, categories):
                             try:
                                 outcomes = sorted(
                                     k['outcomes'][:2], key=lambda x: x['label'])
-                                line = np.ceil(outcomes[1]['line'] - 1)
-                                juicer = 1 / \
-                                    outcomes[0]['oddsDecimal'] + \
-                                    1/outcomes[1]['oddsDecimal']
-                                p = 1/outcomes[1]['oddsDecimal']/juicer
-                                v = fsolve(lambda x: p -
-                                           poisson.cdf(line, x), line)
+                                line = outcomes[1]['line']
+                                over = 1 / outcomes[0]['oddsDecimal']
+                                under = 1 / outcomes[1]['oddsDecimal']
                                 newline = {
-                                    "EV": v[0],
+                                    "EV": get_ev(line, over, under),
                                     "Line": str(outcomes[1]['line']),
                                     "Over": str(outcomes[0]['oddsAmerican']),
                                     "Under": str(outcomes[1]['oddsAmerican'])
@@ -290,7 +244,7 @@ def get_fd(sport, tabs):
         ("customPageId", sport)
     ]
 
-    response = requests.get(api_url.format(
+    response = scraper.get(api_url.format(
         "content-managed-page"), params={key: value for key, value in params})
     if not response:
         print("No lines found")
@@ -311,7 +265,7 @@ def get_fd(sport, tabs):
                 ("tab", tab)
             ]
 
-            response = requests.get(api_url.format(
+            response = scraper.get(api_url.format(
                 "event-page"), params={key: value for key, value in params+new_params})
 
             if not response:
@@ -355,24 +309,22 @@ def get_fd(sport, tabs):
                     outcomes = sorted(k['runners'][:2],
                                       key=lambda x: x['runnerName'])
                     if outcomes[1]['handicap'] == 0:
-                        trueline = [float(s) for s in market.split(
+                        line = [float(s) for s in market.split(
                             " ") if s.replace('.', '').isdigit()]
-                        if trueline:
-                            trueline = trueline[-1]
+                        if line:
+                            line = line[-1]
                         else:
                             continue
                     else:
-                        trueline = outcomes[1]['handicap']
+                        line = outcomes[1]['handicap']
 
-                    line = np.ceil(trueline - 1)
-                    juicer = 1/outcomes[0]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds'] + \
-                        1/outcomes[1]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds']
-                    p = 1 / \
-                        outcomes[1]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds']/juicer
-                    v = fsolve(lambda x: p - poisson.cdf(line, x), line)
+                    over = 1 / \
+                        outcomes[0]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds']
+                    under = 1 / \
+                        outcomes[1]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds']
                     newline = {
-                        "EV": v[0],
-                        "Line": str(trueline),
+                        "EV": get_ev(line, over, under),
+                        "Line": str(line),
                         "Over": str(outcomes[0]['winRunnerOdds']['americanDisplayOdds']['americanOdds']),
                         "Under": str(outcomes[1]['winRunnerOdds']['americanDisplayOdds']['americanOdds'])
                     }
@@ -388,14 +340,23 @@ def get_fd(sport, tabs):
 def get_pinnacle(league):
     header = {
         "X-API-KEY": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R"
-        # "X-Device-UUID": "a673806f-f807446c-5055a9e2-f0fd065e"
+    }
+    params = {
+        'api_key': apikey,
+        'url': f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight",
+        'optimize_request': True,
+        'keep_headers': True
     }
 
-    odds = requests.get(
-        f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight", headers=header)
+    try:
+        odds = requests.get("https://proxy.scrapeops.io/v1/",
+                            headers=header | scraper.header, params=params).json()
+    except:
+        print("No lines found for league: " + str(league))
+        return {}
 
-    if not odds:
-        print("No lines found")
+    if not type(odds) == list or not type(odds[0]) == dict:
+        print("No lines found for league: " + str(league))
         return {}
 
     lines = {}
@@ -421,15 +382,18 @@ def get_pinnacle(league):
                     'Line': price['points']
                 }
 
-    api = requests.get(
-        f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/matchups", headers=header)
+    params['url'] = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/matchups"
 
-    if not api:
+    try:
+        sleep(random.uniform(3, 5))
+        api = requests.get("https://proxy.scrapeops.io/v1/",
+                           headers=header | scraper.header, params=params).json()
+        markets = [line for line in api if line.get(
+            'special', {'category': ''}).get('category') == 'Player Props']
+    except:
         print("No lines found for league: " + str(league))
         return {}
 
-    markets = [line for line in api if line.get(
-        'special', {'category': ''}).get('category') == 'Player Props']
     players = {}
     for market in tqdm(markets):
         player = market['special']['description']
@@ -442,15 +406,11 @@ def get_pinnacle(league):
             outcomes = sorted(market['participants']
                               [:2], key=lambda x: x['name'])
             line = lines[market['id']]['s;0;ou'][outcomes[1]['id']]['Line']
-            line = np.ceil(line - 1)
             prices = [odds_to_prob(
                 lines[market['id']]['s;0;ou'][participant['id']]['Price']) for participant in outcomes]
-            juicer = prices[0] + prices[1]
-            p = prices[1]/juicer
-            v = fsolve(lambda x: p - poisson.cdf(line, x), line)
             newline = {
-                "EV": v[0],
-                "Line": str(lines[market['id']]['s;0;ou'][outcomes[1]['id']]['Line']),
+                "EV": get_ev(line, prices[0], prices[1]),
+                "Line": str(line),
                 "Over": str(lines[market['id']]['s;0;ou'][outcomes[0]['id']]['Price']),
                 "Under": str(lines[market['id']]['s;0;ou'][outcomes[1]['id']]['Price'])
             }
@@ -486,15 +446,11 @@ def get_pinnacle(league):
                         players[player] = {}
 
                     line = lines[game['id']]['s;3;ou;0.5']['Under']['Line']
-                    line = np.ceil(line - 1)
                     prices = [odds_to_prob(lines[game['id']]['s;3;ou;0.5']['Over']['Price']), odds_to_prob(
                         lines[game['id']]['s;3;ou;0.5']['Under']['Price'])]
-                    juicer = prices[0] + prices[1]
-                    p = prices[1]/juicer
-                    v = fsolve(lambda x: p - poisson.cdf(line, x), line)
                     newline = {
-                        "EV": v[0],
-                        "Line": str(lines[game['id']]['s;3;ou;0.5']['Under']['Line']),
+                        "EV": get_ev(line, prices[0], prices[1]),
+                        "Line": str(line),
                         "Over": str(lines[game['id']]['s;3;ou;0.5']['Over']['Price']),
                         "Under": str(lines[game['id']]['s;3;ou;0.5']['Under']['Price'])
                     }
@@ -505,39 +461,88 @@ def get_pinnacle(league):
 
     return players
 
+# Get Caesar's lines
+
+
+def get_caesars(sport, league):
+    caesars = f"https://api.americanwagering.com/regions/us/locations/mi/brands/czr/sb/v3/sports/{sport}/events/schedule/?competitionIds={league}&content-type=json"
+    params = {
+        'api_key': apikey,
+        'url': caesars,
+        'optimize_request': True
+    }
+
+    marketSwap = {
+        'Points + Assists + Rebounds': 'Pts + Rebs + Asts',
+        '3pt Field Goals': '3-PT Made',
+        'Bases': 'Total Bases'
+    }
+
+    try:
+        api = requests.get("https://proxy.scrapeops.io/v1/",
+                           params=params).json()
+
+        gameIds = [game['id'] for game in api['competitions'][0]
+                   ['events'] if game['type'] == 'MATCH' and not game['started']
+                   and game['marketCountActivePreMatch'] > 100]
+
+    except Exception as exc:
+        print(exc)
+        return {}
+
+    players = {}
+    for id in tqdm(gameIds):
+        caesars = f"https://api.americanwagering.com/regions/us/locations/mi/brands/czr/sb/v3/events/{id}?content-type=json"
+        params['url'] = caesars
+        sleep(random.uniform(5, 10))
+        try:
+            api = requests.get(
+                "https://proxy.scrapeops.io/v1/", params=params).json()
+            markets = [market for market in api['markets'] if market.get('active') and (market.get('metadata', {}).get(
+                'marketType', {}) == 'PLAYERLINEBASED' or market.get('displayName') == 'Run In 1st Inning?')]
+
+        except:
+            print("Unable to parse game")
+            continue
+
+        for market in tqdm(markets):
+            if market.get('displayName') == 'Run In 1st Inning?':
+                marketName = "1st Inning Runs Allowed"
+                line = 0.5
+                player = " + ".join([mlb_pitchers.get(team['teamData']['teamAbbreviation'], '')
+                                     for team in api['markets'][0]['selections']])
+            else:
+                player = remove_accents(market['metadata']['player'])
+                marketName = market['displayName'].replace(
+                    '|', '').replace("Total", "").replace("Player", "").replace("Batter", "").strip()
+                marketName = marketSwap.get(marketName, marketName)
+                if marketName == 'Props':
+                    marketName = market.get('metadata', {}).get(
+                        'marketCategoryName')
+                line = market['line']
+
+            if not player in players:
+                players[player] = {}
+
+            over = 1/market['selections'][0]['price']['d']
+            under = 1/market['selections'][1]['price']['d']
+            ev = get_ev(line, over, under)
+            newline = {
+                'EV': ev,
+                'Line': line,
+                'Over': market['selections'][0]['price']['a'],
+                'Under': market['selections'][1]['price']['a'],
+            }
+            players[player][marketName] = newline
+
+    return players
+
 # Get current PrizePicks lines
 
 
 def get_pp():
     offers = []
-    count = 0
     """
-    while True:
-        proxy = random.choice(proxies)
-        try:
-            leagues = requests.get(
-                'https://api.prizepicks.com/leagues', headers=random.choice(headers), proxies=proxy)
-            if leagues.status_code == 200:
-                leagues = leagues.json()
-                break
-            else:
-                count += 1
-                print("Attempt " + str(count) +
-                      ": PrizePicks Error " + str(leagues.status_code))
-                if count == 5:
-                    print("Could not receive offer data")
-                    return []
-                else:
-                    sleep(random.uniform(3, 5))
-        except:
-            count += 1
-            print("Attempt " + str(count) + ": Proxy Login Error")
-            if count == 5:
-                print("Could not receive offer data")
-                return []
-            else:
-                sleep(random.uniform(3, 5))
-
     leagues = [i['id'] for i in leagues['data']
                if i['attributes']['projections_count'] > 0]
    """
@@ -548,16 +553,19 @@ def get_pp():
         params = {
             'api_key': '82ccbf28-ddd6-4e37-b3a1-0097b10fd412',
             'url': f"https://api.prizepicks.com/projections?league_id={l}",
-            'bypass': 'cloudflare'
+            'optimize_request': True
         }
 
-        api = requests.get("https://proxy.scrapeops.io/v1/", params=params)
-
-        if not api:
+        try:
+            api = requests.get("https://proxy.scrapeops.io/v1/",
+                               params=params).json()
+            players = api['included']
+            lines = api['data']
+        except:
             continue
 
         player_ids = {}
-        for p in api['included']:
+        for p in players:
             if p['type'] == 'new_player':
                 player_ids[p['id']] = {
                     'Name': p['attributes']['name'].replace('\t', ''),
@@ -567,7 +575,7 @@ def get_pp():
                 league = p['attributes']['name']
 
         print("Getting offers for " + league)
-        for o in tqdm(api['data']):
+        for o in tqdm(lines):
             n = {
                 'Player': remove_accents(player_ids[o['relationships']['new_player']['data']['id']]['Name']),
                 'League': league,
@@ -587,7 +595,7 @@ def get_pp():
 
 
 def get_ud():
-    teams = requests.get(
+    teams = scraper.get(
         'https://stats.underdogfantasy.com/v1/teams')
 
     if not teams:
@@ -599,7 +607,7 @@ def get_ud():
     for i in teams['teams']:
         team_ids[i['id']] = i['abbr']
 
-    api = requests.get(
+    api = scraper.get(
         'https://api.underdogfantasy.com/beta/v3/over_under_lines')
     if not api:
         print(str(len(offers)) + " offers found")
@@ -652,7 +660,7 @@ def get_ud():
         }
         offers.append(n)
 
-    rivals = requests.get(
+    rivals = scraper.get(
         'https://api.underdogfantasy.com/beta/v3/rival_lines')
 
     if not rivals:
@@ -714,9 +722,80 @@ def get_ud():
     print(str(len(offers)) + " offers found")
     return offers
 
+# Get Thrive Lines
+
+
+def get_thrive():
+    params = {
+        'api_key': apikey,
+        'url': "https://api.thrivefantasy.com/houseProp/upcomingHouseProps",
+        'optimize_request': True,
+        'keep_headers': True
+    }
+    payload = {"currentPage": 1, "currentSize": 100, "half": 0,
+               "Latitude": "29.5908265", "Longitude": "-95.1381594"}
+    header = {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
+              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCRMOGxMaTlUR2REVXZvdE9OTWhSaGxPbWZJc1ptaWRTdGFlZkxiU1ZZTkF4TVBQQTB1Q0ZQLiIsImNyZWF0ZWQiOjE2ODQwNzkwNzAyODgsImV4cCI6MTY4NDY4Mzg3MH0.GLlJuz0fdh0MsrF1IOQsAW47JflfoSSlSRgyo2bQPe-u6b7zZ7AJBLPeKJZCPKUPsrYWsjgyA3fIKgs2bOQtpA'}
+    print("Getting Thrive Lines")
+    try:
+        api = requests.post("https://proxy.scrapeops.io/v1/", params=params,
+                            headers=header | scraper.header, json=payload).json()
+    except Exception as exc:
+        print(id)
+        print(exc)
+
+    if api['success']:
+        lines = api['response']['data']
+    else:
+        return []
+
+    offers = []
+    for line in tqdm(lines):
+        o = line.get('contestProp')
+        n = {
+            'Player': remove_accents(" ".join([o['player1']['firstName'], o['player1']['lastName']])),
+            'League': o['player1']['leagueType'],
+            'Team': o['player1']['teamAbbr'],
+            'Market': " + ".join(o['player1']['propParameters']),
+            'Line': float(o['propValue']),
+            'Opponent': o['team2Abbr']
+        }
+        if n['League'] == 'HOCKEY':
+            n['League'] = 'NHL'
+
+        offers.append(n)
+
+    print(str(len(offers)) + " offers found")
+    return offers
+
+
+# Authorize the gspread API
+SCOPES = [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/drive.file'
+]
+creds = None
+# The file token.json stores the user's access and refresh tokens, and is
+# created automatically when the authorization flow completes for the first
+# time.
+if os.path.exists('token.json'):
+    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+# If there are no (valid) credentials available, let the user log in.
+if not creds or not creds.valid:
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    else:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'credentials.json', SCOPES)
+        creds = flow.run_local_server(port=0)
+    # Save the credentials for the next run
+    with open('token.json', 'w') as token:
+        token.write(creds.to_json())
+gc = gspread.authorize(creds)
+
 
 """"
-Start gathering sprotsbook data
+Start gathering sportsbook data
 """
 print("Getting DraftKings MLB lines")
 dk_data = get_dk(84240, [743, 1024, 1031])  # MLB
@@ -745,6 +824,25 @@ pin_data.update(get_pinnacle(487))  # NBA
 print("Getting Pinnacle NHL lines")
 pin_data.update(get_pinnacle(1456))  # NHL
 print(str(len(pin_data)) + " offers found")
+
+csb_data = {}
+print("Getting Caesars MLB Lines")
+sport = "baseball"
+league = "04f90892-3afa-4e84-acce-5b89f151063d"
+csb_data.update(get_caesars(sport, league))
+print("Getting Caesars NBA Lines")
+sport = "basketball"
+league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+csb_data.update(get_caesars(sport, league))
+print("Getting Caesars NHL Lines")
+sport = "icehockey"
+league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+csb_data.update(get_caesars(sport, league))
+print("Getting Caesars NFL Lines")
+#sport = "americanfootball"
+#league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+#csb_data.update(get_caesars(sport, league))
+print(str(len(csb_data)) + " offers found")
 
 """
 Start gathering player stats
@@ -838,7 +936,7 @@ def get_nba_stats(player, opponent, market, line):
         if not player_games:
             return np.ones(5) * -1000
         last10avg = (np.mean([game[market]
-                     for game in player_games][:10]) - line)/line
+                              for game in player_games][:10]) - line)/line
         made_line = [int(game[market] > line) for game in player_games]
         last5 = np.mean(made_line[:5])
         seasontodate = np.mean(made_line)
@@ -1043,7 +1141,7 @@ def get_mlb_stats(player, opponent, market, line):
         if not player_games:
             return np.ones(5) * -1000
         last10avg = (np.mean([game[market]
-                     for game in player_games][-10:])-line)/line
+                              for game in player_games][-10:])-line)/line
         made_line = [int(game[market] > line) for game in player_games if datetime.datetime.strptime(
             game['gameId'][:10], "%Y/%m/%d") >= season_start]
         last5 = np.mean(made_line[-5:])
@@ -1058,7 +1156,7 @@ def get_mlb_stats(player, opponent, market, line):
             headtohead = [int(game[market] > line)
                           for game in player_games if game['opponent'] == opponent]
             dvp = np.mean([game[market] for game in mlb_data['gamelog']
-                          if game['starting pitcher'] and game['opponent'] == opponent])
+                           if game['starting pitcher'] and game['opponent'] == opponent])
             leagueavg = np.mean(
                 [game[market] for game in mlb_data['gamelog'] if game['starting pitcher']])
 
@@ -1066,7 +1164,7 @@ def get_mlb_stats(player, opponent, market, line):
             headtohead = [int(game[market] > line)
                           for game in player_games if game['opponent pitcher'] == pitcher]
             dvp = np.mean([game[market] for game in mlb_data['gamelog']
-                          if game['starting batter'] and game['opponent pitcher'] == pitcher])
+                           if game['starting batter'] and game['opponent pitcher'] == pitcher])
             leagueavg = np.mean(
                 [game[market] for game in mlb_data['gamelog'] if game['starting batter']])
 
@@ -1095,7 +1193,7 @@ params = {
     'factCayenneExp': 'gamesPlayed>=1',
     'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+nhl_skater_data[-1]['gameDate']+'"'
 }
-nhl_request_data = requests.get(
+nhl_request_data = scraper.get(
     'https://api.nhle.com/stats/rest/en/skater/summary', params=params)['data']
 if nhl_request_data:
     for x in nhl_skater_data[-300:]:
@@ -1106,13 +1204,13 @@ nhl_skater_data = nhl_skater_data + [{k: v for k, v in skater.items() if k in ['
 
 while nhl_request_data:
     params['start'] += 100
-    nhl_request_data = requests.get(
+    nhl_request_data = scraper.get(
         'https://api.nhle.com/stats/rest/en/skater/summary', params=params)['data']
     if not nhl_request_data and params['start'] == 10000:
         params['start'] = 0
         params['cayenneExp'] = params['cayenneExp'][:-12] + \
             '"'+nhl_skater_data[-1]['gameDate']+'"'
-        nhl_request_data = requests.get(
+        nhl_request_data = scraper.get(
             'https://api.nhle.com/stats/rest/en/skater/summary', params=params)['data']
         for x in nhl_skater_data[-300:]:
             if x['gameDate'] == nhl_skater_data[-1]['gameDate']:
@@ -1139,8 +1237,8 @@ params = {
     'factCayenneExp': 'gamesPlayed>=1',
     'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+nhl_goalie_data[-1]['gameDate']+'"'
 }
-nhl_request_data = requests.get(
-    'https://api.nhle.com/stats/rest/en/goalie/summary', params=params).json()['data']
+nhl_request_data = scraper.get(
+    'https://api.nhle.com/stats/rest/en/goalie/summary', params=params)['data']
 if nhl_request_data:
     for x in nhl_goalie_data[-50:]:
         if x['gameDate'] == nhl_goalie_data[-1]['gameDate']:
@@ -1150,14 +1248,14 @@ nhl_goalie_data = nhl_goalie_data + [{k: v for k, v in goalie.items() if k in ['
 
 while nhl_request_data:
     params['start'] += 100
-    nhl_request_data = requests.get(
-        'https://api.nhle.com/stats/rest/en/goalie/summary', params=params).json()['data']
+    nhl_request_data = scraper.get(
+        'https://api.nhle.com/stats/rest/en/goalie/summary', params=params)['data']
     if not nhl_request_data and params['start'] == 10000:
         params['start'] = 0
         params['cayenneExp'] = params['cayenneExp'][:-12] + \
             '"'+nhl_goalie_data[-1]['gameDate']+'"'
-        nhl_request_data = requests.get(
-            'https://api.nhle.com/stats/rest/en/goalie/summary', params=params).json()['data']
+        nhl_request_data = scraper.get(
+            'https://api.nhle.com/stats/rest/en/goalie/summary', params=params)['data']
         if nhl_request_data:
             for x in nhl_goalie_data[-50:]:
                 if x['gameDate'] == nhl_goalie_data[-1]['gameDate']:
@@ -1182,6 +1280,8 @@ def get_nhl_stats(player, opponent, market, line):
         market = 'points'
     elif market == 'AST':
         market = 'assists'
+    elif market == 'BLK':
+        return np.ones(5) * -1000
 
     if " + " in player:
         players = player.split(" + ")
@@ -1241,7 +1341,7 @@ def get_nhl_stats(player, opponent, market, line):
             return np.ones(5) * -1000
 
         last10avg = (np.mean([game[market]
-                     for game in player_games][-10:])-line)/line
+                              for game in player_games][-10:])-line)/line
         made_line = [int(game[market] > line) for game in player_games if datetime.datetime.strptime(
             game['gameDate'], "%Y-%m-%d") >= datetime.datetime.strptime("2022-10-07", "%Y-%m-%d")]
         headtohead = [int(game[market] > line)
@@ -1304,6 +1404,7 @@ def get_loc(stats):
 
 
 untapped_markets = []
+tapped_markets = []
 
 pp_offers = get_pp()
 
@@ -1345,6 +1446,17 @@ pp2pin = {
     'Goalie Saves': 'Saves'
 }
 
+pp2csb = {
+    'Shots On Goal': 'Shots',
+    'Pts+Rebs+Asts': 'Pts + Rebs + Asts',
+    'Hitter Strikeouts': 'Strikeouts',
+    'Pitcher Strikeouts': 'Pitching Strikeouts',
+    'Blks+Stls': 'Blocks + Steals',
+    'Pts+Asts': 'Points + Assists',
+    'Pts+Rebs': 'Points + Rebounds',
+    'Rebs+Asts': 'Rebounds + Assists'
+}
+
 pp2stats = {
     '3-PT Made': 'FG3M',
     'Points': 'PTS',
@@ -1377,6 +1489,7 @@ pp2stats = {
 dk_data['PP Key'] = pp2dk
 fd_data['PP Key'] = pp2fd
 pin_data['PP Key'] = pp2pin
+csb_data['PP Key'] = pp2csb
 
 live_bets = ["1H", "2H", "1P", "2P", "3P", "1Q",
              "2Q", "3Q", "4Q", "LIVE", "SZN", "SZN2", "SERIES"]
@@ -1390,7 +1503,9 @@ if len(pp_offers) > 0:
         try:
             v = []
             lines = []
-            for dataset in [dk_data, fd_data, pin_data]:
+            newline = {"Platform": "PrizePicks",
+                       "League": o['League'], "Market": o['Market']}
+            for dataset in [dk_data, fd_data, pin_data, csb_data]:
                 codex = dataset['PP Key']
                 offer = dataset.get(o['Player'], {o['Player']: None}).get(
                     codex.get(o['Market'], o['Market']))
@@ -1419,6 +1534,10 @@ if len(pp_offers) > 0:
                 lines.append(offer)
 
             if v:
+                tapped_markets.append(newline)
+                if newline in untapped_markets:
+                    untapped_markets.remove(newline)
+
                 v = np.mean(v)
                 line = (np.ceil(o['Line']-1), np.floor(o['Line']))
                 p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
@@ -1437,11 +1556,11 @@ if len(pp_offers) > 0:
 
                 if p[1] > p[0]:
                     o['Bet'] = 'Over'
-                    o['Prob'] = p[1]+push/3
+                    o['Prob'] = p[1]+push/2
 
                 else:
                     o['Bet'] = 'Under'
-                    o['Prob'] = p[0]+push/3
+                    o['Prob'] = p[0]+push/2
 
                 o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
                 o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
@@ -1465,10 +1584,12 @@ if len(pp_offers) > 0:
                     lines[1][o['Bet']] if lines[1] else 'N/A'
                 o['Pinnacle'] = lines[2]['Line'] + "/" + \
                     lines[2][o['Bet']] if lines[2] else 'N/A'
+                o['Caesars'] = str(lines[3]['Line']) + "/" + \
+                    str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-            else:
-                untapped_markets.append(
-                    {"Platform": "PrizePicks", "League": o['League'], "Market": o['Market']})
+            elif newline not in untapped_markets+tapped_markets:
+                untapped_markets.append(newline)
+
         except Exception as exc:
             print(o['Player'] + ", " + o["Market"])
             print(traceback.format_exc())
@@ -1505,6 +1626,11 @@ ud2pin = {
     'Pts + Rebs + Asts': 'Pts+Rebs+Asts'
 }
 
+ud2csb = {
+    'Strikeouts': 'Pitching Strikeouts',
+    '3-Pointers Made': '3-Pt Made'
+}
+
 ud2stats = {
     '3-Pointers Made': 'FG3M',
     'Points': 'PTS',
@@ -1535,6 +1661,7 @@ ud2stats = {
 dk_data['UD Key'] = ud2dk
 fd_data['UD Key'] = ud2fd
 pin_data['UD Key'] = ud2pin
+csb_data['UD Key'] = ud2csb
 
 if len(ud_offers) > 0:
 
@@ -1547,13 +1674,15 @@ if len(ud_offers) > 0:
         p = []
         try:
             market = o['Market']
+            newline = {"Platform": "Underdog",
+                       "League": o['League'], "Market": o['Market']}
             if "H2H" in market:
                 v1 = []
                 v2 = []
                 lines = []
                 market = market[4:]
                 players = o['Player'].split(" vs. ")
-                for dataset in [dk_data, fd_data, pin_data]:
+                for dataset in [dk_data, fd_data, pin_data, csb_data]:
                     codex = dataset['UD Key']
                     offer1 = dataset.get(players[0], {players[0]: None}).get(
                         codex.get(market, market))
@@ -1582,7 +1711,7 @@ if len(ud_offers) > 0:
             else:
                 v = []
                 lines = []
-                for dataset in [dk_data, fd_data, pin_data]:
+                for dataset in [dk_data, fd_data, pin_data, csb_data]:
                     codex = dataset['UD Key']
                     offer = dataset.get(o['Player'], {o['Player']: None}).get(
                         codex.get(market, market))
@@ -1598,6 +1727,10 @@ if len(ud_offers) > 0:
                     push = 1-p[1]-p[0]
 
             if p:
+                tapped_markets.append(newline)
+                if newline in untapped_markets:
+                    untapped_markets.remove(newline)
+
                 stats = np.ones(5) * -1000
                 if o['League'] == 'NBA':
                     stats = get_nba_stats(
@@ -1611,10 +1744,10 @@ if len(ud_offers) > 0:
 
                 if p[1] > p[0]:
                     o['Bet'] = 'Over'
-                    o['Prob'] = p[1]+push/3
+                    o['Prob'] = p[1]+push/2
                 else:
                     o['Bet'] = 'Under'
-                    o['Prob'] = p[0]+push/3
+                    o['Prob'] = p[0]+push/2
 
                 o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
                 o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
@@ -1638,36 +1771,228 @@ if len(ud_offers) > 0:
                     lines[1][o['Bet']] if lines[1] else 'N/A'
                 o['Pinnacle'] = lines[2]['Line'] + "/" + \
                     lines[2][o['Bet']] if lines[2] else 'N/A'
+                o['Caesars'] = str(lines[3]['Line']) + "/" + \
+                    str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-            else:
-                untapped_markets.append(
-                    {"Platform": "Underdog", "League": o['League'], "Market": o['Market']})
+            elif newline not in untapped_markets+tapped_markets:
+                untapped_markets.append(newline)
+
         except Exception as exc:
             print(o['Player'] + ", " + o["Market"])
             print(traceback.format_exc())
             print(exc)
 
-pp_df = pd.DataFrame(pp_offers).dropna().drop(
-    columns='Opponent').sort_values('Prob', ascending=False)
-ud_df = pd.DataFrame(ud_offers).dropna().drop(
-    columns='Opponent').sort_values('Prob', ascending=False)
-untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
+th_offers = get_thrive()
+
+th2dk = {
+    'ASTS': 'Assists',
+    'BASEs': 'Total Bases',
+    'BLKS': 'Blocks',
+    'GOLs + ASTs': 'Points',
+    'HITs + RBIs + RUNs': 'Hits + Runs + RBIs',
+    'Ks': 'Strikeouts',
+    'PTS': 'Points',
+    'PTS + ASTS': 'Pts + Ast',
+    'PTS + REBS': 'Pts + Reb',
+    'PTS + REBS + ASTS': 'Pts + Rebs + Ast',
+    'REBS': 'Rebounds',
+    'REBS + ASTS': 'Ast + Reb',
+    'RUNs': 'Runs Scored',
+    'SAVs': 'Saves',
+    'STLS': 'Steals'
+}
+
+th2fd = {
+    'ASTS': 'Assists',
+    'BLKS': 'Blocks',
+    'Ks': 'Strikeouts',
+    'PTS': 'Points',
+    'PTS + ASTS': 'Pts + Ast',
+    'PTS + REBS': 'Pts + Reb',
+    'PTS + REBS + ASTS': 'Pts + Reb + Ast',
+    'REBS': 'Rebounds',
+    'REBS + ASTS': 'Reb + Ast',
+    'SAVs': 'Saves',
+    'STLS': 'Steals'
+}
+
+th2pin = {
+    'ASTS': 'Assists',
+    'BASEs': 'Total Bases',
+    'GOLs + ASTs': 'Points',
+    'Ks': 'Total Strikeouts',
+    'PTS': 'Points',
+    'PTS + REBS + ASTS': 'Pts+Rebs+Asts',
+    'REBS': 'Rebounds',
+    'SAVs': 'Saves',
+    'STLS': 'Steals'
+}
+
+th2csb = {
+    'ASTS': 'Assists',
+    'BASEs': 'Total Bases',
+    'BLKS': 'Blocks',
+    'GOLs + ASTs': 'Points',
+    'Ks': 'Pitching Strikeouts',
+    'PTS': 'Points',
+    'PTS + ASTS': 'Points + Assists',
+    'PTS + REBS': 'Points + Rebounds',
+    'PTS + REBS + ASTS': 'Pts + Rebs + Asts',
+    'REBS': 'Rebounds',
+    'REBS + ASTS': 'Rebounds + Assists',
+    'SAVs': 'Saves',
+    'STLS': 'Steals'
+}
+
+th2stats = {
+    'GOLs + ASTs': 'PTS',
+    'REBS': 'REB',
+    'PTS': 'PTS',
+    'ASTS': 'AST',
+    'PTS + REBS': 'PR',
+    'PTS + ASTS': 'PA',
+    'REBS + ASTS': 'RA',
+    'PTS + REBS + ASTS': 'PRA',
+    'BLKs': 'BLK',
+    'ASTs': 'AST',
+    'HITs + RBIs + RUNs': 'hits+runs+rbi',
+    'BASEs': 'total bases',
+    'Ks': 'pitcher strikeouts',
+    'RUNs': 'runs',
+    'SAVs': 'saves',
+    'STLS': 'STL'
+}
+
+dk_data['TH Key'] = th2dk
+fd_data['TH Key'] = th2fd
+pin_data['TH Key'] = th2pin
+csb_data['TH Key'] = th2csb
+
+if len(th_offers) > 0:
+
+    print("Matching Thrive offers")
+    for o in tqdm(th_offers):
+
+        opponent = o.get('Opponent')
+        if any(substring in o['League'] for substring in live_bets):
+            o['Market'] = o['Market'] + " " + \
+                [live for live in live_bets if live in o['League']][0]
+        p = []
+        try:
+            market = o['Market']
+            newline = {"Platform": "Thrive",
+                       "League": o['League'], "Market": o['Market']}
+
+            v = []
+            lines = []
+            for dataset in [dk_data, fd_data, pin_data, csb_data]:
+                codex = dataset['TH Key']
+                offer = dataset.get(o['Player'], {o['Player']: None}).get(
+                    codex.get(market, market))
+                if offer is not None:
+                    v.append(offer['EV'])
+
+                lines.append(offer)
+
+            if v:
+                v = np.mean(v)
+                line = (np.ceil(o['Line']-1), np.floor(o['Line']))
+                p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                push = 1-p[1]-p[0]
+
+            if p:
+                tapped_markets.append(newline)
+                if newline in untapped_markets:
+                    untapped_markets.remove(newline)
+
+                stats = np.ones(5) * -1000
+                if o['League'] == 'NBA':
+                    stats = get_nba_stats(
+                        o['Player'], opponent, th2stats[market], o['Line'])
+                elif o['League'] == 'MLB':
+                    stats = get_mlb_stats(
+                        o['Player'], opponent, th2stats[market], o['Line'])
+                elif o['League'] == 'NHL':
+                    stats = get_nhl_stats(
+                        o['Player'], opponent, th2stats[market], o['Line'])
+
+                if p[1] > p[0]:
+                    o['Bet'] = 'Over'
+                    o['Prob'] = p[1]+push/2
+                else:
+                    o['Bet'] = 'Under'
+                    o['Prob'] = p[0]+push/2
+
+                o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
+                o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
+                o['Season'] = stats[2] if stats[2] != -1000 else 'N/A'
+                o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
+                o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
+
+                if o['Bet'] == 'Over':
+                    loc = get_loc(stats)
+                else:
+                    loc = -get_loc(stats)
+
+                if loc+o['Prob'] > .555:
+                    o['Good Bet'] = 'Y'
+                else:
+                    o['Good Bet'] = 'N'
+
+                o['DraftKings'] = lines[0]['Line'] + "/" + \
+                    lines[0][o['Bet']] if lines[0] else 'N/A'
+                o['FanDuel'] = lines[1]['Line'] + "/" + \
+                    lines[1][o['Bet']] if lines[1] else 'N/A'
+                o['Pinnacle'] = lines[2]['Line'] + "/" + \
+                    lines[2][o['Bet']] if lines[2] else 'N/A'
+                o['Caesars'] = str(lines[3]['Line']) + "/" + \
+                    str(lines[3][o['Bet']]) if lines[3] else 'N/A'
+
+            elif newline not in untapped_markets+tapped_markets:
+                untapped_markets.append(newline)
+
+        except Exception as exc:
+            print(o['Player'] + ", " + o["Market"])
+            print(traceback.format_exc())
+            print(exc)
 
 print("Writing to file...")
+if len(pp_offers) > 0:
+    pp_df = pd.DataFrame(pp_offers).dropna().drop(
+        columns='Opponent').sort_values('Prob', ascending=False)
+    wks = gc.open("Sports Betting").worksheet("PrizePicks")
+    wks.clear()
+    wks.update([pp_df.columns.values.tolist()] + pp_df.values.tolist())
+    wks.set_basic_filter()
+    wks.format("G:L", {"numberFormat": {
+               "type": "PERCENT", "pattern": "0.00%"}})
 
-wks = gc.open("Sports Betting").worksheet("PrizePicks")
-wks.clear()
-wks.update([pp_df.columns.values.tolist()] + pp_df.values.tolist())
-wks.set_basic_filter()
+if len(ud_offers) > 0:
+    ud_df = pd.DataFrame(ud_offers).dropna().drop(
+        columns='Opponent').sort_values('Prob', ascending=False)
+    wks = gc.open("Sports Betting").worksheet("Underdog")
+    wks.clear()
+    wks.update([ud_df.columns.values.tolist()] + ud_df.values.tolist())
+    wks.set_basic_filter()
+    wks.format("G:L", {"numberFormat": {
+               "type": "PERCENT", "pattern": "0.00%"}})
 
-wks = gc.open("Sports Betting").worksheet("Underdog")
-wks.clear()
-wks.update([ud_df.columns.values.tolist()] + ud_df.values.tolist())
-wks.set_basic_filter()
+if len(th_offers) > 0:
+    th_df = pd.DataFrame(th_offers).dropna().drop(
+        columns='Opponent').sort_values('Prob', ascending=False)
+    wks = gc.open("Sports Betting").worksheet("Thrive")
+    wks.clear()
+    wks.update([th_df.columns.values.tolist()] + th_df.values.tolist())
+    wks.set_basic_filter()
+    wks.format("G:L", {"numberFormat": {
+               "type": "PERCENT", "pattern": "0.00%"}})
 
-wks = gc.open("Sports Betting").worksheet("Untapped Markets")
-wks.clear()
-wks.update([untapped_df.columns.values.tolist()] + untapped_df.values.tolist())
-wks.set_basic_filter()
+if len(untapped_markets) > 0:
+    untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
+    wks = gc.open("Sports Betting").worksheet("Untapped Markets")
+    wks.clear()
+    wks.update([untapped_df.columns.values.tolist()] +
+               untapped_df.values.tolist())
+    wks.set_basic_filter()
 
 print("Success!")
