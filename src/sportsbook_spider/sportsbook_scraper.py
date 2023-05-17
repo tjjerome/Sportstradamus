@@ -30,8 +30,7 @@ import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
-
+from helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers, get_loc
 
 
 # Get DraftKings Odds
@@ -67,7 +66,7 @@ def get_dk(events, categories):
             dk_api = scraper.get(
                 f"https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/{events}/categories/{cat}/subcategories/{ids}?format=json")
             if not dk_api:
-                #print(str(len(players)) + " lines found")
+                # print(str(len(players)) + " lines found")
                 continue
 
             for i in dk_api['eventGroup']['offerCategories']:
@@ -668,18 +667,18 @@ creds = None
 # The file token.json stores the user's access and refresh tokens, and is
 # created automatically when the authorization flow completes for the first
 # time.
-if os.path.exists('token.json'):
-    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+if os.path.exists('./creds/token.json'):
+    creds = Credentials.from_authorized_user_file('./creds/token.json', SCOPES)
 # If there are no (valid) credentials available, let the user log in.
 if not creds or not creds.valid:
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
     else:
         flow = InstalledAppFlow.from_client_secrets_file(
-            'credentials.json', SCOPES)
+            './creds/credentials.json', SCOPES)
         creds = flow.run_local_server(port=0)
     # Save the credentials for the next run
-    with open('token.json', 'w') as token:
+    with open('./creds/token.json', 'w') as token:
         token.write(creds.to_json())
 gc = gspread.authorize(creds)
 
@@ -729,9 +728,9 @@ sport = "icehockey"
 league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
 csb_data.update(get_caesars(sport, league))
 print("Getting Caesars NFL Lines")
-#sport = "americanfootball"
-#league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-#csb_data.update(get_caesars(sport, league))
+# sport = "americanfootball"
+# league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+# csb_data.update(get_caesars(sport, league))
 print(str(len(csb_data)) + " offers found")
 
 """
@@ -743,7 +742,7 @@ nba_gamelog = nba.playergamelogs.PlayerGameLogs(
 nba_playoffs = nba.playergamelogs.PlayerGameLogs(
     season_nullable='2022-23', season_type_nullable='Playoffs').get_normalized_dict()['PlayerGameLogs']
 nba_gamelog = nba_playoffs + nba_gamelog
-with open("nba_players.dat", "rb") as infile:
+with open("./data/nba_players.dat", "rb") as infile:
     nba_players = pickle.load(infile)
     nba_players = {int(k): v for k, v in nba_players.items()}
 
@@ -765,7 +764,7 @@ for game in tqdm(nba_gamelog):
     game["RA"] = game['REB'] + game['AST']
     game["BLST"] = game['BLK'] + game['STL']
 
-with open("nba_players.dat", "wb") as outfile:
+with open("./data/nba_players.dat", "wb") as outfile:
     pickle.dump(nba_players, outfile)
 
 
@@ -952,7 +951,7 @@ mlb_game_ids = mlb.schedule(start_date=mlb.latest_season(
 mlb_game_ids = [game['game_id'] for game in mlb_game_ids if game['status']
                 == 'Final' and game['game_type'] != 'E' and game['game_type'] != 'S']
 
-with open("mlb_data.dat", "rb") as infile:
+with open("./data/mlb_data.dat", "rb") as infile:
     mlb_data = pickle.load(infile)
 
 for id in tqdm(mlb_game_ids):
@@ -964,7 +963,7 @@ for game in mlb_data['gamelog']:
     if datetime.datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < datetime.datetime.today() - datetime.timedelta(days=365):
         mlb_data['gamelog'].remove(game)
 
-with open("mlb_data.dat", "wb") as outfile:
+with open("./data/mlb_data.dat", "wb") as outfile:
     pickle.dump(mlb_data, outfile)
 
 
@@ -1071,7 +1070,7 @@ def get_mlb_stats(player, opponent, market, line):
 
 
 print("Getting NHL data")
-with open("nhl_skater_data.dat", "rb") as infile:
+with open("./data/nhl_skater_data.dat", "rb") as infile:
     nhl_skater_data = pickle.load(infile)
 
 params = {
@@ -1112,10 +1111,10 @@ for game in nhl_skater_data:
     if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
         nhl_skater_data.remove(game)
 
-with open("nhl_skater_data.dat", "wb") as outfile:
+with open("./data/nhl_skater_data.dat", "wb") as outfile:
     pickle.dump(nhl_skater_data, outfile)
 print('Skater data complete')
-with open("nhl_goalie_data.dat", "rb") as infile:
+with open("./data/nhl_goalie_data.dat", "rb") as infile:
     nhl_goalie_data = pickle.load(infile)
 
 params = {
@@ -1156,7 +1155,7 @@ for game in nhl_goalie_data:
     if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
         nhl_goalie_data.remove(game)
 
-with open("nhl_goalie_data.dat", "wb") as outfile:
+with open("./data/nhl_goalie_data.dat", "wb") as outfile:
     pickle.dump(nhl_goalie_data, outfile)
 print('Goalie data complete')
 
@@ -1282,15 +1281,6 @@ def get_nhl_stats(player, opponent, market, line):
             leagueavg = np.mean(list(leagueavg.values()))/2
             dvpoa = (dvp-leagueavg)/leagueavg
     return np.array([last10avg, last5, seasontodate, headtohead, dvpoa])
-
-
-def get_loc(stats):
-    sat = 0.035
-    baseline = np.array([0, 0.5, 0.5, 0.5, 0])
-    stats[stats == -1000] = baseline[stats == -1000]
-    weights = np.array([0.75, 0.9, 0.5, 1, 0.75])
-    weights = sat/np.dot(np.array([.1, .2, .1, .1, .06]), weights) * weights
-    return np.clip(np.dot(weights, (stats-baseline)), -sat, sat)
 
 
 untapped_markets = []
