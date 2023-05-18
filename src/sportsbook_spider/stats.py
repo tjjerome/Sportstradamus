@@ -30,7 +30,7 @@ class statsNBA:
             season_nullable='2022-23').get_normalized_dict()['PlayerGameLogs']
         nba_playoffs = nba.playergamelogs.PlayerGameLogs(
             season_nullable='2022-23', season_type_nullable='Playoffs').get_normalized_dict()['PlayerGameLogs']
-        nba_gamelog = nba_playoffs + nba_gamelog
+        self.gamelog = nba_playoffs + nba_gamelog
         for game in tqdm(nba_gamelog):
             if game['PLAYER_ID'] not in self.players:
                 self.players[game['PLAYER_ID']] = nba.commonplayerinfo.CommonPlayerInfo(
