@@ -24,7 +24,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from sportsbook_spider.helpers import get_loc
-from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive
+from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 
 
@@ -675,8 +675,158 @@ def main():
                 print(traceback.format_exc())
                 print(exc)
 
+    parp_offers = get_parp()
+
+    parp2dk = {
+        'Blocked Shots': 'Blocks',
+        'Hit + Run + RBI': 'Hits + Runs + RBIs',
+        'Pts + Reb + Ast': 'Pts + Rebs + Ast',
+        'Reb + Ast': 'Ast + Reb',
+        'Shots': 'Player Shots on Goal',
+        'Shots on Goal': 'Player Shots on Goal',
+        'Stl + Blk': 'Steals + Blocks',
+        'Strikeouts (K)': 'Strikeouts'
+    }
+
+    parp2fd = {
+        'Blocked Shots': 'Blocks',
+        'Shots': 'Shots on Goal',
+        'Strikeouts (K)': 'Strikeouts'
+    }
+
+    parp2pin = {
+        'Blocked Shots': 'Blocks',
+        'Pts + Reb + Ast': 'Pts+Rebs+Asts',
+        'Shots': 'Shots on Goal',
+        'Strikeouts (K)': 'Total Strikeouts'
+    }
+
+    parp2csb = {
+        'Blocked Shots': 'Blocks',
+        'Hit + Run + RBI': 'Hits + Runs + RBIs',
+        'Pts + Ast': 'Points + Assists',
+        'Pts + Reb': 'Points + Rebounds',
+        'Pts + Reb + Ast': 'Pts + Rebs + Asts',
+        'Reb + Ast': 'Rebounds + Assists',
+        'Shots on Goal': 'Shots',
+        'Stl + Blk': 'Blocks and Steals',
+        'Strikeouts (K)': 'Pitching Strikeouts'
+    }
+
+    parp2stats = {
+        'Assists': 'AST',
+        'Blocked Shots': 'BLK',
+        'Hit + Run + RBI': 'hits+runs+rbi',
+        'Hits': 'hits',
+        'Points': 'PTS',
+        'Pts + Ast': 'PA',
+        'Pts + Reb': 'PR',
+        'Pts + Reb + Ast': 'PRA',
+        'Reb + Ast': 'RA',
+        'Rebounds': 'REB',
+        'Saves': 'saves',
+        'Shots': 'shots',
+        'Shots on Goal': 'shots',
+        'Stl + Blk': 'BLST',
+        'Strikeouts (K)': 'pitcher strikeouts',
+        'Turnovers': 'TOV'
+    }
+
+    dk_data['PARP Key'] = parp2dk
+    fd_data['PARP Key'] = parp2fd
+    pin_data['PARP Key'] = parp2pin
+    csb_data['PARP Key'] = parp2csb
+
+    if len(parp_offers) > 0:
+
+        print("Matching ParlayPlay offers")
+        for o in tqdm(parp_offers):
+
+            opponent = o.get('Opponent')
+            if any(substring in o['League'] for substring in live_bets):
+                o['Market'] = o['Market'] + " " + \
+                    [live for live in live_bets if live in o['League']][0]
+            p = []
+            try:
+                market = o['Market']
+                newline = {"Platform": "ParlayPlay",
+                           "League": o['League'], "Market": o['Market']}
+
+                v = []
+                lines = []
+                for dataset in [dk_data, fd_data, pin_data, csb_data]:
+                    codex = dataset['PARP Key']
+                    offer = dataset.get(o['Player'], {o['Player']: None}).get(
+                        codex.get(market, market))
+                    if offer is not None:
+                        v.append(offer['EV'])
+
+                    lines.append(offer)
+
+                if v:
+                    v = np.mean(v)
+                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
+                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                    push = 1-p[1]-p[0]
+
+                if p:
+                    tapped_markets.append(newline)
+                    if newline in untapped_markets:
+                        untapped_markets.remove(newline)
+
+                    stats = np.ones(5) * -1000
+                    if o['League'] == 'NBA':
+                        stats = nba.get_stats(
+                            o['Player'], opponent, parp2stats[market], o['Line'])
+                    elif o['League'] == 'MLB':
+                        stats = mlb.get_stats(
+                            o['Player'], opponent, parp2stats[market], o['Line'])
+                    elif o['League'] == 'NHL':
+                        stats = nhl.get_stats(
+                            o['Player'], opponent, parp2stats[market], o['Line'])
+
+                    if p[1] > p[0]:
+                        o['Bet'] = 'Over'
+                        o['Prob'] = p[1]+push/2
+                    else:
+                        o['Bet'] = 'Under'
+                        o['Prob'] = p[0]+push/2
+
+                    o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
+                    o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
+                    o['Season'] = stats[2] if stats[2] != -1000 else 'N/A'
+                    o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
+                    o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
+
+                    if o['Bet'] == 'Over':
+                        loc = get_loc(stats)
+                    else:
+                        loc = -get_loc(stats)
+
+                    if loc+o['Prob'] > .555:
+                        o['Good Bet'] = 'Y'
+                    else:
+                        o['Good Bet'] = 'N'
+
+                    o['DraftKings'] = lines[0]['Line'] + "/" + \
+                        lines[0][o['Bet']] if lines[0] else 'N/A'
+                    o['FanDuel'] = lines[1]['Line'] + "/" + \
+                        lines[1][o['Bet']] if lines[1] else 'N/A'
+                    o['Pinnacle'] = lines[2]['Line'] + "/" + \
+                        lines[2][o['Bet']] if lines[2] else 'N/A'
+                    o['Caesars'] = str(lines[3]['Line']) + "/" + \
+                        str(lines[3][o['Bet']]) if lines[3] else 'N/A'
+
+                elif newline not in untapped_markets+tapped_markets:
+                    untapped_markets.append(newline)
+
+            except Exception as exc:
+                print(o['Player'] + ", " + o["Market"])
+                print(traceback.format_exc())
+                print(exc)
+
     print("Writing to file...")
-    if len(pp_offers) > 0:
+    if len([o for o in pp_offers if o.get('Prob')]) > 0:
         pp_df = pd.DataFrame(pp_offers).dropna().drop(
             columns='Opponent').sort_values('Prob', ascending=False)
         wks = gc.open("Sports Betting").worksheet("PrizePicks")
@@ -688,7 +838,7 @@ def main():
         wks.format("G:L", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
-    if len(ud_offers) > 0:
+    if len([o for o in ud_offers if o.get('Prob')]) > 0:
         ud_df = pd.DataFrame(ud_offers).dropna().drop(
             columns='Opponent').sort_values('Prob', ascending=False)
         wks = gc.open("Sports Betting").worksheet("Underdog")
@@ -700,12 +850,27 @@ def main():
         wks.format("G:L", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
-    if len(th_offers) > 0:
-        th_df = pd.DataFrame(th_offers).dropna().drop(
+    if len([o for o in th_offers if o.get('Prob')]) > 0:
+        try:
+            th_df = pd.DataFrame(th_offers).dropna().drop(
+                columns='Opponent').sort_values('Prob', ascending=False)
+            wks = gc.open("Sports Betting").worksheet("Thrive")
+            wks.clear()
+            wks.update([th_df.columns.values.tolist()] + th_df.values.tolist())
+            wks.update("R1", "Last Updated: " +
+                       datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
+            wks.set_basic_filter()
+            wks.format("G:L", {"numberFormat": {
+                "type": "PERCENT", "pattern": "0.00%"}})
+        except Exception as exc:
+            print(traceback.format_exc())
+
+    if len([o for o in parp_offers if o.get('Prob')]) > 0:
+        parp_df = pd.DataFrame(parp_offers).dropna().drop(
             columns='Opponent').sort_values('Prob', ascending=False)
-        wks = gc.open("Sports Betting").worksheet("Thrive")
+        wks = gc.open("Sports Betting").worksheet("ParlayPlay")
         wks.clear()
-        wks.update([th_df.columns.values.tolist()] + th_df.values.tolist())
+        wks.update([parp_df.columns.values.tolist()] + parp_df.values.tolist())
         wks.update("R1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
