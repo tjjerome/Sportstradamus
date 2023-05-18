@@ -1,6 +1,3 @@
-
-
-import os.path
 import requests
 import json
 import random
