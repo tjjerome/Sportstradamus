@@ -23,9 +23,9 @@ import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from helpers import get_loc
-from books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive
-from stats import statsNBA, statsMLB, statsNHL
+from sportsbook_spider.helpers import get_loc
+from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive
+from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 
 
 def main():

@@ -4,7 +4,7 @@ import random
 from tqdm import tqdm
 import statsapi as mlb
 from time import sleep
-from helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
+from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
 
 
 # Get DraftKings Odds

@@ -9,7 +9,7 @@ import nba_api.stats.endpoints as nba
 from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
 from time import sleep
-from helpers import scraper, mlb_pitchers
+from sportsbook_spider.helpers import scraper, mlb_pitchers
 
 
 class statsNBA:
@@ -368,12 +368,12 @@ class statsNHL:
         self.goalie_data = {}
 
     def load(self):
-        filepath = "./data/self.skater_data.dat"
+        filepath = "./data/nhl_skater_data.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.skater_data = pickle.load(infile)
 
-        filepath = "./data/self.goalie_data.dat"
+        filepath = "./data/nhl_goalie_data.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.goalie_data = pickle.load(infile)
@@ -418,7 +418,7 @@ class statsNHL:
             if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
                 self.skater_data.remove(game)
 
-        with open("./data/self.skater_data.dat", "wb") as outfile:
+        with open("./data/nhl_skater_data.dat", "wb") as outfile:
             pickle.dump(self.skater_data, outfile)
         print('Skater data complete')
 
@@ -460,7 +460,7 @@ class statsNHL:
             if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
                 self.goalie_data.remove(game)
 
-        with open("./data/self.goalie_data.dat", "wb") as outfile:
+        with open("./data/nhl_goalie_data.dat", "wb") as outfile:
             pickle.dump(self.goalie_data, outfile)
         print('Goalie data complete')
 
