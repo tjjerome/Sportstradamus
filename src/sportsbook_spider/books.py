@@ -2,6 +2,7 @@ import datetime
 import traceback
 import random
 from tqdm import tqdm
+import numpy as np
 import statsapi as mlb
 from time import sleep
 from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
@@ -629,4 +630,45 @@ def get_thrive():
         offers.append(n)
 
     print(str(len(offers)) + " offers found")
+    return offers
+
+
+def get_parp():
+    params = {
+        'api_key': '82ccbf28-ddd6-4e37-b3a1-0097b10fd412',
+        'url': "https://parlayplay.io/api/v1/crossgame/search/?format=json&sport=All&league=",
+        'optimize_request': True,
+        'keep_headers': True
+    }
+    header = {'Accept': 'application/json', 'X-Parlay-Request': '1', 'X-Parlayplay-Platform': 'web',
+              'X-Csrftoken': 'FoEEn6o8fwxrKIrSzyphlphpVjBAEVZQANmhb2xeMmmRZwvbaDDZt5zGKoXNzrc2'}
+    try:
+        api = requests.get("https://proxy.scrapeops.io/v1/",
+                           params=params, headers=header | scraper.header).json()
+    except Exception as exc:
+        print(id)
+        print(exc)
+        return []
+
+    offers = []
+    for player in tqdm(api['players']):
+        teams = [player['match']['homeTeam']['teamAbbreviation'],
+                 player['match']['awayTeam']['teamAbbreviation']]
+        for stat in player['stats']:
+            n = {
+                'Player': remove_accents(player['player']['fullName']),
+                'League': player['match']['league']['leagueNameShort'],
+                'Team': player['player']['team']['teamAbbreviation'],
+                'Market': stat['challengeName'],
+                'Line': float(stat['statValue']),
+                'Slide': 'N',
+                'Opponent': [team for team in teams if team != player['player']['team']['teamAbbreviation']][0]
+            }
+            offers.append(n)
+            if stat['slideRange']:
+                m = n | {'Slide': 'Y', 'Line': np.min(stat['slideRange'])}
+                offers.append(m)
+                m = n | {'Slide': 'Y', 'Line': np.max(stat['slideRange'])}
+                offers.append(m)
+
     return offers
