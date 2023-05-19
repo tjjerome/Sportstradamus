@@ -373,7 +373,7 @@ def get_caesars(sport, league):
             if market.get('displayName') == 'Run In 1st Inning?':
                 marketName = "1st Inning Runs Allowed"
                 line = 0.5
-                player = " + ".join([mlb_pitchers.get(team['teamData']['teamAbbreviation'], '')
+                player = " + ".join([mlb_pitchers.get(team['teamData'].get('teamAbbreviation', ''), '')
                                      for team in api['markets'][0]['selections']])
             else:
                 player = remove_accents(market['metadata']['player'])
