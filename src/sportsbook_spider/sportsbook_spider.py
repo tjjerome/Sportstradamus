@@ -871,7 +871,7 @@ def main():
         wks = gc.open("Sports Betting").worksheet("ParlayPlay")
         wks.clear()
         wks.update([parp_df.columns.values.tolist()] + parp_df.values.tolist())
-        wks.update("R1", "Last Updated: " +
+        wks.update("S1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
         wks.format("G:L", {"numberFormat": {
