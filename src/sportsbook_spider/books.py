@@ -1,12 +1,13 @@
 import datetime
-import traceback
 import random
 from tqdm import tqdm
 import numpy as np
 import statsapi as mlb
+import logging
 from time import sleep
 from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
 
+logger = logging.getLogger(__name__)
 
 # Get DraftKings Odds
 
@@ -23,7 +24,7 @@ def get_dk(events, categories):
             continue
 
         if 'errorStatus' in dk_api:
-            print(dk_api['errorStatus']['developerMessage'])
+            logger.warning(dk_api['errorStatus']['developerMessage'])
             continue
 
         for i in dk_api['eventGroup']['events']:
@@ -41,7 +42,7 @@ def get_dk(events, categories):
             dk_api = scraper.get(
                 f"https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/{events}/categories/{cat}/subcategories/{ids}?format=json")
             if not dk_api:
-                # print(str(len(players)) + " lines found")
+                # logger.info(str(len(players)) + " lines found")
                 continue
 
             for i in dk_api['eventGroup']['offerCategories']:
@@ -111,7 +112,7 @@ def get_fd(sport, tabs):
     response = scraper.get(api_url.format(
         "content-managed-page"), params={key: value for key, value in params})
     if not response:
-        print("No lines found")
+        logger.warning("No lines found")
         return {}
 
     attachments = response.get('attachments')
@@ -133,7 +134,7 @@ def get_fd(sport, tabs):
                 "event-page"), params={key: value for key, value in params+new_params})
 
             if not response:
-                print(str(len(players)) + " lines found")
+                logger.info(str(len(players)) + " lines found")
                 return players
 
             attachments = response.get('attachments')
@@ -216,11 +217,11 @@ def get_pinnacle(league):
         odds = requests.get("https://proxy.scrapeops.io/v1/",
                             headers=header | scraper.header, params=params).json()
     except:
-        print("No lines found for league: " + str(league))
+        logger.warning("No lines found for league: " + str(league))
         return {}
 
     if not type(odds) == list or not type(odds[0]) == dict:
-        print("No lines found for league: " + str(league))
+        logger.warning("No lines found for league: " + str(league))
         return {}
 
     lines = {}
@@ -255,7 +256,7 @@ def get_pinnacle(league):
         markets = [line for line in api if line.get(
             'special', {'category': ''}).get('category') == 'Player Props']
     except:
-        print("No lines found for league: " + str(league))
+        logger.warning("No lines found for league: " + str(league))
         return {}
 
     players = {}
@@ -351,7 +352,7 @@ def get_caesars(sport, league):
                    and game['marketCountActivePreMatch'] > 100]
 
     except Exception as exc:
-        print(exc)
+        logger.exception("Caesars API request failed")
         return {}
 
     players = {}
@@ -366,7 +367,7 @@ def get_caesars(sport, league):
                 'marketType', {}) == 'PLAYERLINEBASED' or market.get('displayName') == 'Run In 1st Inning?')]
 
         except:
-            print("Unable to parse game")
+            logger.exception("Unable to parse game")
             continue
 
         for market in tqdm(markets):
@@ -412,7 +413,7 @@ def get_pp():
    """
     leagues = [2, 7, 8]
 
-    print("Processing PrizePicks offers")
+    logger.info("Processing PrizePicks offers")
     for l in tqdm(leagues):
         params = {
             'api_key': '82ccbf28-ddd6-4e37-b3a1-0097b10fd412',
@@ -438,7 +439,7 @@ def get_pp():
             elif p['type'] == 'league':
                 league = p['attributes']['name']
 
-        print("Getting offers for " + league)
+        logger.info("Getting offers for " + league)
         for o in tqdm(lines):
             n = {
                 'Player': remove_accents(player_ids[o['relationships']['new_player']['data']['id']]['Name']),
@@ -452,7 +453,7 @@ def get_pp():
                 n['Line'] = o['attributes']['flash_sale_line_score']
             offers.append(n)
 
-    print(str(len(offers)) + " offers found")
+    logger.info(str(len(offers)) + " offers found")
     return offers
 
 # Get current Underdog lines:
@@ -463,7 +464,7 @@ def get_ud():
         'https://stats.underdogfantasy.com/v1/teams')
 
     if not teams:
-        print("Could not receive offer data")
+        logger.warning("Could not receive offer data")
         return []
 
     offers = []
@@ -474,7 +475,7 @@ def get_ud():
     api = scraper.get(
         'https://api.underdogfantasy.com/beta/v3/over_under_lines')
     if not api:
-        print(str(len(offers)) + " offers found")
+        logger.info(str(len(offers)) + " offers found")
         return offers
 
     player_ids = {}
@@ -506,7 +507,7 @@ def get_ud():
         }
 
     offers = []
-    print("Getting Underdog Over/Unders")
+    logger.info("Getting Underdog Over/Unders")
     for o in tqdm(api['over_under_lines']):
         player = players[o['over_under']['appearance_stat']['appearance_id']]
         game = matches.get(o['over_under']['appearance_stat']
@@ -528,7 +529,7 @@ def get_ud():
         'https://api.underdogfantasy.com/beta/v3/rival_lines')
 
     if not rivals:
-        print(str(len(offers)) + " offers found")
+        logger.info(str(len(offers)) + " offers found")
         return offers
 
     for i in rivals['players']:
@@ -560,7 +561,7 @@ def get_ud():
                 'Away': match_ids.get(i['match_id'], {'Away': ''})['Away']
             }
 
-    print("Getting Underdog Rivals")
+    logger.info("Getting Underdog Rivals")
     for o in tqdm(rivals['rival_lines']):
         player1 = players[o['options'][0]['appearance_stat']['appearance_id']]
         player2 = players[o['options'][1]['appearance_stat']['appearance_id']]
@@ -583,7 +584,7 @@ def get_ud():
         }
         offers.append(n)
 
-    print(str(len(offers)) + " offers found")
+    logger.info(str(len(offers)) + " offers found")
     return offers
 
 # Get Thrive Lines
@@ -600,13 +601,12 @@ def get_thrive():
                "Latitude": "29.5908265", "Longitude": "-95.1381594"}
     header = {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
               'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCRMOGxMaTlUR2REVXZvdE9OTWhSaGxPbWZJc1ptaWRTdGFlZkxiU1ZZTkF4TVBQQTB1Q0ZQLiIsImNyZWF0ZWQiOjE2ODQwNzkwNzAyODgsImV4cCI6MTY4NDY4Mzg3MH0.GLlJuz0fdh0MsrF1IOQsAW47JflfoSSlSRgyo2bQPe-u6b7zZ7AJBLPeKJZCPKUPsrYWsjgyA3fIKgs2bOQtpA'}
-    print("Getting Thrive Lines")
+    logger.info("Getting Thrive Lines")
     try:
         api = requests.post("https://proxy.scrapeops.io/v1/", params=params,
                             headers=header | scraper.header, json=payload).json()
     except Exception as exc:
-        print(id)
-        print(exc)
+        logger.exception(id)
 
     if api['success']:
         lines = api['response']['data']
@@ -629,7 +629,7 @@ def get_thrive():
 
         offers.append(n)
 
-    print(str(len(offers)) + " offers found")
+    logger.info(str(len(offers)) + " offers found")
     return offers
 
 
@@ -646,8 +646,7 @@ def get_parp():
         api = requests.get("https://proxy.scrapeops.io/v1/",
                            params=params, headers=header | scraper.header).json()
     except Exception as exc:
-        print(id)
-        print(exc)
+        logger.exception(id)
         return []
 
     offers = []
