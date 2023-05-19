@@ -1,8 +1,10 @@
 import os.path
 import numpy as np
 import datetime
-import traceback
+import logging
 import pickle
+import importlib.resources as pkg_resources
+from . import data
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
@@ -11,6 +13,8 @@ import nfl_data_py as nfl
 from time import sleep
 from sportsbook_spider.helpers import scraper, mlb_pitchers
 
+logger = logging.getLogger(__name__)
+
 
 class statsNBA:
     def __init__(self):
@@ -18,14 +22,14 @@ class statsNBA:
         self.players = {}
 
     def load(self):
-        filepath = "./data/nba_players.dat"
+        filepath = (pkg_resources.files(data) / "nba_players.dat")
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.players = pickle.load(infile)
                 self.players = {int(k): v for k, v in self.players.items()}
 
     def update(self):
-        print("Getting NBA stats")
+        logger.info("Getting NBA stats")
         nba_gamelog = nba.playergamelogs.PlayerGameLogs(
             season_nullable='2022-23').get_normalized_dict()['PlayerGameLogs']
         nba_playoffs = nba.playergamelogs.PlayerGameLogs(
@@ -49,7 +53,7 @@ class statsNBA:
             game["RA"] = game['REB'] + game['AST']
             game["BLST"] = game['BLK'] + game['STL']
 
-        with open("./data/nba_players.dat", "wb") as outfile:
+        with open((pkg_resources.files(data) / "nba_players.dat"), "wb") as outfile:
             pickle.dump(self.players, outfile)
 
     def get_stats(self, player, opponent, market, line):
@@ -233,7 +237,7 @@ class statsMLB:
                     self.gamelog.append(n)
 
     def load(self):
-        filepath = "./data/mlb_data.dat"
+        filepath = (pkg_resources.files(data) / "mlb_data.dat")
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 mlb_data = pickle.load(infile)
@@ -242,7 +246,7 @@ class statsMLB:
             self.gameIds = mlb_data['games']
 
     def update(self):
-        print("Getting MLB Stats")
+        logger.info("Getting MLB Stats")
         mlb_game_ids = mlb.schedule(start_date=mlb.latest_season(
         )['regularSeasonStartDate'], end_date=datetime.date.today())
         mlb_game_ids = [game['game_id'] for game in mlb_game_ids if game['status']
@@ -256,7 +260,7 @@ class statsMLB:
             if datetime.datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < datetime.datetime.today() - datetime.timedelta(days=365):
                 self.gamelog.remove(game)
 
-        with open("./data/mlb_data.dat", "wb") as outfile:
+        with open((pkg_resources.files(data) / "mlb_data.dat"), "wb") as outfile:
             pickle.dump(
                 {'games': self.gameIds, 'gamelog': self.gamelog}, outfile)
 
@@ -368,18 +372,18 @@ class statsNHL:
         self.goalie_data = {}
 
     def load(self):
-        filepath = "./data/nhl_skater_data.dat"
+        filepath = (pkg_resources.files(data) / "nhl_skater_data.dat")
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.skater_data = pickle.load(infile)
 
-        filepath = "./data/nhl_goalie_data.dat"
+        filepath = (pkg_resources.files(data) / "nhl_goalie_data.dat")
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.goalie_data = pickle.load(infile)
 
     def update(self):
-        print("Getting NHL data")
+        logger.info("Getting NHL data")
         params = {
             'isAggregate': 'false',
             'isGame': 'true',
@@ -418,9 +422,9 @@ class statsNHL:
             if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
                 self.skater_data.remove(game)
 
-        with open("./data/nhl_skater_data.dat", "wb") as outfile:
+        with open((pkg_resources.files(data) / "nhl_skater_data.dat"), "wb") as outfile:
             pickle.dump(self.skater_data, outfile)
-        print('Skater data complete')
+        logger.info('Skater data complete')
 
         params = {
             'isAggregate': 'false',
@@ -460,9 +464,9 @@ class statsNHL:
             if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
                 self.goalie_data.remove(game)
 
-        with open("./data/nhl_goalie_data.dat", "wb") as outfile:
+        with open((pkg_resources.files(data) / "nhl_goalie_data.dat"), "wb") as outfile:
             pickle.dump(self.goalie_data, outfile)
-        print('Goalie data complete')
+        logger.info('Goalie data complete')
 
     def get_stats(self, player, opponent, market, line):
 

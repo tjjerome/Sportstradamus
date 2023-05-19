@@ -11,14 +11,24 @@ TODO:
 *   Add eSports (maybe from GGBET?)
 *   Move to Google Apps Script
 """
+import logging
+import datetime
+import importlib.resources as pkg_resources
+if __name__ == "__main__":
+    now = datetime.datetime.now().strftime("%Y/%m/%d:%H:%M:%S")
+    log_format = "%(asctime)s::%(levelname)s::"\
+        "%(filename)s::%(lineno)d::%(message)s"
+    logging.basicConfig(filename=(pkg_resources.files(
+        logs) / now+".log"), filemode='w', level=logging.INFO, format=log_format)
 
 import os.path
 import pandas as pd
 import numpy as np
-import datetime
-import traceback
 from tqdm import tqdm
+from functools import partialmethod
 from scipy.stats import poisson, skellam
+from . import creds, logs
+import click
 import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -28,85 +38,90 @@ from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, g
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 
 
-def main():
+@click.command()
+@click.option('--progress', default=True, help='Display progress bars')
+def main(progress):
+    logger = logging.getLogger(__name__)
+
+    tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
     # Authorize the gspread API
     SCOPES = [
         'https://www.googleapis.com/auth/drive',
         'https://www.googleapis.com/auth/drive.file'
     ]
-    creds = None
+    cred = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
-    if os.path.exists('./creds/token.json'):
-        creds = Credentials.from_authorized_user_file(
-            './creds/token.json', SCOPES)
+    if os.path.exists((pkg_resources.files(creds) / "token.json")):
+        cred = Credentials.from_authorized_user_file(
+            (pkg_resources.files(creds) / "token.json"), SCOPES)
     # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+    if not cred or not cred.valid:
+        if cred and cred.expired and cred.refresh_token:
+            cred.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                './creds/credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+                (pkg_resources.files(creds) / "credentials.json"), SCOPES)
+            cred = flow.run_local_server(port=0)
         # Save the credentials for the next run
-        with open('./creds/token.json', 'w') as token:
-            token.write(creds.to_json())
-    gc = gspread.authorize(creds)
+        with open((pkg_resources.files(creds) / "token.json"), 'w') as token:
+            token.write(cred.to_json())
+    gc = gspread.authorize(cred)
 
     """"
     Start gathering sportsbook data
     """
     dk_data = {}
-    print("Getting DraftKings MLB lines")
+    logger.info("Getting DraftKings MLB lines")
     dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
-    print("Getting DraftKings NBA lines")
+    logger.info("Getting DraftKings NBA lines")
     dk_data.update(
         get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
-    print("Getting DraftKings NHL lines")
+    logger.info("Getting DraftKings NHL lines")
     dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
     # dk_data.update(get_dk(92893, [488, 633])) # Tennis
     # dk_data.update(get_dk(91581, [488, 633])) # Tennis
-    print(str(len(dk_data)) + " offers found")
+    logger.info(str(len(dk_data)) + " offers found")
 
     fd_data = {}
-    print("Getting FanDuel MLB lines")
+    logger.info("Getting FanDuel MLB lines")
     fd_data.update(get_fd('mlb', ['batter-props', 'pitcher-props', 'innings']))
-    print("Getting FanDuel NBA lines")
+    logger.info("Getting FanDuel NBA lines")
     fd_data.update(get_fd('nba', ['player-points', 'player-rebounds',
                                   'player-assists', 'player-threes', 'player-combos', 'player-defense']))
-    print("Getting FanDuel NHL lines")
+    logger.info("Getting FanDuel NHL lines")
     fd_data.update(
         get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
-    print(str(len(fd_data)) + " offers found")
+    logger.info(str(len(fd_data)) + " offers found")
 
     pin_data = {}
-    print("Getting Pinnacle MLB lines")
+    logger.info("Getting Pinnacle MLB lines")
     pin_data.update(get_pinnacle(246))  # MLB
-    print("Getting Pinnacle NBA lines")
+    logger.info("Getting Pinnacle NBA lines")
     pin_data.update(get_pinnacle(487))  # NBA
-    print("Getting Pinnacle NHL lines")
+    logger.info("Getting Pinnacle NHL lines")
     pin_data.update(get_pinnacle(1456))  # NHL
-    print(str(len(pin_data)) + " offers found")
+    logger.info(str(len(pin_data)) + " offers found")
 
     csb_data = {}
-    print("Getting Caesars MLB Lines")
+    logger.info("Getting Caesars MLB Lines")
     sport = "baseball"
     league = "04f90892-3afa-4e84-acce-5b89f151063d"
     csb_data.update(get_caesars(sport, league))
-    print("Getting Caesars NBA Lines")
+    logger.info("Getting Caesars NBA Lines")
     sport = "basketball"
     league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
     csb_data.update(get_caesars(sport, league))
-    print("Getting Caesars NHL Lines")
+    logger.info("Getting Caesars NHL Lines")
     sport = "icehockey"
     league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
     csb_data.update(get_caesars(sport, league))
-    print("Getting Caesars NFL Lines")
+    logger.info("Getting Caesars NFL Lines")
     # sport = "americanfootball"
     # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
     # csb_data.update(get_caesars(sport, league))
-    print(str(len(csb_data)) + " offers found")
+    logger.info(str(len(csb_data)) + " offers found")
 
     """
     Start gathering player stats
@@ -212,7 +227,7 @@ def main():
     live_bets = ["1H", "2H", "1P", "2P", "3P", "1Q",
                  "2Q", "3Q", "4Q", "LIVE", "SZN", "SZN2", "SERIES"]
     if len(pp_offers) > 0:
-        print("Matching PrizePicks offers")
+        logger.info("Matching PrizePicks offers")
         for o in tqdm(pp_offers):
             opponent = o.get('Opponent')
             if any(substring in o['League'] for substring in live_bets):
@@ -310,9 +325,7 @@ def main():
                     untapped_markets.append(newline)
 
             except Exception as exc:
-                print(o['Player'] + ", " + o["Market"])
-                print(traceback.format_exc())
-                print(exc)
+                logger.exception(o['Player'] + ", " + o["Market"])
 
     ud_offers = get_ud()
 
@@ -384,7 +397,7 @@ def main():
 
     if len(ud_offers) > 0:
 
-        print("Matching Underdog offers")
+        logger.info("Matching Underdog offers")
         for o in tqdm(ud_offers):
             opponent = o.get('Opponent')
             if any(substring in o['League'] for substring in live_bets):
@@ -497,9 +510,7 @@ def main():
                     untapped_markets.append(newline)
 
             except Exception as exc:
-                print(o['Player'] + ", " + o["Market"])
-                print(traceback.format_exc())
-                print(exc)
+                logger.exception(o['Player'] + ", " + o["Market"])
 
     th_offers = get_thrive()
 
@@ -589,7 +600,7 @@ def main():
 
     if len(th_offers) > 0:
 
-        print("Matching Thrive offers")
+        logger.info("Matching Thrive offers")
         for o in tqdm(th_offers):
 
             opponent = o.get('Opponent')
@@ -671,9 +682,7 @@ def main():
                     untapped_markets.append(newline)
 
             except Exception as exc:
-                print(o['Player'] + ", " + o["Market"])
-                print(traceback.format_exc())
-                print(exc)
+                logger.exception(o['Player'] + ", " + o["Market"])
 
     parp_offers = get_parp()
 
@@ -739,7 +748,7 @@ def main():
 
     if len(parp_offers) > 0:
 
-        print("Matching ParlayPlay offers")
+        logger.info("Matching ParlayPlay offers")
         for o in tqdm(parp_offers):
 
             opponent = o.get('Opponent')
@@ -821,11 +830,9 @@ def main():
                     untapped_markets.append(newline)
 
             except Exception as exc:
-                print(o['Player'] + ", " + o["Market"])
-                print(traceback.format_exc())
-                print(exc)
+                logger.exception(o['Player'] + ", " + o["Market"])
 
-    print("Writing to file...")
+    logger.info("Writing to file...")
     if len([o for o in pp_offers if o.get('Prob')]) > 0:
         pp_df = pd.DataFrame(pp_offers).dropna().drop(
             columns='Opponent').sort_values('Prob', ascending=False)
@@ -863,7 +870,7 @@ def main():
             wks.format("G:L", {"numberFormat": {
                 "type": "PERCENT", "pattern": "0.00%"}})
         except Exception as exc:
-            print(traceback.format_exc())
+            logger.exception('Error printing Thrive offers')
 
     if len([o for o in parp_offers if o.get('Prob')]) > 0:
         parp_df = pd.DataFrame(parp_offers).dropna().drop(
@@ -891,4 +898,5 @@ def main():
 
 
 if __name__ == '__main__':
+
     main()

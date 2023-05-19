@@ -3,14 +3,19 @@ import json
 import random
 import unicodedata
 import datetime
+import importlib.resources as pkg_resources
+from . import creds
 from time import sleep
-from scipy.stats import poisson, skellam
+from scipy.stats import poisson
 from scipy.optimize import fsolve
 import numpy as np
 import statsapi as mlb
+import logging
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 
-with open('./creds/scrapeops_cred.json', 'r') as infile:
+logger = logging.getLogger(__name__)
+
+with open((pkg_resources.files(creds) / "scrapeops_cred.json"), 'r') as infile:
     creds = json.load(infile)
 apikey = creds['apikey']
 scrapeops_logger = ScrapeOpsRequests(
@@ -51,13 +56,12 @@ class Scrape:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    print("Attempt " + str(i) +
-                          ", Error " + str(response.status_code))
+                    logging.debug("Attempt " + str(i) +
+                                  ", Error " + str(response.status_code))
             except Exception as exc:
-                print("Attempt " + str(i) + ",")
-                print(exc)
+                logger.exception("Attempt " + str(i) + ",")
 
-        print("Max Attempts Reached")
+        logger.warning("Max Attempts Reached")
         return None
 
 
