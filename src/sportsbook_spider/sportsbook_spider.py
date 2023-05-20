@@ -870,7 +870,7 @@ def main(progress):
             wks.format("G:L", {"numberFormat": {
                 "type": "PERCENT", "pattern": "0.00%"}})
         except Exception as exc:
-            logger.exception('Error printing Thrive offers')
+            logger.exception('Error writing Thrive offers')
 
     if len([o for o in parp_offers if o.get('Prob')]) > 0:
         parp_df = pd.DataFrame(parp_offers).dropna().drop(
@@ -894,7 +894,7 @@ def main(progress):
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
 
-    print("Success!")
+    logger.info("Success!")
 
 
 if __name__ == '__main__':
