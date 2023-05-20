@@ -14,12 +14,12 @@ TODO:
 import logging
 import datetime
 import importlib.resources as pkg_resources
+from . import logs
 if __name__ == "__main__":
-    now = datetime.datetime.now().strftime("%Y/%m/%d:%H:%M:%S")
     log_format = "%(asctime)s::%(levelname)s::"\
         "%(filename)s::%(lineno)d::%(message)s"
     logging.basicConfig(filename=(pkg_resources.files(
-        logs) / now+".log"), filemode='w', level=logging.INFO, format=log_format)
+        logs) / datetime.datetime.now().strftime("%Y_%m_%d:%H:%M:%S.log")), filemode='w', level=logging.INFO, format=log_format)
 
 import os.path
 import pandas as pd
@@ -27,7 +27,7 @@ import numpy as np
 from tqdm import tqdm
 from functools import partialmethod
 from scipy.stats import poisson, skellam
-from . import creds, logs
+from . import creds
 import click
 import gspread
 from google.auth.transport.requests import Request
