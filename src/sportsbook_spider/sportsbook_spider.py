@@ -292,13 +292,13 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[1] + push*2/3
                         else:
                             o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[0] + push*2/3
                         else:
                             o['Prob'] = p[0] + push/3
@@ -484,13 +484,13 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[1] + push*2/3
                         else:
                             o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[0] + push*2/3
                         else:
                             o['Prob'] = p[0] + push/3
@@ -662,13 +662,13 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[1] + push*2/3
                         else:
                             o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[0] + push*2/3
                         else:
                             o['Prob'] = p[0] + push/3
@@ -816,13 +816,13 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[1] + push*2/3
                         else:
                             o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
                             o['Prob'] = p[0] + push*2/3
                         else:
                             o['Prob'] = p[0] + push/3

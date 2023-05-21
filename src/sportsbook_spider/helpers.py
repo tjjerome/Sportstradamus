@@ -83,9 +83,9 @@ def odds_to_prob(odds):
 
 def prob_to_odds(p):
     if p < 0.5:
-        return (1-p)/p*100
+        return np.round((1-p)/p*100)
     else:
-        return (p/(1-p))*-100
+        return np.round((p/(1-p))*-100)
 
 
 def no_vig_odds(over, under):
