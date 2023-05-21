@@ -33,7 +33,7 @@ import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from sportsbook_spider.helpers import get_loc
+from sportsbook_spider.helpers import get_loc, prob_to_odds
 from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 
@@ -258,11 +258,13 @@ def main(progress):
                             ev2 = dataset.get(players[1], {players[1]: None}).get(
                                 codex.get(o['Market'], o['Market']))
                             if ev1 is not None and ev2 is not None:
-                                v.append(ev1['EV']+ev2['EV'])
+                                ev = ev1['EV']+ev2['EV']
+                                l = np.round(ev-0.5)
+                                v.append(ev)
                                 offer = {
-                                    'Line': str(float(ev1['Line']) + float(ev2['Line'])),
-                                    'Over': str((float(ev1['Over']) + float(ev2['Over']))/2),
-                                    'Under': str((float(ev1['Under']) + float(ev2['Under']))/2),
+                                    'Line': str(l+0.5),
+                                    'Over': str(prob_to_odds(poisson.sf(l, ev))),
+                                    'Under': str(prob_to_odds(poisson.cdf(l, ev)))
                                 }
 
                     lines.append(offer)
@@ -290,11 +292,16 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        o['Prob'] = p[1]+push/2
-
+                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[1] + push*2/3
+                        else:
+                            o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        o['Prob'] = p[0]+push/2
+                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[0] + push*2/3
+                        else:
+                            o['Prob'] = p[0] + push/3
 
                     o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
                     o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
@@ -423,10 +430,11 @@ def main(progress):
                         if offer1 is not None and offer2 is not None:
                             v1.append(offer1['EV'])
                             v2.append(offer2['EV'])
+                            l = np.round(offer2['EV']-offer1['EV']-0.5)
                             offer = {
-                                'Line': str(float(offer2['Line']) - float(offer1['Line'])),
-                                'Under': str((float(offer1['Over']) + float(offer2['Under']))/2),
-                                'Over': str((float(offer1['Under']) + float(offer2['Over']))/2),
+                                'Line': str(l+0.5),
+                                'Under': str(prob_to_odds(skellam.cdf(l, offer2['EV'], offer1['EV']))),
+                                'Over': str(prob_to_odds(skellam.sf(l, offer2['EV'], offer1['EV']))),
                             }
                         else:
                             offer = None
@@ -476,10 +484,16 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        o['Prob'] = p[1]+push/2
+                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[1] + push*2/3
+                        else:
+                            o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        o['Prob'] = p[0]+push/2
+                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[0] + push*2/3
+                        else:
+                            o['Prob'] = p[0] + push/3
 
                     o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
                     o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
@@ -648,10 +662,16 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        o['Prob'] = p[1]+push/2
+                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[1] + push*2/3
+                        else:
+                            o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        o['Prob'] = p[0]+push/2
+                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[0] + push*2/3
+                        else:
+                            o['Prob'] = p[0] + push/3
 
                     o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
                     o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
@@ -796,10 +816,16 @@ def main(progress):
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
-                        o['Prob'] = p[1]+push/2
+                        if o['Line'] > np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[1] + push*2/3
+                        else:
+                            o['Prob'] = p[1] + push/3
                     else:
                         o['Bet'] = 'Under'
-                        o['Prob'] = p[0]+push/2
+                        if o['Line'] < np.nanmean([l.get('Line') for l in lines if l]):
+                            o['Prob'] = p[0] + push*2/3
+                        else:
+                            o['Prob'] = p[0] + push/3
 
                     o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
                     o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
@@ -881,7 +907,7 @@ def main(progress):
         wks.update("S1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("G:L", {"numberFormat": {
+        wks.format("H:M", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
     if len(untapped_markets) > 0:

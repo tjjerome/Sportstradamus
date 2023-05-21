@@ -5,7 +5,7 @@ import numpy as np
 import statsapi as mlb
 import logging
 from time import sleep
-from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, odds_to_prob, get_ev, mlb_pitchers
+from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, no_vig_odds, get_ev, prob_to_odds, mlb_pitchers
 
 logger = logging.getLogger(__name__)
 
@@ -77,13 +77,13 @@ def get_dk(events, categories):
                                 outcomes = sorted(
                                     k['outcomes'][:2], key=lambda x: x['label'])
                                 line = outcomes[1]['line']
-                                over = 1 / outcomes[0]['oddsDecimal']
-                                under = 1 / outcomes[1]['oddsDecimal']
+                                p = no_vig_odds(
+                                    outcomes[0]['oddsDecimal'], outcomes[1]['oddsDecimal'])
                                 newline = {
-                                    "EV": get_ev(line, over, under),
+                                    "EV": get_ev(line, p[1]),
                                     "Line": str(outcomes[1]['line']),
-                                    "Over": str(outcomes[0]['oddsAmerican']),
-                                    "Under": str(outcomes[1]['oddsAmerican'])
+                                    "Over": str(prob_to_odds(p[0])),
+                                    "Under": str(prob_to_odds(p[1]))
                                 }
                                 players[player][market] = newline
                             except:
@@ -183,15 +183,13 @@ def get_fd(sport, tabs):
                     else:
                         line = outcomes[1]['handicap']
 
-                    over = 1 / \
-                        outcomes[0]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds']
-                    under = 1 / \
-                        outcomes[1]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds']
+                    p = no_vig_odds(outcomes[0]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds'],
+                                    outcomes[1]['winRunnerOdds']['trueOdds']['decimalOdds']['decimalOdds'])
                     newline = {
-                        "EV": get_ev(line, over, under),
+                        "EV": get_ev(line, p[1]),
                         "Line": str(line),
-                        "Over": str(outcomes[0]['winRunnerOdds']['americanDisplayOdds']['americanOdds']),
-                        "Under": str(outcomes[1]['winRunnerOdds']['americanDisplayOdds']['americanOdds'])
+                        "Over": str(prob_to_odds(p[0])),
+                        "Under": str(prob_to_odds(p[1]))
                     }
                     players[player][market] = newline
                 except:
@@ -271,13 +269,14 @@ def get_pinnacle(league):
             outcomes = sorted(market['participants']
                               [:2], key=lambda x: x['name'])
             line = lines[market['id']]['s;0;ou'][outcomes[1]['id']]['Line']
-            prices = [odds_to_prob(
-                lines[market['id']]['s;0;ou'][participant['id']]['Price']) for participant in outcomes]
+            prices = [lines[market['id']]['s;0;ou'][participant['id']]
+                      ['Price'] for participant in outcomes]
+            p = no_vig_odds(prices[0], prices[1])
             newline = {
-                "EV": get_ev(line, prices[0], prices[1]),
+                "EV": get_ev(line, p[1]),
                 "Line": str(line),
-                "Over": str(lines[market['id']]['s;0;ou'][outcomes[0]['id']]['Price']),
-                "Under": str(lines[market['id']]['s;0;ou'][outcomes[1]['id']]['Price'])
+                "Over": str(prob_to_odds(p[0])),
+                "Under": str(prob_to_odds(p[1]))
             }
             players[player][bet] = newline
         except:
@@ -311,13 +310,14 @@ def get_pinnacle(league):
                         players[player] = {}
 
                     line = lines[game['id']]['s;3;ou;0.5']['Under']['Line']
-                    prices = [odds_to_prob(lines[game['id']]['s;3;ou;0.5']['Over']['Price']), odds_to_prob(
-                        lines[game['id']]['s;3;ou;0.5']['Under']['Price'])]
+                    prices = [lines[game['id']]['s;3;ou;0.5']['Over']['Price'],
+                              lines[game['id']]['s;3;ou;0.5']['Under']['Price']]
+                    p = no_vig_odds(prices[0], prices[1])
                     newline = {
-                        "EV": get_ev(line, prices[0], prices[1]),
+                        "EV": get_ev(line, p[1]),
                         "Line": str(line),
-                        "Over": str(lines[game['id']]['s;3;ou;0.5']['Over']['Price']),
-                        "Under": str(lines[game['id']]['s;3;ou;0.5']['Under']['Price'])
+                        "Over": str(prob_to_odds(p[0])),
+                        "Under": str(prob_to_odds(p[1]))
                     }
                     players[player][bet] = newline
 
@@ -389,14 +389,13 @@ def get_caesars(sport, league):
             if not player in players:
                 players[player] = {}
 
-            over = 1/market['selections'][0]['price']['d']
-            under = 1/market['selections'][1]['price']['d']
-            ev = get_ev(line, over, under)
+            p = no_vig_odds(market['selections'][0]['price']
+                            ['d'], market['selections'][1]['price']['d'])
             newline = {
-                'EV': ev,
+                'EV': get_ev(line, p[1]),
                 'Line': line,
-                'Over': market['selections'][0]['price']['a'],
-                'Under': market['selections'][1]['price']['a'],
+                'Over': str(prob_to_odds(p[0])),
+                'Under': str(prob_to_odds(p[1]))
             }
             players[player][marketName] = newline
 

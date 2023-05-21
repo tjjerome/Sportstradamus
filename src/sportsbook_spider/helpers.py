@@ -81,10 +81,30 @@ def odds_to_prob(odds):
         return odds/(odds+100)
 
 
-def get_ev(line, over, under):
+def prob_to_odds(p):
+    if p < 0.5:
+        return (1-p)/p*100
+    else:
+        return (p/(1-p))*-100
+
+
+def no_vig_odds(over, under):
+    if np.abs(over) >= 100:
+        o = odds_to_prob(over)
+    else:
+        o = 1/over
+    if np.abs(under) >= 100:
+        u = odds_to_prob(under)
+    else:
+        u = 1/under
+
+    juice = o+u
+    return [o/juice, u/juice]
+
+
+def get_ev(line, under):
     line = np.ceil(float(line) - 1)
-    p = under/(over+under)
-    return fsolve(lambda x: p - poisson.cdf(line, x), line)[0]
+    return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
 
 
 mlb_games = mlb.schedule(start_date=datetime.date.today(),
