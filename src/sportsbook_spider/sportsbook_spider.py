@@ -33,7 +33,7 @@ import gspread
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from sportsbook_spider.helpers import get_loc, prob_to_odds
+from sportsbook_spider.helpers import get_pred, prob_to_odds
 from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 
@@ -283,12 +283,15 @@ def main(progress):
                     if o['League'] == 'NBA':
                         stats = nba.get_stats(
                             o['Player'], opponent, pp2stats[o['Market']], o['Line'])
+                        weights = nba.get_weights(pp2stats[o['Market']])
                     elif o['League'] == 'MLB':
                         stats = mlb.get_stats(
                             o['Player'], opponent, pp2stats[o['Market']], o['Line'])
+                        weights = mlb.get_weights(pp2stats[o['Market']])
                     elif o['League'] == 'NHL':
                         stats = nhl.get_stats(
                             o['Player'], opponent, pp2stats[o['Market']], o['Line'])
+                        weights = nhl.get_weights(pp2stats[o['Market']])
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
@@ -310,11 +313,11 @@ def main(progress):
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
                     if o['Bet'] == 'Over':
-                        loc = get_loc(stats)
+                        loc = get_pred(stats, weights)
                     else:
-                        loc = -get_loc(stats)
+                        loc = 1-get_pred(stats, weights)
 
-                    if loc+o['Prob'] > .555:
+                    if 0.25*loc + 0.75*o['Prob'] > .555:
                         o['Good Bet'] = 'Y'
                     else:
                         o['Good Bet'] = 'N'
@@ -475,12 +478,15 @@ def main(progress):
                     if o['League'] == 'NBA':
                         stats = nba.get_stats(
                             o['Player'], opponent, ud2stats[market], o['Line'])
+                        weights = nba.get_weights(ud2stats[market])
                     elif o['League'] == 'MLB':
                         stats = mlb.get_stats(
                             o['Player'], opponent, ud2stats[market], o['Line'])
+                        weights = mlb.get_weights(ud2stats[market])
                     elif o['League'] == 'NHL':
                         stats = nhl.get_stats(
                             o['Player'], opponent, ud2stats[market], o['Line'])
+                        weights = nhl.get_weights(ud2stats[market])
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
@@ -502,11 +508,11 @@ def main(progress):
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
                     if o['Bet'] == 'Over':
-                        loc = get_loc(stats)
+                        loc = get_pred(stats, weights)
                     else:
-                        loc = -get_loc(stats)
+                        loc = 1-get_pred(stats, weights)
 
-                    if loc+o['Prob'] > .555:
+                    if .25*loc+.75*o['Prob'] > .555:
                         o['Good Bet'] = 'Y'
                     else:
                         o['Good Bet'] = 'N'
@@ -653,12 +659,15 @@ def main(progress):
                     if o['League'] == 'NBA':
                         stats = nba.get_stats(
                             o['Player'], opponent, th2stats[market], o['Line'])
+                        weights = nba.get_weights(th2stats[market])
                     elif o['League'] == 'MLB':
                         stats = mlb.get_stats(
                             o['Player'], opponent, th2stats[market], o['Line'])
+                        weights = mlb.get_weights(th2stats[market])
                     elif o['League'] == 'NHL':
                         stats = nhl.get_stats(
                             o['Player'], opponent, th2stats[market], o['Line'])
+                        weights = nhl.get_weights(th2stats[market])
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
@@ -680,11 +689,11 @@ def main(progress):
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
                     if o['Bet'] == 'Over':
-                        loc = get_loc(stats)
+                        loc = get_pred(stats, weights)
                     else:
-                        loc = -get_loc(stats)
+                        loc = 1-get_pred(stats, weights)
 
-                    if loc+o['Prob'] > .555:
+                    if .25*loc+0.75*o['Prob'] > .555:
                         o['Good Bet'] = 'Y'
                     else:
                         o['Good Bet'] = 'N'
@@ -807,12 +816,15 @@ def main(progress):
                     if o['League'] == 'NBA':
                         stats = nba.get_stats(
                             o['Player'], opponent, parp2stats[market], o['Line'])
+                        weights = nba.get_weights(parp2stats[market])
                     elif o['League'] == 'MLB':
                         stats = mlb.get_stats(
                             o['Player'], opponent, parp2stats[market], o['Line'])
+                        weights = mlb.get_weights(parp2stats[market])
                     elif o['League'] == 'NHL':
                         stats = nhl.get_stats(
                             o['Player'], opponent, parp2stats[market], o['Line'])
+                        weights = nhl.get_weights(parp2stats[market])
 
                     if p[1] > p[0]:
                         o['Bet'] = 'Over'
@@ -834,11 +846,11 @@ def main(progress):
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
                     if o['Bet'] == 'Over':
-                        loc = get_loc(stats)
+                        loc = get_pred(stats, weights)
                     else:
-                        loc = -get_loc(stats)
+                        loc = 1-get_pred(stats, weights)
 
-                    if loc+o['Prob'] > .555:
+                    if 0.25*loc + 0.75*o['Prob'] > .555:
                         o['Good Bet'] = 'Y'
                     else:
                         o['Good Bet'] = 'N'
