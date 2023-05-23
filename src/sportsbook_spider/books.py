@@ -599,7 +599,7 @@ def get_thrive():
     payload = {"currentPage": 1, "currentSize": 100, "half": 0,
                "Latitude": "29.5908265", "Longitude": "-95.1381594"}
     header = {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
-              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCRMOGxMaTlUR2REVXZvdE9OTWhSaGxPbWZJc1ptaWRTdGFlZkxiU1ZZTkF4TVBQQTB1Q0ZQLiIsImNyZWF0ZWQiOjE2ODQwNzkwNzAyODgsImV4cCI6MTY4NDY4Mzg3MH0.GLlJuz0fdh0MsrF1IOQsAW47JflfoSSlSRgyo2bQPe-u6b7zZ7AJBLPeKJZCPKUPsrYWsjgyA3fIKgs2bOQtpA'}
+              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCQ2OXNWUmpBeDI4N090dTlEVWFCaEZPbnM5dEZFUERLU1oxVDJjcnQzVXUyYTVLOUp0NlgvRyIsImNyZWF0ZWQiOjE2ODQ4MDkwMjAwNDksImV4cCI6MTY4NTQxMzgyMH0.c8_cV3lVObgjA52Eu75FJcu0wcymmlm-zBub5NW2F3CtlO5jWqJiXuW7Ch-xdkU8XvdMBgtRdK5QP7VZTFuVlQ'}
     logger.info("Getting Thrive Lines")
     try:
         api = requests.post("https://proxy.scrapeops.io/v1/", params=params,
@@ -610,6 +610,7 @@ def get_thrive():
     if api['success']:
         lines = api['response']['data']
     else:
+        logger.error(api['message'])
         return []
 
     offers = []

@@ -6,7 +6,7 @@ import datetime
 import importlib.resources as pkg_resources
 from . import creds
 from time import sleep
-from scipy.stats import poisson
+from scipy.stats import poisson, norm
 from scipy.optimize import fsolve
 import numpy as np
 import statsapi as mlb
@@ -83,9 +83,9 @@ def odds_to_prob(odds):
 
 def prob_to_odds(p):
     if p < 0.5:
-        return np.round((1-p)/p*100)
+        return int(np.round((1-p)/p*100))
     else:
-        return np.round((p/(1-p))*-100)
+        return int(np.round((p/(1-p))*-100))
 
 
 def no_vig_odds(over, under):
@@ -128,10 +128,28 @@ for game in mlb_games:
             mlb_pitchers[homeTeam + str(game['game_num'])
                          ] = remove_accents(game['home_probable_pitcher'])
 
-mlb_pitchers['LA'] = mlb_pitchers.get('LAD')
-mlb_pitchers['ANA'] = mlb_pitchers.get('LAA')
-mlb_pitchers['ARI'] = mlb_pitchers.get('AZ')
-mlb_pitchers['WAS'] = mlb_pitchers.get('WSH')
+mlb_pitchers['LA'] = mlb_pitchers.get('LAD', '')
+mlb_pitchers['ANA'] = mlb_pitchers.get('LAA', '')
+mlb_pitchers['ARI'] = mlb_pitchers.get('AZ', '')
+mlb_pitchers['WAS'] = mlb_pitchers.get('WSH', '')
+
+
+def likelihood(data, beta):
+    l = 0
+    for d in data:
+        y = d['result']
+        x = d['stats']
+        p = norm.cdf(np.dot(x, beta))
+        if p > 0 and p < 1:
+            l += y*np.log(p)+(1-y)*np.log(1-p)
+
+    return l
+
+
+def get_pred(stats, weights):
+    baseline = np.array([0, 0.5, 0.5, 0.5, 0])
+    stats[stats == -1000] = baseline[stats == -1000]
+    return norm.cdf(np.dot(stats-baseline, weights))
 
 
 def get_loc(stats):

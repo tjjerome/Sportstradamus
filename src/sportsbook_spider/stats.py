@@ -3,15 +3,18 @@ import numpy as np
 import datetime
 import logging
 import pickle
+import json
 import importlib.resources as pkg_resources
 from . import data
 from tqdm import tqdm
 import statsapi as mlb
+from scipy.stats import norm
+from scipy.optimize import minimize
 import nba_api.stats.endpoints as nba
 from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
 from time import sleep
-from sportsbook_spider.helpers import scraper, mlb_pitchers
+from sportsbook_spider.helpers import scraper, mlb_pitchers, likelihood
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,13 @@ class statsNBA:
             with open(filepath, "rb") as infile:
                 self.players = pickle.load(infile)
                 self.players = {int(k): v for k, v in self.players.items()}
+
+        filepath = (pkg_resources.files(data) / "weights.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                weights = json.load(infile)
+
+            self.weights = weights
 
     def update(self):
         logger.info("Getting NBA stats")
@@ -101,7 +111,7 @@ class statsNBA:
             dvpoa = -1000
         else:
             player_id = nba_static.find_players_by_full_name(player)
-            if player_id:
+            if player_id and player_id[0]['id'] in self.players:
                 player_id = player_id[0]['id']
                 positions = self.players[player_id]['POSITION'].split('-')
             else:
@@ -157,11 +167,98 @@ class statsNBA:
 
         return np.array([last10avg, last5, seasontodate, headtohead, dvpoa])
 
+    def get_stats_date(self, game, market, line):
+        old_gamelog = self.gamelog
+        try:
+            i = self.gamelog.index(game)
+        except:
+            i = len(self.gamelog)
+        if i == 0:
+            return np.ones(5)*-1000
+        self.gamelog = self.gamelog[i:]
+        player = game['PLAYER_NAME']
+        opponent = game['OPP']
+        stats = self.get_stats(player, opponent, market, line)
+        self.gamelog = old_gamelog
+        return stats
+
+    def bucket_stats(self, market):
+        playerStats = {}
+        for game in self.gamelog:
+
+            if not game['PLAYER_NAME'] in playerStats:
+                playerStats[game['PLAYER_NAME']] = {'games': []}
+
+            playerStats[game['PLAYER_NAME']]['games'].append(game[market])
+
+        playerStats = {k: v for k, v in playerStats.items() if len(
+            v['games']) > 10 and not all([g == 0 for g in v['games']])}
+
+        averages = []
+        for player, games in playerStats.items():
+            playerStats[player]['avg'] = np.mean(games['games'])
+            averages.append(np.mean(games['games']))
+
+        edges = [np.percentile(averages, p) for p in range(0, 101, 10)]
+        lines = np.zeros(10)
+        for i in range(1, 11):
+            lines[i-1] = np.round(np.mean([v for v in averages if v <=
+                                  edges[i] and v >= edges[i-1]])-.5)+.5
+
+        for player, games in playerStats.items():
+            for i in range(0, 10):
+                if games['avg'] >= edges[i]:
+                    playerStats[player]['bucket'] = 10-i
+                    playerStats[player]['line'] = lines[i]
+
+        return playerStats
+
+    def get_weights(self, market):
+        if market in self.weights['NBA']:
+            return self.weights['NBA'].get(market)
+
+        playerStats = self.bucket_stats(market)
+        results = []
+        for game in tqdm(self.gamelog):
+
+            player = game['PLAYER_NAME']
+            if not player in playerStats:
+                continue
+            elif playerStats[player]['bucket'] < 5:
+                continue
+
+            line = playerStats[player]['avg']
+            stats = self.get_stats_date(game, market, line)
+            if all(stats == np.ones(5)*-1000):
+                continue
+            baseline = np.array([0, 0.5, 0.5, 0.5, 0])
+            stats[stats == -1000] = baseline[stats == -1000]
+            stats = stats - baseline
+            y = int(game[market] > line)
+
+            results.append({'stats': stats, 'result': y,
+                            'bucket': playerStats[player]['bucket']})
+
+        res = minimize(lambda x: -likelihood(results, x),
+                       np.ones(5), method='l-bfgs-b', tol=1e-8, bounds=[(0, 10)]*5)
+
+        w = list(res.x)
+        self.weights['NBA'][market] = w
+        filepath = (pkg_resources.files(data) / "weights.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "w") as outfile:
+                json.dump(self.weights, outfile, indent=4)
+
+        return w
+
 
 class statsMLB:
     def __init__(self):
         self.gamelog = []
         self.gameIds = []
+        self.season_start = datetime.datetime.strptime(
+            '2023-03-30', "%Y-%m-%d")
+        self.pitchers = mlb_pitchers
 
     def parse_game(self, gameId):
         game = mlb.boxscore_data(gameId)
@@ -245,6 +342,13 @@ class statsMLB:
             self.gamelog = mlb_data['gamelog']
             self.gameIds = mlb_data['games']
 
+        filepath = (pkg_resources.files(data) / "weights.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                weights = json.load(infile)
+
+            self.weights = weights
+
     def update(self):
         logger.info("Getting MLB Stats")
         mlb_game_ids = mlb.schedule(start_date=mlb.latest_season(
@@ -315,9 +419,8 @@ class statsMLB:
             headtohead = -1000
             dvpoa = -1000
         else:
-            season_start = datetime.datetime.strptime(
-                mlb.latest_season()['regularSeasonStartDate'], "%Y-%m-%d")
-            pitcher = mlb_pitchers.get(opponent, '')
+
+            pitcher = self.pitchers.get(opponent, '')
             if any([string in market for string in ['allowed', 'pitch']]):
                 player_games = [game for game in self.gamelog
                                 if game['playerName'] == player and game['starting pitcher']]
@@ -329,7 +432,7 @@ class statsMLB:
             last10avg = (np.mean([game[market]
                                   for game in player_games][-10:])-line)/line
             made_line = [int(game[market] > line) for game in player_games if datetime.datetime.strptime(
-                game['gameId'][:10], "%Y/%m/%d") >= season_start]
+                game['gameId'][:10], "%Y/%m/%d") >= self.season_start]
             last5 = np.mean(made_line[-5:])
             seasontodate = np.mean(made_line)
             if np.isnan(last5):
@@ -358,12 +461,111 @@ class statsMLB:
                 headtohead = -1000
             else:
                 headtohead = np.mean(headtohead+[1, 0])
-            if not dvp:
+            if np.isnan(dvp):
                 dvpoa = -1000
             else:
                 dvpoa = (dvp-leagueavg)/leagueavg
 
         return np.array([last10avg, last5, seasontodate, headtohead, dvpoa])
+
+    def get_stats_date(self, game, market, line):
+        old_gamelog = self.gamelog
+        try:
+            i = self.gamelog.index(game)
+        except:
+            i = len(self.gamelog)
+        if i == 0:
+            return np.ones(5)*-1000
+        self.gamelog = self.gamelog[:i]
+        self.pitchers.update({game['opponent']: game['opponent pitcher']})
+        if datetime.datetime.strptime(game['gameId'][:10], "%Y/%m/%d") < self.season_start:
+            self.season_start = datetime.datetime.strptime(
+                '2022-04-07', "%Y-%m-%d")
+        player = game['playerName']
+        opponent = game['opponent']
+        stats = self.get_stats(player, opponent, market, line)
+        self.gamelog = old_gamelog
+        self.season_start = datetime.datetime.strptime(
+            '2023-03-30', "%Y-%m-%d")
+        self.pitchers = mlb_pitchers
+        return stats
+
+    def bucket_stats(self, market):
+        playerStats = {}
+        for game in self.gamelog:
+            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
+                continue
+            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
+                continue
+
+            if not game['playerName'] in playerStats:
+                playerStats[game['playerName']] = {'games': []}
+
+            playerStats[game['playerName']]['games'].append(game[market])
+
+        playerStats = {k: v for k, v in playerStats.items() if len(
+            v['games']) > 10 and not all([g == 0 for g in v['games']])}
+
+        averages = []
+        for player, games in playerStats.items():
+            playerStats[player]['avg'] = np.mean(games['games'])
+            averages.append(np.mean(games['games']))
+
+        edges = [np.percentile(averages, p) for p in range(0, 101, 20)]
+        lines = np.zeros(5)
+        for i in range(1, 6):
+            lines[i-1] = np.round(np.mean([v for v in averages if v <=
+                                  edges[i] and v >= edges[i-1]])-.5)+.5
+
+        for player, games in playerStats.items():
+            for i in range(0, 5):
+                if games['avg'] >= edges[i]:
+                    playerStats[player]['bucket'] = 5-i
+                    playerStats[player]['line'] = lines[i]
+
+        return playerStats
+
+    def get_weights(self, market):
+        if market in self.weights['MLB']:
+            return self.weights['MLB'].get(market)
+
+        playerStats = self.bucket_stats(market)
+        results = []
+        for game in tqdm(self.gamelog):
+            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
+                continue
+            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
+                continue
+
+            player = game['playerName']
+            if not player in playerStats:
+                continue
+            elif playerStats[player]['bucket'] < 3:
+                continue
+
+            line = playerStats[player]['line']
+            stats = self.get_stats_date(game, market, line)
+            if all(stats == np.ones(5)*-1000):
+                continue
+            baseline = np.array([0, 0.5, 0.5, 0.5, 0])
+            stats[stats == -1000] = baseline[stats == -1000]
+            stats = stats - baseline
+            y = int(game[market] > line)
+
+            results.append({'stats': stats, 'result': y,
+                            'bucket': playerStats[player]['bucket']})
+
+        res = minimize(lambda x: -likelihood(results, x),
+                       np.ones(5), method='l-bfgs-b', tol=1e-8, bounds=[(0, 10)]*5)
+
+        w = list(res.x)
+        self.weights['MLB'][market] = w
+        filepath = (pkg_resources.files(data) / "weights.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "w") as outfile:
+                json.dump(self.weights, outfile, indent=4)
+
+        return w
 
 
 class statsNHL:
@@ -381,6 +583,13 @@ class statsNHL:
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.goalie_data = pickle.load(infile)
+
+        filepath = (pkg_resources.files(data) / "weights.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                weights = json.load(infile)
+
+            self.weights = weights
 
     def update(self):
         logger.info("Getting NHL data")
@@ -589,3 +798,138 @@ class statsNHL:
                 leagueavg = np.mean(list(leagueavg.values()))/2
                 dvpoa = (dvp-leagueavg)/leagueavg
         return np.array([last10avg, last5, seasontodate, headtohead, dvpoa])
+
+    def get_stats_date(self, game, market, line):
+        old_goalie_data = self.goalie_data
+        old_skater_data = self.skater_data
+        if market in ['goalsAgainst', 'saves']:
+            try:
+                i = self.goalie_data.index(game)
+            except:
+                i = len(self.goalie_data)
+            gameDate = game['gameDate']
+            sameGame = next(
+                game for game in self.skater_data if game["gameDate"] == gameDate)
+            try:
+                j = self.skater_data.index(sameGame)
+            except:
+                j = len(self.skater_data)
+            if i == 0 or j == 0:
+                return np.ones(5)*-1000
+            self.goalie_data = self.goalie_data[:i]
+            self.skater_data = self.skater_data[:j]
+            player = game['goalieFullName']
+
+        else:
+            try:
+                i = self.skater_data.index(game)
+            except:
+                i = len(self.skater_data)
+            gameDate = game['gameDate']
+            sameGame = next(
+                game for game in self.goalie_data if game["gameDate"] == gameDate)
+            try:
+                j = self.goalie_data.index(sameGame)
+            except:
+                j = len(self.goalie_data)
+            if i == 0 or j == 0:
+                return np.ones(5)*-1000
+            self.goalie_data = self.goalie_data[:j]
+            self.skater_data = self.skater_data[:i]
+            player = game['skaterFullName']
+
+        opponent = game['opponentTeamAbbrev']
+        stats = self.get_stats(player, opponent, market, line)
+        self.goalie_data = old_goalie_data
+        self.skater_data = old_skater_data
+        return stats
+
+    def bucket_stats(self, market):
+        playerStats = {}
+        if market in ['goalsAgainst', 'saves']:
+            gamelog = self.goalie_data
+            player = 'goalieFullName'
+        else:
+            gamelog = self.skater_data
+            player = 'skaterFullName'
+
+        for game in gamelog:
+
+            if not game[player] in playerStats:
+                playerStats[game[player]] = {'games': []}
+
+            playerStats[game[player]]['games'].append(game[market])
+
+        playerStats = {k: v for k, v in playerStats.items() if len(
+            v['games']) > 10 and not all([g == 0 for g in v['games']])}
+
+        averages = []
+        for player, games in playerStats.items():
+            playerStats[player]['avg'] = np.mean(games['games'])
+            averages.append(np.mean(games['games']))
+
+        edges = [np.percentile(averages, p) for p in range(0, 101, 10)]
+        lines = np.zeros(10)
+        for i in range(1, 11):
+            lines[i-1] = np.round(np.mean([v for v in averages if v <=
+                                  edges[i] and v >= edges[i-1]])-.5)+.5
+
+        for player, games in playerStats.items():
+            for i in range(0, 10):
+                if games['avg'] >= edges[i]:
+                    playerStats[player]['bucket'] = 10-i
+                    playerStats[player]['line'] = lines[i]
+
+        return playerStats
+
+    def get_weights(self, market):
+        if market == 'PTS':
+            market = 'points'
+        elif market == 'AST':
+            market = 'assists'
+        elif market == 'BLK':
+            return np.zeros(5)
+
+        if market in self.weights['NHL']:
+            return self.weights['NHL'].get(market)
+
+        if market in ['goalsAgainst', 'saves']:
+            gamelog = self.goalie_data
+            playerTag = 'goalieFullName'
+        else:
+            gamelog = self.skater_data
+            playerTag = 'skaterFullName'
+
+        playerStats = self.bucket_stats(market)
+        results = []
+        for game in tqdm(gamelog):
+
+            player = game[playerTag]
+            if not player in playerStats:
+                continue
+            elif playerStats[player]['bucket'] < 5:
+                continue
+
+            line = playerStats[player]['avg']
+            stats = self.get_stats_date(game, market, line)
+            if all(stats == np.ones(5)*-1000):
+                continue
+            baseline = np.array([0, 0.5, 0.5, 0.5, 0])
+            stats[stats == -1000] = baseline[stats == -1000]
+            stats = stats - baseline
+            y = int(game[market] > line)
+
+            results.append({'stats': stats, 'result': y,
+                            'bucket': playerStats[player]['bucket']})
+
+        res = minimize(lambda x: -likelihood(results, x),
+                       np.ones(5), method='l-bfgs-b', tol=1e-8, bounds=[(0, 10)]*5)
+
+        w = list(res.x)
+        self.weights['NHL'][market] = w
+        filepath = (pkg_resources.files(data) / "weights.json")
+        if os.path.isfile(filepath):
+            with open(filepath, "w") as outfile:
+                json.dump(self.weights, outfile, indent=4)
+
+        return w
