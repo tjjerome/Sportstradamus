@@ -8,7 +8,6 @@ import importlib.resources as pkg_resources
 from sportsbook_spider import data
 from tqdm import tqdm
 import statsapi as mlb
-from scipy.stats import norm
 from scipy.optimize import minimize
 import nba_api.stats.endpoints as nba
 from nba_api.stats.static import players as nba_static
