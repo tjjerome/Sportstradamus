@@ -365,7 +365,7 @@ def get_caesars(sport, league):
                 'marketType', {}) == 'PLAYERLINEBASED' or market.get('displayName') == 'Run In 1st Inning?')]
 
         except:
-            logger.exception("Unable to parse game")
+            logger.exception(f"Unable to parse game {id}")
             continue
 
         for market in tqdm(markets):
@@ -404,19 +404,23 @@ def get_caesars(sport, league):
 
 def get_pp():
     offers = []
-    """
-    leagues = [i['id'] for i in leagues['data']
-               if i['attributes']['projections_count'] > 0]
-   """
-    leagues = [2, 7, 8]
+    params = {
+        'api_key': apikey,
+        'url': f"https://api.prizepicks.com/leagues",
+        'optimize_request': True
+    }
+    try:
+        leagues = requests.get("https://proxy.scrapeops.io/v1/",
+                               params=params).json()
+        leagues = [i['id'] for i in leagues['data']
+                   if i['attributes']['projections_count'] > 0]
+    except:
+        logger.exception("Retrieving leagues failed,")
+        leagues = [2, 7, 8, 9]
 
     logger.info("Processing PrizePicks offers")
     for l in tqdm(leagues):
-        params = {
-            'api_key': '82ccbf28-ddd6-4e37-b3a1-0097b10fd412',
-            'url': f"https://api.prizepicks.com/projections?league_id={l}",
-            'optimize_request': True
-        }
+        params['url'] = f"https://api.prizepicks.com/projections?league_id={l}"
 
         try:
             api = requests.get("https://proxy.scrapeops.io/v1/",
@@ -424,6 +428,7 @@ def get_pp():
             players = api['included']
             lines = api['data']
         except:
+            logger.exception(f"League {l} failed,")
             continue
 
         player_ids = {}
@@ -442,6 +447,7 @@ def get_pp():
                 'Player': remove_accents(player_ids[o['relationships']['new_player']['data']['id']]['Name']),
                 'League': league,
                 'Team': player_ids[o['relationships']['new_player']['data']['id']]['Team'],
+                'Date': o['attributes']['start_time'].split("T")[0],
                 'Market': o['attributes']['stat_type'],
                 'Line': o['attributes']['line_score'],
                 'Opponent': o['attributes']['description']
@@ -487,7 +493,8 @@ def get_ud():
         match_ids[i['id']] = {
             'Home': team_ids[i['home_team_id']],
             'Away': team_ids[i['away_team_id']],
-            'League': i['sport_id']
+            'League': i['sport_id'],
+            'Date': i['scheduled_at'].split("T")[0]
         }
 
     players = {}
@@ -500,7 +507,8 @@ def get_ud():
         }
         matches[i['id']] = {
             'Home': match_ids.get(i['match_id'], {'Home': ''})['Home'],
-            'Away': match_ids.get(i['match_id'], {'Away': ''})['Away']
+            'Away': match_ids.get(i['match_id'], {'Away': ''})['Away'],
+            'Date': match_ids.get(i['match_id'], {'Date': ''})['Date']
         }
 
     offers = []
@@ -516,6 +524,7 @@ def get_ud():
             'Player': remove_accents(player['Name']),
             'League': player['League'],
             'Team': player['Team'],
+            'Date': game['Date'],
             'Market': o['over_under']['appearance_stat']['display_stat'],
             'Line': float(o['stat_value']),
             'Opponent': opponent
@@ -541,7 +550,8 @@ def get_ud():
             match_ids[i['id']] = {
                 'Home': team_ids[i['home_team_id']],
                 'Away': team_ids[i['away_team_id']],
-                'League': i['sport_id']
+                'League': i['sport_id'],
+                'Date': i['scheduled_at'].split("T")[0]
             }
 
     for i in rivals['appearances']:
@@ -555,7 +565,8 @@ def get_ud():
         if not i['id'] in matches:
             matches[i['id']] = {
                 'Home': match_ids.get(i['match_id'], {'Home': ''})['Home'],
-                'Away': match_ids.get(i['match_id'], {'Away': ''})['Away']
+                'Away': match_ids.get(i['match_id'], {'Away': ''})['Away'],
+                'Date': match_ids.get(i['match_id'], {'Date': ''})['Date']
             }
 
     logger.info("Getting Underdog Rivals")
@@ -575,6 +586,7 @@ def get_ud():
             'Player': player1['Name'] + " vs. " + player2['Name'],
             'League': player1['League'],
             'Team': player1['Team'] + "/" + player2['Team'],
+            'Date': game1['Date'],
             'Market': "H2H " + bet,
             'Line': float(o['options'][0]['spread'])-float(o['options'][1]['spread']),
             'Opponent': opponent1 + " / " + opponent2
@@ -618,6 +630,7 @@ def get_thrive():
             'Player': remove_accents(" ".join([o['player1']['firstName'], o['player1']['lastName']])),
             'League': o['player1']['leagueType'],
             'Team': o['player1']['teamAbbr'],
+            'Date': o['startTime'].split(" ")[0],
             'Market': " + ".join(o['player1']['propParameters']),
             'Line': float(o['propValue']),
             'Opponent': o['team2Abbr']
@@ -633,7 +646,7 @@ def get_thrive():
 
 def get_parp():
     params = {
-        'api_key': '82ccbf28-ddd6-4e37-b3a1-0097b10fd412',
+        'api_key': apikey,
         'url': "https://parlayplay.io/api/v1/crossgame/search/?format=json&sport=All&league=",
         'optimize_request': True,
         'keep_headers': True
@@ -656,6 +669,7 @@ def get_parp():
                 'Player': remove_accents(player['player']['fullName']),
                 'League': player['match']['league']['leagueNameShort'],
                 'Team': player['player']['team']['teamAbbreviation'],
+                'Date': player['match']['matchDate'].split("T")[0],
                 'Market': stat['challengeName'],
                 'Line': float(stat['statValue']),
                 'Slide': 'N',

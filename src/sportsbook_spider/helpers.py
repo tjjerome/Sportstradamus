@@ -1,13 +1,15 @@
 from sportsbook_spider.spiderLogger import logger
 import requests
 import json
+import pickle
+import os
 import random
 import unicodedata
 import datetime
 import importlib.resources as pkg_resources
-from sportsbook_spider import creds
+from sportsbook_spider import creds, data
 from time import sleep
-from scipy.stats import poisson, norm
+from scipy.stats import poisson, norm, skellam
 from scipy.optimize import fsolve
 import numpy as np
 import statsapi as mlb
@@ -19,7 +21,7 @@ apikey = creds['apikey']
 scrapeops_logger = ScrapeOpsRequests(
     scrapeops_api_key=apikey,
     spider_name='Sportsbooks',
-    job_name='Odds'
+    job_name=os.uname()[1]
 )
 
 requests = scrapeops_logger.RequestsWrapper()
@@ -54,8 +56,8 @@ class Scrape:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    logging.debug("Attempt " + str(i) +
-                                  ", Error " + str(response.status_code))
+                    logger.debug("Attempt " + str(i) +
+                                 ", Error " + str(response.status_code))
             except Exception as exc:
                 logger.exception("Attempt " + str(i) + ",")
 
@@ -157,3 +159,54 @@ def get_loc(stats):
     weights = np.array([0.75, 0.9, 0.5, 1, 0.75])
     weights = sat/np.dot(np.array([.1, .2, .1, .1, .06]), weights) * weights
     return np.clip(np.dot(weights, (stats-baseline)), -sat, sat)
+
+
+class Archive():
+    def __init__(self):
+        self.archive = {}
+        filepath = (pkg_resources.files(data) / "archive.dat")
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                self.archive = pickle.load(infile)
+
+    def add(self, o, stats, lines, key):
+        market = key[o['Market'].replace("H2H ", "")]
+        if not o['League'] in self.archive:
+            self.archive[o['League']] = {}
+
+        if not market in self.archive[o['League']]:
+            self.archive[o['League']][market] = {}
+
+        if not o['Date'] in self.archive[o['League']][market]:
+            self.archive[o['League']][market][o['Date']] = {}
+
+        if not o['Player'] in self.archive[o['League']][market][o['Date']]:
+            self.archive[o['League']][market][o['Date']][o['Player']] = {}
+
+        for line in lines:
+            if line:
+                l = np.floor(o['Line'])
+                if type(line['EV']) is tuple:
+                    p = skellam.sf(l, line['EV'][1], line['EV'][0])
+                    if np.mod(o['Line'], 1) == 0:
+                        p += skellam.pmf(l, line['EV'][1], line['EV'][0])/2
+                else:
+                    p = poisson.sf(l, line['EV'])
+                    if np.mod(o['Line'], 1) == 0:
+                        p += poisson.pmf(l, line['EV'])/2
+
+            else:
+                p = -1000
+
+            stats = np.append(stats, p)
+
+        self.archive[o['League']][market][o['Date']
+                                          ][o['Player']][o['Line']] = stats
+
+    def write(self):
+        filepath = (pkg_resources.files(data) / "archive.dat")
+        with open(filepath, "wb") as outfile:
+            pickle.dump(self.archive, outfile)
+
+
+archive = Archive()
