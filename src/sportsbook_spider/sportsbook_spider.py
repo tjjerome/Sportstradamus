@@ -12,23 +12,21 @@ TODO:
 from sportsbook_spider.spiderLogger import logger
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
-from sportsbook_spider.helpers import get_pred, prob_to_odds
+from sportsbook_spider.helpers import get_pred, prob_to_odds, archive
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 import click
-from sportsbook_spider import creds
+from sportsbook_spider import creds, data
 from scipy.stats import poisson, skellam
 from functools import partialmethod
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import os.path
-import logging
 import datetime
 import importlib.resources as pkg_resources
-from sportsbook_spider import logs
 
 
 @click.command()
@@ -256,7 +254,8 @@ def main(progress):
                                 offer = {
                                     'Line': str(l+0.5),
                                     'Over': str(prob_to_odds(poisson.sf(l, ev))),
-                                    'Under': str(prob_to_odds(poisson.cdf(l, ev)))
+                                    'Under': str(prob_to_odds(poisson.cdf(l, ev))),
+                                    'EV': ev
                                 }
 
                     lines.append(offer)
@@ -323,10 +322,12 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
+                    archive.add(o, stats, lines, pp2stats)
+
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
 
-            except Exception as exc:
+            except:
                 logger.exception(o['Player'] + ", " + o["Market"])
 
     ud_offers = get_ud()
@@ -385,6 +386,7 @@ def main(progress):
         'Singles': 'singles',
         'Walks': 'walks',
         'Hits': 'hits',
+        'RBIs': 'rbi',
         'Walks Allowed': 'walks allowed',
         'Goals Against': 'goalsAgainst',
         'Goals': 'goals',
@@ -430,6 +432,7 @@ def main(progress):
                                 'Line': str(l+0.5),
                                 'Under': str(prob_to_odds(skellam.cdf(l, offer2['EV'], offer1['EV']))),
                                 'Over': str(prob_to_odds(skellam.sf(l, offer2['EV'], offer1['EV']))),
+                                'EV': (offer1['EV'], offer2['EV'])
                             }
                         else:
                             offer = None
@@ -504,7 +507,7 @@ def main(progress):
                     else:
                         loc = 1-get_pred(stats, weights)
 
-                    if .25*loc+.75*o['Prob'] > .555:
+                    if .25*loc+.75*o['Prob'] > .54:
                         o['Good Bet'] = 'Y'
                     else:
                         o['Good Bet'] = 'N'
@@ -518,6 +521,7 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
+                    archive.add(o, stats, lines, ud2stats)
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
 
@@ -699,6 +703,7 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
+                    archive.add(o, stats, lines, th2stats)
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
 
@@ -728,7 +733,8 @@ def main(progress):
         'Blocked Shots': 'Blocks',
         'Pts + Reb + Ast': 'Pts+Rebs+Asts',
         'Shots': 'Shots on Goal',
-        'Strikeouts (K)': 'Total Strikeouts'
+        'Strikeouts (K)': 'Total Strikeouts',
+        'Strikeouts': 'Total Strikeouts'
     }
 
     parp2csb = {
@@ -740,7 +746,8 @@ def main(progress):
         'Reb + Ast': 'Rebounds + Assists',
         'Shots on Goal': 'Shots',
         'Stl + Blk': 'Blocks and Steals',
-        'Strikeouts (K)': 'Pitching Strikeouts'
+        'Strikeouts (K)': 'Pitching Strikeouts',
+        'Strikeouts': 'Pitching Strikeouts'
     }
 
     parp2stats = {
@@ -759,6 +766,12 @@ def main(progress):
         'Shots on Goal': 'shots',
         'Stl + Blk': 'BLST',
         'Strikeouts (K)': 'pitcher strikeouts',
+        'Strikeouts': 'pitcher strikeouts',
+        'Hits Allowed': 'hits allowed',
+        'Walks Allowed': 'walks allowed',
+        'Total Bases': 'total bases',
+        'Pitching Outs': 'pitching outs',
+        'Earned Runs': 'runs',
         'Turnovers': 'TOV'
     }
 
@@ -856,10 +869,11 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
+                    archive.add(o, stats, lines, parp2stats)
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
 
-            except Exception as exc:
+            except:
                 logger.exception(o['Player'] + ", " + o["Market"])
 
     logger.info("Writing to file...")
@@ -869,10 +883,10 @@ def main(progress):
         wks = gc.open("Sports Betting").worksheet("PrizePicks")
         wks.clear()
         wks.update([pp_df.columns.values.tolist()] + pp_df.values.tolist())
-        wks.update("R1", "Last Updated: " +
+        wks.update("S1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("G:L", {"numberFormat": {
+        wks.format("H:M", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
     if len([o for o in ud_offers if o.get('Prob')]) > 0:
@@ -881,10 +895,10 @@ def main(progress):
         wks = gc.open("Sports Betting").worksheet("Underdog")
         wks.clear()
         wks.update([ud_df.columns.values.tolist()] + ud_df.values.tolist())
-        wks.update("R1", "Last Updated: " +
+        wks.update("S1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("G:L", {"numberFormat": {
+        wks.format("H:M", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
     if len([o for o in th_offers if o.get('Prob')]) > 0:
@@ -894,10 +908,10 @@ def main(progress):
             wks = gc.open("Sports Betting").worksheet("Thrive")
             wks.clear()
             wks.update([th_df.columns.values.tolist()] + th_df.values.tolist())
-            wks.update("R1", "Last Updated: " +
+            wks.update("S1", "Last Updated: " +
                        datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
             wks.set_basic_filter()
-            wks.format("G:L", {"numberFormat": {
+            wks.format("H:M", {"numberFormat": {
                 "type": "PERCENT", "pattern": "0.00%"}})
         except Exception as exc:
             logger.exception('Error writing Thrive offers')
@@ -908,10 +922,10 @@ def main(progress):
         wks = gc.open("Sports Betting").worksheet("ParlayPlay")
         wks.clear()
         wks.update([parp_df.columns.values.tolist()] + parp_df.values.tolist())
-        wks.update("S1", "Last Updated: " +
+        wks.update("T1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("H:M", {"numberFormat": {
+        wks.format("I:N", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
     if len(untapped_markets) > 0:
@@ -920,10 +934,9 @@ def main(progress):
         wks.clear()
         wks.update([untapped_df.columns.values.tolist()] +
                    untapped_df.values.tolist())
-        wks.update("R1", "Last Updated: " +
-                   datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
 
+    archive.write()
     logger.info("Success!")
 
 
