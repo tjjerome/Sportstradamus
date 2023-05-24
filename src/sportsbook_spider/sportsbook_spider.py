@@ -710,6 +710,7 @@ def main(progress):
             except Exception as exc:
                 logger.exception(o['Player'] + ", " + o["Market"])
 
+    logger.info("Getting ParlayPlay lines")
     parp_offers = get_parp()
 
     parp2dk = {
@@ -733,8 +734,7 @@ def main(progress):
         'Blocked Shots': 'Blocks',
         'Pts + Reb + Ast': 'Pts+Rebs+Asts',
         'Shots': 'Shots on Goal',
-        'Strikeouts (K)': 'Total Strikeouts',
-        'Strikeouts': 'Total Strikeouts'
+        'Strikeouts (K)': 'Total Strikeouts'
     }
 
     parp2csb = {
@@ -746,8 +746,7 @@ def main(progress):
         'Reb + Ast': 'Rebounds + Assists',
         'Shots on Goal': 'Shots',
         'Stl + Blk': 'Blocks and Steals',
-        'Strikeouts (K)': 'Pitching Strikeouts',
-        'Strikeouts': 'Pitching Strikeouts'
+        'Strikeouts (K)': 'Pitching Strikeouts'
     }
 
     parp2stats = {
@@ -766,7 +765,7 @@ def main(progress):
         'Shots on Goal': 'shots',
         'Stl + Blk': 'BLST',
         'Strikeouts (K)': 'pitcher strikeouts',
-        'Strikeouts': 'pitcher strikeouts',
+        'Strikeouts': 'batter strikeouts',
         'Hits Allowed': 'hits allowed',
         'Walks Allowed': 'walks allowed',
         'Total Bases': 'total bases',
