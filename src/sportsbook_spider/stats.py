@@ -1,11 +1,11 @@
+from sportsbook_spider.spiderLogger import logger
 import os.path
 import numpy as np
 import datetime
-import logging
 import pickle
 import json
 import importlib.resources as pkg_resources
-from . import data
+from sportsbook_spider import data
 from tqdm import tqdm
 import statsapi as mlb
 from scipy.stats import norm
@@ -15,8 +15,6 @@ from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
 from time import sleep
 from sportsbook_spider.helpers import scraper, mlb_pitchers, likelihood
-
-logger = logging.getLogger(__name__)
 
 
 class statsNBA:
@@ -525,8 +523,8 @@ class statsMLB:
 
         return playerStats
 
-    def get_weights(self, market):
-        if market in self.weights['MLB']:
+    def get_weights(self, market, force=False):
+        if market in self.weights['MLB'] and not force:
             return self.weights['MLB'].get(market)
 
         playerStats = self.bucket_stats(market)
@@ -540,10 +538,12 @@ class statsMLB:
             player = game['playerName']
             if not player in playerStats:
                 continue
-            elif playerStats[player]['bucket'] < 3:
+            elif playerStats[player]['bucket'] < 3 and not ('allowed' in market):
+                continue
+            elif playerStats[player]['bucket'] > 3 and ('allowed' in market):
                 continue
 
-            line = playerStats[player]['line']
+            line = playerStats[player]['avg']
             stats = self.get_stats_date(game, market, line)
             if all(stats == np.ones(5)*-1000):
                 continue
