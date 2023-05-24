@@ -678,8 +678,9 @@ class statsNHL:
 
     def get_stats(self, player, opponent, market, line):
 
-        opponent = opponent.replace('NJ', 'NJD').replace(
-            'TB', 'TBL').replace('LA', 'LAK')
+        opponent = opponent.replace('NJ', 'NJD').replace('TB', 'TBL')
+        if opponent == 'LA':
+            opponent = 'LAK'
 
         if market == 'PTS':
             market = 'points'
