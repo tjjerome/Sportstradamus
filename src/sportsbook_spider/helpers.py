@@ -1,19 +1,17 @@
+from sportsbook_spider.spiderLogger import logger
 import requests
 import json
 import random
 import unicodedata
 import datetime
 import importlib.resources as pkg_resources
-from . import creds
+from sportsbook_spider import creds
 from time import sleep
 from scipy.stats import poisson, norm
 from scipy.optimize import fsolve
 import numpy as np
 import statsapi as mlb
-import logging
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
-
-logger = logging.getLogger(__name__)
 
 with open((pkg_resources.files(creds) / "scrapeops_cred.json"), 'r') as infile:
     creds = json.load(infile)

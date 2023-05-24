@@ -3,45 +3,37 @@
 
 TODO:
 
-*   Integrate Feedback
-*   No line movement odds
 *   Expand combo stats
+*   Tennis/Golf/Racing/WNBA
+*   No line movement odds
 *   1H, 2H, and Live Bets
-*   Tennis/Golf/Racing
-*   Add eSports (maybe from GGBET?)
-*   Move to Google Apps Script
+*   Add eSports (maybe from GGBET or Betway?)
 """
+from sportsbook_spider.spiderLogger import logger
+from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
+from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
+from sportsbook_spider.helpers import get_pred, prob_to_odds
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+import gspread
+import click
+from sportsbook_spider import creds
+from scipy.stats import poisson, skellam
+from functools import partialmethod
+from tqdm import tqdm
+import numpy as np
+import pandas as pd
+import os.path
 import logging
 import datetime
 import importlib.resources as pkg_resources
-from . import logs
-if __name__ == "__main__":
-    log_format = "%(asctime)s::%(levelname)s::"\
-        "%(filename)s::%(lineno)d::%(message)s"
-    logging.basicConfig(filename=(pkg_resources.files(
-        logs) / datetime.datetime.now().strftime("%Y_%m_%d:%H:%M:%S.log")), filemode='w', level=logging.INFO, format=log_format)
-
-import os.path
-import pandas as pd
-import numpy as np
-from tqdm import tqdm
-from functools import partialmethod
-from scipy.stats import poisson, skellam
-from . import creds
-import click
-import gspread
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from sportsbook_spider.helpers import get_pred, prob_to_odds
-from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
-from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
+from sportsbook_spider import logs
 
 
 @click.command()
 @click.option('--progress', default=True, help='Display progress bars')
 def main(progress):
-    logger = logging.getLogger(__name__)
 
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
     # Authorize the gspread API

@@ -1,13 +1,11 @@
+from sportsbook_spider.spiderLogger import logger
 import datetime
 import random
 from tqdm import tqdm
 import numpy as np
 import statsapi as mlb
-import logging
 from time import sleep
 from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, no_vig_odds, get_ev, prob_to_odds, mlb_pitchers
-
-logger = logging.getLogger(__name__)
 
 # Get DraftKings Odds
 
