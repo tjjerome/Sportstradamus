@@ -135,9 +135,13 @@ def get_fd(sport, tabs):
                 logger.info(str(len(players)) + " lines found")
                 return players
 
-            attachments = response.get('attachments')
-            events = attachments['events']
-            offers = attachments['markets']
+            try:
+                attachments = response.get('attachments')
+                events = attachments['events']
+                offers = attachments['markets']
+            except:
+                logger.exception(", ".join([str(event_id), str(tab)]))
+                continue
 
             offers = [offer for offer in offers.values(
             ) if offer['bettingType'] == 'MOVING_HANDICAP' or offer['bettingType'] == 'ODDS']
