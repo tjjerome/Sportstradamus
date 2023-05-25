@@ -413,11 +413,14 @@ def get_pp():
         'url': f"https://api.prizepicks.com/leagues",
         'optimize_request': True
     }
+    live_bets = ["1H", "2H", "1P", "2P", "3P", "1Q",
+                 "2Q", "3Q", "4Q", "LIVE", "SZN", "SZN2", "SERIES"]
     try:
         leagues = requests.get("https://proxy.scrapeops.io/v1/",
                                params=params).json()
         leagues = [i['id'] for i in leagues['data']
-                   if i['attributes']['projections_count'] > 0]
+                   if i['attributes']['projections_count'] > 0 and
+                   not any([string in i['attributes']['name'] for string in live_bets])]
     except:
         logger.exception("Retrieving leagues failed,")
         leagues = [2, 7, 8, 9]
