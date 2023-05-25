@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sportsbook-spider"
-version = "0.5.1"
+version = "0.5.2"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
