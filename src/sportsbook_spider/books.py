@@ -1,5 +1,5 @@
 from sportsbook_spider.spiderLogger import logger
-import datetime
+from datetime import datetime, timedelta
 import random
 from tqdm import tqdm
 import numpy as np
@@ -115,8 +115,8 @@ def get_fd(sport, tabs):
 
     attachments = response.get('attachments')
     events = attachments['events']
-    event_ids = [event for event in events if datetime.datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") > datetime.datetime.today()
-                 and datetime.datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") - datetime.timedelta(days=5) < datetime.datetime.today()]
+    event_ids = [event for event in events if datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") > datetime.today()
+                 and datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=5) < datetime.today()]
 
     players = {}
 
@@ -501,7 +501,7 @@ def get_ud():
             'Home': team_ids[i['home_team_id']],
             'Away': team_ids[i['away_team_id']],
             'League': i['sport_id'],
-            'Date': i['scheduled_at'].split("T")[0]
+            'Date': (datetime.strptime(i['scheduled_at'], '%Y-%m-%dT%H:%M:%SZ') - timedelta(hours=5)).strftime('%Y-%m-%d')
         }
 
     players = {}
@@ -558,7 +558,7 @@ def get_ud():
                 'Home': team_ids[i['home_team_id']],
                 'Away': team_ids[i['away_team_id']],
                 'League': i['sport_id'],
-                'Date': i['scheduled_at'].split("T")[0]
+                'Date': (datetime.strptime(i['scheduled_at'], '%Y-%m-%dT%H:%M:%SZ') - timedelta(hours=5)).strftime('%Y-%m-%d')
             }
 
     for i in rivals['appearances']:
@@ -637,7 +637,7 @@ def get_thrive():
             'Player': remove_accents(" ".join([o['player1']['firstName'], o['player1']['lastName']])),
             'League': o['player1']['leagueType'],
             'Team': o['player1']['teamAbbr'],
-            'Date': o['startTime'].split(" ")[0],
+            'Date': (datetime.strptime(o['startTime'], '%Y-%m-%dT%H:%M:%SZ') - timedelta(hours=5)).strftime('%Y-%m-%d'),
             'Market': " + ".join(o['player1']['propParameters']),
             'Line': float(o['propValue']),
             'Opponent': str(o.get('team2Abbr', '') or '').upper()
