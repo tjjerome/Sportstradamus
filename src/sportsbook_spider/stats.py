@@ -102,8 +102,13 @@ class statsNBA:
                             game['OPP'] == opponent[1]])
 
             n = min(len(h2h1), len(h2h2))
-            h2h1 = h2h1[-n:]
-            h2h2 = h2h2[-n:]
+            if n == 0:
+                headtohead = -1000
+            else:
+                h2h1 = h2h1[-n:]
+                h2h2 = h2h2[-n:]
+                headtohead = ((h2h1+h2h2) > line).astype(int)
+                headtohead = np.mean(list(headtohead)+[1, 0])
 
             last10avg = (np.mean([game[market] for game in player1_games[-10:]]) +
                          np.mean([game[market] for game in player2_games[-10:]]) - line)/line
@@ -111,18 +116,12 @@ class statsNBA:
             last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) +
                               np.array([game[market] for game in player2_games[-n:]])) > line).astype(int))
             seasontodate = np.mean(((season1 + season2) > line).astype(int))
-            headtohead = ((h2h1+h2h2) > line).astype(int)
 
             if np.isnan(last5):
                 last5 = -1000
 
             if np.isnan(seasontodate):
                 seasontodate = -1000
-
-            if not len(headtohead):
-                headtohead = -1000
-            else:
-                headtohead = np.mean(list(headtohead)+[1, 0])
 
             dvp = {}
             leagueavg = {}
@@ -186,8 +185,13 @@ class statsNBA:
                             game['OPP'] == opponent[1]])
 
             n = min(len(h2h1), len(h2h2))
-            h2h1 = h2h1[-n:]
-            h2h2 = h2h2[-n:]
+            if n == 0:
+                headtohead = -1000
+            else:
+                h2h1 = h2h1[-n:]
+                h2h2 = h2h2[-n:]
+                headtohead = ((h2h1 + line) > h2h2).astype(int)
+                headtohead = np.mean(list(headtohead)+[1, 0])
 
             last10avg = (np.mean([game[market] for game in player1_games][:10]) + line -
                          np.mean([game[market] for game in player2_games][:10]))
@@ -195,18 +199,12 @@ class statsNBA:
             last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) + line) >
                              np.array([game[market] for game in player2_games[-n:]])).astype(int))
             seasontodate = np.mean(((season1 + line) > season2).astype(int))
-            headtohead = ((h2h1 + line) > h2h2).astype(int)
 
             if np.isnan(last5):
                 last5 = -1000
 
             if np.isnan(seasontodate):
                 seasontodate = -1000
-
-            if not len(headtohead):
-                headtohead = -1000
-            else:
-                headtohead = np.mean(list(headtohead)+[1, 0])
 
             dvp1 = {}
             leagueavg1 = {}
@@ -569,8 +567,13 @@ class statsMLB:
                     [game[market] for game in self.gamelog if game['starting batter']])
 
             n = min(len(h2h1), len(h2h2))
-            h2h1 = h2h1[-n:]
-            h2h2 = h2h2[-n:]
+            if n == 0:
+                headtohead = -1000
+            else:
+                h2h1 = h2h1[-n:]
+                h2h2 = h2h2[-n:]
+                headtohead = ((h2h1+h2h2) > line).astype(int)
+                headtohead = np.mean(list(headtohead)+[1, 0])
 
             last10avg = (np.mean([game[market] for game in player1_games[-10:]]) +
                          np.mean([game[market] for game in player2_games[-10:]]) - line)/line
@@ -578,18 +581,12 @@ class statsMLB:
             last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) +
                               np.array([game[market] for game in player2_games[-n:]])) > line).astype(int))
             seasontodate = np.mean(((season1 + season2) > line).astype(int))
-            headtohead = ((h2h1+h2h2) > line).astype(int)
 
             if np.isnan(last5):
                 last5 = -1000
 
             if np.isnan(seasontodate):
                 seasontodate = -1000
-
-            if not len(headtohead):
-                headtohead = -1000
-            else:
-                headtohead = np.mean(list(headtohead)+[1, 0])
 
             if np.isnan(dvp):
                 dvpoa = -1000
@@ -652,8 +649,13 @@ class statsMLB:
                     [game[market] for game in self.gamelog if game['starting batter']])
 
             n = min(len(h2h1), len(h2h2))
-            h2h1 = h2h1[-n:]
-            h2h2 = h2h2[-n:]
+            if n == 0:
+                headtohead = -1000
+            else:
+                h2h1 = h2h1[-n:]
+                h2h2 = h2h2[-n:]
+                headtohead = ((h2h1 + line) > h2h2).astype(int)
+                headtohead = np.mean(list(headtohead)+[1, 0])
 
             last10avg = (np.mean([game[market] for game in player2_games][-10:]) + line -
                          np.mean([game[market] for game in player1_games][-10:]))
@@ -661,18 +663,12 @@ class statsMLB:
             last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) + line) >
                              np.array([game[market] for game in player2_games[-n:]])).astype(int))
             seasontodate = np.mean(((season1 + line) > season2).astype(int))
-            headtohead = ((h2h1 + line) > h2h2).astype(int)
 
             if np.isnan(last5):
                 last5 = -1000
 
             if np.isnan(seasontodate):
                 seasontodate = -1000
-
-            if not len(headtohead):
-                headtohead = -1000
-            else:
-                headtohead = np.mean(list(headtohead)+[1, 0])
 
             if np.isnan(dvp1) or np.isnan(dvp2):
                 dvpoa = -1000
@@ -987,8 +983,13 @@ class statsNHL:
                              opponent[1] == game['opponentTeamAbbrev']])
 
             n = min(len(h2h1), len(h2h2))
-            h2h1 = h2h1[-n:]
-            h2h2 = h2h2[-n:]
+            if n == 0:
+                headtohead = -1000
+            else:
+                h2h1 = h2h1[-n:]
+                h2h2 = h2h2[-n:]
+                headtohead = ((h2h1+h2h2) > line).astype(int)
+                headtohead = np.mean(list(headtohead)+[1, 0])
 
             last10avg = (np.mean([game[market] for game in player1_games[-10:]]) +
                          np.mean([game[market] for game in player2_games[-10:]]) - line)/line
@@ -996,18 +997,12 @@ class statsNHL:
             last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) +
                               np.array([game[market] for game in player2_games[-n:]])) > line).astype(int))
             seasontodate = np.mean(((season1 + season2) > line).astype(int))
-            headtohead = ((h2h1+h2h2) > line).astype(int)
 
             if np.isnan(last5):
                 last5 = -1000
 
             if np.isnan(seasontodate):
                 seasontodate = -1000
-
-            if not len(headtohead):
-                headtohead = -1000
-            else:
-                headtohead = np.mean(list(headtohead)+[1, 0])
 
             dvp = {}
             leagueavg = {}
@@ -1079,8 +1074,13 @@ class statsNHL:
                              opponent[1] == game['opponentTeamAbbrev']])
 
             n = min(len(h2h1), len(h2h2))
-            h2h1 = h2h1[-n:]
-            h2h2 = h2h2[-n:]
+            if n == 0:
+                headtohead = -1000
+            else:
+                h2h1 = h2h1[-n:]
+                h2h2 = h2h2[-n:]
+                headtohead = ((h2h1 + line) > h2h2).astype(int)
+                headtohead = np.mean(list(headtohead)+[1, 0])
 
             last10avg = (np.mean([game[market] for game in player2_games][-10:]) + line -
                          np.mean([game[market] for game in player1_games][-10:]))
@@ -1088,18 +1088,12 @@ class statsNHL:
             last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) + line) >
                              np.array([game[market] for game in player2_games[-n:]])).astype(int))
             seasontodate = np.mean(((season1 + line) > season2).astype(int))
-            headtohead = ((h2h1 + line) > h2h2).astype(int)
 
             if np.isnan(last5):
                 last5 = -1000
 
             if np.isnan(seasontodate):
                 seasontodate = -1000
-
-            if not len(headtohead):
-                headtohead = -1000
-            else:
-                headtohead = np.mean(list(headtohead)+[1, 0])
 
             dvp1 = {}
             dvp2 = {}
