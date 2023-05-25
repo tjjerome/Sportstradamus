@@ -640,7 +640,7 @@ def get_thrive():
             'Date': o['startTime'].split(" ")[0],
             'Market': " + ".join(o['player1']['propParameters']),
             'Line': float(o['propValue']),
-            'Opponent': o.get('team2Abbr', '').upper()
+            'Opponent': str(o.get('team2Abbr', '') or '').upper()
         }
         if n['League'] == 'HOCKEY':
             n['League'] = 'NHL'
