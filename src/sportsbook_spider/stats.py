@@ -1,7 +1,7 @@
 from sportsbook_spider.spiderLogger import logger
 import os.path
 import numpy as np
-import datetime
+from datetime import datetime, timedelta, date
 import pickle
 import json
 import importlib.resources as pkg_resources
@@ -20,8 +20,7 @@ class statsNBA:
     def __init__(self):
         self.gamelog = []
         self.players = {}
-        self.season_start = datetime.datetime.strptime(
-            "2022-10-18", "%Y-%m-%d")
+        self.season_start = datetime.strptime("2022-10-18", "%Y-%m-%d")
 
     def load(self):
         filepath = (pkg_resources.files(data) / "nba_players.dat")
@@ -89,9 +88,9 @@ class statsNBA:
                 return np.ones(5) * -1000
 
             season1 = np.array([game[market] for game in player1_games if
-                                datetime.datetime.strptime(game['GAME_DATE'].split("T")[0], "%Y-%m-%d") >= self.season_start])
+                                datetime.strptime(game['GAME_DATE'].split("T")[0], "%Y-%m-%d") >= self.season_start])
             season2 = np.array([game[market] for game in player2_games if
-                                datetime.datetime.strptime(game['GAME_DATE'].split("T")[0], "%Y-%m-%d") >= self.season_start])
+                                datetime.strptime(game['GAME_DATE'].split("T")[0], "%Y-%m-%d") >= self.season_start])
 
             n = min(len(season1), len(season2))
             season1 = season1[-n:]
@@ -108,8 +107,9 @@ class statsNBA:
 
             last10avg = (np.mean([game[market] for game in player1_games[-10:]]) +
                          np.mean([game[market] for game in player2_games[-10:]]) - line)/line
-            last5 = np.mean(((np.array([game[market] for game in player1_games[-5:]]) +
-                              np.array([game[market] for game in player2_games[-5:]])) > line).astype(int))
+            n = min(len(player1_games), len(player2_games), 5)
+            last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) +
+                              np.array([game[market] for game in player2_games[-n:]])) > line).astype(int))
             seasontodate = np.mean(((season1 + season2) > line).astype(int))
             headtohead = ((h2h1+h2h2) > line).astype(int)
 
@@ -317,7 +317,7 @@ class statsMLB:
     def __init__(self):
         self.gamelog = []
         self.gameIds = []
-        self.season_start = datetime.datetime.strptime(
+        self.season_start = datetime.strptime(
             mlb.latest_season()['regularSeasonStartDate'], "%Y-%m-%d")
         self.pitchers = mlb_pitchers
 
@@ -413,7 +413,7 @@ class statsMLB:
     def update(self):
         logger.info("Getting MLB Stats")
         mlb_game_ids = mlb.schedule(
-            start_date=self.season_start, end_date=datetime.date.today())
+            start_date=self.season_start.date(), end_date=date.today())
         mlb_game_ids = [game['game_id'] for game in mlb_game_ids if game['status']
                         == 'Final' and game['game_type'] != 'E' and game['game_type'] != 'S']
 
@@ -422,7 +422,7 @@ class statsMLB:
                 self.parse_game(id)
 
         for game in self.gamelog:
-            if datetime.datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < datetime.datetime.today() - datetime.timedelta(days=365):
+            if datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < datetime.today() - timedelta(days=365):
                 self.gamelog.remove(game)
 
         with open((pkg_resources.files(data) / "mlb_data.dat"), "wb") as outfile:
@@ -459,9 +459,9 @@ class statsMLB:
                 return np.ones(5) * -1000
 
             season1 = np.array([game[market] for game in player1_games if
-                                datetime.datetime.strptime(game['gameId'][:10], "%Y/%m/%d") >= self.season_start])
+                                datetime.strptime(game['gameId'][:10], "%Y/%m/%d") >= self.season_start])
             season2 = np.array([game[market] for game in player2_games if
-                                datetime.datetime.strptime(game['gameId'][:10], "%Y/%m/%d") >= self.season_start])
+                                datetime.strptime(game['gameId'][:10], "%Y/%m/%d") >= self.season_start])
 
             n = min(len(season1), len(season2))
             season1 = season1[-n:]
@@ -549,7 +549,7 @@ class statsMLB:
                 return np.ones(5) * -1000
             last10avg = (np.mean([game[market]
                                   for game in player_games][-10:])-line)/line
-            made_line = [int(game[market] > line) for game in player_games if datetime.datetime.strptime(
+            made_line = [int(game[market] > line) for game in player_games if datetime.strptime(
                 game['gameId'][:10], "%Y/%m/%d") >= self.season_start]
             last5 = np.mean(made_line[-5:])
             seasontodate = np.mean(made_line)
@@ -596,15 +596,13 @@ class statsMLB:
             return np.ones(5)*-1000
         self.gamelog = self.gamelog[:i]
         self.pitchers.update({game['opponent']: game['opponent pitcher']})
-        if datetime.datetime.strptime(game['gameId'][:10], "%Y/%m/%d") < self.season_start:
-            self.season_start = datetime.datetime.strptime(
-                '2022-04-07', "%Y-%m-%d")
+        if datetime.strptime(game['gameId'][:10], "%Y/%m/%d") < self.season_start:
+            self.season_start = datetime.strptime('2022-04-07', "%Y-%m-%d")
         player = game['playerName']
         opponent = game['opponent']
         stats = self.get_stats(player, opponent, market, line)
         self.gamelog = old_gamelog
-        self.season_start = datetime.datetime.strptime(
-            '2023-03-30', "%Y-%m-%d")
+        self.season_start = datetime.strptime('2023-03-30', "%Y-%m-%d")
         self.pitchers = mlb_pitchers
         return stats
 
@@ -692,8 +690,7 @@ class statsNHL:
     def __init__(self):
         self.skater_data = {}
         self.goalie_data = {}
-        self.season_start = datetime.datetime.strptime(
-            "2022-10-07", "%Y-%m-%d")
+        self.season_start = datetime.strptime("2022-10-07", "%Y-%m-%d")
 
     def load(self):
         filepath = (pkg_resources.files(data) / "nhl_skater_data.dat")
@@ -750,7 +747,7 @@ class statsNHL:
                                                                                              'playerId', 'points', 'positionCode', 'shots', 'skaterFullName', 'teamAbbrev']} for skater in nhl_request_data]
 
         for game in self.skater_data:
-            if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
+            if datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.today() - timedelta(days=365):
                 self.skater_data.remove(game)
 
         with open((pkg_resources.files(data) / "nhl_skater_data.dat"), "wb") as outfile:
@@ -792,7 +789,7 @@ class statsNHL:
             self.goalie_data = self.goalie_data + [{k: v for k, v in goalie.items() if k in ['gameDate', 'gameId', 'goalsAgainst',
                                                                                              'opponentTeamAbbrev', 'playerId', 'positionCode', 'saves', 'goalieFullName', 'teamAbbrev']} for goalie in nhl_request_data]
         for game in self.goalie_data:
-            if datetime.datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.datetime.today() - datetime.timedelta(days=365):
+            if datetime.strptime(game['gameDate'], '%Y-%m-%d') < datetime.today() - timedelta(days=365):
                 self.goalie_data.remove(game)
 
         with open((pkg_resources.files(data) / "nhl_goalie_data.dat"), "wb") as outfile:
@@ -834,9 +831,9 @@ class statsNHL:
                 return np.ones(5) * -1000
 
             season1 = np.array([game[market] for game in player1_games if
-                                datetime.datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start])
+                                datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start])
             season2 = np.array([game[market] for game in player2_games if
-                                datetime.datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start])
+                                datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start])
 
             n = min(len(season1), len(season2))
             season1 = season1[-n:]
@@ -853,8 +850,9 @@ class statsNHL:
 
             last10avg = (np.mean([game[market] for game in player1_games[-10:]]) +
                          np.mean([game[market] for game in player2_games[-10:]]) - line)/line
-            last5 = np.mean(((np.array([game[market] for game in player1_games[-5:]]) +
-                              np.array([game[market] for game in player2_games[-5:]])) > line).astype(int))
+            n = min(len(player1_games), len(player2_games), 5)
+            last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) +
+                              np.array([game[market] for game in player2_games[-n:]])) > line).astype(int))
             seasontodate = np.mean(((season1 + season2) > line).astype(int))
             headtohead = ((h2h1+h2h2) > line).astype(int)
 
@@ -940,7 +938,7 @@ class statsNHL:
             last10avg = (np.mean([game[market]
                                   for game in player_games][-10:])-line)/line
             made_line = [int(game[market] > line) for game in player_games if
-                         datetime.datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start]
+                         datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start]
             headtohead = [int(game[market] > line)for game in player_games if
                           opponent == game['opponentTeamAbbrev']]
             last5 = np.mean(made_line[-5:])
