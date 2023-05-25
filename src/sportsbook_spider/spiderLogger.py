@@ -1,5 +1,6 @@
 import logging
-import datetime
+import sys
+from datetime import datetime
 import importlib.resources as pkg_resources
 from sportsbook_spider import logs
 
@@ -9,12 +10,24 @@ logger.setLevel(logging.INFO)
 
 # create file handler
 fh = logging.FileHandler(pkg_resources.files(
-    logs) / datetime.datetime.now().strftime("%Y_%m_%d_%H:%M:%S.log"), mode='w')
+    logs) / datetime.now().strftime("%Y_%m_%d_%H:%M:%S.log"), mode='w')
 fh.setLevel(logging.INFO)
 
 # create stream handler
-ch = logging.StreamHandler()
+ch = logging.StreamHandler(stream=sys.stdout)
 ch.setLevel(logging.INFO)
+
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical("Uncaught exception", exc_info=(
+        exc_type, exc_value, exc_traceback))
+
+
+sys.excepthook = handle_exception
 
 # create formatter
 formatter = logging.Formatter(
