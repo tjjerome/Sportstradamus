@@ -6,8 +6,8 @@ nba.get_stats('Jaylen Brown vs. Bam Adebayo', 'MIA/BOS', 'AST', -1.5)
 mlb = statsMLB()
 mlb.load()
 mlb.update()
-mlb.get_stats('Bryce Miller vs. James Paxton',
-              'OAK/LAA', 'pitcher strikeouts', 0.5)
+mlb.get_stats('Spencer Steer vs. Nolan Gorman',
+              'STL/CIN', 'hits+runs+rbi', 0.5)
 nhl = statsNHL()
 nhl.load()
 nhl.update()
