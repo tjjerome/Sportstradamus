@@ -637,7 +637,7 @@ def get_thrive():
             'Player': remove_accents(" ".join([o['player1']['firstName'], o['player1']['lastName']])),
             'League': o['player1']['leagueType'],
             'Team': o['player1']['teamAbbr'],
-            'Date': (datetime.strptime(o['startTime'], '%Y-%m-%dT%H:%M:%SZ') - timedelta(hours=5)).strftime('%Y-%m-%d'),
+            'Date': (datetime.strptime(o['startTime'], '%Y-%m-%d %H:%M') - timedelta(hours=5)).strftime('%Y-%m-%d'),
             'Market': " + ".join(o['player1']['propParameters']),
             'Line': float(o['propValue']),
             'Opponent': str(o.get('team2Abbr', '') or '').upper()
