@@ -126,8 +126,8 @@ class statsNBA:
 
             dvp = {}
             leagueavg = {}
-            for position in positions:
-                for game in self.gamelog:
+            for game in self.gamelog:
+                for position in positions:
                     if position in game['POS']:
                         if game['GAME_ID']+position not in leagueavg:
                             leagueavg[game['GAME_ID']+position] = 0
@@ -151,9 +151,15 @@ class statsNBA:
 
         elif " vs. " in player:
             players = player.split(" vs. ")
+            if "/" in opponent:
+                opponent = opponent.split("/")
+            else:
+                opponent = [opponent, opponent]
             try:
                 player_ids = [nba_static.find_players_by_full_name(
                     player)[0]['id'] for player in players]
+                positions1 = self.players[player_ids[0]]['POSITION'].split('-')
+                positions2 = self.players[player_ids[1]]['POSITION'].split('-')
             except:
                 return np.ones(5)*-1000
 
@@ -164,12 +170,88 @@ class statsNBA:
 
             if not player1_games or not player2_games:
                 return np.ones(5) * -1000
+
+            season1 = np.array([game[market] for game in player1_games if
+                                datetime.strptime(game['GAME_DATE'].split("T")[0], "%Y-%m-%d") >= self.season_start])
+            season2 = np.array([game[market] for game in player2_games if
+                                datetime.strptime(game['GAME_DATE'].split("T")[0], "%Y-%m-%d") >= self.season_start])
+
+            n = min(len(season1), len(season2))
+            season1 = season1[-n:]
+            season2 = season2[-n:]
+
+            h2h1 = np.array([game[market] for game in player1_games if
+                            game['OPP'] == opponent[0]])
+            h2h2 = np.array([game[market] for game in player2_games if
+                            game['OPP'] == opponent[1]])
+
+            n = min(len(h2h1), len(h2h2))
+            h2h1 = h2h1[-n:]
+            h2h2 = h2h2[-n:]
+
             last10avg = (np.mean([game[market] for game in player1_games][:10]) + line -
                          np.mean([game[market] for game in player2_games][:10]))
-            last5 = -1000
-            seasontodate = -1000
-            headtohead = -1000
-            dvpoa = -1000
+            n = min(len(player1_games), len(player2_games), 5)
+            last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) + line) >
+                             np.array([game[market] for game in player2_games[-n:]])).astype(int))
+            seasontodate = np.mean(((season1 + line) > season2).astype(int))
+            headtohead = ((h2h1 + line) > h2h2).astype(int)
+
+            if np.isnan(last5):
+                last5 = -1000
+
+            if np.isnan(seasontodate):
+                seasontodate = -1000
+
+            if not len(headtohead):
+                headtohead = -1000
+            else:
+                headtohead = np.mean(list(headtohead)+[1, 0])
+
+            dvp1 = {}
+            leagueavg1 = {}
+            dvp2 = {}
+            leagueavg2 = {}
+            for game in self.gamelog:
+                for position in positions1:
+                    if position in game['POS']:
+                        if game['GAME_ID']+position not in leagueavg1:
+                            leagueavg1[game['GAME_ID']+position] = 0
+
+                        leagueavg1[game['GAME_ID'] +
+                                   position] = leagueavg1[game['GAME_ID']+position] + game[market]
+
+                        if game['OPP'] in opponent:
+                            if game['GAME_ID']+position not in dvp1:
+                                dvp1[game['GAME_ID']+position] = 0
+
+                            dvp1[game['GAME_ID']+position] = dvp1[game['GAME_ID'] +
+                                                                  position] + game[market]
+
+                for position in positions2:
+                    if position in game['POS']:
+                        if game['GAME_ID']+position not in leagueavg2:
+                            leagueavg2[game['GAME_ID']+position] = 0
+
+                        leagueavg2[game['GAME_ID'] +
+                                   position] = leagueavg2[game['GAME_ID']+position] + game[market]
+
+                        if game['OPP'] in opponent:
+                            if game['GAME_ID']+position not in dvp2:
+                                dvp2[game['GAME_ID']+position] = 0
+
+                            dvp2[game['GAME_ID']+position] = dvp2[game['GAME_ID'] +
+                                                                  position] + game[market]
+
+            if not dvp1 or not dvp2:
+                dvpoa = -1000
+            else:
+                dvp1 = np.mean(list(dvp1.values()))
+                leagueavg1 = np.mean(list(leagueavg1.values()))/2
+                dvp2 = np.mean(list(dvp2.values()))
+                leagueavg2 = np.mean(list(leagueavg2.values()))/2
+                dvpoa = (dvp1-leagueavg1)/leagueavg1 - \
+                    (dvp2-leagueavg2)/leagueavg2
         else:
             player_id = nba_static.find_players_by_full_name(player)
             if player_id and player_id[0]['id'] in self.players:
@@ -203,8 +285,8 @@ class statsNBA:
 
             dvp = {}
             leagueavg = {}
-            for position in positions:
-                for game in self.gamelog:
+            for game in self.gamelog:
+                for position in positions:
                     if position in game['POS']:
                         if game['GAME_ID']+position not in leagueavg:
                             leagueavg[game['GAME_ID']+position] = 0
@@ -516,6 +598,12 @@ class statsMLB:
 
         elif " vs. " in player:
             players = player.split(" vs. ")
+            if "/" in opponent:
+                opponent = opponent.split("/")
+            else:
+                opponent = [opponent, opponent]
+
+            pitcher = [self.pitchers.get(o, '') for o in opponent]
 
             if any([string in market for string in ['allowed', 'pitch']]):
                 player1_games = [game for game in self.gamelog
@@ -530,12 +618,66 @@ class statsMLB:
 
             if not player1_games or not player2_games:
                 return np.ones(5) * -1000
+
+            season1 = np.array([game[market] for game in player1_games if
+                                datetime.strptime(game['gameId'][:10], "%Y/%m/%d") >= self.season_start])
+            season2 = np.array([game[market] for game in player2_games if
+                                datetime.strptime(game['gameId'][:10], "%Y/%m/%d") >= self.season_start])
+
+            n = min(len(season1), len(season2))
+            season1 = season1[-n:]
+            season2 = season2[-n:]
+
+            if any([string in market for string in ['allowed', 'pitch']]):
+                h2h1 = np.array([game[market] for game in player1_games if
+                                game['opponent'] == opponent[0]])
+                h2h2 = np.array([game[market] for game in player2_games if
+                                game['opponent'] == opponent[1]])
+                dvp1 = np.mean([game[market] for game in self.gamelog
+                               if game['starting pitcher'] and game['opponent'] == opponent[0]])
+                dvp2 = np.mean([game[market] for game in self.gamelog
+                               if game['starting pitcher'] and game['opponent'] == opponent[1]])
+                leagueavg = np.mean(
+                    [game[market] for game in self.gamelog if game['starting pitcher']])
+            else:
+                h2h1 = np.array([int(game[market] > line) for game in player1_games if
+                                game['opponent pitcher'] == pitcher[0]])
+                h2h2 = np.array([int(game[market] > line) for game in player2_games if
+                                game['opponent pitcher'] == pitcher[1]])
+                dvp1 = np.mean([game[market] for game in self.gamelog
+                               if game['starting batter'] and game['opponent pitcher'] == pitcher[0]])
+                dvp2 = np.mean([game[market] for game in self.gamelog
+                               if game['starting batter'] and game['opponent pitcher'] == pitcher[1]])
+                leagueavg = np.mean(
+                    [game[market] for game in self.gamelog if game['starting batter']])
+
+            n = min(len(h2h1), len(h2h2))
+            h2h1 = h2h1[-n:]
+            h2h2 = h2h2[-n:]
+
             last10avg = (np.mean([game[market] for game in player2_games][-10:]) + line -
                          np.mean([game[market] for game in player1_games][-10:]))
-            last5 = -1000
-            seasontodate = -1000
-            headtohead = -1000
-            dvpoa = -1000
+            n = min(len(player1_games), len(player2_games), 5)
+            last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) + line) >
+                             np.array([game[market] for game in player2_games[-n:]])).astype(int))
+            seasontodate = np.mean(((season1 + line) > season2).astype(int))
+            headtohead = ((h2h1 + line) > h2h2).astype(int)
+
+            if np.isnan(last5):
+                last5 = -1000
+
+            if np.isnan(seasontodate):
+                seasontodate = -1000
+
+            if not len(headtohead):
+                headtohead = -1000
+            else:
+                headtohead = np.mean(list(headtohead)+[1, 0])
+
+            if np.isnan(dvp1) or np.isnan(dvp2):
+                dvpoa = -1000
+            else:
+                dvpoa = (dvp1-dvp2)/leagueavg
         else:
 
             pitcher = self.pitchers.get(opponent, '')
@@ -903,6 +1045,10 @@ class statsNHL:
 
         elif " vs. " in player:
             players = player.split(" vs. ")
+            if "/" in opponent:
+                opponent = opponent.split("/")
+            else:
+                opponent = [opponent, opponent]
 
             if market in ['goalsAgainst', 'saves']:
                 player1_games = [
@@ -918,12 +1064,97 @@ class statsNHL:
             if not player1_games or not player2_games:
                 return np.ones(5) * -1000
 
+            season1 = np.array([game[market] for game in player1_games if
+                                datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start])
+            season2 = np.array([game[market] for game in player2_games if
+                                datetime.strptime(game['gameDate'], "%Y-%m-%d") >= self.season_start])
+
+            n = min(len(season1), len(season2))
+            season1 = season1[-n:]
+            season2 = season2[-n:]
+
+            h2h1 = np.array([int(game[market] > line)for game in player1_games if
+                             opponent[0] == game['opponentTeamAbbrev']])
+            h2h2 = np.array([int(game[market] > line)for game in player2_games if
+                             opponent[1] == game['opponentTeamAbbrev']])
+
+            n = min(len(h2h1), len(h2h2))
+            h2h1 = h2h1[-n:]
+            h2h2 = h2h2[-n:]
+
             last10avg = (np.mean([game[market] for game in player2_games][-10:]) + line -
                          np.mean([game[market] for game in player1_games][-10:]))
-            last5 = -1000
-            seasontodate = -1000
-            headtohead = -1000
-            dvpoa = -1000
+            n = min(len(player1_games), len(player2_games), 5)
+            last5 = np.mean(((np.array([game[market] for game in player1_games[-n:]]) + line) >
+                             np.array([game[market] for game in player2_games[-n:]])).astype(int))
+            seasontodate = np.mean(((season1 + line) > season2).astype(int))
+            headtohead = ((h2h1 + line) > h2h2).astype(int)
+
+            if np.isnan(last5):
+                last5 = -1000
+
+            if np.isnan(seasontodate):
+                seasontodate = -1000
+
+            if not len(headtohead):
+                headtohead = -1000
+            else:
+                headtohead = np.mean(list(headtohead)+[1, 0])
+
+            dvp1 = {}
+            dvp2 = {}
+            leagueavg1 = {}
+            leagueavg2 = {}
+            if market in ['goalsAgainst', 'saves']:
+                for game in self.goalie_data:
+                    id = game['gameId']
+                    if id not in leagueavg1:
+                        leagueavg1[id] = 0
+                    leagueavg1[id] += game[market]
+                    if id not in leagueavg2:
+                        leagueavg2[id] = 0
+                    leagueavg2[id] += game[market]
+                    if opponent[0] == game['opponentTeamAbbrev']:
+                        if id not in dvp1:
+                            dvp1[id] = 0
+                        dvp1[id] += game[market]
+                    if opponent[1] == game['opponentTeamAbbrev']:
+                        if id not in dvp2:
+                            dvp2[id] = 0
+                        dvp2[id] += game[market]
+
+            else:
+                position1 = player1_games[0]['positionCode']
+                position2 = player2_games[0]['positionCode']
+                for game in self.skater_data:
+                    if game['positionCode'] == position1:
+                        id = game['gameId']
+                        if id not in leagueavg1:
+                            leagueavg1[id] = 0
+                        leagueavg1[id] += game[market]
+                        if opponent[0] == game['opponentTeamAbbrev']:
+                            if id not in dvp1:
+                                dvp1[id] = 0
+                            dvp1[id] += game[market]
+                    if game['positionCode'] == position2:
+                        id = game['gameId']
+                        if id not in leagueavg2:
+                            leagueavg2[id] = 0
+                        leagueavg2[id] += game[market]
+                        if opponent[1] == game['opponentTeamAbbrev']:
+                            if id not in dvp2:
+                                dvp2[id] = 0
+                            dvp2[id] += game[market]
+
+            if not dvp1 or not dvp2:
+                dvpoa = -1000
+            else:
+                dvp1 = np.mean(list(dvp1.values()))
+                leagueavg1 = np.mean(list(leagueavg1.values()))/2
+                dvp2 = np.mean(list(dvp2.values()))
+                leagueavg2 = np.mean(list(leagueavg2.values()))/2
+                dvpoa = (dvp1-leagueavg1)/leagueavg1 - \
+                    (dvp2-leagueavg2)/leagueavg2
         else:
             if market in ['goalsAgainst', 'saves']:
                 player_games = [

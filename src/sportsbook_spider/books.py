@@ -618,7 +618,7 @@ def get_thrive():
     try:
         api = requests.post("https://proxy.scrapeops.io/v1/", params=params,
                             headers=header | scraper.header, json=payload).json()
-    except Exception as exc:
+    except:
         logger.exception(id)
 
     if api['success']:
@@ -637,7 +637,7 @@ def get_thrive():
             'Date': o['startTime'].split(" ")[0],
             'Market': " + ".join(o['player1']['propParameters']),
             'Line': float(o['propValue']),
-            'Opponent': o['team2Abbr'].upper()
+            'Opponent': o.get('team2Abbr', '').upper()
         }
         if n['League'] == 'HOCKEY':
             n['League'] = 'NHL'
