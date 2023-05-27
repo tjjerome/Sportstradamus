@@ -203,6 +203,9 @@ class Archive():
         self.archive[o['League']][market][o['Date']
                                           ][o['Player']][o['Line']] = stats
 
+        self.archive[o['League']][market][o['Date']
+                                          ][o['Player']]['Closing Lines'] = lines
+
     def write(self):
         filepath = (pkg_resources.files(data) / "archive.dat")
         with open(filepath, "wb") as outfile:

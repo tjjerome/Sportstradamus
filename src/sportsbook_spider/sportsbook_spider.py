@@ -3,10 +3,9 @@
 
 TODO:
 
-*   Expand combo stats
+*   Add web app - Flask
+*   Machine learning predictor
 *   Tennis/Golf/Racing/WNBA
-*   No line movement odds
-*   1H, 2H, and Live Bets
 *   Add eSports (maybe from GGBET or Betway?)
 """
 from sportsbook_spider.spiderLogger import logger

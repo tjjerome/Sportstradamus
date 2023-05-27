@@ -1,17 +1,46 @@
-# from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
-# nba = statsNBA()
-# nba.load()
-# nba.update()
-# nba.get_stats('Jaylen Brown vs. Bam Adebayo', 'MIA/BOS', 'AST', -1.5)
-# mlb = statsMLB()
-# mlb.load()
-# mlb.update()
-# mlb.get_stats('Alek Manoah + Zach Eflin','TB/TOR', '1st inning runs allowed', 0.5)
-# nhl = statsNHL()
-# nhl.load()
-# nhl.update()
-# nhl.get_stats('Miro Heiskanen vs. Jack Eichel', 'VGK/DAL', 'shots', 0.5)
+from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
+import pickle
+import importlib.resources as pkg_resources
+from sportsbook_spider import data
+from datetime import datetime
+from sportsbook_spider.helpers import likelihood
+from scipy.optimize import minimize
+import numpy as np
 
-from sportsbook_spider.books import get_thrive
+mlb = statsMLB()
+mlb.load()
+filepath = (pkg_resources.files(data) / "archive.dat")
+with open(filepath, "rb") as infile:
+    archive = pickle.load(infile)
 
-offers = get_thrive()
+market = 'total bases'
+results = []
+for game in mlb.gamelog:
+    if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
+        continue
+    elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
+        continue
+
+    gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
+    if game['gameId'][:10] == '2023/05/24' or game['gameId'][:10] == '2023/05/25':
+        player = game['playerName']
+
+        try:
+            archiveData = archive['MLB'][market][gameDate.strftime(
+                '%Y-%m-%d')][player]
+        except:
+            continue
+
+        for line, stats in archiveData.items():
+            if not line == 'Closing Lines':
+                baseline = np.array([0, 0.5, 0.5, 0.5, 0, 0.5, 0.5, 0.5, 0.5])
+                stats[stats == -1000] = baseline[stats == -1000]
+                stats = stats - baseline
+                y = int(game[market] > line)
+                results.append({'stats': stats, 'result': y,
+                                'player': player, 'date': gameDate})
+
+res = minimize(lambda x: -likelihood(results, x),
+               np.ones(9), method='l-bfgs-b', tol=1e-8, bounds=[(0, 100)]*9)
+
+print(res.x)
