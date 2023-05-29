@@ -321,10 +321,10 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                    archive.add(o, stats, lines, pp2stats)
-
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
+
+                archive.add(o, stats, lines, pp2stats)
 
             except:
                 logger.exception(o['Player'] + ", " + o["Market"])
@@ -520,10 +520,10 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                    archive.add(o, stats, lines, ud2stats)
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
 
+                archive.add(o, stats, lines, ud2stats)
             except Exception as exc:
                 logger.exception(o['Player'] + ", " + o["Market"])
 
@@ -703,11 +703,12 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                    archive.add(o, stats, lines, th2stats)
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
 
-            except Exception as exc:
+                archive.add(o, stats, lines, th2stats)
+
+            except:
                 logger.exception(o['Player'] + ", " + o["Market"])
 
     logger.info("Getting ParlayPlay lines")
@@ -870,9 +871,10 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                    archive.add(o, stats, lines, parp2stats)
                 elif newline not in untapped_markets+tapped_markets:
                     untapped_markets.append(newline)
+
+                archive.add(o, stats, lines, parp2stats)
 
             except:
                 logger.exception(o['Player'] + ", " + o["Market"])
