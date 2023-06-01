@@ -10,13 +10,10 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 
 mlb = statsMLB()
 mlb.load()
-filepath = (pkg_resources.files(data) / "archive.dat")
-with open(filepath, "rb") as infile:
-    archive = pickle.load(infile)
 
-market = 'total bases'
+market = 'pitcher strikeouts'
 
-X, y = mlb.get_learning_matrix(market)
+X, y = mlb.get_training_matrix(market)
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42)
@@ -28,16 +25,17 @@ X_test_scaled = scaler.transform(X_test)
 y_train = y_train.to_numpy()
 y_test = y_test.to_numpy()
 
-search = True
-model = MLPClassifier(hidden_layer_sizes=(256, 256),
-                      batch_size=16, tol=1e-8, max_iter=500)
+search = False
+model = MLPClassifier(hidden_layer_sizes=(256, 128),
+                      batch_size=16, tol=1e-6, max_iter=200)
 
 if search:
 
     params = {
-        'hidden_layer_sizes': [(256, 128), (256, 256), (256, 256, 32)],
+        'hidden_layer_sizes': [(256, 128), (256, 256), (256, 128, 32)],
         'tol': [1e-6, 1e-8],
-        'max_iter': [300, 400, 500]
+        'max_iter': [200, 300, 400, 500],
+        # 'batch_size': [16, 32, 64],
         # 'alpha': [0.0001, 0.001, 0.01],
         # 'learning_rate_init': [0.0001, 0.001, 0.01]
     }
