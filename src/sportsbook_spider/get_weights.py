@@ -22,23 +22,22 @@ for game in mlb.gamelog:
         continue
 
     gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
-    if game['gameId'][:10] == '2023/05/24' or game['gameId'][:10] == '2023/05/25':
-        player = game['playerName']
+    player = game['playerName']
 
-        try:
-            archiveData = archive['MLB'][market][gameDate.strftime(
-                '%Y-%m-%d')][player]
-        except:
-            continue
+    try:
+        archiveData = archive['MLB'][market][gameDate.strftime(
+            '%Y-%m-%d')][player]
+    except:
+        continue
 
-        for line, stats in archiveData.items():
-            if not line == 'Closing Lines':
-                baseline = np.array([0, 0.5, 0.5, 0.5, 0, 0.5, 0.5, 0.5, 0.5])
-                stats[stats == -1000] = baseline[stats == -1000]
-                stats = stats - baseline
-                y = int(game[market] > line)
-                results.append({'stats': stats, 'result': y,
-                                'player': player, 'date': gameDate})
+    for line, stats in archiveData.items():
+        if not line == 'Closing Lines':
+            baseline = np.array([0, 0.5, 0.5, 0.5, 0, 0.5, 0.5, 0.5, 0.5])
+            stats[stats == -1000] = baseline[stats == -1000]
+            stats = stats - baseline
+            y = int(game[market] > line)
+            results.append({'stats': stats, 'result': y,
+                            'player': player, 'date': gameDate})
 
 res = minimize(lambda x: -likelihood(results, x),
                np.ones(9), method='l-bfgs-b', tol=1e-8, bounds=[(0, 100)]*9)
