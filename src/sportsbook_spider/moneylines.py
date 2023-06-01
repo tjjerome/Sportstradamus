@@ -5,6 +5,8 @@ import numpy as np
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
 from sportsbook_spider import creds, data
+from tqdm import tqdm
+from sportsbook_spider.spiderLogger import logger
 
 
 def get_moneylines():
@@ -25,10 +27,11 @@ def get_moneylines():
               for s in res if s['title'] in sports and s['active']]
 
     for sport, league in sports:
+        logger.info(f"Getting {league} Data")
         url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets=h2h,totals&apiKey={apikey}"
         res = scraper.get(url)
 
-        for game in res:
+        for game in tqdm(res):
             gameDate = datetime.strptime(
                 game['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
             gameDate = (gameDate - timedelta(hours=5)).strftime('%Y-%m-%d')

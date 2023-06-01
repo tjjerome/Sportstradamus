@@ -14,30 +14,30 @@ filepath = (pkg_resources.files(data) / "archive.dat")
 with open(filepath, "rb") as infile:
     archive = pickle.load(infile)
 
-market = 'pitcher strikeouts'
+market = 'total bases'
 
 X, y = mlb.get_learning_matrix(market)
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42)
 
-scaler = MinMaxScaler()
+scaler = StandardScaler()
 
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 y_train = y_train.to_numpy()
 y_test = y_test.to_numpy()
 
-search = False
-model = MLPClassifier(hidden_layer_sizes=(256, 128),
-                      batch_size=16, tol=1e-6, max_iter=350)
+search = True
+model = MLPClassifier(hidden_layer_sizes=(256, 256),
+                      batch_size=16, tol=1e-8, max_iter=500)
 
 if search:
 
     params = {
-        'hidden_layer_sizes': [(128, 64), (256, 128), (256, 256), (256, 256, 32)],
+        'hidden_layer_sizes': [(256, 128), (256, 256), (256, 256, 32)],
         'tol': [1e-6, 1e-8],
-        'max_iter': [200, 350, 500]
+        'max_iter': [300, 400, 500]
         # 'alpha': [0.0001, 0.001, 0.01],
         # 'learning_rate_init': [0.0001, 0.001, 0.01]
     }
@@ -59,6 +59,10 @@ if search:
         print("%f (%f) with: %r" % (mean, stdev, param))
 else:
 
+    filepath = (pkg_resources.files(data) / "brains.skl")
+    with open(filepath, 'rb') as infile:
+        models = pickle.load(infile)
+
     model.fit(X_train_scaled, y_train)
 
     y_pred = model.predict(X_test_scaled)
@@ -70,9 +74,8 @@ else:
 
     y_proba = model.predict_proba(X_test_scaled)
 
-    threshold = 0.7
     score = 0
-    for threshold in np.arange(.5, .9, .05):
+    for threshold in np.arange(.6, .95, .05):
         acc = accuracy_score(y_test, (y_proba > threshold).astype(int))
         prec = precision_score(
             y_test, (y_proba > threshold).astype(int), average='weighted')
@@ -86,3 +89,9 @@ else:
                                 (y_proba > t).astype(int), target_names=['Over', 'Under']))
     print("Accuracy      " + str(accuracy_score(y_test,
           (y_proba > t).astype(int))))
+
+    models['MLB'][market] = model
+
+    filepath = (pkg_resources.files(data) / "brains.skl")
+    with open(filepath, 'wb') as outfile:
+        pickle.dump(models, outfile)
