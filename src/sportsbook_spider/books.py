@@ -616,7 +616,7 @@ def get_thrive():
     payload = {"currentPage": 1, "currentSize": 100, "half": 0,
                "Latitude": "29.5908265", "Longitude": "-95.1381594"}
     header = {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
-              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCQ2OXNWUmpBeDI4N090dTlEVWFCaEZPbnM5dEZFUERLU1oxVDJjcnQzVXUyYTVLOUp0NlgvRyIsImNyZWF0ZWQiOjE2ODU1Nzk0MDE5NTEsImV4cCI6MTY4NjE4NDIwMX0.L4vZDsYybT-pjTXBLb5qXRKQ-0nW_kJt4Z-9IM57fglmnxpYJutgR30xb3QIIfljo6Y_8_E7U9qmd-vxuyC7Xw'}
+              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzc3dvcmRMYXN0Q2hhbmdlZEF0IjpudWxsLCJjcmVhdGVkIjoxNjg1NjQ1MDM1MTcyLCJleHAiOjE3MjgwMDAwMDAsImlhdCI6MTY4NTY0NTAzNX0.rkilAs3Jl5cidWGDYXD6nEUxNATdDIxq_ZkJi8MNo-56hcDq_jWoIU9f0Mz6XZ7RAN_tQawU3uErF8Jql7N0eA'}
     logger.info("Getting Thrive Lines")
     try:
         api = requests.post("https://proxy.scrapeops.io/v1/", params=params,
