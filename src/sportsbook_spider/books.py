@@ -115,7 +115,7 @@ def get_fd(sport, tabs):
 
     attachments = response.get('attachments')
     events = attachments['events']
-    event_ids = [event for event in events if datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") > datetime.today()
+    event_ids = [event for event in events if datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") > datetime.now()
                  and datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=5) < datetime.today()]
 
     players = {}
@@ -616,7 +616,7 @@ def get_thrive():
     payload = {"currentPage": 1, "currentSize": 100, "half": 0,
                "Latitude": "29.5908265", "Longitude": "-95.1381594"}
     header = {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
-              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCQ2OXNWUmpBeDI4N090dTlEVWFCaEZPbnM5dEZFUERLU1oxVDJjcnQzVXUyYTVLOUp0NlgvRyIsImNyZWF0ZWQiOjE2ODQ4MDkwMjAwNDksImV4cCI6MTY4NTQxMzgyMH0.c8_cV3lVObgjA52Eu75FJcu0wcymmlm-zBub5NW2F3CtlO5jWqJiXuW7Ch-xdkU8XvdMBgtRdK5QP7VZTFuVlQ'}
+              'Token': 'eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJ0amplcm9tZSIsImF1ZGllbmNlIjoiSU9TIiwicGFzcyI6IiQyYSQxMCQ2OXNWUmpBeDI4N090dTlEVWFCaEZPbnM5dEZFUERLU1oxVDJjcnQzVXUyYTVLOUp0NlgvRyIsImNyZWF0ZWQiOjE2ODU1Nzk0MDE5NTEsImV4cCI6MTY4NjE4NDIwMX0.L4vZDsYybT-pjTXBLb5qXRKQ-0nW_kJt4Z-9IM57fglmnxpYJutgR30xb3QIIfljo6Y_8_E7U9qmd-vxuyC7Xw'}
     logger.info("Getting Thrive Lines")
     try:
         api = requests.post("https://proxy.scrapeops.io/v1/", params=params,

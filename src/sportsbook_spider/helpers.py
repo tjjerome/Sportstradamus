@@ -169,6 +169,9 @@ class Archive():
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
 
+    def __getitem__(self, item):
+        return self.archive[item]
+
     def add(self, o, stats, lines, key):
         market = key[o['Market'].replace("H2H ", "")]
         if not o['League'] in self.archive:
@@ -213,3 +216,23 @@ class Archive():
 
 
 archive = Archive()
+
+
+urls = ["http://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
+        "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams",
+        "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams",
+        "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"]
+
+abbreviations = {}
+for url in urls:
+    res = scraper.get(url)['sports'][0]['leagues'][0]
+    league = res['abbreviation']
+    if league not in abbreviations:
+        abbreviations[league] = {}
+    for team in res['teams']:
+        name = remove_accents(team['team']['displayName'])
+        abbr = team['team']['abbreviation']
+        abbreviations[league][name] = abbr
+
+abbreviations['NBA']['Los Angeles Clippers'] = 'LAC'
+abbreviations['NHL']['St Louis Blues'] = 'STL'
