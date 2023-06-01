@@ -885,7 +885,6 @@ class statsMLB:
 
                     game_res = [game[market] - line for game in player_games]
                     h2h_res = [game[market] - line for game in headtohead]
-                    stats[stats == -1000] = np.nan
 
                     results.append({'Games': game_res[-10:], 'H2H': h2h_res[-5:], 'DVPOA': stats[4], 'Odds': np.nanmean(stats[5:]),
                                     'TeamML': moneyline-0.5, 'Total': total/10,
@@ -893,7 +892,7 @@ class statsMLB:
 
         data = pd.DataFrame(results)
 
-        X = data[['DVPOA', 'Odds', 'TeamML', 'Total']]
+        X = data[['DVPOA', 'Odds', 'TeamML', 'Total']].fillna(0)
         X = X.join(pd.DataFrame(data.Games.tolist(), index=data.index).
                    fillna(0).add_prefix('Game '))
         X = X.join(pd.DataFrame(data.H2H.tolist(), index=data.index).
