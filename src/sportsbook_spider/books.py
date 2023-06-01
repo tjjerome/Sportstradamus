@@ -596,7 +596,7 @@ def get_ud():
             'Date': game1['Date'],
             'Market': "H2H " + bet,
             'Line': float(o['options'][0]['spread'])-float(o['options'][1]['spread']),
-            'Opponent': opponent1 + " / " + opponent2
+            'Opponent': opponent1 + "/" + opponent2
         }
         offers.append(n)
 
@@ -633,14 +633,18 @@ def get_thrive():
     offers = []
     for line in tqdm(lines):
         o = line.get('contestProp')
+        team = o['player1']['teamAbbr']
+        opponent = str(o.get('team2Abbr', '') or '').upper()
+        if team == opponent:
+            opponent = str(o.get('team1Abbr', '') or '').upper()
         n = {
             'Player': remove_accents(" ".join([o['player1']['firstName'], o['player1']['lastName']])),
             'League': o['player1']['leagueType'],
-            'Team': o['player1']['teamAbbr'],
+            'Team': team,
             'Date': (datetime.strptime(o['startTime'], '%Y-%m-%d %H:%M') - timedelta(hours=5)).strftime('%Y-%m-%d'),
             'Market': " + ".join(o['player1']['propParameters']),
             'Line': float(o['propValue']),
-            'Opponent': str(o.get('team2Abbr', '') or '').upper()
+            'Opponent': opponent
         }
         if n['League'] == 'HOCKEY':
             n['League'] = 'NHL'
