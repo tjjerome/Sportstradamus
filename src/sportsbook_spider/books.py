@@ -623,6 +623,7 @@ def get_thrive():
                             headers=header | scraper.header, json=payload).json()
     except:
         logger.exception(id)
+        return []
 
     if api['success']:
         lines = api['response']['data']

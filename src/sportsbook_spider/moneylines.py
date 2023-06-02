@@ -46,7 +46,10 @@ def get_moneylines():
                     if market['key'] == 'h2h':
                         odds = [o['price'] for o in market['outcomes']]
                         odds = no_vig_odds(odds[0], odds[1])
-                        moneyline.append(odds[0])
+                        if market['outcomes'][0]['name'] == game['home_team']:
+                            moneyline.append(odds[0])
+                        else:
+                            moneyline.append(odds[1])
                     elif market['key'] == 'totals':
                         totals.append(market['outcomes'][0]['point'])
 
@@ -65,8 +68,8 @@ def get_moneylines():
             if not gameDate in archive[league]['Totals']:
                 archive[league]['Totals'][gameDate] = {}
 
-            archive[league]['Moneyline'][gameDate][awayTeam] = moneyline
-            archive[league]['Moneyline'][gameDate][homeTeam] = 1-moneyline
+            archive[league]['Moneyline'][gameDate][awayTeam] = 1-moneyline
+            archive[league]['Moneyline'][gameDate][homeTeam] = moneyline
 
             archive[league]['Totals'][gameDate][awayTeam] = totals
             archive[league]['Totals'][gameDate][homeTeam] = totals
