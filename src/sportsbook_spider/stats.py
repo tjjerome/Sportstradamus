@@ -393,6 +393,45 @@ class statsNBA:
 
         return w
 
+    def get_training_matrix(self, market):
+        X = pd.DataFrame()
+        results = []
+        for game in self.gamelog:
+            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
+                continue
+            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
+                continue
+
+            gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
+            try:
+                archiveData = archive['MLB'][market][gameDate.strftime(
+                    '%Y-%m-%d')][game['playerName']]
+            except:
+                continue
+
+            offer = {
+                'Player': game['playerName'],
+                'Team': game['team'],
+                'Market': market,
+                'Opponent': game['opponent'],
+                'Pitcher': game['opponent pitcher']
+            }
+
+            for line, stats in archiveData.items():
+                if not line == 'Closing Lines':
+                    if X.empty:
+                        X = self.row(offer | {'Line': line}, gameDate)
+                    else:
+                        X = pd.concat(
+                            [X, self.row(offer | {'Line': line}, gameDate)])
+
+                    results.append(
+                        {'Over': int(game[market] > line), 'Under': int(game[market] < line)})
+
+        y = pd.DataFrame(results)
+
+        return X, y
+
 
 class statsMLB:
     def __init__(self):
@@ -826,7 +865,81 @@ class statsMLB:
 
         return w
 
-    def get_learning_matrix(self, market):
+    def row(self, offer, date=datetime.today()):
+        if type(date) is datetime:
+            date = date.strftime('%Y-%m-%d')
+
+        player = offer['Player']
+        team = offer['Team']
+        market = offer['Market']
+        line = offer['Line']
+        opponent = offer['Opponent']
+        if datetime.strptime(date, '%Y-%m-%d') < datetime.today():
+            if offer.get('Pitcher'):
+                pitcher = offer['Pitcher']
+            else:
+                pitcher = next((game for game in self.gamelog if game["playerName"] == player and
+                                game['gameId'][:10] == date.replace('-', '/')), None)['opponent pitcher']
+        else:
+            pitcher = self.pitchers[opponent]
+        try:
+            stats = archive['MLB'][market][date][player][line]
+            moneyline = archive['MLB']['Moneyline'][date].get(team, 0.5)
+            total = archive['MLB']['Totals'][date].get(team, 0)
+        except:
+            logger.exception("Could not find archived data")
+
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 0
+
+        date = datetime.strptime(date, '%Y-%m-%d')
+        if any([string in market for string in ['allowed', 'pitch']]):
+            player_games = [game for game in self.gamelog
+                            if game['playerName'] == player and game['starting pitcher']
+                            and datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
+        else:
+            player_games = [game for game in self.gamelog
+                            if game['playerName'] == player and game['starting batter']
+                            and datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
+
+        if any([string in market for string in ['allowed', 'pitch']]):
+            headtohead = [
+                game for game in player_games if game['opponent'] == opponent]
+
+        else:
+            headtohead = [
+                game for game in player_games if game['opponent pitcher'] == pitcher]
+        stats[stats == -1000] = np.nan
+        baseline = np.array(
+            [0, 0.5, 0.5, 0.5, 0, 0.5, 0.5, 0.5, 0.5])
+        stats = stats - baseline
+        if np.isnan(stats[4]):
+            stats[4] = 0
+
+        game_res = [game[market] - line for game in player_games]
+        h2h_res = [game[market] - line for game in headtohead]
+        if len(game_res) < 10:
+            i = 10 - len(game_res)
+            game_res = [0]*i + game_res
+        if len(h2h_res) < 5:
+            i = 5 - len(h2h_res)
+            h2h_res = [0]*i + h2h_res
+
+        data = {'Games': [game_res[-10:]], 'H2H': [h2h_res[-5:]], 'DVPOA': stats[4], 'Odds': np.nanmean(stats[5:]),
+                'TeamML': moneyline-0.5, 'Total': total/10}
+
+        data = pd.DataFrame(data)
+        X = data[['DVPOA', 'Odds', 'TeamML', 'Total']].fillna(0)
+        X = X.join(pd.DataFrame(data.Games.to_list()
+                                ).fillna(0).add_prefix('Game '))
+        X = X.join(pd.DataFrame(data.H2H.to_list()).fillna(
+            0).add_prefix('Meeting '))
+        return X
+
+    def get_training_matrix(self, market):
+        X = pd.DataFrame()
         results = []
         for game in self.gamelog:
             if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
@@ -835,69 +948,32 @@ class statsMLB:
                 continue
 
             gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
-            player = game['playerName']
-
             try:
                 archiveData = archive['MLB'][market][gameDate.strftime(
-                    '%Y-%m-%d')][player]
-                moneyline = archive['MLB']['Moneyline'][gameDate.strftime(
-                    '%Y-%m-%d')].get(game['team'], 0.5)
-                total = archive['MLB']['Totals'][gameDate.strftime(
-                    '%Y-%m-%d')].get(game['team'], 0)
+                    '%Y-%m-%d')][game['playerName']]
             except:
                 continue
 
-            if np.isnan(moneyline):
-                moneyline = 0.5
-            if np.isnan(total):
-                total = 0
-
-            opponent = game['opponent']
-            pitcher = game['opponent pitcher']
-            if any([string in market for string in ['allowed', 'pitch']]):
-                player_games = [game for game in self.gamelog
-                                if game['playerName'] == player and game['starting pitcher']
-                                and datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < gameDate]
-            else:
-                player_games = [game for game in self.gamelog
-                                if game['playerName'] == player and game['starting batter']
-                                and datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < gameDate]
-
-            if any([string in market for string in ['allowed', 'pitch']]):
-                headtohead = [
-                    game for game in player_games if game['opponent'] == opponent]
-
-            else:
-                headtohead = [
-                    game for game in player_games if game['opponent pitcher'] == pitcher]
+            offer = {
+                'Player': game['playerName'],
+                'Team': game['team'],
+                'Market': market,
+                'Opponent': game['opponent'],
+                'Pitcher': game['opponent pitcher']
+            }
 
             for line, stats in archiveData.items():
                 if not line == 'Closing Lines':
-                    if game[market] == line:
-                        continue
+                    if X.empty:
+                        X = self.row(offer | {'Line': line}, gameDate)
+                    else:
+                        X = pd.concat(
+                            [X, self.row(offer | {'Line': line}, gameDate)])
 
-                    stats[stats == -1000] = np.nan
-                    baseline = np.array(
-                        [0, 0.5, 0.5, 0.5, 0, 0.5, 0.5, 0.5, 0.5])
-                    stats = stats - baseline
-                    if np.isnan(stats[4]):
-                        stats[4] = 0
+                    results.append(
+                        {'Over': int(game[market] > line), 'Under': int(game[market] < line)})
 
-                    game_res = [game[market] - line for game in player_games]
-                    h2h_res = [game[market] - line for game in headtohead]
-
-                    results.append({'Games': game_res[-10:], 'H2H': h2h_res[-5:], 'DVPOA': stats[4], 'Odds': np.nanmean(stats[5:]),
-                                    'TeamML': moneyline-0.5, 'Total': total/10,
-                                    'Over': int(game[market] > line), 'Under': int(game[market] < line)})
-
-        data = pd.DataFrame(results)
-
-        X = data[['DVPOA', 'Odds', 'TeamML', 'Total']].fillna(0)
-        X = X.join(pd.DataFrame(data.Games.tolist(), index=data.index).
-                   fillna(0).add_prefix('Game '))
-        X = X.join(pd.DataFrame(data.H2H.tolist(), index=data.index).
-                   fillna(0).add_prefix('Meeting '))
-        y = data[['Over', 'Under']]
+        y = pd.DataFrame(results)
 
         return X, y
 
@@ -1426,7 +1502,8 @@ class statsNHL:
 
         return w
 
-    def get_learning_matrix(self, market):
+    def get_training_matrix(self, market):
+        X = pd.DataFrame()
         results = []
         for game in self.gamelog:
             if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
@@ -1435,69 +1512,31 @@ class statsNHL:
                 continue
 
             gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
-            player = game['playerName']
-
             try:
-                archiveData = archive['NHL'][market][gameDate.strftime(
-                    '%Y-%m-%d')][player]
-                moneyline = archive['NHL']['Moneyline'][gameDate.strftime(
-                    '%Y-%m-%d')].get(game['team'], 0.5)
-                total = archive['NHL']['Totals'][gameDate.strftime(
-                    '%Y-%m-%d')].get(game['team'], 0)
+                archiveData = archive['MLB'][market][gameDate.strftime(
+                    '%Y-%m-%d')][game['playerName']]
             except:
                 continue
 
-            if np.isnan(moneyline):
-                moneyline = 0.5
-            if np.isnan(total):
-                total = 0
-
-            opponent = game['opponent']
-            pitcher = game['opponent pitcher']
-            if any([string in market for string in ['allowed', 'pitch']]):
-                player_games = [game for game in self.gamelog
-                                if game['playerName'] == player and game['starting pitcher']
-                                and datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < gameDate]
-            else:
-                player_games = [game for game in self.gamelog
-                                if game['playerName'] == player and game['starting batter']
-                                and datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < gameDate]
-
-            if any([string in market for string in ['allowed', 'pitch']]):
-                headtohead = [
-                    game for game in player_games if game['opponent'] == opponent]
-
-            else:
-                headtohead = [
-                    game for game in player_games if game['opponent pitcher'] == pitcher]
+            offer = {
+                'Player': game['playerName'],
+                'Team': game['team'],
+                'Market': market,
+                'Opponent': game['opponent'],
+                'Pitcher': game['opponent pitcher']
+            }
 
             for line, stats in archiveData.items():
                 if not line == 'Closing Lines':
-                    if game[market] == line:
-                        continue
+                    if X.empty:
+                        X = self.row(offer | {'Line': line}, gameDate)
+                    else:
+                        X = pd.concat(
+                            [X, self.row(offer | {'Line': line}, gameDate)])
 
-                    stats[stats == -1000] = np.nan
-                    baseline = np.array(
-                        [0, 0.5, 0.5, 0.5, 0, 0.5, 0.5, 0.5, 0.5])
-                    stats = stats - baseline
-                    if np.isnan(stats[4]):
-                        stats[4] = 0
+                    results.append(
+                        {'Over': int(game[market] > line), 'Under': int(game[market] < line)})
 
-                    game_res = [game[market] - line for game in player_games]
-                    h2h_res = [game[market] - line for game in headtohead]
-                    stats[stats == -1000] = np.nan
-
-                    results.append({'Games': game_res[-10:], 'H2H': h2h_res[-5:], 'DVPOA': stats[4], 'Odds': np.nanmean(stats[5:]),
-                                    'TeamML': moneyline-0.5, 'Total': total/10,
-                                    'Over': int(game[market] > line), 'Under': int(game[market] < line)})
-
-        data = pd.DataFrame(results)
-
-        X = data[['DVPOA', 'Odds', 'TeamML', 'Total']]
-        X = X.join(pd.DataFrame(data.Games.tolist(), index=data.index).
-                   fillna(0).add_prefix('Game '))
-        X = X.join(pd.DataFrame(data.H2H.tolist(), index=data.index).
-                   fillna(0).add_prefix('Meeting '))
-        y = data[['Over', 'Under']]
+        y = pd.DataFrame(results)
 
         return X, y

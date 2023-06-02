@@ -173,7 +173,8 @@ class Archive():
         return self.archive[item]
 
     def add(self, o, stats, lines, key):
-        market = key[o['Market'].replace("H2H ", "")]
+        market = o['Market'].replace("H2H ", "")
+        market = key.get(market, market)
         if not o['League'] in self.archive:
             self.archive[o['League']] = {}
 
