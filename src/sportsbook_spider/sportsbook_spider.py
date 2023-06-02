@@ -302,6 +302,7 @@ def main(progress):
                     o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
+                    archive.add(o, stats, lines, pp2stats)
                     if o['Bet'] == 'Over':
                         loc = get_pred(stats, weights)
                     else:
@@ -321,10 +322,10 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                elif newline not in untapped_markets+tapped_markets:
-                    untapped_markets.append(newline)
-
-                archive.add(o, stats, lines, pp2stats)
+                else:
+                    archive.add(o, stats, lines, pp2stats)
+                    if newline not in untapped_markets+tapped_markets:
+                        untapped_markets.append(newline)
 
             except:
                 logger.exception(o['Player'] + ", " + o["Market"])
@@ -501,6 +502,7 @@ def main(progress):
                     o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
+                    archive.add(o, stats, lines, ud2stats)
                     if o['Bet'] == 'Over':
                         loc = get_pred(stats, weights)
                     else:
@@ -520,10 +522,11 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                elif newline not in untapped_markets+tapped_markets:
-                    untapped_markets.append(newline)
+                else:
+                    archive.add(o, stats, lines, ud2stats)
+                    if newline not in untapped_markets+tapped_markets:
+                        untapped_markets.append(newline)
 
-                archive.add(o, stats, lines, ud2stats)
             except Exception as exc:
                 logger.exception(o['Player'] + ", " + o["Market"])
 
@@ -684,6 +687,7 @@ def main(progress):
                     o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
+                    archive.add(o, stats, lines, th2stats)
                     if o['Bet'] == 'Over':
                         loc = get_pred(stats, weights)
                     else:
@@ -703,10 +707,10 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                elif newline not in untapped_markets+tapped_markets:
-                    untapped_markets.append(newline)
-
-                archive.add(o, stats, lines, th2stats)
+                else:
+                    archive.add(o, stats, lines, th2stats)
+                    if newline not in untapped_markets+tapped_markets:
+                        untapped_markets.append(newline)
 
             except:
                 logger.exception(o['Player'] + ", " + o["Market"])
@@ -751,9 +755,11 @@ def main(progress):
     }
 
     parp2stats = {
+        '3PT Made': 'FG3M',
         'Assists': 'AST',
         'Blocked Shots': 'BLK',
         'Hit + Run + RBI': 'hits+runs+rbi',
+        'Runs': 'runs',
         'Hits': 'hits',
         'Points': 'PTS',
         'Pts + Ast': 'PA',
@@ -852,6 +858,7 @@ def main(progress):
                     o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
                     o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
 
+                    archive.add(o, stats, lines, parp2stats)
                     if o['Bet'] == 'Over':
                         loc = get_pred(stats, weights)
                     else:
@@ -871,10 +878,10 @@ def main(progress):
                     o['Caesars'] = str(lines[3]['Line']) + "/" + \
                         str(lines[3][o['Bet']]) if lines[3] else 'N/A'
 
-                elif newline not in untapped_markets+tapped_markets:
-                    untapped_markets.append(newline)
-
-                archive.add(o, stats, lines, parp2stats)
+                else:
+                    archive.add(o, stats, lines, parp2stats)
+                    if newline not in untapped_markets+tapped_markets:
+                        untapped_markets.append(newline)
 
             except:
                 logger.exception(o['Player'] + ", " + o["Market"])
