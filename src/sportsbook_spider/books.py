@@ -425,8 +425,7 @@ def get_pp():
         logger.exception("Retrieving leagues failed,")
         leagues = [2, 7, 8, 9]
 
-    logger.info("Processing PrizePicks offers")
-    for l in tqdm(leagues):
+    for l in tqdm(leagues, desc="Processing PrizePicks offers"):
         params['url'] = f"https://api.prizepicks.com/projections?league_id={l}"
 
         try:
@@ -442,14 +441,13 @@ def get_pp():
         for p in players:
             if p['type'] == 'new_player':
                 player_ids[p['id']] = {
-                    'Name': p['attributes']['name'].replace('\t', ''),
+                    'Name': p['attributes']['name'].replace('\t', '').strip(),
                     'Team': p['attributes']['team']
                 }
             elif p['type'] == 'league':
                 league = p['attributes']['name']
 
-        logger.info("Getting offers for " + league)
-        for o in tqdm(lines):
+        for o in tqdm(lines, desc="Getting offers for " + league, unit='offer'):
             n = {
                 'Player': remove_accents(player_ids[o['relationships']['new_player']['data']['id']]['Name']),
                 'League': league,
@@ -519,8 +517,7 @@ def get_ud():
         }
 
     offers = []
-    logger.info("Getting Underdog Over/Unders")
-    for o in tqdm(api['over_under_lines']):
+    for o in tqdm(api['over_under_lines'], desc="Getting Underdog Over/Unders", unit='offer'):
         player = players[o['over_under']['appearance_stat']['appearance_id']]
         game = matches.get(o['over_under']['appearance_stat']
                            ['appearance_id'], {'Home': '', 'Away': ''})
@@ -576,8 +573,7 @@ def get_ud():
                 'Date': match_ids.get(i['match_id'], {'Date': ''})['Date']
             }
 
-    logger.info("Getting Underdog Rivals")
-    for o in tqdm(rivals['rival_lines']):
+    for o in tqdm(rivals['rival_lines'], desc="Getting Underdog Rivals", unit='offer'):
         player1 = players[o['options'][0]['appearance_stat']['appearance_id']]
         player2 = players[o['options'][1]['appearance_stat']['appearance_id']]
         game1 = matches[o['options'][0]['appearance_stat']['appearance_id']]
@@ -632,7 +628,7 @@ def get_thrive():
         return []
 
     offers = []
-    for line in tqdm(lines):
+    for line in tqdm(lines, desc="Getting Thrive Offers", unit='offer'):
         o = line.get('contestProp')
         team = o['player1']['teamAbbr']
         opponent = str(o.get('team2Abbr', '') or '').upper()
@@ -673,7 +669,7 @@ def get_parp():
         return []
 
     offers = []
-    for player in tqdm(api['players']):
+    for player in tqdm(api['players'], desc="Getting ParlayPlay Offers", unit='offer'):
         teams = [player['match']['homeTeam']['teamAbbreviation'],
                  player['match']['awayTeam']['teamAbbreviation']]
         for stat in player['stats']:

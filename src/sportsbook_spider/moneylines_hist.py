@@ -10,12 +10,12 @@ filepath = (pkg_resources.files(data) / "archive.dat")
 with open(filepath, "rb") as infile:
     archive = pickle.load(infile)
 
-apikey = 'c6ddbef8a3e1283729f64bc4a3b81088'
+apikey = '38c4614a42f2ae7ea623bb87e20edc84'
 
-sport = 'baseball_mlb'
-league = 'MLB'
+sport = 'icehockey_nhl'
+league = 'NHL'
 
-Date = datetime.strptime('2023-05-31T12:00:00Z', "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime('2022-10-07T12:00:00Z', "%Y-%m-%dT%H:%M:%SZ")
 
 while Date < datetime.today():
     date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -39,6 +39,8 @@ while Date < datetime.today():
                     odds = no_vig_odds(odds[0], odds[1])
                     if market['outcomes'][0]['name'] == game['home_team']:
                         moneyline.append(odds[0])
+                    else:
+                        moneyline.append(odds[1])
                 elif market['key'] == 'totals' and market['outcomes'][0].get('point'):
                     totals.append(market['outcomes'][0]['point'])
 
@@ -68,4 +70,4 @@ while Date < datetime.today():
 
 filepath = (pkg_resources.files(data) / "archive.dat")
 with open(filepath, "wb") as outfile:
-    pickle.dump(archive, outfile)
+    pickle.dump(archive, outfile, -1)

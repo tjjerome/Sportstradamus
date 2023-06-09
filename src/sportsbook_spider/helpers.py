@@ -14,6 +14,7 @@ from scipy.optimize import fsolve
 import numpy as np
 import statsapi as mlb
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 with open((pkg_resources.files(creds) / "scrapeops_cred.json"), 'r') as infile:
     creds = json.load(infile)
@@ -46,23 +47,24 @@ class Scrape:
         self.header = random.choices(self.headers, weights=self.weights)[0]
 
     def get(self, url, max_attempts=5, headers={}, params={}):
-        for i in range(1, max_attempts+1):
-            if i > 1:
-                self._new_headers()
-                sleep(random.uniform(3, 5))
-            try:
-                response = requests.get(
-                    url, headers=self.header | headers, params=params)
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.debug("Attempt " + str(i) +
-                                 ", Error " + str(response.status_code))
-            except Exception as exc:
-                logger.exception("Attempt " + str(i) + ",")
+        with logging_redirect_tqdm():
+            for i in range(1, max_attempts+1):
+                if i > 1:
+                    self._new_headers()
+                    sleep(random.uniform(3, 5))
+                try:
+                    response = requests.get(
+                        url, headers=self.header | headers, params=params)
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        logger.debug("Attempt " + str(i) +
+                                     ", Error " + str(response.status_code))
+                except Exception as exc:
+                    logger.exception("Attempt " + str(i) + ",")
 
-        logger.warning("Max Attempts Reached")
-        return None
+            logger.warning("Max Attempts Reached")
+            return None
 
 
 scraper = Scrape(apikey)
@@ -213,16 +215,16 @@ class Archive():
     def write(self):
         filepath = (pkg_resources.files(data) / "archive.dat")
         with open(filepath, "wb") as outfile:
-            pickle.dump(self.archive, outfile)
+            pickle.dump(self.archive, outfile, -1)
 
 
 archive = Archive()
 
 
-urls = ["http://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
-        "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams",
-        "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams",
-        "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"]
+urls = [  # "http://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
+    "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams",
+    "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams",
+    "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"]
 
 abbreviations = {}
 for url in urls:
@@ -237,3 +239,4 @@ for url in urls:
 
 abbreviations['NBA']['Los Angeles Clippers'] = 'LAC'
 abbreviations['NHL']['St Louis Blues'] = 'STL'
+# abbreviations['NFL']['Washington Football Team'] = 'WSH'

@@ -27,11 +27,10 @@ def get_moneylines():
               for s in res if s['title'] in sports and s['active']]
 
     for sport, league in sports:
-        logger.info(f"Getting {league} Data")
         url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets=h2h,totals&apiKey={apikey}"
         res = scraper.get(url)
 
-        for game in tqdm(res):
+        for game in tqdm(res, desc=f"Getting {league} Data", unit='game'):
             gameDate = datetime.strptime(
                 game['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
             gameDate = (gameDate - timedelta(hours=5)).strftime('%Y-%m-%d')
@@ -76,7 +75,7 @@ def get_moneylines():
 
     filepath = (pkg_resources.files(data) / "archive.dat")
     with open(filepath, "wb") as outfile:
-        pickle.dump(archive, outfile)
+        pickle.dump(archive, outfile, -1)
 
 
 if __name__ == '__main__':
