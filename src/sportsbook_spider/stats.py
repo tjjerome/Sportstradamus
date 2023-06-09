@@ -641,26 +641,31 @@ class statsNBA:
                             new_row = self.row(
                                 offer | {'Line': line}, gameDate)
                             if type(new_row) is pd.DataFrame:
-                                if X.empty:
-                                    X = new_row
-                                else:
-                                    X = pd.concat([X, new_row])
 
                                 if ' + ' in name:
                                     player2 = name.split(' + ')[1]
-                                    game2 = next(i for i in self.gamelog if i['PLAYER_NAME'] == player2
-                                                 and i['GAME_ID'] == game['GAME_ID'])
+                                    game2 = next((i for i in self.gamelog if i['PLAYER_NAME'] == player2
+                                                 and i['GAME_ID'] == game['GAME_ID']), None)
+                                    if game2 is None:
+                                        continue
                                     results.append(
                                         {'Result': 1 if (game[market] + game2[market]) > line else -1})
                                 elif ' vs. ' in name:
                                     player2 = name.split(' vs. ')[1]
-                                    game2 = next(i for i in self.gamelog if i['PLAYER_NAME'] == player2
-                                                 and i['GAME_ID'] == game['GAME_ID'])
+                                    game2 = next((i for i in self.gamelog if i['PLAYER_NAME'] == player2
+                                                 and i['GAME_ID'] == game['GAME_ID']), None)
+                                    if game2 is None:
+                                        continue
                                     results.append(
                                         {'Result': 1 if (game[market] + line) > game2[market] else -1})
                                 else:
                                     results.append(
                                         {'Result': 1 if game[market] > line else -1})
+
+                                if X.empty:
+                                    X = new_row
+                                else:
+                                    X = pd.concat([X, new_row])
 
         y = pd.DataFrame(results)
 
@@ -1350,27 +1355,34 @@ class statsMLB:
                 for line, stats in archiveData.items():
                     if not line == 'Closing Lines' and not game[market] == line:
                         new_row = self.row(offer | {'Line': line}, gameDate)
-                        if type(new_row) is pd.DataFrame:
-                            if X.empty:
-                                X = new_row
-                            else:
-                                X = pd.concat([X, new_row])
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            if type(new_row) is pd.DataFrame:
 
                                 if ' + ' in name:
                                     player2 = name.split(' + ')[1]
-                                    game2 = next(i for i in self.gamelog if i['playerName'] == player2
-                                                 and i['gameId'] == game['gameId'])
+                                    game2 = next((i for i in self.gamelog if i['playerName'] == player2
+                                                  and i['gameId'] == game['gameId']), None)
+                                    if game2 is None:
+                                        continue
                                     results.append(
                                         {'Result': 1 if (game[market] + game2[market]) > line else -1})
                                 elif ' vs. ' in name:
                                     player2 = name.split(' vs. ')[1]
-                                    game2 = next(i for i in self.gamelog if i['playerName'] == player2
-                                                 and i['gameId'] == game['gameId'])
+                                    game2 = next((i for i in self.gamelog if i['playerName'] == player2
+                                                  and i['gameId'] == game['gameId']), None)
+                                    if game2 is None:
+                                        continue
                                     results.append(
                                         {'Result': 1 if (game[market] + line) > game2[market] else -1})
                                 else:
                                     results.append(
                                         {'Result': 1 if game[market] > line else -1})
+
+                                if X.empty:
+                                    X = new_row
+                                else:
+                                    X = pd.concat([X, new_row])
 
         y = pd.DataFrame(results)
 
