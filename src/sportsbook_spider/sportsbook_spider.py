@@ -106,7 +106,7 @@ def main(progress):
     sport = "icehockey"
     league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
     csb_data.update(get_caesars(sport, league))
-    logger.info("Getting Caesars NFL Lines")
+    # logger.info("Getting Caesars NFL Lines")
     # sport = "americanfootball"
     # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
     # csb_data.update(get_caesars(sport, league))
@@ -216,8 +216,7 @@ def main(progress):
     live_bets = ["1H", "2H", "1P", "2P", "3P", "1Q",
                  "2Q", "3Q", "4Q", "LIVE", "SZN", "SZN2", "SERIES"]
     if len(pp_offers) > 0:
-        logger.info("Matching PrizePicks offers")
-        for o in tqdm(pp_offers):
+        for o in tqdm(pp_offers, desc="Matching PrizePicks offers", unit='offer'):
             opponent = o.get('Opponent')
             if any(substring in o['League'] for substring in live_bets):
                 o['Market'] = o['Market'] + " " + \
@@ -401,8 +400,7 @@ def main(progress):
 
     if len(ud_offers) > 0:
 
-        logger.info("Matching Underdog offers")
-        for o in tqdm(ud_offers):
+        for o in tqdm(ud_offers, desc="Matching Underdog offers", unit='offer'):
             opponent = o.get('Opponent')
             if any(substring in o['League'] for substring in live_bets):
                 o['Market'] = o['Market'] + " " + \
@@ -619,8 +617,7 @@ def main(progress):
 
     if len(th_offers) > 0:
 
-        logger.info("Matching Thrive offers")
-        for o in tqdm(th_offers):
+        for o in tqdm(th_offers, desc="Matching Thrive offers", unit='offer'):
 
             opponent = o.get('Opponent')
             if any(substring in o['League'] for substring in live_bets):
@@ -790,8 +787,7 @@ def main(progress):
 
     if len(parp_offers) > 0:
 
-        logger.info("Matching ParlayPlay offers")
-        for o in tqdm(parp_offers):
+        for o in tqdm(parp_offers, desc="Matching ParlayPlay offers", unit='offer'):
 
             opponent = o.get('Opponent')
             if any(substring in o['League'] for substring in live_bets):
