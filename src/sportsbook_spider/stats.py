@@ -1160,7 +1160,7 @@ class statsMLB:
             bucket = self.playerStats[player]['bucket']
         else:
             bucket = 20
-            while self.edges[20-bucket] < line:
+            while self.edges[20-bucket] < line and bucket > 0:
                 bucket -= 1
 
         try:
