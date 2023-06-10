@@ -776,7 +776,7 @@ def main(progress):
         'Walks Allowed': 'walks allowed',
         'Total Bases': 'total bases',
         'Pitching Outs': 'pitching outs',
-        'Earned Runs': 'runs',
+        'Earned Runs': 'runs allowed',
         'Turnovers': 'TOV'
     }
 

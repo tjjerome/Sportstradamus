@@ -17,8 +17,8 @@ mlb.load()
 mlb.update()
 
 league = 'MLB'
-markets = ['total bases', 'pitcher strikeouts', 'runs allowed',
-           'hits', 'runs', 'rbi', 'singles', 'hits+runs+rbi']
+markets = [  # 'total bases', 'pitcher strikeouts', 'runs allowed', 'hits',
+    'runs', 'rbi', 'singles', 'hits+runs+rbi', '1st inning runs allowed']
 for market in markets:
 
     X, y = mlb.get_training_matrix(market)
