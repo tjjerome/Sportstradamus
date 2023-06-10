@@ -108,11 +108,11 @@ for market in markets:
                     'ROC_AUC': roc[i]
                 }}
 
-filename = "_".join([league, market]).replace(" ", "-")+'.skl'
+    filename = "_".join([league, market]).replace(" ", "-")+'.skl'
 
-filepath = (pkg_resources.files(data) / filename)
-with open(filepath, 'wb') as outfile:
-    pickle.dump(filedict, outfile, -1)
-    del filedict
-    del model
-    del scaler
+    filepath = (pkg_resources.files(data) / filename)
+    with open(filepath, 'wb') as outfile:
+        pickle.dump(filedict, outfile, -1)
+        del filedict
+        del model
+        del scaler
