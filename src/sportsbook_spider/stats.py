@@ -1276,13 +1276,13 @@ class statsMLB:
 
                 dvpoa = self.dvpoa(pitcher, market)
 
+            game_res = [game[market] - line for game in player_games]
+            h2h_res = [game[market] - line for game in headtohead]
+
         stats[stats == -1000] = np.nan
         odds = np.nanmean(stats[5:])
         if np.isnan(odds):
             odds = 0.5
-
-        game_res = [game[market] - line for game in player_games]
-        h2h_res = [game[market] - line for game in headtohead]
 
         data = {'DVPOA': dvpoa, 'Odds': odds - .5,
                 'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5,
@@ -1354,9 +1354,10 @@ class statsMLB:
 
                 for line, stats in archiveData.items():
                     if not line == 'Closing Lines' and not game[market] == line:
-                        new_row = self.row(offer | {'Line': line}, gameDate)
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
+                            new_row = self.row(
+                                offer | {'Line': line}, gameDate)
                             if type(new_row) is pd.DataFrame:
 
                                 if ' + ' in name:
