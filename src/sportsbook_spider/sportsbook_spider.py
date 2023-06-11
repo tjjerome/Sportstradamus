@@ -1,50 +1,45 @@
-# -*- coding: utf-8 -*-
-"""Sportsbook Scraper
-
-TODO:
-
-*   Add web app - Flask
-*   Tennis/Golf/Racing/WNBA
-*   Add eSports (maybe from GGBET or Betway?)
-"""
 from sportsbook_spider.spiderLogger import logger
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
-from sportsbook_spider.helpers import get_pred, prob_to_odds, archive, match_offers
+from sportsbook_spider.helpers import archive, match_offers
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 import click
-from sportsbook_spider import creds, data
-from scipy.stats import poisson, skellam
+from sportsbook_spider import creds
 from functools import partialmethod
 from tqdm import tqdm
-import numpy as np
 import pandas as pd
 import os.path
 import datetime
 import importlib.resources as pkg_resources
 
+global nba
+global mlb
+global nhl
+global untapped_markets
+
 
 @click.command()
 @click.option('--progress', default=True, help='Display progress bars')
 def main(progress):
-
+    # Initialize tqdm based on the value of 'progress' flag
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
+
     # Authorize the gspread API
     SCOPES = [
         'https://www.googleapis.com/auth/drive',
         'https://www.googleapis.com/auth/drive.file'
     ]
     cred = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
+
+    # Check if token.json file exists and load credentials
     if os.path.exists((pkg_resources.files(creds) / "token.json")):
         cred = Credentials.from_authorized_user_file(
             (pkg_resources.files(creds) / "token.json"), SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
+
+    # If no valid credentials found, let the user log in
     if not cred or not cred.valid:
         if cred and cred.expired and cred.refresh_token:
             cred.refresh(Request())
@@ -52,9 +47,11 @@ def main(progress):
             flow = InstalledAppFlow.from_client_secrets_file(
                 (pkg_resources.files(creds) / "credentials.json"), SCOPES)
             cred = flow.run_local_server(port=0)
+
         # Save the credentials for the next run
         with open((pkg_resources.files(creds) / "token.json"), 'w') as token:
             token.write(cred.to_json())
+
     gc = gspread.authorize(cred)
 
     """"
@@ -111,6 +108,13 @@ def main(progress):
     # csb_data.update(get_caesars(sport, league))
     logger.info(str(len(csb_data)) + " offers found")
 
+    datasets = {
+        "DraftKings": dk_data,
+        "FanDuel": fd_data,
+        "Pinnacle": pin_data,
+        "Caesars": csb_data
+    }
+
     """
     Start gathering player stats
     """
@@ -124,507 +128,43 @@ def main(progress):
     nhl.load()
     nhl.update()
 
+    stats = {
+        'NBA': nba,
+        'MLB': mlb,
+        'NHL': nhl
+    }
+
     untapped_markets = []
 
+    ################# PrizePicks #################
+
     pp_dict = get_pp()
+    pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
 
-    pp2dk = {
-        'Runs': 'Runs Scored',
-        'Pitcher Strikeouts': 'Strikeouts',
-        'Walks Allowed': 'Walks',
-        '1st Inning Runs Allowed': '1st Inning Total Runs',
-        'Hitter Strikeouts': 'Strikeouts',
-        'Hits+Runs+RBIS': 'Hits + Runs + RBIs',
-        'Earned Runs Allowed': 'Earned Runs',
-        'Blks+Stls': 'Steals + Blocks',
-        'Blocked Shots': 'Blocks',
-        'Pts+Asts': 'Pts + Ast',
-        'Pts+Rebs': 'Pts + Reb',
-        'Pts+Rebs+Asts': 'Pts + Reb + Ast',
-        'Rebs+Asts': 'Ast + Reb',
-        '3-PT Made': 'Threes',
-        'Goalie Saves': 'Saves',
-        'Shots On Goal': 'Player Shots on Goal'
-    }
-
-    pp2fd = {
-        'Blocked Shots': 'Blocks',
-        'Pts+Asts': 'Pts + Ast',
-        'Pts+Rebs': 'Pts + Reb',
-        'Pts+Rebs+Asts': 'Pts + Reb + Ast',
-        'Rebs+Asts': 'Reb + Ast',
-        '3-PT Made': 'Made Threes',
-        'Pitcher Strikeouts': 'Strikeouts',
-        '1st Inning Runs Allowed': '1st Inning Over/Under 0.5 Runs',
-        'Goalie Saves': 'Saves',
-        'Shots On Goal': 'Shots on Goal'
-    }
-
-    pp2pin = {
-        'Pitcher Strikeouts': 'Total Strikeouts',
-        '3-PT Made': '3 Point FG',
-        'Goalie Saves': 'Saves'
-    }
-
-    pp2csb = {
-        'Shots On Goal': 'Shots',
-        'Pts+Rebs+Asts': 'Pts + Rebs + Asts',
-        'Hitter Strikeouts': 'Strikeouts',
-        'Pitcher Strikeouts': 'Pitching Strikeouts',
-        'Blks+Stls': 'Blocks + Steals',
-        'Pts+Asts': 'Points + Assists',
-        'Pts+Rebs': 'Points + Rebounds',
-        'Rebs+Asts': 'Rebounds + Assists'
-    }
-
-    pp2stats = {
-        '3-PT Made': 'FG3M',
-        'Points': 'PTS',
-        'Rebounds': 'REB',
-        'Pts+Rebs': 'PR',
-        'Pts+Asts': 'PA',
-        'Rebs+Asts': 'RA',
-        'Pts+Rebs+Asts': 'PRA',
-        'Blocked Shots': 'BLK',
-        'Steals': 'STL',
-        'Assists': 'AST',
-        'Blks+Stls': 'BLST',
-        'Turnovers': 'TOV',
-        'Hits+Runs+RBIS': 'hits+runs+rbi',
-        'Total Bases': 'total bases',
-        'Hitter Strikeouts': 'batter strikeouts',
-        'Pitcher Strikeouts': 'pitcher strikeouts',
-        'Runs': 'runs',
-        'RBIs': 'rbi',
-        'Pitching Outs': 'pitching outs',
-        'Hits Allowed': 'hits allowed',
-        'Walks Allowed': 'walks allowed',
-        'Earned Runs Allowed': 'runs allowed',
-        '1st Inning Runs Allowed': '1st inning runs allowed',
-        'Shots On Goal': 'shots',
-        'Goals': 'goals',
-        'Goalie Saves': 'saves'
-    }
-
-    dk_data['PrizePicks'] = pp2dk
-    fd_data['PrizePicks'] = pp2fd
-    pin_data['PrizePicks'] = pp2pin
-    csb_data['PrizePicks'] = pp2csb
+    ################# Underdog #################
 
     ud_dict = get_ud()
+    ud_offers = process_offers(ud_dict, "Underdog", datasets, stats)
 
-    ud2dk = {
-        'Runs': 'Runs Scored',
-        'Walks Allowed': 'Walks',
-        'Pts + Rebs + Asts': 'Pts + Rebs + Ast',
-        'Rebounds + Assists': 'Ast + Reb',
-        'Points + Assists': 'Pts + Ast',
-        'Points + Rebounds': 'Pts + Reb',
-        'Blocks + Steals': 'Steals + Blocks',
-        '3-Pointers Made': 'Threes',
-        'Shots': 'Player Shots on Goal',
-        'Games won': 'Player Games Won'
-    }
-
-    ud2fd = {
-        'Points + Assists': 'Pts + Ast',
-        'Points + Rebounds': 'Pts + Reb',
-        'Pts + Rebs + Asts': 'Pts + Reb + Ast',
-        'Rebounds + Assists': 'Reb + Ast',
-        '3-Pointers Made': 'Made Threes',
-        'Shots': 'Shots on Goal'
-    }
-
-    ud2pin = {
-        'Shots': 'Shots on Goal',
-        'Strikeouts': 'Total Strikeouts',
-        '3-Pointers Made': '3 Point FG',
-        'Pts + Rebs + Asts': 'Pts+Rebs+Asts'
-    }
-
-    ud2csb = {
-        'Strikeouts': 'Pitching Strikeouts',
-        '3-Pointers Made': '3-Pt Made'
-    }
-
-    ud2stats = {
-        '3-Pointers Made': 'FG3M',
-        'Points': 'PTS',
-        'Rebounds': 'REB',
-        'Points + Rebounds': 'PR',
-        'Points + Assists': 'PA',
-        'Rebounds + Assists': 'RA',
-        'Pts + Rebs + Asts': 'PRA',
-        'Blocks': 'BLK',
-        'Steals': 'STL',
-        'Assists': 'AST',
-        'Blocks + Steals': 'BLST',
-        'Turnovers': 'TOV',
-        'Hits + Runs + RBIs': 'hits+runs+rbi',
-        'Total Bases': 'total bases',
-        'Strikeouts': 'pitcher strikeouts',
-        'Runs': 'runs',
-        'Singles': 'singles',
-        'Walks': 'walks',
-        'Hits': 'hits',
-        'RBIs': 'rbi',
-        'Walks Allowed': 'walks allowed',
-        'Goals Against': 'goalsAgainst',
-        'Goals': 'goals',
-        'Shots': 'shots',
-        'Saves': 'saves'
-    }
-
-    dk_data['Underdog'] = ud2dk
-    fd_data['Underdog'] = ud2fd
-    pin_data['Underdog'] = ud2pin
-    csb_data['Underdog'] = ud2csb
+    ################# Thrive #################
 
     th_dict = get_thrive()
+    th_offers = process_offers(th_dict, "Thrive", datasets, stats)
 
-    th2dk = {
-        'ASTS': 'Assists',
-        'BASEs': 'Total Bases',
-        'BLKS': 'Blocks',
-        'GOLs + ASTs': 'Points',
-        'HITs + RBIs + RUNs': 'Hits + Runs + RBIs',
-        'Ks': 'Strikeouts',
-        'PTS': 'Points',
-        'PTS + ASTS': 'Pts + Ast',
-        'PTS + REBS': 'Pts + Reb',
-        'PTS + REBS + ASTS': 'Pts + Rebs + Ast',
-        'REBS': 'Rebounds',
-        'REBS + ASTS': 'Ast + Reb',
-        'RUNs': 'Runs Scored',
-        'SAVs': 'Saves',
-        'STLS': 'Steals'
-    }
-
-    th2fd = {
-        'ASTS': 'Assists',
-        'BLKS': 'Blocks',
-        'Ks': 'Strikeouts',
-        'PTS': 'Points',
-        'PTS + ASTS': 'Pts + Ast',
-        'PTS + REBS': 'Pts + Reb',
-        'PTS + REBS + ASTS': 'Pts + Reb + Ast',
-        'REBS': 'Rebounds',
-        'REBS + ASTS': 'Reb + Ast',
-        'SAVs': 'Saves',
-        'STLS': 'Steals'
-    }
-
-    th2pin = {
-        'ASTS': 'Assists',
-        'BASEs': 'Total Bases',
-        'GOLs + ASTs': 'Points',
-        'Ks': 'Total Strikeouts',
-        'PTS': 'Points',
-        'PTS + REBS + ASTS': 'Pts+Rebs+Asts',
-        'REBS': 'Rebounds',
-        'SAVs': 'Saves',
-        'STLS': 'Steals'
-    }
-
-    th2csb = {
-        'ASTS': 'Assists',
-        'BASEs': 'Total Bases',
-        'BLKS': 'Blocks',
-        'GOLs + ASTs': 'Points',
-        'Ks': 'Pitching Strikeouts',
-        'PTS': 'Points',
-        'PTS + ASTS': 'Points + Assists',
-        'PTS + REBS': 'Points + Rebounds',
-        'PTS + REBS + ASTS': 'Pts + Rebs + Asts',
-        'REBS': 'Rebounds',
-        'REBS + ASTS': 'Rebounds + Assists',
-        'SAVs': 'Saves',
-        'STLS': 'Steals'
-    }
-
-    th2stats = {
-        'GOLs + ASTs': 'PTS',
-        'REBS': 'REB',
-        'PTS': 'PTS',
-        'ASTS': 'AST',
-        'BLKS': 'BLK',
-        'PTS + REBS': 'PR',
-        'PTS + ASTS': 'PA',
-        'REBS + ASTS': 'RA',
-        'PTS + REBS + ASTS': 'PRA',
-        'BLKs': 'BLK',
-        'ASTs': 'AST',
-        'HITs + RBIs + RUNs': 'hits+runs+rbi',
-        'BASEs': 'total bases',
-        'Ks': 'pitcher strikeouts',
-        'RUNs': 'runs',
-        'SAVs': 'saves',
-        'STLS': 'STL'
-    }
-
-    dk_data['Thrive'] = th2dk
-    fd_data['Thrive'] = th2fd
-    pin_data['Thrive'] = th2pin
-    csb_data['Thrive'] = th2csb
+    ################# ParlayPlays #################
 
     parp_dict = get_parp()
-
-    parp2dk = {
-        'Blocked Shots': 'Blocks',
-        'Hit + Run + RBI': 'Hits + Runs + RBIs',
-        'Pts + Reb + Ast': 'Pts + Rebs + Ast',
-        'Reb + Ast': 'Ast + Reb',
-        'Shots': 'Player Shots on Goal',
-        'Shots on Goal': 'Player Shots on Goal',
-        'Stl + Blk': 'Steals + Blocks',
-        'Strikeouts (K)': 'Strikeouts'
-    }
-
-    parp2fd = {
-        'Blocked Shots': 'Blocks',
-        'Shots': 'Shots on Goal',
-        'Strikeouts (K)': 'Strikeouts'
-    }
-
-    parp2pin = {
-        'Blocked Shots': 'Blocks',
-        'Pts + Reb + Ast': 'Pts+Rebs+Asts',
-        'Shots': 'Shots on Goal',
-        'Strikeouts (K)': 'Total Strikeouts'
-    }
-
-    parp2csb = {
-        'Blocked Shots': 'Blocks',
-        'Hit + Run + RBI': 'Hits + Runs + RBIs',
-        'Pts + Ast': 'Points + Assists',
-        'Pts + Reb': 'Points + Rebounds',
-        'Pts + Reb + Ast': 'Pts + Rebs + Asts',
-        'Reb + Ast': 'Rebounds + Assists',
-        'Shots on Goal': 'Shots',
-        'Stl + Blk': 'Blocks and Steals',
-        'Strikeouts (K)': 'Pitching Strikeouts'
-    }
-
-    parp2stats = {
-        '3PT Made': 'FG3M',
-        'Assists': 'AST',
-        'Blocked Shots': 'BLK',
-        'Hit + Run + RBI': 'hits+runs+rbi',
-        'Runs': 'runs',
-        'Hits': 'hits',
-        'Points': 'PTS',
-        'Pts + Ast': 'PA',
-        'Pts + Reb': 'PR',
-        'Pts + Reb + Ast': 'PRA',
-        'Reb + Ast': 'RA',
-        'Rebounds': 'REB',
-        'Saves': 'saves',
-        'Shots': 'shots',
-        'Shots on Goal': 'shots',
-        'Stl + Blk': 'BLST',
-        'Steals': 'STL',
-        'Blocks': 'BLK',
-        'Strikeouts (K)': 'pitcher strikeouts',
-        'Strikeouts': 'batter strikeouts',
-        'Hits Allowed': 'hits allowed',
-        'Walks Allowed': 'walks allowed',
-        'Total Bases': 'total bases',
-        'Pitching Outs': 'pitching outs',
-        'Earned Runs': 'runs allowed',
-        'Turnovers': 'TOV'
-    }
-
-    dk_data['ParlayPlay'] = parp2dk
-    fd_data['ParlayPlay'] = parp2fd
-    pin_data['ParlayPlay'] = parp2pin
-    csb_data['ParlayPlay'] = parp2csb
-
-    datasets = [dk_data, fd_data, pin_data, csb_data]
-
-    pp_offers = []
-    if len(pp_dict) > 0:
-        total = sum(sum(len(i) for i in v.values()) for v in pp_dict.values())
-        with tqdm(total=total, desc="Matching PrizePicks Offers", unit='offer') as pbar:
-            for league, markets in pp_dict.items():
-                if league == 'NBA':
-                    stat_data = nba
-                elif league == 'MLB':
-                    stat_data = mlb
-                elif league == 'NHL':
-                    stat_data = nhl
-                else:
-                    for market, offers in markets.items():
-                        untapped_markets.append({
-                            'Platform': 'PrizePicks',
-                            'League': league,
-                            'Market': market
-                        })
-                        pbar.update(len(offers))
-                    continue
-
-                for market, offers in markets.items():
-                    new_offers = match_offers(
-                        offers, league, market, 'PrizePicks', datasets, stat_data, pp2stats, pbar)
-                    if len(new_offers) == 0:
-                        untapped_markets.append({
-                            'Platform': 'PrizePicks',
-                            'League': league,
-                            'Market': market
-                        })
-                    else:
-                        pp_offers = pp_offers + new_offers
-
-    ud_offers = []
-    if len(ud_dict) > 0:
-        total = sum(sum(len(i) for i in v.values()) for v in ud_dict.values())
-        with tqdm(total=total, desc="Matching Underdog Offers", unit='offer') as pbar:
-            for league, markets in ud_dict.items():
-                if league == 'NBA':
-                    stat_data = nba
-                elif league == 'MLB':
-                    stat_data = mlb
-                elif league == 'NHL':
-                    stat_data = nhl
-                else:
-                    for market, offers in markets.items():
-                        untapped_markets.append({
-                            'Platform': 'Underdog',
-                            'League': league,
-                            'Market': market
-                        })
-                        pbar.update(len(offers))
-                    continue
-
-                for market, offers in markets.items():
-                    new_offers = match_offers(
-                        offers, league, market, 'Underdog', datasets, stat_data, ud2stats, pbar)
-                    if len(new_offers) == 0:
-                        untapped_markets.append({
-                            'Platform': 'Underdog',
-                            'League': league,
-                            'Market': market
-                        })
-                    else:
-                        ud_offers = ud_offers + new_offers
-
-    th_offers = []
-    if len(th_dict) > 0:
-        total = sum(sum(len(i) for i in v.values()) for v in th_dict.values())
-        with tqdm(total=total, desc="Matching Thrive Offers", unit='offer') as pbar:
-            for league, markets in th_dict.items():
-                if league == 'NBA':
-                    stat_data = nba
-                elif league == 'MLB':
-                    stat_data = mlb
-                elif league == 'NHL':
-                    stat_data = nhl
-                else:
-                    for market, offers in markets.items():
-                        untapped_markets.append({
-                            'Platform': 'Thrive',
-                            'League': league,
-                            'Market': market
-                        })
-                        pbar.update(len(offers))
-                    continue
-
-                for market, offers in markets.items():
-                    new_offers = match_offers(
-                        offers, league, market, 'Thrive', datasets, stat_data, th2stats, pbar)
-                    if len(new_offers) == 0:
-                        untapped_markets.append({
-                            'Platform': 'Thrive',
-                            'League': league,
-                            'Market': market
-                        })
-                    else:
-                        th_offers = th_offers + new_offers
-
-    parp_offers = []
-    if len(parp_dict) > 0:
-        total = sum(sum(len(i) for i in v.values())
-                    for v in parp_dict.values())
-        with tqdm(total=total, desc="Matching ParlayPlay Offers", unit='offer') as pbar:
-            for league, markets in parp_dict.items():
-                if league == 'NBA':
-                    stat_data = nba
-                elif league == 'MLB':
-                    stat_data = mlb
-                elif league == 'NHL':
-                    stat_data = nhl
-                else:
-                    for market, offers in markets.items():
-                        untapped_markets.append({
-                            'Platform': 'ParlayPlay',
-                            'League': league,
-                            'Market': market
-                        })
-                        pbar.update(len(offers))
-                    continue
-
-                for market, offers in markets.items():
-                    new_offers = match_offers(
-                        offers, league, market, 'ParlayPlay', datasets, stat_data, parp2stats, pbar)
-                    if len(new_offers) == 0:
-                        untapped_markets.append({
-                            'Platform': 'ParlayPlay',
-                            'League': league,
-                            'Market': market
-                        })
-                    else:
-                        parp_offers = parp_offers + new_offers
+    parp_offers = process_offers(parp_dict, "ParlayPlay", datasets, stats)
 
     logger.info("Writing to file...")
-    if len(pp_offers) > 0:
-        pp_df = pd.DataFrame(pp_offers).dropna().drop(
-            columns='Opponent').sort_values('Model', ascending=False)
-        wks = gc.open("Sports Betting").worksheet("PrizePicks")
-        wks.clear()
-        wks.update([pp_df.columns.values.tolist()] + pp_df.values.tolist())
-        wks.update("S1", "Last Updated: " +
-                   datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-        wks.set_basic_filter()
-        wks.format("H:N", {"numberFormat": {
-            "type": "PERCENT", "pattern": "0.00%"}})
-
-    if len(ud_offers) > 0:
-        ud_df = pd.DataFrame(ud_offers).dropna().drop(
-            columns='Opponent').sort_values('Model', ascending=False)
-        wks = gc.open("Sports Betting").worksheet("Underdog")
-        wks.clear()
-        wks.update([ud_df.columns.values.tolist()] + ud_df.values.tolist())
-        wks.update("S1", "Last Updated: " +
-                   datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-        wks.set_basic_filter()
-        wks.format("H:N", {"numberFormat": {
-            "type": "PERCENT", "pattern": "0.00%"}})
-
-    if len(th_offers) > 0:
-        try:
-            th_df = pd.DataFrame(th_offers).dropna().drop(
-                columns='Opponent').sort_values('Model', ascending=False)
-            wks = gc.open("Sports Betting").worksheet("Thrive")
-            wks.clear()
-            wks.update([th_df.columns.values.tolist()] + th_df.values.tolist())
-            wks.update("S1", "Last Updated: " +
-                       datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-            wks.set_basic_filter()
-            wks.format("H:N", {"numberFormat": {
-                "type": "PERCENT", "pattern": "0.00%"}})
-        except Exception as exc:
-            logger.exception('Error writing Thrive offers')
-
-    if len(parp_offers) > 0:
-        parp_df = pd.DataFrame(parp_offers).dropna().drop(
-            columns='Opponent').sort_values('Model', ascending=False)
-        wks = gc.open("Sports Betting").worksheet("ParlayPlay")
-        wks.clear()
-        wks.update([parp_df.columns.values.tolist()] + parp_df.values.tolist())
-        wks.update("T1", "Last Updated: " +
-                   datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
-        wks.set_basic_filter()
-        wks.format("I:O", {"numberFormat": {
-            "type": "PERCENT", "pattern": "0.00%"}})
+    offer_list = [
+        ("PrizePicks", pp_offers),
+        ("Underdog", ud_offers),
+        ("Thrive", th_offers),
+        ("ParlayPlay", parp_offers)
+    ]
+    for book, offers in offer_list:
+        save_data(offers, book, gc)
 
     if len(untapped_markets) > 0:
         untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
@@ -636,6 +176,99 @@ def main(progress):
 
     archive.write()
     logger.info("Success!")
+
+
+def process_offers(offer_dict, book, datasets, stats):
+    """
+    Process the offers from the given offer dictionary and match them with player statistics.
+
+    Args:
+        offer_dict (dict): Dictionary containing the offers to be processed.
+        book (str): Name of the book or platform.
+        datasets (dict): Dictionary containing the datasets of player prop odds.
+        stats (dict): Dictionary containing player stats.
+
+    Returns:
+        list: List of processed offers.
+
+    """
+    new_offers = []
+    if len(offer_dict) > 0:
+        # Calculate the total number of offers to process
+        total = sum(sum(len(i) for i in v.values())
+                    for v in offer_dict.values())
+
+        # Display a progress bar
+        with tqdm(total=total, desc=f"Matching {book} Offers", unit='offer') as pbar:
+            for league, markets in offer_dict.items():
+                if league in stats:
+                    stat_data = stats.get(league)
+                else:
+                    # Handle untapped markets where the league is not supported
+                    for market, offers in markets.items():
+                        untapped_markets.append({
+                            'Platform': book,
+                            'League': league,
+                            'Market': market
+                        })
+                        pbar.update(len(offers))
+                    continue
+
+                for market, offers in markets.items():
+                    # Match the offers with player statistics
+                    matched_offers = match_offers(
+                        offers, league, market, book, datasets, stat_data, pbar)
+
+                    if len(matched_offers) == 0:
+                        # No matched offers found for the market
+                        untapped_markets.append({
+                            'Platform': book,
+                            'League': league,
+                            'Market': market
+                        })
+                    else:
+                        # Add the matched offers to the new_offers list
+                        new_offers.extend(matched_offers)
+
+    return new_offers
+
+
+def save_data(offers, book, gc):
+    """
+    Save offers data to a Google Sheets worksheet.
+
+    Args:
+        offers (list): List of offer data.
+        book (str): Name of the DFS book.
+        gc (gspread.client.Client): Google Sheets client.
+
+    Raises:
+        Exception: If there is an error writing the offers to the worksheet.
+    """
+    if len(offers) > 0:
+        try:
+            # Create a DataFrame from the offers data and perform necessary operations
+            df = pd.DataFrame(offers).dropna().drop(
+                columns='Opponent').sort_values('Model', ascending=False)
+
+            # Access the Google Sheets worksheet and update its contents
+            wks = gc.open("Sports Betting").worksheet(book)
+            wks.clear()
+            wks.update([df.columns.values.tolist()] + df.values.tolist())
+            wks.update("S1", "Last Updated: " +
+                       datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
+            wks.set_basic_filter()
+
+            # Apply number formatting to the relevant columns
+            if book == "ParlayPlay":
+                wks.format("I:O", {"numberFormat": {
+                           "type": "PERCENT", "pattern": "0.00%"}})
+            else:
+                wks.format("H:N", {"numberFormat": {
+                           "type": "PERCENT", "pattern": "0.00%"}})
+        except Exception as exc:
+            # Log the exception if there is an error writing the offers to the worksheet
+            logger.exception(f"Error writing {book} offers")
 
 
 if __name__ == '__main__':
