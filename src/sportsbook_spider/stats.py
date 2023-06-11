@@ -572,8 +572,8 @@ class statsNBA:
                 game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S')
             data = {}
             try:
-                names = list(archive['NBA'][market][gameDate.strftime(
-                    '%Y-%m-%d')].keys())
+                names = list(archive['NBA'][market].get(gameDate.strftime(
+                    '%Y-%m-%d'), {}).keys())
                 for name in names:
                     if game['PLAYER_NAME'] == name.strip().replace('vs.', '+').split(' + ')[0]:
                         data[name] = archive['NBA'][market][gameDate.strftime(
@@ -1255,8 +1255,8 @@ class statsMLB:
             data = {}
             gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
             try:
-                names = list(archive['MLB'][market][gameDate.strftime(
-                    '%Y-%m-%d')].keys())
+                names = list(archive['MLB'][market].get(gameDate.strftime(
+                    '%Y-%m-%d'), {}).keys())
                 for name in names:
                     if game['playerName'] == name.strip().replace('vs.', '+').split(' + ')[0]:
                         data[name] = archive['MLB'][market][gameDate.strftime(
