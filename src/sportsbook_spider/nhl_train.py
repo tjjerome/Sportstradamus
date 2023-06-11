@@ -17,8 +17,8 @@ nhl.load()
 nhl.update()
 
 league = 'NHL'
-markets = ['saves', 'goals allowed', 'shots', 'goals',
-           'assists', 'points', 'hits', 'blocked shots']
+markets = ['saves', 'goalsAgainst', 'shots', 'goals',
+           'assists', 'points']
 for market in markets:
 
     X, y = nhl.get_training_matrix(market)
