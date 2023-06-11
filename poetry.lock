@@ -383,6 +383,40 @@ files = [
 ]
 
 [[package]]
+name = "dom-toml"
+version = "0.6.1"
+description = "Dom's tools for Tom's Obvious, Minimal Language."
+optional = false
+python-versions = ">=3.6.1"
+files = [
+    {file = "dom_toml-0.6.1-py3-none-any.whl", hash = "sha256:ebdd69c571268dfa5a56b5085b5311583d8a8d2dc1811349e796160c9f36d501"},
+    {file = "dom_toml-0.6.1.tar.gz", hash = "sha256:a0bfc204ae32c72ed36e526dce56108a3b20741ac3c055207206ce3b2f302868"},
+]
+
+[package.dependencies]
+domdf-python-tools = ">=2.8.0"
+toml = ">=0.10.2"
+
+[[package]]
+name = "domdf-python-tools"
+version = "3.6.1"
+description = "Helpful functions for Python 🐍 🛠️"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "domdf_python_tools-3.6.1-py3-none-any.whl", hash = "sha256:e18158460850957f18e740eb94ede56f580ddb0cb162ab9d9834ed8bbb1b6431"},
+    {file = "domdf_python_tools-3.6.1.tar.gz", hash = "sha256:acc04563d23bce4d437dd08af6b9bea788328c412772a044d8ca428a7ad861be"},
+]
+
+[package.dependencies]
+natsort = ">=7.0.1"
+typing-extensions = ">=3.7.4.1"
+
+[package.extras]
+all = ["pytz (>=2019.1)"]
+dates = ["pytz (>=2019.1)"]
+
+[[package]]
 name = "executing"
 version = "1.2.0"
 description = "Get the currently executing AST node of a frame, and other information"
@@ -450,13 +484,13 @@ lzo = ["python-lzo"]
 
 [[package]]
 name = "fsspec"
-version = "2023.5.0"
+version = "2023.6.0"
 description = "File-system specification"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "fsspec-2023.5.0-py3-none-any.whl", hash = "sha256:51a4ad01a5bb66fcc58036e288c0d53d3975a0df2a5dc59a93b59bade0391f2a"},
-    {file = "fsspec-2023.5.0.tar.gz", hash = "sha256:b3b56e00fb93ea321bc9e5d9cf6f8522a0198b20eb24e02774d329e9c6fb84ce"},
+    {file = "fsspec-2023.6.0-py3-none-any.whl", hash = "sha256:1cbad1faef3e391fba6dc005ae9b5bdcbf43005c9167ce78c915549c352c869a"},
+    {file = "fsspec-2023.6.0.tar.gz", hash = "sha256:d0b2f935446169753e7a5c5c55681c54ea91996cc67be93c39a154fb3a2742af"},
 ]
 
 [package.extras]
@@ -597,13 +631,13 @@ test = ["flaky", "ipyparallel", "pre-commit", "pytest (>=7.0)", "pytest-asyncio"
 
 [[package]]
 name = "ipython"
-version = "8.13.2"
+version = "8.14.0"
 description = "IPython: Productive Interactive Computing"
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "ipython-8.13.2-py3-none-any.whl", hash = "sha256:ffca270240fbd21b06b2974e14a86494d6d29290184e788275f55e0b55914926"},
-    {file = "ipython-8.13.2.tar.gz", hash = "sha256:7dff3fad32b97f6488e02f87b970f309d082f758d7b7fc252e3b19ee0e432dbb"},
+    {file = "ipython-8.14.0-py3-none-any.whl", hash = "sha256:248aca623f5c99a6635bc3857677b7320b9b8039f99f070ee0d20a5ca5a8e6bf"},
+    {file = "ipython-8.14.0.tar.gz", hash = "sha256:1d197b907b6ba441b692c48cf2a3a2de280dc0ac91a3405b39349a50272ca0a1"},
 ]
 
 [package.dependencies]
@@ -757,6 +791,21 @@ files = [
 
 [package.dependencies]
 requests = "*"
+
+[[package]]
+name = "natsort"
+version = "8.3.1"
+description = "Simple yet flexible natural sorting in Python."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "natsort-8.3.1-py3-none-any.whl", hash = "sha256:d583bc9050dd10538de36297c960b93f873f0cd01671a3c50df5bd86dd391dcb"},
+    {file = "natsort-8.3.1.tar.gz", hash = "sha256:517595492dde570a4fd6b6a76f644440c1ba51e2338c8a671d7f0475fda8f9fd"},
+]
+
+[package.extras]
+fast = ["fastnumbers (>=2.0.0)"]
+icu = ["PyICU (>=1.0.0)"]
 
 [[package]]
 name = "nba-api"
@@ -972,18 +1021,18 @@ files = [
 
 [[package]]
 name = "platformdirs"
-version = "3.5.1"
+version = "3.5.3"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a \"user data dir\"."
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "platformdirs-3.5.1-py3-none-any.whl", hash = "sha256:e2378146f1964972c03c085bb5662ae80b2b8c06226c54b2ff4aa9483e8a13a5"},
-    {file = "platformdirs-3.5.1.tar.gz", hash = "sha256:412dae91f52a6f84830f39a8078cecd0e866cb72294a5c66808e74d5e88d251f"},
+    {file = "platformdirs-3.5.3-py3-none-any.whl", hash = "sha256:0ade98a4895e87dc51d47151f7d2ec290365a585151d97b4d8d6312ed6132fed"},
+    {file = "platformdirs-3.5.3.tar.gz", hash = "sha256:e48fabd87db8f3a7df7150a4a5ea22c546ee8bc39bc2473244730d4b56d2cc4e"},
 ]
 
 [package.extras]
-docs = ["furo (>=2023.3.27)", "proselint (>=0.13)", "sphinx (>=6.2.1)", "sphinx-autodoc-typehints (>=1.23,!=1.23.4)"]
-test = ["appdirs (==1.4.4)", "covdefaults (>=2.3)", "pytest (>=7.3.1)", "pytest-cov (>=4)", "pytest-mock (>=3.10)"]
+docs = ["furo (>=2023.5.20)", "proselint (>=0.13)", "sphinx (>=7.0.1)", "sphinx-autodoc-typehints (>=1.23,!=1.23.4)"]
+test = ["appdirs (==1.4.4)", "covdefaults (>=2.3)", "pytest (>=7.3.1)", "pytest-cov (>=4.1)", "pytest-mock (>=3.10)"]
 
 [[package]]
 name = "prompt-toolkit"
@@ -1583,6 +1632,31 @@ files = [
 ]
 
 [[package]]
+name = "sphinx-pdj-theme"
+version = "0.4.0"
+description = "A cool theme for sphinx documentation"
+optional = false
+python-versions = "*"
+files = [
+    {file = "sphinx-pdj-theme-0.4.0.tar.gz", hash = "sha256:4b86bfd8b8e20344db56aba13473f634286149fa0203d18e0437157f48c7e0fa"},
+]
+
+[[package]]
+name = "sphinx-pyproject"
+version = "0.1.0"
+description = "Move some of your Sphinx configuration into pyproject.toml"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "sphinx_pyproject-0.1.0-py3-none-any.whl", hash = "sha256:aaa974eb1bf9456c4bf9f97c9e1eb19469e337b5d30271f163085014ef7a8365"},
+    {file = "sphinx_pyproject-0.1.0.tar.gz", hash = "sha256:c2525c3c473a771e95fca4691da0e35aebcc459ff618a7912d9b57bc995eef3d"},
+]
+
+[package.dependencies]
+dom-toml = ">=0.3.0"
+domdf-python-tools = ">=2.7.0"
+
+[[package]]
 name = "stack-data"
 version = "0.6.2"
 description = "Extract data from python stack frames and tracebacks for informative displays"
@@ -1621,6 +1695,17 @@ python-versions = ">=3.7, <4"
 files = [
     {file = "tld-0.13-py2.py3-none-any.whl", hash = "sha256:f75b2be080f767ed17c2338a339eaa4fab5792586319ca819119da252f9f3749"},
     {file = "tld-0.13.tar.gz", hash = "sha256:93dde5e1c04bdf1844976eae440706379d21f4ab235b73c05d7483e074fb5629"},
+]
+
+[[package]]
+name = "toml"
+version = "0.10.2"
+description = "Python Library for Tom's Obvious, Minimal Language"
+optional = false
+python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
+files = [
+    {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},
+    {file = "toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f"},
 ]
 
 [[package]]
@@ -1679,6 +1764,17 @@ docs = ["myst-parser", "pydata-sphinx-theme", "sphinx"]
 test = ["argcomplete (>=2.0)", "pre-commit", "pytest", "pytest-mock"]
 
 [[package]]
+name = "typing-extensions"
+version = "4.6.3"
+description = "Backported and Experimental Type Hints for Python 3.7+"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "typing_extensions-4.6.3-py3-none-any.whl", hash = "sha256:88a4153d8505aabbb4e13aacb7c486c2b4a33ca3b3f807914a9b4c844c471c26"},
+    {file = "typing_extensions-4.6.3.tar.gz", hash = "sha256:d91d5919357fe7f681a9f2b5b4cb2a5f1ef0a1e9f59c4d8ff0d3491e05c0ffd5"},
+]
+
+[[package]]
 name = "tzdata"
 version = "2023.3"
 description = "Provider of IANA time zone data"
@@ -1719,4 +1815,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "713f8f093c1d018bb9a683a966909d9cbffc4581e6a2080b8e79e86bbfc47609"
+content-hash = "3d7c5d564eac3115ca9c0303ec7abc4d41abfb4a0f07db97ff656a8e0f73a6c6"

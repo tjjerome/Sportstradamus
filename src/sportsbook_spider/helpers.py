@@ -185,7 +185,7 @@ class Archive:
         Loads the archive data from a file if it exists.
         """
         self.archive = {}
-        filepath = pkg_resources.resource_filename('data', 'archive.dat')
+        filepath = pkg_resources.files(data) / 'archive.dat'
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
@@ -258,7 +258,7 @@ class Archive:
         Returns:
             None
         """
-        filepath = pkg_resources.resource_filename('data', 'archive.dat')
+        filepath = pkg_resources.files(data) / 'archive.dat'
         with open(filepath, "wb") as outfile:
             pickle.dump(self.archive, outfile, protocol=-1)
 
