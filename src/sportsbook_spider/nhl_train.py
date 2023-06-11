@@ -1,4 +1,4 @@
-from sportsbook_spider.stats import statsMLB
+from sportsbook_spider.stats import statsNHL
 import pickle
 import importlib.resources as pkg_resources
 from sportsbook_spider import data
@@ -12,16 +12,16 @@ from sklearn.calibration import calibration_curve, CalibratedClassifierCV
 from skopt import BayesSearchCV
 from matplotlib import pyplot as plt
 
-mlb = statsMLB()
-mlb.load()
-mlb.update()
+nhl = statsNHL()
+nhl.load()
+nhl.update()
 
-league = 'MLB'
-markets = ['total bases', 'pitcher strikeouts', 'runs allowed', 'hits',
-           'runs', 'rbi', 'singles', 'hits+runs+rbi', '1st inning runs allowed']
+league = 'NHL'
+markets = ['saves', 'goals allowed', 'shots', 'goals',
+           'assists', 'points', 'hits', 'blocked shots']
 for market in markets:
 
-    X, y = mlb.get_training_matrix(market)
+    X, y = nhl.get_training_matrix(market)
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
@@ -100,7 +100,7 @@ for market in markets:
     filedict = {'model': model,
                 'scaler': scaler,
                 'threshold': t,
-                'edges': [np.floor(i*2)/2 for i in mlb.edges][:-1],
+                'edges': [np.floor(i*2)/2 for i in nhl.edges][:-1],
                 'stats': {
                     'Accuracy': (acc[0], acc[i]),
                     'Precision_Over': (preco[0], preco[i]),

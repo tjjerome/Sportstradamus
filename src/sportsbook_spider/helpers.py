@@ -240,3 +240,169 @@ for url in urls:
 abbreviations['NBA']['Los Angeles Clippers'] = 'LAC'
 abbreviations['NHL']['St Louis Blues'] = 'STL'
 # abbreviations['NFL']['Washington Football Team'] = 'WSH'
+
+
+def match_offers(offers, league, market, platform, datasets, stat_data, stat_dict, pbar):
+    market = stat_dict.get(market, market)
+    filename = "_".join([league, market]).replace(" ", "-")+'.skl'
+    filepath = (pkg_resources.files(data) / filename)
+    if not os.path.isfile(filepath):
+        pbar.update(len(offers))
+        return []
+
+    new_offers = []
+    with open(filepath, 'rb') as infile:
+        filedict = pickle.load(infile)
+    model = filedict['model']
+    scaler = filedict['scaler']
+    threshold = filedict['threshold']
+    edges = filedict['edges']
+    stat_data.bucket_stats(market)
+    stat_data.edges = edges
+    for o in offers:
+        stats = stat_data.row(o | {'Market': market}, date=o['Date'])
+        if type(stats) is int:
+            pbar.update()
+            continue
+        try:
+            v = []
+            lines = []
+            if ' + ' in o['Player']:
+                for dataset in datasets:
+                    codex = dataset[platform]
+                    offer = dataset.get(o['Player'], dataset.get(' + '.join(o['Player'].split(' + ')[::-1]), {})).get(
+                        codex.get(o['Market'], o['Market']))
+                    if offer is not None:
+                        v.append(offer['EV'])
+                    else:
+                        players = o['Player'].split(' + ')
+                        ev1 = dataset.get(players[0], {players[0]: None}).get(
+                            codex.get(o['Market'], o['Market']))
+                        ev2 = dataset.get(players[1], {players[1]: None}).get(
+                            codex.get(o['Market'], o['Market']))
+                        if ev1 is not None and ev2 is not None:
+                            ev = ev1['EV']+ev2['EV']
+                            l = np.round(ev-0.5)
+                            v.append(ev)
+                            offer = {
+                                'Line': str(l+0.5),
+                                'Over': str(prob_to_odds(poisson.sf(l, ev))),
+                                'Under': str(prob_to_odds(poisson.cdf(l, ev))),
+                                'EV': ev
+                            }
+
+                    lines.append(offer)
+
+                if v:
+                    v = np.mean(v)
+                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
+                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                    push = 1-p[1]-p[0]
+                    p[0] += push/2
+                    p[1] += push/2
+                    stats['Odds'] = p[1]-0.5
+                else:
+                    p = [0.5]*2
+            elif ' vs. ' in o['Player']:
+                m = o['Market'].replace("H2H ", "")
+                v1 = []
+                v2 = []
+                for dataset in datasets:
+                    codex = dataset[platform]
+                    offer = dataset.get(o['Player'], dataset.get(' vs. '.join(o['Player'].split(' + ')[::-1]), {})).get(
+                        codex.get(m, m))
+                    if offer is not None:
+                        v.append(offer['EV'])
+                    else:
+                        players = o['Player'].split(' vs. ')
+                        ev1 = dataset.get(players[0], {players[0]: None}).get(
+                            codex.get(m, m))
+                        ev2 = dataset.get(players[1], {players[1]: None}).get(
+                            codex.get(m, m))
+                        if ev1 is not None and ev2 is not None:
+                            v1.append(ev1['EV'])
+                            v2.append(ev2['EV'])
+                            l = np.round(ev2['EV']-ev1['EV']-0.5)
+                            offer = {
+                                'Line': str(l+0.5),
+                                'Under': str(prob_to_odds(skellam.cdf(l, ev2['EV'], ev1['EV']))),
+                                'Over': str(prob_to_odds(skellam.sf(l, ev2['EV'], ev1['EV']))),
+                                'EV': (ev1['EV'], ev2['EV'])
+                            }
+
+                    lines.append(offer)
+
+                if v1 and v2:
+                    v1 = np.mean(v1)
+                    v2 = np.mean(v2)
+                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
+                    p = [skellam.cdf(line[0], v2, v1),
+                         skellam.sf(line[1], v2, v1)]
+                    push = 1-p[1]-p[0]
+                    p[0] += push/2
+                    p[1] += push/2
+                    stats['Odds'] = p[1]-0.5
+                else:
+                    p = [0.5]*2
+            else:
+                for dataset in datasets:
+                    codex = dataset[platform]
+                    offer = dataset.get(o['Player'], {}).get(
+                        codex.get(o['Market'], o['Market']))
+                    if offer is not None:
+                        v.append(offer['EV'])
+
+                    lines.append(offer)
+
+                if v:
+                    v = np.mean(v)
+                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
+                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                    push = 1-p[1]-p[0]
+                    p[0] += push/2
+                    p[1] += push/2
+                    stats['Odds'] = p[1]-0.5
+                else:
+                    p = [0.5]*2
+
+            X = scaler.transform(stats)
+            proba = model.predict_proba(X)[0, :]
+
+            if proba[1] > proba[0]:
+                o['Bet'] = 'Over'
+                o['Books'] = p[1]
+                o['Model'] = proba[1]
+            else:
+                o['Bet'] = 'Under'
+                o['Books'] = p[0]
+                o['Model'] = proba[0]
+
+            o['Avg 10'] = (stats.loc[0, 'Avg10']) / o['Line']
+            if " vs. " in o['Player']:
+                o['Avg 10'] = 0.0
+            o['Last 5'] = stats.loc[0, 'Last5'] + 0.5
+            o['Last 10'] = stats.loc[0, 'Last10'] + 0.5
+            o['H2H'] = stats.loc[0, 'H2H'] + 0.5
+            o['OvP'] = stats.loc[0, 'DVPOA']
+
+            stats = [o['Avg 10'], o['Last 5'],
+                     o['Last 10'], o['H2H'], o['OvP']]
+            archive.add(o, stats, lines, stat_dict)
+
+            o['DraftKings'] = lines[0]['Line'] + "/" + \
+                lines[0][o['Bet']] if lines[0] else 'N/A'
+            o['FanDuel'] = lines[1]['Line'] + "/" + \
+                lines[1][o['Bet']] if lines[1] else 'N/A'
+            o['Pinnacle'] = lines[2]['Line'] + "/" + \
+                lines[2][o['Bet']] if lines[2] else 'N/A'
+            o['Caesars'] = str(lines[3]['Line']) + "/" + \
+                str(lines[3][o['Bet']]) if lines[3] else 'N/A'
+
+            new_offers.append(o)
+
+        except:
+            logger.exception(o['Player'] + ", " + o["Market"])
+
+        pbar.update()
+
+    return new_offers
