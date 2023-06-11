@@ -7,14 +7,25 @@ import statsapi as mlb
 from time import sleep
 from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, no_vig_odds, get_ev, prob_to_odds, mlb_pitchers
 
-# Get DraftKings Odds
-
 
 def get_dk(events, categories):
+    """
+    Retrieve DraftKings data for given events and categories.
+
+    Args:
+        events (str): The event ID.
+        categories (list): The list of categories to retrieve data for.
+
+    Returns:
+        dict: The parsed DraftKings data.
+    """
     players = {}
     markets = []
     games = {}
+
+    # Iterate over categories
     for cat in tqdm(categories):
+        # Get data from DraftKings API
         dk_api = scraper.get(
             f"https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/{events}/categories/{cat}?format=json")
 
@@ -25,28 +36,35 @@ def get_dk(events, categories):
             logger.warning(dk_api['errorStatus']['developerMessage'])
             continue
 
+        # Store game IDs and names
         for i in dk_api['eventGroup']['events']:
             games[i['eventId']] = i['name']
 
+        # Get offer subcategory descriptors
         for i in dk_api['eventGroup']['offerCategories']:
             if 'offerSubcategoryDescriptors' in i:
                 markets = i['offerSubcategoryDescriptors']
 
         subcategoryIds = []  # Need subcategoryIds first
+
+        # Retrieve subcategory IDs
         for i in markets:
             subcategoryIds.append(i['subcategoryId'])
 
+        # Iterate over subcategories
         for ids in subcategoryIds:
+            # Get data from DraftKings API
             dk_api = scraper.get(
                 f"https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/{events}/categories/{cat}/subcategories/{ids}?format=json")
             if not dk_api:
-                # logger.info(str(len(players)) + " lines found")
                 continue
 
+            # Get offer subcategory descriptors
             for i in dk_api['eventGroup']['offerCategories']:
                 if 'offerSubcategoryDescriptors' in i:
                     markets = i['offerSubcategoryDescriptors']
 
+            # Iterate over markets
             for i in tqdm(markets):
                 if 'offerSubcategory' in i:
                     market = i['name']
@@ -88,10 +106,18 @@ def get_dk(events, categories):
                                 continue
     return players
 
-# Get FanDuel Odds
-
 
 def get_fd(sport, tabs):
+    """
+    Retrieve FanDuel data for a given sport and tabs.
+
+    Args:
+        sport (str): The sport ID.
+        tabs (list): The list of tabs to retrieve data for.
+
+    Returns:
+        dict: The parsed FanDuel data.
+    """
     api_url = "https://sbapi.tn.sportsbook.fanduel.com/api/{}"
     params = [
         ("betexRegion", "GBR"),
@@ -115,11 +141,14 @@ def get_fd(sport, tabs):
 
     attachments = response.get('attachments')
     events = attachments['events']
+
+    # Filter event IDs based on open date
     event_ids = [event for event in events if datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") > datetime.now()
                  and datetime.strptime(events[event]['openDate'], "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=5) < datetime.today()]
 
     players = {}
 
+    # Iterate over event IDs and tabs
     for event_id in event_ids:
         for tab in tqdm(tabs):
             new_params = [
@@ -132,8 +161,7 @@ def get_fd(sport, tabs):
                 "event-page"), params={key: value for key, value in params+new_params})
 
             if not response:
-                logger.info(str(len(players)) + " lines found")
-                return players
+                continue
 
             try:
                 attachments = response.get('attachments')
@@ -143,11 +171,13 @@ def get_fd(sport, tabs):
                 logger.exception(", ".join([str(event_id), str(tab)]))
                 continue
 
+            # Filter offers based on market name
             offers = [offer for offer in offers.values(
             ) if offer['bettingType'] == 'MOVING_HANDICAP' or offer['bettingType'] == 'ODDS']
             offers = [offer for offer in offers if not any(substring in offer['marketName'] for substring in [
                                                            "Total Points", "Spread Betting", "Run Line", "Total Runs", "Puck Line", "Total Goals", "Qtr", "Moneyline", "Result", "Odd/Even", "To ", "Alt "])]
 
+            # Iterate over offers
             for k in tqdm(offers):
                 if len(k['runners']) != 2:
                     continue
@@ -199,10 +229,17 @@ def get_fd(sport, tabs):
 
     return players
 
-# Get Pinnacle Odds
-
 
 def get_pinnacle(league):
+    """
+    Retrieve Pinnacle data for a given league.
+
+    Args:
+        league (int): The league ID.
+
+    Returns:
+        dict: The parsed Pinnacle data.
+    """
     header = {
         "X-API-KEY": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R"
     }
@@ -328,17 +365,30 @@ def get_pinnacle(league):
 
     return players
 
-# Get Caesar's lines
-
 
 def get_caesars(sport, league):
+    """
+    Retrieves player props data from the Caesars API for the specified sport and league.
+
+    Args:
+        sport (str): The sport for which to fetch player props data.
+        league (int): The league ID for which to fetch player props data.
+
+    Returns:
+        dict: A dictionary containing player props data.
+
+    """
+    # Define the Caesars API URL
     caesars = f"https://api.americanwagering.com/regions/us/locations/mi/brands/czr/sb/v3/sports/{sport}/events/schedule/?competitionIds={league}&content-type=json"
+
+    # Set request parameters
     params = {
         'api_key': apikey,
         'url': caesars,
         'optimize_request': True
     }
 
+    # Mapping to swap certain market display names
     marketSwap = {
         'Points + Assists + Rebounds': 'Pts + Rebs + Asts',
         '3pt Field Goals': '3-PT Made',
@@ -346,12 +396,13 @@ def get_caesars(sport, league):
     }
 
     try:
+        # Make a GET request to the Caesars API
         api = requests.get("https://proxy.scrapeops.io/v1/",
                            params=params).json()
 
-        gameIds = [game['id'] for game in api['competitions'][0]
-                   ['events'] if game['type'] == 'MATCH' and not game['started']
-                   and game['marketCountActivePreMatch'] > 100]
+        # Get the game IDs for the specified sport and league
+        gameIds = [game['id'] for game in api['competitions'][0]['events'] if game['type']
+                   == 'MATCH' and not game['started'] and game['marketCountActivePreMatch'] > 100]
 
     except Exception as exc:
         logger.exception("Caesars API request failed")
@@ -361,10 +412,16 @@ def get_caesars(sport, league):
     for id in tqdm(gameIds):
         caesars = f"https://api.americanwagering.com/regions/us/locations/mi/brands/czr/sb/v3/events/{id}?content-type=json"
         params['url'] = caesars
+
+        # Sleep for a random interval to avoid overloading the API
         sleep(random.uniform(5, 10))
+
         try:
+            # Make a GET request to the Caesars API for each game ID
             api = requests.get(
                 "https://proxy.scrapeops.io/v1/", params=params).json()
+
+            # Filter and retrieve the desired markets
             markets = [market for market in api['markets'] if market.get('active') and (market.get('metadata', {}).get(
                 'marketType', {}) == 'PLAYERLINEBASED' or market.get('displayName') == 'Run In 1st Inning?')]
 
@@ -374,23 +431,28 @@ def get_caesars(sport, league):
 
         for market in tqdm(markets):
             if market.get('displayName') == 'Run In 1st Inning?':
+                # Handle special case for "Run In 1st Inning?" market
                 marketName = "1st Inning Runs Allowed"
                 line = 0.5
-                player = " + ".join([mlb_pitchers.get(team['teamData'].get('teamAbbreviation', ''), '')
-                                     for team in api['markets'][0]['selections']])
+                player = " + ".join([mlb_pitchers.get(team['teamData'].get(
+                    'teamAbbreviation', ''), '') for team in api['markets'][0]['selections']])
             else:
+                # Get player and market names
                 player = remove_accents(market['metadata']['player'])
-                marketName = market['displayName'].replace(
-                    '|', '').replace("Total", "").replace("Player", "").replace("Batter", "").strip()
+                marketName = market['displayName'].replace('|', '').replace(
+                    "Total", "").replace("Player", "").replace("Batter", "").strip()
                 marketName = marketSwap.get(marketName, marketName)
+
                 if marketName == 'Props':
                     marketName = market.get('metadata', {}).get(
                         'marketCategoryName')
+
                 line = market['line']
 
-            if not player in players:
+            if player not in players:
                 players[player] = {}
 
+            # Calculate odds and expected value
             p = no_vig_odds(market['selections'][0]['price']
                             ['d'], market['selections'][1]['price']['d'])
             newline = {
@@ -403,10 +465,32 @@ def get_caesars(sport, league):
 
     return players
 
-# Get current PrizePicks lines
-
 
 def get_pp():
+    """
+    Retrieves player offers data from the PrizePicks API.
+
+    Returns:
+        dict: A dictionary containing player offers data in the following format:
+              {
+                  'League Name': {
+                      'Market Name': [
+                          {
+                              'Player': player_name,
+                              'League': league_name,
+                              'Team': team_name,
+                              'Date': start_date,
+                              'Market': market_type,
+                              'Line': line_score,
+                              'Opponent': opponent_name
+                          },
+                          ...
+                      ],
+                      ...
+                  },
+                  ...
+              }
+    """
     offers = {}
     params = {
         'api_key': apikey,
@@ -415,29 +499,33 @@ def get_pp():
     }
     live_bets = ["1H", "2H", "1P", "2P", "3P", "1Q",
                  "2Q", "3Q", "4Q", "LIVE", "SZN", "SZN2", "SERIES"]
+
     try:
-        leagues = requests.get("https://proxy.scrapeops.io/v1/",
-                               params=params).json()
-        leagues = [i['id'] for i in leagues['data']
-                   if i['attributes']['projections_count'] > 0 and
-                   not any([string in i['attributes']['name'] for string in live_bets])]
+        # Retrieve the available leagues
+        leagues = requests.get(
+            "https://proxy.scrapeops.io/v1/", params=params).json()
+        leagues = [i['id'] for i in leagues['data'] if i['attributes']['projections_count']
+                   > 0 and not any([string in i['attributes']['name'] for string in live_bets])]
     except:
-        logger.exception("Retrieving leagues failed,")
+        logger.exception("Retrieving leagues failed")
         leagues = [2, 7, 8, 9]
 
     for l in tqdm(leagues, desc="Processing PrizePicks offers"):
         params['url'] = f"https://api.prizepicks.com/projections?league_id={l}"
 
         try:
-            api = requests.get("https://proxy.scrapeops.io/v1/",
-                               params=params).json()
+            # Retrieve players and lines for each league
+            api = requests.get(
+                "https://proxy.scrapeops.io/v1/", params=params).json()
             players = api['included']
             lines = api['data']
         except:
-            logger.exception(f"League {l} failed,")
+            logger.exception(f"League {l} failed")
             continue
 
         player_ids = {}
+        league = None
+
         for p in players:
             if p['type'] == 'new_player':
                 player_ids[p['id']] = {
@@ -457,6 +545,7 @@ def get_pp():
                 'Line': o['attributes']['line_score'],
                 'Opponent': o['attributes']['description']
             }
+
             if o['attributes']['is_promo']:
                 n['Line'] = o['attributes']['flash_sale_line_score']
 
@@ -470,12 +559,33 @@ def get_pp():
     logger.info(str(len(offers)) + " offers found")
     return offers
 
-# Get current Underdog lines:
-
 
 def get_ud():
-    teams = scraper.get(
-        'https://stats.underdogfantasy.com/v1/teams')
+    """
+    Retrieves player offers data from the Underdog Fantasy API.
+
+    Returns:
+        dict: A dictionary containing player offers data in the following format:
+              {
+                  'League Name': {
+                      'Market Name': [
+                          {
+                              'Player': player_name,
+                              'League': league_name,
+                              'Team': team_name,
+                              'Date': start_date,
+                              'Market': market_type,
+                              'Line': line_score,
+                              'Opponent': opponent_description
+                          },
+                          ...
+                      ],
+                      ...
+                  },
+                  ...
+              }
+    """
+    teams = scraper.get('https://stats.underdogfantasy.com/v1/teams')
 
     if not teams:
         logger.warning("Could not receive offer data")
@@ -546,8 +656,7 @@ def get_ud():
 
         offers[n['League']][n['Market']].append(n)
 
-    rivals = scraper.get(
-        'https://api.underdogfantasy.com/beta/v3/rival_lines')
+    rivals = scraper.get('https://api.underdogfantasy.com/beta/v3/rival_lines')
 
     if not rivals:
         logger.info(str(len(offers)) + " offers found")
@@ -602,7 +711,7 @@ def get_ud():
             'Team': player1['Team'] + "/" + player2['Team'],
             'Date': game1['Date'],
             'Market': "H2H " + bet,
-            'Line': float(o['options'][0]['spread'])-float(o['options'][1]['spread']),
+            'Line': float(o['options'][0]['spread']) - float(o['options'][1]['spread']),
             'Opponent': opponent1 + "/" + opponent2
         }
 
@@ -616,10 +725,32 @@ def get_ud():
     logger.info(str(len(offers)) + " offers found")
     return offers
 
-# Get Thrive Lines
-
 
 def get_thrive():
+    """
+    Retrieves upcoming house prop data from the Thrive Fantasy API.
+
+    Returns:
+        dict: A dictionary containing house prop data in the following format:
+              {
+                  'League Name': {
+                      'Market Name': [
+                          {
+                              'Player': player_name,
+                              'League': league_name,
+                              'Team': team_name,
+                              'Date': start_date,
+                              'Market': market_type,
+                              'Line': line_score,
+                              'Opponent': opponent_description
+                          },
+                          ...
+                      ],
+                      ...
+                  },
+                  ...
+              }
+    """
     params = {
         'api_key': apikey,
         'url': "https://api.thrivefantasy.com/houseProp/upcomingHouseProps",
@@ -638,11 +769,11 @@ def get_thrive():
         logger.exception(id)
         return []
 
-    if api['success']:
-        lines = api['response']['data']
-    else:
+    if not api['success']:
         logger.error(api['message'])
         return []
+
+    lines = api['response']['data']
 
     offers = {}
     for line in tqdm(lines, desc="Getting Thrive Offers", unit='offer'):
@@ -675,6 +806,31 @@ def get_thrive():
 
 
 def get_parp():
+    """
+    Retrieves cross-game search data from the ParlayPlay API.
+
+    Returns:
+        dict: A dictionary containing cross-game search data in the following format:
+              {
+                  'League Name': {
+                      'Market Name': [
+                          {
+                              'Player': player_name,
+                              'League': league_name,
+                              'Team': team_name,
+                              'Date': match_date,
+                              'Market': market_type,
+                              'Line': line_score,
+                              'Slide': slide_indicator,
+                              'Opponent': opponent_description
+                          },
+                          ...
+                      ],
+                      ...
+                  },
+                  ...
+              }
+    """
     params = {
         'api_key': apikey,
         'url': "https://parlayplay.io/api/v1/crossgame/search/?format=json&sport=All&league=",
