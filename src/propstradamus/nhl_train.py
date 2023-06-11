@@ -1,28 +1,25 @@
-from sportsbook_spider.stats import StatsNBA
+from propstradamus.stats import StatsNHL
 import pickle
 import importlib.resources as pkg_resources
-from sportsbook_spider import data
+from propstradamus import data
 import numpy as np
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, precision_score, accuracy_score, roc_auc_score, brier_score_loss
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import MaxAbsScaler, StandardScaler
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import MaxAbsScaler
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import calibration_curve, CalibratedClassifierCV
-from skopt import BayesSearchCV
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 
-nba = StatsNBA()
-nba.load()
-nba.update()
+nhl = StatsNHL()
+nhl.load()
+nhl.update()
 
-league = 'NBA'
-markets = ['PTS', 'REB', 'AST', 'TOV', 'STL', 'FG3M',
-           'BLK', 'PRA', 'PR', 'RA', 'PA', 'BLST']
-
+league = 'NHL'
+markets = ['saves', 'goalsAgainst', 'shots', 'goals',
+           'assists', 'points']
 for market in markets:
 
-    X, y = nba.get_training_matrix(market)
+    X, y = nhl.get_training_matrix(market)
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
@@ -46,7 +43,7 @@ for market in markets:
         loss='log_loss', learning_rate=0.1, n_estimators=500, max_depth=3, max_features='log2')  # .547r, .39a, .61u, .55o
 
     # model = RandomForestClassifier(
-    #     criterion='entropy', n_estimators=500, max_features=0.25)  # .564r, .40a, .58u, .60o
+    #     criterion='entropy', n_estimators=500, max_features=0.25, max_depth=26)  # .564r, .40a, .58u, .60o
 
     model = CalibratedClassifierCV(
         model, cv=50, n_jobs=-1, method='isotonic')
@@ -106,7 +103,7 @@ for market in markets:
     filedict = {'model': model,
                 'scaler': scaler,
                 'threshold': (.54, t1, t2),
-                'edges': [np.floor(i*2)/2 for i in nba.edges][:-1],
+                'edges': [np.floor(i*2)/2 for i in nhl.edges][:-1],
                 'stats': {
                     'Accuracy': (acc[0], acc[i], acc[j]),
                     'Null Points': (null[0], null[i], null[j]),

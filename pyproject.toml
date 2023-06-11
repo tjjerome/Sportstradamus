@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "Propstradamus"
-version = "1.0.0"
+name = "propstradamus"
+version = "1.1.1"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
@@ -31,8 +31,8 @@ sphinx-pdj-theme = "^0.4.0"
 sphinx-pyproject = "^0.1.0"
 
 [tool.poetry.scripts]
-prophecize = "sportsbook_spider.sportsbook_spider:main"
-get-money = "sportsbook_spider.moneylines:get_moneylines"
+prophecize = "propstradamus.propstradamus:main"
+get-money = "propstradamus.moneylines:get_moneylines"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"

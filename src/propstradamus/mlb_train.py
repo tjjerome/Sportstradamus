@@ -1,14 +1,14 @@
-from sportsbook_spider.stats import StatsMLB
+from propstradamus.stats import StatsMLB
 import pickle
 import importlib.resources as pkg_resources
-from sportsbook_spider import data
+from propstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, precision_score, accuracy_score, roc_auc_score, brier_score_loss
 from sklearn.preprocessing import MaxAbsScaler
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import calibration_curve, CalibratedClassifierCV
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 
 mlb = StatsMLB()
 mlb.load()

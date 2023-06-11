@@ -1,4 +1,4 @@
-from sportsbook_spider.spiderLogger import logger
+from propstradamus.spiderLogger import logger
 import requests
 import json
 import pickle
@@ -7,7 +7,7 @@ import random
 import unicodedata
 import datetime
 import importlib.resources as pkg_resources
-from sportsbook_spider import creds, data
+from propstradamus import creds, data
 from time import sleep
 from scipy.stats import poisson, norm, skellam
 from scipy.optimize import fsolve

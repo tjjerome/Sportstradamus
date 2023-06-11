@@ -1,18 +1,18 @@
-from sportsbook_spider.spiderLogger import logger
+from propstradamus.spiderLogger import logger
 import os.path
 import numpy as np
 from datetime import datetime, timedelta
 import pickle
 import json
 import importlib.resources as pkg_resources
-from sportsbook_spider import data
+from propstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
 from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
 from time import sleep
-from sportsbook_spider.helpers import scraper, mlb_pitchers, archive
+from propstradamus.helpers import scraper, mlb_pitchers, archive
 import pandas as pd
 import warnings
 
@@ -461,7 +461,7 @@ class StatsNBA(Stats):
         X = pd.DataFrame(data, index=[0]).fillna(0)
         X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
             0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[:5]]).fillna(0).add_prefix('Game '))
+        X = X.join(pd.DataFrame([game_res[:10]]).fillna(0).add_prefix('Game '))
 
         return X
 
@@ -811,7 +811,7 @@ class StatsMLB(Stats):
             bucket = self.playerStats[player]['bucket']
         else:
             bucket = 20
-            while self.edges[20 - bucket] < line and bucket > 0:
+            while bucket > 0 and self.edges[20 - bucket] < line:
                 bucket -= 1
 
         try:
@@ -971,10 +971,10 @@ class StatsMLB(Stats):
 
         if len(game_res) < 10:
             i = 10 - len(game_res)
-            game_res = game_res + [0] * i
+            game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
-            h2h_res = h2h_res + [0] * i
+            h2h_res = [0] * i + h2h_res
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
         X = X.join(pd.DataFrame([h2h_res[-5:]])
@@ -1000,6 +1000,9 @@ class StatsMLB(Stats):
 
         # Initialize an empty list for the target labels
         results = []
+
+        # Bucket the stats for the current market
+        self.bucket_stats(market)
 
         # Iterate over the gamelog to collect training data
         for game in tqdm(self.gamelog, unit='games', desc='Getting Training Data'):
@@ -1482,10 +1485,10 @@ class StatsNHL(Stats):
             m = np.min([len(headtohead1), len(headtohead2)])
 
             # Trim the game lists to the determined minimum length
-            player1_games = player1_games[:n]
-            player2_games = player2_games[:n]
-            headtohead1 = headtohead1[:m]
-            headtohead2 = headtohead2[:m]
+            player1_games = player1_games[-n:]
+            player2_games = player2_games[-n:]
+            headtohead1 = headtohead1[-m:]
+            headtohead2 = headtohead2[-m:]
 
             # Determine the positions for player1, player2, and DVPOA calculation
             if market in ['saves', 'goalsAgainst']:
@@ -1558,12 +1561,12 @@ class StatsNHL(Stats):
 
         # Calculate various statistics based on game and head-to-head results
         data = {'DVPOA': dvpoa, 'Odds': odds - .5,
-                'Last5': np.mean([int(i > 0) for i in game_res[:5]]) - .5,
-                'Last10': np.mean([int(i > 0) for i in game_res[:10]]) - .5,
-                'H2H': np.mean([int(i > 0) for i in h2h_res[:5]]) - .5,
-                'Avg5': np.mean(game_res[:5]) if len(game_res[:5]) else 0,
-                'Avg10': np.mean(game_res[:10]) if len(game_res[:10]) else 0,
-                'AvgH2H': np.mean(h2h_res[:5]) if len(h2h_res[:5]) else 0,
+                'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5,
+                'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5,
+                'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5,
+                'Avg5': np.mean(game_res[-5:]) if len(game_res[-5:]) else 0,
+                'Avg10': np.mean(game_res[-10:]) if len(game_res[-10:]) else 0,
+                'AvgH2H': np.mean(h2h_res[-5:]) if len(h2h_res[-5:]) else 0,
                 'Moneyline': moneyline - 0.5, 'Total': total / 229.3 - 1,
                 'Bucket': bucket if bucket < 21 else 0,
                 'Combo': 1 if bucket == 21 else 0,
@@ -1573,16 +1576,16 @@ class StatsNHL(Stats):
         # Pad game_res and h2h_res lists with zeros if they are shorter than required
         if len(game_res) < 10:
             i = 10 - len(game_res)
-            game_res = game_res + [0] * i
+            game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
-            h2h_res = h2h_res + [0] * i
+            h2h_res = [0] * i + h2h_res
 
         # Create a DataFrame with the calculated statistics
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[:5]])
+        X = X.join(pd.DataFrame([h2h_res[-5:]])
                    .fillna(0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[:5]])
+        X = X.join(pd.DataFrame([game_res[-10:]])
                    .fillna(0).add_prefix('Game '))
 
         return X

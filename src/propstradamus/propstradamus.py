@@ -1,13 +1,13 @@
-from sportsbook_spider.spiderLogger import logger
-from sportsbook_spider.stats import StatsNBA, StatsMLB, StatsNHL
-from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
-from sportsbook_spider.helpers import archive, match_offers
+from propstradamus.spiderLogger import logger
+from propstradamus.stats import StatsNBA, StatsMLB, StatsNHL
+from propstradamus.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
+from propstradamus.helpers import archive, match_offers
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 import click
-from sportsbook_spider import creds
+from propstradamus import creds
 from functools import partialmethod
 from tqdm import tqdm
 import pandas as pd
@@ -15,15 +15,11 @@ import os.path
 import datetime
 import importlib.resources as pkg_resources
 
-global nba
-global mlb
-global nhl
-global untapped_markets
-
 
 @click.command()
 @click.option('--progress', default=True, help='Display progress bars')
 def main(progress):
+    global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -192,6 +188,7 @@ def process_offers(offer_dict, book, datasets, stats):
         list: List of processed offers.
 
     """
+    global untapped_markets
     new_offers = []
     if len(offer_dict) > 0:
         # Calculate the total number of offers to process

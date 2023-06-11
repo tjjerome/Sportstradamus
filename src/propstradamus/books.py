@@ -1,11 +1,11 @@
-from sportsbook_spider.spiderLogger import logger
+from propstradamus.spiderLogger import logger
 from datetime import datetime, timedelta
 import random
 from tqdm import tqdm
 import numpy as np
 import statsapi as mlb
 from time import sleep
-from sportsbook_spider.helpers import apikey, requests, scraper, remove_accents, no_vig_odds, get_ev, prob_to_odds, mlb_pitchers
+from propstradamus.helpers import apikey, requests, scraper, remove_accents, no_vig_odds, get_ev, prob_to_odds, mlb_pitchers
 
 
 def get_dk(events, categories):
