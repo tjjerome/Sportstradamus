@@ -1,4 +1,4 @@
-from sportsbook_spider.stats import statsMLB
+from sportsbook_spider.stats import StatsMLB
 import pickle
 import importlib.resources as pkg_resources
 from sportsbook_spider import data
@@ -10,7 +10,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import calibration_curve, CalibratedClassifierCV
 from matplotlib import pyplot as plt
 
-mlb = statsMLB()
+mlb = StatsMLB()
 mlb.load()
 mlb.update()
 

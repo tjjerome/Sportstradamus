@@ -1,5 +1,5 @@
 from sportsbook_spider.spiderLogger import logger
-from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
+from sportsbook_spider.stats import StatsNBA, StatsMLB, StatsNHL
 from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
 from sportsbook_spider.helpers import archive, match_offers
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -118,13 +118,13 @@ def main(progress):
     """
     Start gathering player stats
     """
-    nba = statsNBA()
+    nba = StatsNBA()
     nba.load()
     nba.update()
-    mlb = statsMLB()
+    mlb = StatsMLB()
     mlb.load()
     mlb.update()
-    nhl = statsNHL()
+    nhl = StatsNHL()
     nhl.load()
     nhl.update()
 
