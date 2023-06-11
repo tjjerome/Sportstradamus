@@ -1,7 +1,7 @@
 import pickle
 import json
 import importlib.resources as pkg_resources
-from sportsbook_spider import data
+from propstradamus import data
 import pandas as pd
 
 model_list = [f.name for f in pkg_resources.files(

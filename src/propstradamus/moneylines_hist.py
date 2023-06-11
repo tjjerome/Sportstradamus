@@ -1,9 +1,9 @@
-from sportsbook_spider.helpers import scraper, no_vig_odds, abbreviations, remove_accents
+from propstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents
 import pickle
 import numpy as np
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
-from sportsbook_spider import data
+from propstradamus import data
 from itertools import cycle
 
 filepath = (pkg_resources.files(data) / "archive.dat")

@@ -1,12 +1,12 @@
-from sportsbook_spider.helpers import scraper, no_vig_odds, abbreviations, remove_accents
+from propstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents
 import pickle
 import json
 import numpy as np
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
-from sportsbook_spider import creds, data
+from propstradamus import creds, data
 from tqdm import tqdm
-from sportsbook_spider.spiderLogger import logger
+from propstradamus.spiderLogger import logger
 
 
 def get_moneylines():
