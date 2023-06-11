@@ -4,14 +4,13 @@
 TODO:
 
 *   Add web app - Flask
-*   Machine learning predictor
 *   Tennis/Golf/Racing/WNBA
 *   Add eSports (maybe from GGBET or Betway?)
 """
 from sportsbook_spider.spiderLogger import logger
 from sportsbook_spider.stats import statsNBA, statsMLB, statsNHL
 from sportsbook_spider.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
-from sportsbook_spider.helpers import get_pred, prob_to_odds, archive
+from sportsbook_spider.helpers import get_pred, prob_to_odds, archive, match_offers
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -126,9 +125,8 @@ def main(progress):
     nhl.update()
 
     untapped_markets = []
-    tapped_markets = []
 
-    pp_offers = get_pp()
+    pp_dict = get_pp()
 
     pp2dk = {
         'Runs': 'Runs Scored',
@@ -208,128 +206,12 @@ def main(progress):
         'Goalie Saves': 'saves'
     }
 
-    dk_data['PP Key'] = pp2dk
-    fd_data['PP Key'] = pp2fd
-    pin_data['PP Key'] = pp2pin
-    csb_data['PP Key'] = pp2csb
+    dk_data['PrizePicks'] = pp2dk
+    fd_data['PrizePicks'] = pp2fd
+    pin_data['PrizePicks'] = pp2pin
+    csb_data['PrizePicks'] = pp2csb
 
-    live_bets = ["1H", "2H", "1P", "2P", "3P", "1Q",
-                 "2Q", "3Q", "4Q", "LIVE", "SZN", "SZN2", "SERIES"]
-    if len(pp_offers) > 0:
-        for o in tqdm(pp_offers, desc="Matching PrizePicks offers", unit='offer'):
-            opponent = o.get('Opponent')
-            if any(substring in o['League'] for substring in live_bets):
-                o['Market'] = o['Market'] + " " + \
-                    [live for live in live_bets if live in o['League']][0]
-            try:
-                v = []
-                lines = []
-                newline = {"Platform": "PrizePicks",
-                           "League": o['League'], "Market": o['Market']}
-                for dataset in [dk_data, fd_data, pin_data, csb_data]:
-                    codex = dataset['PP Key']
-                    offer = dataset.get(o['Player'], {o['Player']: None}).get(
-                        codex.get(o['Market'], o['Market']))
-                    if offer is not None:
-                        v.append(offer['EV'])
-                    elif " + " in o['Player'] or " vs. " in o['Player']:
-                        players = o['Player'].replace(
-                            " vs. ", " + ").split(" + ")
-                        player = players[1] + " + " + players[0]
-                        offer = dataset.get(player, {player: None}).get(
-                            codex.get(o['Market'], o['Market']))
-                        if offer is not None:
-                            v.append(offer['EV'])
-                        else:
-                            ev1 = dataset.get(players[0], {players[0]: None}).get(
-                                codex.get(o['Market'], o['Market']))
-                            ev2 = dataset.get(players[1], {players[1]: None}).get(
-                                codex.get(o['Market'], o['Market']))
-                            if ev1 is not None and ev2 is not None:
-                                ev = ev1['EV']+ev2['EV']
-                                l = np.round(ev-0.5)
-                                v.append(ev)
-                                offer = {
-                                    'Line': str(l+0.5),
-                                    'Over': str(prob_to_odds(poisson.sf(l, ev))),
-                                    'Under': str(prob_to_odds(poisson.cdf(l, ev))),
-                                    'EV': ev
-                                }
-
-                    lines.append(offer)
-
-                if v:
-                    tapped_markets.append(newline)
-                    if newline in untapped_markets:
-                        untapped_markets.remove(newline)
-
-                    v = np.mean(v)
-                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
-                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
-                    push = 1-p[1]-p[0]
-
-                    stats = np.ones(5) * -1000
-                    if o['League'] == 'NBA':
-                        stats = nba.get_stats(
-                            o['Player'], opponent, pp2stats[o['Market']], o['Line'])
-                        weights = nba.get_weights(pp2stats[o['Market']])
-                    elif o['League'] == 'MLB':
-                        stats = mlb.get_stats(
-                            o['Player'], opponent, pp2stats[o['Market']], o['Line'])
-                        weights = mlb.get_weights(pp2stats[o['Market']])
-                    elif o['League'] == 'NHL':
-                        stats = nhl.get_stats(
-                            o['Player'], opponent, pp2stats[o['Market']], o['Line'])
-                        weights = nhl.get_weights(pp2stats[o['Market']])
-
-                    if p[1] > p[0]:
-                        o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[1] + push*2/3
-                        else:
-                            o['Prob'] = p[1] + push/3
-                    else:
-                        o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[0] + push*2/3
-                        else:
-                            o['Prob'] = p[0] + push/3
-
-                    o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
-                    o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
-                    o['Season'] = stats[2] if stats[2] != -1000 else 'N/A'
-                    o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
-                    o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
-
-                    archive.add(o, stats, lines, pp2stats)
-                    if o['Bet'] == 'Over':
-                        loc = get_pred(stats, weights)
-                    else:
-                        loc = 1-get_pred(stats, weights)
-
-                    if 0.25*loc + 0.75*o['Prob'] > .555:
-                        o['Good Bet'] = 'Y'
-                    else:
-                        o['Good Bet'] = 'N'
-
-                    o['DraftKings'] = lines[0]['Line'] + "/" + \
-                        lines[0][o['Bet']] if lines[0] else 'N/A'
-                    o['FanDuel'] = lines[1]['Line'] + "/" + \
-                        lines[1][o['Bet']] if lines[1] else 'N/A'
-                    o['Pinnacle'] = lines[2]['Line'] + "/" + \
-                        lines[2][o['Bet']] if lines[2] else 'N/A'
-                    o['Caesars'] = str(lines[3]['Line']) + "/" + \
-                        str(lines[3][o['Bet']]) if lines[3] else 'N/A'
-
-                else:
-                    archive.add(o, stats, lines, pp2stats)
-                    if newline not in untapped_markets+tapped_markets:
-                        untapped_markets.append(newline)
-
-            except:
-                logger.exception(o['Player'] + ", " + o["Market"])
-
-    ud_offers = get_ud()
+    ud_dict = get_ud()
 
     ud2dk = {
         'Runs': 'Runs Scored',
@@ -393,142 +275,12 @@ def main(progress):
         'Saves': 'saves'
     }
 
-    dk_data['UD Key'] = ud2dk
-    fd_data['UD Key'] = ud2fd
-    pin_data['UD Key'] = ud2pin
-    csb_data['UD Key'] = ud2csb
+    dk_data['Underdog'] = ud2dk
+    fd_data['Underdog'] = ud2fd
+    pin_data['Underdog'] = ud2pin
+    csb_data['Underdog'] = ud2csb
 
-    if len(ud_offers) > 0:
-
-        for o in tqdm(ud_offers, desc="Matching Underdog offers", unit='offer'):
-            opponent = o.get('Opponent')
-            if any(substring in o['League'] for substring in live_bets):
-                o['Market'] = o['Market'] + " " + \
-                    [live for live in live_bets if live in o['League']][0]
-            p = []
-            try:
-                market = o['Market']
-                newline = {"Platform": "Underdog",
-                           "League": o['League'], "Market": o['Market']}
-                if "H2H" in market:
-                    v1 = []
-                    v2 = []
-                    lines = []
-                    market = market[4:]
-                    players = o['Player'].split(" vs. ")
-                    for dataset in [dk_data, fd_data, pin_data, csb_data]:
-                        codex = dataset['UD Key']
-                        offer1 = dataset.get(players[0], {players[0]: None}).get(
-                            codex.get(market, market))
-                        offer2 = dataset.get(players[1], {players[1]: None}).get(
-                            codex.get(market, market))
-                        if offer1 is not None and offer2 is not None:
-                            v1.append(offer1['EV'])
-                            v2.append(offer2['EV'])
-                            l = np.round(offer2['EV']-offer1['EV']-0.5)
-                            offer = {
-                                'Line': str(l+0.5),
-                                'Under': str(prob_to_odds(skellam.cdf(l, offer2['EV'], offer1['EV']))),
-                                'Over': str(prob_to_odds(skellam.sf(l, offer2['EV'], offer1['EV']))),
-                                'EV': (offer1['EV'], offer2['EV'])
-                            }
-                        else:
-                            offer = None
-                        lines.append(offer)
-
-                    if v1 and v2:
-                        v1 = np.mean(v1)
-                        v2 = np.mean(v2)
-                        line = (np.ceil(o['Line']-1), np.floor(o['Line']))
-                        p = [skellam.cdf(line[0], v2, v1),
-                             skellam.sf(line[1], v2, v1)]
-                        push = 1-p[1]-p[0]
-
-                else:
-                    v = []
-                    lines = []
-                    for dataset in [dk_data, fd_data, pin_data, csb_data]:
-                        codex = dataset['UD Key']
-                        offer = dataset.get(o['Player'], {o['Player']: None}).get(
-                            codex.get(market, market))
-                        if offer is not None:
-                            v.append(offer['EV'])
-
-                        lines.append(offer)
-
-                    if v:
-                        v = np.mean(v)
-                        line = (np.ceil(o['Line']-1), np.floor(o['Line']))
-                        p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
-                        push = 1-p[1]-p[0]
-
-                if p:
-                    tapped_markets.append(newline)
-                    if newline in untapped_markets:
-                        untapped_markets.remove(newline)
-
-                    stats = np.ones(5) * -1000
-                    if o['League'] == 'NBA':
-                        stats = nba.get_stats(
-                            o['Player'], opponent, ud2stats[market], o['Line'])
-                        weights = nba.get_weights(ud2stats[market])
-                    elif o['League'] == 'MLB':
-                        stats = mlb.get_stats(
-                            o['Player'], opponent, ud2stats[market], o['Line'])
-                        weights = mlb.get_weights(ud2stats[market])
-                    elif o['League'] == 'NHL':
-                        stats = nhl.get_stats(
-                            o['Player'], opponent, ud2stats[market], o['Line'])
-                        weights = nhl.get_weights(ud2stats[market])
-
-                    if p[1] > p[0]:
-                        o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[1] + push*2/3
-                        else:
-                            o['Prob'] = p[1] + push/3
-                    else:
-                        o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[0] + push*2/3
-                        else:
-                            o['Prob'] = p[0] + push/3
-
-                    o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
-                    o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
-                    o['Season'] = stats[2] if stats[2] != -1000 else 'N/A'
-                    o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
-                    o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
-
-                    archive.add(o, stats, lines, ud2stats)
-                    if o['Bet'] == 'Over':
-                        loc = get_pred(stats, weights)
-                    else:
-                        loc = 1-get_pred(stats, weights)
-
-                    if .25*loc+.75*o['Prob'] > .54:
-                        o['Good Bet'] = 'Y'
-                    else:
-                        o['Good Bet'] = 'N'
-
-                    o['DraftKings'] = lines[0]['Line'] + "/" + \
-                        lines[0][o['Bet']] if lines[0] else 'N/A'
-                    o['FanDuel'] = lines[1]['Line'] + "/" + \
-                        lines[1][o['Bet']] if lines[1] else 'N/A'
-                    o['Pinnacle'] = lines[2]['Line'] + "/" + \
-                        lines[2][o['Bet']] if lines[2] else 'N/A'
-                    o['Caesars'] = str(lines[3]['Line']) + "/" + \
-                        str(lines[3][o['Bet']]) if lines[3] else 'N/A'
-
-                else:
-                    archive.add(o, stats, lines, ud2stats)
-                    if newline not in untapped_markets+tapped_markets:
-                        untapped_markets.append(newline)
-
-            except Exception as exc:
-                logger.exception(o['Player'] + ", " + o["Market"])
-
-    th_offers = get_thrive()
+    th_dict = get_thrive()
 
     th2dk = {
         'ASTS': 'Assists',
@@ -610,110 +362,12 @@ def main(progress):
         'STLS': 'STL'
     }
 
-    dk_data['TH Key'] = th2dk
-    fd_data['TH Key'] = th2fd
-    pin_data['TH Key'] = th2pin
-    csb_data['TH Key'] = th2csb
+    dk_data['Thrive'] = th2dk
+    fd_data['Thrive'] = th2fd
+    pin_data['Thrive'] = th2pin
+    csb_data['Thrive'] = th2csb
 
-    if len(th_offers) > 0:
-
-        for o in tqdm(th_offers, desc="Matching Thrive offers", unit='offer'):
-
-            opponent = o.get('Opponent')
-            if any(substring in o['League'] for substring in live_bets):
-                o['Market'] = o['Market'] + " " + \
-                    [live for live in live_bets if live in o['League']][0]
-            p = []
-            try:
-                market = o['Market']
-                newline = {"Platform": "Thrive",
-                           "League": o['League'], "Market": o['Market']}
-
-                v = []
-                lines = []
-                for dataset in [dk_data, fd_data, pin_data, csb_data]:
-                    codex = dataset['TH Key']
-                    offer = dataset.get(o['Player'], {o['Player']: None}).get(
-                        codex.get(market, market))
-                    if offer is not None:
-                        v.append(offer['EV'])
-
-                    lines.append(offer)
-
-                if v:
-                    v = np.mean(v)
-                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
-                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
-                    push = 1-p[1]-p[0]
-
-                if p:
-                    tapped_markets.append(newline)
-                    if newline in untapped_markets:
-                        untapped_markets.remove(newline)
-
-                    stats = np.ones(5) * -1000
-                    if o['League'] == 'NBA':
-                        stats = nba.get_stats(
-                            o['Player'], opponent, th2stats[market], o['Line'])
-                        weights = nba.get_weights(th2stats[market])
-                    elif o['League'] == 'MLB':
-                        stats = mlb.get_stats(
-                            o['Player'], opponent, th2stats[market], o['Line'])
-                        weights = mlb.get_weights(th2stats[market])
-                    elif o['League'] == 'NHL':
-                        stats = nhl.get_stats(
-                            o['Player'], opponent, th2stats[market], o['Line'])
-                        weights = nhl.get_weights(th2stats[market])
-
-                    if p[1] > p[0]:
-                        o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[1] + push*2/3
-                        else:
-                            o['Prob'] = p[1] + push/3
-                    else:
-                        o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[0] + push*2/3
-                        else:
-                            o['Prob'] = p[0] + push/3
-
-                    o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
-                    o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
-                    o['Season'] = stats[2] if stats[2] != -1000 else 'N/A'
-                    o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
-                    o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
-
-                    archive.add(o, stats, lines, th2stats)
-                    if o['Bet'] == 'Over':
-                        loc = get_pred(stats, weights)
-                    else:
-                        loc = 1-get_pred(stats, weights)
-
-                    if .25*loc+0.75*o['Prob'] > .555:
-                        o['Good Bet'] = 'Y'
-                    else:
-                        o['Good Bet'] = 'N'
-
-                    o['DraftKings'] = lines[0]['Line'] + "/" + \
-                        lines[0][o['Bet']] if lines[0] else 'N/A'
-                    o['FanDuel'] = lines[1]['Line'] + "/" + \
-                        lines[1][o['Bet']] if lines[1] else 'N/A'
-                    o['Pinnacle'] = lines[2]['Line'] + "/" + \
-                        lines[2][o['Bet']] if lines[2] else 'N/A'
-                    o['Caesars'] = str(lines[3]['Line']) + "/" + \
-                        str(lines[3][o['Bet']]) if lines[3] else 'N/A'
-
-                else:
-                    archive.add(o, stats, lines, th2stats)
-                    if newline not in untapped_markets+tapped_markets:
-                        untapped_markets.append(newline)
-
-            except:
-                logger.exception(o['Player'] + ", " + o["Market"])
-
-    logger.info("Getting ParlayPlay lines")
-    parp_offers = get_parp()
+    parp_dict = get_parp()
 
     parp2dk = {
         'Blocked Shots': 'Blocks',
@@ -780,158 +434,196 @@ def main(progress):
         'Turnovers': 'TOV'
     }
 
-    dk_data['PARP Key'] = parp2dk
-    fd_data['PARP Key'] = parp2fd
-    pin_data['PARP Key'] = parp2pin
-    csb_data['PARP Key'] = parp2csb
+    dk_data['ParlayPlay'] = parp2dk
+    fd_data['ParlayPlay'] = parp2fd
+    pin_data['ParlayPlay'] = parp2pin
+    csb_data['ParlayPlay'] = parp2csb
 
-    if len(parp_offers) > 0:
+    datasets = [dk_data, fd_data, pin_data, csb_data]
 
-        for o in tqdm(parp_offers, desc="Matching ParlayPlay offers", unit='offer'):
-
-            opponent = o.get('Opponent')
-            if any(substring in o['League'] for substring in live_bets):
-                o['Market'] = o['Market'] + " " + \
-                    [live for live in live_bets if live in o['League']][0]
-            p = []
-            try:
-                market = o['Market']
-                newline = {"Platform": "ParlayPlay",
-                           "League": o['League'], "Market": o['Market']}
-
-                v = []
-                lines = []
-                for dataset in [dk_data, fd_data, pin_data, csb_data]:
-                    codex = dataset['PARP Key']
-                    offer = dataset.get(o['Player'], {o['Player']: None}).get(
-                        codex.get(market, market))
-                    if offer is not None:
-                        v.append(offer['EV'])
-
-                    lines.append(offer)
-
-                if v:
-                    v = np.mean(v)
-                    line = (np.ceil(o['Line']-1), np.floor(o['Line']))
-                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
-                    push = 1-p[1]-p[0]
-
-                if p:
-                    tapped_markets.append(newline)
-                    if newline in untapped_markets:
-                        untapped_markets.remove(newline)
-
-                    stats = np.ones(5) * -1000
-                    if o['League'] == 'NBA':
-                        stats = nba.get_stats(
-                            o['Player'], opponent, parp2stats[market], o['Line'])
-                        weights = nba.get_weights(parp2stats[market])
-                    elif o['League'] == 'MLB':
-                        stats = mlb.get_stats(
-                            o['Player'], opponent, parp2stats[market], o['Line'])
-                        weights = mlb.get_weights(parp2stats[market])
-                    elif o['League'] == 'NHL':
-                        stats = nhl.get_stats(
-                            o['Player'], opponent, parp2stats[market], o['Line'])
-                        weights = nhl.get_weights(parp2stats[market])
-
-                    if p[1] > p[0]:
-                        o['Bet'] = 'Over'
-                        if o['Line'] > np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[1] + push*2/3
-                        else:
-                            o['Prob'] = p[1] + push/3
-                    else:
-                        o['Bet'] = 'Under'
-                        if o['Line'] < np.nanmean([float(l.get('Line')) for l in lines if l]):
-                            o['Prob'] = p[0] + push*2/3
-                        else:
-                            o['Prob'] = p[0] + push/3
-
-                    o['Last 10 Avg'] = stats[0] if stats[0] != -1000 else 'N/A'
-                    o['Last 5'] = stats[1] if stats[1] != -1000 else 'N/A'
-                    o['Season'] = stats[2] if stats[2] != -1000 else 'N/A'
-                    o['H2H'] = stats[3] if stats[3] != -1000 else 'N/A'
-                    o['OvP'] = stats[4] if stats[4] != -1000 else 'N/A'
-
-                    archive.add(o, stats, lines, parp2stats)
-                    if o['Bet'] == 'Over':
-                        loc = get_pred(stats, weights)
-                    else:
-                        loc = 1-get_pred(stats, weights)
-
-                    if 0.25*loc + 0.75*o['Prob'] > .555:
-                        o['Good Bet'] = 'Y'
-                    else:
-                        o['Good Bet'] = 'N'
-
-                    o['DraftKings'] = lines[0]['Line'] + "/" + \
-                        lines[0][o['Bet']] if lines[0] else 'N/A'
-                    o['FanDuel'] = lines[1]['Line'] + "/" + \
-                        lines[1][o['Bet']] if lines[1] else 'N/A'
-                    o['Pinnacle'] = lines[2]['Line'] + "/" + \
-                        lines[2][o['Bet']] if lines[2] else 'N/A'
-                    o['Caesars'] = str(lines[3]['Line']) + "/" + \
-                        str(lines[3][o['Bet']]) if lines[3] else 'N/A'
-
+    pp_offers = []
+    if len(pp_dict) > 0:
+        total = sum(sum(len(i) for i in v.values()) for v in pp_dict.values())
+        with tqdm(total=total, desc="Matching PrizePicks Offers", unit='offer') as pbar:
+            for league, markets in pp_dict.items():
+                if league == 'NBA':
+                    stat_data = nba
+                elif league == 'MLB':
+                    stat_data = mlb
+                elif league == 'NHL':
+                    stat_data = nhl
                 else:
-                    archive.add(o, stats, lines, parp2stats)
-                    if newline not in untapped_markets+tapped_markets:
-                        untapped_markets.append(newline)
+                    for market, offers in markets.items():
+                        untapped_markets.append({
+                            'Platform': 'PrizePicks',
+                            'League': league,
+                            'Market': market
+                        })
+                        pbar.update(len(offers))
+                    continue
 
-            except:
-                logger.exception(o['Player'] + ", " + o["Market"])
+                for market, offers in markets.items():
+                    new_offers = match_offers(
+                        offers, league, market, 'PrizePicks', datasets, stat_data, pp2stats, pbar)
+                    if len(new_offers) == 0:
+                        untapped_markets.append({
+                            'Platform': 'PrizePicks',
+                            'League': league,
+                            'Market': market
+                        })
+                    else:
+                        pp_offers = pp_offers + new_offers
+
+    ud_offers = []
+    if len(ud_dict) > 0:
+        total = sum(sum(len(i) for i in v.values()) for v in ud_dict.values())
+        with tqdm(total=total, desc="Matching Underdog Offers", unit='offer') as pbar:
+            for league, markets in ud_dict.items():
+                if league == 'NBA':
+                    stat_data = nba
+                elif league == 'MLB':
+                    stat_data = mlb
+                elif league == 'NHL':
+                    stat_data = nhl
+                else:
+                    for market, offers in markets.items():
+                        untapped_markets.append({
+                            'Platform': 'Underdog',
+                            'League': league,
+                            'Market': market
+                        })
+                        pbar.update(len(offers))
+                    continue
+
+                for market, offers in markets.items():
+                    new_offers = match_offers(
+                        offers, league, market, 'Underdog', datasets, stat_data, ud2stats, pbar)
+                    if len(new_offers) == 0:
+                        untapped_markets.append({
+                            'Platform': 'Underdog',
+                            'League': league,
+                            'Market': market
+                        })
+                    else:
+                        ud_offers = ud_offers + new_offers
+
+    th_offers = []
+    if len(th_dict) > 0:
+        total = sum(sum(len(i) for i in v.values()) for v in th_dict.values())
+        with tqdm(total=total, desc="Matching Thrive Offers", unit='offer') as pbar:
+            for league, markets in th_dict.items():
+                if league == 'NBA':
+                    stat_data = nba
+                elif league == 'MLB':
+                    stat_data = mlb
+                elif league == 'NHL':
+                    stat_data = nhl
+                else:
+                    for market, offers in markets.items():
+                        untapped_markets.append({
+                            'Platform': 'Thrive',
+                            'League': league,
+                            'Market': market
+                        })
+                        pbar.update(len(offers))
+                    continue
+
+                for market, offers in markets.items():
+                    new_offers = match_offers(
+                        offers, league, market, 'Thrive', datasets, stat_data, th2stats, pbar)
+                    if len(new_offers) == 0:
+                        untapped_markets.append({
+                            'Platform': 'Thrive',
+                            'League': league,
+                            'Market': market
+                        })
+                    else:
+                        th_offers = th_offers + new_offers
+
+    parp_offers = []
+    if len(parp_dict) > 0:
+        total = sum(sum(len(i) for i in v.values())
+                    for v in parp_dict.values())
+        with tqdm(total=total, desc="Matching ParlayPlay Offers", unit='offer') as pbar:
+            for league, markets in parp_dict.items():
+                if league == 'NBA':
+                    stat_data = nba
+                elif league == 'MLB':
+                    stat_data = mlb
+                elif league == 'NHL':
+                    stat_data = nhl
+                else:
+                    for market, offers in markets.items():
+                        untapped_markets.append({
+                            'Platform': 'ParlayPlay',
+                            'League': league,
+                            'Market': market
+                        })
+                        pbar.update(len(offers))
+                    continue
+
+                for market, offers in markets.items():
+                    new_offers = match_offers(
+                        offers, league, market, 'ParlayPlay', datasets, stat_data, parp2stats, pbar)
+                    if len(new_offers) == 0:
+                        untapped_markets.append({
+                            'Platform': 'ParlayPlay',
+                            'League': league,
+                            'Market': market
+                        })
+                    else:
+                        parp_offers = parp_offers + new_offers
 
     logger.info("Writing to file...")
-    if len([o for o in pp_offers if o.get('Prob')]) > 0:
+    if len(pp_offers) > 0:
         pp_df = pd.DataFrame(pp_offers).dropna().drop(
-            columns='Opponent').sort_values('Prob', ascending=False)
+            columns='Opponent').sort_values('Model', ascending=False)
         wks = gc.open("Sports Betting").worksheet("PrizePicks")
         wks.clear()
         wks.update([pp_df.columns.values.tolist()] + pp_df.values.tolist())
         wks.update("S1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("H:M", {"numberFormat": {
+        wks.format("H:N", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
-    if len([o for o in ud_offers if o.get('Prob')]) > 0:
+    if len(ud_offers) > 0:
         ud_df = pd.DataFrame(ud_offers).dropna().drop(
-            columns='Opponent').sort_values('Prob', ascending=False)
+            columns='Opponent').sort_values('Model', ascending=False)
         wks = gc.open("Sports Betting").worksheet("Underdog")
         wks.clear()
         wks.update([ud_df.columns.values.tolist()] + ud_df.values.tolist())
         wks.update("S1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("H:M", {"numberFormat": {
+        wks.format("H:N", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
-    if len([o for o in th_offers if o.get('Prob')]) > 0:
+    if len(th_offers) > 0:
         try:
             th_df = pd.DataFrame(th_offers).dropna().drop(
-                columns='Opponent').sort_values('Prob', ascending=False)
+                columns='Opponent').sort_values('Model', ascending=False)
             wks = gc.open("Sports Betting").worksheet("Thrive")
             wks.clear()
             wks.update([th_df.columns.values.tolist()] + th_df.values.tolist())
             wks.update("S1", "Last Updated: " +
                        datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
             wks.set_basic_filter()
-            wks.format("H:M", {"numberFormat": {
+            wks.format("H:N", {"numberFormat": {
                 "type": "PERCENT", "pattern": "0.00%"}})
         except Exception as exc:
             logger.exception('Error writing Thrive offers')
 
-    if len([o for o in parp_offers if o.get('Prob')]) > 0:
+    if len(parp_offers) > 0:
         parp_df = pd.DataFrame(parp_offers).dropna().drop(
-            columns='Opponent').sort_values('Prob', ascending=False)
+            columns='Opponent').sort_values('Model', ascending=False)
         wks = gc.open("Sports Betting").worksheet("ParlayPlay")
         wks.clear()
         wks.update([parp_df.columns.values.tolist()] + parp_df.values.tolist())
         wks.update("T1", "Last Updated: " +
                    datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
         wks.set_basic_filter()
-        wks.format("I:N", {"numberFormat": {
+        wks.format("I:O", {"numberFormat": {
             "type": "PERCENT", "pattern": "0.00%"}})
 
     if len(untapped_markets) > 0:

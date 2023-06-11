@@ -368,46 +368,6 @@ class statsNBA:
                     self.playerStats[player]['bucket'] = buckets-i
                     self.playerStats[player]['line'] = lines[i]
 
-    def get_weights(self, market):
-        if market in self.weights['NBA']:
-            return self.weights['NBA'].get(market)
-        else:
-            return np.zeros(5)
-
-        self.bucket_stats(market)
-        results = []
-        for game in tqdm(self.gamelog):
-
-            player = game['PLAYER_NAME']
-            if not player in self.playerStats:
-                continue
-            elif self.playerStats[player]['bucket'] < 5:
-                continue
-
-            line = self.playerStats[player]['avg']
-            stats = self.get_stats_date(game, market, line)
-            if all(stats == np.ones(5)*-1000):
-                continue
-            baseline = np.array([0, 0.5, 0.5, 0.5, 0])
-            stats[stats == -1000] = baseline[stats == -1000]
-            stats = stats - baseline
-            y = int(game[market] > line)
-
-            results.append({'stats': stats, 'result': y,
-                            'bucket': self.playerStats[player]['bucket']})
-
-        res = minimize(lambda x: -likelihood(results, x),
-                       np.ones(5), method='l-bfgs-b', tol=1e-8, bounds=[(0, 10)]*5)
-
-        w = list(res.x)
-        self.weights['NBA'][market] = w
-        filepath = (pkg_resources.files(data) / "weights.json")
-        if os.path.isfile(filepath):
-            with open(filepath, "w") as outfile:
-                json.dump(self.weights, outfile, indent=4)
-
-        return w
-
     def dvpoa(self, team, position, market):
         if not market in self.dvp_index:
             self.dvp_index[market] = {}
@@ -446,7 +406,7 @@ class statsNBA:
 
         player = offer['Player']
         team = offer['Team']
-        market = offer['Market']
+        market = offer['Market'].replace("H2H ", "")
         line = offer['Line']
         opponent = offer['Opponent']
 
@@ -463,7 +423,7 @@ class statsNBA:
 
         try:
             stats = archive['NBA'][market].get(date, {}).get(
-                player, {}).get(line, np.zeros(9))
+                player, {}).get(line, [0.5]*9)
             moneyline = archive['NBA']['Moneyline'].get(
                 date, {}).get(team, np.nan)
             total = archive['NBA']['Totals'].get(date, {}).get(team, np.nan)
@@ -1071,52 +1031,6 @@ class statsMLB:
                     self.playerStats[player]['bucket'] = buckets-i
                     self.playerStats[player]['line'] = lines[i]
 
-    def get_weights(self, market, force=False):
-        if market in self.weights['MLB'] and not force:
-            return self.weights['MLB'].get(market)
-        else:
-            return np.zeros(5)
-
-        self.playerStats, _ = self.bucket_stats(market)
-        results = []
-        for game in tqdm(self.gamelog):
-            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
-                continue
-            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
-                continue
-
-            player = game['playerName']
-            if not player in self.playerStats:
-                continue
-            elif self.playerStats[player]['bucket'] < 3 and not ('allowed' in market):
-                continue
-            elif self.playerStats[player]['bucket'] > 3 and ('allowed' in market):
-                continue
-
-            line = self.playerStats[player]['avg']
-            stats = self.get_stats_date(game, market, line)
-            if all(stats == np.ones(5)*-1000):
-                continue
-            baseline = np.array([0, 0.5, 0.5, 0.5, 0])
-            stats[stats == -1000] = baseline[stats == -1000]
-            stats = stats - baseline
-            y = int(game[market] > line)
-
-            results.append({'stats': stats, 'result': y,
-                            'bucket': self.playerStats[player]['bucket']})
-
-        res = minimize(lambda x: -likelihood(results, x),
-                       np.ones(5), method='l-bfgs-b', tol=1e-8, bounds=[(0, 10)]*5)
-
-        w = list(res.x)
-        self.weights['MLB'][market] = w
-        filepath = (pkg_resources.files(data) / "weights.json")
-        if os.path.isfile(filepath):
-            with open(filepath, "w") as outfile:
-                json.dump(self.weights, outfile, indent=4)
-
-        return w
-
     def dvpoa(self, team, market):
         if not market in self.dvp_index:
             self.dvp_index[market] = {}
@@ -1148,7 +1062,7 @@ class statsMLB:
 
         player = offer['Player']
         team = offer['Team']
-        market = offer['Market']
+        market = offer['Market'].replace("H2H ", "")
         line = offer['Line']
         opponent = offer['Opponent']
 
@@ -1164,17 +1078,33 @@ class statsMLB:
                 bucket -= 1
 
         try:
-            if datetime.strptime(date, '%Y-%m-%d') < datetime.today():
+            if datetime.strptime(date, '%Y-%m-%d').date() < datetime.today().date():
                 if offer.get('Pitcher'):
                     pitcher = offer['Pitcher']
                 else:
-                    pitcher = next((game['opponent pitcher'] for game in self.gamelog if game["playerName"] == player and
-                                    game['gameId'][:10] == date.replace('-', '/') and game['team'] == team), None)['opponent pitcher']
+                    if '+' in player or 'vs.' in player:
+                        players = player.strip().replace('vs.', '+').split(' + ')
+                        pitcher1 = next((game['opponent pitcher'] for game in self.gamelog if game["playerName"] == players[0] and
+                                        game['gameId'][:10] == date.replace('-', '/') and game['team'] == team), None)['opponent pitcher']
+                        pitcher2 = next((game['opponent pitcher'] for game in self.gamelog if game["playerName"] == players[1] and
+                                        game['gameId'][:10] == date.replace('-', '/') and game['team'] == team), None)['opponent pitcher']
+                        pitcher = '/'.join([pitcher1, pitcher2])
+                    else:
+                        pitcher = next((game['opponent pitcher'] for game in self.gamelog if game["playerName"] == player and
+                                        game['gameId'][:10] == date.replace('-', '/') and game['team'] == team), None)['opponent pitcher']
             else:
-                pitcher = self.pitchers[opponent]
+                if '+' in player or 'vs.' in player:
+                    opponents = opponent.split('/')
+                    if len(opponents) == 1:
+                        opponents = opponents*2
+                    pitcher1 = self.pitchers[opponents[0]]
+                    pitcher2 = self.pitchers[opponents[1]]
+                    pitcher = '/'.join([pitcher1, pitcher2])
+                else:
+                    pitcher = self.pitchers[opponent]
 
             stats = archive['MLB'][market].get(date, {}).get(
-                player, {}).get(line, np.zeros(9))
+                player, {}).get(line, [0.5]*9)
             moneyline = archive['MLB']['Moneyline'].get(
                 date, {}).get(team, 0.5)
             total = archive['MLB']['Totals'].get(date, {}).get(team, 8.3)
@@ -1345,7 +1275,11 @@ class statsMLB:
                 if ' + ' in name or ' vs. ' in name:
                     pitcher1 = game['opponent pitcher']
                     pitcher2 = [i['playerName'] for i in self.gamelog if i['gameId'] ==
-                                game['gameId'] and i['starting pitcher'] and not i['playerName'] == pitcher1][0]
+                                game['gameId'] and i['starting pitcher'] and not i['playerName'] == pitcher1]
+                    if len(pitcher2) == 0:
+                        continue
+                    else:
+                        pitcher2 = pitcher2[0]
                     offer = offer | {
                         'Team': '/'.join([game['team'], game['opponent']]),
                         'Opponent': '/'.join([game['opponent'], game['team']]),
@@ -1395,6 +1329,9 @@ class statsNHL:
         self.skater_data = {}
         self.goalie_data = {}
         self.season_start = datetime.strptime("2022-10-07", "%Y-%m-%d")
+        self.playerStats = []
+        self.edges = []
+        self.dvp_index = {}
 
     def load(self):
         filepath = (pkg_resources.files(data) / "nhl_skater_data.dat")
@@ -1862,94 +1799,273 @@ class statsNHL:
 
         return self.playerStats
 
-    def get_weights(self, market):
-        if market == 'PTS':
-            market = 'points'
-        elif market == 'AST':
-            market = 'assists'
-        elif market == 'BLK':
-            return np.zeros(5)
+    def dvpoa(self, team, position, market):
+        if not market in self.dvp_index:
+            self.dvp_index[market] = {}
+        if not team in self.dvp_index[market]:
+            self.dvp_index[market][team] = {}
+        if self.dvp_index[market][team].get(position):
+            return self.dvp_index[market][team].get(position)
 
-        if market in self.weights['NHL']:
-            return self.weights['NHL'].get(market)
-        else:
-            return np.zeros(5)
-
+        dvp = {}
+        leagueavg = {}
         if market in ['goalsAgainst', 'saves']:
-            gamelog = self.goalie_data
-            playerTag = 'goalieFullName'
+            for game in self.goalie_data:
+                id = game['gameId']
+                if id not in leagueavg:
+                    leagueavg[id] = 0
+                leagueavg[id] += game[market]
+                if team == game['opponentTeamAbbrev']:
+                    if id not in dvp:
+                        dvp[id] = 0
+                    dvp[id] += game[market]
+
         else:
-            gamelog = self.skater_data
-            playerTag = 'skaterFullName'
+            for game in self.skater_data:
+                if game['positionCode'] == position:
+                    id = game['gameId']
+                    if id not in leagueavg:
+                        leagueavg[id] = 0
+                    leagueavg[id] += game[market]
+                    if team == game['opponentTeamAbbrev']:
+                        if id not in dvp:
+                            dvp[id] = 0
+                        dvp[id] += game[market]
 
-        self.playerStats = self.bucket_stats(market)
-        results = []
-        for game in tqdm(gamelog):
+        if not dvp:
+            return 0
+        else:
+            dvp = np.mean(list(dvp.values()))
+            leagueavg = np.mean(list(leagueavg.values()))/2
+            dvpoa = (dvp-leagueavg)/leagueavg
+            return dvpoa
 
-            player = game[playerTag]
-            if not player in self.playerStats:
-                continue
-            elif self.playerStats[player]['bucket'] < 5:
-                continue
+    def row(self, offer, date=datetime.today()):
+        if type(date) is datetime:
+            date = date.strftime('%Y-%m-%d')
 
-            line = self.playerStats[player]['avg']
-            stats = self.get_stats_date(game, market, line)
-            if all(stats == np.ones(5)*-1000):
-                continue
-            baseline = np.array([0, 0.5, 0.5, 0.5, 0])
-            stats[stats == -1000] = baseline[stats == -1000]
-            stats = stats - baseline
-            y = int(game[market] > line)
+        player = offer['Player']
+        team = offer['Team']
+        market = offer['Market'].replace("H2H ", "")
+        line = offer['Line']
+        opponent = offer['Opponent']
 
-            results.append({'stats': stats, 'result': y,
-                            'bucket': self.playerStats[player]['bucket']})
+        if "+" in player:
+            bucket = 21
+        elif "vs." in player:
+            bucket = 22
+        elif self.playerStats.get(player):
+            bucket = self.playerStats[player]['bucket']
+        else:
+            bucket = 20
+            while self.edges[20-bucket] < line:
+                bucket -= 1
 
-        res = minimize(lambda x: -likelihood(results, x),
-                       np.ones(5), method='l-bfgs-b', tol=1e-8, bounds=[(0, 10)]*5)
+        try:
+            stats = archive['NBA'][market].get(date, {}).get(
+                player, {}).get(line, [0.5]*9)
+            moneyline = archive['NBA']['Moneyline'].get(
+                date, {}).get(team, np.nan)
+            total = archive['NBA']['Totals'].get(date, {}).get(team, np.nan)
+        except:
+            return 0
 
-        w = list(res.x)
-        self.weights['NHL'][market] = w
-        filepath = (pkg_resources.files(data) / "weights.json")
-        if os.path.isfile(filepath):
-            with open(filepath, "w") as outfile:
-                json.dump(self.weights, outfile, indent=4)
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 229.3
 
-        return w
+        date = datetime.strptime(date, '%Y-%m-%d')
+        if "+" in player or "vs." in player:
+            players = player.strip().replace('vs.', '+').split(' + ')
+            opponents = opponent.split('/')
+            if len(opponents) == 1:
+                opponents = opponents*2
+
+            player1_id = nba_static.find_players_by_full_name(players[0])
+            player2_id = nba_static.find_players_by_full_name(players[1])
+            if not len(player1_id)*len(player2_id):
+                return 0
+            player1_id = player1_id[0]['id']
+            position1 = self.players[player1_id]['POSITION']
+            player2_id = player2_id[0]['id']
+            position2 = self.players[player2_id]['POSITION']
+
+            if position1 is None or position2 is None:
+                return 0
+
+            player1_games = [game for game in self.gamelog if
+                             game['PLAYER_NAME'] == players[0] and
+                             datetime.strptime(game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S') < date]
+
+            headtohead1 = [
+                game for game in player1_games if game['OPP'] == opponents[0]]
+
+            player2_games = [game for game in self.gamelog if
+                             game['PLAYER_NAME'] == players[1] and
+                             datetime.strptime(game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S') < date]
+
+            headtohead2 = [
+                game for game in player2_games if game['OPP'] == opponents[1]]
+
+            n = np.min([len(player1_games), len(player2_games)])
+            m = np.min([len(headtohead1), len(headtohead2)])
+
+            player1_games = player1_games[:n]
+            player2_games = player2_games[:n]
+            headtohead1 = headtohead1[:m]
+            headtohead2 = headtohead2[:m]
+
+            dvpoa1 = self.dvpoa(opponents[0], position1, market)
+            dvpoa2 = self.dvpoa(opponents[1], position2, market)
+
+            if "+" in player:
+                game_res = np.array([game[market] for game in player1_games]) + \
+                    np.array([game[market] for game in player2_games]) - \
+                    np.array([line]*n)
+                h2h_res = np.array([game[market] for game in headtohead1]) + \
+                    np.array([game[market] for game in headtohead2]) - \
+                    np.array([line]*m)
+
+                if dvpoa1*dvpoa2 == 0 or dvpoa1+dvpoa2 == 0:
+                    dvpoa = 0
+                else:
+                    dvpoa = 2/(1/dvpoa1 + 1/dvpoa2)
+
+            else:
+                game_res = np.array([game[market] for game in player1_games]) - \
+                    np.array([game[market] for game in player2_games]) + \
+                    np.array([line]*n)
+                h2h_res = np.array([game[market] for game in headtohead1]) - \
+                    np.array([game[market] for game in headtohead2]) + \
+                    np.array([line]*m)
+
+                if dvpoa1*dvpoa2 == 0 or dvpoa1-dvpoa2 == 0:
+                    dvpoa = 0
+                else:
+                    dvpoa = 2/(1/dvpoa1 - 1/dvpoa2)
+
+            game_res = list(game_res)
+            h2h_res = list(h2h_res)
+
+        else:
+            player_id = nba_static.find_players_by_full_name(player)
+            if not len(player_id):
+                return 0
+            player_id = player_id[0].get('id')
+            position = self.players.get(player_id, {}).get('POSITION')
+            if position is None:
+                return 0
+
+            player_games = [game for game in self.gamelog if
+                            game['PLAYER_NAME'] == player and
+                            datetime.strptime(game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S') < date]
+
+            headtohead = [
+                game for game in player_games if game['OPP'] == opponent]
+
+            game_res = [game[market] - line for game in player_games]
+            h2h_res = [game[market] - line for game in headtohead]
+
+            dvpoa = self.dvpoa(opponent, position, market)
+
+        stats[stats == -1000] = np.nan
+        odds = np.nanmean(stats[5:])
+        if np.isnan(odds):
+            odds = 0.5
+
+        data = {'DVPOA': dvpoa, 'Odds': odds - .5,
+                'Last5': np.mean([int(i > 0) for i in game_res[:5]]) - .5,
+                'Last10': np.mean([int(i > 0) for i in game_res[:10]]) - .5,
+                'H2H': np.mean([int(i > 0) for i in h2h_res[:5]]) - .5,
+                'Avg5': np.mean(game_res[:5]) if len(game_res[:5]) else 0,
+                'Avg10': np.mean(game_res[:10]) if len(game_res[:10]) else 0,
+                'AvgH2H': np.mean(h2h_res[:5]) if len(h2h_res[:5]) else 0,
+                'Moneyline': moneyline - 0.5, 'Total': total/229.3 - 1,
+                'Bucket': bucket if bucket < 21 else 0,
+                'Combo': 1 if bucket == 21 else 0,
+                'Rival': 1 if bucket == 22 else 0
+                }
+
+        if len(game_res) < 10:
+            i = 10 - len(game_res)
+            game_res = game_res + [0]*i
+        if len(h2h_res) < 5:
+            i = 5 - len(h2h_res)
+            h2h_res = h2h_res + [0]*i
+
+        X = pd.DataFrame(data, index=[0]).fillna(0)
+        X = X.join(pd.DataFrame([h2h_res[:5]])
+                   .fillna(0).add_prefix('Meeting '))
+        X = X.join(pd.DataFrame([game_res[:5]])
+                   .fillna(0).add_prefix('Game '))
+
+        return X
 
     def get_training_matrix(self, market):
+        self.bucket_stats(market)
         X = pd.DataFrame()
         results = []
-        for game in self.gamelog:
-            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
-                continue
-            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
-                continue
+        for game in tqdm(self.gamelog, unit='game', desc='Gathering Training Data'):
 
-            gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
+            gameDate = datetime.strptime(
+                game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S')
+            data = {}
             try:
-                archiveData = archive['MLB'][market][gameDate.strftime(
-                    '%Y-%m-%d')][game['playerName']]
+                names = list(archive['NBA'][market][gameDate.strftime(
+                    '%Y-%m-%d')].keys())
+                for name in names:
+                    if game['PLAYER_NAME'] == name.strip().replace('vs.', '+').split(' + ')[0]:
+                        data[name] = archive['NBA'][market][gameDate.strftime(
+                            '%Y-%m-%d')][name]
             except:
                 continue
 
-            offer = {
-                'Player': game['playerName'],
-                'Team': game['team'],
-                'Market': market,
-                'Opponent': game['opponent'],
-                'Pitcher': game['opponent pitcher']
-            }
+            for name, archiveData in data.items():
+                offer = {
+                    'Player': name,
+                    'Team': game['TEAM_ABBREVIATION'],
+                    'Market': market,
+                    'Opponent': game['OPP']
+                }
+                if ' + ' in name or ' vs. ' in name:
+                    offer = offer | {
+                        'Team': '/'.join([game['TEAM_ABBREVIATION'], game['OPP']]),
+                        'Opponent': '/'.join([game['OPP'], game['TEAM_ABBREVIATION']])
+                    }
 
-            for line, stats in archiveData.items():
-                if not line == 'Closing Lines':
-                    if X.empty:
-                        X = self.row(offer | {'Line': line}, gameDate)
-                    else:
-                        X = pd.concat(
-                            [X, self.row(offer | {'Line': line}, gameDate)])
+                for line, stats in archiveData.items():
+                    if not line == 'Closing Lines' and not game[market] == line:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            new_row = self.row(
+                                offer | {'Line': line}, gameDate)
+                            if type(new_row) is pd.DataFrame:
 
-                    results.append(
-                        {'Over': int(game[market] > line), 'Under': int(game[market] < line)})
+                                if ' + ' in name:
+                                    player2 = name.split(' + ')[1]
+                                    game2 = next((i for i in self.gamelog if i['PLAYER_NAME'] == player2
+                                                 and i['GAME_ID'] == game['GAME_ID']), None)
+                                    if game2 is None:
+                                        continue
+                                    results.append(
+                                        {'Result': 1 if (game[market] + game2[market]) > line else -1})
+                                elif ' vs. ' in name:
+                                    player2 = name.split(' vs. ')[1]
+                                    game2 = next((i for i in self.gamelog if i['PLAYER_NAME'] == player2
+                                                 and i['GAME_ID'] == game['GAME_ID']), None)
+                                    if game2 is None:
+                                        continue
+                                    results.append(
+                                        {'Result': 1 if (game[market] + line) > game2[market] else -1})
+                                else:
+                                    results.append(
+                                        {'Result': 1 if game[market] > line else -1})
+
+                                if X.empty:
+                                    X = new_row
+                                else:
+                                    X = pd.concat([X, new_row])
 
         y = pd.DataFrame(results)
 

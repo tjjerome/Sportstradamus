@@ -407,7 +407,7 @@ def get_caesars(sport, league):
 
 
 def get_pp():
-    offers = []
+    offers = {}
     params = {
         'api_key': apikey,
         'url': f"https://api.prizepicks.com/leagues",
@@ -459,7 +459,13 @@ def get_pp():
             }
             if o['attributes']['is_promo']:
                 n['Line'] = o['attributes']['flash_sale_line_score']
-            offers.append(n)
+
+            if league not in offers:
+                offers[league] = {}
+            if n['Market'] not in offers[league]:
+                offers[league][n['Market']] = []
+
+            offers[league][n['Market']].append(n)
 
     logger.info(str(len(offers)) + " offers found")
     return offers
@@ -475,7 +481,6 @@ def get_ud():
         logger.warning("Could not receive offer data")
         return []
 
-    offers = []
     team_ids = {}
     for i in teams['teams']:
         team_ids[i['id']] = i['abbr']
@@ -483,8 +488,8 @@ def get_ud():
     api = scraper.get(
         'https://api.underdogfantasy.com/beta/v3/over_under_lines')
     if not api:
-        logger.info(str(len(offers)) + " offers found")
-        return offers
+        logger.info("No offers found")
+        return {}
 
     player_ids = {}
     for i in api['players']:
@@ -516,7 +521,7 @@ def get_ud():
             'Date': match_ids.get(i['match_id'], {'Date': ''})['Date']
         }
 
-    offers = []
+    offers = {}
     for o in tqdm(api['over_under_lines'], desc="Getting Underdog Over/Unders", unit='offer'):
         player = players[o['over_under']['appearance_stat']['appearance_id']]
         game = matches.get(o['over_under']['appearance_stat']
@@ -533,7 +538,13 @@ def get_ud():
             'Line': float(o['stat_value']),
             'Opponent': opponent
         }
-        offers.append(n)
+
+        if n['League'] not in offers:
+            offers[n['League']] = {}
+        if n['Market'] not in offers[n['League']]:
+            offers[n['League']][n['Market']] = []
+
+        offers[n['League']][n['Market']].append(n)
 
     rivals = scraper.get(
         'https://api.underdogfantasy.com/beta/v3/rival_lines')
@@ -594,7 +605,13 @@ def get_ud():
             'Line': float(o['options'][0]['spread'])-float(o['options'][1]['spread']),
             'Opponent': opponent1 + "/" + opponent2
         }
-        offers.append(n)
+
+        if n['League'] not in offers:
+            offers[n['League']] = {}
+        if bet not in offers[n['League']]:
+            offers[n['League']][bet] = []
+
+        offers[n['League']][bet].append(n)
 
     logger.info(str(len(offers)) + " offers found")
     return offers
@@ -627,7 +644,7 @@ def get_thrive():
         logger.error(api['message'])
         return []
 
-    offers = []
+    offers = {}
     for line in tqdm(lines, desc="Getting Thrive Offers", unit='offer'):
         o = line.get('contestProp')
         team = o['player1']['teamAbbr']
@@ -646,7 +663,12 @@ def get_thrive():
         if n['League'] == 'HOCKEY':
             n['League'] = 'NHL'
 
-        offers.append(n)
+        if n['League'] not in offers:
+            offers[n['League']] = {}
+        if n['Market'] not in offers[n['League']]:
+            offers[n['League']][n['Market']] = []
+
+        offers[n['League']][n['Market']].append(n)
 
     logger.info(str(len(offers)) + " offers found")
     return offers
@@ -668,7 +690,7 @@ def get_parp():
         logger.exception(id)
         return []
 
-    offers = []
+    offers = {}
     for player in tqdm(api['players'], desc="Getting ParlayPlay Offers", unit='offer'):
         teams = [player['match']['homeTeam']['teamAbbreviation'],
                  player['match']['awayTeam']['teamAbbreviation']]
@@ -683,11 +705,17 @@ def get_parp():
                 'Slide': 'N',
                 'Opponent': [team for team in teams if team != player['player']['team']['teamAbbreviation']][0]
             }
-            offers.append(n)
+
+            if n['League'] not in offers:
+                offers[n['League']] = {}
+            if n['Market'] not in offers[n['League']]:
+                offers[n['League']][n['Market']] = []
+
+            offers[n['League']][n['Market']].append(n)
             if stat['slideRange']:
                 m = n | {'Slide': 'Y', 'Line': np.min(stat['slideRange'])}
-                offers.append(m)
+                offers[n['League']][n['Market']].append(m)
                 m = n | {'Slide': 'Y', 'Line': np.max(stat['slideRange'])}
-                offers.append(m)
+                offers[n['League']][n['Market']].append(m)
 
     return offers
