@@ -1,5 +1,5 @@
 from sportsbook_spider.helpers import archive, get_ev
-from sportsbook_spider.stats import statsMLB
+from sportsbook_spider.stats import StatsMLB
 import pandas as pd
 from itertools import combinations
 from scipy.stats import poisson, skellam
@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 
-mlb = statsMLB()
+mlb = StatsMLB()
 mlb.load()
 mlb.update()
 

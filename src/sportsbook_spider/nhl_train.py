@@ -1,4 +1,4 @@
-from sportsbook_spider.stats import statsNHL
+from sportsbook_spider.stats import StatsNHL
 import pickle
 import importlib.resources as pkg_resources
 from sportsbook_spider import data
@@ -12,7 +12,7 @@ from sklearn.calibration import calibration_curve, CalibratedClassifierCV
 from skopt import BayesSearchCV
 from matplotlib import pyplot as plt
 
-nhl = statsNHL()
+nhl = StatsNHL()
 nhl.load()
 nhl.update()
 

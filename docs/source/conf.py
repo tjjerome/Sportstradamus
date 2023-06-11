@@ -17,13 +17,12 @@
 
 # -- Project information -----------------------------------------------------
 
-import sphinx_pdj_theme
-project = 'Propstradamus'
-copyright = '2023, Trevor Jerome'
-author = 'Trevor Jerome'
+# import sphinx_pdj_theme
+from sphinx_pyproject import SphinxConfig
 
-# The full version, including alpha/beta/rc tags
-release = '1.0.0'
+config = SphinxConfig("../pyproject.toml", globalns=globals())
+
+author  # This name *looks* to be undefined, but it isn't.
 
 
 # -- General configuration ---------------------------------------------------
@@ -31,11 +30,13 @@ release = '1.0.0'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = [
+extensions = config["extensions"]
+extensions.extend([
+    # 'sphinx_pdj_theme',
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
     'sphinx.ext.autodoc',
-]
+])
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -51,8 +52,8 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_pdj_theme'
-html_theme_path = [sphinx_pdj_theme.get_html_theme_path()]
+html_theme = 'alabaster'
+# html_theme_path = [sphinx_pdj_theme.get_html_theme_path()]
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

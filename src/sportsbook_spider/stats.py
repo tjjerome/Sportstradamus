@@ -1,7 +1,7 @@
 from sportsbook_spider.spiderLogger import logger
 import os.path
 import numpy as np
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import pickle
 import json
 import importlib.resources as pkg_resources
@@ -43,7 +43,7 @@ class Stats:
         self.gamelog = []
         self.archive = {}
         self.players = {}
-        self.season_start = datetime(year=2023, month=1, day=1)
+        self.season_start = datetime(year=2023, month=1, day=1).date()
         self.playerStats = {}
         self.edges = {}
         self.dvp_index = {}
@@ -123,7 +123,7 @@ class Stats:
         # Implementation details...
 
 
-class statsNBA(Stats):
+class StatsNBA(Stats):
     """
     A class for handling and analyzing NBA statistics.
     Inherits from the Stats parent class.
@@ -137,16 +137,16 @@ class statsNBA(Stats):
 
     def __init__(self):
         """
-        Initialize the statsNBA class.
+        Initialize the StatsNBA class.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2022-10-18", "%Y-%m-%d")
+        self.season_start = datetime.strptime("2022-10-18", "%Y-%m-%d").date()
 
     def load(self):
         """
         Load data from files.
         """
-        filepath = pkg_resources.resource_filename('data', 'nba_players.dat')
+        filepath = pkg_resources.files(data) / 'nba_players.dat'
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.players = pickle.load(infile)
@@ -193,7 +193,7 @@ class statsNBA(Stats):
             game["BLST"] = game['BLK'] + game['STL']
 
         # Save the updated player data
-        with open(pkg_resources.resource_filename('data', 'nba_players.dat'), "wb") as outfile:
+        with open(pkg_resources.files(data) / 'nba_players.dat', "wb") as outfile:
             pickle.dump(self.players, outfile)
 
     def bucket_stats(self, market, buckets=20):
@@ -544,13 +544,14 @@ class statsNBA(Stats):
         return X, y
 
 
-class statsMLB(Stats):
+class StatsMLB(Stats):
     """
     A class for handling and analyzing MLB statistics.
     Inherits from the Stats parent class.
 
     Additional Attributes:
         pitchers (mlb_pitchers): Object containing MLB pitcher data.
+        gameIds (list): List of game ids in gamelog.
 
     Additional Methods:
         None
@@ -558,12 +559,13 @@ class statsMLB(Stats):
 
     def __init__(self):
         """
-        Initialize the statsMLB instance.
+        Initialize the StatsMLB instance.
         """
         super().__init__()
         self.season_start = datetime.strptime(
-            mlb.latest_season()['regularSeasonStartDate'], "%Y-%m-%d")
+            mlb.latest_season()['regularSeasonStartDate'], "%Y-%m-%d").date()
         self.pitchers = mlb_pitchers
+        self.gameIds = []
 
     def parse_game(self, gameId):
         """
@@ -650,42 +652,39 @@ class statsMLB(Stats):
         """
         Loads MLB player statistics from a file.
         """
-        filename = "player_stats.pkl"
-        if os.path.isfile(filename):
-            with open(filename, "rb") as file:
-                self.playerStats = pickle.load(file)
+        filepath = (pkg_resources.files(data) / "mlb_data.dat")
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                mlb_data = pickle.load(infile)
+
+            self.gamelog = mlb_data['gamelog']
+            self.gameIds = mlb_data['games']
 
     def update(self):
         """
         Updates the MLB player statistics.
         """
-        today = datetime.now().date()
-        # Check if statistics need to be updated
-        if today <= self.season_start or today - self.season_start < timedelta(days=7):
-            return
+        # Get the current MLB schedule
+        today = datetime.today().date()
+        mlb_game_ids = mlb.schedule(
+            start_date=self.season_start, end_date=today)
+        mlb_game_ids = [game['game_id'] for game in mlb_game_ids if game['status']
+                        == 'Final' and game['game_type'] != 'E' and game['game_type'] != 'S']
 
-        # Get the latest game ID
-        latest_gameId = max(self.gameIds) if self.gameIds else None
-        # Set the start date for updating statistics
-        start_date = self.season_start
-        if latest_gameId:
-            game_date = datetime.strptime(
-                str(latest_gameId)[:8], "%Y%m%d").date()
-            start_date = game_date + timedelta(days=1)
+        # Parse the game stats
+        for id in tqdm(mlb_game_ids, desc="Getting MLB Stats"):
+            if id not in self.gameIds:
+                self.parse_game(id)
 
-        # Get all game IDs from start date to today
-        game_dates = [start_date + timedelta(days=i)
-                      for i in range((today - start_date).days + 1)]
-        gameIds = [int(d.strftime("%Y%m%d") + "01") for d in game_dates]
+        # Remove old games to prevent file bloat
+        for game in self.gamelog:
+            if datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() < today - timedelta(days=365):
+                self.gamelog.remove(game)
 
-        # Parse game data and update player statistics for each game
-        for gameId in tqdm(gameIds, desc="Updating player statistics"):
-            self.parse_game(gameId)
-
-        # Save updated player statistics to a file
-        filename = "player_stats.pkl"
-        with open(filename, "wb") as file:
-            pickle.dump(self.playerStats, file)
+        # Write to file
+        with open((pkg_resources.files(data) / "mlb_data.dat"), "wb") as outfile:
+            pickle.dump(
+                {'games': self.gameIds, 'gamelog': self.gamelog}, outfile)
 
     def bucket_stats(self, market, buckets=20):
         """
@@ -1110,7 +1109,7 @@ class StatsNHL(Stats):
         super().__init__()
         self.skater_data = []
         self.goalie_data = []
-        self.season_start = datetime.strptime("2022-10-07", "%Y-%m-%d")
+        self.season_start = datetime.strptime("2022-10-07", "%Y-%m-%d").date()
 
     def load(self):
         """
