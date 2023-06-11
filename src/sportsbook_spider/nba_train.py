@@ -17,7 +17,7 @@ nba.load()
 nba.update()
 
 league = 'NBA'
-markets = ['PTS', 'REB', 'AST', 'TOV', 'STL',
+markets = ['PTS', 'REB', 'AST', 'TOV', 'STL', 'FG3M',
            'BLK', 'PRA', 'PR', 'RA', 'PA', 'BLST']
 
 for market in markets:
