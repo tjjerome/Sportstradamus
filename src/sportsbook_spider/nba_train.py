@@ -54,8 +54,9 @@ for market in markets:
 
     y_proba = model.predict_proba(X_test)
 
-    thresholds = np.arange(0.54, 0.6, 0.001)
+    thresholds = np.arange(0.54, 0.65, 0.001)
     acc = np.zeros_like(thresholds)
+    null = np.zeros_like(thresholds)
     preco = np.zeros_like(thresholds)
     precu = np.zeros_like(thresholds)
     prec = np.zeros_like(thresholds)
@@ -66,13 +67,17 @@ for market in markets:
         precu[i] = precision_score(
             (y_test == -1).astype(int), y_pred[:, 0])
         y_pred = y_pred[:, 1]-y_pred[:, 0]
-        acc[i] = accuracy_score(y_test, y_pred)
+        null[i] = 1-np.mean(np.abs(y_pred))
+        acc[i] = accuracy_score(
+            y_test[np.abs(y_pred) > 0], y_pred[np.abs(y_pred) > 0])
         prec[i] = precision_score(y_test, y_pred, average='weighted')
         roc[i] = roc_auc_score(
             y_test, y_pred, average='weighted')
 
     i = np.argmax(prec)
-    t = thresholds[i]
+    j = np.argmax(acc)
+    t1 = thresholds[i]
+    t2 = thresholds[j]
 
     # y_pred = (y_proba > t).astype(int)
     # y_pred = y_pred[:, 1]-y_pred[:, 0]
@@ -100,13 +105,14 @@ for market in markets:
 
     filedict = {'model': model,
                 'scaler': scaler,
-                'threshold': t,
+                'threshold': (.54, t1, t2),
                 'edges': [np.floor(i*2)/2 for i in nba.edges][:-1],
                 'stats': {
-                    'Accuracy': (acc[0], acc[i]),
-                    'Precision_Over': (preco[0], preco[i]),
-                    'Precision_Under': (precu[0], precu[i]),
-                    'ROC_AUC': (roc[0], roc[i])
+                    'Accuracy': (acc[0], acc[i], acc[j]),
+                    'Null Points': (null[0], null[i], null[j]),
+                    'Precision_Over': (preco[0], preco[i], preco[j]),
+                    'Precision_Under': (precu[0], precu[i], precu[j]),
+                    'ROC_AUC': (roc[0], roc[i], roc[j])
                 }}
 
     filename = "_".join([league, market]).replace(" ", "-")+'.skl'
