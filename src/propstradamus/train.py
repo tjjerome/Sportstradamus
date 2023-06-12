@@ -105,14 +105,14 @@ def meditate():
 
             filedict = {'model': model,
                         'scaler': scaler,
-                        'threshold': (.54, t1, t2),
+                        'threshold': (.545, t1, t2),
                         'edges': [np.floor(i*2)/2 for i in mlb.edges][:-1],
                         'stats': {
-                            'Accuracy': (acc[0], acc[i], acc[j]),
-                            'Null Points': (null[0], null[i], null[j]),
-                            'Precision_Over': (preco[0], preco[i], preco[j]),
-                            'Precision_Under': (precu[0], precu[i], precu[j]),
-                            'ROC_AUC': (roc[0], roc[i], roc[j]),
+                            'Accuracy': (acc[26], acc[i], acc[j]),
+                            'Null Points': (null[26], null[i], null[j]),
+                            'Precision_Over': (preco[26], preco[i], preco[j]),
+                            'Precision_Under': (precu[26], precu[i], precu[j]),
+                            'ROC_AUC': (roc[26], roc[i], roc[j]),
                             'Brier Score Loss': (bs, bs, bs)
                         }}
 
