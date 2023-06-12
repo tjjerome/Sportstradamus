@@ -253,7 +253,7 @@ def save_data(offers, book, gc):
                 columns='Opponent').sort_values('Model', ascending=False)
 
             # Access the Google Sheets worksheet and update its contents
-            wks = gc.open("Sports Betting").worksheet(book)
+            wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
             wks.update([df.columns.values.tolist()] + df.values.tolist())
             wks.update("S1", "Last Updated: " +
