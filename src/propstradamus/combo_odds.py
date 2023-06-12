@@ -1,10 +1,10 @@
-from sportsbook_spider.stats import statsNBA
-from sportsbook_spider.helpers import archive, get_ev
+from propstradamus.stats import StatsNBA
+from propstradamus.helpers import archive, get_ev
 from datetime import datetime, timedelta
 import numpy as np
 from scipy.stats import poisson
 
-nba = statsNBA()
+nba = StatsNBA()
 nba.load()
 nba.update()
 
