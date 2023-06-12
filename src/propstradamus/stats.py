@@ -503,9 +503,11 @@ class StatsNBA(Stats):
                 }
 
                 if ' + ' in name or ' vs. ' in name:
-                    player2 = name.replace('vs.', '+').split(' + ')[1]
+                    player2 = name.replace('vs.', '+').split(' + ')[1].strip()
                     game2 = next((i for i in self.gamelog if i['GAME_DATE'] == gameDate.strftime(
                         '%Y-%m-%dT%H:%M:%S') and i['PLAYER_NAME'] == player2), None)
+                    if game2 is None:
+                        continue
                     offer = offer | {
                         'Team': '/'.join([game['TEAM_ABBREVIATION'], game2['TEAM_ABBREVIATION']]),
                         'Opponent': '/'.join([game['OPP'], game2['OPP']])
@@ -1046,6 +1048,8 @@ class StatsMLB(Stats):
                     player2 = name.replace('vs.', '+').split(' + ')[1]
                     game2 = next((i for i in self.gamelog if i['gameId'][:10] == gameDate.strftime(
                         '%Y/%m/%d') and i['playerName'] == player2), None)
+                    if game2 is None:
+                        continue
                     offer = offer | {
                         'Team': '/'.join([game['team'], game2['team']]),
                         'Opponent': '/'.join([game['opponent'], game2['opponent']]),
@@ -1662,6 +1666,8 @@ class StatsNHL(Stats):
                     player2 = name.replace('vs.', '+').split(' + ')[1]
                     game2 = next((i for i in gamelog if i['gameDate'] == gameDate.strftime(
                         '%Y-%m-%d') and i[nameStr] == player2), None)
+                    if game2 is None:
+                        continue
                     offer = offer | {
                         'Team': '/'.join([game['teamAbbrev'], game2['teamAbbrev']]),
                         'Opponent': '/'.join([game['opponentTeamAbbrev'], game2['opponentTeamAbbrev']])
