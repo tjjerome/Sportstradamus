@@ -1,7 +1,7 @@
 from propstradamus.spiderLogger import logger
 from propstradamus.stats import StatsNBA, StatsMLB, StatsNHL
 from propstradamus.books import get_caesars, get_fd, get_pinnacle, get_dk, get_pp, get_ud, get_thrive, get_parp
-from propstradamus.helpers import archive, match_offers, prob_to_odds
+from propstradamus.helpers import archive, prob_to_odds
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
