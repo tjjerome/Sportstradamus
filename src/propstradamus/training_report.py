@@ -1,5 +1,4 @@
 import pickle
-import json
 import importlib.resources as pkg_resources
 from propstradamus import data
 import pandas as pd
@@ -8,19 +7,18 @@ model_list = [f.name for f in pkg_resources.files(
     data).iterdir() if '.skl' in f.name]
 
 report = {}
-for model_str in model_list:
-    with open(pkg_resources.files(data) / model_str, 'rb') as infile:
-        model = pickle.load(infile)
+with open(pkg_resources.files(data) / 'training_report.txt', 'w') as f:
 
-    name = model_str.split('_')
-    league = name[0]
-    market = name[1].replace('-', ' ').replace('.skl', '')
+    for model_str in model_list:
+        with open(pkg_resources.files(data) / model_str, 'rb') as infile:
+            model = pickle.load(infile)
 
-    if not league in report:
-        report[league] = {}
+        name = model_str.split('_')
+        league = name[0]
+        market = name[1].replace('-', ' ').replace('.skl', '')
 
-    report[league][market] = pd.DataFrame(
-        model['stats'], index=model['threshold'])
-
-with open(pkg_resources.files(data) / 'training_report.json', 'w') as outfile:
-    json.dump(report, outfile, indent=4)
+        f.write(f" {league} {market} ".center(72, '='))
+        f.write("\n")
+        f.write(pd.DataFrame(model['stats'],
+                index=model['threshold']).to_string())
+        f.write("\n\n")
