@@ -273,6 +273,10 @@ class Archive:
         with open(filepath, "wb") as outfile:
             pickle.dump(self.archive, outfile, protocol=-1)
 
+    def rename_market(self, league, old_name, new_name):
+        """rename_market Rename a market in the archive
+        """
+
 
 scraper = Scrape(apikey)
 
