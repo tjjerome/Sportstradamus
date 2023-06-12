@@ -34,13 +34,15 @@ def meditate():
     for league, markets in all_markets.items():
         for market in markets:
             if league == 'MLB':
-                X, y = mlb.get_training_matrix(market)
+                stat_data = mlb
             elif league == 'NBA':
-                X, y = nba.get_training_matrix(market)
+                stat_data = nba
             elif league == 'NHL':
-                X, y = nhl.get_training_matrix(market)
+                stat_data = nhl
             else:
                 continue
+
+            X, y = stat_data.get_training_matrix(market)
 
             if X.empty:
                 continue
@@ -106,7 +108,7 @@ def meditate():
             filedict = {'model': model,
                         'scaler': scaler,
                         'threshold': (.545, t1, t2),
-                        'edges': [np.floor(i*2)/2 for i in mlb.edges][:-1],
+                        'edges': [np.floor(i*2)/2 for i in stat_data.edges][:-1],
                         'stats': {
                             'Accuracy': (acc[26], acc[i], acc[j]),
                             'Null Points': (null[26], null[i], null[j]),

@@ -304,10 +304,10 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
         filedict = pickle.load(infile)
     model = filedict['model']
     scaler = filedict['scaler']
-    threshold = filedict['threshold']
-    edges = filedict['edges']
+    # threshold = filedict['threshold']
+    # edges = filedict['edges']
     stat_data.bucket_stats(market)
-    stat_data.edges = edges
+    # stat_data.edges = edges
 
     for o in tqdm(offers, leave=False, disable=not pbar):
         stats = stat_data.get_stats(o | {'Market': market}, date=o['Date'])
@@ -433,9 +433,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 o['Books'] = p[0]
                 o['Model'] = proba[0]
 
-            o['Avg 10'] = (stats.loc[0, 'Avg10']) / o['Line']
-            if " vs. " in o['Player']:
-                o['Avg 10'] = 0.0
+            o['Avg 10'] = (stats.loc[0, 'Avg10']) / \
+                o['Line'] if " vs. " not in o['Player'] else 0
             o['Last 5'] = stats.loc[0, 'Last5'] + 0.5
             o['Last 10'] = stats.loc[0, 'Last10'] + 0.5
             o['H2H'] = stats.loc[0, 'H2H'] + 0.5
