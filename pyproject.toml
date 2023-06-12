@@ -33,6 +33,7 @@ sphinx-pyproject = "^0.1.0"
 [tool.poetry.scripts]
 prophecize = "propstradamus.propstradamus:main"
 get-money = "propstradamus.moneylines:get_moneylines"
+meditate = "propstradamus.train:meditate"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"

@@ -453,15 +453,15 @@ class StatsNBA(Stats):
                 'Rival': 1 if bucket == 22 else 0
                 }
 
-        if len(game_res) < 10:
-            game_res.extend([0] * (10 - len(game_res)))
+        if len(game_res) < 6:
+            game_res.extend([0] * (6 - len(game_res)))
         if len(h2h_res) < 5:
             h2h_res.extend([0] * (5 - len(h2h_res)))
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
         X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
             0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[:10]]).fillna(0).add_prefix('Game '))
+        X = X.join(pd.DataFrame([game_res[:6]]).fillna(0).add_prefix('Game '))
 
         return X
 
@@ -503,9 +503,12 @@ class StatsNBA(Stats):
                 }
 
                 if ' + ' in name or ' vs. ' in name:
+                    player2 = name.replace('vs.', '+').split(' + ')[1]
+                    game2 = next((i for i in self.gamelog if i['GAME_DATE'] == gameDate.strftime(
+                        '%Y-%m-%dT%H:%M:%S') and i['PLAYER_NAME'] == player2), None)
                     offer = offer | {
-                        'Team': '/'.join([game['TEAM_ABBREVIATION'], game['OPP']]),
-                        'Opponent': '/'.join([game['OPP'], game['TEAM_ABBREVIATION']])
+                        'Team': '/'.join([game['TEAM_ABBREVIATION'], game2['TEAM_ABBREVIATION']]),
+                        'Opponent': '/'.join([game['OPP'], game2['OPP']])
                     }
 
                 for line, stats in archiveData.items():
@@ -611,6 +614,7 @@ class StatsMLB(Stats):
                         'walks': v['stats']['batting'].get('baseOnBalls', 0),
                         'pitcher strikeouts': v['stats']['pitching'].get('strikeOuts', 0),
                         'walks allowed': v['stats']['pitching'].get('baseOnBalls', 0),
+                        'pitches thrown': v['stats']['pitching'].get('numberOfPitches', 0),
                         'runs allowed': v['stats']['pitching'].get('runs', 0),
                         'hits allowed': v['stats']['pitching'].get('hits', 0),
                         'pitching outs': 3*int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[0]) + int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[1]),
@@ -641,6 +645,7 @@ class StatsMLB(Stats):
                         'walks': v['stats']['batting'].get('baseOnBalls', 0),
                         'pitcher strikeouts': v['stats']['pitching'].get('strikeOuts', 0),
                         'walks allowed': v['stats']['pitching'].get('baseOnBalls', 0),
+                        'pitches thrown': v['stats']['pitching'].get('numberOfPitches', 0),
                         'runs allowed': v['stats']['pitching'].get('runs', 0),
                         'hits allowed': v['stats']['pitching'].get('hits', 0),
                         'pitching outs': 3*int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[0]) + int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[1]),
@@ -667,7 +672,7 @@ class StatsMLB(Stats):
         # Get the current MLB schedule
         today = datetime.today().date()
         mlb_game_ids = mlb.schedule(
-            start_date=self.season_start, end_date=today)
+            start_date=datetime.strptime('2022-04-07', '%Y-%m-%d').date(), end_date=today)
         mlb_game_ids = [game['game_id'] for game in mlb_game_ids if game['status']
                         == 'Final' and game['game_type'] != 'E' and game['game_type'] != 'S']
 
@@ -678,7 +683,7 @@ class StatsMLB(Stats):
 
         # Remove old games to prevent file bloat
         for game in self.gamelog:
-            if datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() < today - timedelta(days=365):
+            if datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() < today - timedelta(days=730):
                 self.gamelog.remove(game)
 
         # Write to file
@@ -969,8 +974,8 @@ class StatsMLB(Stats):
             'Rival': 1 if bucket == 22 else 0
         }
 
-        if len(game_res) < 10:
-            i = 10 - len(game_res)
+        if len(game_res) < 6:
+            i = 6 - len(game_res)
             game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
@@ -979,7 +984,7 @@ class StatsMLB(Stats):
         X = pd.DataFrame(data, index=[0]).fillna(0)
         X = X.join(pd.DataFrame([h2h_res[-5:]])
                    .fillna(0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[-10:]])
+        X = X.join(pd.DataFrame([game_res[-6:]])
                    .fillna(0).add_prefix('Game '))
 
         return X
@@ -1038,17 +1043,13 @@ class StatsMLB(Stats):
 
                 # Modify offer for dual player markets
                 if ' + ' in name or ' vs. ' in name:
-                    pitcher1 = game['opponent pitcher']
-                    pitcher2 = [i['playerName'] for i in self.gamelog if i['gameId'] ==
-                                game['gameId'] and i['starting pitcher'] and not i['playerName'] == pitcher1]
-                    if len(pitcher2) == 0:
-                        continue
-                    else:
-                        pitcher2 = pitcher2[0]
+                    player2 = name.replace('vs.', '+').split(' + ')[1]
+                    game2 = next((i for i in self.gamelog if i['gameId'][:10] == gameDate.strftime(
+                        '%Y/%m/%d') and i['playerName'] == player2), None)
                     offer = offer | {
-                        'Team': '/'.join([game['team'], game['opponent']]),
-                        'Opponent': '/'.join([game['opponent'], game['team']]),
-                        'Pitcher': '/'.join([pitcher1, pitcher2])
+                        'Team': '/'.join([game['team'], game2['team']]),
+                        'Opponent': '/'.join([game['opponent'], game2['opponent']]),
+                        'Pitcher': '/'.join([game['opponent pitcher'], game2['opponent pitcher']])
                     }
 
                 # Process stats for each line
@@ -1147,6 +1148,10 @@ class StatsNHL(Stats):
         logger.info("Getting NHL data")
 
         # Skater data update
+        if self.skater_data:
+            startDate = self.skater_data[-1]['gameDate']
+        else:
+            startDate = self.season_start.strftime('%Y-%m-%d')
         skater_params = {
             'isAggregate': 'false',
             'isGame': 'true',
@@ -1154,7 +1159,7 @@ class StatsNHL(Stats):
             'start': 0,
             'limit': 100,
             'factCayenneExp': 'gamesPlayed>=1',
-            'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+self.skater_data[-1]['gameDate']+'"'
+            'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+startDate+'"'
         }
 
         skater_request_data = scraper.get(
@@ -1197,15 +1202,19 @@ class StatsNHL(Stats):
                 # Update progress bar
                 pbar.update(100)
 
-        # Remove games older than 1 year from the skater data
+        # Remove games older than 2 years from the skater data
         self.skater_data = [
-            game for game in self.skater_data if datetime.strptime(game['gameDate'], '%Y-%m-%d') >= datetime.today() - timedelta(days=365)]
+            game for game in self.skater_data if datetime.strptime(game['gameDate'], '%Y-%m-%d') >= datetime.today() - timedelta(days=730)]
 
         # Save skater data to file
         with open((pkg_resources.files(data) / "nhl_skater_data.dat"), "wb") as outfile:
             pickle.dump(self.skater_data, outfile)
 
         # Goalie data update
+        if self.goalie_data:
+            startDate = self.goalie_data[-1]['gameDate']
+        else:
+            startDate = self.season_start.strftime('%Y-%m-%d')
         goalie_params = {
             'isAggregate': 'false',
             'isGame': 'true',
@@ -1213,7 +1222,7 @@ class StatsNHL(Stats):
             'start': 0,
             'limit': 100,
             'factCayenneExp': 'gamesPlayed>=1',
-            'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+self.goalie_data[-1]['gameDate']+'"'
+            'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+startDate+'"'
         }
 
         goalie_request_data = scraper.get(
@@ -1257,9 +1266,9 @@ class StatsNHL(Stats):
                 # Update progress bar
                 pbar.update(100)
 
-        # Remove games older than 1 year from the goalie data
+        # Remove games older than 2 years from the goalie data
         self.goalie_data = [
-            game for game in self.goalie_data if datetime.strptime(game['gameDate'], '%Y-%m-%d') >= datetime.today() - timedelta(days=365)]
+            game for game in self.goalie_data if datetime.strptime(game['gameDate'], '%Y-%m-%d') >= datetime.today() - timedelta(days=730)]
 
         # Save goalie data to file
         with open((pkg_resources.files(data) / "nhl_goalie_data.dat"), "wb") as outfile:
@@ -1400,6 +1409,13 @@ class StatsNHL(Stats):
         if type(date) is datetime:
             date = date.strftime('%Y-%m-%d')
 
+        # Retrieve offer details
+        player = offer['Player']
+        team = offer['Team']
+        market = offer['Market'].replace("H2H ", "")
+        line = offer['Line']
+        opponent = offer['Opponent']
+
         # Replace team abbreviations and market names with appropriate values
         opponent = opponent.replace('NJ', 'NJD').replace('TB', 'TBL')
         if opponent == 'LA':
@@ -1410,14 +1426,7 @@ class StatsNHL(Stats):
         elif market == 'AST':
             market = 'assists'
         elif market == 'BLK':
-            return np.ones(5) * -1000
-
-        # Retrieve offer details
-        player = offer['Player']
-        team = offer['Team']
-        market = offer['Market'].replace("H2H ", "")
-        line = offer['Line']
-        opponent = offer['Opponent']
+            market = 'blockedShots'
 
         # Determine the gamelog and nameStr based on the market type
         if market in ['saves', 'goalsAgainst']:
@@ -1489,6 +1498,12 @@ class StatsNHL(Stats):
             player2_games = player2_games[-n:]
             headtohead1 = headtohead1[-m:]
             headtohead2 = headtohead2[-m:]
+            if n == 0:
+                player1_games = []
+                player2_games = []
+            if m == 0:
+                headtohead1 = []
+                headtohead2 = []
 
             # Determine the positions for player1, player2, and DVPOA calculation
             if market in ['saves', 'goalsAgainst']:
@@ -1567,15 +1582,15 @@ class StatsNHL(Stats):
                 'Avg5': np.mean(game_res[-5:]) if len(game_res[-5:]) else 0,
                 'Avg10': np.mean(game_res[-10:]) if len(game_res[-10:]) else 0,
                 'AvgH2H': np.mean(h2h_res[-5:]) if len(h2h_res[-5:]) else 0,
-                'Moneyline': moneyline - 0.5, 'Total': total / 229.3 - 1,
+                'Moneyline': moneyline - 0.5, 'Total': total / 6.5 - 1,
                 'Bucket': bucket if bucket < 21 else 0,
                 'Combo': 1 if bucket == 21 else 0,
                 'Rival': 1 if bucket == 22 else 0
                 }
 
         # Pad game_res and h2h_res lists with zeros if they are shorter than required
-        if len(game_res) < 10:
-            i = 10 - len(game_res)
+        if len(game_res) < 6:
+            i = 6 - len(game_res)
             game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
@@ -1585,7 +1600,7 @@ class StatsNHL(Stats):
         X = pd.DataFrame(data, index=[0]).fillna(0)
         X = X.join(pd.DataFrame([h2h_res[-5:]])
                    .fillna(0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[-10:]])
+        X = X.join(pd.DataFrame([game_res[-6:]])
                    .fillna(0).add_prefix('Game '))
 
         return X
@@ -1644,9 +1659,12 @@ class StatsNHL(Stats):
 
                 # Modify offer parameters for multi-player cases
                 if ' + ' in name or ' vs. ' in name:
+                    player2 = name.replace('vs.', '+').split(' + ')[1]
+                    game2 = next((i for i in gamelog if i['gameDate'] == gameDate.strftime(
+                        '%Y-%m-%d') and i[nameStr] == player2), None)
                     offer = offer | {
-                        'Team': '/'.join([game['teamAbbrev'], game['opponentTeamAbbrev']]),
-                        'Opponent': '/'.join([game['opponentTeamAbbrev'], game['teamAbbrev']])
+                        'Team': '/'.join([game['teamAbbrev'], game2['teamAbbrev']]),
+                        'Opponent': '/'.join([game['opponentTeamAbbrev'], game2['opponentTeamAbbrev']])
                     }
 
                 # Iterate over each line and stats in the archive data
