@@ -706,7 +706,7 @@ def get_ud():
             opponent2 = game2['Away']
         bet = o['options'][0]['appearance_stat']['display_stat']
         n = {
-            'Player': player1['Name'] + " vs. " + player2['Name'],
+            'Player': remove_accents(player1['Name']) + " vs. " + remove_accents(player2['Name']),
             'League': player1['League'],
             'Team': player1['Team'] + "/" + player2['Team'],
             'Date': game1['Date'],
@@ -842,9 +842,13 @@ def get_parp():
     try:
         api = requests.get("https://proxy.scrapeops.io/v1/",
                            params=params, headers=header | scraper.header).json()
-    except Exception as exc:
+    except:
         logger.exception(id)
-        return []
+        return {}
+
+    if 'players' not in api:
+        logger.error("Error getting ParlayPlay Offers")
+        return {}
 
     offers = {}
     for player in tqdm(api['players'], desc="Getting ParlayPlay Offers", unit='offer'):
