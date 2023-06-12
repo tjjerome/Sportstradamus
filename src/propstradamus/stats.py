@@ -229,8 +229,9 @@ class StatsNBA(Stats):
         # Compute averages and percentiles
         averages = []
         for player, games in self.playerStats.items():
-            self.playerStats[player]['avg'] = np.mean(games['games'])
-            averages.append(np.mean(games['games']))
+            self.playerStats[player]['avg'] = np.mean(
+                games['games']) if games['games'] else 0
+            averages.append(self.playerStats[player]['avg'])
 
         # Compute edges for each bucket
         w = int(100 / buckets)
@@ -324,7 +325,7 @@ class StatsNBA(Stats):
             bucket = self.playerStats[player]['bucket']
         else:
             bucket = 20
-            while self.edges[20-bucket] < line:
+            while bucket > 0 and self.edges[20-bucket] < line:
                 bucket -= 1
 
         try:
@@ -441,12 +442,12 @@ class StatsNBA(Stats):
             odds = 0.5
 
         data = {'DVPOA': dvpoa, 'Odds': odds - .5,
-                'Last5': np.mean([int(i > 0) for i in game_res[:5]]) - .5,
-                'Last10': np.mean([int(i > 0) for i in game_res[:10]]) - .5,
-                'H2H': np.mean([int(i > 0) for i in h2h_res[:5]]) - .5,
-                'Avg5': np.mean(game_res[:5]) if game_res[:5] else 0,
-                'Avg10': np.mean(game_res[:10]) if game_res[:10] else 0,
-                'AvgH2H': np.mean(h2h_res[:5]) if h2h_res[:5] else 0,
+                'Last5': np.mean([int(i > 0) for i in game_res[:5]]) - .5 if game_res else 0,
+                'Last10': np.mean([int(i > 0) for i in game_res[:10]]) - .5 if game_res else 0,
+                'H2H': np.mean([int(i > 0) for i in h2h_res[:5]]) - .5 if h2h_res else 0,
+                'Avg5': np.mean(game_res[:5]) if game_res[:5] else 0 if game_res else 0,
+                'Avg10': np.mean(game_res[:10]) if game_res[:10] else 0 if game_res else 0,
+                'AvgH2H': np.mean(h2h_res[:5]) if h2h_res[:5] else 0 if h2h_res else 0,
                 'Moneyline': moneyline - 0.5, 'Total': total / 229.3 - 1,
                 'Bucket': bucket if bucket < 21 else 0,
                 'Combo': 1 if bucket == 21 else 0,
@@ -730,8 +731,9 @@ class StatsMLB(Stats):
         # Calculate average stats for each player
         averages = []
         for player, games in self.playerStats.items():
-            self.playerStats[player]['avg'] = np.mean(games['games'])
-            averages.append(np.mean(games['games']))
+            self.playerStats[player]['avg'] = np.mean(
+                games['games']) if games['games'] else 0
+            averages.append(self.playerStats[player]['avg'])
 
         # Determine edges for each bucket based on percentiles
         w = int(100 / buckets)
@@ -771,21 +773,24 @@ class StatsMLB(Stats):
 
         # Calculate DVP (Defense Versus Position) and league average for the specified team and market
         if any([string in market for string in ['allowed', 'pitch']]):
-            dvp = np.mean(
-                [game[market] for game in self.gamelog if game['starting pitcher'] and game['opponent'] == team])
-            leagueavg = np.mean(
-                [game[market] for game in self.gamelog if game['starting pitcher']])
+            dvp = [game[market] for game in self.gamelog if game['starting pitcher']
+                   and game['opponent'] == team]
+            leagueavg = [game[market]
+                         for game in self.gamelog if game['starting pitcher']]
         else:
-            dvp = np.mean([game[market] for game in self.gamelog if game['starting batter']
-                          and game['opponent pitcher'] == team])
-            leagueavg = np.mean(
-                [game[market] for game in self.gamelog if game['starting batter']])
+            dvp = [game[market] for game in self.gamelog if game['starting batter']
+                   and game['opponent pitcher'] == team]
+            leagueavg = [game[market]
+                         for game in self.gamelog if game['starting batter']]
 
-        # Check if DVP value is NaN (Not a Number)
-        if np.isnan(dvp):
+        # Check if DVP values exist
+        if not dvp:
+            self.dvp_index[market][team] = 0
             return 0
         else:
             # Calculate DVPOA (Defense Versus Position over League-Average)
+            dvp = np.mean(dvp)
+            leagueavg = np.mean(leagueavg)
             dvpoa = (dvp - leagueavg) / leagueavg
             self.dvp_index[market][team] = dvpoa
             return dvpoa
@@ -964,12 +969,12 @@ class StatsMLB(Stats):
 
         data = {
             'DVPOA': dvpoa, 'Odds': odds - .5,
-            'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5,
-            'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5,
-            'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5,
-            'Avg5': np.mean(game_res[:5]) if len(game_res[-5:]) else 0,
-            'Avg10': np.mean(game_res[:10]) if len(game_res[-10:]) else 0,
-            'AvgH2H': np.mean(h2h_res[:5]) if len(h2h_res[-5:]) else 0,
+            'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5 if game_res else 0,
+            'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5 if game_res else 0,
+            'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5 if h2h_res else 0,
+            'Avg5': np.mean(game_res[:5]) if len(game_res[-5:]) else 0 if game_res else 0,
+            'Avg10': np.mean(game_res[:10]) if len(game_res[-10:]) else 0 if game_res else 0,
+            'AvgH2H': np.mean(h2h_res[:5]) if len(h2h_res[-5:]) else 0 if h2h_res else 0,
             'Moneyline': moneyline - 0.5, 'Total': total / 8.3 - 1,
             'Bucket': bucket if bucket < 21 else 0,
             'Combo': 1 if bucket == 21 else 0,
@@ -1317,8 +1322,9 @@ class StatsNHL(Stats):
         # Calculate averages and store in playerStats dictionary
         averages = []
         for player, games in self.playerStats.items():
-            self.playerStats[player]['avg'] = np.mean(games['games'])
-            averages.append(np.mean(games['games']))
+            self.playerStats[player]['avg'] = np.mean(
+                games['games']) if games['games'] else 0
+            averages.append(self.playerStats[player]['avg'])
 
         # Calculate edges for bucketing based on percentiles
         self.edges = [np.percentile(averages, p) for p in range(0, 101, 10)]
@@ -1580,12 +1586,12 @@ class StatsNHL(Stats):
 
         # Calculate various statistics based on game and head-to-head results
         data = {'DVPOA': dvpoa, 'Odds': odds - .5,
-                'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5,
-                'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5,
-                'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5,
-                'Avg5': np.mean(game_res[-5:]) if len(game_res[-5:]) else 0,
-                'Avg10': np.mean(game_res[-10:]) if len(game_res[-10:]) else 0,
-                'AvgH2H': np.mean(h2h_res[-5:]) if len(h2h_res[-5:]) else 0,
+                'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5 if game_res else 0,
+                'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5 if game_res else 0,
+                'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5 if h2h_res else 0,
+                'Avg5': np.mean(game_res[-5:]) if game_res[-5:] else 0,
+                'Avg10': np.mean(game_res[-10:]) if game_res[-10:] else 0,
+                'AvgH2H': np.mean(h2h_res[-5:]) if h2h_res[-5:] else 0,
                 'Moneyline': moneyline - 0.5, 'Total': total / 6.5 - 1,
                 'Bucket': bucket if bucket < 21 else 0,
                 'Combo': 1 if bucket == 21 else 0,
