@@ -833,12 +833,12 @@ def get_parp():
     """
     params = {
         'api_key': apikey,
-        'url': "https://parlayplay.io/api/v1/crossgame/search/?format=json&sport=All&league=",
+        'url': "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=",
         'optimize_request': True,
         'keep_headers': True
     }
     header = {'Accept': 'application/json', 'X-Parlay-Request': '1', 'X-Parlayplay-Platform': 'web',
-              'X-Csrftoken': 'FoEEn6o8fwxrKIrSzyphlphpVjBAEVZQANmhb2xeMmmRZwvbaDDZt5zGKoXNzrc2'}
+              'X-CSRFToken': '1'}
     try:
         api = requests.get("https://proxy.scrapeops.io/v1/",
                            params=params, headers=header | scraper.header).json()
