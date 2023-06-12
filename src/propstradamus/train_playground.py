@@ -1,7 +1,4 @@
-from sportsbook_spider.stats import statsMLB
-import pickle
-import importlib.resources as pkg_resources
-from sportsbook_spider import data
+from propstradamus.stats import StatsNBA, StatsMLB
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, precision_score, accuracy_score, roc_auc_score, brier_score_loss
@@ -9,22 +6,28 @@ from sklearn.preprocessing import MaxAbsScaler
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import calibration_curve, CalibratedClassifierCV
 from matplotlib import pyplot as plt
+import pandas as pd
 
-mlb = statsMLB()
-mlb.load()
-mlb.update()
+# nba = StatsNBA()
+# nba.load()
+# nba.update()
 
-league = 'MLB'
-markets = ['total bases', 'pitcher strikeouts', 'runs allowed', 'hits',
-           'runs', 'rbi', 'singles', 'hits+runs+rbi', '1st inning runs allowed']
+league = 'NBA'
+markets = ['PRA']
 for market in markets:
 
-    X, y = mlb.get_training_matrix(market)
+    # X, y = nba.get_training_matrix(market)
+    X = pd.read_csv('src/propstradamus/data/X.csv', index_col=0)
+    y = pd.read_csv('src/propstradamus/data/y.csv', index_col=0)
+
+    X = X.drop(columns=['Game 6', 'Game 7', 'Game 8', 'Game 9'])
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
+        X, y, test_size=0.2)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train, y_train, test_size=0.25)
 
-    if len(X_train) < 100:
+    if len(X_train) < 1000:
         continue
 
     scaler = MaxAbsScaler()
@@ -40,18 +43,20 @@ for market in markets:
     #                       solver='adam', early_stopping=True, n_iter_no_change=300)  # .553r, .40a, .54u, .64o
 
     model = GradientBoostingClassifier(
-        loss='log_loss', learning_rate=0.1, n_estimators=500, max_depth=3, max_features='log2')  # .547r, .39a, .61u, .55o
+        loss='log_loss', learning_rate=0.1, n_estimators=500, max_depth=10, max_features='sqrt')  # .547r, .39a, .61u, .55o
 
     # model = RandomForestClassifier(
     #     criterion='entropy', n_estimators=500, max_features=0.25, max_depth=26)  # .564r, .40a, .58u, .60o
 
+    # model.fit(X_train, y_train)
+
     model = CalibratedClassifierCV(
-        model, cv=50, n_jobs=-1, method='isotonic')
+        model, cv=10, n_jobs=-1, method='sigmoid')
     model.fit(X_train, y_train)
 
     y_proba = model.predict_proba(X_test)
 
-    thresholds = np.arange(0.54, 0.65, 0.001)
+    thresholds = np.arange(0.54, 0.58, 0.001)
     acc = np.zeros_like(thresholds)
     null = np.zeros_like(thresholds)
     preco = np.zeros_like(thresholds)
@@ -80,42 +85,24 @@ for market in markets:
     # print(f"Threshold: {t}")
     # print(classification_report(y_test, y_pred))
 
-    # fop, mpv = calibration_curve(y_test, y_proba[:, 1], n_bins=10)
-    # bs = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
+    fop, mpv = calibration_curve(y_test, y_proba[:, 1], n_bins=50)
+    bs = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
 
-    # f, (ax1, ax2) = plt.subplots(1, 2)
-    # ax1.plot(thresholds, acc, color='r', label='Accuracy')
-    # ax1.plot(thresholds, preco, color='b', label='Precision - Over')
-    # ax1.plot(thresholds, precu, color='c', label='Precision - Under')
-    # ax1.plot(thresholds, roc, color='g', label='ROC AUC')
-    # ax1.axvline(t, linestyle='--', label="T=%.3f" % t)
-    # ax1.set_title("Validation Scores")
-    # ax1.legend()
+    f, (ax1, ax2) = plt.subplots(1, 2)
+    ax1.plot(thresholds, acc, color='r', label='Accuracy')
+    ax1.plot(thresholds, preco, color='b', label='Precision - Over')
+    ax1.plot(thresholds, precu, color='c', label='Precision - Under')
+    ax1.plot(thresholds, roc, color='g', label='ROC AUC')
+    ax1.axvline(t1, linestyle='--', color='b', label="T1=%.3f" % t1)
+    ax1.axvline(t2, linestyle='--', color='c', label="T2=%.3f" % t2)
+    ax1.set_title("Validation Scores")
+    ax1.legend()
 
-    # # plot perfectly calibrated
-    # ax2.plot([0, 1], [0, 1], linestyle='--')
-    # # plot model reliability
-    # ax2.plot(mpv, fop, marker='.')
-    # ax2.set_title("Probability Calibration, Breier=%.3f" % bs)
-    # plt.show()
+    # plot perfectly calibrated
+    ax2.plot([0.4, 0.6], [0.4, 0.6], linestyle='--')
+    # plot model reliability
+    ax2.plot(mpv, fop, marker='.')
+    ax2.set_title("Probability Calibration, Breier=%.3f" % bs)
+    plt.show()
 
-    filedict = {'model': model,
-                'scaler': scaler,
-                'threshold': (.54, t1, t2),
-                'edges': [np.floor(i*2)/2 for i in mlb.edges][:-1],
-                'stats': {
-                    'Accuracy': (acc[0], acc[i], acc[j]),
-                    'Null Points': (null[0], null[i], null[j]),
-                    'Precision_Over': (preco[0], preco[i], preco[j]),
-                    'Precision_Under': (precu[0], precu[i], precu[j]),
-                    'ROC_AUC': (roc[0], roc[i], roc[j])
-                }}
-
-    filename = "_".join([league, market]).replace(" ", "-")+'.skl'
-
-    filepath = (pkg_resources.files(data) / filename)
-    with open(filepath, 'wb') as outfile:
-        pickle.dump(filedict, outfile, -1)
-        del filedict
-        del model
-        del scaler
+    model

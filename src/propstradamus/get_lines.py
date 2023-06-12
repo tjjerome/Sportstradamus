@@ -1,5 +1,5 @@
-from sportsbook_spider.helpers import scraper, archive, no_vig_odds
-from sportsbook_spider.stats import statsNHL
+from propstradamus.helpers import scraper, archive, no_vig_odds
+from propstradamus.stats import StatsNHL
 from datetime import datetime, timedelta
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -50,7 +50,7 @@ nfl_market_ids = {
 
 header = {'X-API-Key': 'CHi8Hy5CEE4khd46XNYL23dCFX96oUdw6qOt1Dnh'}
 
-nhl = statsNHL()
+nhl = StatsNHL()
 nhl.load()
 
 with logging_redirect_tqdm():
