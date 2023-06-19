@@ -1,5 +1,5 @@
-from propstradamus.helpers import scraper, archive, no_vig_odds
-from propstradamus.stats import StatsNHL
+from sportstradamus.helpers import scraper, archive, no_vig_odds
+from sportstradamus.stats import StatsNHL
 from datetime import datetime, timedelta
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm

@@ -1,7 +1,7 @@
-from propstradamus.stats import StatsMLB, StatsNBA, StatsNHL
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL
 import pickle
 import importlib.resources as pkg_resources
-from propstradamus import data
+from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, accuracy_score, roc_auc_score, brier_score_loss

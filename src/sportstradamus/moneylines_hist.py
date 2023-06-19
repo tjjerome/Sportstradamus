@@ -1,9 +1,9 @@
-from propstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents
+from sportstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents
 import pickle
 import numpy as np
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
-from propstradamus import data
+from sportstradamus import data
 from itertools import cycle
 
 filepath = (pkg_resources.files(data) / "archive.dat")

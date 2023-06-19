@@ -1,6 +1,6 @@
-# Propstradamus
+# sportstradamus
 
-Propstradamus is a powerful Python package for processing and analyzing player prop data for the major American sports leagues, including NHL, NFL, MLB, and NBA. It provides a range of functions and methods to assist with extracting, organizing, and making predictions based on player prop data.
+sportstradamus is a powerful Python package for processing and analyzing player prop data for the major American sports leagues, including NHL, NFL, MLB, and NBA. It provides a range of functions and methods to assist with extracting, organizing, and making predictions based on player prop data.
 
 ## Features
 
@@ -13,14 +13,14 @@ Propstradamus is a powerful Python package for processing and analyzing player p
 
 ## Installation
 
-Use the following command to install Propstradamus:
+Use the following command to install sportstradamus:
 
-pip install propstradamus
+pip install sportstradamus
 
 ## Usage
-Here's a simple example to demonstrate how to use Propstradamus:
+Here's a simple example to demonstrate how to use sportstradamus:
 
-import propstradamus as ps
+import sportstradamus as ps
 
 # Load player prop data
 data = ps.load_data('props.csv')
@@ -42,7 +42,7 @@ optimal_strategy = ps.optimize_strategy(clean_data)
 Please refer to the documentation for detailed usage instructions, API reference, and examples.
 
 # Contributing
-Contributions to Propstradamus are welcome! If you find any issues or have suggestions for improvements, please open an issue or submit a pull request. We appreciate your feedback and contributions.
+Contributions to sportstradamus are welcome! If you find any issues or have suggestions for improvements, please open an issue or submit a pull request. We appreciate your feedback and contributions.
 
 # License
 This project is licensed under the MIT License. See the LICENSE file for more information.

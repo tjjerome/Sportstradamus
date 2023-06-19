@@ -1,5 +1,5 @@
-from propstradamus.helpers import archive, get_ev
-from propstradamus.stats import StatsMLB
+from sportstradamus.helpers import archive, get_ev
+from sportstradamus.stats import StatsMLB
 import pandas as pd
 from itertools import combinations
 from scipy.stats import poisson, skellam

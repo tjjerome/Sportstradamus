@@ -1,18 +1,18 @@
-from propstradamus.spiderLogger import logger
+from sportstradamus.spiderLogger import logger
 import os.path
 import numpy as np
 from datetime import datetime, timedelta
 import pickle
 import json
 import importlib.resources as pkg_resources
-from propstradamus import data
+from sportstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
 from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
 from time import sleep
-from propstradamus.helpers import scraper, mlb_pitchers, archive
+from sportstradamus.helpers import scraper, mlb_pitchers, archive
 import pandas as pd
 import warnings
 

@@ -1,4 +1,4 @@
-from propstradamus.stats import StatsNBA, StatsMLB
+from sportstradamus.stats import StatsNBA, StatsMLB
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, precision_score, accuracy_score, roc_auc_score, brier_score_loss
@@ -17,8 +17,8 @@ markets = ['PRA']
 for market in markets:
 
     # X, y = nba.get_training_matrix(market)
-    X = pd.read_csv('src/propstradamus/data/X.csv', index_col=0)
-    y = pd.read_csv('src/propstradamus/data/y.csv', index_col=0)
+    X = pd.read_csv('src/sportstradamus/data/X.csv', index_col=0)
+    y = pd.read_csv('src/sportstradamus/data/y.csv', index_col=0)
 
     X = X.drop(columns=['Game 6', 'Game 7', 'Game 8', 'Game 9'])
 
