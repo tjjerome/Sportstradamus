@@ -146,7 +146,7 @@ class StatsNBA(Stats):
         """
         Load data from files.
         """
-        filepath = pkg_resources.files(data) / 'nba_players.dat'
+        filepath = pkg_resources.files(data) / "nba_players.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.players = pickle.load(infile)
@@ -158,42 +158,45 @@ class StatsNBA(Stats):
         """
         # Fetch regular season game logs
         nba_gamelog = nba.playergamelogs.PlayerGameLogs(
-            season_nullable='2022-23').get_normalized_dict()['PlayerGameLogs']
+            season_nullable="2022-23"
+        ).get_normalized_dict()["PlayerGameLogs"]
 
         # Fetch playoffs game logs
         nba_playoffs = nba.playergamelogs.PlayerGameLogs(
-            season_nullable='2022-23', season_type_nullable='Playoffs').get_normalized_dict()['PlayerGameLogs']
+            season_nullable="2022-23", season_type_nullable="Playoffs"
+        ).get_normalized_dict()["PlayerGameLogs"]
 
         # Combine regular season and playoffs game logs
         self.gamelog = nba_playoffs + nba_gamelog
 
         # Process each game
         for game in tqdm(self.gamelog, desc="Getting NBA stats"):
-            player_id = game['PLAYER_ID']
+            player_id = game["PLAYER_ID"]
 
             if player_id not in self.players:
                 # Fetch player information if not already present
                 self.players[player_id] = nba.commonplayerinfo.CommonPlayerInfo(
-                    player_id=player_id).get_normalized_dict()['CommonPlayerInfo'][0]
+                    player_id=player_id
+                ).get_normalized_dict()["CommonPlayerInfo"][0]
                 sleep(0.5)
 
             # Extract additional game information
-            game['POS'] = self.players[player_id].get('POSITION')
-            game['HOME'] = "vs." in game['MATCHUP']
-            teams = game['MATCHUP'].replace("vs.", "@").split(" @ ")
+            game["POS"] = self.players[player_id].get("POSITION")
+            game["HOME"] = "vs." in game["MATCHUP"]
+            teams = game["MATCHUP"].replace("vs.", "@").split(" @ ")
             for team in teams:
-                if team != game['TEAM_ABBREVIATION']:
-                    game['OPP'] = team
+                if team != game["TEAM_ABBREVIATION"]:
+                    game["OPP"] = team
 
             # Compute derived stats
-            game["PRA"] = game['PTS'] + game['REB'] + game['AST']
-            game["PR"] = game['PTS'] + game['REB']
-            game["PA"] = game['PTS'] + game['AST']
-            game["RA"] = game['REB'] + game['AST']
-            game["BLST"] = game['BLK'] + game['STL']
+            game["PRA"] = game["PTS"] + game["REB"] + game["AST"]
+            game["PR"] = game["PTS"] + game["REB"]
+            game["PA"] = game["PTS"] + game["AST"]
+            game["RA"] = game["REB"] + game["AST"]
+            game["BLST"] = game["BLK"] + game["STL"]
 
         # Save the updated player data
-        with open(pkg_resources.files(data) / 'nba_players.dat', "wb") as outfile:
+        with open(pkg_resources.files(data) / "nba_players.dat", "wb") as outfile:
             pickle.dump(self.players, outfile)
 
     def bucket_stats(self, market, buckets=20):
@@ -212,42 +215,50 @@ class StatsNBA(Stats):
         self.edges = []
 
         # Collect stats for each player
-        for game in tqdm(self.gamelog, unit='games', desc='Bucketing Stats'):
-            player_name = game['PLAYER_NAME']
+        for game in tqdm(self.gamelog, unit="games", desc="Bucketing Stats"):
+            player_name = game["PLAYER_NAME"]
 
             if player_name not in self.playerStats:
-                self.playerStats[player_name] = {'games': []}
+                self.playerStats[player_name] = {"games": []}
 
-            self.playerStats[player_name]['games'].append(game[market])
+            self.playerStats[player_name]["games"].append(game[market])
 
         # Filter players based on minimum games played and non-zero stats
         self.playerStats = {
-            player: stats for player, stats in self.playerStats.items()
-            if len(stats['games']) > 10 and not all(g == 0 for g in stats['games'])
+            player: stats
+            for player, stats in self.playerStats.items()
+            if len(stats["games"]) > 10 and not all(g == 0 for g in stats["games"])
         }
 
         # Compute averages and percentiles
         averages = []
         for player, games in self.playerStats.items():
-            self.playerStats[player]['avg'] = np.mean(
-                games['games']) if games['games'] else 0
-            averages.append(self.playerStats[player]['avg'])
+            self.playerStats[player]["avg"] = (
+                np.mean(games["games"]) if games["games"] else 0
+            )
+            averages.append(self.playerStats[player]["avg"])
 
         # Compute edges for each bucket
         w = int(100 / buckets)
         self.edges = [np.percentile(averages, p) for p in range(0, 101, w)]
         lines = np.zeros(buckets)
         for i in range(1, buckets + 1):
-            lines[i - 1] = np.round(np.mean([
-                v for v in averages if self.edges[i - 1] <= v <= self.edges[i]
-            ]) - 0.5) + 0.5
+            lines[i - 1] = (
+                np.round(
+                    np.mean(
+                        [v for v in averages if self.edges[i - 1] <= v <= self.edges[i]]
+                    )
+                    - 0.5
+                )
+                + 0.5
+            )
 
         # Assign bucket and line values to each player
         for player, games in self.playerStats.items():
             for i in range(buckets):
-                if games['avg'] >= self.edges[i]:
-                    self.playerStats[player]['bucket'] = buckets - i
-                    self.playerStats[player]['line'] = lines[i]
+                if games["avg"] >= self.edges[i]:
+                    self.playerStats[player]["bucket"] = buckets - i
+                    self.playerStats[player]["line"] = lines[i]
 
     def dvpoa(self, team, position, market):
         """
@@ -274,15 +285,17 @@ class StatsNBA(Stats):
         leagueavg = {}
 
         for game in self.gamelog:
-            if game['POS'] == position or game['POS'] == '-'.join(position.split('-')[::-1]):
-                game_id = game['GAME_ID']
+            if game["POS"] == position or game["POS"] == "-".join(
+                position.split("-")[::-1]
+            ):
+                game_id = game["GAME_ID"]
 
                 if game_id not in leagueavg:
                     leagueavg[game_id] = 0
 
                 leagueavg[game_id] += game[market]
 
-                if game['OPP'] == team:
+                if game["OPP"] == team:
                     if game_id not in dvp:
                         dvp[game_id] = 0
 
@@ -309,31 +322,34 @@ class StatsNBA(Stats):
             pandas.DataFrame: The generated DataFrame with the summary of stats.
         """
         if isinstance(date, datetime):
-            date = date.strftime('%Y-%m-%d')
+            date = date.strftime("%Y-%m-%d")
 
-        player = offer['Player']
-        team = offer['Team']
-        market = offer['Market'].replace("H2H ", "")
-        line = offer['Line']
-        opponent = offer['Opponent']
+        player = offer["Player"]
+        team = offer["Team"]
+        market = offer["Market"].replace("H2H ", "")
+        line = offer["Line"]
+        opponent = offer["Opponent"]
 
         if "+" in player:
             bucket = 21
         elif "vs." in player:
             bucket = 22
         elif self.playerStats.get(player):
-            bucket = self.playerStats[player]['bucket']
+            bucket = self.playerStats[player]["bucket"]
         else:
             bucket = 20
-            while bucket > 0 and self.edges[20-bucket] < line:
+            while bucket > 0 and self.edges[20 - bucket] < line:
                 bucket -= 1
 
         try:
-            stats = archive['NBA'][market].get(
-                date, {}).get(player, {}).get(line, [0.5]*9)
-            moneyline = archive['NBA']['Moneyline'].get(
-                date, {}).get(team, np.nan)
-            total = archive['NBA']['Totals'].get(date, {}).get(team, np.nan)
+            stats = (
+                archive["NBA"][market]
+                .get(date, {})
+                .get(player, {})
+                .get(line, [0.5] * 9)
+            )
+            moneyline = archive["NBA"]["Moneyline"].get(date, {}).get(team, np.nan)
+            total = archive["NBA"]["Totals"].get(date, {}).get(team, np.nan)
         except:
             return 0
 
@@ -342,10 +358,10 @@ class StatsNBA(Stats):
         if np.isnan(total):
             total = 229.3
 
-        date = datetime.strptime(date, '%Y-%m-%d')
+        date = datetime.strptime(date, "%Y-%m-%d")
         if "+" in player or "vs." in player:
-            players = player.strip().replace('vs.', '+').split(' + ')
-            opponents = opponent.split('/')
+            players = player.strip().replace("vs.", "+").split(" + ")
+            opponents = opponent.split("/")
             if len(opponents) == 1:
                 opponents = opponents * 2
 
@@ -353,27 +369,35 @@ class StatsNBA(Stats):
             player2_id = nba_static.find_players_by_full_name(players[1])
             if not player1_id or not player2_id:
                 return 0
-            player1_id = player1_id[0]['id']
-            position1 = self.players[player1_id]['POSITION']
-            player2_id = player2_id[0]['id']
-            position2 = self.players[player2_id]['POSITION']
+            player1_id = player1_id[0]["id"]
+            position1 = self.players[player1_id]["POSITION"]
+            player2_id = player2_id[0]["id"]
+            position2 = self.players[player2_id]["POSITION"]
 
             if position1 is None or position2 is None:
                 return 0
 
-            player1_games = [game for game in self.gamelog if
-                             game['PLAYER_NAME'] == players[0] and
-                             datetime.strptime(game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S') < date]
+            player1_games = [
+                game
+                for game in self.gamelog
+                if game["PLAYER_NAME"] == players[0]
+                and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
+            ]
 
             headtohead1 = [
-                game for game in player1_games if game['OPP'] == opponents[0]]
+                game for game in player1_games if game["OPP"] == opponents[0]
+            ]
 
-            player2_games = [game for game in self.gamelog if
-                             game['PLAYER_NAME'] == players[1] and
-                             datetime.strptime(game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S') < date]
+            player2_games = [
+                game
+                for game in self.gamelog
+                if game["PLAYER_NAME"] == players[1]
+                and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
+            ]
 
             headtohead2 = [
-                game for game in player2_games if game['OPP'] == opponents[1]]
+                game for game in player2_games if game["OPP"] == opponents[1]
+            ]
 
             n = min(len(player1_games), len(player2_games))
             m = min(len(headtohead1), len(headtohead2))
@@ -387,12 +411,16 @@ class StatsNBA(Stats):
             dvpoa2 = self.dvpoa(opponents[1], position2, market)
 
             if "+" in player:
-                game_res = np.array([game[market] for game in player1_games]) + \
-                    np.array([game[market] for game in player2_games]) - \
-                    np.array([line] * n)
-                h2h_res = np.array([game[market] for game in headtohead1]) + \
-                    np.array([game[market] for game in headtohead2]) - \
-                    np.array([line] * m)
+                game_res = (
+                    np.array([game[market] for game in player1_games])
+                    + np.array([game[market] for game in player2_games])
+                    - np.array([line] * n)
+                )
+                h2h_res = (
+                    np.array([game[market] for game in headtohead1])
+                    + np.array([game[market] for game in headtohead2])
+                    - np.array([line] * m)
+                )
 
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 + dvpoa2 == 0:
                     dvpoa = 0
@@ -400,12 +428,16 @@ class StatsNBA(Stats):
                     dvpoa = 2 / (1 / dvpoa1 + 1 / dvpoa2)
 
             else:
-                game_res = np.array([game[market] for game in player1_games]) - \
-                    np.array([game[market] for game in player2_games]) + \
-                    np.array([line] * n)
-                h2h_res = np.array([game[market] for game in headtohead1]) - \
-                    np.array([game[market] for game in headtohead2]) + \
-                    np.array([line] * m)
+                game_res = (
+                    np.array([game[market] for game in player1_games])
+                    - np.array([game[market] for game in player2_games])
+                    + np.array([line] * n)
+                )
+                h2h_res = (
+                    np.array([game[market] for game in headtohead1])
+                    - np.array([game[market] for game in headtohead2])
+                    + np.array([line] * m)
+                )
 
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 - dvpoa2 == 0:
                     dvpoa = 0
@@ -419,17 +451,19 @@ class StatsNBA(Stats):
             player_id = nba_static.find_players_by_full_name(player)
             if not player_id:
                 return 0
-            player_id = player_id[0].get('id')
-            position = self.players.get(player_id, {}).get('POSITION')
+            player_id = player_id[0].get("id")
+            position = self.players.get(player_id, {}).get("POSITION")
             if position is None:
                 return 0
 
-            player_games = [game for game in self.gamelog if
-                            game['PLAYER_NAME'] == player and
-                            datetime.strptime(game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S') < date]
+            player_games = [
+                game
+                for game in self.gamelog
+                if game["PLAYER_NAME"] == player
+                and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
+            ]
 
-            headtohead = [
-                game for game in player_games if game['OPP'] == opponent]
+            headtohead = [game for game in player_games if game["OPP"] == opponent]
 
             game_res = [game[market] - line for game in player_games]
             h2h_res = [game[market] - line for game in headtohead]
@@ -441,18 +475,25 @@ class StatsNBA(Stats):
         if np.isnan(odds):
             odds = 0.5
 
-        data = {'DVPOA': dvpoa, 'Odds': odds - .5,
-                'Last5': np.mean([int(i > 0) for i in game_res[:5]]) - .5 if game_res else 0,
-                'Last10': np.mean([int(i > 0) for i in game_res[:10]]) - .5 if game_res else 0,
-                'H2H': np.mean([int(i > 0) for i in h2h_res[:5]]) - .5 if h2h_res else 0,
-                'Avg5': np.mean(game_res[:5]) if game_res[:5] else 0 if game_res else 0,
-                'Avg10': np.mean(game_res[:10]) if game_res[:10] else 0 if game_res else 0,
-                'AvgH2H': np.mean(h2h_res[:5]) if h2h_res[:5] else 0 if h2h_res else 0,
-                'Moneyline': moneyline - 0.5, 'Total': total / 229.3 - 1,
-                'Bucket': bucket if bucket < 21 else 0,
-                'Combo': 1 if bucket == 21 else 0,
-                'Rival': 1 if bucket == 22 else 0
-                }
+        data = {
+            "DVPOA": dvpoa,
+            "Odds": odds - 0.5,
+            "Last5": np.mean([int(i > 0) for i in game_res[:5]]) - 0.5
+            if game_res
+            else 0,
+            "Last10": np.mean([int(i > 0) for i in game_res[:10]]) - 0.5
+            if game_res
+            else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[:5]]) - 0.5 if h2h_res else 0,
+            "Avg5": np.mean(game_res[:5]) if game_res[:5] else 0 if game_res else 0,
+            "Avg10": np.mean(game_res[:10]) if game_res[:10] else 0 if game_res else 0,
+            "AvgH2H": np.mean(h2h_res[:5]) if h2h_res[:5] else 0 if h2h_res else 0,
+            "Moneyline": moneyline - 0.5,
+            "Total": total / 229.3 - 1,
+            "Bucket": bucket if bucket < 21 else 0,
+            "Combo": 1 if bucket == 21 else 0,
+            "Rival": 1 if bucket == 22 else 0,
+        }
 
         if len(game_res) < 6:
             game_res.extend([0] * (6 - len(game_res)))
@@ -460,9 +501,8 @@ class StatsNBA(Stats):
             h2h_res.extend([0] * (5 - len(h2h_res)))
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
-            0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[:6]]).fillna(0).add_prefix('Game '))
+        X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(0).add_prefix("Meeting "))
+        X = X.join(pd.DataFrame([game_res[:6]]).fillna(0).add_prefix("Game "))
 
         return X
 
@@ -480,66 +520,105 @@ class StatsNBA(Stats):
         X = pd.DataFrame()
         results = []
 
-        for game in tqdm(self.gamelog, unit='game', desc='Gathering Training Data'):
-            gameDate = datetime.strptime(
-                game['GAME_DATE'], '%Y-%m-%dT%H:%M:%S')
+        for game in tqdm(self.gamelog, unit="game", desc="Gathering Training Data"):
+            gameDate = datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
             data = {}
 
             try:
-                names = list(archive['NBA'][market].get(
-                    gameDate.strftime('%Y-%m-%d'), {}).keys())
+                names = list(
+                    archive["NBA"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()
+                )
                 for name in names:
-                    if game['PLAYER_NAME'] == name.strip().replace('vs.', '+').split(' + ')[0]:
-                        data[name] = archive['NBA'][market][gameDate.strftime(
-                            '%Y-%m-%d')][name]
+                    if (
+                        game["PLAYER_NAME"]
+                        == name.strip().replace("vs.", "+").split(" + ")[0]
+                    ):
+                        data[name] = archive["NBA"][market][
+                            gameDate.strftime("%Y-%m-%d")
+                        ][name]
             except:
                 continue
 
             for name, archiveData in data.items():
                 offer = {
-                    'Player': name,
-                    'Team': game['TEAM_ABBREVIATION'],
-                    'Market': market,
-                    'Opponent': game['OPP']
+                    "Player": name,
+                    "Team": game["TEAM_ABBREVIATION"],
+                    "Market": market,
+                    "Opponent": game["OPP"],
                 }
 
-                if ' + ' in name or ' vs. ' in name:
-                    player2 = name.replace('vs.', '+').split(' + ')[1].strip()
-                    game2 = next((i for i in self.gamelog if i['GAME_DATE'] == gameDate.strftime(
-                        '%Y-%m-%dT%H:%M:%S') and i['PLAYER_NAME'] == player2), None)
+                if " + " in name or " vs. " in name:
+                    player2 = name.replace("vs.", "+").split(" + ")[1].strip()
+                    game2 = next(
+                        (
+                            i
+                            for i in self.gamelog
+                            if i["GAME_DATE"] == gameDate.strftime("%Y-%m-%dT%H:%M:%S")
+                            and i["PLAYER_NAME"] == player2
+                        ),
+                        None,
+                    )
                     if game2 is None:
                         continue
                     offer = offer | {
-                        'Team': '/'.join([game['TEAM_ABBREVIATION'], game2['TEAM_ABBREVIATION']]),
-                        'Opponent': '/'.join([game['OPP'], game2['OPP']])
+                        "Team": "/".join(
+                            [game["TEAM_ABBREVIATION"], game2["TEAM_ABBREVIATION"]]
+                        ),
+                        "Opponent": "/".join([game["OPP"], game2["OPP"]]),
                     }
 
                 for line, stats in archiveData.items():
-                    if not line == 'Closing Lines' and not game[market] == line:
+                    if not line == "Closing Lines" and not game[market] == line:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             new_get_stats = self.get_stats(
-                                offer | {'Line': line}, gameDate)
+                                offer | {"Line": line}, gameDate
+                            )
                             if isinstance(new_get_stats, pd.DataFrame):
-                                if ' + ' in name:
-                                    player2 = name.split(' + ')[1]
-                                    game2 = next((i for i in self.gamelog if i['PLAYER_NAME'] == player2
-                                                  and i['GAME_ID'] == game['GAME_ID']), None)
+                                if " + " in name:
+                                    player2 = name.split(" + ")[1]
+                                    game2 = next(
+                                        (
+                                            i
+                                            for i in self.gamelog
+                                            if i["PLAYER_NAME"] == player2
+                                            and i["GAME_ID"] == game["GAME_ID"]
+                                        ),
+                                        None,
+                                    )
                                     if game2 is None:
                                         continue
                                     results.append(
-                                        {'Result': 1 if (game[market] + game2[market]) > line else -1})
-                                elif ' vs. ' in name:
-                                    player2 = name.split(' vs. ')[1]
-                                    game2 = next((i for i in self.gamelog if i['PLAYER_NAME'] == player2
-                                                  and i['GAME_ID'] == game['GAME_ID']), None)
+                                        {
+                                            "Result": 1
+                                            if (game[market] + game2[market]) > line
+                                            else -1
+                                        }
+                                    )
+                                elif " vs. " in name:
+                                    player2 = name.split(" vs. ")[1]
+                                    game2 = next(
+                                        (
+                                            i
+                                            for i in self.gamelog
+                                            if i["PLAYER_NAME"] == player2
+                                            and i["GAME_ID"] == game["GAME_ID"]
+                                        ),
+                                        None,
+                                    )
                                     if game2 is None:
                                         continue
                                     results.append(
-                                        {'Result': 1 if (game[market] + line) > game2[market] else -1})
+                                        {
+                                            "Result": 1
+                                            if (game[market] + line) > game2[market]
+                                            else -1
+                                        }
+                                    )
                                 else:
                                     results.append(
-                                        {'Result': 1 if game[market] > line else -1})
+                                        {"Result": 1 if game[market] > line else -1}
+                                    )
 
                                 if X.empty:
                                     X = new_get_stats
@@ -569,7 +648,8 @@ class StatsMLB(Stats):
         """
         super().__init__()
         self.season_start = datetime.strptime(
-            mlb.latest_season()['regularSeasonStartDate'], "%Y-%m-%d").date()
+            mlb.latest_season()["regularSeasonStartDate"], "%Y-%m-%d"
+        ).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
 
@@ -583,76 +663,138 @@ class StatsMLB(Stats):
         game = mlb.boxscore_data(gameId)
         if game:
             self.gameIds.append(gameId)
-            linescore = mlb.get('game_linescore', {'gamePk': str(gameId)})
-            awayTeam = game['teamInfo']['away']['abbreviation']
-            homeTeam = game['teamInfo']['home']['abbreviation']
-            awayPitcher = game['awayPitchers'][1]['personId']
-            awayPitcher = game['away']['players']['ID' +
-                                                  str(awayPitcher)]['person']['fullName']
-            homePitcher = game['homePitchers'][1]['personId']
-            homePitcher = game['home']['players']['ID' +
-                                                  str(homePitcher)]['person']['fullName']
-            awayInning1Runs = linescore['innings'][0]['away']['runs']
-            homeInning1Runs = linescore['innings'][0]['home']['runs']
-            for v in game['away']['players'].values():
-                if v['person']['id'] == game['awayPitchers'][1]['personId'] or v['person']['id'] in game['away']['batters']:
+            linescore = mlb.get("game_linescore", {"gamePk": str(gameId)})
+            awayTeam = game["teamInfo"]["away"]["abbreviation"]
+            homeTeam = game["teamInfo"]["home"]["abbreviation"]
+            awayPitcher = game["awayPitchers"][1]["personId"]
+            awayPitcher = game["away"]["players"]["ID" + str(awayPitcher)]["person"][
+                "fullName"
+            ]
+            homePitcher = game["homePitchers"][1]["personId"]
+            homePitcher = game["home"]["players"]["ID" + str(homePitcher)]["person"][
+                "fullName"
+            ]
+            awayInning1Runs = linescore["innings"][0]["away"]["runs"]
+            homeInning1Runs = linescore["innings"][0]["home"]["runs"]
+            for v in game["away"]["players"].values():
+                if (
+                    v["person"]["id"] == game["awayPitchers"][1]["personId"]
+                    or v["person"]["id"] in game["away"]["batters"]
+                ):
                     n = {
-                        'gameId': game['gameId'],
-                        'playerId': v['person']['id'],
-                        'playerName': v['person']['fullName'],
-                        'position': v.get('position', {'abbreviation': ''})['abbreviation'],
-                        'team': awayTeam,
-                        'opponent': homeTeam,
-                        'opponent pitcher': homePitcher,
-                        'home': False,
-                        'starting pitcher': v['person']['id'] == game['awayPitchers'][1]['personId'],
-                        'starting batter': v['person']['id'] in game['away']['batters'],
-                        'hits': v['stats']['batting'].get('hits', 0),
-                        'total bases': v['stats']['batting'].get('hits', 0) + v['stats']['batting'].get('doubles', 0) + 2*v['stats']['batting'].get('triples', 0) + 3*v['stats']['batting'].get('homeRuns', 0),
-                        'singles': v['stats']['batting'].get('hits', 0)-v['stats']['batting'].get('doubles', 0)-v['stats']['batting'].get('triples', 0)-v['stats']['batting'].get('homeRuns', 0),
-                        'batter strikeouts': v['stats']['batting'].get('strikeOuts', 0),
-                        'runs': v['stats']['batting'].get('runs', 0),
-                        'rbi': v['stats']['batting'].get('rbi', 0),
-                        'hits+runs+rbi': v['stats']['batting'].get('hits', 0) + v['stats']['batting'].get('runs', 0) + v['stats']['batting'].get('rbi', 0),
-                        'walks': v['stats']['batting'].get('baseOnBalls', 0),
-                        'pitcher strikeouts': v['stats']['pitching'].get('strikeOuts', 0),
-                        'walks allowed': v['stats']['pitching'].get('baseOnBalls', 0),
-                        'pitches thrown': v['stats']['pitching'].get('numberOfPitches', 0),
-                        'runs allowed': v['stats']['pitching'].get('runs', 0),
-                        'hits allowed': v['stats']['pitching'].get('hits', 0),
-                        'pitching outs': 3*int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[0]) + int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[1]),
-                        '1st inning runs allowed': homeInning1Runs if v['person']['id'] == game['awayPitchers'][1]['personId'] else 0
+                        "gameId": game["gameId"],
+                        "playerId": v["person"]["id"],
+                        "playerName": v["person"]["fullName"],
+                        "position": v.get("position", {"abbreviation": ""})[
+                            "abbreviation"
+                        ],
+                        "team": awayTeam,
+                        "opponent": homeTeam,
+                        "opponent pitcher": homePitcher,
+                        "home": False,
+                        "starting pitcher": v["person"]["id"]
+                        == game["awayPitchers"][1]["personId"],
+                        "starting batter": v["person"]["id"] in game["away"]["batters"],
+                        "hits": v["stats"]["batting"].get("hits", 0),
+                        "total bases": v["stats"]["batting"].get("hits", 0)
+                        + v["stats"]["batting"].get("doubles", 0)
+                        + 2 * v["stats"]["batting"].get("triples", 0)
+                        + 3 * v["stats"]["batting"].get("homeRuns", 0),
+                        "singles": v["stats"]["batting"].get("hits", 0)
+                        - v["stats"]["batting"].get("doubles", 0)
+                        - v["stats"]["batting"].get("triples", 0)
+                        - v["stats"]["batting"].get("homeRuns", 0),
+                        "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
+                        "runs": v["stats"]["batting"].get("runs", 0),
+                        "rbi": v["stats"]["batting"].get("rbi", 0),
+                        "hits+runs+rbi": v["stats"]["batting"].get("hits", 0)
+                        + v["stats"]["batting"].get("runs", 0)
+                        + v["stats"]["batting"].get("rbi", 0),
+                        "walks": v["stats"]["batting"].get("baseOnBalls", 0),
+                        "pitcher strikeouts": v["stats"]["pitching"].get(
+                            "strikeOuts", 0
+                        ),
+                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
+                        "pitches thrown": v["stats"]["pitching"].get(
+                            "numberOfPitches", 0
+                        ),
+                        "runs allowed": v["stats"]["pitching"].get("runs", 0),
+                        "hits allowed": v["stats"]["pitching"].get("hits", 0),
+                        "pitching outs": 3
+                        * int(
+                            v["stats"]["pitching"]
+                            .get("inningsPitched", "0.0")
+                            .split(".")[0]
+                        )
+                        + int(
+                            v["stats"]["pitching"]
+                            .get("inningsPitched", "0.0")
+                            .split(".")[1]
+                        ),
+                        "1st inning runs allowed": homeInning1Runs
+                        if v["person"]["id"] == game["awayPitchers"][1]["personId"]
+                        else 0,
                     }
                     self.gamelog.append(n)
 
-            for v in game['home']['players'].values():
-                if v['person']['id'] == game['homePitchers'][1]['personId'] or v['person']['id'] in game['home']['batters']:
+            for v in game["home"]["players"].values():
+                if (
+                    v["person"]["id"] == game["homePitchers"][1]["personId"]
+                    or v["person"]["id"] in game["home"]["batters"]
+                ):
                     n = {
-                        'gameId': game['gameId'],
-                        'playerId': v['person']['id'],
-                        'playerName': v['person']['fullName'],
-                        'position': v.get('position', {'abbreviation': ''})['abbreviation'],
-                        'team': homeTeam,
-                        'opponent': awayTeam,
-                        'opponent pitcher': awayPitcher,
-                        'home': True,
-                        'starting pitcher': v['person']['id'] == game['homePitchers'][1]['personId'],
-                        'starting batter': v['person']['id'] in game['home']['batters'],
-                        'hits': v['stats']['batting'].get('hits', 0),
-                        'total bases': v['stats']['batting'].get('hits', 0) + v['stats']['batting'].get('doubles', 0) + 2*v['stats']['batting'].get('triples', 0) + 3*v['stats']['batting'].get('homeRuns', 0),
-                        'singles': v['stats']['batting'].get('hits', 0)-v['stats']['batting'].get('doubles', 0)-v['stats']['batting'].get('triples', 0)-v['stats']['batting'].get('homeRuns', 0),
-                        'batter strikeouts': v['stats']['batting'].get('strikeOuts', 0),
-                        'runs': v['stats']['batting'].get('runs', 0),
-                        'rbi': v['stats']['batting'].get('rbi', 0),
-                        'hits+runs+rbi': v['stats']['batting'].get('hits', 0) + v['stats']['batting'].get('runs', 0) + v['stats']['batting'].get('rbi', 0),
-                        'walks': v['stats']['batting'].get('baseOnBalls', 0),
-                        'pitcher strikeouts': v['stats']['pitching'].get('strikeOuts', 0),
-                        'walks allowed': v['stats']['pitching'].get('baseOnBalls', 0),
-                        'pitches thrown': v['stats']['pitching'].get('numberOfPitches', 0),
-                        'runs allowed': v['stats']['pitching'].get('runs', 0),
-                        'hits allowed': v['stats']['pitching'].get('hits', 0),
-                        'pitching outs': 3*int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[0]) + int(v['stats']['pitching'].get('inningsPitched', '0.0').split('.')[1]),
-                        '1st inning runs allowed': awayInning1Runs if v['person']['id'] == game['homePitchers'][1]['personId'] else 0
+                        "gameId": game["gameId"],
+                        "playerId": v["person"]["id"],
+                        "playerName": v["person"]["fullName"],
+                        "position": v.get("position", {"abbreviation": ""})[
+                            "abbreviation"
+                        ],
+                        "team": homeTeam,
+                        "opponent": awayTeam,
+                        "opponent pitcher": awayPitcher,
+                        "home": True,
+                        "starting pitcher": v["person"]["id"]
+                        == game["homePitchers"][1]["personId"],
+                        "starting batter": v["person"]["id"] in game["home"]["batters"],
+                        "hits": v["stats"]["batting"].get("hits", 0),
+                        "total bases": v["stats"]["batting"].get("hits", 0)
+                        + v["stats"]["batting"].get("doubles", 0)
+                        + 2 * v["stats"]["batting"].get("triples", 0)
+                        + 3 * v["stats"]["batting"].get("homeRuns", 0),
+                        "singles": v["stats"]["batting"].get("hits", 0)
+                        - v["stats"]["batting"].get("doubles", 0)
+                        - v["stats"]["batting"].get("triples", 0)
+                        - v["stats"]["batting"].get("homeRuns", 0),
+                        "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
+                        "runs": v["stats"]["batting"].get("runs", 0),
+                        "rbi": v["stats"]["batting"].get("rbi", 0),
+                        "hits+runs+rbi": v["stats"]["batting"].get("hits", 0)
+                        + v["stats"]["batting"].get("runs", 0)
+                        + v["stats"]["batting"].get("rbi", 0),
+                        "walks": v["stats"]["batting"].get("baseOnBalls", 0),
+                        "pitcher strikeouts": v["stats"]["pitching"].get(
+                            "strikeOuts", 0
+                        ),
+                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
+                        "pitches thrown": v["stats"]["pitching"].get(
+                            "numberOfPitches", 0
+                        ),
+                        "runs allowed": v["stats"]["pitching"].get("runs", 0),
+                        "hits allowed": v["stats"]["pitching"].get("hits", 0),
+                        "pitching outs": 3
+                        * int(
+                            v["stats"]["pitching"]
+                            .get("inningsPitched", "0.0")
+                            .split(".")[0]
+                        )
+                        + int(
+                            v["stats"]["pitching"]
+                            .get("inningsPitched", "0.0")
+                            .split(".")[1]
+                        ),
+                        "1st inning runs allowed": awayInning1Runs
+                        if v["person"]["id"] == game["homePitchers"][1]["personId"]
+                        else 0,
                     }
                     self.gamelog.append(n)
 
@@ -660,13 +802,13 @@ class StatsMLB(Stats):
         """
         Loads MLB player statistics from a file.
         """
-        filepath = (pkg_resources.files(data) / "mlb_data.dat")
+        filepath = pkg_resources.files(data) / "mlb_data.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 mlb_data = pickle.load(infile)
 
-            self.gamelog = mlb_data['gamelog']
-            self.gameIds = mlb_data['games']
+            self.gamelog = mlb_data["gamelog"]
+            self.gameIds = mlb_data["games"]
 
     def update(self):
         """
@@ -675,9 +817,16 @@ class StatsMLB(Stats):
         # Get the current MLB schedule
         today = datetime.today().date()
         mlb_game_ids = mlb.schedule(
-            start_date=datetime.strptime('2022-04-07', '%Y-%m-%d').date(), end_date=today)
-        mlb_game_ids = [game['game_id'] for game in mlb_game_ids if game['status']
-                        == 'Final' and game['game_type'] != 'E' and game['game_type'] != 'S']
+            start_date=datetime.strptime("2022-04-07", "%Y-%m-%d").date(),
+            end_date=today,
+        )
+        mlb_game_ids = [
+            game["game_id"]
+            for game in mlb_game_ids
+            if game["status"] == "Final"
+            and game["game_type"] != "E"
+            and game["game_type"] != "S"
+        ]
 
         # Parse the game stats
         for id in tqdm(mlb_game_ids, desc="Getting MLB Stats"):
@@ -686,13 +835,14 @@ class StatsMLB(Stats):
 
         # Remove old games to prevent file bloat
         for game in self.gamelog:
-            if datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() < today - timedelta(days=730):
+            if datetime.strptime(
+                game["gameId"][:10], "%Y/%m/%d"
+            ).date() < today - timedelta(days=730):
                 self.gamelog.remove(game)
 
         # Write to file
         with open((pkg_resources.files(data) / "mlb_data.dat"), "wb") as outfile:
-            pickle.dump(
-                {'games': self.gameIds, 'gamelog': self.gamelog}, outfile)
+            pickle.dump({"games": self.gameIds, "gamelog": self.gamelog}, outfile)
 
     def bucket_stats(self, market, buckets=20):
         """
@@ -710,30 +860,40 @@ class StatsMLB(Stats):
         self.edges = []
 
         # Iterate over game log and gather stats for each player
-        for game in tqdm(self.gamelog, unit='games', desc='Bucketing Stats'):
+        for game in tqdm(self.gamelog, unit="games", desc="Bucketing Stats"):
             # Skip non-starting pitchers or non-starting batters depending on the market
-            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
+            if (
+                any([string in market for string in ["allowed", "pitch"]])
+                and not game["starting pitcher"]
+            ):
                 continue
-            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
+            elif (
+                not any([string in market for string in ["allowed", "pitch"]])
+                and not game["starting batter"]
+            ):
                 continue
 
             # Check if player exists in playerStats dictionary
-            if not game['playerName'] in self.playerStats:
-                self.playerStats[game['playerName']] = {'games': []}
+            if not game["playerName"] in self.playerStats:
+                self.playerStats[game["playerName"]] = {"games": []}
 
             # Add the stat for the current game to the player's games list
-            self.playerStats[game['playerName']]['games'].append(game[market])
+            self.playerStats[game["playerName"]]["games"].append(game[market])
 
         # Remove players with insufficient games or all zero stats
-        self.playerStats = {k: v for k, v in self.playerStats.items() if len(
-            v['games']) > 10 and not all([g == 0 for g in v['games']])}
+        self.playerStats = {
+            k: v
+            for k, v in self.playerStats.items()
+            if len(v["games"]) > 10 and not all([g == 0 for g in v["games"]])
+        }
 
         # Calculate average stats for each player
         averages = []
         for player, games in self.playerStats.items():
-            self.playerStats[player]['avg'] = np.mean(
-                games['games']) if games['games'] else 0
-            averages.append(self.playerStats[player]['avg'])
+            self.playerStats[player]["avg"] = (
+                np.mean(games["games"]) if games["games"] else 0
+            )
+            averages.append(self.playerStats[player]["avg"])
 
         # Determine edges for each bucket based on percentiles
         w = int(100 / buckets)
@@ -742,15 +902,26 @@ class StatsMLB(Stats):
         # Calculate lines for each bucket based on average values
         lines = np.zeros(buckets)
         for i in range(1, buckets + 1):
-            lines[i - 1] = np.round(np.mean([v for v in averages if v <=
-                                    self.edges[i] and v >= self.edges[i - 1]]) - 0.5) + 0.5
+            lines[i - 1] = (
+                np.round(
+                    np.mean(
+                        [
+                            v
+                            for v in averages
+                            if v <= self.edges[i] and v >= self.edges[i - 1]
+                        ]
+                    )
+                    - 0.5
+                )
+                + 0.5
+            )
 
         # Assign bucket and line values to each player based on their average stat
         for player, games in self.playerStats.items():
             for i in range(0, buckets):
-                if games['avg'] >= self.edges[i]:
-                    self.playerStats[player]['bucket'] = buckets - i
-                    self.playerStats[player]['line'] = lines[i]
+                if games["avg"] >= self.edges[i]:
+                    self.playerStats[player]["bucket"] = buckets - i
+                    self.playerStats[player]["line"] = lines[i]
 
     def dvpoa(self, team, market):
         """
@@ -772,16 +943,24 @@ class StatsMLB(Stats):
             return self.dvp_index[market][team]
 
         # Calculate DVP (Defense Versus Position) and league average for the specified team and market
-        if any([string in market for string in ['allowed', 'pitch']]):
-            dvp = [game[market] for game in self.gamelog if game['starting pitcher']
-                   and game['opponent'] == team]
-            leagueavg = [game[market]
-                         for game in self.gamelog if game['starting pitcher']]
+        if any([string in market for string in ["allowed", "pitch"]]):
+            dvp = [
+                game[market]
+                for game in self.gamelog
+                if game["starting pitcher"] and game["opponent"] == team
+            ]
+            leagueavg = [
+                game[market] for game in self.gamelog if game["starting pitcher"]
+            ]
         else:
-            dvp = [game[market] for game in self.gamelog if game['starting batter']
-                   and game['opponent pitcher'] == team]
-            leagueavg = [game[market]
-                         for game in self.gamelog if game['starting batter']]
+            dvp = [
+                game[market]
+                for game in self.gamelog
+                if game["starting batter"] and game["opponent pitcher"] == team
+            ]
+            leagueavg = [
+                game[market] for game in self.gamelog if game["starting batter"]
+            ]
 
         # Check if DVP values exist
         if not dvp:
@@ -807,59 +986,83 @@ class StatsMLB(Stats):
             pandas.DataFrame: The calculated statistics as a DataFrame.
         """
         if type(date) is datetime:
-            date = date.strftime('%Y-%m-%d')
+            date = date.strftime("%Y-%m-%d")
 
-        player = offer['Player']
-        team = offer['Team']
-        market = offer['Market'].replace("H2H ", "")
-        line = offer['Line']
-        opponent = offer['Opponent']
+        player = offer["Player"]
+        team = offer["Team"]
+        market = offer["Market"].replace("H2H ", "")
+        line = offer["Line"]
+        opponent = offer["Opponent"]
 
         if "+" in player:
             bucket = 21
         elif "vs." in player:
             bucket = 22
         elif self.playerStats.get(player):
-            bucket = self.playerStats[player]['bucket']
+            bucket = self.playerStats[player]["bucket"]
         else:
             bucket = 20
             while bucket > 0 and self.edges[20 - bucket] < line:
                 bucket -= 1
 
         try:
-            if datetime.strptime(date, '%Y-%m-%d').date() < datetime.today().date():
-                if offer.get('Pitcher'):
-                    pitcher = offer['Pitcher']
+            if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
+                if offer.get("Pitcher"):
+                    pitcher = offer["Pitcher"]
                 else:
-                    if '+' in player or 'vs.' in player:
-                        players = player.strip().replace('vs.', '+').split(' + ')
-                        pitcher1 = next((game['opponent pitcher'] for game in self.gamelog if
-                                        game["playerName"] == players[0] and game['gameId'][:10] == date.replace('-', '/') and
-                                        game['team'] == team), None)['opponent pitcher']
-                        pitcher2 = next((game['opponent pitcher'] for game in self.gamelog if
-                                        game["playerName"] == players[1] and game['gameId'][:10] == date.replace('-', '/') and
-                                        game['team'] == team), None)['opponent pitcher']
-                        pitcher = '/'.join([pitcher1, pitcher2])
+                    if "+" in player or "vs." in player:
+                        players = player.strip().replace("vs.", "+").split(" + ")
+                        pitcher1 = next(
+                            (
+                                game["opponent pitcher"]
+                                for game in self.gamelog
+                                if game["playerName"] == players[0]
+                                and game["gameId"][:10] == date.replace("-", "/")
+                                and game["team"] == team
+                            ),
+                            None,
+                        )["opponent pitcher"]
+                        pitcher2 = next(
+                            (
+                                game["opponent pitcher"]
+                                for game in self.gamelog
+                                if game["playerName"] == players[1]
+                                and game["gameId"][:10] == date.replace("-", "/")
+                                and game["team"] == team
+                            ),
+                            None,
+                        )["opponent pitcher"]
+                        pitcher = "/".join([pitcher1, pitcher2])
                     else:
-                        pitcher = next((game['opponent pitcher'] for game in self.gamelog if
-                                        game["playerName"] == player and game['gameId'][:10] == date.replace('-', '/') and
-                                        game['team'] == team), None)['opponent pitcher']
+                        pitcher = next(
+                            (
+                                game["opponent pitcher"]
+                                for game in self.gamelog
+                                if game["playerName"] == player
+                                and game["gameId"][:10] == date.replace("-", "/")
+                                and game["team"] == team
+                            ),
+                            None,
+                        )["opponent pitcher"]
             else:
-                if '+' in player or 'vs.' in player:
-                    opponents = opponent.split('/')
+                if "+" in player or "vs." in player:
+                    opponents = opponent.split("/")
                     if len(opponents) == 1:
                         opponents = opponents * 2
                     pitcher1 = self.pitchers[opponents[0]]
                     pitcher2 = self.pitchers[opponents[1]]
-                    pitcher = '/'.join([pitcher1, pitcher2])
+                    pitcher = "/".join([pitcher1, pitcher2])
                 else:
                     pitcher = self.pitchers[opponent]
 
-            stats = archive['MLB'][market].get(date, {}).get(
-                player, {}).get(line, [0.5] * 9)
-            moneyline = archive['MLB']['Moneyline'].get(
-                date, {}).get(team, 0.5)
-            total = archive['MLB']['Totals'].get(date, {}).get(team, 8.3)
+            stats = (
+                archive["MLB"][market]
+                .get(date, {})
+                .get(player, {})
+                .get(line, [0.5] * 9)
+            )
+            moneyline = archive["MLB"]["Moneyline"].get(date, {}).get(team, 0.5)
+            total = archive["MLB"]["Totals"].get(date, {}).get(team, 8.3)
         except:
             return 0
 
@@ -868,40 +1071,64 @@ class StatsMLB(Stats):
         if np.isnan(total):
             total = 8.3
 
-        date = datetime.strptime(date, '%Y-%m-%d')
+        date = datetime.strptime(date, "%Y-%m-%d")
 
         if "+" in player or "vs." in player:
-            players = player.strip().replace('vs.', '+').split(' + ')
-            opponents = opponent.split('/')
+            players = player.strip().replace("vs.", "+").split(" + ")
+            opponents = opponent.split("/")
             if len(opponents) == 1:
                 opponents = opponents * 2
-            pitchers = pitcher.split('/')
+            pitchers = pitcher.split("/")
 
-            if any([string in market for string in ['allowed', 'pitch']]):
-                player1_games = [game for game in self.gamelog
-                                 if game['playerName'] == players[0] and game['starting pitcher'] and
-                                 datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
-                player2_games = [game for game in self.gamelog
-                                 if game['playerName'] == players[1] and game['starting pitcher'] and
-                                 datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
+            if any([string in market for string in ["allowed", "pitch"]]):
+                player1_games = [
+                    game
+                    for game in self.gamelog
+                    if game["playerName"] == players[0]
+                    and game["starting pitcher"]
+                    and datetime.strptime(game["gameId"][:10], "%Y/%m/%d") < date
+                ]
+                player2_games = [
+                    game
+                    for game in self.gamelog
+                    if game["playerName"] == players[1]
+                    and game["starting pitcher"]
+                    and datetime.strptime(game["gameId"][:10], "%Y/%m/%d") < date
+                ]
                 headtohead1 = [
-                    game for game in player1_games if game['opponent'] == opponents[0]]
+                    game for game in player1_games if game["opponent"] == opponents[0]
+                ]
                 headtohead2 = [
-                    game for game in player2_games if game['opponent'] == opponents[1]]
+                    game for game in player2_games if game["opponent"] == opponents[1]
+                ]
 
                 dvpoa1 = self.dvpoa(opponents[0], market)
                 dvpoa2 = self.dvpoa(opponents[1], market)
             else:
-                player1_games = [game for game in self.gamelog
-                                 if game['playerName'] == players[0] and game['starting batter'] and
-                                 datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
-                player2_games = [game for game in self.gamelog
-                                 if game['playerName'] == players[1] and game['starting batter'] and
-                                 datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
+                player1_games = [
+                    game
+                    for game in self.gamelog
+                    if game["playerName"] == players[0]
+                    and game["starting batter"]
+                    and datetime.strptime(game["gameId"][:10], "%Y/%m/%d") < date
+                ]
+                player2_games = [
+                    game
+                    for game in self.gamelog
+                    if game["playerName"] == players[1]
+                    and game["starting batter"]
+                    and datetime.strptime(game["gameId"][:10], "%Y/%m/%d") < date
+                ]
                 headtohead1 = [
-                    game for game in player1_games if game['opponent pitcher'] == pitchers[0]]
+                    game
+                    for game in player1_games
+                    if game["opponent pitcher"] == pitchers[0]
+                ]
                 headtohead2 = [
-                    game for game in player2_games if game['opponent pitcher'] == pitchers[1]]
+                    game
+                    for game in player2_games
+                    if game["opponent pitcher"] == pitchers[1]
+                ]
 
                 dvpoa1 = self.dvpoa(pitchers[0], market)
                 dvpoa2 = self.dvpoa(pitchers[1], market)
@@ -915,24 +1142,32 @@ class StatsMLB(Stats):
             headtohead2 = headtohead2[:m]
 
             if "+" in player:
-                game_res = np.array([game[market] for game in player1_games]) + \
-                    np.array([game[market] for game in player2_games]) - \
-                    np.array([line] * n)
-                h2h_res = np.array([game[market] for game in headtohead1]) + \
-                    np.array([game[market] for game in headtohead2]) - \
-                    np.array([line] * m)
+                game_res = (
+                    np.array([game[market] for game in player1_games])
+                    + np.array([game[market] for game in player2_games])
+                    - np.array([line] * n)
+                )
+                h2h_res = (
+                    np.array([game[market] for game in headtohead1])
+                    + np.array([game[market] for game in headtohead2])
+                    - np.array([line] * m)
+                )
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 + dvpoa2 == 0:
                     dvpoa = 0
                 else:
                     dvpoa = 2 / (1 / dvpoa1 + 1 / dvpoa2)
 
             else:
-                game_res = np.array([game[market] for game in player1_games]) - \
-                    np.array([game[market] for game in player2_games]) + \
-                    np.array([line] * n)
-                h2h_res = np.array([game[market] for game in headtohead1]) - \
-                    np.array([game[market] for game in headtohead2]) + \
-                    np.array([line] * m)
+                game_res = (
+                    np.array([game[market] for game in player1_games])
+                    - np.array([game[market] for game in player2_games])
+                    + np.array([line] * n)
+                )
+                h2h_res = (
+                    np.array([game[market] for game in headtohead1])
+                    - np.array([game[market] for game in headtohead2])
+                    + np.array([line] * m)
+                )
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 - dvpoa2 == 0:
                     dvpoa = 0
                 else:
@@ -942,20 +1177,30 @@ class StatsMLB(Stats):
             h2h_res = list(h2h_res)
 
         else:
-            if any([string in market for string in ['allowed', 'pitch']]):
-                player_games = [game for game in self.gamelog
-                                if game['playerName'] == player and game['starting pitcher'] and
-                                datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
+            if any([string in market for string in ["allowed", "pitch"]]):
+                player_games = [
+                    game
+                    for game in self.gamelog
+                    if game["playerName"] == player
+                    and game["starting pitcher"]
+                    and datetime.strptime(game["gameId"][:10], "%Y/%m/%d") < date
+                ]
                 headtohead = [
-                    game for game in player_games if game['opponent'] == opponent]
+                    game for game in player_games if game["opponent"] == opponent
+                ]
 
                 dvpoa = self.dvpoa(opponent, market)
             else:
-                player_games = [game for game in self.gamelog
-                                if game['playerName'] == player and game['starting batter'] and
-                                datetime.strptime(game['gameId'][:10], '%Y/%m/%d') < date]
+                player_games = [
+                    game
+                    for game in self.gamelog
+                    if game["playerName"] == player
+                    and game["starting batter"]
+                    and datetime.strptime(game["gameId"][:10], "%Y/%m/%d") < date
+                ]
                 headtohead = [
-                    game for game in player_games if game['opponent pitcher'] == pitcher]
+                    game for game in player_games if game["opponent pitcher"] == pitcher
+                ]
 
                 dvpoa = self.dvpoa(pitcher, market)
 
@@ -968,17 +1213,35 @@ class StatsMLB(Stats):
             odds = 0.5
 
         data = {
-            'DVPOA': dvpoa, 'Odds': odds - .5,
-            'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5 if game_res else 0,
-            'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5 if game_res else 0,
-            'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5 if h2h_res else 0,
-            'Avg5': np.mean(game_res[:5]) if len(game_res[-5:]) else 0 if game_res else 0,
-            'Avg10': np.mean(game_res[:10]) if len(game_res[-10:]) else 0 if game_res else 0,
-            'AvgH2H': np.mean(h2h_res[:5]) if len(h2h_res[-5:]) else 0 if h2h_res else 0,
-            'Moneyline': moneyline - 0.5, 'Total': total / 8.3 - 1,
-            'Bucket': bucket if bucket < 21 else 0,
-            'Combo': 1 if bucket == 21 else 0,
-            'Rival': 1 if bucket == 22 else 0
+            "DVPOA": dvpoa,
+            "Odds": odds - 0.5,
+            "Last5": np.mean([int(i > 0) for i in game_res[-5:]]) - 0.5
+            if game_res
+            else 0,
+            "Last10": np.mean([int(i > 0) for i in game_res[-10:]]) - 0.5
+            if game_res
+            else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]]) - 0.5 if h2h_res else 0,
+            "Avg5": np.mean(game_res[:5])
+            if len(game_res[-5:])
+            else 0
+            if game_res
+            else 0,
+            "Avg10": np.mean(game_res[:10])
+            if len(game_res[-10:])
+            else 0
+            if game_res
+            else 0,
+            "AvgH2H": np.mean(h2h_res[:5])
+            if len(h2h_res[-5:])
+            else 0
+            if h2h_res
+            else 0,
+            "Moneyline": moneyline - 0.5,
+            "Total": total / 8.3 - 1,
+            "Bucket": bucket if bucket < 21 else 0,
+            "Combo": 1 if bucket == 21 else 0,
+            "Rival": 1 if bucket == 22 else 0,
         }
 
         if len(game_res) < 6:
@@ -989,10 +1252,8 @@ class StatsMLB(Stats):
             h2h_res = [0] * i + h2h_res
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[-5:]])
-                   .fillna(0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[-6:]])
-                   .fillna(0).add_prefix('Game '))
+        X = X.join(pd.DataFrame([h2h_res[-5:]]).fillna(0).add_prefix("Meeting "))
+        X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
 
         return X
 
@@ -1017,23 +1278,34 @@ class StatsMLB(Stats):
         self.bucket_stats(market)
 
         # Iterate over the gamelog to collect training data
-        for game in tqdm(self.gamelog, unit='games', desc='Getting Training Data'):
+        for game in tqdm(self.gamelog, unit="games", desc="Getting Training Data"):
             # Skip games without starting pitcher or starting batter based on market type
-            if any([string in market for string in ['allowed', 'pitch']]) and not game['starting pitcher']:
+            if (
+                any([string in market for string in ["allowed", "pitch"]])
+                and not game["starting pitcher"]
+            ):
                 continue
-            elif not any([string in market for string in ['allowed', 'pitch']]) and not game['starting batter']:
+            elif (
+                not any([string in market for string in ["allowed", "pitch"]])
+                and not game["starting batter"]
+            ):
                 continue
 
             # Retrieve data from the archive based on game date and player name
             data = {}
-            gameDate = datetime.strptime(game['gameId'][:10], '%Y/%m/%d')
+            gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
             try:
-                names = list(archive['MLB'][market].get(
-                    gameDate.strftime('%Y-%m-%d'), {}).keys())
+                names = list(
+                    archive["MLB"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()
+                )
                 for name in names:
-                    if game['playerName'] == name.strip().replace('vs.', '+').split(' + ')[0]:
-                        data[name] = archive['MLB'][market][gameDate.strftime(
-                            '%Y-%m-%d')][name]
+                    if (
+                        game["playerName"]
+                        == name.strip().replace("vs.", "+").split(" + ")[0]
+                    ):
+                        data[name] = archive["MLB"][market][
+                            gameDate.strftime("%Y-%m-%d")
+                        ][name]
             except:
                 continue
 
@@ -1041,56 +1313,91 @@ class StatsMLB(Stats):
             for name, archiveData in data.items():
                 # Construct an offer dictionary with player, team, market, opponent, and pitcher information
                 offer = {
-                    'Player': name,
-                    'Team': game['team'],
-                    'Market': market,
-                    'Opponent': game['opponent'],
-                    'Pitcher': game['opponent pitcher']
+                    "Player": name,
+                    "Team": game["team"],
+                    "Market": market,
+                    "Opponent": game["opponent"],
+                    "Pitcher": game["opponent pitcher"],
                 }
 
                 # Modify offer for dual player markets
-                if ' + ' in name or ' vs. ' in name:
-                    player2 = name.replace('vs.', '+').split(' + ')[1]
-                    game2 = next((i for i in self.gamelog if i['gameId'][:10] == gameDate.strftime(
-                        '%Y/%m/%d') and i['playerName'] == player2), None)
+                if " + " in name or " vs. " in name:
+                    player2 = name.replace("vs.", "+").split(" + ")[1]
+                    game2 = next(
+                        (
+                            i
+                            for i in self.gamelog
+                            if i["gameId"][:10] == gameDate.strftime("%Y/%m/%d")
+                            and i["playerName"] == player2
+                        ),
+                        None,
+                    )
                     if game2 is None:
                         continue
                     offer = offer | {
-                        'Team': '/'.join([game['team'], game2['team']]),
-                        'Opponent': '/'.join([game['opponent'], game2['opponent']]),
-                        'Pitcher': '/'.join([game['opponent pitcher'], game2['opponent pitcher']])
+                        "Team": "/".join([game["team"], game2["team"]]),
+                        "Opponent": "/".join([game["opponent"], game2["opponent"]]),
+                        "Pitcher": "/".join(
+                            [game["opponent pitcher"], game2["opponent pitcher"]]
+                        ),
                     }
 
                 # Process stats for each line
                 for line, stats in archiveData.items():
                     # Skip if line is the same as game value
-                    if not line == 'Closing Lines' and not game[market] == line:
+                    if not line == "Closing Lines" and not game[market] == line:
                         # Retrieve stats using get_stats method
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             new_get_stats = self.get_stats(
-                                offer | {'Line': line}, gameDate)
+                                offer | {"Line": line}, gameDate
+                            )
                             if type(new_get_stats) is pd.DataFrame:
                                 # Determine the result based on market type and comparison with the line
-                                if ' + ' in name:
-                                    player2 = name.split(' + ')[1]
+                                if " + " in name:
+                                    player2 = name.split(" + ")[1]
                                     game2 = next(
-                                        (i for i in self.gamelog if i['playerName'] == player2 and i['gameId'] == game['gameId']), None)
+                                        (
+                                            i
+                                            for i in self.gamelog
+                                            if i["playerName"] == player2
+                                            and i["gameId"] == game["gameId"]
+                                        ),
+                                        None,
+                                    )
                                     if game2 is None:
                                         continue
                                     results.append(
-                                        {'Result': 1 if (game[market] + game2[market]) > line else -1})
-                                elif ' vs. ' in name:
-                                    player2 = name.split(' vs. ')[1]
+                                        {
+                                            "Result": 1
+                                            if (game[market] + game2[market]) > line
+                                            else -1
+                                        }
+                                    )
+                                elif " vs. " in name:
+                                    player2 = name.split(" vs. ")[1]
                                     game2 = next(
-                                        (i for i in self.gamelog if i['playerName'] == player2 and i['gameId'] == game['gameId']), None)
+                                        (
+                                            i
+                                            for i in self.gamelog
+                                            if i["playerName"] == player2
+                                            and i["gameId"] == game["gameId"]
+                                        ),
+                                        None,
+                                    )
                                     if game2 is None:
                                         continue
                                     results.append(
-                                        {'Result': 1 if (game[market] + line) > game2[market] else -1})
+                                        {
+                                            "Result": 1
+                                            if (game[market] + line) > game2[market]
+                                            else -1
+                                        }
+                                    )
                                 else:
                                     results.append(
-                                        {'Result': 1 if game[market] > line else -1})
+                                        {"Result": 1 if game[market] > line else -1}
+                                    )
 
                                 # Concatenate retrieved stats into the training data matrix
                                 if X.empty:
@@ -1134,12 +1441,12 @@ class StatsNHL(Stats):
         Returns:
             None
         """
-        filepath_skater = (pkg_resources.files(data) / "nhl_skater_data.dat")
+        filepath_skater = pkg_resources.files(data) / "nhl_skater_data.dat"
         if os.path.isfile(filepath_skater):
             with open(filepath_skater, "rb") as infile:
                 self.skater_data = pickle.load(infile)
 
-        filepath_goalie = (pkg_resources.files(data) / "nhl_goalie_data.dat")
+        filepath_goalie = pkg_resources.files(data) / "nhl_goalie_data.dat"
         if os.path.isfile(filepath_goalie):
             with open(filepath_goalie, "rb") as infile:
                 self.goalie_data = pickle.load(infile)
@@ -1158,62 +1465,113 @@ class StatsNHL(Stats):
 
         # Skater data update
         if self.skater_data:
-            startDate = self.skater_data[-1]['gameDate']
+            startDate = self.skater_data[-1]["gameDate"]
         else:
-            startDate = self.season_start.strftime('%Y-%m-%d')
+            startDate = self.season_start.strftime("%Y-%m-%d")
         skater_params = {
-            'isAggregate': 'false',
-            'isGame': 'true',
-            'sort': '[{"property":"gameDate","direction":"ASC"},{"property":"playerId","direction":"ASC"}]',
-            'start': 0,
-            'limit': 100,
-            'factCayenneExp': 'gamesPlayed>=1',
-            'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+startDate+'"'
+            "isAggregate": "false",
+            "isGame": "true",
+            "sort": '[{"property":"gameDate","direction":"ASC"},{"property":"playerId","direction":"ASC"}]',
+            "start": 0,
+            "limit": 100,
+            "factCayenneExp": "gamesPlayed>=1",
+            "cayenneExp": "gameTypeId>=2 and gameDate>=" + '"' + startDate + '"',
         }
 
         skater_request_data = scraper.get(
-            'https://api.nhle.com/stats/rest/en/skater/summary', params=skater_params)['data']
+            "https://api.nhle.com/stats/rest/en/skater/summary", params=skater_params
+        )["data"]
 
         # Remove duplicate games from the skater data
         if skater_request_data:
             for x in self.skater_data[-300:]:
-                if x['gameDate'] == self.skater_data[-1]['gameDate']:
+                if x["gameDate"] == self.skater_data[-1]["gameDate"]:
                     self.skater_data.remove(x)
 
         # Append new skater data to the existing data
-        self.skater_data += [{k: v for k, v in skater.items() if k in ['assists', 'gameDate', 'gameId', 'goals', 'opponentTeamAbbrev',
-                                                                       'playerId', 'points', 'positionCode', 'shots', 'skaterFullName', 'teamAbbrev']} for skater in skater_request_data]
+        self.skater_data += [
+            {
+                k: v
+                for k, v in skater.items()
+                if k
+                in [
+                    "assists",
+                    "gameDate",
+                    "gameId",
+                    "goals",
+                    "opponentTeamAbbrev",
+                    "playerId",
+                    "points",
+                    "positionCode",
+                    "shots",
+                    "skaterFullName",
+                    "teamAbbrev",
+                ]
+            }
+            for skater in skater_request_data
+        ]
 
         # Retrieve additional skater data if available
         with tqdm(total=100, desc="Updating Skater Data", leave=False) as pbar:
             while skater_request_data:
-                skater_params['start'] += 100
+                skater_params["start"] += 100
                 skater_request_data = scraper.get(
-                    'https://api.nhle.com/stats/rest/en/skater/summary', params=skater_params)['data']
+                    "https://api.nhle.com/stats/rest/en/skater/summary",
+                    params=skater_params,
+                )["data"]
 
                 # Check if there is no more data and reached the maximum start value
-                if not skater_request_data and skater_params['start'] == 10000:
-                    skater_params['start'] = 0
-                    skater_params['cayenneExp'] = skater_params['cayenneExp'][:-12] + \
-                        '"'+self.skater_data[-1]['gameDate']+'"'
+                if not skater_request_data and skater_params["start"] == 10000:
+                    skater_params["start"] = 0
+                    skater_params["cayenneExp"] = (
+                        skater_params["cayenneExp"][:-12]
+                        + '"'
+                        + self.skater_data[-1]["gameDate"]
+                        + '"'
+                    )
                     skater_request_data = scraper.get(
-                        'https://api.nhle.com/stats/rest/en/skater/summary', params=skater_params)['data']
+                        "https://api.nhle.com/stats/rest/en/skater/summary",
+                        params=skater_params,
+                    )["data"]
 
                     # Remove duplicate games from the skater data
                     for x in self.skater_data[-300:]:
-                        if x['gameDate'] == self.skater_data[-1]['gameDate']:
+                        if x["gameDate"] == self.skater_data[-1]["gameDate"]:
                             self.skater_data.remove(x)
 
                 # Append new skater data to the existing data
-                self.skater_data += [{k: v for k, v in skater.items() if k in ['assists', 'gameDate', 'gameId', 'goals', 'opponentTeamAbbrev',
-                                                                               'playerId', 'points', 'positionCode', 'shots', 'skaterFullName', 'teamAbbrev']} for skater in skater_request_data]
+                self.skater_data += [
+                    {
+                        k: v
+                        for k, v in skater.items()
+                        if k
+                        in [
+                            "assists",
+                            "gameDate",
+                            "gameId",
+                            "goals",
+                            "opponentTeamAbbrev",
+                            "playerId",
+                            "points",
+                            "positionCode",
+                            "shots",
+                            "skaterFullName",
+                            "teamAbbrev",
+                        ]
+                    }
+                    for skater in skater_request_data
+                ]
 
                 # Update progress bar
                 pbar.update(100)
 
         # Remove games older than 2 years from the skater data
         self.skater_data = [
-            game for game in self.skater_data if datetime.strptime(game['gameDate'], '%Y-%m-%d') >= datetime.today() - timedelta(days=730)]
+            game
+            for game in self.skater_data
+            if datetime.strptime(game["gameDate"], "%Y-%m-%d")
+            >= datetime.today() - timedelta(days=730)
+        ]
 
         # Save skater data to file
         with open((pkg_resources.files(data) / "nhl_skater_data.dat"), "wb") as outfile:
@@ -1221,63 +1579,110 @@ class StatsNHL(Stats):
 
         # Goalie data update
         if self.goalie_data:
-            startDate = self.goalie_data[-1]['gameDate']
+            startDate = self.goalie_data[-1]["gameDate"]
         else:
-            startDate = self.season_start.strftime('%Y-%m-%d')
+            startDate = self.season_start.strftime("%Y-%m-%d")
         goalie_params = {
-            'isAggregate': 'false',
-            'isGame': 'true',
-            'sort': '[{"property":"gameDate","direction":"ASC"},{"property":"playerId","direction":"ASC"}]',
-            'start': 0,
-            'limit': 100,
-            'factCayenneExp': 'gamesPlayed>=1',
-            'cayenneExp': 'gameTypeId>=2 and gameDate>=' + '"'+startDate+'"'
+            "isAggregate": "false",
+            "isGame": "true",
+            "sort": '[{"property":"gameDate","direction":"ASC"},{"property":"playerId","direction":"ASC"}]',
+            "start": 0,
+            "limit": 100,
+            "factCayenneExp": "gamesPlayed>=1",
+            "cayenneExp": "gameTypeId>=2 and gameDate>=" + '"' + startDate + '"',
         }
 
         goalie_request_data = scraper.get(
-            'https://api.nhle.com/stats/rest/en/goalie/summary', params=goalie_params)['data']
+            "https://api.nhle.com/stats/rest/en/goalie/summary", params=goalie_params
+        )["data"]
 
         # Remove duplicate games from the goalie data
         if goalie_request_data:
             for x in self.goalie_data[-50:]:
-                if x['gameDate'] == self.goalie_data[-1]['gameDate']:
+                if x["gameDate"] == self.goalie_data[-1]["gameDate"]:
                     self.goalie_data.remove(x)
 
         # Append new goalie data to the existing data
-        self.goalie_data += [{k: v for k, v in goalie.items() if k in ['gameDate', 'gameId', 'goalsAgainst',
-                                                                       'opponentTeamAbbrev', 'playerId', 'positionCode', 'saves', 'goalieFullName', 'teamAbbrev']} for goalie in goalie_request_data]
+        self.goalie_data += [
+            {
+                k: v
+                for k, v in goalie.items()
+                if k
+                in [
+                    "gameDate",
+                    "gameId",
+                    "goalsAgainst",
+                    "opponentTeamAbbrev",
+                    "playerId",
+                    "positionCode",
+                    "saves",
+                    "goalieFullName",
+                    "teamAbbrev",
+                ]
+            }
+            for goalie in goalie_request_data
+        ]
 
         # Retrieve additional goalie data if available
         with tqdm(total=100, desc="Updating Goalie Data", leave=False) as pbar:
             while goalie_request_data:
-                goalie_params['start'] += 100
+                goalie_params["start"] += 100
                 goalie_request_data = scraper.get(
-                    'https://api.nhle.com/stats/rest/en/goalie/summary', params=goalie_params)['data']
+                    "https://api.nhle.com/stats/rest/en/goalie/summary",
+                    params=goalie_params,
+                )["data"]
 
                 # Check if there is no more data and reached the maximum start value
-                if not goalie_request_data and goalie_params['start'] == 10000:
-                    goalie_params['start'] = 0
-                    goalie_params['cayenneExp'] = goalie_params['cayenneExp'][:-12] + \
-                        '"'+self.goalie_data[-1]['gameDate']+'"'
+                if not goalie_request_data and goalie_params["start"] == 10000:
+                    goalie_params["start"] = 0
+                    goalie_params["cayenneExp"] = (
+                        goalie_params["cayenneExp"][:-12]
+                        + '"'
+                        + self.goalie_data[-1]["gameDate"]
+                        + '"'
+                    )
                     goalie_request_data = scraper.get(
-                        'https://api.nhle.com/stats/rest/en/goalie/summary', params=goalie_params)['data']
+                        "https://api.nhle.com/stats/rest/en/goalie/summary",
+                        params=goalie_params,
+                    )["data"]
 
                     # Remove duplicate games from the goalie data
                     if goalie_request_data:
                         for x in self.goalie_data[-50:]:
-                            if x['gameDate'] == self.goalie_data[-1]['gameDate']:
+                            if x["gameDate"] == self.goalie_data[-1]["gameDate"]:
                                 self.goalie_data.remove(x)
 
                 # Append new goalie data to the existing data
-                self.goalie_data += [{k: v for k, v in goalie.items() if k in ['gameDate', 'gameId', 'goalsAgainst',
-                                                                               'opponentTeamAbbrev', 'playerId', 'positionCode', 'saves', 'goalieFullName', 'teamAbbrev']} for goalie in goalie_request_data]
+                self.goalie_data += [
+                    {
+                        k: v
+                        for k, v in goalie.items()
+                        if k
+                        in [
+                            "gameDate",
+                            "gameId",
+                            "goalsAgainst",
+                            "opponentTeamAbbrev",
+                            "playerId",
+                            "positionCode",
+                            "saves",
+                            "goalieFullName",
+                            "teamAbbrev",
+                        ]
+                    }
+                    for goalie in goalie_request_data
+                ]
 
                 # Update progress bar
                 pbar.update(100)
 
         # Remove games older than 2 years from the goalie data
         self.goalie_data = [
-            game for game in self.goalie_data if datetime.strptime(game['gameDate'], '%Y-%m-%d') >= datetime.today() - timedelta(days=730)]
+            game
+            for game in self.goalie_data
+            if datetime.strptime(game["gameDate"], "%Y-%m-%d")
+            >= datetime.today() - timedelta(days=730)
+        ]
 
         # Save goalie data to file
         with open((pkg_resources.files(data) / "nhl_goalie_data.dat"), "wb") as outfile:
@@ -1298,33 +1703,36 @@ class StatsNHL(Stats):
         self.playerStats = {}
 
         # Determine the gamelog and player key based on the market
-        if market in ['goalsAgainst', 'saves']:
+        if market in ["goalsAgainst", "saves"]:
             gamelog = self.goalie_data
-            player = 'goalieFullName'
+            player = "goalieFullName"
         else:
             gamelog = self.skater_data
-            player = 'skaterFullName'
+            player = "skaterFullName"
 
         # Iterate over each game in the gamelog
         for game in gamelog:
-
             # Check if the player is already in the playerStats dictionary
             if game[player] not in self.playerStats:
-                self.playerStats[game[player]] = {'games': []}
+                self.playerStats[game[player]] = {"games": []}
 
             # Append the market value to the player's games list
-            self.playerStats[game[player]]['games'].append(game[market])
+            self.playerStats[game[player]]["games"].append(game[market])
 
         # Filter playerStats based on minimum games played and non-zero games
-        self.playerStats = {k: v for k, v in self.playerStats.items() if len(
-            v['games']) > 10 and not all([g == 0 for g in v['games']])}
+        self.playerStats = {
+            k: v
+            for k, v in self.playerStats.items()
+            if len(v["games"]) > 10 and not all([g == 0 for g in v["games"]])
+        }
 
         # Calculate averages and store in playerStats dictionary
         averages = []
         for player, games in self.playerStats.items():
-            self.playerStats[player]['avg'] = np.mean(
-                games['games']) if games['games'] else 0
-            averages.append(self.playerStats[player]['avg'])
+            self.playerStats[player]["avg"] = (
+                np.mean(games["games"]) if games["games"] else 0
+            )
+            averages.append(self.playerStats[player]["avg"])
 
         # Calculate edges for bucketing based on percentiles
         self.edges = [np.percentile(averages, p) for p in range(0, 101, 10)]
@@ -1332,15 +1740,26 @@ class StatsNHL(Stats):
         # Calculate lines for each bucket
         lines = np.zeros(10)
         for i in range(1, 11):
-            lines[i-1] = np.round(np.mean([v for v in averages if v <=
-                                  self.edges[i] and v >= self.edges[i-1]]) - 0.5) + 0.5
+            lines[i - 1] = (
+                np.round(
+                    np.mean(
+                        [
+                            v
+                            for v in averages
+                            if v <= self.edges[i] and v >= self.edges[i - 1]
+                        ]
+                    )
+                    - 0.5
+                )
+                + 0.5
+            )
 
         # Assign bucket and line values to each player in playerStats
         for player, games in self.playerStats.items():
             for i in range(0, 10):
-                if games['avg'] >= self.edges[i]:
-                    self.playerStats[player]['bucket'] = 10 - i
-                    self.playerStats[player]['line'] = lines[i]
+                if games["avg"] >= self.edges[i]:
+                    self.playerStats[player]["bucket"] = 10 - i
+                    self.playerStats[player]["line"] = lines[i]
 
     def dvpoa(self, team, position, market):
         """
@@ -1372,24 +1791,24 @@ class StatsNHL(Stats):
         leagueavg = {}
 
         # Calculate dvp and league averages based on the market
-        if market in ['goalsAgainst', 'saves']:
+        if market in ["goalsAgainst", "saves"]:
             for game in self.goalie_data:
-                id = game['gameId']
+                id = game["gameId"]
                 if id not in leagueavg:
                     leagueavg[id] = 0
                 leagueavg[id] += game[market]
-                if team == game['opponentTeamAbbrev']:
+                if team == game["opponentTeamAbbrev"]:
                     if id not in dvp:
                         dvp[id] = 0
                     dvp[id] += game[market]
         else:
             for game in self.skater_data:
-                if game['positionCode'] == position:
-                    id = game['gameId']
+                if game["positionCode"] == position:
+                    id = game["gameId"]
                     if id not in leagueavg:
                         leagueavg[id] = 0
                     leagueavg[id] += game[market]
-                    if team == game['opponentTeamAbbrev']:
+                    if team == game["opponentTeamAbbrev"]:
                         if id not in dvp:
                             dvp[id] = 0
                         dvp[id] += game[market]
@@ -1417,34 +1836,34 @@ class StatsNHL(Stats):
 
         # Convert date to string format if it's a datetime object
         if type(date) is datetime:
-            date = date.strftime('%Y-%m-%d')
+            date = date.strftime("%Y-%m-%d")
 
         # Retrieve offer details
-        player = offer['Player']
-        team = offer['Team']
-        market = offer['Market'].replace("H2H ", "")
-        line = offer['Line']
-        opponent = offer['Opponent']
+        player = offer["Player"]
+        team = offer["Team"]
+        market = offer["Market"].replace("H2H ", "")
+        line = offer["Line"]
+        opponent = offer["Opponent"]
 
         # Replace team abbreviations and market names with appropriate values
-        opponent = opponent.replace('NJ', 'NJD').replace('TB', 'TBL')
-        if opponent == 'LA':
-            opponent = 'LAK'
+        opponent = opponent.replace("NJ", "NJD").replace("TB", "TBL")
+        if opponent == "LA":
+            opponent = "LAK"
 
-        if market == 'PTS':
-            market = 'points'
-        elif market == 'AST':
-            market = 'assists'
-        elif market == 'BLK':
-            market = 'blockedShots'
+        if market == "PTS":
+            market = "points"
+        elif market == "AST":
+            market = "assists"
+        elif market == "BLK":
+            market = "blockedShots"
 
         # Determine the gamelog and nameStr based on the market type
-        if market in ['saves', 'goalsAgainst']:
+        if market in ["saves", "goalsAgainst"]:
             gamelog = self.goalie_data
-            nameStr = 'goalieFullName'
+            nameStr = "goalieFullName"
         else:
             gamelog = self.skater_data
-            nameStr = 'skaterFullName'
+            nameStr = "skaterFullName"
 
         # Determine the bucket based on player type and line value
         if "+" in player:
@@ -1452,7 +1871,7 @@ class StatsNHL(Stats):
         elif "vs." in player:
             bucket = 22
         elif self.playerStats.get(player):
-            bucket = self.playerStats[player]['bucket']
+            bucket = self.playerStats[player]["bucket"]
         else:
             bucket = 20
             while self.edges[20 - bucket] < line:
@@ -1460,11 +1879,14 @@ class StatsNHL(Stats):
 
         try:
             # Retrieve stats, moneyline, and total from the archive based on date, player, and team
-            stats = archive['NHL'][market].get(date, {}).get(
-                player, {}).get(line, [0.5] * 9)
-            moneyline = archive['NHL']['Moneyline'].get(
-                date, {}).get(team, np.nan)
-            total = archive['NHL']['Totals'].get(date, {}).get(team, np.nan)
+            stats = (
+                archive["NHL"][market]
+                .get(date, {})
+                .get(player, {})
+                .get(line, [0.5] * 9)
+            )
+            moneyline = archive["NHL"]["Moneyline"].get(date, {}).get(team, np.nan)
+            total = archive["NHL"]["Totals"].get(date, {}).get(team, np.nan)
         except:
             return 0
 
@@ -1475,29 +1897,41 @@ class StatsNHL(Stats):
             total = 6.5
 
         # Convert date to datetime object
-        date = datetime.strptime(date, '%Y-%m-%d')
+        date = datetime.strptime(date, "%Y-%m-%d")
 
         if "+" in player or "vs." in player:
             # Split player and opponent information for combined or head-to-head offers
-            players = player.strip().replace('vs.', '+').split(' + ')
-            opponents = opponent.split('/')
+            players = player.strip().replace("vs.", "+").split(" + ")
+            opponents = opponent.split("/")
             if len(opponents) == 1:
                 opponents = opponents * 2
 
             # Filter games based on player and opponent for each player
-            player1_games = [game for game in gamelog if
-                             game[nameStr] == players[0] and
-                             datetime.strptime(game['gameDate'], '%Y-%m-%d') < date]
+            player1_games = [
+                game
+                for game in gamelog
+                if game[nameStr] == players[0]
+                and datetime.strptime(game["gameDate"], "%Y-%m-%d") < date
+            ]
 
             headtohead1 = [
-                game for game in player1_games if game['opponentTeamAbbrev'] == opponents[0]]
+                game
+                for game in player1_games
+                if game["opponentTeamAbbrev"] == opponents[0]
+            ]
 
-            player2_games = [game for game in gamelog if
-                             game[nameStr] == players[1] and
-                             datetime.strptime(game['gameDate'], '%Y-%m-%d') < date]
+            player2_games = [
+                game
+                for game in gamelog
+                if game[nameStr] == players[1]
+                and datetime.strptime(game["gameDate"], "%Y-%m-%d") < date
+            ]
 
             headtohead2 = [
-                game for game in player2_games if game['opponentTeamAbbrev'] == opponents[1]]
+                game
+                for game in player2_games
+                if game["opponentTeamAbbrev"] == opponents[1]
+            ]
 
             # Determine the minimum number of games for player and head-to-head comparisons
             n = np.min([len(player1_games), len(player2_games)])
@@ -1516,12 +1950,12 @@ class StatsNHL(Stats):
                 headtohead2 = []
 
             # Determine the positions for player1, player2, and DVPOA calculation
-            if market in ['saves', 'goalsAgainst']:
-                position1 = 'G'
-                position2 = 'G'
+            if market in ["saves", "goalsAgainst"]:
+                position1 = "G"
+                position2 = "G"
             else:
-                position1 = player1_games[0]['positionCode']
-                position2 = player2_games[0]['positionCode']
+                position1 = player1_games[0]["positionCode"]
+                position2 = player2_games[0]["positionCode"]
 
             # Calculate DVPOA for opponent and positions
             dvpoa1 = self.dvpoa(opponents[0], position1, market)
@@ -1529,12 +1963,16 @@ class StatsNHL(Stats):
 
             if "+" in player:
                 # Calculate game and head-to-head results for combined offers
-                game_res = np.array([game[market] for game in player1_games]) + \
-                    np.array([game[market] for game in player2_games]) - \
-                    np.array([line] * n)
-                h2h_res = np.array([game[market] for game in headtohead1]) + \
-                    np.array([game[market] for game in headtohead2]) - \
-                    np.array([line] * m)
+                game_res = (
+                    np.array([game[market] for game in player1_games])
+                    + np.array([game[market] for game in player2_games])
+                    - np.array([line] * n)
+                )
+                h2h_res = (
+                    np.array([game[market] for game in headtohead1])
+                    + np.array([game[market] for game in headtohead2])
+                    - np.array([line] * m)
+                )
 
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 + dvpoa2 == 0:
                     dvpoa = 0
@@ -1543,12 +1981,16 @@ class StatsNHL(Stats):
 
             else:
                 # Calculate game and head-to-head results for head-to-head offers
-                game_res = np.array([game[market] for game in player1_games]) - \
-                    np.array([game[market] for game in player2_games]) + \
-                    np.array([line] * n)
-                h2h_res = np.array([game[market] for game in headtohead1]) - \
-                    np.array([game[market] for game in headtohead2]) + \
-                    np.array([line] * m)
+                game_res = (
+                    np.array([game[market] for game in player1_games])
+                    - np.array([game[market] for game in player2_games])
+                    + np.array([line] * n)
+                )
+                h2h_res = (
+                    np.array([game[market] for game in headtohead1])
+                    - np.array([game[market] for game in headtohead2])
+                    + np.array([line] * m)
+                )
 
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 - dvpoa2 == 0:
                     dvpoa = 0
@@ -1560,21 +2002,25 @@ class StatsNHL(Stats):
 
         else:
             # Filter games based on player and opponent for single player offers
-            player_games = [game for game in gamelog if
-                            game[nameStr] == player and
-                            datetime.strptime(game['gameDate'], '%Y-%m-%d') < date]
+            player_games = [
+                game
+                for game in gamelog
+                if game[nameStr] == player
+                and datetime.strptime(game["gameDate"], "%Y-%m-%d") < date
+            ]
 
             headtohead = [
-                game for game in player_games if game['opponentTeamAbbrev'] == opponent]
+                game for game in player_games if game["opponentTeamAbbrev"] == opponent
+            ]
 
             # Calculate game and head-to-head results for single player offers
             game_res = [game[market] - line for game in player_games]
             h2h_res = [game[market] - line for game in headtohead]
 
-            if market in ['saves', 'goalsAgainst']:
-                position = 'G'
+            if market in ["saves", "goalsAgainst"]:
+                position = "G"
             else:
-                position = player_games[0]['positionCode']
+                position = player_games[0]["positionCode"]
 
             dvpoa = self.dvpoa(opponent, position, market)
 
@@ -1585,18 +2031,25 @@ class StatsNHL(Stats):
             odds = 0.5
 
         # Calculate various statistics based on game and head-to-head results
-        data = {'DVPOA': dvpoa, 'Odds': odds - .5,
-                'Last5': np.mean([int(i > 0) for i in game_res[-5:]]) - .5 if game_res else 0,
-                'Last10': np.mean([int(i > 0) for i in game_res[-10:]]) - .5 if game_res else 0,
-                'H2H': np.mean([int(i > 0) for i in h2h_res[-5:]]) - .5 if h2h_res else 0,
-                'Avg5': np.mean(game_res[-5:]) if game_res[-5:] else 0,
-                'Avg10': np.mean(game_res[-10:]) if game_res[-10:] else 0,
-                'AvgH2H': np.mean(h2h_res[-5:]) if h2h_res[-5:] else 0,
-                'Moneyline': moneyline - 0.5, 'Total': total / 6.5 - 1,
-                'Bucket': bucket if bucket < 21 else 0,
-                'Combo': 1 if bucket == 21 else 0,
-                'Rival': 1 if bucket == 22 else 0
-                }
+        data = {
+            "DVPOA": dvpoa,
+            "Odds": odds - 0.5,
+            "Last5": np.mean([int(i > 0) for i in game_res[-5:]]) - 0.5
+            if game_res
+            else 0,
+            "Last10": np.mean([int(i > 0) for i in game_res[-10:]]) - 0.5
+            if game_res
+            else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]]) - 0.5 if h2h_res else 0,
+            "Avg5": np.mean(game_res[-5:]) if game_res[-5:] else 0,
+            "Avg10": np.mean(game_res[-10:]) if game_res[-10:] else 0,
+            "AvgH2H": np.mean(h2h_res[-5:]) if h2h_res[-5:] else 0,
+            "Moneyline": moneyline - 0.5,
+            "Total": total / 6.5 - 1,
+            "Bucket": bucket if bucket < 21 else 0,
+            "Combo": 1 if bucket == 21 else 0,
+            "Rival": 1 if bucket == 22 else 0,
+        }
 
         # Pad game_res and h2h_res lists with zeros if they are shorter than required
         if len(game_res) < 6:
@@ -1608,10 +2061,8 @@ class StatsNHL(Stats):
 
         # Create a DataFrame with the calculated statistics
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[-5:]])
-                   .fillna(0).add_prefix('Meeting '))
-        X = X.join(pd.DataFrame([game_res[-6:]])
-                   .fillna(0).add_prefix('Game '))
+        X = X.join(pd.DataFrame([h2h_res[-5:]]).fillna(0).add_prefix("Meeting "))
+        X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
 
         return X
 
@@ -1633,82 +2084,121 @@ class StatsNHL(Stats):
         X = pd.DataFrame()
         results = []
 
-        if market in ['saves', 'goalsAgainst']:
+        if market in ["saves", "goalsAgainst"]:
             gamelog = self.goalie_data
-            nameStr = 'goalieFullName'
+            nameStr = "goalieFullName"
         else:
             gamelog = self.skater_data
-            nameStr = 'skaterFullName'
+            nameStr = "skaterFullName"
 
         # Iterate over each game in the gamelog
-        for game in tqdm(gamelog, unit='game', desc='Gathering Training Data'):
-
-            gameDate = datetime.strptime(game['gameDate'], '%Y-%m-%d')
+        for game in tqdm(gamelog, unit="game", desc="Gathering Training Data"):
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
             data = {}
 
             try:
-                names = list(archive['NHL'][market].get(
-                    gameDate.strftime('%Y-%m-%d'), {}).keys())
+                names = list(
+                    archive["NHL"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()
+                )
 
                 # Filter data based on the player's name in the gamelog
                 for name in names:
-                    if game[nameStr] == name.strip().replace('vs.', '+').split(' + ')[0]:
-                        data[name] = archive['NHL'][market][gameDate.strftime(
-                            '%Y-%m-%d')][name]
+                    if (
+                        game[nameStr]
+                        == name.strip().replace("vs.", "+").split(" + ")[0]
+                    ):
+                        data[name] = archive["NHL"][market][
+                            gameDate.strftime("%Y-%m-%d")
+                        ][name]
             except:
                 continue
 
             # Iterate over each name and associated archive data
             for name, archiveData in data.items():
                 offer = {
-                    'Player': name,
-                    'Team': game['teamAbbrev'],
-                    'Market': market,
-                    'Opponent': game['opponentTeamAbbrev']
+                    "Player": name,
+                    "Team": game["teamAbbrev"],
+                    "Market": market,
+                    "Opponent": game["opponentTeamAbbrev"],
                 }
 
                 # Modify offer parameters for multi-player cases
-                if ' + ' in name or ' vs. ' in name:
-                    player2 = name.replace('vs.', '+').split(' + ')[1]
-                    game2 = next((i for i in gamelog if i['gameDate'] == gameDate.strftime(
-                        '%Y-%m-%d') and i[nameStr] == player2), None)
+                if " + " in name or " vs. " in name:
+                    player2 = name.replace("vs.", "+").split(" + ")[1]
+                    game2 = next(
+                        (
+                            i
+                            for i in gamelog
+                            if i["gameDate"] == gameDate.strftime("%Y-%m-%d")
+                            and i[nameStr] == player2
+                        ),
+                        None,
+                    )
                     if game2 is None:
                         continue
                     offer = offer | {
-                        'Team': '/'.join([game['teamAbbrev'], game2['teamAbbrev']]),
-                        'Opponent': '/'.join([game['opponentTeamAbbrev'], game2['opponentTeamAbbrev']])
+                        "Team": "/".join([game["teamAbbrev"], game2["teamAbbrev"]]),
+                        "Opponent": "/".join(
+                            [game["opponentTeamAbbrev"], game2["opponentTeamAbbrev"]]
+                        ),
                     }
 
                 # Iterate over each line and stats in the archive data
                 for line, stats in archiveData.items():
-                    if not line == 'Closing Lines' and not game[market] == line:
+                    if not line == "Closing Lines" and not game[market] == line:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             new_get_stats = self.get_stats(
-                                offer | {'Line': line}, gameDate)
+                                offer | {"Line": line}, gameDate
+                            )
 
                             if type(new_get_stats) is pd.DataFrame:
                                 # Compute the result and append it to the results list
 
-                                if ' + ' in name:
-                                    player2 = name.split(' + ')[1]
-                                    game2 = next((i for i in gamelog if i[nameStr] == player2
-                                                  and i['gameId'] == game['gameId']), None)
+                                if " + " in name:
+                                    player2 = name.split(" + ")[1]
+                                    game2 = next(
+                                        (
+                                            i
+                                            for i in gamelog
+                                            if i[nameStr] == player2
+                                            and i["gameId"] == game["gameId"]
+                                        ),
+                                        None,
+                                    )
                                     if game2 is None:
                                         continue
                                     results.append(
-                                        {'Result': 1 if (game[market] + game2[market]) > line else -1})
-                                elif ' vs. ' in name:
-                                    player2 = name.split(' vs. ')[1]
-                                    game2 = next((i for i in gamelog if i[nameStr] == player2
-                                                  and i['gameId'] == game['gameId']), None)
+                                        {
+                                            "Result": 1
+                                            if (game[market] + game2[market]) > line
+                                            else -1
+                                        }
+                                    )
+                                elif " vs. " in name:
+                                    player2 = name.split(" vs. ")[1]
+                                    game2 = next(
+                                        (
+                                            i
+                                            for i in gamelog
+                                            if i[nameStr] == player2
+                                            and i["gameId"] == game["gameId"]
+                                        ),
+                                        None,
+                                    )
                                     if game2 is None:
                                         continue
                                     results.append(
-                                        {'Result': 1 if (game[market] + line) > game2[market] else -1})
+                                        {
+                                            "Result": 1
+                                            if (game[market] + line) > game2[market]
+                                            else -1
+                                        }
+                                    )
                                 else:
                                     results.append(
-                                        {'Result': 1 if game[market] > line else -1})
+                                        {"Result": 1 if game[market] > line else -1}
+                                    )
 
                                 # Concatenate the new_get_stats dataframe with X
                                 if X.empty:

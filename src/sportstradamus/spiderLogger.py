@@ -5,12 +5,14 @@ import importlib.resources as pkg_resources
 from sportstradamus import logs
 
 # create logger
-logger = logging.getLogger('log')
+logger = logging.getLogger("log")
 logger.setLevel(logging.INFO)
 
 # create file handler
-fh = logging.FileHandler(pkg_resources.files(
-    logs) / datetime.now().strftime("%Y_%m_%d_%H:%M:%S.log"), mode='w')
+fh = logging.FileHandler(
+    pkg_resources.files(logs) / datetime.now().strftime("%Y_%m_%d_%H:%M:%S.log"),
+    mode="w",
+)
 fh.setLevel(logging.INFO)
 
 # create stream handler
@@ -23,15 +25,15 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    logger.critical("Uncaught exception", exc_info=(
-        exc_type, exc_value, exc_traceback))
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
 
 sys.excepthook = handle_exception
 
 # create formatter
 formatter = logging.Formatter(
-    "%(asctime)s::%(levelname)s::%(filename)s::%(lineno)d - %(message)s")
+    "%(asctime)s::%(levelname)s::%(filename)s::%(lineno)d - %(message)s"
+)
 
 # add formatter to ch
 fh.setFormatter(formatter)
