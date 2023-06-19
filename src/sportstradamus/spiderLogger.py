@@ -2,7 +2,7 @@ import logging
 import sys
 from datetime import datetime
 import importlib.resources as pkg_resources
-from propstradamus import logs
+from sportstradamus import logs
 
 # create logger
 logger = logging.getLogger('log')

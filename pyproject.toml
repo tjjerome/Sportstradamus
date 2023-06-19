@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "propstradamus"
+name = "Sportstradamus"
 version = "1.1.1"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
-homepage = "https://github.com/tjjerome/Propstradamus"
-repository = "https://github.com/tjjerome/Propstradamus"
+homepage = "https://github.com/tjjerome/sportstradamus"
+repository = "https://github.com/tjjerome/sportstradamus"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
@@ -29,11 +29,12 @@ scikit-learn = "^1.2.2"
 scikit-optimize = "^0.9.0"
 sphinx-pdj-theme = "^0.4.0"
 sphinx-pyproject = "^0.1.0"
+lightgbm = "^3.3.5"
 
 [tool.poetry.scripts]
-prophecize = "propstradamus.propstradamus:main"
-get-money = "propstradamus.moneylines:get_moneylines"
-meditate = "propstradamus.train:meditate"
+prophecize = "sportstradamus.sportstradamus:main"
+get-money = "sportstradamus.moneylines:get_moneylines"
+meditate = "sportstradamus.train:meditate"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"

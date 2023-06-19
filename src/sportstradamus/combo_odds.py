@@ -1,5 +1,5 @@
-from propstradamus.stats import StatsNBA
-from propstradamus.helpers import archive, get_ev
+from sportstradamus.stats import StatsNBA
+from sportstradamus.helpers import archive, get_ev
 from datetime import datetime, timedelta
 import numpy as np
 from scipy.stats import poisson

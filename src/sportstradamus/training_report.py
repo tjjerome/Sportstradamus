@@ -1,6 +1,6 @@
 import pickle
 import importlib.resources as pkg_resources
-from propstradamus import data
+from sportstradamus import data
 import pandas as pd
 
 model_list = [f.name for f in pkg_resources.files(
