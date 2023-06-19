@@ -1,7 +1,13 @@
 from sportstradamus.stats import StatsNBA, StatsMLB
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, precision_score, accuracy_score, roc_auc_score, brier_score_loss
+from sklearn.metrics import (
+    classification_report,
+    precision_score,
+    accuracy_score,
+    roc_auc_score,
+    brier_score_loss,
+)
 from sklearn.preprocessing import MaxAbsScaler
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import calibration_curve, CalibratedClassifierCV
@@ -12,20 +18,17 @@ import pandas as pd
 # nba.load()
 # nba.update()
 
-league = 'NBA'
-markets = ['PRA']
+league = "NBA"
+markets = ["PRA"]
 for market in markets:
-
     # X, y = nba.get_training_matrix(market)
-    X = pd.read_csv('src/sportstradamus/data/X.csv', index_col=0)
-    y = pd.read_csv('src/sportstradamus/data/y.csv', index_col=0)
+    X = pd.read_csv("src/sportstradamus/data/X.csv", index_col=0)
+    y = pd.read_csv("src/sportstradamus/data/y.csv", index_col=0)
 
-    X = X.drop(columns=['Game 6', 'Game 7', 'Game 8', 'Game 9'])
+    X = X.drop(columns=["Game 6", "Game 7", "Game 8", "Game 9"])
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train, y_train, test_size=0.25)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25)
 
     if len(X_train) < 1000:
         continue
@@ -43,15 +46,19 @@ for market in markets:
     #                       solver='adam', early_stopping=True, n_iter_no_change=300)  # .553r, .40a, .54u, .64o
 
     model = GradientBoostingClassifier(
-        loss='log_loss', learning_rate=0.1, n_estimators=500, max_depth=10, max_features='sqrt')  # .547r, .39a, .61u, .55o
+        loss="log_loss",
+        learning_rate=0.1,
+        n_estimators=500,
+        max_depth=10,
+        max_features="sqrt",
+    )  # .547r, .39a, .61u, .55o
 
     # model = RandomForestClassifier(
     #     criterion='entropy', n_estimators=500, max_features=0.25, max_depth=26)  # .564r, .40a, .58u, .60o
 
     # model.fit(X_train, y_train)
 
-    model = CalibratedClassifierCV(
-        model, cv=10, n_jobs=-1, method='sigmoid')
+    model = CalibratedClassifierCV(model, cv=10, n_jobs=-1, method="sigmoid")
     model.fit(X_train, y_train)
 
     y_proba = model.predict_proba(X_test)
@@ -66,14 +73,11 @@ for market in markets:
     for i, threshold in enumerate(thresholds):
         y_pred = (y_proba > threshold).astype(int)
         preco[i] = precision_score((y_test == 1).astype(int), y_pred[:, 1])
-        precu[i] = precision_score(
-            (y_test == -1).astype(int), y_pred[:, 0])
-        y_pred = y_pred[:, 1]-y_pred[:, 0]
-        acc[i] = accuracy_score(
-            y_test[np.abs(y_pred) > 0], y_pred[np.abs(y_pred) > 0])
-        prec[i] = precision_score(y_test, y_pred, average='weighted')
-        roc[i] = roc_auc_score(
-            y_test, y_pred, average='weighted')
+        precu[i] = precision_score((y_test == -1).astype(int), y_pred[:, 0])
+        y_pred = y_pred[:, 1] - y_pred[:, 0]
+        acc[i] = accuracy_score(y_test[np.abs(y_pred) > 0], y_pred[np.abs(y_pred) > 0])
+        prec[i] = precision_score(y_test, y_pred, average="weighted")
+        roc[i] = roc_auc_score(y_test, y_pred, average="weighted")
 
     i = np.argmax(prec)
     j = np.argmax(acc)
@@ -89,19 +93,19 @@ for market in markets:
     bs = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
 
     f, (ax1, ax2) = plt.subplots(1, 2)
-    ax1.plot(thresholds, acc, color='r', label='Accuracy')
-    ax1.plot(thresholds, preco, color='b', label='Precision - Over')
-    ax1.plot(thresholds, precu, color='c', label='Precision - Under')
-    ax1.plot(thresholds, roc, color='g', label='ROC AUC')
-    ax1.axvline(t1, linestyle='--', color='b', label="T1=%.3f" % t1)
-    ax1.axvline(t2, linestyle='--', color='c', label="T2=%.3f" % t2)
+    ax1.plot(thresholds, acc, color="r", label="Accuracy")
+    ax1.plot(thresholds, preco, color="b", label="Precision - Over")
+    ax1.plot(thresholds, precu, color="c", label="Precision - Under")
+    ax1.plot(thresholds, roc, color="g", label="ROC AUC")
+    ax1.axvline(t1, linestyle="--", color="b", label="T1=%.3f" % t1)
+    ax1.axvline(t2, linestyle="--", color="c", label="T2=%.3f" % t2)
     ax1.set_title("Validation Scores")
     ax1.legend()
 
     # plot perfectly calibrated
-    ax2.plot([0.4, 0.6], [0.4, 0.6], linestyle='--')
+    ax2.plot([0.4, 0.6], [0.4, 0.6], linestyle="--")
     # plot model reliability
-    ax2.plot(mpv, fop, marker='.')
+    ax2.plot(mpv, fop, marker=".")
     ax2.set_title("Probability Calibration, Breier=%.3f" % bs)
     plt.show()
 

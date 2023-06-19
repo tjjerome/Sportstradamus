@@ -30,6 +30,7 @@ scikit-optimize = "^0.9.0"
 sphinx-pdj-theme = "^0.4.0"
 sphinx-pyproject = "^0.1.0"
 lightgbm = "^3.3.5"
+pytest = "^7.3.2"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"

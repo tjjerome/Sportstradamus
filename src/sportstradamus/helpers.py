@@ -17,13 +17,11 @@ from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 
-with open((pkg_resources.files(creds) / "scrapeops_cred.json"), 'r') as infile:
+with open((pkg_resources.files(creds) / "scrapeops_cred.json"), "r") as infile:
     creds = json.load(infile)
-apikey = creds['apikey']
+apikey = creds["apikey"]
 scrapeops_logger = ScrapeOpsRequests(
-    scrapeops_api_key=apikey,
-    spider_name='Sportstradamus',
-    job_name=os.uname()[1]
+    scrapeops_api_key=apikey, spider_name="Sportstradamus", job_name=os.uname()[1]
 )
 
 requests = scrapeops_logger.RequestsWrapper()
@@ -38,7 +36,8 @@ class Scrape:
             apikey (str): API key for fetching browser headers.
         """
         self.headers = requests.get(
-            f"http://headers.scrapeops.io/v1/browser-headers?api_key={apikey}").json()['result']
+            f"http://headers.scrapeops.io/v1/browser-headers?api_key={apikey}"
+        ).json()["result"]
         self.header = random.choice(self.headers)
         self.weights = np.ones([len(self.headers)])
 
@@ -71,18 +70,20 @@ class Scrape:
             Exception: If an exception occurs during the request attempts.
         """
         with logging_redirect_tqdm():
-            for i in range(1, max_attempts+1):
+            for i in range(1, max_attempts + 1):
                 if i > 1:
                     self._new_headers()
                     sleep(random.uniform(3, 5))
                 try:
                     response = requests.get(
-                        url, headers=self.header | headers, params=params)
+                        url, headers=self.header | headers, params=params
+                    )
                     if response.status_code == 200:
                         return response.json()
                     else:
-                        logger.debug("Attempt " + str(i) +
-                                     ", Error " + str(response.status_code))
+                        logger.debug(
+                            "Attempt " + str(i) + ", Error " + str(response.status_code)
+                        )
                 except Exception as exc:
                     logger.exception("Attempt " + str(i) + ",")
 
@@ -100,8 +101,8 @@ def remove_accents(input_str):
     Returns:
         str: The input string without accents.
     """
-    nfkd_form = unicodedata.normalize('NFKD', input_str)
-    out_str = u"".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    nfkd_form = unicodedata.normalize("NFKD", input_str)
+    out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
     if out_str == "Michael Porter":
         out_str = "Michael Porter Jr."
     return out_str
@@ -199,7 +200,7 @@ class Archive:
         Loads the archive data from a file if it exists.
         """
         self.archive = {}
-        filepath = pkg_resources.files(data) / 'archive.dat'
+        filepath = pkg_resources.files(data) / "archive.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
@@ -229,41 +230,36 @@ class Archive:
         Returns:
             None
         """
-        market = o['Market'].replace("H2H ", "")
+        market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
-        if o['League'] == 'NHL':
-            market_swap = {
-                'AST': 'assists',
-                'PTS': 'points',
-                'BLK': 'blockedShots'
-            }
+        if o["League"] == "NHL":
+            market_swap = {"AST": "assists", "PTS": "points", "BLK": "blockedShots"}
             market = market_swap.get(market, market)
 
-        self.archive.setdefault(o['League'], {}).setdefault(market, {})
-        self.archive[o['League']][market].setdefault(o['Date'], {})
-        self.archive[o['League']][market][o['Date']
-                                          ].setdefault(o['Player'], {})
+        self.archive.setdefault(o["League"], {}).setdefault(market, {})
+        self.archive[o["League"]][market].setdefault(o["Date"], {})
+        self.archive[o["League"]][market][o["Date"]].setdefault(o["Player"], {})
 
         for line in lines:
             if line:
-                l = np.floor(o['Line'])
-                if isinstance(line['EV'], tuple):
-                    p = skellam.sf(l, line['EV'][1], line['EV'][0])
-                    if np.mod(o['Line'], 1) == 0:
-                        p += skellam.pmf(l, line['EV'][1], line['EV'][0]) / 2
+                l = np.floor(o["Line"])
+                if isinstance(line["EV"], tuple):
+                    p = skellam.sf(l, line["EV"][1], line["EV"][0])
+                    if np.mod(o["Line"], 1) == 0:
+                        p += skellam.pmf(l, line["EV"][1], line["EV"][0]) / 2
                 else:
-                    p = poisson.sf(l, line['EV'])
-                    if np.mod(o['Line'], 1) == 0:
-                        p += poisson.pmf(l, line['EV']) / 2
+                    p = poisson.sf(l, line["EV"])
+                    if np.mod(o["Line"], 1) == 0:
+                        p += poisson.pmf(l, line["EV"]) / 2
             else:
                 p = -1000
 
             stats = np.append(stats, p)
 
-        self.archive[o['League']][market][o['Date']
-                                          ][o['Player']][o['Line']] = stats
-        self.archive[o['League']][market][o['Date']
-                                          ][o['Player']]['Closing Lines'] = lines
+        self.archive[o["League"]][market][o["Date"]][o["Player"]][o["Line"]] = stats
+        self.archive[o["League"]][market][o["Date"]][o["Player"]][
+            "Closing Lines"
+        ] = lines
 
     def write(self):
         """
@@ -272,61 +268,68 @@ class Archive:
         Returns:
             None
         """
-        filepath = pkg_resources.files(data) / 'archive.dat'
+        filepath = pkg_resources.files(data) / "archive.dat"
         with open(filepath, "wb") as outfile:
             pickle.dump(self.archive, outfile, protocol=-1)
 
     def rename_market(self, league, old_name, new_name):
-        """rename_market Rename a market in the archive
-        """
+        """rename_market Rename a market in the archive"""
 
 
 scraper = Scrape(apikey)
 
 archive = Archive()
 
-mlb_games = mlb.schedule(start_date=datetime.date.today(),
-                         end_date=datetime.date.today())
-mlb_teams = mlb.get('teams', {'sportId': 1})
+mlb_games = mlb.schedule(
+    start_date=datetime.date.today(), end_date=datetime.date.today()
+)
+mlb_teams = mlb.get("teams", {"sportId": 1})
 mlb_pitchers = {}
 for game in mlb_games:
-    if game['status'] != 'Final':
-        awayTeam = [team['abbreviation']
-                    for team in mlb_teams['teams'] if team['id'] == game['away_id']][0]
-        homeTeam = [team['abbreviation']
-                    for team in mlb_teams['teams'] if team['id'] == game['home_id']][0]
-        if game['game_num'] == 1:
-            mlb_pitchers[awayTeam] = remove_accents(
-                game['away_probable_pitcher'])
-            mlb_pitchers[homeTeam] = remove_accents(
-                game['home_probable_pitcher'])
-        elif game['game_num'] > 1:
-            mlb_pitchers[awayTeam + str(game['game_num'])
-                         ] = remove_accents(game['away_probable_pitcher'])
-            mlb_pitchers[homeTeam + str(game['game_num'])
-                         ] = remove_accents(game['home_probable_pitcher'])
+    if game["status"] != "Final":
+        awayTeam = [
+            team["abbreviation"]
+            for team in mlb_teams["teams"]
+            if team["id"] == game["away_id"]
+        ][0]
+        homeTeam = [
+            team["abbreviation"]
+            for team in mlb_teams["teams"]
+            if team["id"] == game["home_id"]
+        ][0]
+        if game["game_num"] == 1:
+            mlb_pitchers[awayTeam] = remove_accents(game["away_probable_pitcher"])
+            mlb_pitchers[homeTeam] = remove_accents(game["home_probable_pitcher"])
+        elif game["game_num"] > 1:
+            mlb_pitchers[awayTeam + str(game["game_num"])] = remove_accents(
+                game["away_probable_pitcher"]
+            )
+            mlb_pitchers[homeTeam + str(game["game_num"])] = remove_accents(
+                game["home_probable_pitcher"]
+            )
 
-mlb_pitchers['LA'] = mlb_pitchers.get('LAD', '')
-mlb_pitchers['ANA'] = mlb_pitchers.get('LAA', '')
-mlb_pitchers['ARI'] = mlb_pitchers.get('AZ', '')
-mlb_pitchers['WAS'] = mlb_pitchers.get('WSH', '')
+mlb_pitchers["LA"] = mlb_pitchers.get("LAD", "")
+mlb_pitchers["ANA"] = mlb_pitchers.get("LAA", "")
+mlb_pitchers["ARI"] = mlb_pitchers.get("AZ", "")
+mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
 
 urls = [  # "http://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
     "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams",
     "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams",
-    "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"]
+    "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams",
+]
 
 abbreviations = {}
 for url in urls:
-    res = scraper.get(url)['sports'][0]['leagues'][0]
-    league = res['abbreviation']
+    res = scraper.get(url)["sports"][0]["leagues"][0]
+    league = res["abbreviation"]
     if league not in abbreviations:
         abbreviations[league] = {}
-    for team in res['teams']:
-        name = remove_accents(team['team']['displayName'])
-        abbr = team['team']['abbreviation']
+    for team in res["teams"]:
+        name = remove_accents(team["team"]["displayName"])
+        abbr = team["team"]["abbreviation"]
         abbreviations[league][name] = abbr
 
-abbreviations['NBA']['Los Angeles Clippers'] = 'LAC'
-abbreviations['NHL']['St Louis Blues'] = 'STL'
+abbreviations["NBA"]["Los Angeles Clippers"] = "LAC"
+abbreviations["NHL"]["St Louis Blues"] = "STL"
 # abbreviations['NFL']['Washington Football Team'] = 'WSH'
