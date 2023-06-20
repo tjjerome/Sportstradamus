@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
 from sportstradamus import creds, data
 from tqdm import tqdm
-from sportstradamus.spiderLogger import logger
 
 
 def get_moneylines():
@@ -43,7 +42,8 @@ def get_moneylines():
 
         # Process odds data for each game
         for game in tqdm(res, desc=f"Getting {league} Data", unit="game"):
-            gameDate = datetime.strptime(game["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
+            gameDate = datetime.strptime(
+                game["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
             gameDate = (gameDate - timedelta(hours=5)).strftime("%Y-%m-%d")
 
             homeTeam = abbreviations[league][remove_accents(game["home_team"])]

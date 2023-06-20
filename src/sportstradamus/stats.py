@@ -246,7 +246,8 @@ class StatsNBA(Stats):
             lines[i - 1] = (
                 np.round(
                     np.mean(
-                        [v for v in averages if self.edges[i - 1] <= v <= self.edges[i]]
+                        [v for v in averages if self.edges[i - 1]
+                            <= v <= self.edges[i]]
                     )
                     - 0.5
                 )
@@ -348,7 +349,8 @@ class StatsNBA(Stats):
                 .get(player, {})
                 .get(line, [0.5] * 9)
             )
-            moneyline = archive["NBA"]["Moneyline"].get(date, {}).get(team, np.nan)
+            moneyline = archive["NBA"]["Moneyline"].get(
+                date, {}).get(team, np.nan)
             total = archive["NBA"]["Totals"].get(date, {}).get(team, np.nan)
         except:
             return 0
@@ -463,7 +465,8 @@ class StatsNBA(Stats):
                 and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
             ]
 
-            headtohead = [game for game in player_games if game["OPP"] == opponent]
+            headtohead = [
+                game for game in player_games if game["OPP"] == opponent]
 
             game_res = [game[market] - line for game in player_games]
             h2h_res = [game[market] - line for game in headtohead]
@@ -485,9 +488,9 @@ class StatsNBA(Stats):
             if game_res
             else 0,
             "H2H": np.mean([int(i > 0) for i in h2h_res[:5]]) - 0.5 if h2h_res else 0,
-            "Avg5": np.mean(game_res[:5]) if game_res[:5] else 0 if game_res else 0,
-            "Avg10": np.mean(game_res[:10]) if game_res[:10] else 0 if game_res else 0,
-            "AvgH2H": np.mean(h2h_res[:5]) if h2h_res[:5] else 0 if h2h_res else 0,
+            "Avg5": np.mean(game_res[:5]) if game_res else 0,
+            "Avg10": np.mean(game_res[:10]) if game_res else 0,
+            "AvgH2H": np.mean(h2h_res[:5]) if h2h_res else 0,
             "Moneyline": moneyline - 0.5,
             "Total": total / 229.3 - 1,
             "Bucket": bucket if bucket < 21 else 0,
@@ -501,7 +504,8 @@ class StatsNBA(Stats):
             h2h_res.extend([0] * (5 - len(h2h_res)))
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(0).add_prefix("Meeting "))
+        X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
+            0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[:6]]).fillna(0).add_prefix("Game "))
 
         return X
@@ -521,12 +525,14 @@ class StatsNBA(Stats):
         results = []
 
         for game in tqdm(self.gamelog, unit="game", desc="Gathering Training Data"):
-            gameDate = datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
+            gameDate = datetime.strptime(
+                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
             data = {}
 
             try:
                 names = list(
-                    archive["NBA"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()
+                    archive["NBA"][market].get(
+                        gameDate.strftime("%Y-%m-%d"), {}).keys()
                 )
                 for name in names:
                     if (
@@ -617,7 +623,8 @@ class StatsNBA(Stats):
                                     )
                                 else:
                                     results.append(
-                                        {"Result": 1 if game[market] > line else -1}
+                                        {"Result": 1 if game[market]
+                                            > line else -1}
                                     )
 
                                 if X.empty:
@@ -817,7 +824,7 @@ class StatsMLB(Stats):
         # Get the current MLB schedule
         today = datetime.today().date()
         mlb_game_ids = mlb.schedule(
-            start_date=datetime.strptime("2022-04-07", "%Y-%m-%d").date(),
+            start_date=self.season_start,
             end_date=today,
         )
         mlb_game_ids = [
@@ -842,7 +849,8 @@ class StatsMLB(Stats):
 
         # Write to file
         with open((pkg_resources.files(data) / "mlb_data.dat"), "wb") as outfile:
-            pickle.dump({"games": self.gameIds, "gamelog": self.gamelog}, outfile)
+            pickle.dump(
+                {"games": self.gameIds, "gamelog": self.gamelog}, outfile)
 
     def bucket_stats(self, market, buckets=20):
         """
@@ -1061,7 +1069,8 @@ class StatsMLB(Stats):
                 .get(player, {})
                 .get(line, [0.5] * 9)
             )
-            moneyline = archive["MLB"]["Moneyline"].get(date, {}).get(team, 0.5)
+            moneyline = archive["MLB"]["Moneyline"].get(
+                date, {}).get(team, 0.5)
             total = archive["MLB"]["Totals"].get(date, {}).get(team, 8.3)
         except:
             return 0
@@ -1222,19 +1231,13 @@ class StatsMLB(Stats):
             if game_res
             else 0,
             "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]]) - 0.5 if h2h_res else 0,
-            "Avg5": np.mean(game_res[:5])
-            if len(game_res[-5:])
-            else 0
+            "Avg5": np.mean(game_res[-5:])
             if game_res
             else 0,
-            "Avg10": np.mean(game_res[:10])
-            if len(game_res[-10:])
-            else 0
+            "Avg10": np.mean(game_res[-10:])
             if game_res
             else 0,
-            "AvgH2H": np.mean(h2h_res[:5])
-            if len(h2h_res[-5:])
-            else 0
+            "AvgH2H": np.mean(h2h_res[-5:])
             if h2h_res
             else 0,
             "Moneyline": moneyline - 0.5,
@@ -1252,7 +1255,8 @@ class StatsMLB(Stats):
             h2h_res = [0] * i + h2h_res
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[-5:]]).fillna(0).add_prefix("Meeting "))
+        X = X.join(pd.DataFrame([h2h_res[-5:]]
+                                ).fillna(0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
 
         return X
@@ -1296,7 +1300,8 @@ class StatsMLB(Stats):
             gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
             try:
                 names = list(
-                    archive["MLB"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()
+                    archive["MLB"][market].get(
+                        gameDate.strftime("%Y-%m-%d"), {}).keys()
                 )
                 for name in names:
                     if (
@@ -1396,7 +1401,8 @@ class StatsMLB(Stats):
                                     )
                                 else:
                                     results.append(
-                                        {"Result": 1 if game[market] > line else -1}
+                                        {"Result": 1 if game[market]
+                                            > line else -1}
                                     )
 
                                 # Concatenate retrieved stats into the training data matrix
@@ -1885,7 +1891,8 @@ class StatsNHL(Stats):
                 .get(player, {})
                 .get(line, [0.5] * 9)
             )
-            moneyline = archive["NHL"]["Moneyline"].get(date, {}).get(team, np.nan)
+            moneyline = archive["NHL"]["Moneyline"].get(
+                date, {}).get(team, np.nan)
             total = archive["NHL"]["Totals"].get(date, {}).get(team, np.nan)
         except:
             return 0
@@ -2061,7 +2068,8 @@ class StatsNHL(Stats):
 
         # Create a DataFrame with the calculated statistics
         X = pd.DataFrame(data, index=[0]).fillna(0)
-        X = X.join(pd.DataFrame([h2h_res[-5:]]).fillna(0).add_prefix("Meeting "))
+        X = X.join(pd.DataFrame([h2h_res[-5:]]
+                                ).fillna(0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
 
         return X
@@ -2098,7 +2106,8 @@ class StatsNHL(Stats):
 
             try:
                 names = list(
-                    archive["NHL"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()
+                    archive["NHL"][market].get(
+                        gameDate.strftime("%Y-%m-%d"), {}).keys()
                 )
 
                 # Filter data based on the player's name in the gamelog
@@ -2139,7 +2148,8 @@ class StatsNHL(Stats):
                     offer = offer | {
                         "Team": "/".join([game["teamAbbrev"], game2["teamAbbrev"]]),
                         "Opponent": "/".join(
-                            [game["opponentTeamAbbrev"], game2["opponentTeamAbbrev"]]
+                            [game["opponentTeamAbbrev"],
+                                game2["opponentTeamAbbrev"]]
                         ),
                     }
 
@@ -2197,7 +2207,8 @@ class StatsNHL(Stats):
                                     )
                                 else:
                                     results.append(
-                                        {"Result": 1 if game[market] > line else -1}
+                                        {"Result": 1 if game[market]
+                                            > line else -1}
                                     )
 
                                 # Concatenate the new_get_stats dataframe with X

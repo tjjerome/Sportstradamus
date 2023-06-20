@@ -12,10 +12,10 @@ with open(filepath, "rb") as infile:
 
 apikey = "38c4614a42f2ae7ea623bb87e20edc84"
 
-sport = "icehockey_nhl"
-league = "NHL"
+sport = "baseball_mlb"
+league = "MLB"
 
-Date = datetime.strptime("2022-10-07T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2023-06-13T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
 while Date < datetime.today():
     date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -23,7 +23,8 @@ while Date < datetime.today():
     res = scraper.get(url)["data"]
 
     for game in res:
-        gameDate = datetime.strptime(game["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
+        gameDate = datetime.strptime(
+            game["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
         gameDate = (gameDate - timedelta(hours=5)).strftime("%Y-%m-%d")
 
         homeTeam = abbreviations[league][remove_accents(game["home_team"])]
