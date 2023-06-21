@@ -238,7 +238,8 @@ def get_fd(sport, tabs):
                     continue
                 try:
                     if " - " in k["marketName"]:
-                        player = remove_accents(k["marketName"].split(" - ")[0])
+                        player = remove_accents(
+                            k["marketName"].split(" - ")[0])
                         market = k["marketName"].split(" - ")[1]
 
                     elif "@" in events[event_id]["name"]:
@@ -249,10 +250,12 @@ def get_fd(sport, tabs):
                             .split(")")
                         )
                         pitcher1 = mlb_pitchers.get(
-                            mlb.lookup_team(teams[0].strip())[0]["fileCode"].upper(), ""
+                            mlb.lookup_team(teams[0].strip())[
+                                0]["fileCode"].upper(), ""
                         )
                         pitcher2 = mlb_pitchers.get(
-                            mlb.lookup_team(teams[3].strip())[0]["fileCode"].upper(), ""
+                            mlb.lookup_team(teams[3].strip())[
+                                0]["fileCode"].upper(), ""
                         )
                         player = pitcher1 + " + " + pitcher2
                         market = k["marketName"]
@@ -263,7 +266,8 @@ def get_fd(sport, tabs):
                     if player not in players:
                         players[player] = {}
 
-                    outcomes = sorted(k["runners"][:2], key=lambda x: x["runnerName"])
+                    outcomes = sorted(k["runners"][:2],
+                                      key=lambda x: x["runnerName"])
                     if outcomes[1]["handicap"] == 0:
                         line = [
                             float(s)
@@ -385,7 +389,8 @@ def get_pinnacle(league):
         if player not in players:
             players[player] = {}
         try:
-            outcomes = sorted(market["participants"][:2], key=lambda x: x["name"])
+            outcomes = sorted(market["participants"]
+                              [:2], key=lambda x: x["name"])
             line = lines[market["id"]]["s;0;ou"][outcomes[1]["id"]]["Line"]
             prices = [
                 lines[market["id"]]["s;0;ou"][participant["id"]]["Price"]
@@ -420,7 +425,8 @@ def get_pinnacle(league):
                         else:
                             team_name = team["name"]
 
-                        team_abbr = mlb.lookup_team(team_name)[0]["fileCode"].upper()
+                        team_abbr = mlb.lookup_team(
+                            team_name)[0]["fileCode"].upper()
                         if game_num > 1:
                             team_abbr = team_abbr + str(game_num)
 
@@ -478,7 +484,8 @@ def get_caesars(sport, league):
 
     try:
         # Make a GET request to the Caesars API
-        api = requests.get("https://proxy.scrapeops.io/v1/", params=params).json()
+        api = requests.get("https://proxy.scrapeops.io/v1/",
+                           params=params).json()
 
         # Get the game IDs for the specified sport and league
         gameIds = [
@@ -503,7 +510,8 @@ def get_caesars(sport, league):
 
         try:
             # Make a GET request to the Caesars API for each game ID
-            api = requests.get("https://proxy.scrapeops.io/v1/", params=params).json()
+            api = requests.get(
+                "https://proxy.scrapeops.io/v1/", params=params).json()
 
             # Filter and retrieve the desired markets
             markets = [
@@ -548,7 +556,8 @@ def get_caesars(sport, league):
                 marketName = marketSwap.get(marketName, marketName)
 
                 if marketName == "Props":
-                    marketName = market.get("metadata", {}).get("marketCategoryName")
+                    marketName = market.get("metadata", {}).get(
+                        "marketCategoryName")
 
                 line = market["line"]
 
@@ -620,7 +629,8 @@ def get_pp():
 
     try:
         # Retrieve the available leagues
-        leagues = requests.get("https://proxy.scrapeops.io/v1/", params=params).json()
+        leagues = requests.get(
+            "https://proxy.scrapeops.io/v1/", params=params).json()
         leagues = [
             i["id"]
             for i in leagues["data"]
@@ -636,7 +646,8 @@ def get_pp():
 
         try:
             # Retrieve players and lines for each league
-            api = requests.get("https://proxy.scrapeops.io/v1/", params=params).json()
+            api = requests.get(
+                "https://proxy.scrapeops.io/v1/", params=params).json()
             players = api["included"]
             lines = api["data"]
         except:
@@ -658,7 +669,8 @@ def get_pp():
         for o in tqdm(lines, desc="Getting offers for " + league, unit="offer"):
             n = {
                 "Player": remove_accents(
-                    player_ids[o["relationships"]["new_player"]["data"]["id"]]["Name"]
+                    player_ids[o["relationships"]
+                               ["new_player"]["data"]["id"]]["Name"]
                 ),
                 "League": league,
                 "Team": player_ids[o["relationships"]["new_player"]["data"]["id"]][
@@ -719,7 +731,8 @@ def get_ud():
     for i in teams["teams"]:
         team_ids[i["id"]] = i["abbr"]
 
-    api = scraper.get("https://api.underdogfantasy.com/beta/v3/over_under_lines")
+    api = scraper.get(
+        "https://api.underdogfantasy.com/beta/v3/over_under_lines")
     if not api:
         logger.info("No offers found")
         return {}
@@ -936,7 +949,8 @@ def get_thrive():
             "League": o["player1"]["leagueType"],
             "Team": team,
             "Date": (
-                datetime.strptime(o["startTime"], "%Y-%m-%d %H:%M") - timedelta(hours=5)
+                datetime.strptime(
+                    o["startTime"], "%Y-%m-%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
@@ -984,21 +998,21 @@ def get_parp():
     """
     params = {
         "api_key": apikey,
-        "url": "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=",
+        "url": "https://parlayplay.io/api/v1/crossgame/search/?format=json&league=&sport=All",
         "optimize_request": True,
-        "keep_headers": True,
+        "keep_headers": True
     }
     header = {
         "Accept": "application/json",
+        "X-CSRFToken": "FoEEn6o8fwxrKIrSzyphlphpVjBAEVZQANmhb2xeMmmRZwvbaDDZt5zGKoXNzrc2",
         "X-Parlay-Request": "1",
         "X-Parlayplay-Platform": "web",
-        "X-CSRFToken": "1",
     }
     try:
         api = requests.get(
             "https://proxy.scrapeops.io/v1/",
             params=params,
-            headers=header | scraper.header,
+            headers=header,
         ).json()
     except:
         logger.exception(id)
