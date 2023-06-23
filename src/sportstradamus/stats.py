@@ -481,13 +481,9 @@ class StatsNBA(Stats):
         data = {
             "DVPOA": dvpoa,
             "Odds": odds - 0.5,
-            "Last5": np.mean([int(i > 0) for i in game_res[:5]]) - 0.5
-            if game_res
-            else 0,
-            "Last10": np.mean([int(i > 0) for i in game_res[:10]]) - 0.5
-            if game_res
-            else 0,
-            "H2H": np.mean([int(i > 0) for i in h2h_res[:5]]) - 0.5 if h2h_res else 0,
+            "Last5": np.mean([int(i > 0) for i in game_res[:5]]) - 0.5 if game_res else 0,
+            "Last10": np.mean([int(i > 0) for i in game_res[:10]]) - 0.5 if game_res else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[:5]] + [1, 0]) - 0.5 if h2h_res else 0,
             "Avg5": np.mean(game_res[:5]) if game_res else 0,
             "Avg10": np.mean(game_res[:10]) if game_res else 0,
             "AvgH2H": np.mean(h2h_res[:5]) if h2h_res else 0,
@@ -1230,7 +1226,7 @@ class StatsMLB(Stats):
             "Last10": np.mean([int(i > 0) for i in game_res[-10:]]) - 0.5
             if game_res
             else 0,
-            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]]) - 0.5 if h2h_res else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]] + [1, 0]) - 0.5 if h2h_res else 0,
             "Avg5": np.mean(game_res[-5:])
             if game_res
             else 0,
@@ -2047,7 +2043,7 @@ class StatsNHL(Stats):
             "Last10": np.mean([int(i > 0) for i in game_res[-10:]]) - 0.5
             if game_res
             else 0,
-            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]]) - 0.5 if h2h_res else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]] + [1, 0]) - 0.5 if h2h_res else 0,
             "Avg5": np.mean(game_res[-5:]) if game_res[-5:] else 0,
             "Avg10": np.mean(game_res[-10:]) if game_res[-10:] else 0,
             "AvgH2H": np.mean(h2h_res[-5:]) if h2h_res[-5:] else 0,
