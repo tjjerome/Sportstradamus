@@ -13,8 +13,8 @@ from sklearn.metrics import (
 from sklearn.preprocessing import MaxAbsScaler
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import CalibratedClassifierCV
+from lightgbm import LGBMClassifier
 import pandas as pd
-import json
 
 
 def meditate():
@@ -36,6 +36,7 @@ def meditate():
             "runs allowed",
             "hits",
             "pitching outs",
+            "pitches thrown",
             "walks allowed",
             "hits allowed",
             "runs",
@@ -71,6 +72,7 @@ def meditate():
             else:
                 continue
 
+            print(f"Training {league} - {market}")
             X, y = stat_data.get_training_matrix(market)
 
             if X.empty:
@@ -95,18 +97,35 @@ def meditate():
             #                       beta_1=.96, beta_2=.958, learning_rate_init=.005685,
             #                       solver='adam', early_stopping=True, n_iter_no_change=300)  # .553r, .40a, .54u, .64o
 
-            model = GradientBoostingClassifier(
-                loss="log_loss",
-                learning_rate=0.1,
+            # model = GradientBoostingClassifier(
+            #     loss="log_loss",
+            #     learning_rate=0.1,
+            #     n_estimators=500,
+            #     max_depth=10,
+            #     max_features="log2",
+            # )  # .547r, .39a, .61u, .55o
+
+            model = LGBMClassifier(
+                boosting_type='dart',
+                learning_rate=0.00034500169297317786,
+                max_depth=9,
+                num_boost_round=1000,
+                max_bin=1023,
                 n_estimators=500,
-                max_depth=10,
-                max_features="log2",
-            )  # .547r, .39a, .61u, .55o
+                num_leaves=61,
+                feature_fraction=0.6956400653428916,
+                bagging_fraction=0.4347964848874769,
+                bagging_freq=5,
+                lambda_l1=0.7877116478856533,
+                lambda_l2=0.8815438838292535,
+                is_unbalance=True
+            )
 
             # model = RandomForestClassifier(
             #     criterion='entropy', n_estimators=500, max_features=0.25, max_depth=26)  # .564r, .40a, .58u, .60o
 
-            model = CalibratedClassifierCV(model, cv=10, n_jobs=-1, method="sigmoid")
+            model = CalibratedClassifierCV(
+                model, cv=15, n_jobs=-1, method="sigmoid")
             model.fit(X_train, y_train)
 
             y_proba = model.predict_proba(X_test)
@@ -120,8 +139,10 @@ def meditate():
             roc = np.zeros_like(thresholds)
             for i, threshold in enumerate(thresholds):
                 y_pred = (y_proba > threshold).astype(int)
-                preco[i] = precision_score((y_test == 1).astype(int), y_pred[:, 1])
-                precu[i] = precision_score((y_test == -1).astype(int), y_pred[:, 0])
+                preco[i] = precision_score(
+                    (y_test == 1).astype(int), y_pred[:, 1])
+                precu[i] = precision_score(
+                    (y_test == -1).astype(int), y_pred[:, 0])
                 y_pred = y_pred[:, 1] - y_pred[:, 0]
                 null[i] = 1 - np.mean(np.abs(y_pred))
                 acc[i] = accuracy_score(
@@ -152,7 +173,7 @@ def meditate():
                 },
             }
 
-            filename = "_".join([league, market]).replace(" ", "-") + ".skl"
+            filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
 
             filepath = pkg_resources.files(data) / filename
             with open(filepath, "wb") as outfile:
@@ -161,11 +182,11 @@ def meditate():
                 del model
                 del scaler
 
-    model_list = [
-        f.name for f in pkg_resources.files(data).iterdir() if ".skl" in f.name
-    ]
 
-    report = {}
+def report():
+    model_list = [f.name for f in pkg_resources.files(
+        data).iterdir() if ".mdl" in f.name]
+    model_list.sort()
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
             with open(pkg_resources.files(data) / model_str, "rb") as infile:
@@ -173,13 +194,15 @@ def meditate():
 
             name = model_str.split("_")
             league = name[0]
-            market = name[1].replace("-", " ").replace(".skl", "")
+            market = name[1].replace("-", " ").replace(".mdl", "")
 
-            f.write(f" {league} {market} ".center(72, "="))
+            f.write(f" {league} {market} ".center(89, "="))
             f.write("\n")
-            f.write(pd.DataFrame(model["stats"], index=model["threshold"]).to_string())
+            f.write(pd.DataFrame(model["stats"],
+                    index=model["threshold"]).to_string())
             f.write("\n\n")
 
 
 if __name__ == "__main__":
     meditate()
+    report()

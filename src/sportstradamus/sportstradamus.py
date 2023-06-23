@@ -177,7 +177,8 @@ def main(progress):
         untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
         wks = gc.open("Sports Betting").worksheet("Untapped Markets")
         wks.clear()
-        wks.update([untapped_df.columns.values.tolist()] + untapped_df.values.tolist())
+        wks.update([untapped_df.columns.values.tolist()] +
+                   untapped_df.values.tolist())
         wks.set_basic_filter()
 
     archive.write()
@@ -202,7 +203,8 @@ def process_offers(offer_dict, book, datasets, stats):
     new_offers = []
     if len(offer_dict) > 0:
         # Calculate the total number of offers to process
-        total = sum(sum(len(i) for i in v.values()) for v in offer_dict.values())
+        total = sum(sum(len(i) for i in v.values())
+                    for v in offer_dict.values())
 
         # Display a progress bar
         with tqdm(total=total, desc=f"Matching {book} Offers", unit="offer") as pbar:
@@ -272,11 +274,13 @@ def save_data(offers, book, gc):
             # Apply number formatting to the relevant columns
             if book == "ParlayPlay":
                 wks.format(
-                    "I:O", {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}
+                    "I:O", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
                 )
             else:
                 wks.format(
-                    "H:N", {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}
+                    "H:N", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
                 )
         except Exception:
             # Log the exception if there is an error writing the offers to the worksheet
@@ -304,7 +308,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
 
     stat_map = stat_map[platform]
     market = stat_map["Stats"].get(market, market)
-    filename = "_".join([league, market]).replace(" ", "-") + ".skl"
+    filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
         pbar.update(len(offers))
@@ -335,7 +339,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     codex = stat_map[book]
                     offer = dataset.get(
                         o["Player"],
-                        dataset.get(" + ".join(o["Player"].split(" + ")[::-1]), {}),
+                        dataset.get(
+                            " + ".join(o["Player"].split(" + ")[::-1]), {}),
                     ).get(codex.get(o["Market"], o["Market"]))
 
                     if offer is not None:
@@ -381,7 +386,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     codex = stat_map[book]
                     offer = dataset.get(
                         o["Player"],
-                        dataset.get(" vs. ".join(o["Player"].split(" + ")[::-1]), {}),
+                        dataset.get(" vs. ".join(
+                            o["Player"].split(" + ")[::-1]), {}),
                     ).get(codex.get(m, m))
                     if offer is not None:
                         v.append(offer["EV"])
@@ -400,10 +406,12 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                             offer = {
                                 "Line": str(l + 0.5),
                                 "Under": str(
-                                    prob_to_odds(skellam.cdf(l, ev2["EV"], ev1["EV"]))
+                                    prob_to_odds(skellam.cdf(
+                                        l, ev2["EV"], ev1["EV"]))
                                 ),
                                 "Over": str(
-                                    prob_to_odds(skellam.sf(l, ev2["EV"], ev1["EV"]))
+                                    prob_to_odds(skellam.sf(
+                                        l, ev2["EV"], ev1["EV"]))
                                 ),
                                 "EV": (ev1["EV"], ev2["EV"]),
                             }
@@ -414,7 +422,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     v1 = np.mean(v1)
                     v2 = np.mean(v2)
                     line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [skellam.cdf(line[0], v2, v1), skellam.sf(line[1], v2, v1)]
+                    p = [skellam.cdf(line[0], v2, v1),
+                         skellam.sf(line[1], v2, v1)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -457,25 +466,30 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 o["Model"] = proba[0]
 
             o["Avg 10"] = (
-                (stats.loc[0, "Avg10"]) / o["Line"] if " vs. " not in o["Player"] else 0
+                (stats.loc[0, "Avg10"]) /
+                o["Line"] if " vs. " not in o["Player"] else 0
             )
             o["Last 5"] = stats.loc[0, "Last5"] + 0.5
             o["Last 10"] = stats.loc[0, "Last10"] + 0.5
             o["H2H"] = stats.loc[0, "H2H"] + 0.5
             o["OvP"] = stats.loc[0, "DVPOA"]
 
-            stats = [o["Avg 10"], o["Last 5"], o["Last 10"], o["H2H"], o["OvP"]]
+            stats = [o["Avg 10"], o["Last 5"],
+                     o["Last 10"], o["H2H"], o["OvP"]]
 
             archive.add(o, stats, lines, stat_map["Stats"])
 
             o["DraftKings"] = (
-                lines[0]["Line"] + "/" + lines[0][o["Bet"]] if lines[0] else "N/A"
+                lines[0]["Line"] + "/" +
+                lines[0][o["Bet"]] if lines[0] else "N/A"
             )
             o["FanDuel"] = (
-                lines[1]["Line"] + "/" + lines[1][o["Bet"]] if lines[1] else "N/A"
+                lines[1]["Line"] + "/" +
+                lines[1][o["Bet"]] if lines[1] else "N/A"
             )
             o["Pinnacle"] = (
-                lines[2]["Line"] + "/" + lines[2][o["Bet"]] if lines[2] else "N/A"
+                lines[2]["Line"] + "/" +
+                lines[2][o["Bet"]] if lines[2] else "N/A"
             )
             o["Caesars"] = (
                 str(lines[3]["Line"]) + "/" + str(lines[3][o["Bet"]])
