@@ -5,15 +5,7 @@ import pandas as pd
 import numpy as np
 import optuna
 import importlib.resources as pkg_resources
-import data
-from optuna.visualization.matplotlib import plot_contour
-from optuna.visualization.matplotlib import plot_edf
-from optuna.visualization.matplotlib import plot_intermediate_values
-from optuna.visualization.matplotlib import plot_optimization_history
-from optuna.visualization.matplotlib import plot_parallel_coordinate
-from optuna.visualization.matplotlib import plot_param_importances
-from optuna.visualization.matplotlib import plot_slice
-from optuna.visualization.matplotlib import plot_pareto_front
+from sportstradamus import data
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -36,40 +28,37 @@ def objective(trial):
     # Define hyperparameters
     params = {
         'objective': 'binary',
-        'max_bin': 1023,
-        'n_estimators': 500,
         'verbosity': -1,
-        'boosting_type': 'dart',
-        'learning_rate': trial.suggest_float('learning_rate', 1e-5, 1e-1, log=True),
-        'max_depth': trial.suggest_int('max_depth', 3, 12),
-        'num_leaves': trial.suggest_int('num_leaves', 2, 128),
-        'feature_fraction': trial.suggest_float('feature_fraction', 0.1, 1.0),
-        'bagging_fraction': trial.suggest_float("bagging_fraction", 0.4, 1.0),
-        'bagging_freq': trial.suggest_int("bagging_freq", 1, 7),
-        'lambda_l1': trial.suggest_float('lambda_l1', 0.0, 1.0),
-        'lambda_l2': trial.suggest_float('lambda_l2', 0.0, 1.0),
-        'is_unbalance': trial.suggest_categorical('is_unbalance', [True, False]),
+        'boosting_type': 'gbdt',
+        'max_depth': trial.suggest_int('max_depth', 2, 63),
+        'num_leaves': trial.suggest_int('num_leaves', 7, 4095),
+        'min_child_weight': trial.suggest_float('min_child_weight', 1e-2, len(X_train)/1000, log=True),
+        'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
+        'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
+        'n_estimators': 9999999,
+        'bagging_freq': 1,
+        'is_unbalance': False,
         'metric': 'auc'
     }
 
     # Train model
+    early_stopping = lgb.early_stopping(100)
     pruning_callback = optuna.integration.LightGBMPruningCallback(trial, "auc")
-    model = lgb.train(params, lgb_train, valid_sets=lgb_val, num_boost_round=1000,
-                      callbacks=[pruning_callback])
+    model = lgb.train(params, lgb_train, valid_sets=lgb_val,
+                      callbacks=[pruning_callback, early_stopping])
 
     # Return metrics
     y_pred = model.predict(X_val)
     y_pred = np.rint(y_pred)
     y_pred[y_pred == 0] = -1
     acc = accuracy_score(y_val, y_pred)
-    prec = precision_score(y_val, y_pred, average="weighted")
-    roc = roc_auc_score(y_val, y_pred, average="weighted")
     # Return accuracy on validation set
     return acc
 
 
 # %%
 study = optuna.create_study(direction='maximize')
-study.optimize(objective, n_trials=1000, show_progress_bar=True)
-
+study.optimize(objective, n_trials=1000, n_jobs=-1)
+# %%
+print(study.best_params)
 # %%

@@ -453,8 +453,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 else:
                     p = [0.5] * 2
 
-            X = scaler.transform(stats)
-            proba = model.predict_proba(X)[0, :]
+            proba = model.predict_proba(stats)[0, :]
 
             if proba[1] > proba[0]:
                 o["Bet"] = "Over"

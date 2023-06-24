@@ -19,8 +19,21 @@ rosters = rosters.to_dict()['team']
 
 # %%
 schedules = nfl.import_schedules([2021, 2022])
-schedules = schedules.loc[schedules.week.isin([15, 16, 17])]
+schedules = schedules.loc[schedules.week < 18]
 schedules = schedules[['season', 'week', 'away_team', 'home_team']]
+schedules = schedules.groupby(['season', 'week']).apply(
+    lambda x: {i[2]: i[3] for i in x.values} | {i[3]: i[2] for i in x.values})
+schedules = schedules.to_dict()
+
+# %%
+weekly = nfl.import_weekly_data([2021, 2022], [
+                                'player_display_name', 'position', 'season', 'week', 'fantasy_points', 'receptions'], True)
+weekly['fantasy_points'] = weekly['fantasy_points'] + weekly['receptions']/2
+weekly = weekly.loc[(weekly['position'].isin(
+    ['QB', 'WR', 'RB', 'TE'])) & (weekly['week'] < 18)]
+weekly = weekly.groupby(['season', 'week']).apply(
+    lambda x: {i[0]: i[4] for i in x.values})
+weekly = weekly.to_dict()
 
 # %%
 data_list = [f.name for f in pkg_resources.files(
@@ -58,11 +71,12 @@ df.loc[df['days_until_season_start'] > 200, 'days_until_season_start'] = \
 # %%
 teams = df.groupby(['draft_id', 'pick_order'])
 teams = teams[['player_name', 'position_name', 'team', 'team_pick_number', 'roster_points', 'draft_capital_spent',
-               'draft_capital_gained', 'days_until_season_start']]
+               'draft_capital_gained', 'days_until_season_start', 'season']]
 
 
 # %%
 team_df = {}
+weekly_df = {}
 with tqdm(total=teams.ngroups, desc="Analyzing Teams", unit="team") as pbar:
     for order, team in teams:
         team = team.sort_values('team_pick_number')
@@ -89,8 +103,16 @@ with tqdm(total=teams.ngroups, desc="Analyzing Teams", unit="team") as pbar:
         QB3TE = team.loc[(team['team'] == QBTeams[2]) & (
             team['position_name'] == 'TE'), 'draft_capital_spent']
 
+        teamStacks = team.loc[~team['team'].isin(QBTeams)].groupby('team')
         teamStacks = team.loc[~team['team'].isin(QBTeams)].groupby(
-            'team').filter(lambda x: x['player_name'].count() > 1)
+            'team').filter(lambda x: x['player_name'].count() == np.min([teamStacks.size().max(), 2]))
+        if teamStacks.empty:
+            StackedTeam = "NA"
+        else:
+            StackedTeam = teamStacks.groupby(
+                'team').sum()['draft_capital_spent'].idxmax()
+        teamStacks = team.loc[team['team'] ==
+                              StackedTeam, 'draft_capital_spent']
 
         team_df[order] = {
             'daysFromSeasonStart': team['days_until_season_start'].mean(),
@@ -123,13 +145,74 @@ with tqdm(total=teams.ngroups, desc="Analyzing Teams", unit="team") as pbar:
             'QB3WRVal': QB3WR.sum(),
             'QB3RBVal': QB3RB.sum(),
             'QB3TEVal': QB3TE.sum(),
-            'NonQBStackNum': teamStacks.groupby('team').count()['draft_capital_spent'].max(),
-            'NonQBStackVal': teamStacks.groupby('team').sum()['draft_capital_spent'].max(),
+            'NonQBStackNum': teamStacks.count(),
+            'NonQBStackVal': teamStacks.sum(),
             'Points': team['roster_points'].mean()
         }
+        for week in np.arange(15, 18):
+            team['player_points'] = team['player_name'].map(
+                weekly[(int(team['season'].max()), week)])
+            QBPoints = team.loc[team['position_name'] == 'QB', 'player_points'].sort_values(
+                ascending=False).iloc[:1].sum()
+            activePlayers = team.loc[team['position_name']
+                                     == 'QB'].index.to_list()
+            WRPoints = team.loc[team['position_name'] == 'WR', 'player_points'].sort_values(
+                ascending=False).iloc[:3].sum()
+            activePlayers.extend(team.loc[team['position_name'] == 'WR', 'player_points'].sort_values(
+                ascending=False).iloc[:3].index.to_list())
+            RBPoints = team.loc[team['position_name'] == 'RB', 'player_points'].sort_values(
+                ascending=False).iloc[:2].sum()
+            activePlayers.extend(team.loc[team['position_name'] == 'RB', 'player_points'].sort_values(
+                ascending=False).iloc[:2].index.to_list())
+            TEPoints = team.loc[team['position_name'] == 'TE', 'player_points'].sort_values(
+                ascending=False).iloc[:1].sum()
+            activePlayers.extend(team.loc[team['position_name'] == 'TE', 'player_points'].sort_values(
+                ascending=False).iloc[:1].index.to_list())
+            FLXPoints = team.loc[~team.index.isin(
+                activePlayers), 'player_points'].max()
+
+            QB1OPP = team.loc[(team['team'] == schedules[(
+                int(team['season'].max()), week)].get(QBTeams[0])), 'draft_capital_spent']
+            QB2OPP = team.loc[(team['team'] == schedules[(
+                int(team['season'].max()), week)].get(QBTeams[1])), 'draft_capital_spent']
+            QB3OPP = team.loc[(team['team'] == schedules[(
+                int(team['season'].max()), week)].get(QBTeams[2])), 'draft_capital_spent']
+            teamStackOPP = team.loc[(team['team'] == schedules[(
+                int(team['season'].max()), week)].get(StackedTeam)), 'draft_capital_spent']
+
+            if not (int(team['season'].max()), week) in weekly_df:
+                weekly_df[(int(team['season'].max()), week)] = {}
+
+            weekly_df[(int(team['season'].max()), week)][order] = team_df[order] | {
+                'QB1OPPNum': QB1OPP.count(),
+                'QB2OPPNum': QB2OPP.count(),
+                'QB3OPPNum': QB3OPP.count(),
+                'QB1OPPVal': QB1OPP.sum(),
+                'QB2OPPVal': QB2OPP.sum(),
+                'QB3OPPVal': QB3OPP.sum(),
+                'NonQBOPPNum': teamStackOPP.count(),
+                'NonQBOPPVal': teamStackOPP.sum(),
+                'Points': QBPoints + WRPoints + RBPoints + TEPoints + FLXPoints
+            }
         pbar.update(1)
     pbar.close()
 
 # %%
-with open(pkg_resources.files(data) / 'BBM_teams.dat', 'wb') as outfile:
-    pickle.dump(team_df, outfile, -1)
+del df
+del teams
+del weekly
+del schedules
+del rosters
+
+# %%
+team_df = pd.DataFrame(team_df)
+team_df.to_csv(pkg_resources.files(data) / 'BBM_teams.csv')
+
+# %%
+for k in weekly_df.keys():
+    df = pd.DataFrame(weekly_df[k])
+    df.to_csv(pkg_resources.files(data) / f"BBM_teams_S{k[0]}_W{k[1]}.csv")
+
+# %%
+# with open(pkg_resources.files(data) / 'BBM_teams.dat', 'wb') as outfile:
+#     pickle.dump(team_df, outfile, -1)
