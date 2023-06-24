@@ -30,7 +30,7 @@ import importlib.resources as pkg_resources
 
 
 @click.command()
-@click.option("--progress", default=True, help="Display progress bars")
+@click.option("--progress/--no-progress", default=True, help="Display progress bars")
 def main(progress):
     global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
@@ -175,7 +175,7 @@ def main(progress):
 
     if len(untapped_markets) > 0:
         untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
-        wks = gc.open("Sports Betting").worksheet("Untapped Markets")
+        wks = gc.open("Sportstradamus").worksheet("Untapped Markets")
         wks.clear()
         wks.update([untapped_df.columns.values.tolist()] +
                    untapped_df.values.tolist())

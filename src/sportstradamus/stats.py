@@ -341,7 +341,7 @@ class StatsNBA(Stats):
                 if len(players) > 1:
                     continue
                 i = 20
-                while i > 0 and self.edges[20 - i] < line:
+                while i > 1 and self.edges[20 - i] < line:
                     i -= 1
                 bucket.append(i)
 
@@ -511,8 +511,6 @@ class StatsNBA(Stats):
         X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
             0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[:6]]).fillna(0).add_prefix("Game "))
-        X[['Bucket', 'Combo', 'Rival']] = X[[
-            'Bucket', 'Combo', 'Rival']].astype('category')
 
         return X
 
@@ -1018,7 +1016,7 @@ class StatsMLB(Stats):
                 if len(players) > 1:
                     continue
                 i = 20
-                while i > 0 and self.edges[20 - i] < line:
+                while i > 1 and self.edges[20 - i] < line:
                     i -= 1
                 bucket.append(i)
 
@@ -1272,8 +1270,6 @@ class StatsMLB(Stats):
         X = X.join(pd.DataFrame([h2h_res[-5:]]
                                 ).fillna(0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
-        X[['Bucket', 'Combo', 'Rival']] = X[[
-            'Bucket', 'Combo', 'Rival']].astype('category')
 
         return X
 
@@ -1898,7 +1894,7 @@ class StatsNHL(Stats):
                 if len(players) > 1:
                     continue
                 i = 20
-                while i > 0 and self.edges[20 - i] < line:
+                while i > 1 and self.edges[20 - i] < line:
                     i -= 1
                 bucket.append(i)
 
@@ -2095,8 +2091,6 @@ class StatsNHL(Stats):
         X = X.join(pd.DataFrame([h2h_res[-5:]]
                                 ).fillna(0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
-        X[['Bucket', 'Combo', 'Rival']] = X[[
-            'Bucket', 'Combo', 'Rival']].astype('category')
 
         return X
 
