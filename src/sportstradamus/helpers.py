@@ -82,7 +82,8 @@ class Scrape:
                         return response.json()
                     else:
                         logger.debug(
-                            "Attempt " + str(i) + ", Error " + str(response.status_code)
+                            "Attempt " + str(i) + ", Error " +
+                            str(response.status_code)
                         )
                 except Exception as exc:
                     logger.exception("Attempt " + str(i) + ",")
@@ -233,12 +234,14 @@ class Archive:
         market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
         if o["League"] == "NHL":
-            market_swap = {"AST": "assists", "PTS": "points", "BLK": "blockedShots"}
+            market_swap = {"AST": "assists",
+                           "PTS": "points", "BLK": "blockedShots"}
             market = market_swap.get(market, market)
 
         self.archive.setdefault(o["League"], {}).setdefault(market, {})
         self.archive[o["League"]][market].setdefault(o["Date"], {})
-        self.archive[o["League"]][market][o["Date"]].setdefault(o["Player"], {})
+        self.archive[o["League"]][market][o["Date"]
+                                          ].setdefault(o["Player"], {})
 
         for line in lines:
             if line:
@@ -256,10 +259,10 @@ class Archive:
 
             stats = np.append(stats, p)
 
-        self.archive[o["League"]][market][o["Date"]][o["Player"]][o["Line"]] = stats
-        self.archive[o["League"]][market][o["Date"]][o["Player"]][
-            "Closing Lines"
-        ] = lines
+        self.archive[o["League"]][market][o["Date"]
+                                          ][o["Player"]][o["Line"]] = stats
+        self.archive[o["League"]][market][o["Date"]
+                                          ][o["Player"]]["Closing Lines"] = lines
 
     def write(self):
         """
@@ -298,8 +301,10 @@ for game in mlb_games:
             if team["id"] == game["home_id"]
         ][0]
         if game["game_num"] == 1:
-            mlb_pitchers[awayTeam] = remove_accents(game["away_probable_pitcher"])
-            mlb_pitchers[homeTeam] = remove_accents(game["home_probable_pitcher"])
+            mlb_pitchers[awayTeam] = remove_accents(
+                game["away_probable_pitcher"])
+            mlb_pitchers[homeTeam] = remove_accents(
+                game["home_probable_pitcher"])
         elif game["game_num"] > 1:
             mlb_pitchers[awayTeam + str(game["game_num"])] = remove_accents(
                 game["away_probable_pitcher"]

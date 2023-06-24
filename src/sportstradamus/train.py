@@ -16,9 +16,15 @@ from lightgbm import LGBMClassifier
 import lightgbm as lgb
 import optuna
 import pandas as pd
+import click
+import os
 
 
-def meditate():
+@click.command()
+@click.option("-f", "--force", default=False, help="Display progress bars")
+@click.option("--league", type=click.Choice(['All', 'NFL', 'NBA', 'MLB', 'NHL']), default='All',
+              help="Select league to train on")
+def meditate(force, league):
     mlb = StatsMLB()
     mlb.load()
     mlb.update()
@@ -31,8 +37,8 @@ def meditate():
 
     all_markets = {
         "MLB": [
-            "total bases",
             "pitcher strikeouts",
+            "total bases",
             "batter strikeouts",
             "runs allowed",
             "hits",
@@ -60,8 +66,17 @@ def meditate():
             "PA",
             "BLST",
         ],
-        "NHL": ["saves", "goalsAgainst", "shots", "goals", "assists", "points"],
+        "NHL": [
+            "saves",
+            "goalsAgainst",
+            "shots",
+            "goals",
+            "assists",
+            "points",
+        ],
     }
+    if not league == "All":
+        all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
         for market in markets:
             if league == "MLB":
@@ -71,6 +86,11 @@ def meditate():
             elif league == "NHL":
                 stat_data = nhl
             else:
+                continue
+
+            filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
+            filepath = pkg_resources.files(data) / filename
+            if os.path.isfile(filepath) and not force:
                 continue
 
             print(f"Training {league} - {market}")
@@ -224,7 +244,7 @@ def optimize(X, y):
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=1000)
 
-    return study.best_params
+    return study.best_params | {'n_estimators': study.best_trial.last_step}
 
 
 if __name__ == "__main__":
