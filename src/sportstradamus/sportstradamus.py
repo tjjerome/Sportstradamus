@@ -264,11 +264,6 @@ def save_data(offers, book, gc):
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
             wks.update([df.columns.values.tolist()] + df.values.tolist())
-            wks.update(
-                "S1",
-                "Last Updated: "
-                + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
-            )
             wks.set_basic_filter()
 
             # Apply number formatting to the relevant columns
@@ -277,10 +272,20 @@ def save_data(offers, book, gc):
                     "I:O", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
+                wks.update(
+                    "T1",
+                    "Last Updated: "
+                    + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
+                )
             else:
                 wks.format(
                     "H:N", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
+                )
+                wks.update(
+                    "S1",
+                    "Last Updated: "
+                    + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
                 )
         except Exception:
             # Log the exception if there is an error writing the offers to the worksheet
@@ -318,7 +323,6 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
     model = filedict["model"]
-    scaler = filedict["scaler"]
     # threshold = filedict['threshold']
     # edges = filedict['edges']
     stat_data.bucket_stats(market)
