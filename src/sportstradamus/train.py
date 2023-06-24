@@ -11,9 +11,10 @@ from sklearn.metrics import (
     brier_score_loss,
 )
 from sklearn.preprocessing import MaxAbsScaler
-from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from lightgbm import LGBMClassifier
+import lightgbm as lgb
+import optuna
 import pandas as pd
 
 
@@ -85,52 +86,33 @@ def meditate():
             if len(X_train) < 1000:
                 continue
 
-            scaler = MaxAbsScaler()
-
-            X_train = scaler.fit_transform(X_train)
-            X_test = scaler.transform(X_test)
             y_train = np.ravel(y_train.to_numpy())
             y_test = np.ravel(y_test.to_numpy())
 
-            # model = MLPClassifier(hidden_layer_sizes=(472, 112, 64),  # (472,112,64), (448,96,64), (416, 352, 56)
-            #                       batch_size=128, tol=3.86e-5, max_iter=1000, alpha=0.001375,
-            #                       beta_1=.96, beta_2=.958, learning_rate_init=.005685,
-            #                       solver='adam', early_stopping=True, n_iter_no_change=300)  # .553r, .40a, .54u, .64o
+            opt_params = optimize(X, y)
 
-            # model = GradientBoostingClassifier(
-            #     loss="log_loss",
-            #     learning_rate=0.1,
-            #     n_estimators=500,
-            #     max_depth=10,
-            #     max_features="log2",
-            # )  # .547r, .39a, .61u, .55o
+            params = {
+                'boosting_type': 'gbdt',
+                'max_depth': 9,
+                'n_estimators': 500,
+                'num_leaves': 65,
+                'min_child_weight': 5.9665759403609915,
+                'feature_fraction': 0.8276862446751593,
+                'bagging_fraction': 0.8821195174753188,
+                'bagging_freq': 1,
+                'is_unbalance': False
+            } | opt_params
 
-            model = LGBMClassifier(
-                boosting_type='dart',
-                learning_rate=0.00034500169297317786,
-                max_depth=9,
-                num_boost_round=1000,
-                max_bin=1023,
-                n_estimators=500,
-                num_leaves=61,
-                feature_fraction=0.6956400653428916,
-                bagging_fraction=0.4347964848874769,
-                bagging_freq=5,
-                lambda_l1=0.7877116478856533,
-                lambda_l2=0.8815438838292535,
-                is_unbalance=True
-            )
+            trees = LGBMClassifier(**params)
 
-            # model = RandomForestClassifier(
-            #     criterion='entropy', n_estimators=500, max_features=0.25, max_depth=26)  # .564r, .40a, .58u, .60o
-
+            trees.fit(X_train, y_train)
             model = CalibratedClassifierCV(
-                model, cv=15, n_jobs=-1, method="sigmoid")
+                trees, cv=15, n_jobs=-1, method="sigmoid")
             model.fit(X_train, y_train)
 
             y_proba = model.predict_proba(X_test)
 
-            thresholds = np.arange(0.52, 0.58, 0.001)
+            thresholds = np.arange(0.5, 0.58, 0.001)
             acc = np.zeros_like(thresholds)
             null = np.zeros_like(thresholds)
             preco = np.zeros_like(thresholds)
@@ -160,7 +142,6 @@ def meditate():
 
             filedict = {
                 "model": model,
-                "scaler": scaler,
                 "threshold": (0.545, t1, t2),
                 "edges": [np.floor(i * 2) / 2 for i in stat_data.edges][:-1],
                 "stats": {
@@ -180,7 +161,6 @@ def meditate():
                 pickle.dump(filedict, outfile, -1)
                 del filedict
                 del model
-                del scaler
 
 
 def report():
@@ -201,6 +181,50 @@ def report():
             f.write(pd.DataFrame(model["stats"],
                     index=model["threshold"]).to_string())
             f.write("\n\n")
+
+
+def optimize(X, y):
+
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2)
+    lgb_train = lgb.Dataset(X_train, label=y_train)
+    lgb_val = lgb.Dataset(X_val, label=y_val, reference=lgb_train)
+
+    def objective(trial):
+        # Define hyperparameters
+        params = {
+            'objective': 'binary',
+            'verbosity': -1,
+            'boosting_type': 'gbdt',
+            'max_depth': trial.suggest_int('max_depth', 2, 63),
+            'num_leaves': trial.suggest_int('num_leaves', 7, 4095),
+            'min_child_weight': trial.suggest_float('min_child_weight', 1e-2, len(X_train)/1000, log=True),
+            'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
+            'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
+            'n_estimators': 9999999,
+            'bagging_freq': 1,
+            'is_unbalance': False,
+            'metric': 'auc'
+        }
+
+        # Train model
+        early_stopping = lgb.early_stopping(100)
+        pruning_callback = optuna.integration.LightGBMPruningCallback(
+            trial, "auc")
+        model = lgb.train(params, lgb_train, valid_sets=lgb_val,
+                          callbacks=[pruning_callback, early_stopping])
+
+        # Return metrics
+        y_pred = model.predict(X_val)
+        y_pred = np.rint(y_pred)
+        y_pred[y_pred == 0] = -1
+        acc = accuracy_score(y_val, y_pred)
+        # Return accuracy on validation set
+        return acc
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=1000)
+
+    return study.best_params
 
 
 if __name__ == "__main__":

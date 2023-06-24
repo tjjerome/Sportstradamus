@@ -18,19 +18,19 @@ from lightgbm import LGBMClassifier
 import importlib.resources as pkg_resources
 from sportstradamus import data
 
-# nba = StatsNBA()
-# nba.load()
-# nba.update()
+nba = StatsMLB()
+nba.load()
+nba.update()
 
-league = "NBA"
-markets = ["PRA"]
+league = "MLB"
+markets = ["1st inning runs allowed"]
 for market in markets:
-    # X, y = nba.get_training_matrix(market)
-    X = pd.read_csv(pkg_resources.files(data) / "X.csv", index_col=0)
-    y = pd.read_csv(pkg_resources.files(data) / "y.csv", index_col=0)
+    X, y = nba.get_training_matrix(market)
+    # X = pd.read_csv(pkg_resources.files(data) / "X.csv", index_col=0)
+    # y = pd.read_csv(pkg_resources.files(data) / "y.csv", index_col=0)
 
-    # X.to_csv(pkg_resources.files(data) / "X.csv")
-    # y.to_csv(pkg_resources.files(data) / "y.csv")
+    X.to_csv(pkg_resources.files(data) / "X.csv")
+    y.to_csv(pkg_resources.files(data) / "y.csv")
 
     X = X.reset_index()
     y = np.ravel(y)
@@ -52,13 +52,16 @@ for market in markets:
     #                       beta_1=.96, beta_2=.958, learning_rate_init=.005685,
     #                       solver='adam', early_stopping=True, n_iter_no_change=300)  # .553r, .40a, .54u, .64o
 
-    model = LGBMClassifier(
-        boosting_type='dart',
-        learning_rate=0.01,
-        num_iterations=1000,
-        max_bin=1023,
+    trees = LGBMClassifier(
+        boosting_type='gbdt',
+        max_depth=9,
         n_estimators=500,
-        num_leaves=50
+        num_leaves=65,
+        min_child_weight=5.9665759403609915,
+        feature_fraction=0.8276862446751593,
+        bagging_fraction=0.8821195174753188,
+        bagging_freq=1,
+        is_unbalance=False
     )
 
     # model = GradientBoostingClassifier(
@@ -74,12 +77,14 @@ for market in markets:
 
     # model.fit(X_train, y_train)
 
-    # model = CalibratedClassifierCV(model, cv=10, n_jobs=-1, method="sigmoid")
+    trees.fit(X_train, y_train)
+    model = CalibratedClassifierCV(
+        trees, cv=15, n_jobs=-1, method="sigmoid")
     model.fit(X_train, y_train)
 
     y_proba = model.predict_proba(X_test)
 
-    thresholds = np.arange(0.52, 0.58, 0.001)
+    thresholds = np.arange(0.5, 0.58, 0.001)
     acc = np.zeros_like(thresholds)
     null = np.zeros_like(thresholds)
     preco = np.zeros_like(thresholds)

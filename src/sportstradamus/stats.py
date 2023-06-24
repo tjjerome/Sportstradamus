@@ -331,16 +331,24 @@ class StatsNBA(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
 
-        if "+" in player:
-            bucket = 21
-        elif "vs." in player:
-            bucket = 22
-        elif self.playerStats.get(player):
-            bucket = self.playerStats[player]["bucket"]
-        else:
-            bucket = 20
-            while bucket > 0 and self.edges[20 - bucket] < line:
-                bucket -= 1
+        players = player.replace("vs.", "+").split(" + ")
+
+        bucket = []
+        for p in players:
+            if self.playerStats.get(p):
+                bucket.append(self.playerStats[p]["bucket"])
+            else:
+                if len(players) > 1:
+                    continue
+                i = 20
+                while i > 0 and self.edges[20 - i] < line:
+                    i -= 1
+                bucket.append(i)
+
+        if not bucket:
+            return 0
+
+        bucket = int(np.mean(bucket))
 
         try:
             stats = (
@@ -489,9 +497,9 @@ class StatsNBA(Stats):
             "AvgH2H": np.mean(h2h_res[:5]) if h2h_res else 0,
             "Moneyline": moneyline - 0.5,
             "Total": total / 229.3 - 1,
-            "Bucket": bucket if bucket < 21 else 0,
-            "Combo": 1 if bucket == 21 else 0,
-            "Rival": 1 if bucket == 22 else 0,
+            "Bucket": bucket,
+            "Combo": 1 if "+" in player else 0,
+            "Rival": 1 if "vs." in player else 0,
         }
 
         if len(game_res) < 6:
@@ -503,6 +511,8 @@ class StatsNBA(Stats):
         X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
             0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[:6]]).fillna(0).add_prefix("Game "))
+        X[['Bucket', 'Combo', 'Rival']] = X[[
+            'Bucket', 'Combo', 'Rival']].astype('category')
 
         return X
 
@@ -998,16 +1008,24 @@ class StatsMLB(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
 
-        if "+" in player:
-            bucket = 21
-        elif "vs." in player:
-            bucket = 22
-        elif self.playerStats.get(player):
-            bucket = self.playerStats[player]["bucket"]
-        else:
-            bucket = 20
-            while bucket > 0 and self.edges[20 - bucket] < line:
-                bucket -= 1
+        players = player.replace("vs.", "+").split(" + ")
+
+        bucket = []
+        for p in players:
+            if self.playerStats.get(p):
+                bucket.append(self.playerStats[p]["bucket"])
+            else:
+                if len(players) > 1:
+                    continue
+                i = 20
+                while i > 0 and self.edges[20 - i] < line:
+                    i -= 1
+                bucket.append(i)
+
+        if not bucket:
+            return 0
+
+        bucket = int(np.mean(bucket))
 
         try:
             if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
@@ -1238,9 +1256,9 @@ class StatsMLB(Stats):
             else 0,
             "Moneyline": moneyline - 0.5,
             "Total": total / 8.3 - 1,
-            "Bucket": bucket if bucket < 21 else 0,
-            "Combo": 1 if bucket == 21 else 0,
-            "Rival": 1 if bucket == 22 else 0,
+            "Bucket": bucket,
+            "Combo": 1 if "+" in player else 0,
+            "Rival": 1 if "vs." in player else 0,
         }
 
         if len(game_res) < 6:
@@ -1254,6 +1272,8 @@ class StatsMLB(Stats):
         X = X.join(pd.DataFrame([h2h_res[-5:]]
                                 ).fillna(0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
+        X[['Bucket', 'Combo', 'Rival']] = X[[
+            'Bucket', 'Combo', 'Rival']].astype('category')
 
         return X
 
@@ -1868,16 +1888,24 @@ class StatsNHL(Stats):
             nameStr = "skaterFullName"
 
         # Determine the bucket based on player type and line value
-        if "+" in player:
-            bucket = 21
-        elif "vs." in player:
-            bucket = 22
-        elif self.playerStats.get(player):
-            bucket = self.playerStats[player]["bucket"]
-        else:
-            bucket = 20
-            while self.edges[20 - bucket] < line:
-                bucket -= 1
+        players = player.replace("vs.", "+").split(" + ")
+
+        bucket = []
+        for p in players:
+            if self.playerStats.get(p):
+                bucket.append(self.playerStats[p]["bucket"])
+            else:
+                if len(players) > 1:
+                    continue
+                i = 20
+                while i > 0 and self.edges[20 - i] < line:
+                    i -= 1
+                bucket.append(i)
+
+        if not bucket:
+            return 0
+
+        bucket = int(np.mean(bucket))
 
         try:
             # Retrieve stats, moneyline, and total from the archive based on date, player, and team
@@ -2049,9 +2077,9 @@ class StatsNHL(Stats):
             "AvgH2H": np.mean(h2h_res[-5:]) if h2h_res[-5:] else 0,
             "Moneyline": moneyline - 0.5,
             "Total": total / 6.5 - 1,
-            "Bucket": bucket if bucket < 21 else 0,
-            "Combo": 1 if bucket == 21 else 0,
-            "Rival": 1 if bucket == 22 else 0,
+            "Bucket": bucket,
+            "Combo": 1 if "+" in player else 0,
+            "Rival": 1 if "vs." in player else 0,
         }
 
         # Pad game_res and h2h_res lists with zeros if they are shorter than required
@@ -2067,6 +2095,8 @@ class StatsNHL(Stats):
         X = X.join(pd.DataFrame([h2h_res[-5:]]
                                 ).fillna(0).add_prefix("Meeting "))
         X = X.join(pd.DataFrame([game_res[-6:]]).fillna(0).add_prefix("Game "))
+        X[['Bucket', 'Combo', 'Rival']] = X[[
+            'Bucket', 'Combo', 'Rival']].astype('category')
 
         return X
 
