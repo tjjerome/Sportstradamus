@@ -677,7 +677,7 @@ def get_pp():
                     "Team"
                 ],
                 "Date": o["attributes"]["start_time"].split("T")[0],
-                "Market": o["attributes"]["stat_type"],
+                "Market": o["attributes"]["stat_type"].replace(" Combos", "s").replace("Mades", "Made"),
                 "Line": o["attributes"]["line_score"],
                 "Opponent": o["attributes"]["description"],
             }
