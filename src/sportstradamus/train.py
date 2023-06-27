@@ -94,7 +94,16 @@ def meditate(force, league):
                 continue
 
             print(f"Training {league} - {market}")
-            X, y = stat_data.get_training_matrix(market)
+            filename = "_".join([league, market]).replace(" ", "-")
+            filepathX = pkg_resources.files(data) / (filename + "_X.csv")
+            filepathy = pkg_resources.files(data) / (filename + "_y.csv")
+            if os.path.isfile(filepathX):
+                X = pd.read_csv(filepathX, index_col=0)
+                y = pd.read_csv(filepathy, index_col=0)
+            else:
+                X, y = stat_data.get_training_matrix(market)
+                X.to_csv(filepathX)
+                y.to_csv(filepathy)
 
             if X.empty:
                 continue
@@ -127,7 +136,7 @@ def meditate(force, league):
 
             trees.fit(X_train, y_train)
             model = CalibratedClassifierCV(
-                trees, cv=15, n_jobs=-1, method="sigmoid")
+                trees, cv=5, n_jobs=-1, method="sigmoid")
             model.fit(X_train, y_train)
 
             y_proba = model.predict_proba(X_test)
@@ -172,6 +181,7 @@ def meditate(force, league):
                     "ROC_AUC": (roc[26], roc[i], roc[j]),
                     "Brier Score Loss": (bs, bs, bs),
                 },
+                "params": params
             }
 
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
@@ -181,6 +191,8 @@ def meditate(force, league):
                 pickle.dump(filedict, outfile, -1)
                 del filedict
                 del model
+
+    report()
 
 
 def report():
@@ -222,7 +234,7 @@ def optimize(X, y):
             'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
             'n_estimators': 9999999,
             'bagging_freq': 1,
-            'is_unbalance': False,
+            'is_unbalance': trial.suggest_categorical('is_unbalance', [True, False]),
             'metric': 'auc'
         }
 
@@ -237,16 +249,15 @@ def optimize(X, y):
         y_pred = model.predict(X_val)
         y_pred = np.rint(y_pred)
         y_pred[y_pred == 0] = -1
-        acc = accuracy_score(y_val, y_pred)
+        acc = roc_auc_score(y_val, y_pred)
         # Return accuracy on validation set
         return acc
 
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=1000)
 
-    return study.best_params | {'n_estimators': study.best_trial.last_step}
+    return study.best_params | {'n_estimators': study.best_trial.last_step-99}
 
 
 if __name__ == "__main__":
     meditate()
-    report()

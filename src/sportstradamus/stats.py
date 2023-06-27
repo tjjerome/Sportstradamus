@@ -357,9 +357,17 @@ class StatsNBA(Stats):
                 .get(player, {})
                 .get(line, [0.5] * 9)
             )
-            moneyline = archive["NBA"]["Moneyline"].get(
-                date, {}).get(team, np.nan)
-            total = archive["NBA"]["Totals"].get(date, {}).get(team, np.nan)
+            moneyline = 0
+            total = 0
+            teams = team.split("/")
+            for t in teams:
+                moneyline += archive["NBA"]["Moneyline"].get(
+                    date, {}).get(t, np.nan)
+                total += archive["NBA"]["Totals"].get(date, {}).get(t, np.nan)
+
+            moneyline /= len(teams)
+            total /= len(teams)
+
         except:
             return 0
 
@@ -1081,9 +1089,16 @@ class StatsMLB(Stats):
                 .get(player, {})
                 .get(line, [0.5] * 9)
             )
-            moneyline = archive["MLB"]["Moneyline"].get(
-                date, {}).get(team, 0.5)
-            total = archive["MLB"]["Totals"].get(date, {}).get(team, 8.3)
+            moneyline = 0
+            total = 0
+            teams = team.split("/")
+            for t in teams:
+                moneyline += archive["MLB"]["Moneyline"].get(
+                    date, {}).get(t, np.nan)
+                total += archive["MLB"]["Totals"].get(date, {}).get(t, np.nan)
+
+            moneyline /= len(teams)
+            total /= len(teams)
         except:
             return 0
 
@@ -1911,9 +1926,16 @@ class StatsNHL(Stats):
                 .get(player, {})
                 .get(line, [0.5] * 9)
             )
-            moneyline = archive["NHL"]["Moneyline"].get(
-                date, {}).get(team, np.nan)
-            total = archive["NHL"]["Totals"].get(date, {}).get(team, np.nan)
+            moneyline = 0
+            total = 0
+            teams = team.split("/")
+            for t in teams:
+                moneyline += archive["NHL"]["Moneyline"].get(
+                    date, {}).get(t, np.nan)
+                total += archive["NHL"]["Totals"].get(date, {}).get(t, np.nan)
+
+            moneyline /= len(teams)
+            total /= len(teams)
         except:
             return 0
 

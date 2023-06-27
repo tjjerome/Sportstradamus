@@ -204,6 +204,7 @@
             "BLKs": "BLK",
             "ASTs": "AST",
             "HITs + RBIs + RUNs": "hits+runs+rbi",
+            "RBIs": "rbi",
             "BASEs": "total bases",
             "Ks": "pitcher strikeouts",
             "RUNs": "runs",
@@ -220,7 +221,8 @@
             "Shots": "Player Shots on Goal",
             "Shots on Goal": "Player Shots on Goal",
             "Stl + Blk": "Steals + Blocks",
-            "Strikeouts (K)": "Strikeouts"
+            "Strikeouts (K)": "Strikeouts",
+            "Strikeouts": "Strikeouts"
         },
         "FanDuel": {
             "Blocked Shots": "Blocks",
@@ -242,13 +244,15 @@
             "Reb + Ast": "Rebounds + Assists",
             "Shots on Goal": "Shots",
             "Stl + Blk": "Blocks and Steals",
-            "Strikeouts (K)": "Pitching Strikeouts"
+            "Strikeouts (K)": "Pitching Strikeouts",
+            "Strikeouts": "Strikeouts"
         },
         "Stats": {
             "3PT Made": "FG3M",
             "Assists": "AST",
             "Blocked Shots": "BLK",
             "Hit + Run + RBI": "hits+runs+rbi",
+            "RBIs": "rbi",
             "Runs": "runs",
             "Hits": "hits",
             "Points": "PTS",

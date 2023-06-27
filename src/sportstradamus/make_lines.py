@@ -45,14 +45,12 @@ for market in tqdm(markets, unit="markets", position=1):
                 opponents = []
                 for c in combo:
                     opponents.append(
-                        sub_df.loc[sub_df["playerName"] == c]["opponent"].to_list()[
-                            0]
+                        sub_df.loc[sub_df["playerName"] == c]["opponent"].to_list()[0]
                     )
                     offer = archive["MLB"][market][gameDate][c]
                     ev = []
                     for line, stats in offer.items():
-                        over = np.mean(
-                            [i for i in stats[-4:] if not i == -1000])
+                        over = np.mean([i for i in stats[-4:] if not i == -1000])
                         ev.append(get_ev(line, 1 - over))
 
                     EV.append(np.mean(ev))

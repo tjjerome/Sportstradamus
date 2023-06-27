@@ -664,7 +664,7 @@ def get_pp():
                     "Team": p["attributes"]["team"],
                 }
             elif p["type"] == "league":
-                league = p["attributes"]["name"]
+                league = p["attributes"]["name"].replace("CMB", "")
 
         for o in tqdm(lines, desc="Getting offers for " + league, unit="offer"):
             n = {
