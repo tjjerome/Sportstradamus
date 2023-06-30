@@ -950,7 +950,7 @@ def get_thrive():
             "Team": team,
             "Date": (
                 datetime.strptime(
-                    o["startTime"], "%Y-%m-%d %H:%M") - timedelta(hours=5)
+                    o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
