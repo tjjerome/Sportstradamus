@@ -55,12 +55,14 @@ nhl.load()
 
 with logging_redirect_tqdm():
     players = list(
-        {(game["playerId"], game["goalieFullName"]) for game in nhl.goalie_data}
+        {(game["playerId"], game["goalieFullName"])
+         for game in nhl.goalie_data}
     )
     for id, player in tqdm(players, unit="player", position=1):
         tryJr = False
         code = player.lower().replace(" ", "-")
-        player_games = [game for game in nhl.goalie_data if game["playerId"] == id]
+        player_games = [
+            game for game in nhl.goalie_data if game["playerId"] == id]
 
         for market, mid in tqdm(
             list(nhl_market_ids.items()), unit="market", position=2, leave=False
@@ -113,13 +115,14 @@ with logging_redirect_tqdm():
                 if prop["recommendation"] == "under":
                     odds.reverse()
                 odds = no_vig_odds(odds[0], odds[1])
-                game = next((i for i in player_games if i["gameId"][:10] == date), None)
+                game = next(
+                    (i for i in player_games if i["gameId"][:10] == date), None)
                 if game is None:
                     tqdm.write(f"Error finding {player}, {market}, {date}")
                     continue
                 stats = nhl.get_stats_date(game, market, line)
                 stats = np.append(stats, [odds[0]] * 4)
-                if not date in archive.archive["MLB"][market]:
+                if date not in archive.archive["MLB"][market]:
                     archive.archive["MLB"][market][date] = {}
 
                 archive.archive["MLB"][market][date][player] = {line: stats}

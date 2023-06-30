@@ -66,10 +66,13 @@
             "RBIs": "rbi",
             "Pitching Outs": "pitching outs",
             "Pitches Thrown": "pitches thrown",
+            "Pitcher Fantasy Score": "pitcher fantasy score",
+            "Hitter Fantasy Score": "hitter fantasy score",
             "Hits Allowed": "hits allowed",
             "Walks Allowed": "walks allowed",
             "Earned Runs Allowed": "runs allowed",
             "1st Inning Runs Allowed": "1st inning runs allowed",
+            "1st Inning Hits Allowed": "1st inning hits allowed",
             "Shots On Goal": "shots",
             "Goals": "goals",
             "Goalie Saves": "saves"
@@ -127,6 +130,8 @@
             "Walks": "walks",
             "Hits": "hits",
             "RBIs": "rbi",
+            "Pitch Count": "pitches thrown",
+            "Fantasy Points": "fantasy points",
             "Walks Allowed": "walks allowed",
             "Goals Against": "goalsAgainst",
             "Goals": "goals",
@@ -273,6 +278,8 @@
             "Walks Allowed": "walks allowed",
             "Total Bases": "total bases",
             "Pitching Outs": "pitching outs",
+            "Pitches Thrown": "pitches thrown",
+            "Fantasy Points": "fantasy points",
             "Earned Runs": "runs allowed",
             "Turnovers": "TOV"
         }

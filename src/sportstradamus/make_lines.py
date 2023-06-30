@@ -13,59 +13,23 @@ mlb.update()
 
 df = pd.DataFrame(mlb.gamelog)
 
-markets = ["hits+runs+rbi"]
+markets = ["batter strikeouts"]
 for market in tqdm(markets, unit="markets", position=1):
     mlb.bucket_stats(market)
 
-    games = df.gameId.unique()
-
-    for gameId in tqdm(games, unit="games", position=2):
-        sub_df = df.loc[df["gameId"] == gameId]
-        gameDate = sub_df.iloc[0]["gameId"][:10].replace("/", "-")
-        if not archive["MLB"][market].get(gameDate):
+    for game in mlb.gamelog:
+        if not game['starting batter']:
             continue
-
-        players = [
-            (player, mlb.playerStats.get(player, {}).get("avg", 0))
-            for player in sub_df["playerName"].to_list()
-        ]
-        players.sort(reverse=True, key=lambda x: x[1])
-        players = [i[0] for i in players[:4]]
-
-        for combo in combinations(players, 2):
-            player = " vs. ".join(combo)
-            if (
-                player in archive["MLB"][market][gameDate]
-                or " vs. ".join(player.split(" + ")[::-1])
-                in archive["MLB"][market][gameDate]
-            ):
-                continue
-            try:
-                EV = []
-                opponents = []
-                for c in combo:
-                    opponents.append(
-                        sub_df.loc[sub_df["playerName"] == c]["opponent"].to_list()[0]
-                    )
-                    offer = archive["MLB"][market][gameDate][c]
-                    ev = []
-                    for line, stats in offer.items():
-                        over = np.mean([i for i in stats[-4:] if not i == -1000])
-                        ev.append(get_ev(line, 1 - over))
-
-                    EV.append(np.mean(ev))
-            except:
-                continue
-
-            opponent = "/".join(opponents)
-            # line = np.round((EV[1]-EV[0])*2)/2
-            line = 0
-            over = skellam.sf(np.floor(line), EV[1], EV[0])
-            if np.mod(line, 1) == 0:
-                over += skellam.pmf(line, EV[1], EV[0]) / 2
-            # stats = mlb.get_stats_date(player, opponent, datetime.strptime(
-            #     gameDate, '%Y-%m-%d'), market, line)
-            stats = np.append(np.zeros(5), [over] * 4)
-            archive.archive["MLB"][market][gameDate][player] = {line: stats}
+        gameDate = game['gameId'][:10].replace('/', '-')
+        player = game['playerName']
+        if player not in mlb.playerStats:
+            continue
+        # line = np.rint(mlb.playerStats[player]['avg'])
+        line = mlb.playerStats[player]['line']
+        stats = np.append(np.zeros(5), [0.5] * 4)
+        if gameDate not in archive.archive["MLB"][market]:
+            archive.archive["MLB"][market][gameDate] = {}
+        archive.archive["MLB"][market][gameDate][player] = {
+            line: stats}
 
 archive.write()

@@ -3,18 +3,21 @@ import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
     roc_auc_score,
     brier_score_loss,
+    log_loss
 )
 from sklearn.preprocessing import MaxAbsScaler
 from sklearn.calibration import CalibratedClassifierCV
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
 import optuna
+from optuna.terminator import report_cross_validation_scores
+from optuna.terminator import TerminatorCallback
 import pandas as pd
 import click
 import os
@@ -38,32 +41,32 @@ def meditate(force, league):
     all_markets = {
         "MLB": [
             "pitcher strikeouts",
-            "total bases",
-            "batter strikeouts",
-            "runs allowed",
-            "hits",
             "pitching outs",
             "pitches thrown",
             "walks allowed",
             "hits allowed",
+            "runs allowed",
+            "1st inning runs allowed",
+            "hits",
             "runs",
             "rbi",
-            "singles",
             "hits+runs+rbi",
-            "1st inning runs allowed",
+            "singles",
+            "total bases",
+            "batter strikeouts",
         ],
         "NBA": [
             "PTS",
             "REB",
             "AST",
-            "TOV",
-            "STL",
-            "FG3M",
-            "BLK",
             "PRA",
             "PR",
             "RA",
             "PA",
+            "FG3M",
+            "TOV",
+            "BLK",
+            "STL",
             "BLST",
         ],
         "NHL": [
@@ -150,17 +153,22 @@ def meditate(force, league):
             roc = np.zeros_like(thresholds)
             for i, threshold in enumerate(thresholds):
                 y_pred = (y_proba > threshold).astype(int)
+                null[i] = 1 - np.mean(np.sum(y_pred, axis=1))
+                if null[i] > .98:
+                    continue
                 preco[i] = precision_score(
                     (y_test == 1).astype(int), y_pred[:, 1])
                 precu[i] = precision_score(
-                    (y_test == -1).astype(int), y_pred[:, 0])
-                y_pred = y_pred[:, 1] - y_pred[:, 0]
-                null[i] = 1 - np.mean(np.abs(y_pred))
+                    (y_test == 0).astype(int), y_pred[:, 0])
+                y_pred = y_pred[:, 1]
                 acc[i] = accuracy_score(
-                    y_test[np.abs(y_pred) > 0], y_pred[np.abs(y_pred) > 0]
+                    y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
+                        y_proba, axis=1) > threshold]
                 )
-                prec[i] = precision_score(y_test, y_pred, average="weighted")
-                roc[i] = roc_auc_score(y_test, y_pred, average="weighted")
+                prec[i] = precision_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
+                    y_proba, axis=1) > threshold], average="weighted")
+                roc[i] = roc_auc_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
+                    y_proba, axis=1) > threshold], average="weighted")
 
             i = np.argmax(roc)
             j = np.argmax(acc)
@@ -217,11 +225,7 @@ def report():
 
 def optimize(X, y):
 
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2)
-    lgb_train = lgb.Dataset(X_train, label=y_train)
-    lgb_val = lgb.Dataset(X_val, label=y_val, reference=lgb_train)
-
-    def objective(trial):
+    def objective(trial, X, y):
         # Define hyperparameters
         params = {
             'objective': 'binary',
@@ -229,34 +233,75 @@ def optimize(X, y):
             'boosting_type': 'gbdt',
             'max_depth': trial.suggest_int('max_depth', 2, 63),
             'num_leaves': trial.suggest_int('num_leaves', 7, 4095),
-            'min_child_weight': trial.suggest_float('min_child_weight', 1e-2, len(X_train)/1000, log=True),
+            'min_child_weight': trial.suggest_float('min_child_weight', 1e-2, len(X)*.8/1000, log=True),
             'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
             'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
             'n_estimators': 9999999,
             'bagging_freq': 1,
             'is_unbalance': trial.suggest_categorical('is_unbalance', [True, False]),
-            'metric': 'auc'
+            'metric': 'binary_logloss'
         }
 
-        # Train model
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         early_stopping = lgb.early_stopping(100)
-        pruning_callback = optuna.integration.LightGBMPruningCallback(
-            trial, "auc")
-        model = lgb.train(params, lgb_train, valid_sets=lgb_val,
-                          callbacks=[pruning_callback, early_stopping])
 
-        # Return metrics
-        y_pred = model.predict(X_val)
-        y_pred = np.rint(y_pred)
-        y_pred[y_pred == 0] = -1
-        acc = roc_auc_score(y_val, y_pred)
+        cv_scores = np.empty(5)
+        for idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
+            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+            lgb_train = lgb.Dataset(X_train, label=y_train)
+            lgb_val = lgb.Dataset(X_val, label=y_val, reference=lgb_train)
+
+            # Train model
+            pruning_callback = optuna.integration.LightGBMPruningCallback(
+                trial, "binary_logloss")
+            # pruning_callback = optuna.pruners.PatientPruner(
+            #     pruning_callback, patience=3)
+            model = lgb.train(params, lgb_train, valid_sets=lgb_val,
+                              callbacks=[pruning_callback, early_stopping])
+
+            # Return metrics
+            y_pred = model.predict(X_val)
+            loss = log_loss(y_val, y_pred)
+            y_pred = np.rint(y_pred)
+            acc = roc_auc_score(y_val, y_pred)
+
+            cv_scores[idx] = loss
+
+        report_cross_validation_scores(trial, cv_scores)
+
         # Return accuracy on validation set
-        return acc
+        return np.mean(cv_scores)
 
-    study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=1000)
+    study = optuna.create_study(direction='minimize')
+    study.optimize(lambda x: objective(x, X, y), n_trials=500)
 
-    return study.best_params | {'n_estimators': study.best_trial.last_step-99}
+    params = {
+        'objective': 'binary',
+        'verbosity': -1,
+        'boosting_type': 'gbdt',
+        'n_estimators': 9999999,
+        'bagging_freq': 1,
+        'metric': 'binary_logloss'
+    } | study.best_params
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    early_stopping = lgb.early_stopping(100)
+
+    n_estimators = np.empty(5)
+    for idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+        lgb_train = lgb.Dataset(X_train, label=y_train)
+        lgb_val = lgb.Dataset(X_val, label=y_val, reference=lgb_train)
+
+        # Train model
+        model = lgb.train(params, lgb_train, valid_sets=lgb_val,
+                          callbacks=[early_stopping])
+
+        n_estimators[idx] = model.num_trees()
+
+    return params | {'n_estimators': int(np.rint(np.mean(n_estimators)))}
 
 
 if __name__ == "__main__":

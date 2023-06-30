@@ -374,7 +374,7 @@ class StatsNBA(Stats):
         if np.isnan(moneyline):
             moneyline = 0.5
         if np.isnan(total):
-            total = 229.3
+            total = 228
 
         date = datetime.strptime(date, "%Y-%m-%d")
         if "+" in player or "vs." in player:
@@ -504,7 +504,7 @@ class StatsNBA(Stats):
             "Avg10": np.mean(game_res[:10]) if game_res else 0,
             "AvgH2H": np.mean(h2h_res[:5]) if h2h_res else 0,
             "Moneyline": moneyline - 0.5,
-            "Total": total / 229.3 - 1,
+            "Total": total / 228 - 1,
             "Bucket": bucket,
             "Combo": 1 if "+" in player else 0,
             "Rival": 1 if "vs." in player else 0,
@@ -608,9 +608,7 @@ class StatsNBA(Stats):
                                         continue
                                     results.append(
                                         {
-                                            "Result": 1
-                                            if (game[market] + game2[market]) > line
-                                            else -1
+                                            "Result": int((game[market] + game2[market]) > line)
                                         }
                                     )
                                 elif " vs. " in name:
@@ -628,15 +626,12 @@ class StatsNBA(Stats):
                                         continue
                                     results.append(
                                         {
-                                            "Result": 1
-                                            if (game[market] + line) > game2[market]
-                                            else -1
+                                            "Result": int((game[market] + line) > game2[market])
                                         }
                                     )
                                 else:
                                     results.append(
-                                        {"Result": 1 if game[market]
-                                            > line else -1}
+                                        {"Result": int(game[market] > line)}
                                     )
 
                                 if X.empty:
@@ -1093,6 +1088,7 @@ class StatsMLB(Stats):
             total = 0
             teams = team.split("/")
             for t in teams:
+                t = "ARI" if t == "AZ" else t
                 moneyline += archive["MLB"]["Moneyline"].get(
                     date, {}).get(t, np.nan)
                 total += archive["MLB"]["Totals"].get(date, {}).get(t, np.nan)
@@ -1325,6 +1321,8 @@ class StatsMLB(Stats):
             # Retrieve data from the archive based on game date and player name
             data = {}
             gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
+            if gameDate < datetime(2022, 6, 5):
+                continue
             try:
                 names = list(
                     archive["MLB"][market].get(
@@ -1401,9 +1399,7 @@ class StatsMLB(Stats):
                                         continue
                                     results.append(
                                         {
-                                            "Result": 1
-                                            if (game[market] + game2[market]) > line
-                                            else -1
+                                            "Result": int((game[market] + game2[market]) > line)
                                         }
                                     )
                                 elif " vs. " in name:
@@ -1421,15 +1417,12 @@ class StatsMLB(Stats):
                                         continue
                                     results.append(
                                         {
-                                            "Result": 1
-                                            if (game[market] + line) > game2[market]
-                                            else -1
+                                            "Result": int((game[market] + line) > game2[market])
                                         }
                                     )
                                 else:
                                     results.append(
-                                        {"Result": 1 if game[market]
-                                            > line else -1}
+                                        {"Result": int(game[market] > line)}
                                     )
 
                                 # Concatenate retrieved stats into the training data matrix
@@ -2222,9 +2215,7 @@ class StatsNHL(Stats):
                                         continue
                                     results.append(
                                         {
-                                            "Result": 1
-                                            if (game[market] + game2[market]) > line
-                                            else -1
+                                            "Result": int((game[market] + game2[market]) > line)
                                         }
                                     )
                                 elif " vs. " in name:
@@ -2242,15 +2233,12 @@ class StatsNHL(Stats):
                                         continue
                                     results.append(
                                         {
-                                            "Result": 1
-                                            if (game[market] + line) > game2[market]
-                                            else -1
+                                            "Result": int((game[market] + line) > game2[market])
                                         }
                                     )
                                 else:
                                     results.append(
-                                        {"Result": 1 if game[market]
-                                            > line else -1}
+                                        {"Result": int(game[market] > line)}
                                     )
 
                                 # Concatenate the new_get_stats dataframe with X

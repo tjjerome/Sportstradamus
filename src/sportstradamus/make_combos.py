@@ -13,7 +13,7 @@ mlb.update()
 
 df = pd.DataFrame(mlb.gamelog)
 
-markets = ["hits+runs+rbi"]
+markets = ["total bases"]
 for market in tqdm(markets, unit="markets", position=1):
     mlb.bucket_stats(market)
 
