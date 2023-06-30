@@ -12,6 +12,7 @@ import pickle
 # %%
 rosters = nfl.import_rosters([2021, 2022])
 rosters = rosters.loc[rosters.position.isin(['QB', 'WR', 'TE', 'RB'])]
+rosters['player_name'] = rosters['player_name'].replace(".", "")
 rosters = rosters[['player_name', 'season', 'team']]
 rosters = rosters.set_index(
     rosters['player_name'] + ', ' + rosters['season'].astype(str))
@@ -33,7 +34,7 @@ divisions = {
     'CHI': 'NCFN',
     'PHI': 'NFCE',
     'DAL': 'NFCE',
-    'WSH': 'NFCE',
+    'WAS': 'NFCE',
     'NYG': 'NCFE',
     'NO': 'NFCS',
     'TB': 'NFCS',
@@ -41,7 +42,7 @@ divisions = {
     'ATL': 'NCFS',
     'SF': 'NFCW',
     'SEA': 'NFCW',
-    'LAR': 'NFCW',
+    'LA': 'NFCW',
     'ARI': 'NCFW',
     'CLE': 'AFCN',
     'CIN': 'AFCN',
@@ -62,6 +63,15 @@ divisions = {
 }
 
 # %%
+byes = {}
+for s, w in schedules.keys():
+    teams = list(set(divisions.keys())-set(schedules[(s, w)].keys()))
+    if s not in byes:
+        byes[s] = {}
+    for team in teams:
+        byes[s][team] = w
+
+# %%
 weekly = nfl.import_weekly_data([2021, 2022], [
                                 'player_display_name', 'position', 'season', 'week', 'fantasy_points', 'receptions'], True)
 weekly['fantasy_points'] = weekly['fantasy_points'] + weekly['receptions']/2
@@ -73,28 +83,30 @@ weekly = weekly.to_dict()
 
 # %%
 data_list = [f.name for f in pkg_resources.files(
-    data).iterdir() if ".csv" in f.name and "Regular" in f.name]
+    data).iterdir() if ".csv" in f.name and "Regular" in f.name and "teams" not in f.name]
 # %%
-df = pd.DataFrame()
-for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
-    if df.empty:
-        df = pd.read_csv(pkg_resources.files(data) / data_str)
-    else:
-        df = pd.concat([df, pd.read_csv(pkg_resources.files(data) / data_str)])
+# df = pd.DataFrame()
+# for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
+#     if df.empty:
+#         df = pd.read_csv(pkg_resources.files(data) / data_str)
+#     else:
+#         df = pd.concat([df, pd.read_csv(pkg_resources.files(data) / data_str)])
 
 
-picks = df.overall_pick_number.replace(0, 216).to_numpy()
-value = df.pick_points.to_numpy()
-fit = np.polyfit(np.log(picks), value, 1)
+# picks = df.overall_pick_number.replace(0, 216).to_numpy()
+# value = df.pick_points.to_numpy()
+# fit = np.polyfit(np.log(picks), value, 1) # 257.4327 - 39.4727ln(x)
+fit = [-39.4727, 257.4327]
 
 # %%
 for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
     df = pd.read_csv(pkg_resources.files(data) / data_str)
 
     df['season'] = df['draft_time'].str[:4]
-    df['team'] = (df['player_name'] + ', ' + df['season']
+    df['team'] = (df['player_name'].replace(".", "") + ', ' + df['season']
                   ).map(rosters).fillna("None")
     df['division'] = df['team'].map(divisions)
+    df['bye'] = df['team'].map(byes[int(df.iloc[0]['season'])])
 
     df['draft_capital_spent'] = fit[0]*np.log(df['overall_pick_number'])+fit[1]
     df['projection_draft_capital'] = fit[0] * \
@@ -144,8 +156,8 @@ for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
 
             teamStacks = team.loc[~team['team'].isin(QBTeams)].groupby('team')
             teamStacks = teamStacks.filter(
-                lambda x: x['player_name'].count() == np.min([teamStacks.size().max(), 2]))
-            if teamStacks.empty:
+                lambda x: x['player_name'].count() == np.max([teamStacks.size().max(), 2])).groupby('team')
+            if teamStacks.size().empty:
                 StackedTeam = "NA"
             else:
                 StackedTeam = teamStacks.sum()['draft_capital_spent'].idxmax()
@@ -153,10 +165,10 @@ for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
                                   StackedTeam, 'draft_capital_spent']
 
             divStack = team.groupby('division').filter(
-                lambda x: x['team'].unique().count() > 2)
+                lambda x: len(x['team'].unique()) > 1).groupby('division')
             divStack = divStack.filter(
-                lambda x: x['player_name'].count() == np.min([divStack.size().max(), 2]))
-            if divStack.empty:
+                lambda x: x['player_name'].count() == np.max([divStack.size().max(), 2])).groupby('division')
+            if divStack.size().empty:
                 StackedDiv = "NA"
             else:
                 StackedDiv = divStack.sum()['draft_capital_spent'].idxmax()
@@ -164,10 +176,10 @@ for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
                                 StackedDiv, 'draft_capital_spent']
 
             byeStack = team.groupby('bye').filter(
-                lambda x: x['team'].unique().count() > 2)
+                lambda x: len(x['team'].unique()) > 1).groupby('division')
             byeStack = byeStack.filter(
-                lambda x: x['player_name'].count() == np.min([divStack.size().max(), 2]))
-            if byeStack.empty:
+                lambda x: x['player_name'].count() == np.max([byeStack.size().max(), 2])).groupby('bye')
+            if byeStack.size().empty:
                 StackedBye = 0
             else:
                 StackedBye = byeStack.sum()['draft_capital_spent'].idxmax()
