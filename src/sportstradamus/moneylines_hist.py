@@ -15,7 +15,7 @@ apikey = "38c4614a42f2ae7ea623bb87e20edc84"
 sport = "baseball_mlb"
 league = "MLB"
 
-Date = datetime.strptime("2023-06-13T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2022-06-05T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
 while Date < datetime.today():
     date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")

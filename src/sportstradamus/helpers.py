@@ -278,6 +278,8 @@ class Archive:
     def rename_market(self, league, old_name, new_name):
         """rename_market Rename a market in the archive"""
 
+        self.archive[league][new_name] = self.archive[league].pop(old_name)
+
 
 scraper = Scrape(apikey)
 
