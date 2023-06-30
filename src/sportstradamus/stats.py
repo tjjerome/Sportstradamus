@@ -831,8 +831,8 @@ class StatsMLB(Stats):
         # Get the current MLB schedule
         today = datetime.today().date()
         mlb_game_ids = mlb.schedule(
-            start_date=self.season_start,
-            end_date=today,
+            start_date=self.season_start.strftime('%Y-%m-%d'),
+            end_date=today.strftime('%Y-%m-%d'),
         )
         mlb_game_ids = [
             game["game_id"]
