@@ -689,72 +689,97 @@ class StatsMLB(Stats):
             ]
             awayInning1Runs = linescore["innings"][0]["away"]["runs"]
             homeInning1Runs = linescore["innings"][0]["home"]["runs"]
+            awayInning1Hits = linescore["innings"][0]["away"]["hits"]
+            homeInning1Hits = linescore["innings"][0]["home"]["hits"]
             for v in game["away"]["players"].values():
-                if (
-                    v["person"]["id"] == game["awayPitchers"][1]["personId"]
-                    or v["person"]["id"] in game["away"]["batters"]
-                ):
+                if (v["person"]["id"] == game["awayPitchers"][1]["personId"] or v["person"]["id"] in game["away"]["batters"]):
                     n = {
                         "gameId": game["gameId"],
                         "playerId": v["person"]["id"],
                         "playerName": v["person"]["fullName"],
-                        "position": v.get("position", {"abbreviation": ""})[
-                            "abbreviation"
-                        ],
+                        "position": v.get("position", {"abbreviation": ""})["abbreviation"],
                         "team": awayTeam,
                         "opponent": homeTeam,
                         "opponent pitcher": homePitcher,
                         "home": False,
-                        "starting pitcher": v["person"]["id"]
-                        == game["awayPitchers"][1]["personId"],
+                        "starting pitcher": v["person"]["id"] == game["awayPitchers"][1]["personId"],
                         "starting batter": v["person"]["id"] in game["away"]["batters"],
                         "hits": v["stats"]["batting"].get("hits", 0),
-                        "total bases": v["stats"]["batting"].get("hits", 0)
-                        + v["stats"]["batting"].get("doubles", 0)
-                        + 2 * v["stats"]["batting"].get("triples", 0)
-                        + 3 * v["stats"]["batting"].get("homeRuns", 0),
-                        "singles": v["stats"]["batting"].get("hits", 0)
-                        - v["stats"]["batting"].get("doubles", 0)
-                        - v["stats"]["batting"].get("triples", 0)
-                        - v["stats"]["batting"].get("homeRuns", 0),
+                        "total bases": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("doubles", 0) +
+                        2 * v["stats"]["batting"].get("triples", 0) +
+                        3 * v["stats"]["batting"].get("homeRuns", 0),
+                        "singles": v["stats"]["batting"].get("hits", 0) - v["stats"]["batting"].get("doubles", 0) -
+                        v["stats"]["batting"].get(
+                            "triples", 0) - v["stats"]["batting"].get("homeRuns", 0),
                         "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
                         "runs": v["stats"]["batting"].get("runs", 0),
                         "rbi": v["stats"]["batting"].get("rbi", 0),
-                        "hits+runs+rbi": v["stats"]["batting"].get("hits", 0)
-                        + v["stats"]["batting"].get("runs", 0)
-                        + v["stats"]["batting"].get("rbi", 0),
+                        "hits+runs+rbi": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("runs", 0) +
+                        v["stats"]["batting"].get("rbi", 0),
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0),
-                        "pitcher strikeouts": v["stats"]["pitching"].get(
-                            "strikeOuts", 0
-                        ),
+                        "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
                         "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
-                        "pitches thrown": v["stats"]["pitching"].get(
-                            "numberOfPitches", 0
-                        ),
+                        "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
                         "runs allowed": v["stats"]["pitching"].get("runs", 0),
                         "hits allowed": v["stats"]["pitching"].get("hits", 0),
-                        "pitching outs": 3
-                        * int(
-                            v["stats"]["pitching"]
-                            .get("inningsPitched", "0.0")
-                            .split(".")[0]
-                        )
-                        + int(
-                            v["stats"]["pitching"]
-                            .get("inningsPitched", "0.0")
-                            .split(".")[1]
-                        ),
-                        "1st inning runs allowed": homeInning1Runs
-                        if v["person"]["id"] == game["awayPitchers"][1]["personId"]
-                        else 0,
+                        "pitching outs": 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1]),
+                        "1st inning runs allowed": homeInning1Runs if v["person"]["id"] ==
+                        game["awayPitchers"][1]["personId"] else 0,
+                        "1st inning hits allowed": homeInning1Hits if v["person"]["id"] ==
+                        game["awayPitchers"][1]["personId"] else 0,
+                        "hitter fantasy score": 3*v["stats"]["batting"].get("hits", 0) +
+                        2*v["stats"]["batting"].get("doubles", 0) +
+                        5*v["stats"]["batting"].get("triples", 0) +
+                        7*v["stats"]["batting"].get("homeRuns", 0) +
+                        2*v["stats"]["batting"].get("runs", 0) +
+                        2*v["stats"]["batting"].get("rbi", 0) +
+                        2*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        5*v["stats"]["batting"].get("stolenBases", 0),
+                        "pitcher fantasy score": 6*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1]) +
+                        4 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        "hitter fantasy points underdog": 3*v["stats"]["batting"].get("hits", 0) +
+                        3*v["stats"]["batting"].get("doubles", 0) +
+                        5*v["stats"]["batting"].get("triples", 0) +
+                        7*v["stats"]["batting"].get("homeRuns", 0) +
+                        2*v["stats"]["batting"].get("runs", 0) +
+                        2*v["stats"]["batting"].get("rbi", 0) +
+                        3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        4*v["stats"]["batting"].get("stolenBases", 0),
+                        "pitcher fantasy points underdog": 2*v["stats"]["pitching"].get("wins", 0) +
+                        v["stats"]["pitching"].get("strikeOuts", 0) -
+                        v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1]) +
+                        3 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
+                        3*v["stats"]["batting"].get("doubles", 0) +
+                        6*v["stats"]["batting"].get("triples", 0) +
+                        9*v["stats"]["batting"].get("homeRuns", 0) +
+                        3*v["stats"]["batting"].get("runs", 0) +
+                        3*v["stats"]["batting"].get("rbi", 0) +
+                        3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        6*v["stats"]["batting"].get("stolenBases", 0),
+                        "pitcher fantasy points parlay": 6*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1])
                     }
                     self.gamelog.append(n)
 
             for v in game["home"]["players"].values():
-                if (
-                    v["person"]["id"] == game["homePitchers"][1]["personId"]
-                    or v["person"]["id"] in game["home"]["batters"]
-                ):
+                if (v["person"]["id"] == game["homePitchers"][1]["personId"] or v["person"]["id"] in game["home"]["batters"]):
                     n = {
                         "gameId": game["gameId"],
                         "playerId": v["person"]["id"],
@@ -805,9 +830,56 @@ class StatsMLB(Stats):
                             .get("inningsPitched", "0.0")
                             .split(".")[1]
                         ),
-                        "1st inning runs allowed": awayInning1Runs
-                        if v["person"]["id"] == game["homePitchers"][1]["personId"]
-                        else 0,
+                        "1st inning runs allowed": awayInning1Runs if v["person"]["id"] ==
+                        game["homePitchers"][1]["personId"] else 0,
+                        "1st inning hits allowed": awayInning1Hits if v["person"]["id"] ==
+                        game["homePitchers"][1]["personId"] else 0,
+                        "hitter fantasy score": 3*v["stats"]["batting"].get("hits", 0) +
+                        2*v["stats"]["batting"].get("doubles", 0) +
+                        5*v["stats"]["batting"].get("triples", 0) +
+                        7*v["stats"]["batting"].get("homeRuns", 0) +
+                        2*v["stats"]["batting"].get("runs", 0) +
+                        2*v["stats"]["batting"].get("rbi", 0) +
+                        2*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        5*v["stats"]["batting"].get("stolenBases", 0),
+                        "pitcher fantasy score": 6*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1]) +
+                        4 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        "hitter fantasy points underdog": 3*v["stats"]["batting"].get("hits", 0) +
+                        3*v["stats"]["batting"].get("doubles", 0) +
+                        5*v["stats"]["batting"].get("triples", 0) +
+                        7*v["stats"]["batting"].get("homeRuns", 0) +
+                        2*v["stats"]["batting"].get("runs", 0) +
+                        2*v["stats"]["batting"].get("rbi", 0) +
+                        3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        4*v["stats"]["batting"].get("stolenBases", 0),
+                        "pitcher fantasy points underdog": 2*v["stats"]["pitching"].get("wins", 0) +
+                        v["stats"]["pitching"].get("strikeOuts", 0) -
+                        v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1]) +
+                        3 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
+                        3*v["stats"]["batting"].get("doubles", 0) +
+                        6*v["stats"]["batting"].get("triples", 0) +
+                        9*v["stats"]["batting"].get("homeRuns", 0) +
+                        3*v["stats"]["batting"].get("runs", 0) +
+                        3*v["stats"]["batting"].get("rbi", 0) +
+                        3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        6*v["stats"]["batting"].get("stolenBases", 0),
+                        "pitcher fantasy points parlay": 6*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        int(v["stats"]["pitching"].get(
+                            "inningsPitched", "0.0").split(".")[1])
                     }
                     self.gamelog.append(n)
 
@@ -1007,6 +1079,12 @@ class StatsMLB(Stats):
         market = offer["Market"].replace("H2H ", "")
         line = offer["Line"]
         opponent = offer["Opponent"]
+
+        if "fantasy points" in market:
+            if player in list(self.pitchers.values()):
+                market = "pitcher " + market
+            else:
+                market = "hitter " + market
 
         players = player.replace("vs.", "+").split(" + ")
 
@@ -1317,6 +1395,8 @@ class StatsMLB(Stats):
             ):
                 continue
 
+            if game["starting pitcher"]:
+                self.pitchers['Player'] = game["playerName"]
             # Retrieve data from the archive based on game date and player name
             data = {}
             gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
