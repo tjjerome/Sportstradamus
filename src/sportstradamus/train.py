@@ -248,7 +248,7 @@ def optimize(X, y):
         }
 
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        early_stopping = lgb.early_stopping(100)
+        early_stopping = lgb.early_stopping(20)
 
         cv_scores = np.empty(5)
         for idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
@@ -277,7 +277,7 @@ def optimize(X, y):
         return np.mean(cv_scores)
 
     study = optuna.create_study(direction='minimize')
-    study.optimize(lambda x: objective(x, X, y), n_trials=500)
+    study.optimize(lambda x: objective(x, X, y), n_trials=100)
 
     params = {
         'objective': 'binary',
@@ -289,7 +289,7 @@ def optimize(X, y):
     } | study.best_params
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    early_stopping = lgb.early_stopping(100)
+    early_stopping = lgb.early_stopping(20)
 
     n_estimators = np.empty(5)
     for idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):

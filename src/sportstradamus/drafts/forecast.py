@@ -1,6 +1,6 @@
 # %%
 from lightgbmlss.model import *
-from lightgbmlss.distributions.Gaussian import *
+from lightgbmlss.distributions.ZIPoisson import *
 from sklearn.model_selection import train_test_split
 import pandas as pd
 from sportstradamus.drafts import data
@@ -8,6 +8,7 @@ import importlib.resources as pkg_resources
 import numpy as np
 from tqdm import tqdm
 import lightgbm as lgb
+import pickle
 
 import plotnine
 from plotnine import *
@@ -31,14 +32,14 @@ df['NumSpikes'] = 0
 for week in np.arange(1, 18):
     mu = df[f"W{week}_Points"].mean()
     sig = df[f"W{week}_Points"].std()
-    df['Z'] = df['Z'] + ((df[f"W{week}_Points"]-mu)/sig - 91).clip(lower=1)
+    df['Z'] = df['Z'] + ((df[f"W{week}_Points"]-mu)/sig - 1.91).clip(lower=0)
     df['NumSpikes'] = df['NumSpikes'] + \
         ((df[f"W{week}_Points"]-mu)/sig > 1.91).astype(int)
 # %%
 X = df.iloc[:, :36]
 feature_names = X.columns
-X = X.to_numpy()
-y = df['Z'].to_numpy()
+X = X
+y = df['NumSpikes']
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=123)
@@ -46,12 +47,12 @@ dtrain = lgb.Dataset(X_train, label=y_train)
 # %%
 # candidate_distributions = [Gaussian, Cauchy, LogNormal, Gumbel]
 lgblss = LightGBMLSS(
-    Gaussian(stabilization="None",   # Options are "None", "MAD", "L2".
-             # Function to transform the scale-parameter, e.g., "exp" or "softplus".
-             response_fn="exp",
-             # Loss function. Options are "nll" (negative log-likelihood) or "crps"(continuous ranked probability score).
-             loss_fn="nll"
-             )
+    ZIPoisson(stabilization="None",   # Options are "None", "MAD", "L2".
+              # Function to transform the scale-parameter, e.g., "exp" or "softplus".
+              response_fn="softplus",
+              # Loss function. Options are "nll" (negative log-likelihood) or "crps"(continuous ranked probability score).
+              loss_fn="nll"
+              )
 )
 
 # %%
@@ -73,11 +74,11 @@ np.random.seed(123)
 opt_param = lgblss.hyper_opt(param_dict,
                              dtrain,
                              # Number of boosting iterations.
-                             num_boost_round=100,
+                             num_boost_round=99999,
                              nfold=5,                    # Number of cv-folds.
                              early_stopping_rounds=20,   # Number of early-stopping rounds
                              # Time budget in minutes, i.e., stop study after the given number of minutes.
-                             max_minutes=10,
+                             max_minutes=20,
                              # The number of trials. If this argument is set to None, there is no limitation on the number of trials.
                              n_trials=None,
                              # Controls the verbosity of the trail, i.e., user can silence the outputs of the trail.
@@ -100,13 +101,26 @@ lgblss.train(opt_params,
              dtrain,
              num_boost_round=n_rounds
              )
+
+# %%
+# Save to file
+with open(pkg_resources.files(data) / "WW.mdl", 'wb') as outfile:
+    pickle.dump(lgblss, outfile)
+
 # %%
 pred_params = lgblss.predict(X_test,
                              pred_type="parameters")
 
 # %%
-pdp_df = pd.DataFrame(X_train, columns=feature_names)
+# pdp_df = pd.DataFrame(X_test, columns=feature_names)
+# Feature Importance of gate parameter
+lgblss.plot(pdp_df,
+            parameter="gate",
+            plot_type="Feature_Importance")
+
+# %%
+# Partial Dependence Plot of rate parameter
 lgblss.plot(pdp_df,
             parameter="rate",
-            feature=feature_names[0],
-            plot_type="Feature_Importance")
+            feature="PriceQB",
+            plot_type="Partial_Dependence")

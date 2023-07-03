@@ -1037,7 +1037,7 @@ def get_parp():
         for stat in player["stats"]:
             market = stat["challengeName"]
             if "Fantasy" in market:
-                if player["position"] == "SP":
+                if player.get("position") == "SP":
                     market = "Pitcher Fantasy Points"
                 else:
                     market = "Hitter Fantasy Points"
