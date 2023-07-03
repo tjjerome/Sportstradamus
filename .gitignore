@@ -162,7 +162,8 @@ cython_debug/
 
 .vscode
 *.dat
-*.skl
+*.mdl
 docs/build
 *.csv*
-*.mdl
+*.
+.lprof
