@@ -131,7 +131,8 @@
             "Hits": "hits",
             "RBIs": "rbi",
             "Pitch Count": "pitches thrown",
-            "Fantasy Points": "fantasy points underdog",
+            "Hitter Fantasy Points": "hitter fantasy points underdog",
+            "Pitcher Fantasy Points": "pitcher fantasy points underdog",
             "Walks Allowed": "walks allowed",
             "Goals Against": "goalsAgainst",
             "Goals": "goals",
@@ -279,7 +280,8 @@
             "Total Bases": "total bases",
             "Pitching Outs": "pitching outs",
             "Pitches Thrown": "pitches thrown",
-            "Fantasy Points": "fantasy points parlay",
+            "Pitcher Fantasy Points": "pitcher fantasy points parlay",
+            "Hitter Fantasy Points": "hitter fantasy points parlay",
             "Earned Runs": "runs allowed",
             "Turnovers": "TOV"
         }

@@ -1080,12 +1080,6 @@ class StatsMLB(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
 
-        if "fantasy points" in market:
-            if player in list(self.pitchers.values()):
-                market = "pitcher " + market
-            else:
-                market = "hitter " + market
-
         players = player.replace("vs.", "+").split(" + ")
 
         bucket = []
@@ -1395,8 +1389,6 @@ class StatsMLB(Stats):
             ):
                 continue
 
-            if game["starting pitcher"]:
-                self.pitchers['Player'] = game["playerName"]
             # Retrieve data from the archive based on game date and player name
             data = {}
             gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
