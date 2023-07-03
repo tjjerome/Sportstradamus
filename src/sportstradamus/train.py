@@ -16,8 +16,6 @@ from sklearn.calibration import CalibratedClassifierCV
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
 import optuna
-from optuna.terminator import report_cross_validation_scores
-from optuna.terminator import TerminatorCallback
 import pandas as pd
 import click
 import os
@@ -47,6 +45,7 @@ def meditate(force, league):
             "hits allowed",
             "runs allowed",
             "1st inning runs allowed",
+            "1st inning hits allowed",
             "hits",
             "runs",
             "rbi",
@@ -54,6 +53,12 @@ def meditate(force, league):
             "singles",
             "total bases",
             "batter strikeouts",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hitter fantasy points parlay",
+            "pitcher fantasy points parlay",
         ],
         "NBA": [
             "PTS",
@@ -267,8 +272,6 @@ def optimize(X, y):
             acc = roc_auc_score(y_val, y_pred)
 
             cv_scores[idx] = loss
-
-        report_cross_validation_scores(trial, cv_scores)
 
         # Return accuracy on validation set
         return np.mean(cv_scores)
