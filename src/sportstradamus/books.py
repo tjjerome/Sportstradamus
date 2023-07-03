@@ -782,12 +782,18 @@ def get_ud():
         opponent = game["Home"]
         if opponent == player["Team"]:
             opponent = game["Away"]
+        market = o["over_under"]["appearance_stat"]["display_stat"]
+        if "Fantasy" in market:
+            if o["over_under"]["scoring_type_id"] == "61504260-8c02-4afa-9916-c1cd84af6fed":
+                market = "Hitter Fantasy Points"
+            else:
+                market = "Pitcher Fantasy Points"
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"].replace("COMBOS", ""),
             "Team": player["Team"],
             "Date": game["Date"],
-            "Market": o["over_under"]["appearance_stat"]["display_stat"],
+            "Market": market,
             "Line": float(o["stat_value"]),
             "Opponent": opponent,
         }
@@ -1029,12 +1035,18 @@ def get_parp():
             player["match"]["awayTeam"]["teamAbbreviation"],
         ]
         for stat in player["stats"]:
+            market = stat["challengeName"]
+            if "Fantasy" in market:
+                if player["position"] == "SP":
+                    market = "Pitcher Fantasy Points"
+                else:
+                    market = "Hitter Fantasy Points"
             n = {
                 "Player": remove_accents(player["player"]["fullName"]),
                 "League": player["match"]["league"]["leagueNameShort"],
                 "Team": player["player"]["team"]["teamAbbreviation"],
                 "Date": player["match"]["matchDate"].split("T")[0],
-                "Market": stat["challengeName"],
+                "Market": market,
                 "Line": float(stat["statValue"]),
                 "Slide": "N",
                 "Opponent": [
