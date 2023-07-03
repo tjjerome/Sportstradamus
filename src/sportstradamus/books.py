@@ -784,7 +784,7 @@ def get_ud():
             opponent = game["Away"]
         n = {
             "Player": remove_accents(player["Name"]),
-            "League": player["League"],
+            "League": player["League"].replace("COMBOS", ""),
             "Team": player["Team"],
             "Date": game["Date"],
             "Market": o["over_under"]["appearance_stat"]["display_stat"],
