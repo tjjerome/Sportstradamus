@@ -783,11 +783,6 @@ def get_ud():
         if opponent == player["Team"]:
             opponent = game["Away"]
         market = o["over_under"]["appearance_stat"]["display_stat"]
-        if "Fantasy" in market:
-            if o["over_under"]["scoring_type_id"] == "61504260-8c02-4afa-9916-c1cd84af6fed":
-                market = "Hitter Fantasy Points"
-            else:
-                market = "Pitcher Fantasy Points"
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"].replace("COMBOS", ""),
@@ -797,6 +792,11 @@ def get_ud():
             "Line": float(o["stat_value"]),
             "Opponent": opponent,
         }
+        if "Fantasy" in market:
+            if n["Player"] in list(mlb_pitchers.values()):
+                n["Market"] = "Pitcher Fantasy Score"
+            else:
+                n["Market"] = "Hitter Fantasy Score"
 
         if n["League"] not in offers:
             offers[n["League"]] = {}

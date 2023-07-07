@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 import lightgbm as lgb
 import pickle
+from matplotlib import pyplot as plt
 
 import plotnine
 from plotnine import *
@@ -114,13 +115,40 @@ pred_params = lgblss.predict(X_test,
 # %%
 # pdp_df = pd.DataFrame(X_test, columns=feature_names)
 # Feature Importance of gate parameter
-lgblss.plot(pdp_df,
-            parameter="gate",
+lgblss.plot(X_test,
+            parameter="rate",
             plot_type="Feature_Importance")
 
 # %%
 # Partial Dependence Plot of rate parameter
-lgblss.plot(pdp_df,
+lgblss.plot(X.loc[(X['NumQB'] < 3) & (X['NumRB'] > 4)],
             parameter="rate",
-            feature="PriceQB",
+            feature="PriceRB",
             plot_type="Partial_Dependence")
+
+# %%
+n_bins = 10
+data = df.loc[(df['NumQB'] < 3) & (df['NumTE'] < 5) & (df['NumWR'] < 11) & (
+    df['NumWR'] > 5) & (df['NumRB'] > 3) & (df['NumRB'] < 8)]
+X = data['draftValue1318']
+if X.nunique() > n_bins:
+    x, edges = pd.cut(X, n_bins, labels=np.arange(n_bins, 0, -1), retbins=True)
+    edges = (edges[1:]+edges[:-1])/2
+else:
+    x = X
+    edges = sorted(x.unique())
+Y = data['NumSpikes']
+y = pd.DataFrame(index=sorted(x.unique()), columns=['val'])
+for i in x.unique():
+    y.loc[i] = Y.loc[x == i].mean()
+
+fig, ax1 = plt.subplots()
+
+ax1.hist(X, bins=n_bins, color='tab:orange', alpha=.2)
+
+ax2 = ax1.twinx()
+ax2.plot(edges, y, marker='.')
+
+fig.tight_layout()
+plt.show()
+# %%
