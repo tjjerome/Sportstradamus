@@ -44,6 +44,7 @@ optuna-dashboard = "^0.10.2"
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
 shap = {git = "https://github.com/dsgibbons/shap.git"}
 torch = {version = "^2.0.1+cpu", source = "torch-cpu"}
+imbalanced-learn = "^0.10.1"
 
 
 [[tool.poetry.source]]

@@ -13,6 +13,8 @@ from sklearn.metrics import (
 )
 from sklearn.preprocessing import MaxAbsScaler
 from sklearn.calibration import CalibratedClassifierCV
+from imblearn.over_sampling import ADASYN
+from imblearn.combine import SMOTEENN
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
 import optuna
@@ -122,6 +124,9 @@ def meditate(force, league):
 
             if len(X_train) < 1000:
                 continue
+
+            if y_train.value_counts(normalize=True).min() < 0.47:
+                X_train, y_train = SMOTEENN().fit_resample(X_train, y_train)
 
             y_train = np.ravel(y_train.to_numpy())
             y_test = np.ravel(y_test.to_numpy())
@@ -243,7 +248,6 @@ def optimize(X, y):
             'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
             'n_estimators': 9999999,
             'bagging_freq': 1,
-            'is_unbalance': trial.suggest_categorical('is_unbalance', [True, False]),
             'metric': 'binary_logloss'
         }
 
