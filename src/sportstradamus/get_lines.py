@@ -1,5 +1,5 @@
 from sportstradamus.helpers import scraper, archive, no_vig_odds
-from sportstradamus.stats import StatsNHL
+from sportstradamus.stats import StatsNFL
 from datetime import datetime, timedelta
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -37,35 +37,32 @@ nhl_market_ids = {
 }
 
 nfl_market_ids = {
-    "pass td": 102,
-    "pass yd": 103,
-    "pass comp": 100,
-    "pass att": 333,
-    "int": 101,
-    "rush att": 106,
-    "rush yd": 107,
-    "rec yd": 105,
-    "rec": 104,
+    "passing_tds": 102,
+    "passing_yards": 103,
+    "completions": 100,
+    "attempts": 333,
+    "interceptions": 101,
+    "carries": 106,
+    "rushing_yards": 107,
+    "receiving_yards": 105,
+    "receptions": 104,
 }
 
 header = {"X-API-Key": "CHi8Hy5CEE4khd46XNYL23dCFX96oUdw6qOt1Dnh"}
 
-nhl = StatsNHL()
-nhl.load()
+nfl = StatsNFL()
+nfl.load()
+nfl.update()
 
 with logging_redirect_tqdm():
-    players = list(
-        {(game["playerId"], game["goalieFullName"])
-         for game in nhl.goalie_data}
-    )
-    for id, player in tqdm(players, unit="player", position=1):
+    players = list(nfl.gamelog['player_display_name'].unique())
+    for player in tqdm(players, unit="player", position=1):
         tryJr = False
-        code = player.lower().replace(" ", "-")
-        player_games = [
-            game for game in nhl.goalie_data if game["playerId"] == id]
+        code = player.lower().replace(".", "").replace(" ", "-")
+        player_games = nfl.gamelog.loc[nfl.gamelog['player_display_name'] == player]
 
         for market, mid in tqdm(
-            list(nhl_market_ids.items()), unit="market", position=2, leave=False
+            list(nfl_market_ids.items()), unit="market", position=2, leave=False
         ):
             url = f"https://api.bettingpros.com/v3/props/analysis?include_no_line_events=false&player_slug={code}&market_id={mid}&location=ALL&sort=desc&sport=MLB&limit=1000"
             try:
@@ -115,17 +112,18 @@ with logging_redirect_tqdm():
                 if prop["recommendation"] == "under":
                     odds.reverse()
                 odds = no_vig_odds(odds[0], odds[1])
-                game = next(
-                    (i for i in player_games if i["gameId"][:10] == date), None)
-                if game is None:
-                    tqdm.write(f"Error finding {player}, {market}, {date}")
-                    continue
-                stats = nhl.get_stats_date(game, market, line)
+                # game = next(
+                #     (i for i in player_games if i["gameId"][:10] == date), None)
+                # if game is None:
+                #     tqdm.write(f"Error finding {player}, {market}, {date}")
+                #     continue
+                # stats = nfl.get_stats_date(game, market, line)
+                stats = np.zeros(5)
                 stats = np.append(stats, [odds[0]] * 4)
-                if date not in archive.archive["MLB"][market]:
-                    archive.archive["MLB"][market][date] = {}
+                if date not in archive.archive["NFL"][market]:
+                    archive.archive["NFL"][market][date] = {}
 
-                archive.archive["MLB"][market][date][player] = {line: stats}
+                archive.archive["NFL"][market][date][player] = {line: stats}
 
 
 archive.write()

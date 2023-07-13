@@ -1,4 +1,4 @@
-from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -14,7 +14,6 @@ from sklearn.metrics import (
 from sklearn.preprocessing import MaxAbsScaler
 from sklearn.calibration import CalibratedClassifierCV
 from imblearn.over_sampling import ADASYN
-from imblearn.combine import SMOTEENN
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
 import optuna
@@ -37,6 +36,9 @@ def meditate(force, league):
     nhl = StatsNHL()
     nhl.load()
     nhl.update()
+    nfl = StatsNFL()
+    nfl.load()
+    nfl.update()
 
     all_markets = {
         "MLB": [
@@ -84,6 +86,17 @@ def meditate(force, league):
             "assists",
             "points",
         ],
+        "NFL": [
+            "passing_tds",
+            "passing_yards",
+            "completions",
+            "attempts",
+            "interceptions",
+            "carries",
+            "rushing_yards",
+            "receiving_yards",
+            "receptions",
+        ]
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -95,6 +108,8 @@ def meditate(force, league):
                 stat_data = nba
             elif league == "NHL":
                 stat_data = nhl
+            elif league == "NFL":
+                stat_data = nfl
             else:
                 continue
 
@@ -125,8 +140,8 @@ def meditate(force, league):
             if len(X_train) < 1000:
                 continue
 
-            if y_train.value_counts(normalize=True).min() < 0.47:
-                X_train, y_train = SMOTEENN().fit_resample(X_train, y_train)
+            if y_train.value_counts(normalize=True).min() < 0.44:
+                X_train, y_train = ADASYN().fit_resample(X_train, y_train)
 
             y_train = np.ravel(y_train.to_numpy())
             y_test = np.ravel(y_test.to_numpy())

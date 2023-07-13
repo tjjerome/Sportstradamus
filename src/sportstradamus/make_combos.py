@@ -67,7 +67,7 @@ for market in tqdm(markets, unit="markets", position=1):
                 over += skellam.pmf(line, EV[1], EV[0]) / 2
             # stats = mlb.get_stats_date(player, opponent, datetime.strptime(
             #     gameDate, '%Y-%m-%d'), market, line)
-            stats = np.append(np.zeros(5), [over] * 4)
+            stats = np.append([over] * 4)
             archive.archive["MLB"][market][gameDate][player] = {line: stats}
 
 archive.write()

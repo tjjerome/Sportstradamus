@@ -34,7 +34,7 @@ for market in tqdm(markets, unit="markets", position=1):
         line = mlb.playerStats[player]['line']
         if market == "1st inning hits allowed":
             line = 1.5
-        stats = np.append(np.zeros(5), [0.5] * 4)
+        stats = np.append([0.5] * 4)
         if market not in archive.archive["MLB"]:
             archive.archive["MLB"][market] = {}
         if gameDate not in archive.archive["MLB"][market]:
