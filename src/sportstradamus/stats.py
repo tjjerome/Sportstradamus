@@ -355,7 +355,7 @@ class StatsNBA(Stats):
                 archive["NBA"][market]
                 .get(date, {})
                 .get(player, {})
-                .get(line, [0.5] * 9)
+                .get(line, [0.5] * 4)
             )
             moneyline = 0
             total = 0
@@ -489,8 +489,8 @@ class StatsNBA(Stats):
 
             dvpoa = self.dvpoa(opponent, position, market)
 
-        stats[stats == -1000] = np.nan
-        odds = np.nanmean(stats[5:])
+        stats[stats is None] = np.nan
+        odds = np.nanmean(stats)
         if np.isnan(odds):
             odds = 0.5
 
@@ -1153,7 +1153,7 @@ class StatsMLB(Stats):
                 archive["MLB"][market]
                 .get(date, {})
                 .get(player, {})
-                .get(line, [0.5] * 9)
+                .get(line, [0.5] * 4)
             )
             moneyline = 0
             total = 0
@@ -1310,8 +1310,8 @@ class StatsMLB(Stats):
             game_res = [game[market] - line for game in player_games]
             h2h_res = [game[market] - line for game in headtohead]
 
-        stats[stats == -1000] = np.nan
-        odds = np.nanmean(stats[5:])
+        stats[stats is None] = np.nan
+        odds = np.nanmean(stats)
         if np.isnan(odds):
             odds = 0.5
 
@@ -1755,7 +1755,7 @@ class StatsNFL(Stats):
                 archive["NBA"][market]
                 .get(date, {})
                 .get(player, {})
-                .get(line, [0.5] * 9)
+                .get(line, [0.5] * 4)
             )
             moneyline = 0
             total = 0
@@ -1889,8 +1889,8 @@ class StatsNFL(Stats):
 
             dvpoa = self.dvpoa(opponent, position, market)
 
-        stats[stats == -1000] = np.nan
-        odds = np.nanmean(stats[5:])
+        stats[stats is None] = np.nan
+        odds = np.nanmean(stats)
         if np.isnan(odds):
             odds = 0.5
 
@@ -2523,7 +2523,7 @@ class StatsNHL(Stats):
                 archive["NHL"][market]
                 .get(date, {})
                 .get(player, {})
-                .get(line, [0.5] * 9)
+                .get(line, [0.5] * 4)
             )
             moneyline = 0
             total = 0
@@ -2672,9 +2672,8 @@ class StatsNHL(Stats):
 
             dvpoa = self.dvpoa(opponent, position, market)
 
-        # Replace -1000 values with NaN in stats
-        stats[stats == -1000] = np.nan
-        odds = np.nanmean(stats[5:])
+        stats[stats is None] = np.nan
+        odds = np.nanmean(stats)
         if np.isnan(odds):
             odds = 0.5
 
