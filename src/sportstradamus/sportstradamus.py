@@ -480,7 +480,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
             stats = [o["Avg 10"], o["Last 5"],
                      o["Last 10"], o["H2H"], o["OvP"]]
 
-            archive.add(o, stats, lines, stat_map["Stats"])
+            archive.add(o, lines, stat_map["Stats"])
 
             o["DraftKings"] = (
                 lines[0]["Line"] + "/" +

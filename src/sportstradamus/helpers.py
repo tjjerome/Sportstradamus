@@ -181,6 +181,24 @@ def get_ev(line, under):
     return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
 
 
+def merge_dict(a, b, path=None):
+    "merges b into a"
+    if path is None:
+        path = []
+    for key in b:
+        if key in a:
+            if isinstance(a[key], dict) and isinstance(b[key], dict):
+                merge_dict(a[key], b[key], path + [str(key)])
+            elif np.all(a[key] == b[key]):
+                pass  # same leaf value
+            else:
+                # raise Exception('Conflict at %s' % '.'.join(path + [str(key)]))
+                a[key] = b[key]
+        else:
+            a[key] = b[key]
+    return a
+
+
 class Archive:
     """
     A class to manage the archive of sports data.
@@ -218,13 +236,12 @@ class Archive:
         """
         return self.archive[item]
 
-    def add(self, o, stats, lines, key):
+    def add(self, o, lines, key):
         """
         Add data to the archive.
 
         Args:
             o (dict): The data to add.
-            stats (numpy.ndarray): The statistics array.
             lines (list): The list of lines.
             key (dict): A dictionary for key mapping.
 
@@ -255,12 +272,10 @@ class Archive:
                     if np.mod(o["Line"], 1) == 0:
                         p += poisson.pmf(l, line["EV"]) / 2
             else:
-                p = -1000
-
-            stats = np.append(stats, p)
+                p = None
 
         self.archive[o["League"]][market][o["Date"]
-                                          ][o["Player"]][o["Line"]] = stats
+                                          ][o["Player"]][o["Line"]] = p
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]]["Closing Lines"] = lines
 
@@ -271,9 +286,47 @@ class Archive:
         Returns:
             None
         """
+        filepath = pkg_resources.files(data) / "archive_full.dat"
+        full_archive = {}
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                full_archive = pickle.load(infile)
+
+        with open(filepath, "wb") as outfile:
+            pickle.dump(merge_dict(full_archive, self.archive),
+                        outfile, protocol=-1)
+
         filepath = pkg_resources.files(data) / "archive.dat"
+        self.clip()
         with open(filepath, "wb") as outfile:
             pickle.dump(self.archive, outfile, protocol=-1)
+
+    def clip(self, cutoff_date=None):
+        if cutoff_date is None:
+            cutoff_date = (datetime.datetime.today() -
+                           datetime.timedelta(days=7))
+
+        for league in list(self.archive.keys()):
+            for market in list(self.archive[league].keys()):
+                if market not in ['Moneyline', 'Totals']:
+                    for date in list(self.archive[league][market].keys()):
+                        try:
+                            if datetime.datetime.strptime(date, "%Y-%m-%d") < cutoff_date:
+                                self.archive[league][market].pop(date)
+                        except:
+                            self.archive[league][market].pop(date)
+
+    def refactor(self):
+        for league in self.archive.keys():
+            for market in self.archive[league].keys():
+                if market not in ['Moneyline', 'Totals']:
+                    for date in self.archive[league][market].keys():
+                        for player in self.archive[league][market][date].keys():
+                            for line in self.archive[league][market][date][player].keys():
+                                if line != 'Closing Lines':
+                                    self.archive[league][market][date][player][line] = self.archive[league][market][date][player][line][5:]
+                                    self.archive[league][market][date][player][line][self.archive[league]
+                                                                                     [market][date][player][line] == -1000] = None
 
     def rename_market(self, league, old_name, new_name):
         """rename_market Rename a market in the archive"""
@@ -291,7 +344,7 @@ mlb_games = mlb.schedule(
 mlb_teams = mlb.get("teams", {"sportId": 1})
 mlb_pitchers = {}
 for game in mlb_games:
-    if game["status"] != "Final":
+    if game["status"] == "Pregame":
         awayTeam = [
             team["abbreviation"]
             for team in mlb_teams["teams"]
