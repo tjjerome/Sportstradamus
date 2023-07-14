@@ -260,6 +260,7 @@ class Archive:
         self.archive[o["League"]][market][o["Date"]
                                           ].setdefault(o["Player"], {})
 
+        odds = []
         for line in lines:
             if line:
                 l = np.floor(o["Line"])
@@ -274,8 +275,10 @@ class Archive:
             else:
                 p = None
 
+            np.append(odds, p)
+
         self.archive[o["League"]][market][o["Date"]
-                                          ][o["Player"]][o["Line"]] = p
+                                          ][o["Player"]][o["Line"]] = odds
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]]["Closing Lines"] = lines
 
