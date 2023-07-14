@@ -794,9 +794,9 @@ def get_ud():
         }
         if "Fantasy" in market:
             if n["Player"] in list(mlb_pitchers.values()):
-                n["Market"] = "Pitcher Fantasy Score"
+                n["Market"] = "Pitcher Fantasy Points"
             else:
-                n["Market"] = "Hitter Fantasy Score"
+                n["Market"] = "Hitter Fantasy Points"
 
         if n["League"] not in offers:
             offers[n["League"]] = {}
