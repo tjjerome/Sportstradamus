@@ -1310,7 +1310,7 @@ class StatsMLB(Stats):
             game_res = [game[market] - line for game in player_games]
             h2h_res = [game[market] - line for game in headtohead]
 
-        stats[stats is None] = np.nan
+        stats = np.array(stats, dtype=np.float64)
         odds = np.nanmean(stats)
         if np.isnan(odds):
             odds = 0.5
