@@ -344,7 +344,7 @@ mlb_games = mlb.schedule(
 mlb_teams = mlb.get("teams", {"sportId": 1})
 mlb_pitchers = {}
 for game in mlb_games:
-    if game["status"] == "Pregame":
+    if game["status"] == "Pre-Game":
         awayTeam = [
             team["abbreviation"]
             for team in mlb_teams["teams"]
