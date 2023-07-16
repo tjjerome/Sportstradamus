@@ -58,13 +58,13 @@ with logging_redirect_tqdm():
     players = list(nfl.gamelog['player_display_name'].unique())
     for player in tqdm(players, unit="player", position=1):
         tryJr = False
-        code = player.lower().replace(".", "").replace(" ", "-")
+        code = player.lower().replace(".", "").replace("'", "").replace(" ", "-")
         player_games = nfl.gamelog.loc[nfl.gamelog['player_display_name'] == player]
 
         for market, mid in tqdm(
             list(nfl_market_ids.items()), unit="market", position=2, leave=False
         ):
-            url = f"https://api.bettingpros.com/v3/props/analysis?include_no_line_events=false&player_slug={code}&market_id={mid}&location=ALL&sort=desc&sport=MLB&limit=1000"
+            url = f"https://api.bettingpros.com/v3/props/analysis?include_no_line_events=false&player_slug={code}&market_id={mid}&location=ALL&sort=desc&sport=NFL&limit=1000"
             try:
                 res = scraper.get(url, headers=header, max_attempts=2)
                 props = [
@@ -105,7 +105,7 @@ with logging_redirect_tqdm():
                 date = (
                     datetime.strptime(event["scheduled"], "%Y-%m-%d %H:%M:%S")
                     - timedelta(hours=5)
-                ).strftime("%Y/%m/%d")
+                ).strftime("%Y-%m-%d")
                 odds = [prop["cost"], prop["cost_inverse"]]
                 if 0 in odds:
                     continue
@@ -120,6 +120,8 @@ with logging_redirect_tqdm():
                 # stats = nfl.get_stats_date(game, market, line)
                 stats = np.zeros(5)
                 stats = np.append(stats, [odds[0]] * 4)
+                if market not in archive.archive["NFL"]:
+                    archive["NFL"][market] = {}
                 if date not in archive.archive["NFL"][market]:
                     archive.archive["NFL"][market][date] = {}
 

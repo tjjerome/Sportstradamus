@@ -1536,7 +1536,7 @@ class StatsNFL(Stats):
                 'receiving_fumbles', 'receiving_fumbles_lost', 'receiving_2pt_conversions',
                 'special_teams_tds', 'fumbles', 'fumbles_lost', 'yards', 'tds',
                 'fantasy_points_prizepicks', 'fantasy_points_underdog', 'fantasy_points_parlayplay',
-                'home', 'opponent']
+                'home', 'opponent', 'gameday', 'game_id']
         self.gamelog = pd.DataFrame(columns=cols)
 
     def load(self):
@@ -1596,16 +1596,30 @@ class StatsNFL(Stats):
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates().reset_index(drop=True)
 
-        for i, row in tqdm(self.gamelog.iterrows(), desc="Updating NFL data", unit="game"):
+        for i, row in tqdm(self.gamelog.iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
             if row['opponent'] != row['opponent']:
                 if row['recent_team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
                                                                == row['recent_team']), 'away_team'].values[0]
+                    self.gamelog.at[i, 'gameday'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
+                                                                                                == row['recent_team']), 'gameday'].values[0]
+                    self.gamelog.at[i, 'game_id'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
+                                                                                                == row['recent_team']), 'game_id'].values[0]
                 else:
                     self.gamelog.at[i, 'home'] = False
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                == row['recent_team']), 'home_team'].values[0]
+                    self.gamelog.at[i, 'gameday'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
+                                                                                                == row['recent_team']), 'gameday'].values[0]
+                    self.gamelog.at[i, 'game_id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
+                                                                                                == row['recent_team']), 'game_id'].values[0]
+
+        self.players = nfl.import_ids()
+        self.players = self.players.loc[self.players['position'].isin([
+            'QB', 'RB', 'WR', 'TE'])]
+        self.players = self.players.groupby(
+            'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
 
         # Save the updated player data
         self.gamelog.to_pickle(pkg_resources.files(data) / "nfl_data.dat")
@@ -1622,44 +1636,31 @@ class StatsNFL(Stats):
             None.
         """
         # Reset playerStats and edges
-        self.playerStats = pd.Series()
+        self.playerStats = pd.DataFrame()
         self.edges = []
 
         # Collect stats for each player
-        self.playerStats = self.gamelog.groupby('player_display_name').\
-            filter(lambda x: len(x) > 4 and not all(x[market] == 0)).\
-            groupby('player_display_name')[market].median()
-
-        # Compute averages and percentiles
-        averages = []
-        for player, games in self.playerStats.items():
-            self.playerStats[player]["avg"] = (
-                np.mean(games["games"]) if games["games"] else 0
-            )
-            averages.append(self.playerStats[player]["avg"])
+        playerGroups = self.gamelog.groupby('player_display_name').\
+            filter(lambda x: len(x[x[market] != 0]) > 4).\
+            groupby('player_display_name')[market]
 
         # Compute edges for each bucket
         w = int(100 / buckets)
-        self.edges = [np.percentile(averages, p) for p in range(0, 101, w)]
-        lines = np.zeros(buckets)
-        for i in range(1, buckets + 1):
-            lines[i - 1] = (
-                np.round(
-                    np.mean(
-                        [v for v in averages if self.edges[i - 1]
-                            <= v <= self.edges[i]]
-                    )
-                    - 0.5
-                )
-                + 0.5
-            )
+        self.edges = playerGroups.mean().quantile(
+            np.arange(0, 101, w)/100).to_list()
 
         # Assign bucket and line values to each player
-        for player, games in self.playerStats.items():
-            for i in range(buckets):
-                if games["avg"] >= self.edges[i]:
-                    self.playerStats[player]["bucket"] = buckets - i
-                    self.playerStats[player]["line"] = lines[i]
+        self.playerStats['avg'] = playerGroups.mean()
+        self.playerStats['bucket'] = np.ceil(
+            playerGroups.mean().rank(pct=True, ascending=False)*20).astype(int)
+        self.playerStats['line'] = playerGroups.median()
+        self.playerStats.loc[self.playerStats['line'] == 0.0, 'line'] = 0.5
+        self.playerStats.loc[(np.mod(self.playerStats['line'], 1) == 0) & (
+            self.playerStats['avg'] > self.playerStats['line']), 'line'] += 0.5
+        self.playerStats.loc[(np.mod(self.playerStats['line'], 1) == 0) & (
+            self.playerStats['avg'] < self.playerStats['line']), 'line'] -= 0.5
+
+        self.playerStats = self.playerStats.to_dict(orient='index')
 
     def dvpoa(self, team, position, market):
         """
@@ -1682,31 +1683,14 @@ class StatsNFL(Stats):
         if position in self.dvp_index[market][team]:
             return self.dvp_index[market][team][position]
 
-        dvp = {}
-        leagueavg = {}
+        position_games = self.gamelog.loc[self.gamelog['position_group'] == position]
+        team_games = position_games.loc[position_games['opponent'] == team]
 
-        for game in self.gamelog:
-            if game["POS"] == position or game["POS"] == "-".join(
-                position.split("-")[::-1]
-            ):
-                game_id = game["GAME_ID"]
-
-                if game_id not in leagueavg:
-                    leagueavg[game_id] = 0
-
-                leagueavg[game_id] += game[market]
-
-                if game["OPP"] == team:
-                    if game_id not in dvp:
-                        dvp[game_id] = 0
-
-                    dvp[game_id] += game[market]
-
-        if not dvp:
+        if len(team_games) == 0:
             return 0
         else:
-            dvp = np.mean(list(dvp.values()))
-            leagueavg = np.mean(list(leagueavg.values())) / 2
+            dvp = team_games[market].mean()
+            leagueavg = position_games[market].mean()
             dvpoa = (dvp - leagueavg) / leagueavg
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
@@ -1752,7 +1736,7 @@ class StatsNFL(Stats):
 
         try:
             stats = (
-                archive["NBA"][market]
+                archive["NFL"][market]
                 .get(date, {})
                 .get(player, {})
                 .get(line, [0.5] * 4)
@@ -1761,9 +1745,9 @@ class StatsNFL(Stats):
             total = 0
             teams = team.split("/")
             for t in teams:
-                moneyline += archive["NBA"]["Moneyline"].get(
+                moneyline += archive["NFL"]["Moneyline"].get(
                     date, {}).get(t, np.nan)
-                total += archive["NBA"]["Totals"].get(date, {}).get(t, np.nan)
+                total += archive["NFL"]["Totals"].get(date, {}).get(t, np.nan)
 
             moneyline /= len(teams)
             total /= len(teams)
@@ -1774,7 +1758,7 @@ class StatsNFL(Stats):
         if np.isnan(moneyline):
             moneyline = 0.5
         if np.isnan(total):
-            total = 228
+            total = 46
 
         date = datetime.strptime(date, "%Y-%m-%d")
         if "+" in player or "vs." in player:
@@ -1783,62 +1767,36 @@ class StatsNFL(Stats):
             if len(opponents) == 1:
                 opponents = opponents * 2
 
-            player1_id = nba_static.find_players_by_full_name(players[0])
-            player2_id = nba_static.find_players_by_full_name(players[1])
-            if not player1_id or not player2_id:
-                return 0
-            player1_id = player1_id[0]["id"]
-            position1 = self.players[player1_id]["POSITION"]
-            player2_id = player2_id[0]["id"]
-            position2 = self.players[player2_id]["POSITION"]
+            player1_games = self.gamelog.loc[(self.gamelog["player_display_name"] == players[0]) & (
+                pd.to_datetime(self.gamelog["gameday"]) < date)]
+            position1 = self.players.get(players[0], "")
 
-            if position1 is None or position2 is None:
-                return 0
+            headtohead1 = player1_games.loc[player1_games["opponent"]
+                                            == opponents[0]]
 
-            player1_games = [
-                game
-                for game in self.gamelog
-                if game["PLAYER_NAME"] == players[0]
-                and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
-            ]
+            player2_games = self.gamelog.loc[(self.gamelog["player_display_name"] == players[1]) & (
+                pd.to_datetime(self.gamelog["gameday"]) < date)]
+            position2 = self.players.get(players[1], "")
 
-            headtohead1 = [
-                game for game in player1_games if game["OPP"] == opponents[0]
-            ]
-
-            player2_games = [
-                game
-                for game in self.gamelog
-                if game["PLAYER_NAME"] == players[1]
-                and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
-            ]
-
-            headtohead2 = [
-                game for game in player2_games if game["OPP"] == opponents[1]
-            ]
+            headtohead2 = player1_games.loc[player2_games["opponent"]
+                                            == opponents[1]]
 
             n = min(len(player1_games), len(player2_games))
             m = min(len(headtohead1), len(headtohead2))
 
-            player1_games = player1_games[:n]
-            player2_games = player2_games[:n]
-            headtohead1 = headtohead1[:m]
-            headtohead2 = headtohead2[:m]
+            player1_games = player1_games.iloc[-n:]
+            player2_games = player2_games.iloc[-n:]
+            headtohead1 = headtohead1.iloc[-m:]
+            headtohead2 = headtohead2.iloc[-m:]
 
             dvpoa1 = self.dvpoa(opponents[0], position1, market)
             dvpoa2 = self.dvpoa(opponents[1], position2, market)
 
             if "+" in player:
-                game_res = (
-                    np.array([game[market] for game in player1_games])
-                    + np.array([game[market] for game in player2_games])
-                    - np.array([line] * n)
-                )
-                h2h_res = (
-                    np.array([game[market] for game in headtohead1])
-                    + np.array([game[market] for game in headtohead2])
-                    - np.array([line] * m)
-                )
+                game_res = (player1_games[market] +
+                            player2_games[market] - line).to_list()
+                h2h_res = (headtohead1[market] +
+                           headtohead2[market] - line).to_list()
 
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 + dvpoa2 == 0:
                     dvpoa = 0
@@ -1846,16 +1804,10 @@ class StatsNFL(Stats):
                     dvpoa = 2 / (1 / dvpoa1 + 1 / dvpoa2)
 
             else:
-                game_res = (
-                    np.array([game[market] for game in player1_games])
-                    - np.array([game[market] for game in player2_games])
-                    + np.array([line] * n)
-                )
-                h2h_res = (
-                    np.array([game[market] for game in headtohead1])
-                    - np.array([game[market] for game in headtohead2])
-                    + np.array([line] * m)
-                )
+                game_res = (player1_games[market] -
+                            player2_games[market] + line).to_list()
+                h2h_res = (headtohead1[market] -
+                           headtohead2[market] + line).to_list()
 
                 if dvpoa1 * dvpoa2 == 0 or dvpoa1 - dvpoa2 == 0:
                     dvpoa = 0
@@ -1866,30 +1818,18 @@ class StatsNFL(Stats):
             h2h_res = list(h2h_res)
 
         else:
-            player_id = nba_static.find_players_by_full_name(player)
-            if not player_id:
-                return 0
-            player_id = player_id[0].get("id")
-            position = self.players.get(player_id, {}).get("POSITION")
-            if position is None:
-                return 0
+            player_games = self.gamelog.loc[(self.gamelog["player_display_name"] == player) & (
+                pd.to_datetime(self.gamelog["gameday"]) < date)]
+            position = self.players.get(player, "")
 
-            player_games = [
-                game
-                for game in self.gamelog
-                if game["PLAYER_NAME"] == player
-                and datetime.strptime(game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S") < date
-            ]
+            headtohead = player_games.loc[player_games["opponent"] == opponent]
 
-            headtohead = [
-                game for game in player_games if game["OPP"] == opponent]
-
-            game_res = [game[market] - line for game in player_games]
-            h2h_res = [game[market] - line for game in headtohead]
+            game_res = (player_games[market]-line).to_list()
+            h2h_res = (headtohead[market]-line).to_list()
 
             dvpoa = self.dvpoa(opponent, position, market)
 
-        stats[stats is None] = np.nan
+        stats[stats == None] = np.nan
         odds = np.nanmean(stats)
         if np.isnan(odds):
             odds = 0.5
@@ -1897,23 +1837,23 @@ class StatsNFL(Stats):
         data = {
             "DVPOA": dvpoa,
             "Odds": odds - 0.5,
-            "Last5": np.mean([int(i > 0) for i in game_res[:5]]) - 0.5 if game_res else 0,
-            "Last10": np.mean([int(i > 0) for i in game_res[:10]]) - 0.5 if game_res else 0,
-            "H2H": np.mean([int(i > 0) for i in h2h_res[:5]] + [1, 0]) - 0.5 if h2h_res else 0,
-            "Avg5": np.mean(game_res[:5]) if game_res else 0,
-            "Avg10": np.mean(game_res[:10]) if game_res else 0,
-            "AvgH2H": np.mean(h2h_res[:5]) if h2h_res else 0,
+            "Last5": np.mean([int(i > 0) for i in game_res[-5:]]) - 0.5 if game_res else 0,
+            "Last10": np.mean([int(i > 0) for i in game_res[-10:]]) - 0.5 if game_res else 0,
+            "H2H": np.mean([int(i > 0) for i in h2h_res[-5:]] + [1, 0]) - 0.5 if h2h_res else 0,
+            "Avg5": np.mean(game_res[-5:]) if game_res else 0,
+            "Avg10": np.mean(game_res[-10:]) if game_res else 0,
+            "AvgH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "Moneyline": moneyline - 0.5,
-            "Total": total / 228 - 1,
+            "Total": total / 46 - 1,
             "Bucket": bucket,
             "Combo": 1 if "+" in player else 0,
             "Rival": 1 if "vs." in player else 0,
         }
 
         if len(game_res) < 6:
-            game_res.extend([0] * (6 - len(game_res)))
+            game_res = ([0] * (6 - len(game_res))) + game_res
         if len(h2h_res) < 5:
-            h2h_res.extend([0] * (5 - len(h2h_res)))
+            h2h_res = ([0] * (5 - len(h2h_res))) + h2h_res
 
         X = pd.DataFrame(data, index=[0]).fillna(0)
         X = X.join(pd.DataFrame([h2h_res[:5]]).fillna(
@@ -1932,26 +1872,27 @@ class StatsNFL(Stats):
         Returns:
             tuple: A tuple containing the feature matrix (X) and the target vector (y).
         """
+        archive.__init__(True)
         self.bucket_stats(market)
         X = pd.DataFrame()
         results = []
 
-        for game in tqdm(self.gamelog, unit="game", desc="Gathering Training Data"):
+        for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(
-                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
+                game["gameday"], "%Y-%m-%d")
             data = {}
 
             try:
                 names = list(
-                    archive["NBA"][market].get(
+                    archive["NFL"][market].get(
                         gameDate.strftime("%Y-%m-%d"), {}).keys()
                 )
                 for name in names:
                     if (
-                        game["PLAYER_NAME"]
+                        game["player_display_name"]
                         == name.strip().replace("vs.", "+").split(" + ")[0]
                     ):
-                        data[name] = archive["NBA"][market][
+                        data[name] = archive["NFL"][market][
                             gameDate.strftime("%Y-%m-%d")
                         ][name]
             except:
@@ -1960,9 +1901,9 @@ class StatsNFL(Stats):
             for name, archiveData in data.items():
                 offer = {
                     "Player": name,
-                    "Team": game["TEAM_ABBREVIATION"],
+                    "Team": game["recent_team"],
                     "Market": market,
-                    "Opponent": game["OPP"],
+                    "Opponent": game["opponent"],
                 }
 
                 if " + " in name or " vs. " in name:
@@ -1971,8 +1912,8 @@ class StatsNFL(Stats):
                         (
                             i
                             for i in self.gamelog
-                            if i["GAME_DATE"] == gameDate.strftime("%Y-%m-%dT%H:%M:%S")
-                            and i["PLAYER_NAME"] == player2
+                            if i["gameday"] == gameDate.strftime("%Y-%m-%d")
+                            and i["player_display_name"] == player2
                         ),
                         None,
                     )
@@ -1980,9 +1921,9 @@ class StatsNFL(Stats):
                         continue
                     offer = offer | {
                         "Team": "/".join(
-                            [game["TEAM_ABBREVIATION"], game2["TEAM_ABBREVIATION"]]
+                            [game["recent_team"], game2["recent_team"]]
                         ),
-                        "Opponent": "/".join([game["OPP"], game2["OPP"]]),
+                        "Opponent": "/".join([game["opponent"], game2["opponent"]]),
                     }
 
                 for line, stats in archiveData.items():
@@ -1999,8 +1940,8 @@ class StatsNFL(Stats):
                                         (
                                             i
                                             for i in self.gamelog
-                                            if i["PLAYER_NAME"] == player2
-                                            and i["GAME_ID"] == game["GAME_ID"]
+                                            if i["player_display_name"] == player2
+                                            and i["game_id"] == game["game_id"]
                                         ),
                                         None,
                                     )
@@ -2017,8 +1958,8 @@ class StatsNFL(Stats):
                                         (
                                             i
                                             for i in self.gamelog
-                                            if i["PLAYER_NAME"] == player2
-                                            and i["GAME_ID"] == game["GAME_ID"]
+                                            if i["player_display_name"] == player2
+                                            and i["game_id"] == game["game_id"]
                                         ),
                                         None,
                                     )
