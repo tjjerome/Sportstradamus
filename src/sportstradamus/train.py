@@ -137,7 +137,7 @@ def meditate(force, league):
                 X, y, test_size=0.2, random_state=42
             )
 
-            if len(X_train) < 1000:
+            if len(X_train) < 800:
                 continue
 
             if y_train.value_counts(normalize=True).min() < 0.44:

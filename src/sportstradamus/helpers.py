@@ -212,7 +212,7 @@ class Archive:
         write(): Write the archive data to a file.
     """
 
-    def __init__(self):
+    def __init__(self, full=False):
         """
         Initialize the Archive class.
 
@@ -220,6 +220,8 @@ class Archive:
         """
         self.archive = {}
         filepath = pkg_resources.files(data) / "archive.dat"
+        if full:
+            filepath = pkg_resources.files(data) / "archive_full.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
@@ -319,17 +321,13 @@ class Archive:
                         except:
                             self.archive[league][market].pop(date)
 
-    def refactor(self):
-        for league in self.archive.keys():
-            for market in self.archive[league].keys():
-                if market not in ['Moneyline', 'Totals']:
-                    for date in self.archive[league][market].keys():
-                        for player in self.archive[league][market][date].keys():
-                            for line in self.archive[league][market][date][player].keys():
-                                if line != 'Closing Lines':
-                                    self.archive[league][market][date][player][line] = self.archive[league][market][date][player][line][5:]
-                                    self.archive[league][market][date][player][line][self.archive[league]
-                                                                                     [market][date][player][line] == -1000] = None
+    def merge(self, filepath):
+        if os.path.isfile(filepath):
+            with open(filepath, 'rb') as infile:
+                new_archive = pickle.load(infile)
+
+        if type(new_archive) is dict:
+            self.archive = merge_dict(self.archive, new_archive)
 
     def rename_market(self, league, old_name, new_name):
         """rename_market Rename a market in the archive"""
