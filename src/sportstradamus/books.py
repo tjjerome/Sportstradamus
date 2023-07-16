@@ -864,7 +864,7 @@ def get_ud():
             "League": player1["League"],
             "Team": player1["Team"] + "/" + player2["Team"],
             "Date": game1["Date"],
-            "Market": "H2H " + bet,
+            "Market": "H2H " + bet.replace("Fewer ", ""),
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
             "Opponent": opponent1 + "/" + opponent2,
         }
