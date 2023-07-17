@@ -53,6 +53,7 @@ def meditate(force, league):
             "hits",
             "runs",
             "rbi",
+            "walks",
             "hits+runs+rbi",
             "singles",
             "total bases",
@@ -96,6 +97,7 @@ def meditate(force, league):
             "rushing_yards",
             "receiving_yards",
             "receptions",
+            "yards"
         ]
     }
     if not league == "All":

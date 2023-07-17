@@ -1,26 +1,28 @@
-from sportstradamus.stats import StatsNBA
+from sportstradamus.stats import StatsNFL
 from sportstradamus.helpers import archive, get_ev
 from datetime import datetime, timedelta
 import numpy as np
 from scipy.stats import poisson
 
-nba = StatsNBA()
-nba.load()
-nba.update()
+# NFL = StatsNFL()
+# NFL.load()
+# NFL.update()
 
-markets = ["BLK", "STL"]
-new_market = "BLST"
-Date = datetime.strptime("2022-10-18T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
-
+markets = ["rushing-yards", "receiving-yards"]
+new_market = "yards"
+Date = datetime.strptime("2022-09-09T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+archive.__init__(True)
 while Date < datetime.strptime("2023-05-26", "%Y-%m-%d"):
     date = Date.strftime("%Y-%m-%d")
     print(date)
     Date = Date + timedelta(days=1)
     market = markets[0]
-    # and (not archive['NBA'].get(new_market, {}).get(date)):
-    if archive["NBA"][market].get(date):
-        players = archive["NBA"][market][date]
+    # and (not archive['NFL'].get(new_market, {}).get(date)):
+    if archive["NFL"][market].get(date):
+        players = archive["NFL"][market][date]
         for player, offer in players.items():
+            if player not in archive["NFL"][markets[0]][date].keys():
+                continue
             EV = []
             ev = []
             for line, stats in offer.items():
@@ -28,7 +30,7 @@ while Date < datetime.strptime("2023-05-26", "%Y-%m-%d"):
                 ev.append(get_ev(line, 1 - over))
             EV.append(np.mean(ev))
             for market in markets[1:]:
-                offer1 = archive["NBA"][market][date].get(player)
+                offer1 = archive["NFL"][market][date].get(player)
                 if offer1 is None:
                     EV.append(0)
                     continue
@@ -41,9 +43,12 @@ while Date < datetime.strptime("2023-05-26", "%Y-%m-%d"):
                 EV = np.sum(EV)
                 line = np.round(EV - 0.5) + 0.5
                 over = poisson.sf(np.floor(line), EV)
-                stats = np.append(np.zeros(5), [over] * 4)
-                if date not in archive.archive["NBA"][new_market]:
-                    archive.archive["NBA"][new_market][date] = {}
-                archive.archive["NBA"][new_market][date][player] = {line: stats}
+                stats = np.array([over] * 4)
+                if new_market not in archive.archive["NFL"]:
+                    archive.archive["NFL"][new_market] = {}
+                if date not in archive.archive["NFL"][new_market]:
+                    archive.archive["NFL"][new_market][date] = {}
+                archive.archive["NFL"][new_market][date][player] = {
+                    line: stats}
 
 archive.write()

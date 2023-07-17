@@ -1522,7 +1522,7 @@ class StatsNFL(Stats):
 
     def __init__(self):
         """
-        Initialize the StatsNBA class.
+        Initialize the StatsNFL class.
         """
         super().__init__()
         self.season_start = datetime.strptime("2022-09-08", "%Y-%m-%d").date()
