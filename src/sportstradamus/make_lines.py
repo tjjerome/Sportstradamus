@@ -1,5 +1,5 @@
 from sportstradamus.helpers import archive, get_ev
-from sportstradamus.stats import StatsMLB
+from sportstradamus.stats import StatsNBA
 import pandas as pd
 from itertools import combinations
 from scipy.stats import poisson, skellam
@@ -7,39 +7,40 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 
-mlb = StatsMLB()
-mlb.load()
-mlb.update()
+NBA = StatsNBA()
+NBA.load()
+NBA.update()
 
-df = pd.DataFrame(mlb.gamelog)
-
-markets = ["hitter fantasy score",
-           "pitcher fantasy score",
-           "hitter fantasy points underdog",
-           "pitcher fantasy points underdog",
-           "hitter fantasy points parlay",
-           "pitcher fantasy points parlay",
-           "1st inning hits allowed"]
+markets = ["FG3A", "FTM", "FGM", "FGA", "OREB", "DREB", "PF", "MIN"]
 for market in tqdm(markets, unit="markets", position=1):
-    mlb.bucket_stats(market)
+    NBA.bucket_stats(market)
 
-    for game in mlb.gamelog:
-        if not game['starting batter']:
+    for game in NBA.gamelog:
+        # if (
+        #     any([string in market for string in ["saves", "goalie", "Against"]])
+        #     and game["position"] != "G"
+        # ):
+        #     continue
+        # elif (
+        #     not any([string in market for string in [
+        #             "saves", "goalie", "Against"]])
+        #     and game["position"] == "G"
+        # ):
+        #     continue
+        gameDate = game['GAME_DATE']
+        player = game['PLAYER_NAME']
+        if player not in NBA.playerStats:
             continue
-        gameDate = game['gameId'][:10].replace('/', '-')
-        player = game['playerName']
-        if player not in mlb.playerStats:
-            continue
-        # line = np.rint(mlb.playerStats[player]['avg'])
-        line = mlb.playerStats[player]['line']
+        # line = np.rint(NBA.playerStats[player]['avg'])
+        line = NBA.playerStats[player]['line']
         if market == "1st inning hits allowed":
             line = 1.5
-        stats = np.append([0.5] * 4)
-        if market not in archive.archive["MLB"]:
-            archive.archive["MLB"][market] = {}
-        if gameDate not in archive.archive["MLB"][market]:
-            archive.archive["MLB"][market][gameDate] = {}
-        archive.archive["MLB"][market][gameDate][player] = {
+        stats = [0.5] * 4
+        if market not in archive.archive["NBA"]:
+            archive.archive["NBA"][market] = {}
+        if gameDate not in archive.archive["NBA"][market]:
+            archive.archive["NBA"][market][gameDate] = {}
+        archive.archive["NBA"][market][gameDate][player] = {
             line: stats}
 
 archive.write()

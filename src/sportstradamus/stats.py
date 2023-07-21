@@ -3,7 +3,6 @@ import os.path
 import numpy as np
 from datetime import datetime, timedelta
 import pickle
-import json
 import importlib.resources as pkg_resources
 from sportstradamus import data
 from tqdm import tqdm
@@ -197,6 +196,10 @@ class StatsNBA(Stats):
             game["PA"] = game["PTS"] + game["AST"]
             game["RA"] = game["REB"] + game["AST"]
             game["BLST"] = game["BLK"] + game["STL"]
+            game["fantasy score"] = game["PTS"] + game["REB"] * \
+                1.2 + game["AST"]*1.5 + game["BLST"]*3 - game["TOV"]
+            game["fantasy points parlay"] = game["PRA"] + \
+                game["BLST"]*2 - game["TOV"]
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_players.dat", "wb") as outfile:
@@ -225,7 +228,9 @@ class StatsNBA(Stats):
 
         # Collect stats for each player
         for game in self.gamelog:
-            if datetime.strptime(game['GAME_DATE'], '%Y-%m-%d').date() > date.date():
+            if datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() > date.date():
+                continue
+            elif datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
                 continue
             player_name = game["PLAYER_NAME"]
 
@@ -304,7 +309,9 @@ class StatsNBA(Stats):
         leagueavg = {}
 
         for game in self.gamelog:
-            if datetime.strptime(game['GAME_DATE'], '%Y-%m-%d').date() > date.date():
+            if datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() > date.date():
+                continue
+            elif datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
                 continue
             if game["POS"] == position or game["POS"] == "-".join(
                 position.split("-")[::-1]
@@ -973,7 +980,9 @@ class StatsMLB(Stats):
 
         # Iterate over game log and gather stats for each player
         for game in self.gamelog:
-            if datetime.strptime(game['gameId'][:10], '%Y-%m-%d').date() > date.date():
+            if datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() > date.date():
+                continue
+            elif datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() < (date - timedelta(days=365)).date():
                 continue
             # Skip non-starting pitchers or non-starting batters depending on the market
             if (
@@ -1065,7 +1074,8 @@ class StatsMLB(Stats):
             return self.dvp_index[market][team]
 
         gamelog = [game for game in self.gamelog if datetime.strptime(
-            game['gameId'][:10], '%Y-%m-%d').date() < date.date()]
+            game['gameId'][:10], '%Y/%m/%d').date() < date.date() and
+            datetime.strptime(game['gameId'][:10], '%Y/%m/%d').date() > (date - timedelta(days=365)).date()]
 
         # Calculate DVP (Defense Versus Position) and league average for the specified team and market
         if any([string in market for string in ["allowed", "pitch"]]):
@@ -1654,6 +1664,9 @@ class StatsNFL(Stats):
                     self.gamelog.at[i, 'game_id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent_team']), 'game_id'].values[0]
 
+        self.gamelog.rename(
+            columns=lambda x: x.replace("_", " "), inplace=True)
+
         self.players = nfl.import_ids()
         self.players = self.players.loc[self.players['position'].isin([
             'QB', 'RB', 'WR', 'TE'])]
@@ -1686,10 +1699,11 @@ class StatsNFL(Stats):
         self.edges = []
 
         # Collect stats for each player
-        playerGroups = self.gamelog.loc[pd.to_datetime(self.gamelog["gameday"]) < date].\
-            groupby('player_display_name').\
+        playerGroups = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameday"]) < date) &
+                                        (pd.to_datetime(self.gamelog["gameday"]) > date - timedelta(days=365))].\
+            groupby('player display name').\
             filter(lambda x: len(x[x[market] != 0]) > 4).\
-            groupby('player_display_name')[market]
+            groupby('player display name')[market]
 
         # Compute edges for each bucket
         w = int(100 / buckets)
@@ -1735,7 +1749,7 @@ class StatsNFL(Stats):
         if position in self.dvp_index[market][team]:
             return self.dvp_index[market][team][position]
 
-        position_games = self.gamelog.loc[(self.gamelog['position_group'] == position) & (
+        position_games = self.gamelog.loc[(self.gamelog['position group'] == position) & (
             pd.to_datetime(self.gamelog["gameday"]) < date)]
         team_games = position_games.loc[(position_games['opponent'] == team) & (
             pd.to_datetime(self.gamelog["gameday"]) < date)]
@@ -1821,14 +1835,14 @@ class StatsNFL(Stats):
             if len(opponents) == 1:
                 opponents = opponents * 2
 
-            player1_games = self.gamelog.loc[(self.gamelog["player_display_name"] == players[0]) & (
+            player1_games = self.gamelog.loc[(self.gamelog["player display name"] == players[0]) & (
                 pd.to_datetime(self.gamelog["gameday"]) < date)]
             position1 = self.players.get(players[0], "")
 
             headtohead1 = player1_games.loc[player1_games["opponent"]
                                             == opponents[0]]
 
-            player2_games = self.gamelog.loc[(self.gamelog["player_display_name"] == players[1]) & (
+            player2_games = self.gamelog.loc[(self.gamelog["player display name"] == players[1]) & (
                 pd.to_datetime(self.gamelog["gameday"]) < date)]
             position2 = self.players.get(players[1], "")
 
@@ -1872,7 +1886,7 @@ class StatsNFL(Stats):
             h2h_res = list(h2h_res)
 
         else:
-            player_games = self.gamelog.loc[(self.gamelog["player_display_name"] == player) & (
+            player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
                 pd.to_datetime(self.gamelog["gameday"]) < date)]
             position = self.players.get(player, "")
 
@@ -1944,7 +1958,7 @@ class StatsNFL(Stats):
                 )
                 for name in names:
                     if (
-                        game["player_display_name"]
+                        game["player display name"]
                         == name.strip().replace("vs.", "+").split(" + ")[0]
                     ):
                         data[name] = archive["NFL"][market][
@@ -1956,7 +1970,7 @@ class StatsNFL(Stats):
             for name, archiveData in data.items():
                 offer = {
                     "Player": name,
-                    "Team": game["recent_team"],
+                    "Team": game["recent team"],
                     "Market": market,
                     "Opponent": game["opponent"],
                 }
@@ -1968,7 +1982,7 @@ class StatsNFL(Stats):
                             i
                             for i in self.gamelog
                             if i["gameday"] == gameDate.strftime("%Y-%m-%d")
-                            and i["player_display_name"] == player2
+                            and i["player display name"] == player2
                         ),
                         None,
                     )
@@ -1976,7 +1990,7 @@ class StatsNFL(Stats):
                         continue
                     offer = offer | {
                         "Team": "/".join(
-                            [game["recent_team"], game2["recent_team"]]
+                            [game["recent team"], game2["recent team"]]
                         ),
                         "Opponent": "/".join([game["opponent"], game2["opponent"]]),
                     }
@@ -1995,8 +2009,8 @@ class StatsNFL(Stats):
                                         (
                                             i
                                             for i in self.gamelog
-                                            if i["player_display_name"] == player2
-                                            and i["game_id"] == game["game_id"]
+                                            if i["player display name"] == player2
+                                            and i["game id"] == game["game id"]
                                         ),
                                         None,
                                     )
@@ -2013,8 +2027,8 @@ class StatsNFL(Stats):
                                         (
                                             i
                                             for i in self.gamelog
-                                            if i["player_display_name"] == player2
-                                            and i["game_id"] == game["game_id"]
+                                            if i["player display name"] == player2
+                                            and i["game id"] == game["game id"]
                                         ),
                                         None,
                                     )
@@ -2207,6 +2221,8 @@ class StatsNHL(Stats):
         for game in self.gamelog:
             if datetime.strptime(game['gameDate'], '%Y-%m-%d').date() > date.date():
                 continue
+            elif datetime.strptime(game['gameDate'], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
+                continue
             if (market in ['goalsAgainst', 'saves'] or "goalie fantasy" in market) and game['position'] != "G":
                 continue
             elif (market not in ['goalsAgainst', 'saves'] or "goalie fantasy" not in market) and game['position'] == "G":
@@ -2302,6 +2318,8 @@ class StatsNHL(Stats):
         # Calculate dvp and league averages based on the market
         for game in self.gamelog:
             if datetime.strptime(game['gameDate'], '%Y-%m-%d').date() > date.date():
+                continue
+            elif datetime.strptime(game['gameDate'], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
                 continue
             if (market in ['goalsAgainst', 'saves'] or "goalie fantasy" in market) and game['position'] != "G":
                 continue

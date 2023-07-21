@@ -59,6 +59,14 @@
             "Assists": "AST",
             "Blks+Stls": "BLST",
             "Turnovers": "TOV",
+            "Offensive Rebounds": "OREB",
+            "Defensive Rebounds": "DREB",
+            "Free Throws Made": "FTM",
+            "Personal Fouls": "PF",
+            "FG Attempted": "FGA",
+            "FG Made": "FGM",
+            "3-PT Attempted": "FG3A",
+            "Minutes Played": "MIN",
             "Hits+Runs+RBIs": "hits+runs+rbi",
             "Hits+Runs+RBIS": "hits+runs+rbi",
             "Total Bases": "total bases",
@@ -77,7 +85,9 @@
             "1st Inning Hits Allowed": "1st inning hits allowed",
             "Shots On Goal": "shots",
             "Goals": "goals",
-            "Goalie Saves": "saves"
+            "Goalie Saves": "saves",
+            "SOG + BS": "sogBS",
+            "Hits": "hits"
         }
     },
     "Underdog": {
