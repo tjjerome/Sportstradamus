@@ -24,7 +24,7 @@ import os
 
 @click.command()
 @click.option("-f", "--force", default=False, help="Display progress bars")
-@click.option("--league", type=click.Choice(['All', 'NFL', 'NBA', 'MLB', 'NHL']), default='All',
+@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
     mlb = StatsMLB()
@@ -78,26 +78,51 @@ def meditate(force, league):
             "BLK",
             "STL",
             "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN",
+            "fantasy score",
+            "fantasy points parlay"
         ],
         "NHL": [
-            "saves",
-            "goalsAgainst",
-            "shots",
             "goals",
             "assists",
             "points",
+            "saves",
+            "goalsAgainst",
+            "hits",
+            "sogBS",
+            "blocked",
+            "fantasy score",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "goalie fantasy points parlay",
+            "skater fantasy points parlay"
         ],
         "NFL": [
-            "passing_tds",
-            "passing_yards",
+            "passing tds",
+            "passing yards",
             "completions",
             "attempts",
             "interceptions",
             "carries",
-            "rushing_yards",
-            "receiving_yards",
+            "rushing yards",
+            "receiving yards",
             "receptions",
-            "yards"
+            "yards",
+            "rushing tds",
+            "receptions",
+            "targets",
+            "receiving tds",
+            "tds",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "fantasy points parlayplay"
         ]
     }
     if not league == "All":
@@ -135,8 +160,8 @@ def meditate(force, league):
             if X.empty:
                 continue
 
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
+            X_train, X_test, y_train, Y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=(X['Combo'] + 2*X['Rivals']).to_numpy()
             )
 
             if len(X_train) < 800:
@@ -146,20 +171,19 @@ def meditate(force, league):
                 X_train, y_train = ADASYN().fit_resample(X_train, y_train)
 
             y_train = np.ravel(y_train.to_numpy())
-            y_test = np.ravel(y_test.to_numpy())
 
             opt_params = optimize(X, y)
 
             params = {
-                'boosting_type': 'gbdt',
-                'max_depth': 9,
-                'n_estimators': 500,
-                'num_leaves': 65,
-                'min_child_weight': 5.9665759403609915,
-                'feature_fraction': 0.8276862446751593,
-                'bagging_fraction': 0.8821195174753188,
-                'bagging_freq': 1,
-                'is_unbalance': False
+                "boosting_type": "gbdt",
+                "max_depth": 9,
+                "n_estimators": 500,
+                "num_leaves": 65,
+                "min_child_weight": 5.9665759403609915,
+                "feature_fraction": 0.8276862446751593,
+                "bagging_fraction": 0.8821195174753188,
+                "bagging_freq": 1,
+                "is_unbalance": False
             } | opt_params
 
             trees = LGBMClassifier(**params)
@@ -169,16 +193,23 @@ def meditate(force, league):
                 trees, cv=5, n_jobs=-1, method="sigmoid")
             model.fit(X_train, y_train)
 
-            y_proba = model.predict_proba(X_test)
+            threshold = 0.545
+            acc = [0, 0, 0]
+            null = [0, 0, 0]
+            preco = [0, 0, 0]
+            precu = [0, 0, 0]
+            roc = [0, 0, 0]
+            bs = [0, 0, 0]
+            for i in range(0, 3):
+                if i == 0:
+                    mask = (X_test['Combo'] == 0) & (X_test['Rivals'] == 0)
+                elif i == 1:
+                    mask = (X_test['Combo'] == 1) & (X_test['Rivals'] == 0)
+                elif i == 2:
+                    mask = (X_test['Combo'] == 0) & (X_test['Rivals'] == 1)
 
-            thresholds = np.arange(0.5, 0.58, 0.001)
-            acc = np.zeros_like(thresholds)
-            null = np.zeros_like(thresholds)
-            preco = np.zeros_like(thresholds)
-            precu = np.zeros_like(thresholds)
-            prec = np.zeros_like(thresholds)
-            roc = np.zeros_like(thresholds)
-            for i, threshold in enumerate(thresholds):
+                y_proba = model.predict_proba(X_test.loc[mask])
+                y_test = np.ravel(Y_test.loc[mask].to_numpy())
                 y_pred = (y_proba > threshold).astype(int)
                 null[i] = 1 - np.mean(np.sum(y_pred, axis=1))
                 if null[i] > .98:
@@ -192,29 +223,21 @@ def meditate(force, league):
                     y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
                         y_proba, axis=1) > threshold]
                 )
-                prec[i] = precision_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
-                    y_proba, axis=1) > threshold], average="weighted")
                 roc[i] = roc_auc_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
                     y_proba, axis=1) > threshold], average="weighted")
 
-            i = np.argmax(roc)
-            j = np.argmax(acc)
-            t1 = thresholds[i]
-            t2 = thresholds[j]
-
-            bs = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
+                bs[i] = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
 
             filedict = {
                 "model": model,
-                "threshold": (0.545, t1, t2),
                 "edges": [np.floor(i * 2) / 2 for i in stat_data.edges][:-1],
                 "stats": {
-                    "Accuracy": (acc[26], acc[i], acc[j]),
-                    "Null Points": (null[26], null[i], null[j]),
-                    "Precision_Over": (preco[26], preco[i], preco[j]),
-                    "Precision_Under": (precu[26], precu[i], precu[j]),
-                    "ROC_AUC": (roc[26], roc[i], roc[j]),
-                    "Brier Score Loss": (bs, bs, bs),
+                    "Accuracy": (acc[0], acc[1], acc[2]),
+                    "Null Points": (null[0], null[1], null[2]),
+                    "Precision_Over": (preco[0], preco[1], preco[2]),
+                    "Precision_Under": (precu[0], precu[1], precu[2]),
+                    "ROC_AUC": (roc[0], roc[1], roc[2]),
+                    "Brier Score Loss": (bs[0], bs[1], bs[2]),
                 },
                 "params": params
             }
@@ -246,7 +269,7 @@ def report():
             f.write(f" {league} {market} ".center(89, "="))
             f.write("\n")
             f.write(pd.DataFrame(model["stats"],
-                    index=model["threshold"]).to_string())
+                    index=["Normal, Combo, Rival"]).to_string())
             f.write("\n\n")
 
 
@@ -255,17 +278,17 @@ def optimize(X, y):
     def objective(trial, X, y):
         # Define hyperparameters
         params = {
-            'objective': 'binary',
-            'verbosity': -1,
-            'boosting_type': 'gbdt',
-            'max_depth': trial.suggest_int('max_depth', 2, 63),
-            'num_leaves': trial.suggest_int('num_leaves', 7, 4095),
-            'min_child_weight': trial.suggest_float('min_child_weight', 1e-2, len(X)*.8/1000, log=True),
-            'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
-            'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
-            'n_estimators': 9999999,
-            'bagging_freq': 1,
-            'metric': 'binary_logloss'
+            "objective": "binary",
+            "verbosity": -1,
+            "boosting_type": "gbdt",
+            "max_depth": trial.suggest_int("max_depth", 2, 63),
+            "num_leaves": trial.suggest_int("num_leaves", 7, 4095),
+            "min_child_weight": trial.suggest_float("min_child_weight", 1e-2, len(X)*.8/1000, log=True),
+            "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
+            "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
+            "n_estimators": 9999999,
+            "bagging_freq": 1,
+            "metric": "binary_logloss"
         }
 
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -297,16 +320,16 @@ def optimize(X, y):
         # Return accuracy on validation set
         return np.mean(cv_scores)
 
-    study = optuna.create_study(direction='minimize')
+    study = optuna.create_study(direction="minimize")
     study.optimize(lambda x: objective(x, X, y), n_trials=100)
 
     params = {
-        'objective': 'binary',
-        'verbosity': -1,
-        'boosting_type': 'gbdt',
-        'n_estimators': 9999999,
-        'bagging_freq': 1,
-        'metric': 'binary_logloss'
+        "objective": "binary",
+        "verbosity": -1,
+        "boosting_type": "gbdt",
+        "n_estimators": 9999999,
+        "bagging_freq": 1,
+        "metric": "binary_logloss"
     } | study.best_params
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -325,7 +348,7 @@ def optimize(X, y):
 
         n_estimators[idx] = model.num_trees()
 
-    return params | {'n_estimators': int(np.rint(np.mean(n_estimators)))}
+    return params | {"n_estimators": int(np.rint(np.mean(n_estimators)))}
 
 
 if __name__ == "__main__":

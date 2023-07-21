@@ -326,13 +326,17 @@ class Archive:
             with open(filepath, 'rb') as infile:
                 new_archive = pickle.load(infile)
 
-        if type(new_archive) is dict:
-            self.archive = merge_dict(self.archive, new_archive)
+            if type(new_archive) is dict:
+                self.archive = merge_dict(self.archive, new_archive)
 
     def rename_market(self, league, old_name, new_name):
         """rename_market Rename a market in the archive"""
 
-        self.archive[league][new_name] = self.archive[league].pop(old_name)
+        if new_name in self.archive[league]:
+            self.archive[league][new_name] = merge_dict(
+                self.archive[league][new_name], self.archive[league].pop(old_name))
+        else:
+            self.archive[league][new_name] = self.archive[league].pop(old_name)
 
 
 scraper = Scrape(apikey)
