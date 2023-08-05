@@ -277,7 +277,7 @@ class Archive:
             else:
                 p = None
 
-            np.append(odds, p)
+            odds = np.append(odds, p)
 
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]][o["Line"]] = odds
