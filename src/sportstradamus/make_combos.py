@@ -1,5 +1,5 @@
-from sportstradamus.helpers import archive, get_ev
-from sportstradamus.stats import StatsMLB
+from sportstradamus.helpers import Archive, get_ev
+from sportstradamus.stats import StatsNFL
 import pandas as pd
 from itertools import combinations
 from scipy.stats import poisson, skellam
@@ -7,50 +7,72 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 
-mlb = StatsMLB()
-mlb.load()
-mlb.update()
+NFL = StatsNFL()
+NFL.load()
+NFL.update()
 
-df = pd.DataFrame(mlb.gamelog)
+archive = Archive(True)
 
-markets = ["total bases"]
+df = pd.DataFrame(NFL.gamelog)
+
+markets = [
+    "passing tds",
+    "passing yards",
+    "completions",
+    "attempts",
+    "interceptions",
+    "carries",
+    "rushing yards",
+    "receiving yards",
+    "receptions",
+    "yards",
+    "rushing tds",
+    "receptions",
+    "targets",
+    "receiving tds",
+    "tds",
+    "fantasy points prizepicks",
+    "fantasy points underdog",
+    "fantasy points parlayplay"
+]
 for market in tqdm(markets, unit="markets", position=1):
-    mlb.bucket_stats(market)
 
-    games = df.gameId.unique()
+    games = df['game id'].unique()
 
-    for gameId in tqdm(games, unit="games", position=2):
-        sub_df = df.loc[df["gameId"] == gameId]
-        gameDate = sub_df.iloc[0]["gameId"][:10].replace("/", "-")
-        if not archive["MLB"][market].get(gameDate):
+    for gameId in tqdm(games, desc=market, unit="games", position=2):
+        sub_df = df.loc[df["game id"] == gameId]
+        gameDate = sub_df.iloc[0]["gameday"][:10]
+        if not archive["NFL"][market].get(gameDate):
             continue
 
-        players = [
-            (player, mlb.playerStats.get(player, {}).get("avg", 0))
-            for player in sub_df["playerName"].to_list()
-        ]
-        players.sort(reverse=True, key=lambda x: x[1])
-        players = [i[0] for i in players[:4]]
+        NFL.bucket_stats(market, date=datetime.strptime(gameDate, '%Y-%m-%d'))
+
+        if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]):
+            players = sub_df.loc[sub_df['position group'] == 'QB',
+                                 'player display name'].to_list()
+        else:
+            players = [
+                (player, NFL.playerStats.get(player, {}).get("avg", 0))
+                for player in sub_df["player display name"].to_list()
+            ]
+            players.sort(reverse=True, key=lambda x: x[1])
+            players = [i[0] for i in players[:4]]
 
         for combo in combinations(players, 2):
-            player = " vs. ".join(combo)
-            if (
-                player in archive["MLB"][market][gameDate]
-                or " vs. ".join(player.split(" + ")[::-1])
-                in archive["MLB"][market][gameDate]
-            ):
-                continue
             try:
                 EV = []
                 opponents = []
                 for c in combo:
                     opponents.append(
-                        sub_df.loc[sub_df["playerName"] == c]["opponent"].to_list()[
+                        sub_df.loc[sub_df["player display name"] == c]["opponent"].to_list()[
                             0]
                     )
-                    offer = archive["MLB"][market][gameDate][c]
+                    offer = archive["NFL"][market][gameDate][c]
                     ev = []
                     for line, stats in offer.items():
+                        if line == "Closing Lines":
+                            continue
+                        stats = np.nan_to_num(stats, nan=0.5)
                         over = np.mean(
                             [i for i in stats[-4:] if not i == -1000])
                         ev.append(get_ev(line, 1 - over))
@@ -60,14 +82,33 @@ for market in tqdm(markets, unit="markets", position=1):
                 continue
 
             opponent = "/".join(opponents)
-            # line = np.round((EV[1]-EV[0])*2)/2
-            line = 0
-            over = skellam.sf(np.floor(line), EV[1], EV[0])
-            if np.mod(line, 1) == 0:
-                over += skellam.pmf(line, EV[1], EV[0]) / 2
-            # stats = mlb.get_stats_date(player, opponent, datetime.strptime(
-            #     gameDate, '%Y-%m-%d'), market, line)
-            stats = np.append([over] * 4)
-            archive.archive["MLB"][market][gameDate][player] = {line: stats}
+
+            player = " + ".join(combo)
+            if not (
+                player in archive["NFL"][market][gameDate]
+                or " + ".join(player.split(" + ")[::-1])
+                in archive["NFL"][market][gameDate]
+            ):
+                line = np.round((EV[1]+EV[0])*2)/2
+                over = poisson.sf(np.floor(line), EV[1] + EV[0])
+                if np.mod(line, 1) == 0:
+                    over += poisson.pmf(line, EV[1] + EV[0]) / 2
+                stats = [over] * 4
+                archive.archive["NFL"][market][gameDate][player] = {
+                    line: stats}
+
+            player = " vs. ".join(combo)
+            if not (
+                player in archive["NFL"][market][gameDate]
+                or " vs. ".join(player.split(" vs. ")[::-1])
+                in archive["NFL"][market][gameDate]
+            ):
+                line = np.round((EV[1]-EV[0])*2)/2
+                over = skellam.sf(np.floor(line), EV[1], EV[0])
+                if np.mod(line, 1) == 0:
+                    over += skellam.pmf(line, EV[1], EV[0]) / 2
+                stats = [over] * 4
+                archive.archive["NFL"][market][gameDate][player] = {
+                    line: stats}
 
 archive.write()
