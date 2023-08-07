@@ -325,7 +325,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     model = filedict["model"]
     # threshold = filedict['threshold']
     # edges = filedict['edges']
-    stat_data.bucket_stats(market)
+    stat_data.profile_market(market)
     # stat_data.edges = edges
 
     for o in tqdm(offers, leave=False, disable=not pbar):

@@ -1,4 +1,4 @@
-from sportstradamus.helpers import archive, get_ev
+from sportstradamus.helpers import Archive, get_ev
 from sportstradamus.stats import StatsMLB
 import pandas as pd
 from itertools import combinations
@@ -11,11 +11,34 @@ mlb = StatsMLB()
 mlb.load()
 mlb.update()
 
+archive = Archive(True)
+
 df = pd.DataFrame(mlb.gamelog)
 
-markets = ["total bases"]
+markets = [
+    "pitcher strikeouts",
+    "pitching outs",
+    "pitches thrown",
+    "walks allowed",
+    "hits allowed",
+    "runs allowed",
+    "1st inning runs allowed",
+    "1st inning hits allowed",
+    "hits",
+    "runs",
+    "rbi",
+    "hits+runs+rbi",
+    "singles",
+    "total bases",
+    "batter strikeouts",
+    "hitter fantasy score",
+    "pitcher fantasy score",
+    "hitter fantasy points underdog",
+    "pitcher fantasy points underdog",
+    "hitter fantasy points parlay",
+    "pitcher fantasy points parlay"
+]
 for market in tqdm(markets, unit="markets", position=1):
-    mlb.bucket_stats(market)
 
     games = df.gameId.unique()
 
@@ -25,12 +48,18 @@ for market in tqdm(markets, unit="markets", position=1):
         if not archive["MLB"][market].get(gameDate):
             continue
 
-        players = [
-            (player, mlb.playerStats.get(player, {}).get("avg", 0))
-            for player in sub_df["playerName"].to_list()
-        ]
-        players.sort(reverse=True, key=lambda x: x[1])
-        players = [i[0] for i in players[:4]]
+        mlb.bucket_stats(market, date=datetime.strptime(gameDate, '%Y-%m-%d'))
+
+        if any([string in market for string in ["allowed", "pitch"]]):
+            players = sub_df.loc[sub_df['starting pitcher'],
+                                 'playerName'].to_list()
+        else:
+            players = [
+                (player, mlb.playerStats.get(player, {}).get("avg", 0))
+                for player in sub_df["playerName"].to_list()
+            ]
+            players.sort(reverse=True, key=lambda x: x[1])
+            players = [i[0] for i in players[:4]]
 
         for combo in combinations(players, 2):
             player = " vs. ".join(combo)
@@ -60,14 +89,11 @@ for market in tqdm(markets, unit="markets", position=1):
                 continue
 
             opponent = "/".join(opponents)
-            # line = np.round((EV[1]-EV[0])*2)/2
-            line = 0
+            line = np.round((EV[1]-EV[0])*2)/2
             over = skellam.sf(np.floor(line), EV[1], EV[0])
             if np.mod(line, 1) == 0:
                 over += skellam.pmf(line, EV[1], EV[0]) / 2
-            # stats = mlb.get_stats_date(player, opponent, datetime.strptime(
-            #     gameDate, '%Y-%m-%d'), market, line)
-            stats = np.append([over] * 4)
+            stats = [over] * 4
             archive.archive["MLB"][market][gameDate][player] = {line: stats}
 
 archive.write()

@@ -42,28 +42,47 @@ def meditate(force, league):
 
     all_markets = {
         "MLB": [
-            "pitcher strikeouts",
-            "pitching outs",
-            "pitches thrown",
-            "walks allowed",
-            "hits allowed",
-            "runs allowed",
-            "1st inning runs allowed",
-            "1st inning hits allowed",
-            "hits",
-            "runs",
-            "rbi",
-            "walks",
-            "hits+runs+rbi",
-            "singles",
-            "total bases",
-            "batter strikeouts",
-            "hitter fantasy score",
-            "pitcher fantasy score",
+            # "pitcher strikeouts",
+            # "pitching outs",
+            # "pitches thrown",
+            # "hits allowed",
+            # "runs allowed",
+            # "1st inning runs allowed",
+            # "1st inning hits allowed",
+            # "hitter fantasy score",
+            # "pitcher fantasy score",
             "hitter fantasy points underdog",
-            "pitcher fantasy points underdog",
-            "hitter fantasy points parlay",
-            "pitcher fantasy points parlay",
+            # "pitcher fantasy points underdog",
+            # "hitter fantasy points parlay",
+            # "pitcher fantasy points parlay",
+            # "hits+runs+rbi",
+            "total bases",
+            # "walks",
+            # "hits",
+            # "runs",
+            # "rbi",
+            # "singles",
+            # "batter strikeouts",
+            # "walks allowed",
+        ],
+        "NFL": [
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "fantasy points parlayplay",
+            "passing tds",
+            "rushing tds",
+            "receiving tds",
+            "tds",
+            "completions",
+            "carries",
+            "receptions",
+            "interceptions",
+            "attempts",
+            "targets",
         ],
         "NBA": [
             "PTS",
@@ -74,6 +93,8 @@ def meditate(force, league):
             "RA",
             "PA",
             "FG3M",
+            "fantasy score",
+            "fantasy points parlay",
             "TOV",
             "BLK",
             "STL",
@@ -86,44 +107,25 @@ def meditate(force, league):
             "DREB",
             "PF",
             "MIN",
-            "fantasy score",
-            "fantasy points parlay"
         ],
         "NHL": [
-            "goals",
-            "assists",
             "points",
             "saves",
             "goalsAgainst",
-            "hits",
+            "shots",
             "sogBS",
-            "blocked",
             "fantasy score",
             "goalie fantasy points underdog",
             "skater fantasy points underdog",
             "goalie fantasy points parlay",
-            "skater fantasy points parlay"
+            "skater fantasy points parlay",
+            "blocked",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
         ],
-        "NFL": [
-            "passing tds",
-            "passing yards",
-            "completions",
-            "attempts",
-            "interceptions",
-            "carries",
-            "rushing yards",
-            "receiving yards",
-            "receptions",
-            "yards",
-            "rushing tds",
-            "receptions",
-            "targets",
-            "receiving tds",
-            "tds",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "fantasy points parlayplay"
-        ]
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -152,22 +154,28 @@ def meditate(force, league):
             if os.path.isfile(filepathX):
                 X = pd.read_csv(filepathX, index_col=0)
                 y = pd.read_csv(filepathy, index_col=0)
+                X.replace([np.inf, -np.inf], 0, inplace=True)
+                X.to_csv(filepathX)
             else:
                 X, y = stat_data.get_training_matrix(market)
+                X.replace([np.inf, -np.inf], 0, inplace=True)
                 X.to_csv(filepathX)
                 y.to_csv(filepathy)
 
             if X.empty:
                 continue
 
+            y.loc[y['Result'] > 0] = int(1)
+            y.loc[y['Result'] <= 0] = int(0)
+
             X_train, X_test, y_train, Y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=(X['Combo'] + 2*X['Rivals']).to_numpy()
+                X, y, test_size=0.2, random_state=42, stratify=(X['Combo'] + 2*X['Rival']).to_numpy()
             )
 
             if len(X_train) < 800:
                 continue
 
-            if y_train.value_counts(normalize=True).min() < 0.44:
+            if y_train.value_counts(normalize=True).min() < 0.45:
                 X_train, y_train = ADASYN().fit_resample(X_train, y_train)
 
             y_train = np.ravel(y_train.to_numpy())
@@ -202,11 +210,14 @@ def meditate(force, league):
             bs = [0, 0, 0]
             for i in range(0, 3):
                 if i == 0:
-                    mask = (X_test['Combo'] == 0) & (X_test['Rivals'] == 0)
+                    mask = (X_test['Combo'] == 0) & (X_test['Rival'] == 0)
                 elif i == 1:
-                    mask = (X_test['Combo'] == 1) & (X_test['Rivals'] == 0)
+                    mask = (X_test['Combo'] == 1) & (X_test['Rival'] == 0)
                 elif i == 2:
-                    mask = (X_test['Combo'] == 0) & (X_test['Rivals'] == 1)
+                    mask = (X_test['Combo'] == 0) & (X_test['Rival'] == 1)
+
+                if mask.sum() < 20:
+                    continue
 
                 y_proba = model.predict_proba(X_test.loc[mask])
                 y_test = np.ravel(Y_test.loc[mask].to_numpy())
@@ -250,7 +261,7 @@ def meditate(force, league):
                 del filedict
                 del model
 
-    report()
+            report()
 
 
 def report():
@@ -268,8 +279,8 @@ def report():
 
             f.write(f" {league} {market} ".center(89, "="))
             f.write("\n")
-            f.write(pd.DataFrame(model["stats"],
-                    index=["Normal, Combo, Rival"]).to_string())
+            f.write(pd.DataFrame(model['stats'], index=[
+                    ['Normal', 'Combo', 'Rival']]).to_string())
             f.write("\n\n")
 
 
