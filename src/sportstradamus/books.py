@@ -154,24 +154,29 @@ def get_fd(sport, tabs):
         ("customPageId", sport),
     ]
 
-    response = scraper.get(
+    data = scraper.get(
         api_url.format("content-managed-page"),
         params={key: value for key, value in params},
     )
-    if not response:
-        logger.warning("No lines found")
+
+    if not data:
+        logger.warning(f"No lines found for {sport}.")
         return {}
 
-    attachments = response.get("attachments")
+    attachments = data.get("attachments")
+    if not attachments or not attachments.get("events"):
+        logger.warning(f"No events found for {sport}.")
+        return {}
+
     events = attachments["events"]
 
     # Filter event IDs based on open date
     event_ids = [
-        event
-        for event in events
-        if datetime.strptime(events[event]["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        event['eventId']
+        for event in events.values()
+        if datetime.strptime(event["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
         > datetime.now()
-        and datetime.strptime(events[event]["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        and datetime.strptime(event["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
         - timedelta(days=5)
         < datetime.today()
     ]
@@ -179,28 +184,27 @@ def get_fd(sport, tabs):
     players = {}
 
     # Iterate over event IDs and tabs
-    for event_id in event_ids:
-        for tab in tqdm(tabs):
+    for event_id in tqdm(event_ids, desc="Processing Events", unit="event"):
+        for tab in tabs:
             new_params = [
                 ("usePlayerPropsVirtualMarket", "true"),
                 ("eventId", event_id),
                 ("tab", tab),
             ]
 
-            response = scraper.get(
+            data = scraper.get(
                 api_url.format("event-page"),
                 params={key: value for key, value in params + new_params},
             )
 
-            if not response:
+            if not data:
                 continue
 
-            try:
-                attachments = response.get("attachments")
-                events = attachments["events"]
-                offers = attachments["markets"]
-            except:
-                logger.exception(", ".join([str(event_id), str(tab)]))
+            attachments = data.get("attachments")
+            events = attachments.get("events")
+            offers = attachments.get("markets")
+            if not events or not offers:
+                logger.warning(f"No offers found for {event_id}, {tab}.")
                 continue
 
             # Filter offers based on market name
@@ -233,15 +237,15 @@ def get_fd(sport, tabs):
             ]
 
             # Iterate over offers
-            for k in tqdm(offers):
-                if len(k["runners"]) != 2:
+            for offer in tqdm(offers, desc="Processing Offers", unit="offer"):
+                if len(offer["runners"]) != 2:
                     continue
-                try:
-                    if " - " in k["marketName"]:
-                        player = remove_accents(
-                            k["marketName"].split(" - ")[0])
-                        market = k["marketName"].split(" - ")[1]
 
+                try:
+                    if " - " in offer["marketName"]:
+                        player = remove_accents(
+                            offer["marketName"].split(" - ")[0])
+                        market = offer["marketName"].split(" - ")[1]
                     elif "@" in events[event_id]["name"]:
                         teams = (
                             events[event_id]["name"]
@@ -258,16 +262,15 @@ def get_fd(sport, tabs):
                                 0]["fileCode"].upper(), ""
                         )
                         player = pitcher1 + " + " + pitcher2
-                        market = k["marketName"]
-
+                        market = offer["marketName"]
                     else:
                         continue
 
                     if player not in players:
                         players[player] = {}
 
-                    outcomes = sorted(k["runners"][:2],
-                                      key=lambda x: x["runnerName"])
+                    outcomes = sorted(
+                        offer["runners"][:2], key=lambda x: x["runnerName"])
                     if outcomes[1]["handicap"] == 0:
                         line = [
                             float(s)
@@ -282,12 +285,8 @@ def get_fd(sport, tabs):
                         line = outcomes[1]["handicap"]
 
                     p = no_vig_odds(
-                        outcomes[0]["winRunnerOdds"]["trueOdds"]["decimalOdds"][
-                            "decimalOdds"
-                        ],
-                        outcomes[1]["winRunnerOdds"]["trueOdds"]["decimalOdds"][
-                            "decimalOdds"
-                        ],
+                        outcomes[0]["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"],
+                        outcomes[1]["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"],
                     )
                     newline = {
                         "EV": get_ev(line, p[1]),

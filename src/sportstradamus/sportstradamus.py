@@ -147,31 +147,25 @@ def main(progress):
 
     pp_dict = get_pp()
     pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
+    save_data(pp_offers, "PrizePicks", gc)
 
     # Underdog
 
     ud_dict = get_ud()
     ud_offers = process_offers(ud_dict, "Underdog", datasets, stats)
+    save_data(ud_offers, "Underdog", gc)
+
+    # ParlayPlay
+
+    parp_dict = get_parp()
+    parp_offers = process_offers(parp_dict, "ParlayPlay", datasets, stats)
+    save_data(parp_offers, "ParlayPlay", gc)
 
     # Thrive
 
     th_dict = get_thrive()
     th_offers = process_offers(th_dict, "Thrive", datasets, stats)
-
-    # ParlayPlays
-
-    parp_dict = get_parp()
-    parp_offers = process_offers(parp_dict, "ParlayPlay", datasets, stats)
-
-    logger.info("Writing to file...")
-    offer_list = [
-        ("PrizePicks", pp_offers),
-        ("Underdog", ud_offers),
-        ("Thrive", th_offers),
-        ("ParlayPlay", parp_offers),
-    ]
-    for book, offers in offer_list:
-        save_data(offers, book, gc)
+    save_data(th_offers, "Thrive", gc)
 
     if len(untapped_markets) > 0:
         untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
@@ -323,10 +317,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
     model = filedict["model"]
-    # threshold = filedict['threshold']
-    # edges = filedict['edges']
     stat_data.profile_market(market)
-    # stat_data.edges = edges
 
     for o in tqdm(offers, leave=False, disable=not pbar):
         stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
@@ -457,7 +448,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 else:
                     p = [0.5] * 2
 
-            proba = model.predict_proba(stats)[0, :]
+            proba = model.predict_proba(
+                np.array(list(stats.values())).reshape(1, -1))[0, :]
 
             if proba[1] > proba[0]:
                 o["Bet"] = "Over"
@@ -472,13 +464,10 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 (stats.loc[0, "Avg10"]) /
                 o["Line"] if " vs. " not in o["Player"] else 0
             )
-            o["Last 5"] = stats.loc[0, "Last5"] + 0.5
-            o["Last 10"] = stats.loc[0, "Last10"] + 0.5
-            o["H2H"] = stats.loc[0, "H2H"] + 0.5
-            o["OvP"] = stats.loc[0, "DVPOA"]
-
-            stats = [o["Avg 10"], o["Last 5"],
-                     o["Last 10"], o["H2H"], o["OvP"]]
+            o["Last 5"] = stats["Last5"] + 0.5
+            o["Last 10"] = stats["Last10"] + 0.5
+            o["H2H"] = stats["H2H"] + 0.5
+            o["DvPOA"] = stats["DVPOA"]
 
             archive.add(o, lines, stat_map["Stats"])
 
