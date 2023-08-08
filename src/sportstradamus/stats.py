@@ -978,7 +978,8 @@ class StatsMLB(Stats):
                     }
                     new_games.append(n)
 
-        self.gamelog = self.gamelog.append(new_games, ignore_index=True)
+        self.gamelog = pd.concat(
+            [self.gamelog, pd.DataFrame.from_records(new_games)], ignore_index=True)
 
     def load(self):
         """
