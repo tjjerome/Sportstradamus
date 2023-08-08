@@ -461,7 +461,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 o["Model"] = proba[0]
 
             o["Avg 10"] = (
-                (stats.loc[0, "Avg10"]) /
+                (stats["Avg10"]) /
                 o["Line"] if " vs. " not in o["Player"] else 0
             )
             o["Last 5"] = stats["Last5"] + 0.5

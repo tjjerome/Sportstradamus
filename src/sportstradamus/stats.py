@@ -1980,7 +1980,7 @@ class StatsNFL(Stats):
                 pd.to_datetime(self.gamelog["gameday"]) < date)]
             position2 = self.players.get(players[1], "")
 
-            headtohead2 = player1_games.loc[player2_games["opponent"]
+            headtohead2 = player2_games.loc[player2_games["opponent"]
                                             == opponents[1]]
 
             n = min(len(player1_games), len(player2_games))
