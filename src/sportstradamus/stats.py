@@ -332,13 +332,15 @@ class StatsNBA(Stats):
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['HOME'].astype(bool), market].mean()/x[market].mean())-1
 
-        self.playerProfile['moneyline gain'] = playerGroups.\
-            apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float),
-                  x[market].values/x[market].mean(), 1)[1])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.playerProfile['moneyline gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float),
+                                           x[market].values/x[market].mean(), 1)[1])
 
-        self.playerProfile['totals gain'] = playerGroups.\
-            apply(lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float)/8.3,
-                  x[market].values/x[market].mean(), 1)[1])
+            self.playerProfile['totals gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float)/8.3,
+                                           x[market].values/x[market].mean(), 1)[1])
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -1203,11 +1205,13 @@ class StatsMLB(Stats):
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
 
-        self.playerProfile['moneyline gain'] = playerGroups.apply(
-            lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float), x[market].values / x[market].mean(), 1)[1])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.playerProfile['moneyline gain'] = playerGroups.apply(
+                lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float), x[market].values / x[market].mean(), 1)[1])
 
-        self.playerProfile['totals gain'] = playerGroups.apply(
-            lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.3, x[market].values / x[market].mean(), 1)[1])
+            self.playerProfile['totals gain'] = playerGroups.apply(
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.3, x[market].values / x[market].mean(), 1)[1])
 
         if any([string in market for string in ["allowed", "pitch"]]):
             self.playerProfile['days off'] = playerGroups['gameId'].apply(lambda x: np.diff(
@@ -1246,12 +1250,11 @@ class StatsMLB(Stats):
 
         # Calculate DVP (Defense Versus Position) and league average for the specified team and market
         if any([string in market for string in ["allowed", "pitch"]]):
-            position = "starting pitcher"
+            position_games = gamelog.loc[gamelog['starting pitcher']]
+            team_games = position_games.loc[position_games['opponent'] == team]
         else:
-            position = "starting batter"
-
-        position_games = gamelog.loc[gamelog[position]]
-        team_games = position_games.loc[position_games['opponent'] == team]
+            position_games = gamelog.loc[gamelog['starting batter']]
+            team_games = position_games.loc[position_games['opponent pitcher'] == team]
 
         if len(team_games) == 0:
             return 0
@@ -1857,13 +1860,15 @@ class StatsNFL(Stats):
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['home'].astype(bool), market].mean()/x[market].mean())-1
 
-        self.playerProfile['moneyline gain'] = playerGroups.\
-            apply(lambda x: np.polyfit(x.moneyline.values.astype(float),
-                  x[market].values/x[market].mean(), 1)[1])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.playerProfile['moneyline gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.moneyline.values.astype(float),
+                                           x[market].values.astype(float)/x[market].mean(), 1)[1])
 
-        self.playerProfile['totals gain'] = playerGroups.\
-            apply(lambda x: np.polyfit(x.totals.values.astype(float)/45,
-                  x[market].values/x[market].mean(), 1)[1])
+            self.playerProfile['totals gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.totals.values.astype(float)/45,
+                                           x[market].values.astype(float)/x[market].mean(), 1)[1])
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -2457,13 +2462,15 @@ class StatsNHL(Stats):
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['home'].astype(bool), market].mean()/x[market].mean())-1
 
-        self.playerProfile['moneyline gain'] = playerGroups.\
-            apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float),
-                  x[market].values/x[market].mean(), 1)[1])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.playerProfile['moneyline gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float),
+                                           x[market].values/x[market].mean(), 1)[1])
 
-        self.playerProfile['totals gain'] = playerGroups.\
-            apply(lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float)/8.3,
-                  x[market].values/x[market].mean(), 1)[1])
+            self.playerProfile['totals gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float)/8.3,
+                                           x[market].values/x[market].mean(), 1)[1])
 
         # self.playerProfile = self.playerProfile.dropna()
 
