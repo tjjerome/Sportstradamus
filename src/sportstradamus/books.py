@@ -791,7 +791,7 @@ def get_ud():
             "Line": float(o["stat_value"]),
             "Opponent": opponent,
         }
-        if "Fantasy" in market:
+        if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
                 n["Market"] = "Pitcher Fantasy Points"
             else:
@@ -867,6 +867,11 @@ def get_ud():
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
             "Opponent": opponent1 + "/" + opponent2,
         }
+        if "Fantasy" in market and n["League"] == "MLB":
+            if n["Player"] in list(mlb_pitchers.values()):
+                n["Market"] = "H2H Pitcher Fantasy Points"
+            else:
+                n["Market"] = "H2H Hitter Fantasy Points"
 
         if n["League"] not in offers:
             offers[n["League"]] = {}
