@@ -761,6 +761,7 @@ class StatsMLB(Stats):
                                               ).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
+        self.gamelog = pd.DataFrame()
 
     def parse_game(self, gameId):
         """
@@ -997,9 +998,12 @@ class StatsMLB(Stats):
         """
         # Get the current MLB schedule
         today = datetime.today().date()
-        next_day = pd.to_datetime(
-            self.gamelog.gameId.str[:10]).max() + timedelta(days=1)
-        if next_day.date() > today:
+        if self.gamelog.empty:
+            next_day = self.season_start
+        else:
+            next_day = pd.to_datetime(
+                self.gamelog.gameId.str[:10]).max().date() + timedelta(days=1)
+        if next_day > today:
             return
         mlb_games = mlb.schedule(
             start_date=next_day.strftime('%Y-%m-%d'),
