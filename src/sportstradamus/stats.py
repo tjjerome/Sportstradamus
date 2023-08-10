@@ -757,7 +757,7 @@ class StatsMLB(Stats):
         Initialize the StatsMLB instance.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2023-03-28", "%Y-%m-%d"
+        self.season_start = datetime.strptime("2021-03-30", "%Y-%m-%d"
                                               ).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
@@ -790,7 +790,8 @@ class StatsMLB(Stats):
             awayInning1Hits = linescore["innings"][0]["away"]["hits"]
             homeInning1Hits = linescore["innings"][0]["home"]["hits"]
             for v in game["away"]["players"].values():
-                if (v["person"]["id"] == game["awayPitchers"][1]["personId"] or v["person"]["id"] in game["away"]["batters"]):
+                if (v["person"]["id"] == game["awayPitchers"][1]["personId"] or
+                        v["person"]["id"] in game["away"]["battingOrder"]):
                     n = {
                         "gameId": game["gameId"],
                         "playerId": v["person"]["id"],
@@ -801,7 +802,7 @@ class StatsMLB(Stats):
                         "opponent pitcher": homePitcher,
                         "home": False,
                         "starting pitcher": v["person"]["id"] == game["awayPitchers"][1]["personId"],
-                        "starting batter": v["person"]["id"] in game["away"]["batters"],
+                        "starting batter": v["person"]["id"] in game["away"]["battingOrder"],
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("doubles", 0) +
                         2 * v["stats"]["batting"].get("triples", 0) +
@@ -815,6 +816,7 @@ class StatsMLB(Stats):
                         "hits+runs+rbi": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("runs", 0) +
                         v["stats"]["batting"].get("rbi", 0),
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0),
+                        "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
                         "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
                         "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
@@ -851,13 +853,11 @@ class StatsMLB(Stats):
                         2*v["stats"]["batting"].get("rbi", 0) +
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
                         4*v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points underdog": 2*v["stats"]["pitching"].get("wins", 0) +
-                        v["stats"]["pitching"].get("strikeOuts", 0) -
-                        v["stats"]["pitching"].get("earnedRuns", 0) +
+                        "pitcher fantasy points underdog": 5*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
                         3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
-                        int(v["stats"]["pitching"].get(
-                            "inningsPitched", "0.0").split(".")[1]) +
-                        3 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                        5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
                                  0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
                         "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
@@ -877,7 +877,8 @@ class StatsMLB(Stats):
                     new_games.append(n)
 
             for v in game["home"]["players"].values():
-                if (v["person"]["id"] == game["homePitchers"][1]["personId"] or v["person"]["id"] in game["home"]["batters"]):
+                if (v["person"]["id"] == game["homePitchers"][1]["personId"] or
+                        v["person"]["id"] in game["home"]["battingOrder"]):
                     n = {
                         "gameId": game["gameId"],
                         "playerId": v["person"]["id"],
@@ -891,7 +892,7 @@ class StatsMLB(Stats):
                         "home": True,
                         "starting pitcher": v["person"]["id"]
                         == game["homePitchers"][1]["personId"],
-                        "starting batter": v["person"]["id"] in game["home"]["batters"],
+                        "starting batter": v["person"]["id"] in game["home"]["battingOrder"],
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0)
                         + v["stats"]["batting"].get("doubles", 0)
@@ -908,6 +909,7 @@ class StatsMLB(Stats):
                         + v["stats"]["batting"].get("runs", 0)
                         + v["stats"]["batting"].get("rbi", 0),
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0),
+                        "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get(
                             "strikeOuts", 0
                         ),
@@ -956,13 +958,11 @@ class StatsMLB(Stats):
                         2*v["stats"]["batting"].get("rbi", 0) +
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
                         4*v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points underdog": 2*v["stats"]["pitching"].get("wins", 0) +
-                        v["stats"]["pitching"].get("strikeOuts", 0) -
-                        v["stats"]["pitching"].get("earnedRuns", 0) +
+                        "pitcher fantasy points underdog": 5*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
                         3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
-                        int(v["stats"]["pitching"].get(
-                            "inningsPitched", "0.0").split(".")[1]) +
-                        3 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                        5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
                                  0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
                         "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
@@ -1085,82 +1085,35 @@ class StatsMLB(Stats):
         self.bucket_market = market
         self.bucket_latest_date = date
 
-        # Initialize playerStats and edges
-        self.playerStats = {}
+        # Reset playerStats and edges
+        self.playerStats = pd.DataFrame()
         self.edges = []
 
-        # Iterate over game log and gather stats for each player
-        for game in self.gamelog:
-            gameDate = datetime.strptime(
-                game['gameId'][:10], '%Y/%m/%d').date()
-            if gameDate > date.date():
-                continue
-            elif gameDate < (date - timedelta(days=365)).date():
-                continue
-            # Skip non-starting pitchers or non-starting batters depending on the market
-            if (
-                any([string in market for string in ["allowed", "pitch"]])
-                and not game["starting pitcher"]
-            ):
-                continue
-            elif (
-                not any([string in market for string in ["allowed", "pitch"]])
-                and not game["starting batter"]
-            ):
-                continue
+        # Collect stats for each player
+        gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameId"].str[:10]) < date) &
+                                   (pd.to_datetime(self.gamelog["gameId"].str[:10]) > date - timedelta(days=365))]
+        playerGroups = gamelog.\
+            groupby('playerName').\
+            filter(lambda x: len(x[x[market] != 0]) > 4).\
+            groupby('playerName')[market]
 
-            # Check if player exists in playerStats dictionary
-            if not game["playerName"] in self.playerStats:
-                self.playerStats[game["playerName"]] = {"games": []}
-
-            # Add the stat for the current game to the player's games list
-            self.playerStats[game["playerName"]]["games"].append(game[market])
-
-        # Remove players with insufficient games or all zero stats
-        self.playerStats = {
-            k: v
-            for k, v in self.playerStats.items()
-            if len(v["games"]) > 10 and not all([g == 0 for g in v["games"]])
-        }
-
-        # Calculate average stats for each player
-        averages = []
-        for player, games in self.playerStats.items():
-            self.playerStats[player]["avg"] = (
-                np.mean(games["games"]) if games["games"] else 0
-            )
-            averages.append(self.playerStats[player]["avg"])
-
-        if not len(averages):
-            return
-
-        # Determine edges for each bucket based on percentiles
+        # Compute edges for each bucket
         w = int(100 / buckets)
-        self.edges = [np.percentile(averages, p) for p in range(0, 101, w)]
+        self.edges = playerGroups.mean().quantile(
+            np.arange(0, 101, w)/100).to_list()
 
-        # Calculate lines for each bucket based on average values
-        lines = np.zeros(buckets)
-        for i in range(1, buckets + 1):
-            lines[i - 1] = (
-                np.round(
-                    np.mean(
-                        [
-                            v
-                            for v in averages
-                            if v <= self.edges[i] and v >= self.edges[i - 1]
-                        ]
-                    )
-                    - 0.5
-                )
-                + 0.5
-            )
+        # Assign bucket and line values to each player
+        self.playerStats['avg'] = playerGroups.mean()
+        self.playerStats['bucket'] = np.ceil(
+            playerGroups.mean().rank(pct=True, ascending=False)*20).astype(int)
+        self.playerStats['line'] = playerGroups.median()
+        self.playerStats.loc[self.playerStats['line'] == 0.0, 'line'] = 0.5
+        self.playerStats.loc[(np.mod(self.playerStats['line'], 1) == 0) & (
+            self.playerStats['avg'] > self.playerStats['line']), 'line'] += 0.5
+        self.playerStats.loc[(np.mod(self.playerStats['line'], 1) == 0) & (
+            self.playerStats['avg'] < self.playerStats['line']), 'line'] -= 0.5
 
-        # Assign bucket and line values to each player based on their average stat
-        for player, games in self.playerStats.items():
-            for i in range(0, buckets):
-                if games["avg"] >= self.edges[i]:
-                    self.playerStats[player]["bucket"] = buckets - i
-                    self.playerStats[player]["line"] = lines[i]
+        self.playerStats = self.playerStats.to_dict(orient='index')
 
     def profile_market(self, market, date=datetime.today().date()):
         if market == self.profiled_market and date == self.profile_latest_date:
