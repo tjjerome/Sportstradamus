@@ -195,6 +195,7 @@ def process_offers(offer_dict, book, datasets, stats):
     """
     global untapped_markets
     new_offers = []
+    logger.info(f"Processing {book} offers")
     if len(offer_dict) > 0:
         # Calculate the total number of offers to process
         total = sum(sum(len(i) for i in v.values())
@@ -229,6 +230,7 @@ def process_offers(offer_dict, book, datasets, stats):
                         # Add the matched offers to the new_offers list
                         new_offers.extend(matched_offers)
 
+    logger.info(str(len(new_offers)) + " offers processed")
     return new_offers
 
 
