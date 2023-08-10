@@ -604,6 +604,7 @@ def get_pp():
                   ...
               }
     """
+    logger.info("Getting PrizePicks Lines")
     offers = {}
     params = {
         "api_key": apikey,
@@ -720,6 +721,7 @@ def get_ud():
                   ...
               }
     """
+    logger.info("Getting Underdog Lines")
     teams = scraper.get("https://stats.underdogfantasy.com/v1/teams")
 
     if not teams:
@@ -1006,6 +1008,7 @@ def get_parp():
                   ...
               }
     """
+    logger.info("Getting ParlayPlay Lines")
     params = {
         "api_key": apikey,
         "url": "https://parlayplay.io/api/v1/crossgame/search/?format=json&league=&sport=All",
@@ -1072,4 +1075,5 @@ def get_parp():
                 m = n | {"Slide": "Y", "Line": np.max(stat["slideRange"])}
                 offers[n["League"]][n["Market"]].append(m)
 
+    logger.info(str(len(offers)) + " offers found")
     return offers
