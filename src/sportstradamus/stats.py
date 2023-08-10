@@ -1194,6 +1194,9 @@ class StatsMLB(Stats):
         if market not in self.dvp_index:
             self.dvp_index[market] = {}
 
+        if team == "ARI":
+            team = "AZ"
+
         # Check if DVPOA value for the specified team and market is already calculated and cached
         if self.dvp_index[market].get(team):
             return self.dvp_index[market][team]
@@ -1547,7 +1550,7 @@ class StatsMLB(Stats):
                 if " + " in name or " vs. " in name:
                     player2 = name.replace("vs.", "+").split(" + ")[1].strip()
                     game2 = self.gamelog.loc[(self.gamelog.gameId.str[:10] == gameDate.strftime(
-                        "%Y/%m/%d")) & (self.gamelog.playerName == player2)].squeeze()
+                        "%Y/%m/%d")) & (self.gamelog.playerName == player2)].head(1).squeeze()
                     if game2.empty:
                         continue
                     offer = offer | {
