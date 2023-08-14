@@ -1,5 +1,5 @@
 from sportstradamus.helpers import archive, get_ev
-from sportstradamus.stats import StatsNHL
+from sportstradamus.stats import StatsMLB
 import pandas as pd
 from itertools import combinations
 from scipy.stats import poisson, skellam
@@ -7,17 +7,19 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 
-NHL = StatsNHL()
-NHL.load()
-NHL.update()
+MLB = StatsMLB()
+MLB.load()
+MLB.update()
 archive.__init__(True)
 markets = [
-    "saves",
-    "goalsAgainst",
-    "goalie fantasy points underdog",
-    "goalie fantasy points parlay",
-    "faceOffWins",
-    "timeOnIce",
+    "pitcher fantasy points underdog",
+    "pitcher fantasy score"
+    # "saves",
+    # "goalsAgainst",
+    # "goalie fantasy points underdog",
+    # "goalie fantasy points parlay",
+    # "faceOffWins",
+    # "timeOnIce",
     # "goals",
     # "assists",
     # "points",
@@ -31,33 +33,30 @@ markets = [
 ]
 for market in tqdm(markets, unit="markets", position=1):
 
-    for game in tqdm(NHL.gamelog, desc=market, unit='game'):
+    for game in tqdm(MLB.gamelog, desc=market, unit='game'):
         if (
-            any([string in market for string in ["saves", "goalie", "Against"]])
-            and game["position"] != "G"
+            any([string in market for string in ["pitch", "allowed"]])
+            and not game["starting pitcher"]
         ):
             continue
         elif (
-            not any([string in market for string in [
-                    "saves", "goalie", "Against"]])
-            and game["position"] == "G"
+            not any([string in market for string in ["pitch", "allowed"]])
+            and not game["starting batter"]
         ):
             continue
-        gameDate = game['gameDate']
-        NHL.bucket_stats(market, date=datetime.strptime(gameDate, "%Y-%m-%d"))
+        gameDate = game['gameId'][:10].replace("/", "-")
+        MLB.bucket_stats(market, date=datetime.strptime(gameDate, "%Y-%m-%d"))
         player = game['playerName']
-        if player not in NHL.playerStats:
+        if player not in MLB.playerStats:
             continue
-        # line = np.rint(NHL.playerStats[player]['avg'])
-        line = NHL.playerStats[player]['line']
-        if market == "1st inning hits allowed":
-            line = 1.5
+        # line = np.rint(MLB.playerStats[player]['avg'])
+        line = MLB.playerStats[player]['line']
         stats = [0.5] * 4
-        if market not in archive.archive["NHL"]:
-            archive.archive["NHL"][market] = {}
-        if gameDate not in archive.archive["NHL"][market]:
-            archive.archive["NHL"][market][gameDate] = {}
-        archive.archive["NHL"][market][gameDate][player] = {
+        if market not in archive.archive["MLB"]:
+            archive.archive["MLB"][market] = {}
+        if gameDate not in archive.archive["MLB"][market]:
+            archive.archive["MLB"][market][gameDate] = {}
+        archive.archive["MLB"][market][gameDate][player] = {
             line: stats}
 
 archive.write()
