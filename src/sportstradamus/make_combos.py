@@ -1,5 +1,5 @@
 from sportstradamus.helpers import Archive, get_ev
-from sportstradamus.stats import StatsNFL
+from sportstradamus.stats import StatsMLB
 import pandas as pd
 from itertools import combinations
 from scipy.stats import poisson, skellam
@@ -7,67 +7,67 @@ import numpy as np
 from datetime import datetime
 from tqdm import tqdm
 
-NFL = StatsNFL()
-NFL.load()
-NFL.update()
+MLB = StatsMLB()
+MLB.load()
+MLB.update()
 
 archive = Archive(True)
 
-df = pd.DataFrame(NFL.gamelog)
+df = pd.DataFrame(MLB.gamelog)
 
 markets = [
-    "passing tds",
-    "passing yards",
-    "completions",
-    "attempts",
-    "interceptions",
-    "carries",
-    "rushing yards",
-    "receiving yards",
-    "receptions",
-    "yards",
-    "rushing tds",
-    "receptions",
-    "targets",
-    "receiving tds",
-    "tds",
-    "fantasy points prizepicks",
-    "fantasy points underdog",
-    "fantasy points parlayplay"
+    "pitcher fantasy points underdog",
+    "pitcher fantasy score"
+    # "passing tds",
+    # "passing yards",
+    # "completions",
+    # "attempts",
+    # "interceptions",
+    # "carries",
+    # "rushing yards",
+    # "receiving yards",
+    # "receptions",
+    # "yards",
+    # "rushing tds",
+    # "receptions",
+    # "targets",
+    # "receiving tds",
+    # "tds",
+    # "fantasy points prizepicks",
+    # "fantasy points underdog",
+    # "fantasy points parlayplay"
 ]
 for market in tqdm(markets, unit="markets", position=1):
 
-    games = df['game id'].unique()
+    games = df['gameId'].unique()
 
     for gameId in tqdm(games, desc=market, unit="games", position=2):
-        sub_df = df.loc[df["game id"] == gameId]
-        gameDate = sub_df.iloc[0]["gameday"][:10]
-        if not archive["NFL"][market].get(gameDate):
+        sub_df = df.loc[df["gameId"] == gameId]
+        gameDate = sub_df.iloc[0]["gameId"][:10]
+        if not archive["MLB"][market].get(gameDate):
             continue
 
-        NFL.bucket_stats(market, date=datetime.strptime(gameDate, '%Y-%m-%d'))
+        MLB.bucket_stats(market, date=datetime.strptime(gameDate, '%Y-%m-%d'))
 
-        if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]):
-            players = sub_df.loc[sub_df['position group'] == 'QB',
-                                 'player display name'].to_list()
-        else:
-            players = [
-                (player, NFL.playerStats.get(player, {}).get("avg", 0))
-                for player in sub_df["player display name"].to_list()
-            ]
-            players.sort(reverse=True, key=lambda x: x[1])
-            players = [i[0] for i in players[:4]]
+        # if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]):
+        #     players = sub_df.loc[sub_df['position group'] == 'QB',
+        #                          'player display name'].to_list()
+        # else:
+        #     players = [
+        #         (player, MLB.playerStats.get(player, {}).get("avg", 0))
+        #         for player in sub_df["player display name"].to_list()
+        #     ]
+        #     players.sort(reverse=True, key=lambda x: x[1])
+        #     players = [i[0] for i in players[:4]]
+
+        players = sub_df.loc[sub_df['starting pitcher'],
+                             'playerName'].to_list()
 
         for combo in combinations(players, 2):
             try:
                 EV = []
-                opponents = []
                 for c in combo:
-                    opponents.append(
-                        sub_df.loc[sub_df["player display name"] == c]["opponent"].to_list()[
-                            0]
-                    )
-                    offer = archive["NFL"][market][gameDate][c]
+                    offer = archive["MLB"][market][gameDate][c]
                     ev = []
                     for line, stats in offer.items():
                         if line == "Closing Lines":
@@ -81,34 +81,34 @@ for market in tqdm(markets, unit="markets", position=1):
             except:
                 continue
 
-            opponent = "/".join(opponents)
-
             player = " + ".join(combo)
             if not (
-                player in archive["NFL"][market][gameDate]
+                player in archive["MLB"][market][gameDate]
                 or " + ".join(player.split(" + ")[::-1])
-                in archive["NFL"][market][gameDate]
+                in archive["MLB"][market][gameDate]
             ):
                 line = np.round((EV[1]+EV[0])*2)/2
                 over = poisson.sf(np.floor(line), EV[1] + EV[0])
                 if np.mod(line, 1) == 0:
                     over += poisson.pmf(line, EV[1] + EV[0]) / 2
+                over = 0.5
                 stats = [over] * 4
-                archive.archive["NFL"][market][gameDate][player] = {
+                archive.archive["MLB"][market][gameDate][player] = {
                     line: stats}
 
             player = " vs. ".join(combo)
             if not (
-                player in archive["NFL"][market][gameDate]
+                player in archive["MLB"][market][gameDate]
                 or " vs. ".join(player.split(" vs. ")[::-1])
-                in archive["NFL"][market][gameDate]
+                in archive["MLB"][market][gameDate]
             ):
                 line = np.round((EV[1]-EV[0])*2)/2
                 over = skellam.sf(np.floor(line), EV[1], EV[0])
                 if np.mod(line, 1) == 0:
                     over += skellam.pmf(line, EV[1], EV[0]) / 2
+                over = 0.5
                 stats = [over] * 4
-                archive.archive["NFL"][market][gameDate][player] = {
+                archive.archive["MLB"][market][gameDate][player] = {
                     line: stats}
 
 archive.write()

@@ -757,7 +757,7 @@ class StatsMLB(Stats):
         Initialize the StatsMLB instance.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2021-03-30", "%Y-%m-%d"
+        self.season_start = datetime.strptime("2023-03-30", "%Y-%m-%d"
                                               ).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
@@ -773,7 +773,6 @@ class StatsMLB(Stats):
         game = mlb.boxscore_data(gameId)
         new_games = []
         if game:
-            self.gameIds.append(gameId)
             linescore = mlb.get("game_linescore", {"gamePk": str(gameId)})
             awayTeam = game["teamInfo"]["away"]["abbreviation"]
             homeTeam = game["teamInfo"]["home"]["abbreviation"]
@@ -817,6 +816,7 @@ class StatsMLB(Stats):
                         v["stats"]["batting"].get("rbi", 0),
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0),
                         "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
+                        "atBats": v["stats"]["batting"].get("atBats", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
                         "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
                         "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
@@ -843,8 +843,8 @@ class StatsMLB(Stats):
                         3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1]) +
-                        4 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
-                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        (4 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                            0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0),
                         "hitter fantasy points underdog": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
                         5*v["stats"]["batting"].get("triples", 0) +
@@ -857,8 +857,8 @@ class StatsMLB(Stats):
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
                         3*v["stats"]["pitching"].get("earnedRuns", 0) +
                         3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
-                        5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
-                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        (5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                            0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0),
                         "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
                         6*v["stats"]["batting"].get("triples", 0) +
@@ -910,6 +910,7 @@ class StatsMLB(Stats):
                         + v["stats"]["batting"].get("rbi", 0),
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0),
                         "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
+                        "atBats": v["stats"]["batting"].get("atBats", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get(
                             "strikeOuts", 0
                         ),
@@ -948,8 +949,8 @@ class StatsMLB(Stats):
                         3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1]) +
-                        4 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
-                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        (4 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                            0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0),
                         "hitter fantasy points underdog": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
                         5*v["stats"]["batting"].get("triples", 0) +
@@ -962,8 +963,8 @@ class StatsMLB(Stats):
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
                         3*v["stats"]["pitching"].get("earnedRuns", 0) +
                         3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
-                        5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
-                                 0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0,
+                        (5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                            0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0),
                         "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
                         6*v["stats"]["batting"].get("triples", 0) +
@@ -1091,7 +1092,12 @@ class StatsMLB(Stats):
 
         # Collect stats for each player
         gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameId"].str[:10]) < date) &
-                                   (pd.to_datetime(self.gamelog["gameId"].str[:10]) > date - timedelta(days=365))]
+                                   (pd.to_datetime(self.gamelog["gameId"].str[:10]) > date - timedelta(days=60))]
+
+        if gamelog.empty:
+            gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameId"].str[:10]) < date) &
+                                       (pd.to_datetime(self.gamelog["gameId"].str[:10]) > date - timedelta(days=240))]
+
         playerGroups = gamelog.\
             groupby('playerName').\
             filter(lambda x: len(x[x[market] != 0]) > 4).\
