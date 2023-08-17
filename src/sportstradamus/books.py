@@ -1044,10 +1044,11 @@ def get_parp():
         for stat in player["stats"]:
             market = stat["challengeName"]
             if "Fantasy" in market:
-                if player.get("position") == "SP":
-                    market = "Pitcher Fantasy Points"
-                else:
-                    market = "Hitter Fantasy Points"
+                if player["match"]["league"]["leagueNameShort"] == "MLB":
+                    if player.get("position") == "SP":
+                        market = "Pitcher Fantasy Points"
+                    else:
+                        market = "Hitter Fantasy Points"
             n = {
                 "Player": remove_accents(player["player"]["fullName"]),
                 "League": player["match"]["league"]["leagueNameShort"],
@@ -1074,6 +1075,44 @@ def get_parp():
                 offers[n["League"]][n["Market"]].append(m)
                 m = n | {"Slide": "Y", "Line": np.max(stat["slideRange"])}
                 offers[n["League"]][n["Market"]].append(m)
+
+    for combo in tqdm(api["comboPackages"], desc="Getting ParlayPlay Combos", unit="offer"):
+        teams = []
+        opponents = []
+        players = []
+        for player in combo['packageLegs']:
+            players.append(remove_accents(player["player"]["fullName"]))
+            teams.append(player["player"]["team"]["teamAbbreviation"])
+            opponents.append([team for team in
+                              [player["match"]["homeTeam"]["teamAbbreviation"],
+                               player["match"]["awayTeam"]["teamAbbreviation"]]
+                              if team != player["player"]["team"]["teamAbbreviation"]][0])
+
+        market = combo['pickType']['challengeName']
+        if "Fantasy" in market:
+            if combo['league']['leagueNameShort'] == "MLB":
+                if player.get("position") == "SP":
+                    market = "Pitcher Fantasy Points"
+                else:
+                    market = "Hitter Fantasy Points"
+
+        n = {
+            "Player": " + ".join(players),
+            "League": player["match"]["league"]["leagueNameShort"],
+            "Team": "/".join(teams),
+            "Date": player["match"]["matchDate"].split("T")[0],
+            "Market": market,
+            "Line": float(combo["pickValue"]),
+            "Slide": "N",
+            "Opponent": "/".join(opponents),
+        }
+
+        if n["League"] not in offers:
+            offers[n["League"]] = {}
+        if n["Market"] not in offers[n["League"]]:
+            offers[n["League"]][n["Market"]] = []
+
+        offers[n["League"]][n["Market"]].append(n)
 
     logger.info(str(len(offers)) + " offers found")
     return offers
