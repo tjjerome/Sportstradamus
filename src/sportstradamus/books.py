@@ -742,7 +742,7 @@ def get_ud():
     for i in api["players"]:
         player_ids[i["id"]] = {
             "Name": str(i["first_name"] or "") + " " + str(i["last_name"] or ""),
-            "League": i["sport_id"],
+            "League": i["sport_id"].replace("COMBOS", ""),
         }
 
     match_ids = {}
@@ -750,7 +750,21 @@ def get_ud():
         match_ids[i["id"]] = {
             "Home": team_ids[i["home_team_id"]],
             "Away": team_ids[i["away_team_id"]],
-            "League": i["sport_id"],
+            "League": i["sport_id"].replace("COMBOS", ""),
+            "Date": (
+                datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
+                - timedelta(hours=5)
+            ).strftime("%Y-%m-%d"),
+        }
+    for i in api["solo_games"]:
+        if not " vs " in i["title"] and not " @ " in i["title"]:
+            continue
+        if " vs " in i["title"]:
+            i["title"] = " @ ".join(i["title"].split(" vs ")[::-1])
+        match_ids[i["id"]] = {
+            "Home": i["title"].split(" @ ")[1],
+            "Away": i["title"].split(" @ ")[0],
+            "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
                 datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
                 - timedelta(hours=5)
@@ -786,7 +800,7 @@ def get_ud():
         market = o["over_under"]["appearance_stat"]["display_stat"]
         n = {
             "Player": remove_accents(player["Name"]),
-            "League": player["League"].replace("COMBOS", ""),
+            "League": player["League"],
             "Team": player["Team"],
             "Date": game["Date"],
             "Market": market,
