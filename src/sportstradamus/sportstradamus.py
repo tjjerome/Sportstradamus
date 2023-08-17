@@ -344,6 +344,20 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                         v.append(offer["EV"])
                     else:
                         players = o["Player"].split(" + ")
+                        for i, player in enumerate(players):
+                            if len(player.split(" ")[0].replace(".", "")) == 1:
+                                if league == "NFL":
+                                    nameStr = 'player display name'
+                                elif league == "NBA":
+                                    nameStr = 'PLAYER_NAME'
+                                else:
+                                    nameStr = "playerName"
+                                name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
+                                    " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
+                                if name_df.empty:
+                                    continue
+                                else:
+                                    players[i] = name_df.iloc[0, 2]
                         ev1 = dataset.get(players[0], {players[0]: None}).get(
                             codex.get(o["Market"], o["Market"])
                         )
