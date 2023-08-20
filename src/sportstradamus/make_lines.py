@@ -33,7 +33,7 @@ markets = [
 ]
 for market in tqdm(markets, unit="markets", position=1):
 
-    for game in tqdm(MLB.gamelog, desc=market, unit='game'):
+    for i, game in tqdm(MLB.gamelog.iterrows(), desc=market, unit='game', total=len(MLB.gamelog)):
         if (
             any([string in market for string in ["pitch", "allowed"]])
             and not game["starting pitcher"]

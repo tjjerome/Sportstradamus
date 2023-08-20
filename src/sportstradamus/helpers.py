@@ -212,7 +212,7 @@ class Archive:
         write(): Write the archive data to a file.
     """
 
-    def __init__(self, full=False):
+    def __init__(self, league="None"):
         """
         Initialize the Archive class.
 
@@ -220,11 +220,12 @@ class Archive:
         """
         self.archive = {}
         filepath = pkg_resources.files(data) / "archive.dat"
-        if full:
-            filepath = pkg_resources.files(data) / "archive_full.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
+
+        if league != "None":
+            self.merge(pkg_resources.files(data) / f"archive_{league}.dat")
 
     def __getitem__(self, item):
         """
@@ -291,15 +292,30 @@ class Archive:
         Returns:
             None
         """
-        filepath = pkg_resources.files(data) / "archive_full.dat"
-        full_archive = {}
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                full_archive = pickle.load(infile)
+        leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
+        for league in leagues:
 
-        with open(filepath, "wb") as outfile:
-            pickle.dump(merge_dict(full_archive, self.archive),
-                        outfile, protocol=-1)
+            filepath = pkg_resources.files(data) / f"archive_{league}.dat"
+            full_archive = {}
+            # if os.path.isfile(filepath):
+            #     with open(filepath, "rb") as infile:
+            #         full_archive = pickle.load(infile)
+
+            with open(filepath, "wb") as outfile:
+                if league == "MISC":
+                    misc_leagues = list(self.archive.keys())
+                    for l in leagues:
+                        if l in misc_leagues:
+                            misc_leagues.remove(l)
+                    for l in misc_leagues:
+                        full_archive = merge_dict(
+                            full_archive, {l: self.archive[l]})
+
+                    pickle.dump(full_archive,
+                                outfile, protocol=-1)
+                else:
+                    pickle.dump(merge_dict(full_archive, {league: self.archive[league]}),
+                                outfile, protocol=-1)
 
         filepath = pkg_resources.files(data) / "archive.dat"
         self.clip()
