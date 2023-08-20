@@ -2034,6 +2034,9 @@ class StatsNFL(Stats):
                 pd.to_datetime(self.gamelog["gameday"]) < date)]
             position2 = self.players.get(players[1], "")
 
+            if position1 == '' or position2 == '':
+                return 0
+
             headtohead2 = player2_games.loc[player2_games["opponent"]
                                             == opponents[1]]
 
@@ -2081,6 +2084,9 @@ class StatsNFL(Stats):
             player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
                 pd.to_datetime(self.gamelog["gameday"]) < date)]
             position = self.players.get(player, "")
+
+            if position == '':
+                return 0
 
             headtohead = player_games.loc[player_games["opponent"] == opponent]
 
