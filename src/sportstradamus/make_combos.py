@@ -16,8 +16,8 @@ archive = Archive(True)
 df = pd.DataFrame(MLB.gamelog)
 
 markets = [
+    "pitcher fantasy score",
     "pitcher fantasy points underdog",
-    "pitcher fantasy score"
     # "passing tds",
     # "passing yards",
     # "completions",
@@ -43,7 +43,7 @@ for market in tqdm(markets, unit="markets", position=1):
 
     for gameId in tqdm(games, desc=market, unit="games", position=2):
         sub_df = df.loc[df["gameId"] == gameId]
-        gameDate = sub_df.iloc[0]["gameId"][:10]
+        gameDate = sub_df.iloc[0]["gameId"][:10].replace("/", "-")
         if not archive["MLB"][market].get(gameDate):
             continue
 

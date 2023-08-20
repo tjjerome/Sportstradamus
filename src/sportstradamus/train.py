@@ -30,15 +30,15 @@ def meditate(force, league):
     mlb = StatsMLB()
     mlb.load()
     mlb.update()
-    nba = StatsNBA()
-    nba.load()
-    nba.update()
-    nhl = StatsNHL()
-    nhl.load()
-    nhl.update()
-    nfl = StatsNFL()
-    nfl.load()
-    nfl.update()
+    # nba = StatsNBA()
+    # nba.load()
+    # nba.update()
+    # nhl = StatsNHL()
+    # nhl.load()
+    # nhl.update()
+    # nfl = StatsNFL()
+    # nfl.load()
+    # nfl.update()
 
     all_markets = {
         "MLB": [
@@ -64,7 +64,7 @@ def meditate(force, league):
             "rbi",
             "walks allowed",
             "batter strikeouts",
-            # "singles",
+            "singles",
         ],
         "NFL": [
             "passing yards",
@@ -150,21 +150,19 @@ def meditate(force, league):
 
             print(f"Training {league} - {market}")
             filename = "_".join([league, market]).replace(" ", "-")
-            filepathX = pkg_resources.files(data) / (filename + "_X.csv")
-            filepathy = pkg_resources.files(data) / (filename + "_y.csv")
-            if os.path.isfile(filepathX):
-                X = pd.read_csv(filepathX, index_col=0)
-                y = pd.read_csv(filepathy, index_col=0)
-                X.replace([np.inf, -np.inf], 0, inplace=True)
-                X.to_csv(filepathX)
+            filepath = pkg_resources.files(data) / (filename + ".csv")
+            if os.path.isfile(filepath):
+                M = pd.read_csv(filepath, index_col=0)
             else:
-                X, y = stat_data.get_training_matrix(market)
-                X.replace([np.inf, -np.inf], 0, inplace=True)
-                X.to_csv(filepathX)
-                y.to_csv(filepathy)
+                M = stat_data.get_training_matrix(market)
+                M.replace([np.inf, -np.inf], 0, inplace=True)
+                M.to_csv(filepath)
 
-            if X.empty:
+            if M.empty:
                 continue
+
+            y = M[['Result']]
+            X = M.drop(columns=['Result'])
 
             y.loc[y['Result'] > 0] = int(1)
             y.loc[y['Result'] <= 0] = int(0)
