@@ -297,9 +297,9 @@ class Archive:
 
             filepath = pkg_resources.files(data) / f"archive_{league}.dat"
             full_archive = {}
-            # if os.path.isfile(filepath):
-            #     with open(filepath, "rb") as infile:
-            #         full_archive = pickle.load(infile)
+            if os.path.isfile(filepath):
+                with open(filepath, "rb") as infile:
+                    full_archive = pickle.load(infile)
 
             with open(filepath, "wb") as outfile:
                 if league == "MISC":
