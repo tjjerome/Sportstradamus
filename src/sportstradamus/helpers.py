@@ -394,32 +394,5 @@ mlb_pitchers["ANA"] = mlb_pitchers.get("LAA", "")
 mlb_pitchers["ARI"] = mlb_pitchers.get("AZ", "")
 mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
 
-urls = ["http://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
-        "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams",
-        "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/teams",
-        "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams",
-        ]
-
-abbreviations = {}
-for url in urls:
-    res = requests.get(url)
-    try:
-        res = res.json()
-    except:
-        continue
-    if 'sports' in res:
-        res = res["sports"][0]["leagues"][0]
-        league = res["abbreviation"]
-        if league not in abbreviations:
-            abbreviations[league] = {}
-        for team in res["teams"]:
-            name = remove_accents(team["team"]["displayName"])
-            if name == "Los Angeles Clippers":
-                abbr = "LAC"
-            elif name == "St Louis Blues":
-                abbr = "STL"
-            elif name == "Washington Football Team":
-                abbr = "WSH"
-            else:
-                abbr = team["team"]["abbreviation"]
-            abbreviations[league][name] = abbr
+with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
+    abbreviations = json.load(infile)
