@@ -30,15 +30,15 @@ def meditate(force, league):
     mlb = StatsMLB()
     mlb.load()
     mlb.update()
-    # nba = StatsNBA()
-    # nba.load()
-    # nba.update()
-    # nhl = StatsNHL()
-    # nhl.load()
-    # nhl.update()
-    # nfl = StatsNFL()
-    # nfl.load()
-    # nfl.update()
+    nba = StatsNBA()
+    nba.load()
+    nba.update()
+    nhl = StatsNHL()
+    nhl.load()
+    nhl.update()
+    nfl = StatsNFL()
+    nfl.load()
+    nfl.update()
 
     all_markets = {
         "MLB": [
@@ -53,8 +53,6 @@ def meditate(force, league):
             "pitcher fantasy score",
             "hitter fantasy points underdog",
             "pitcher fantasy points underdog",
-            "hitter fantasy points parlay",
-            "pitcher fantasy points parlay",
             "hits+runs+rbi",
             "total bases",
             "walks",
@@ -64,6 +62,8 @@ def meditate(force, league):
             "rbi",
             "walks allowed",
             "batter strikeouts",
+            "hitter fantasy points parlay",
+            "pitcher fantasy points parlay",
             "singles",
         ],
         "NFL": [
@@ -155,7 +155,6 @@ def meditate(force, league):
                 M = pd.read_csv(filepath, index_col=0)
             else:
                 M = stat_data.get_training_matrix(market)
-                M.replace([np.inf, -np.inf], 0, inplace=True)
                 M.to_csv(filepath)
 
             if M.empty:
@@ -164,8 +163,7 @@ def meditate(force, league):
             y = M[['Result']]
             X = M.drop(columns=['Result'])
 
-            y.loc[y['Result'] > 0] = int(1)
-            y.loc[y['Result'] <= 0] = int(0)
+            y = y.clip(0, 1).astype(int)
 
             X_train, X_test, y_train, Y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=(X['Combo'] + 2*X['Rival']).to_numpy()
@@ -179,6 +177,16 @@ def meditate(force, league):
 
             y_train = np.ravel(y_train.to_numpy())
 
+            categories = ["Home", "Combo", "Rival", "Position"]
+            if "Position" not in X.columns:
+                categories.remove("Position")
+            for c in categories:
+                X[c] = X[c].astype('category')
+                X_train[c] = X_train[c].astype('category')
+                X_test[c] = X_test[c].astype('category')
+
+            categories = "name:"+",".join(categories)
+
             opt_params = optimize(X, y)
 
             params = {
@@ -190,7 +198,8 @@ def meditate(force, league):
                 "feature_fraction": 0.8276862446751593,
                 "bagging_fraction": 0.8821195174753188,
                 "bagging_freq": 1,
-                "is_unbalance": False
+                "is_unbalance": False,
+                "categorical_feature": categories,
             } | opt_params
 
             trees = LGBMClassifier(**params)
@@ -240,7 +249,6 @@ def meditate(force, league):
 
             filedict = {
                 "model": model,
-                "edges": [np.floor(i * 2) / 2 for i in stat_data.edges][:-1],
                 "stats": {
                     "Accuracy": (acc[0], acc[1], acc[2]),
                     "Null Points": (null[0], null[1], null[2]),
@@ -286,6 +294,9 @@ def report():
 def optimize(X, y):
 
     def objective(trial, X, y):
+        categories = "name:Home,Combo,Rival,Position"
+        if "Position" not in X.columns:
+            categories = categories.replace(",Position", "")
         # Define hyperparameters
         params = {
             "objective": "binary",
@@ -298,7 +309,8 @@ def optimize(X, y):
             "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
             "n_estimators": 9999999,
             "bagging_freq": 1,
-            "metric": "binary_logloss"
+            "metric": "binary_logloss",
+            "categorical_feature": categories
         }
 
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
