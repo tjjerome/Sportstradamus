@@ -28,11 +28,11 @@ def get_moneylines():
     url = f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}"
     res = scraper.get(url)
 
-    # Filter sports to NBA, MLB, and NHL
+    # Filter sports
     sports = [
         (s["key"], s["title"])
         for s in res
-        if s["title"] in ["NBA", "MLB", "NHL"] and s["active"]
+        if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
     ]
 
     # Retrieve odds data for each sport
