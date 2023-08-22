@@ -1,5 +1,5 @@
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL
+from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL
 from sportstradamus.books import (
     get_caesars,
     get_fd,
@@ -138,8 +138,11 @@ def main(progress):
     nhl = StatsNHL()
     nhl.load()
     nhl.update()
+    nfl = StatsNFL()
+    nfl.load()
+    nfl.update()
 
-    stats = {"NBA": nba, "MLB": mlb, "NHL": nhl}
+    stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
 
     untapped_markets = []
 
