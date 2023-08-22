@@ -1524,11 +1524,19 @@ class StatsMLB(Stats):
                     order = self.upcoming_games[teams[i]]['Batting Order']
                     if player in order:
                         position = np.min([order.index(player), position])
-                    elif len(player_games) > 0:
-                        position = int(
-                            player_games['battingOrder'].iloc[-10:].median())
                     else:
-                        position = 0
+                        games = []
+                        if len(players) > 1:
+                            games.append(player1_games)
+                            games.append(player2_games)
+                        else:
+                            games.append(player_games)
+
+                        if len(games[i]) > 0:
+                            position = int(
+                                games[i]['battingOrder'].iloc[-10:].median())
+                        else:
+                            position = 0
 
             data = data | {"Position": position}
 
@@ -1907,7 +1915,7 @@ class StatsNFL(Stats):
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
         gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameday"]) < date) &
-                                   (pd.to_datetime(self.gamelog["gameday"]) > date - timedelta(days=730))]
+                                   (pd.to_datetime(self.gamelog["gameday"]) > date - timedelta(days=260))]
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -2011,6 +2019,8 @@ class StatsNFL(Stats):
         Returns:
             pandas.DataFrame: The generated DataFrame with the summary of stats.
         """
+        if self.defenseProfile.empty:
+            return 0
         if isinstance(date, datetime):
             date = date.strftime("%Y-%m-%d")
 
