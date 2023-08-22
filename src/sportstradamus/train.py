@@ -41,6 +41,25 @@ def meditate(force, league):
     nfl.update()
 
     all_markets = {
+        "NFL": [
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "fantasy points parlayplay",
+            "passing tds",
+            "rushing tds",
+            "receiving tds",
+            "tds",
+            "completions",
+            "carries",
+            "receptions",
+            "interceptions",
+            "attempts",
+            "targets",
+        ],
         "MLB": [
             "pitcher strikeouts",
             "pitching outs",
@@ -65,25 +84,6 @@ def meditate(force, league):
             "hitter fantasy points parlay",
             "pitcher fantasy points parlay",
             "singles",
-        ],
-        "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
-            "yards",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "fantasy points parlayplay",
-            "passing tds",
-            "rushing tds",
-            "receiving tds",
-            "tds",
-            "completions",
-            "carries",
-            "receptions",
-            "interceptions",
-            "attempts",
-            "targets",
         ],
         # "NBA": [
         #     "PTS",
@@ -172,10 +172,10 @@ def meditate(force, league):
             if len(X_train) < 800:
                 continue
 
-            if y_train.value_counts(normalize=True).min() < 0.44:
+            try:
                 X_train, y_train = ADASYN().fit_resample(X_train, y_train)
-
-            y_train = np.ravel(y_train.to_numpy())
+            except ValueError:
+                pass
 
             categories = ["Home", "Combo", "Rival", "Position"]
             if "Position" not in X.columns:
@@ -187,7 +187,9 @@ def meditate(force, league):
 
             categories = "name:"+",".join(categories)
 
-            opt_params = optimize(X, y)
+            opt_params = optimize(X_train, y_train)
+
+            y_train = np.ravel(y_train.to_numpy())
 
             params = {
                 "boosting_type": "gbdt",
