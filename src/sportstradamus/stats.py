@@ -1382,6 +1382,8 @@ class StatsMLB(Stats):
 
             moneyline /= len(teams)
             total /= len(teams)
+            if len(teams) == 1:
+                teams = teams * 2
         except:
             return 0
 
@@ -1533,8 +1535,8 @@ class StatsMLB(Stats):
                             games.append(player_games)
 
                         if len(games[i]) > 0:
-                            position = int(
-                                games[i]['battingOrder'].iloc[-10:].median())
+                            position = np.min([int(
+                                games[i]['battingOrder'].iloc[-10:].median()), position])
                         else:
                             position = 0
 
