@@ -87,7 +87,13 @@
             "Goals": "goals",
             "Goalie Saves": "saves",
             "SOG + BS": "sogBS",
-            "Hits": "hits"
+            "Hits": "hits",
+            "Pass Yards": "passing yards",
+            "Rush Yards": "rushing yards",
+            "Receiving Yards": "receiving yards",
+            "Pass TDs": "passing tds",
+            "Rec TDs": "receiving tds",
+            "Rush TDs": "rushing tds"
         }
     },
     "Underdog": {
@@ -153,7 +159,16 @@
             "Goals Against": "goalsAgainst",
             "Goals": "goals",
             "Shots": "shots",
-            "Saves": "saves"
+            "Saves": "saves",
+            "Passing Yards": "passing yards",
+            "Receiving Yards": "receiving yards",
+            "Rushing Yards": "rushing yards",
+            "Rushing + Receiving Yards": "yards",
+            "Fantasy Points": "fantasy points underdog",
+            "Passing TDs": "passing tds",
+            "Receiving TDs": "receiving tds",
+            "Rushing TDs": "rushing tds",
+            "Rushing + Receiving TDs": "tds"
         }
     },
     "Thrive": {
@@ -232,9 +247,9 @@
             "RUNs": "runs",
             "SAVs": "saves",
             "STLS": "STL",
-            "Pass YDS": "passing-yards",
-            "Rec YDS": "receiving-yards",
-            "Rush YDS": "rushing-yards",
+            "Pass YDS": "passing yards",
+            "Rec YDS": "receiving yards",
+            "Rush YDS": "rushing yards",
             "Rush YDS + Rec YDS": "yards"
         }
     },
@@ -303,7 +318,10 @@
             "Pitcher Fantasy Points": "pitcher fantasy points parlay",
             "Hitter Fantasy Points": "hitter fantasy points parlay",
             "Earned Runs": "runs allowed",
-            "Turnovers": "TOV"
+            "Turnovers": "TOV",
+            "Passing Yards": "passing yards",
+            "Rushing Yards": "rushing yards",
+            "Receiving Yards": "receiving yards"
         }
     }
 }
