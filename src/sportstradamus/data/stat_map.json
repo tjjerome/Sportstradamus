@@ -93,7 +93,8 @@
             "Receiving Yards": "receiving yards",
             "Pass TDs": "passing tds",
             "Rec TDs": "receiving tds",
-            "Rush TDs": "rushing tds"
+            "Rush TDs": "rushing tds",
+            "Fantasy Points": "fantasy points prizepicks"
         }
     },
     "Underdog": {
@@ -321,7 +322,8 @@
             "Turnovers": "TOV",
             "Passing Yards": "passing yards",
             "Rushing Yards": "rushing yards",
-            "Receiving Yards": "receiving yards"
+            "Receiving Yards": "receiving yards",
+            "Fantasy Points": "fantasy points parlay"
         }
     }
 }
