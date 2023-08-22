@@ -1827,6 +1827,8 @@ class StatsNFL(Stats):
 
         self.gamelog.loc[self.gamelog['recent team']
                          == 'LA', 'recent team'] = "LAR"
+        self.gamelog.loc[self.gamelog['opponent']
+                         == 'LA', 'opponent'] = "LAR"
         self.gamelog = self.gamelog.sort_values('gameday')
 
         self.players = nfl.import_ids()
@@ -1909,7 +1911,7 @@ class StatsNFL(Stats):
 
         playerGroups = gamelog.\
             groupby('player display name').\
-            filter(lambda x: len(x[x[market] != 0]) > 1).\
+            filter(lambda x: len(x[x[market] > 0]) > 2).\
             groupby('player display name')
 
         defenseGroups = gamelog.groupby('opponent')
