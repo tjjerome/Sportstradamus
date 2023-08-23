@@ -1300,6 +1300,9 @@ class StatsMLB(Stats):
         player = offer["Player"]
         team = offer["Team"]
         market = offer["Market"].replace("H2H ", "")
+        if self.defenseProfile.empty:
+            logger.exception(f"{market} not profiled")
+            return 0
         line = offer["Line"]
         opponent = offer["Opponent"]
         home = offer.get("Home")
@@ -1385,6 +1388,7 @@ class StatsMLB(Stats):
             if len(teams) == 1:
                 teams = teams * 2
         except:
+            logger.exception(f"{player}, {market}")
             return 0
 
         if np.isnan(moneyline):
@@ -2027,8 +2031,6 @@ class StatsNFL(Stats):
         Returns:
             pandas.DataFrame: The generated DataFrame with the summary of stats.
         """
-        if self.defenseProfile.empty:
-            return 0
         if isinstance(date, datetime):
             date = date.strftime("%Y-%m-%d")
 
@@ -2037,6 +2039,9 @@ class StatsNFL(Stats):
         market = offer["Market"].replace("H2H ", "")
         line = offer["Line"]
         opponent = offer["Opponent"]
+        if self.defenseProfile.empty:
+            logger.exception(f"{market} not profiled")
+            return 0
         home = offer.get("Home")
         if home is None:
             home = 0
@@ -2069,6 +2074,7 @@ class StatsNFL(Stats):
             total /= len(teams)
 
         except:
+            logger.exception(f"{player}, {market}")
             return 0
 
         if np.isnan(moneyline):
