@@ -1945,12 +1945,18 @@ class StatsNFL(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[~x['home'].astype(bool), market].mean()/x[market].mean())-1
 
-        for position in ['QB', 'WR', 'RB', 'TE']:
+        positions = ['QB', 'WR', 'RB', 'TE']
+        if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]):
+            positions = ['QB']
+        for position in positions:
             positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
                 'opponent')
             leagueavg = positionGroups[market].mean().mean()
-            self.defenseProfile[position] = positionGroups[market].mean().div(
-                leagueavg) - 1
+            if leagueavg == 0:
+                self.defenseProfile[position] = 0
+            else:
+                self.defenseProfile[position] = positionGroups[market].mean().div(
+                    leagueavg) - 1
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
