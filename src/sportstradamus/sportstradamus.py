@@ -31,7 +31,8 @@ import importlib.resources as pkg_resources
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-def main(progress):
+@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+def main(progress, books):
     global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
@@ -69,55 +70,57 @@ def main(progress):
     Start gathering sportsbook data
     """
     dk_data = {}
-    logger.info("Getting DraftKings MLB lines")
-    dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
-    # logger.info("Getting DraftKings NBA lines")
-    # dk_data.update(
-    #    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
-    # logger.info("Getting DraftKings NHL lines")
-    # dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
-    # dk_data.update(get_dk(92893, [488, 633])) # Tennis
-    # dk_data.update(get_dk(91581, [488, 633])) # Tennis
-    logger.info(str(len(dk_data)) + " offers found")
-
     fd_data = {}
-    logger.info("Getting FanDuel MLB lines")
-    fd_data.update(get_fd("mlb", ["batter-props", "pitcher-props", "innings"]))
-    # logger.info("Getting FanDuel NBA lines")
-    # fd_data.update(get_fd('nba', ['player-points', 'player-rebounds',
-    #                              'player-assists', 'player-threes', 'player-combos', 'player-defense']))
-    # logger.info("Getting FanDuel NHL lines")
-    # fd_data.update(
-    #    get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
-    logger.info(str(len(fd_data)) + " offers found")
-
     pin_data = {}
-    logger.info("Getting Pinnacle MLB lines")
-    pin_data.update(get_pinnacle(246))  # MLB
-    # logger.info("Getting Pinnacle NBA lines")
-    # pin_data.update(get_pinnacle(487))  # NBA
-    # logger.info("Getting Pinnacle NHL lines")
-    # pin_data.update(get_pinnacle(1456))  # NHL
-    logger.info(str(len(pin_data)) + " offers found")
-
     csb_data = {}
-    logger.info("Getting Caesars MLB Lines")
-    sport = "baseball"
-    league = "04f90892-3afa-4e84-acce-5b89f151063d"
-    csb_data.update(get_caesars(sport, league))
-    # logger.info("Getting Caesars NBA Lines")
-    # sport = "basketball"
-    # league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
-    # csb_data.update(get_caesars(sport, league))
-    # logger.info("Getting Caesars NHL Lines")
-    # sport = "icehockey"
-    # league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
-    # csb_data.update(get_caesars(sport, league))
-    # logger.info("Getting Caesars NFL Lines")
-    # sport = "americanfootball"
-    # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-    # csb_data.update(get_caesars(sport, league))
-    logger.info(str(len(csb_data)) + " offers found")
+    if books:
+        logger.info("Getting DraftKings MLB lines")
+        dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
+        # logger.info("Getting DraftKings NBA lines")
+        # dk_data.update(
+        #    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
+        # logger.info("Getting DraftKings NHL lines")
+        # dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
+        # dk_data.update(get_dk(92893, [488, 633])) # Tennis
+        # dk_data.update(get_dk(91581, [488, 633])) # Tennis
+        logger.info(str(len(dk_data)) + " offers found")
+
+        logger.info("Getting FanDuel MLB lines")
+        fd_data.update(
+            get_fd("mlb", ["batter-props", "pitcher-props", "innings"]))
+        # logger.info("Getting FanDuel NBA lines")
+        # fd_data.update(get_fd('nba', ['player-points', 'player-rebounds',
+        #                              'player-assists', 'player-threes', 'player-combos', 'player-defense']))
+        # logger.info("Getting FanDuel NHL lines")
+        # fd_data.update(
+        #    get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
+        logger.info(str(len(fd_data)) + " offers found")
+
+        logger.info("Getting Pinnacle MLB lines")
+        pin_data.update(get_pinnacle(246))  # MLB
+        # logger.info("Getting Pinnacle NBA lines")
+        # pin_data.update(get_pinnacle(487))  # NBA
+        # logger.info("Getting Pinnacle NHL lines")
+        # pin_data.update(get_pinnacle(1456))  # NHL
+        logger.info(str(len(pin_data)) + " offers found")
+
+        logger.info("Getting Caesars MLB Lines")
+        sport = "baseball"
+        league = "04f90892-3afa-4e84-acce-5b89f151063d"
+        csb_data.update(get_caesars(sport, league))
+        # logger.info("Getting Caesars NBA Lines")
+        # sport = "basketball"
+        # league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+        # csb_data.update(get_caesars(sport, league))
+        # logger.info("Getting Caesars NHL Lines")
+        # sport = "icehockey"
+        # league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+        # csb_data.update(get_caesars(sport, league))
+        # logger.info("Getting Caesars NFL Lines")
+        # sport = "americanfootball"
+        # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+        # csb_data.update(get_caesars(sport, league))
+        logger.info(str(len(csb_data)) + " offers found")
 
     datasets = {
         "DraftKings": dk_data,
