@@ -1369,7 +1369,8 @@ class StatsMLB(Stats):
                     pitcher = self.pitchers[opponent]
 
             stats = (
-                archive["MLB"][market]
+                archive["MLB"]
+                .get(market, {})
                 .get(date, {})
                 .get(player, {})
                 .get(line, [0.5] * 4)
@@ -2057,7 +2058,8 @@ class StatsNFL(Stats):
 
         try:
             stats = (
-                archive["NFL"][market]
+                archive["NFL"]
+                .get(market, {})
                 .get(date, {})
                 .get(player, {})
                 .get(line, [0.5] * 4)
