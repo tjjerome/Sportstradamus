@@ -229,6 +229,7 @@ def process_offers(offer_dict, book, datasets, stats):
 
                     if len(matched_offers) == 0:
                         # No matched offers found for the market
+                        logger.info(f"{league}, {market} offers not matched")
                         untapped_markets.append(
                             {"Platform": book, "League": league, "Market": market}
                         )
@@ -319,6 +320,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
         pbar.update(len(offers))
+        logger.warning(f"{filename} missing")
         return []
 
     new_offers = []
@@ -330,6 +332,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     for o in tqdm(offers, leave=False, disable=not pbar):
         stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
         if type(stats) is int:
+            logger.warning(f"{o['Player']}, {market} stat error")
             pbar.update()
             continue
 
