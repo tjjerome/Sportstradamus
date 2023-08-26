@@ -1,8 +1,44 @@
+============================== MLB 1st inning hits allowed ==============================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.000000     0.000000        0.000000         0.000000  0.000000          0.000000
+Combo   0.737828     0.030266        0.453125         0.762551  0.541765          0.191877
+Rival   0.000000     0.000000        0.000000         0.000000  0.000000          0.000000
+
+============================== MLB 1st inning runs allowed ==============================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.000000     0.000000        0.000000         0.000000  0.000000          0.000000
+Combo   0.731057     0.025988        0.578125         0.742268  0.550611          0.201472
+Rival   0.000000     0.000000        0.000000         0.000000  0.000000          0.000000
+
+================================= MLB batter strikeouts =================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.846756     0.003565        0.361702         0.848970  0.503697          0.127908
+Combo   0.883069     0.003675        0.500000         0.885057  0.509579          0.101230
+Rival   0.676287     0.077230        0.668224         0.684836  0.676385          0.222987
+
+=================================== MLB hits+runs+rbi ===================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.743345     0.014356        0.490566         0.746755  0.508173          0.185588
+Combo   0.729396     0.047120        0.842105         0.716258  0.615988          0.187967
+Rival   0.638554     0.126316        0.662359         0.611418  0.636952          0.236705
+
+==================================== MLB hits allowed ===================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.764650     0.046417        0.770073         0.763844  0.641884          0.169504
+Combo   0.660508     0.037778        0.541667         0.667482  0.524258          0.234578
+Rival   0.588689     0.117914        0.555556         0.602941  0.567491          0.256778
+
 ======================================== MLB hits =======================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.804884     0.003043        0.285714         0.805810  0.500520          0.153355
-Combo   0.779874     0.008728        0.500000         0.781290  0.504101          0.162636
-Rival   0.545746     0.108727        0.498771         0.634259  0.560809          0.269320
+Normal  0.806919     0.003043        0.727273         0.807143  0.504762          0.155821
+Combo   0.788221     0.004988        0.800000         0.788071  0.521252          0.156464
+Rival   0.576981     0.089796        0.581907         0.569231  0.571975          0.275287
+
+============================ MLB hitter fantasy points parlay ===========================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.749293     0.048591        0.810345         0.741298  0.629228          0.182421
+Combo   0.716861     0.084466        0.733051         0.711457  0.673789          0.196218
+Rival   0.606891     0.140067        0.608899         0.604870  0.606886          0.246850
 
 =========================== MLB hitter fantasy points underdog ==========================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
@@ -15,6 +51,12 @@ Rival   0.618012     0.229665        0.610599         0.628151  0.616541        
 Normal  0.691408     0.057562        0.668860         0.693186  0.555199          0.209354
 Combo   0.696473     0.090113        0.757637         0.683506  0.633367          0.204231
 Rival   0.586164     0.167249        0.605634         0.575342  0.583149          0.244633
+
+=========================== MLB pitcher fantasy points parlay ===========================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.715244     0.209848        0.715164         0.715315  0.714517          0.209136
+Combo   0.582857     0.301397        0.614815         0.562791  0.584174          0.244011
+Rival   0.578035     0.305221        0.535088         0.599138  0.560031          0.246343
 
 ========================== MLB pitcher fantasy points underdog ==========================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
@@ -30,9 +72,45 @@ Rival   0.644951     0.189974        0.592308         0.683616  0.637175        
 
 ================================= MLB pitcher strikeouts ================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.687109     0.072009        0.621212         0.700150  0.597034          0.207947
-Combo   0.666667     0.134021        0.588235         0.693227  0.613118          0.221237
-Rival   0.643777     0.120755        0.515625         0.692308  0.589388          0.227273
+Normal  0.708908     0.073256        0.671875         0.715994  0.615490          0.199761
+Combo   0.689076     0.079897        0.655172         0.700000  0.638029          0.210507
+Rival   0.609244     0.098485        0.507692         0.647399  0.564421          0.240982
+
+=================================== MLB pitches thrown ==================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.908454     0.029465        0.903331         0.915385  0.905120          0.096225
+Combo   0.663212     0.138393        0.714286         0.567164  0.634908          0.221618
+Rival   0.606138     0.131111        0.510490         0.661290  0.582911          0.244849
+
+=================================== MLB pitching outs ===================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.838473     0.066697        0.809242         0.859049  0.833231          0.139747
+Combo   0.612987     0.144444        0.512821         0.656716  0.575051          0.234987
+Rival   0.575916     0.149220        0.450820         0.634615  0.538937          0.257577
+
+======================================== MLB rbi ========================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.897268     0.002453        0.692308         0.897998  0.511201          0.091260
+Combo   0.705298     0.041270        0.555556         0.728489  0.577155          0.207134
+Rival   0.809783     0.008086        0.807163         1.000000  0.533333          0.176000
+
+==================================== MLB runs allowed ===================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.694853     0.050611        0.529412         0.705882  0.532295          0.212449
+Combo   0.652174     0.061224        0.428571         0.670588  0.515600          0.233366
+Rival   0.561111     0.072165        0.500000         0.577465  0.526194          0.271702
+
+======================================== MLB runs =======================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.912017     0.000259        0.000000         0.912490  0.499716          0.079327
+Combo   0.832593     0.005891        0.625000         0.835082  0.519061          0.137144
+Rival   0.660532     0.035503        0.672872         0.619469  0.608712          0.245320
+
+==================================== MLB stolen bases ===================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.000000     0.000000             0.0          0.00000  0.000000          0.000000
+Combo   0.948905     0.001458             0.5          0.95022  0.513516          0.048904
+Rival   0.000000     0.000000             0.0          0.00000  0.000000          0.000000
 
 ==================================== MLB total bases ====================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
@@ -40,17 +118,65 @@ Normal  0.712682     0.015287        0.542373         0.715116  0.508713        
 Combo   0.599736     0.159822        0.700637         0.573333  0.590171          0.241993
 Rival   0.609062     0.117209        0.608247         0.611111  0.590064          0.244006
 
+=================================== MLB walks allowed ===================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.800674     0.017967        0.712500         0.804206  0.556557          0.152884
+Combo   0.796875     0.002227        1.000000         0.795964  0.510753          0.163692
+Rival   0.569767     0.072776        0.466019         0.614108  0.534745          0.277923
+
+======================================= MLB walks =======================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.000000     0.000000        0.000000         0.000000  0.000000          0.000000
+Combo   0.732836     0.023324        0.428571         0.746106  0.518124          0.202249
+Rival   0.000000     0.000000        0.000000         0.000000  0.000000          0.000000
+
+====================================== NFL attempts =====================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.722772     0.288732        0.761905         0.694915  0.721961          0.217960
+Combo   0.677419     0.340426        0.714286         0.647059  0.679167          0.232827
+Rival   0.647059     0.260870        0.727273         0.608696  0.647059          0.245293
+
+====================================== NFL carries ======================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.748945     0.065089        0.650602         0.769821  0.643561          0.182023
+Combo   0.708633     0.125786        0.628571         0.735577  0.649597          0.203220
+Rival   0.692308     0.109034        0.672131         0.707317  0.687179          0.212217
+
+==================================== NFL completions ====================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.789474     0.160221        0.765957         0.800000  0.757895          0.186243
+Combo   0.560976     0.180000        0.538462         0.571429  0.547847          0.246905
+Rival   0.547619     0.160000        0.600000         0.500000  0.550343          0.257724
+
+============================= NFL fantasy points parlayplay =============================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.760745     0.146177        0.774266         0.754460  0.736177          0.187882
+Combo   0.737354     0.178914        0.729064         0.742765  0.728408          0.201443
+Rival   0.597458     0.244800        0.596386         0.598039  0.588973          0.237866
+
 ============================= NFL fantasy points prizepicks =============================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
 Normal  0.737131     0.134721        0.697834         0.760214  0.720821          0.193611
 Combo   0.721805     0.156894        0.695652         0.741722  0.717087          0.201537
 Rival   0.615385     0.197785        0.597884         0.625786  0.605353          0.235549
 
+============================== NFL fantasy points underdog ==============================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.766972     0.145098        0.749296         0.775510  0.741058          0.186018
+Combo   0.718284     0.147854        0.720430         0.717143  0.701745          0.203349
+Rival   0.645098     0.189189        0.598086         0.677741  0.635698          0.228518
+
+==================================== NFL passing tds ====================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.777778     0.014599        0.375000         0.803150  0.530207          0.176048
+Combo   0.844444     0.021739        0.000000         0.863636  0.487179          0.138115
+Rival   0.600000     0.042553        0.444444         0.638889  0.528361          0.295192
+
 =================================== NFL passing yards ===================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.820809     0.130653        0.784091         0.858824  0.822665          0.166296
-Combo   0.707317     0.226415        0.736842         0.681818  0.708333          0.213741
-Rival   0.901961     0.037736        0.920000         0.000000  0.489362          0.092258
+Normal  0.759777     0.122549        0.772727         0.752212  0.747785          0.196198
+Combo   0.650000     0.245283        0.764706         0.565217  0.664962          0.234516
+Rival   0.552632     0.283019        0.576923         0.500000  0.533613          0.253088
 
 ================================== NFL receiving yards ==================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
@@ -58,11 +184,29 @@ Normal  0.780075     0.153540        0.762125         0.792393  0.772511        
 Combo   0.704380     0.167173        0.666667         0.736486  0.702391          0.213159
 Rival   0.651341     0.206687        0.645390         0.658333  0.650899          0.231060
 
+===================================== NFL receptions ====================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.740000     0.012230        0.590909         0.744838  0.526191          0.191950
+Combo   0.748784     0.028346        0.789474         0.746114  0.575655          0.181551
+Rival   0.619298     0.095238        0.559211         0.641148  0.580851          0.244257
+
 =================================== NFL rushing yards ===================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
 Normal  0.777778     0.074766        0.815000         0.758883  0.760832          0.175944
 Combo   0.749077     0.155763        0.753968         0.744828  0.748338          0.193395
 Rival   0.648352     0.149533        0.673267         0.633721  0.643345          0.219927
+
+====================================== NFL targets ======================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.745419     0.037655        0.666667         0.752846  0.581357          0.184389
+Combo   0.716578     0.074257        0.741573         0.711864  0.631333          0.201361
+Rival   0.567568     0.140962        0.542714         0.583072  0.559806          0.259036
+
+======================================== NFL tds ========================================
+        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
+Normal  0.941277     0.001699            0.00         0.942078  0.499548          0.054925
+Combo   0.931990     0.005013            0.00         0.931990  0.500000          0.063826
+Rival   0.766839     0.005155            0.76         0.833333  0.620550          0.206987
 
 ======================================= NFL yards =======================================
         Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss

@@ -11,7 +11,7 @@ from sklearn.metrics import (
     brier_score_loss,
     log_loss
 )
-from sklearn.preprocessing import MaxAbsScaler
+from sklearn.utils import shuffle
 from sklearn.calibration import CalibratedClassifierCV
 from imblearn.over_sampling import ADASYN
 from lightgbm import LGBMClassifier
@@ -50,8 +50,6 @@ def meditate(force, league):
             "fantasy points underdog",
             "fantasy points parlayplay",
             "passing tds",
-            "rushing tds",
-            "receiving tds",
             "tds",
             "completions",
             "carries",
@@ -171,6 +169,36 @@ def meditate(force, league):
 
             if len(X_train) < 800:
                 continue
+
+            # X_n = X_train.loc[(X_train["Combo"] == 0) &
+            #                   (X_train["Rival"] == 0)]
+            # y_n = y_train.loc[(X_train["Combo"] == 0) &
+            #                   (X_train["Rival"] == 0)]
+            # X_c = X_train.loc[(X_train["Combo"] == 1) &
+            #                   (X_train["Rival"] == 0)]
+            # y_c = y_train.loc[(X_train["Combo"] == 1) &
+            #                   (X_train["Rival"] == 0)]
+            # X_r = X_train.loc[(X_train["Combo"] == 0) &
+            #                   (X_train["Rival"] == 1)]
+            # y_r = y_train.loc[(X_train["Combo"] == 0) &
+            #                   (X_train["Rival"] == 1)]
+            # try:
+            #     X_n, y_n = ADASYN().fit_resample(X_n, y_n)
+            # except ValueError:
+            #     pass
+            # try:
+            #     X_c, y_c = ADASYN().fit_resample(X_c, y_c)
+            # except ValueError:
+            #     pass
+            # try:
+            #     X_r, y_r = ADASYN().fit_resample(X_r, y_r)
+            # except ValueError:
+            #     pass
+
+            # X_train = pd.concat([X_n, X_r, X_c])
+            # y_train = pd.concat([y_n, y_r, y_c])
+
+            # X_train, y_train = shuffle(X_train, y_train)
 
             try:
                 X_train, y_train = ADASYN().fit_resample(X_train, y_train)
