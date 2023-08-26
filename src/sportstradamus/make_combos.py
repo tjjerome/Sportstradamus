@@ -20,19 +20,12 @@ markets = [
     "rushing yards",
     "receiving yards",
     "yards",
-    "fantasy points prizepicks",
-    "fantasy points underdog",
-    "fantasy points parlayplay",
     "passing tds",
-    "rushing tds",
-    "receiving tds",
-    "tds",
     "completions",
     "carries",
     "receptions",
     "interceptions",
     "attempts",
-    "targets",
 ]
 for market in tqdm(markets, unit="markets", position=1):
 
@@ -87,7 +80,6 @@ for market in tqdm(markets, unit="markets", position=1):
                 over = poisson.sf(np.floor(line), EV[1] + EV[0])
                 if np.mod(line, 1) == 0:
                     over += poisson.pmf(line, EV[1] + EV[0]) / 2
-                over = 0.5
                 stats = [over] * 4
                 archive.archive["NFL"][market][gameDate][player] = {
                     line: stats}
@@ -102,7 +94,6 @@ for market in tqdm(markets, unit="markets", position=1):
                 over = skellam.sf(np.floor(line), EV[1], EV[0])
                 if np.mod(line, 1) == 0:
                     over += skellam.pmf(line, EV[1], EV[0]) / 2
-                over = 0.5
                 stats = [over] * 4
                 archive.archive["NFL"][market][gameDate][player] = {
                     line: stats}
