@@ -3,23 +3,20 @@ import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
     roc_auc_score,
-    brier_score_loss,
-    log_loss
+    brier_score_loss
 )
-from sklearn.utils import shuffle
-from sklearn.calibration import CalibratedClassifierCV
-from imblearn.over_sampling import ADASYN
-from lightgbm import LGBMClassifier
+from scipy.stats import norm
 import lightgbm as lgb
-import optuna
 import pandas as pd
 import click
 import os
+from lightgbmlss.model import LightGBMLSS
+from lightgbmlss.distributions.Gaussian import Gaussian
 
 
 @click.command()
@@ -158,54 +155,30 @@ def meditate(force, league):
             if M.empty:
                 continue
 
+            M = M.loc[(M['Combo'] == 0) & (M['Rival'] == 0)
+                      ].reset_index(drop=True)
+
             y = M[['Result']]
             X = M.drop(columns=['Result'])
 
-            y = y.clip(0, 1).astype(int)
+            columns = ['Avg5', 'Avg10', 'AvgH2H', 'Meeting 1', 'Meeting 2', 'Meeting 3', 'Meeting 4', 'Meeting 5',
+                       'Game 1', 'Game 2', 'Game 3', 'Game 4', 'Game 5', 'Game 6']
+            for column in columns:
+                X.loc[X[column] != 0, column] = X.loc[X[column]
+                                                      != 0, column] + X.loc[X[column] != 0, "Line"]
+            y['Result'] = y['Result'] + X['Line']
+            X.drop(columns=['Last5', 'Last10', 'H2H',
+                   'Combo', 'Rival'], inplace=True)
 
-            X_train, X_test, y_train, Y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=(X['Combo'] + 2*X['Rival']).to_numpy()
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
             )
 
+            y_train = np.ravel(y_train.to_numpy())
             if len(X_train) < 800:
                 continue
 
-            # X_n = X_train.loc[(X_train["Combo"] == 0) &
-            #                   (X_train["Rival"] == 0)]
-            # y_n = y_train.loc[(X_train["Combo"] == 0) &
-            #                   (X_train["Rival"] == 0)]
-            # X_c = X_train.loc[(X_train["Combo"] == 1) &
-            #                   (X_train["Rival"] == 0)]
-            # y_c = y_train.loc[(X_train["Combo"] == 1) &
-            #                   (X_train["Rival"] == 0)]
-            # X_r = X_train.loc[(X_train["Combo"] == 0) &
-            #                   (X_train["Rival"] == 1)]
-            # y_r = y_train.loc[(X_train["Combo"] == 0) &
-            #                   (X_train["Rival"] == 1)]
-            # try:
-            #     X_n, y_n = ADASYN().fit_resample(X_n, y_n)
-            # except ValueError:
-            #     pass
-            # try:
-            #     X_c, y_c = ADASYN().fit_resample(X_c, y_c)
-            # except ValueError:
-            #     pass
-            # try:
-            #     X_r, y_r = ADASYN().fit_resample(X_r, y_r)
-            # except ValueError:
-            #     pass
-
-            # X_train = pd.concat([X_n, X_r, X_c])
-            # y_train = pd.concat([y_n, y_r, y_c])
-
-            # X_train, y_train = shuffle(X_train, y_train)
-
-            try:
-                X_train, y_train = ADASYN().fit_resample(X_train, y_train)
-            except ValueError:
-                pass
-
-            categories = ["Home", "Combo", "Rival", "Position"]
+            categories = ["Home", "Position"]
             if "Position" not in X.columns:
                 categories.remove("Position")
             for c in categories:
@@ -215,77 +188,83 @@ def meditate(force, league):
 
             categories = "name:"+",".join(categories)
 
-            opt_params = optimize(X_train, y_train)
-
-            y_train = np.ravel(y_train.to_numpy())
+            dtrain = lgb.Dataset(X_train, label=y_train)
 
             params = {
-                "boosting_type": "gbdt",
-                "max_depth": 9,
-                "n_estimators": 500,
-                "num_leaves": 65,
-                "min_child_weight": 5.9665759403609915,
-                "feature_fraction": 0.8276862446751593,
-                "bagging_fraction": 0.8821195174753188,
-                "bagging_freq": 1,
-                "is_unbalance": False,
-                "categorical_feature": categories,
-            } | opt_params
+                "boosting_type": ["categorical", ["gbdt"]],
+                "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
+                "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
+                "min_child_weight": ["float", {"low": 1e-2, "high": len(X)*.8/1000, "log": True}],
+                "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                "bagging_freq": ["int", {"low": 1, "high": 1, "log": False}]
+            }
 
-            trees = LGBMClassifier(**params)
+            model = LightGBMLSS(
+                Gaussian(stabilization="None",
+                         response_fn="exp",
+                         loss_fn="nll"
+                         )
+            )
+            opt_param = model.hyper_opt(params,
+                                        dtrain,
+                                        num_boost_round=999,
+                                        nfold=5,
+                                        early_stopping_rounds=20,
+                                        max_minutes=20,
+                                        n_trials=500,
+                                        silence=True,
+                                        )
+            opt_params = opt_param.copy()
+            n_rounds = opt_params["opt_rounds"]
+            del opt_params["opt_rounds"]
 
-            trees.fit(X_train, y_train)
-            model = CalibratedClassifierCV(
-                trees, cv=5, n_jobs=-1, method="sigmoid")
-            model.fit(X_train, y_train)
+            model.train(opt_params,
+                        dtrain,
+                        num_boost_round=n_rounds
+                        )
 
             threshold = 0.545
-            acc = [0, 0, 0]
-            null = [0, 0, 0]
-            preco = [0, 0, 0]
-            precu = [0, 0, 0]
-            roc = [0, 0, 0]
-            bs = [0, 0, 0]
-            for i in range(0, 3):
-                if i == 0:
-                    mask = (X_test['Combo'] == 0) & (X_test['Rival'] == 0)
-                elif i == 1:
-                    mask = (X_test['Combo'] == 1) & (X_test['Rival'] == 0)
-                elif i == 2:
-                    mask = (X_test['Combo'] == 0) & (X_test['Rival'] == 1)
+            acc = 0
+            null = 0
+            preco = 0
+            precu = 0
+            roc = 0
+            bs = 0
 
-                if mask.sum() < 20:
-                    continue
+            prob_params = model.predict(X_test, pred_type="parameters")
+            y_proba = norm.cdf(
+                X_test["Line"], prob_params["loc"], prob_params["scale"])
+            y_proba = np.array([y_proba, 1-y_proba]).transpose()
+            y_test = (y_test["Result"] - X_test["Line"]).clip(0, 1).astype(int)
+            y_test = np.ravel(y_test.to_numpy())
+            y_pred = (y_proba > threshold).astype(int)
+            null = 1 - np.mean(np.sum(y_pred, axis=1))
+            if null > .98:
+                continue
+            preco = precision_score(
+                (y_test == 1).astype(int), y_pred[:, 1])
+            precu = precision_score(
+                (y_test == 0).astype(int), y_pred[:, 0])
+            y_pred = y_pred[:, 1]
+            acc = accuracy_score(
+                y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
+                    y_proba, axis=1) > threshold]
+            )
+            roc = roc_auc_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
+                y_proba, axis=1) > threshold], average="weighted")
 
-                y_proba = model.predict_proba(X_test.loc[mask])
-                y_test = np.ravel(Y_test.loc[mask].to_numpy())
-                y_pred = (y_proba > threshold).astype(int)
-                null[i] = 1 - np.mean(np.sum(y_pred, axis=1))
-                if null[i] > .98:
-                    continue
-                preco[i] = precision_score(
-                    (y_test == 1).astype(int), y_pred[:, 1])
-                precu[i] = precision_score(
-                    (y_test == 0).astype(int), y_pred[:, 0])
-                y_pred = y_pred[:, 1]
-                acc[i] = accuracy_score(
-                    y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
-                        y_proba, axis=1) > threshold]
-                )
-                roc[i] = roc_auc_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
-                    y_proba, axis=1) > threshold], average="weighted")
-
-                bs[i] = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
+            bs = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
 
             filedict = {
                 "model": model,
                 "stats": {
-                    "Accuracy": (acc[0], acc[1], acc[2]),
-                    "Null Points": (null[0], null[1], null[2]),
-                    "Precision_Over": (preco[0], preco[1], preco[2]),
-                    "Precision_Under": (precu[0], precu[1], precu[2]),
-                    "ROC_AUC": (roc[0], roc[1], roc[2]),
-                    "Brier Score Loss": (bs[0], bs[1], bs[2]),
+                    "Accuracy": acc,
+                    "Null Points": null,
+                    "Precision_Over": preco,
+                    "Precision_Under": precu,
+                    "ROC_AUC": roc,
+                    "Brier Score Loss": bs,
                 },
                 "params": params
             }
@@ -319,88 +298,6 @@ def report():
             f.write(pd.DataFrame(model['stats'], index=[
                     ['Normal', 'Combo', 'Rival']]).to_string())
             f.write("\n\n")
-
-
-def optimize(X, y):
-
-    def objective(trial, X, y):
-        categories = "name:Home,Combo,Rival,Position"
-        if "Position" not in X.columns:
-            categories = categories.replace(",Position", "")
-        # Define hyperparameters
-        params = {
-            "objective": "binary",
-            "verbosity": -1,
-            "boosting_type": "gbdt",
-            "max_depth": trial.suggest_int("max_depth", 2, 63),
-            "num_leaves": trial.suggest_int("num_leaves", 7, 4095),
-            "min_child_weight": trial.suggest_float("min_child_weight", 1e-2, len(X)*.8/1000, log=True),
-            "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
-            "bagging_fraction": trial.suggest_float("bagging_fraction", 0.4, 1.0),
-            "n_estimators": 9999999,
-            "bagging_freq": 1,
-            "metric": "binary_logloss",
-            "categorical_feature": categories
-        }
-
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        early_stopping = lgb.early_stopping(20)
-
-        cv_scores = np.empty(5)
-        for idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
-            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-            lgb_train = lgb.Dataset(X_train, label=y_train)
-            lgb_val = lgb.Dataset(X_val, label=y_val, reference=lgb_train)
-
-            # Train model
-            pruning_callback = optuna.integration.LightGBMPruningCallback(
-                trial, "binary_logloss")
-            # pruning_callback = optuna.pruners.PatientPruner(
-            #     pruning_callback, patience=3)
-            model = lgb.train(params, lgb_train, valid_sets=lgb_val,
-                              callbacks=[pruning_callback, early_stopping])
-
-            # Return metrics
-            y_pred = model.predict(X_val)
-            loss = log_loss(y_val, y_pred)
-            y_pred = np.rint(y_pred)
-            acc = roc_auc_score(y_val, y_pred)
-
-            cv_scores[idx] = loss
-
-        # Return accuracy on validation set
-        return np.mean(cv_scores)
-
-    study = optuna.create_study(direction="minimize")
-    study.optimize(lambda x: objective(x, X, y), n_trials=100)
-
-    params = {
-        "objective": "binary",
-        "verbosity": -1,
-        "boosting_type": "gbdt",
-        "n_estimators": 9999999,
-        "bagging_freq": 1,
-        "metric": "binary_logloss"
-    } | study.best_params
-
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    early_stopping = lgb.early_stopping(20)
-
-    n_estimators = np.empty(5)
-    for idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-        lgb_train = lgb.Dataset(X_train, label=y_train)
-        lgb_val = lgb.Dataset(X_val, label=y_val, reference=lgb_train)
-
-        # Train model
-        model = lgb.train(params, lgb_train, valid_sets=lgb_val,
-                          callbacks=[early_stopping])
-
-        n_estimators[idx] = model.num_trees()
-
-    return params | {"n_estimators": int(np.rint(np.mean(n_estimators)))}
 
 
 if __name__ == "__main__":
