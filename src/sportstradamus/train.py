@@ -13,8 +13,7 @@ from sklearn.metrics import (
 from scipy.stats import (
     norm,
     poisson,
-    gamma,
-    lognorm
+    gamma
 )
 import lightgbm as lgb
 import pandas as pd
@@ -24,7 +23,7 @@ from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions import (
     Gaussian,
     Poisson,
-    LogNormal,
+    Gamma,
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 
@@ -43,12 +42,9 @@ def meditate(force, stats, league):
     }
 
     distributions = {
-        "Gaussian": {"model": Gaussian.Gaussian(**dist_params),
-                     "eval": norm},
-        "Poisson": {"model": Poisson.Poisson(**dist_params),
-                    "eval": poisson},
-        "LogNormal": {"model": LogNormal.LogNormal(**dist_params),
-                      "eval": lognorm},
+        "Gaussian": Gaussian.Gaussian(**dist_params),
+        "Poisson": Poisson.Poisson(**dist_params),
+        "Gamma": Gamma.Gamma(**dist_params)
     }
 
     mlb = StatsMLB()
@@ -216,10 +212,12 @@ def meditate(force, stats, league):
                 dtrain = lgb.Dataset(X_train, label=y_train)
 
                 lgblss_dist_class = DistributionClass()
-                candidate_distributions = [Gaussian, LogNormal, Poisson]
+                candidate_distributions = [Gaussian, Gamma, Poisson]
 
                 dist = lgblss_dist_class.dist_select(
-                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100).iloc[0, 1]
+                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100)
+
+                dist = dist.iloc[0, 1]
 
                 params = {
                     "boosting_type": ["categorical", ["gbdt"]],
@@ -231,13 +229,13 @@ def meditate(force, stats, league):
                     "bagging_freq": ["int", {"low": 1, "high": 1, "log": False}]
                 }
 
-                model = LightGBMLSS(distributions[dist]["model"])
+                model = LightGBMLSS(distributions[dist])
                 opt_param = model.hyper_opt(params,
                                             dtrain,
                                             num_boost_round=999,
                                             nfold=5,
                                             early_stopping_rounds=20,
-                                            max_minutes=30,
+                                            max_minutes=1,
                                             n_trials=500,
                                             silence=True,
                                             )
@@ -259,16 +257,21 @@ def meditate(force, stats, league):
             r2 = 0
 
             prob_params = model.predict(X_test, pred_type="parameters")
-            statmodel = distributions[dist]["eval"]
             if dist == "Poisson":
-                under = statmodel.cdf(
+                under = poisson.cdf(
                     X_test["Line"].replace(0, 0.5), prob_params["rate"])
-                push = statmodel.pmf(
+                push = poisson.pmf(
                     X_test["Line"].replace(0, 0.5), prob_params["rate"])
                 y_proba = under - push/2
-            else:
-                y_proba = statmodel.cdf(
+                ev = prob_params["rate"]
+            elif dist == "Gaussian":
+                y_proba = norm.cdf(
                     X_test["Line"].replace(0, 0.5), prob_params["loc"], prob_params["scale"])
+                ev = prob_params["loc"]
+            elif dist == "Gamma":
+                y_proba = gamma.cdf(
+                    X_test["Line"].replace(0, 0.5), prob_params["concentration"], scale=1/prob_params["rate"])
+                ev = prob_params["concentration"]/prob_params["rate"]
 
             y_proba = np.array([y_proba, 1-y_proba]).transpose()
             y_class = (y_test["Result"] >
@@ -290,7 +293,7 @@ def meditate(force, stats, league):
 
             bs = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
 
-            r2 = r2_score(y_test, prob_params["loc"])
+            r2 = r2_score(y_test, ev)
 
             filedict = {
                 "model": model,
@@ -310,9 +313,12 @@ def meditate(force, stats, league):
             X_test.reset_index(inplace=True, drop=True)
             if dist == "Poisson":
                 X_test['EV'] = prob_params['rate']
-            else:
+            elif dist == "Gaussian":
                 X_test['EV'] = prob_params['loc']
                 X_test['STD'] = prob_params['scale']
+            elif dist == "Gamma":
+                X_test['alpha'] = prob_params['concentration']
+                X_test['beta'] = prob_params['rate']
 
             filename = "_".join(["test", league, market]
                                 ).replace(" ", "-") + ".csv"

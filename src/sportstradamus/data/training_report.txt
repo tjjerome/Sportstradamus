@@ -1,5 +1,30 @@
-=============================== NFL passing yards ================================
-Distribution Model: Gaussian
+========================== NFL fantasy points prizepicks ==========================
+ Distribution Model: LogNormal
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.636242     0.004011        0.956403         0.531612          0.265191 -1.011004
+
+=========================== NFL fantasy points underdog ===========================
+ Distribution Model: LogNormal
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.640108     0.006707        0.924569         0.510324          0.264605 -0.846301
+
+================================ NFL passing yards ================================
+ Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.678571      0.23913        0.703704         0.662791          0.219644   0.11182
+
+=============================== NFL receiving yards ===============================
+ Distribution Model: LogNormal
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.529253          0.0             1.0         0.452929          0.326412 -1.178253
+
+================================ NFL rushing yards ================================
+ Distribution Model: LogNormal
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.589837     0.001812        0.981132         0.496629          0.286991 -0.927741
+
+==================================== NFL yards ====================================
+ Distribution Model: LogNormal
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.566011          0.0        0.995305         0.490504          0.311662 -1.154444
 
