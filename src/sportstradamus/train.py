@@ -12,8 +12,7 @@ from sklearn.metrics import (
 )
 from scipy.stats import (
     norm,
-    poisson,
-    gamma
+    poisson
 )
 import lightgbm as lgb
 import pandas as pd
@@ -22,8 +21,7 @@ import os
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions import (
     Gaussian,
-    Poisson,
-    Gamma,
+    Poisson
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 
@@ -43,19 +41,18 @@ def meditate(force, stats, league):
 
     distributions = {
         "Gaussian": Gaussian.Gaussian(**dist_params),
-        "Poisson": Poisson.Poisson(**dist_params),
-        "Gamma": Gamma.Gamma(**dist_params)
+        "Poisson": Poisson.Poisson(**dist_params)
     }
 
     mlb = StatsMLB()
     mlb.load()
     mlb.update()
-    nba = StatsNBA()
-    nba.load()
-    nba.update()
-    nhl = StatsNHL()
-    nhl.load()
-    nhl.update()
+    # nba = StatsNBA()
+    # nba.load()
+    # nba.update()
+    # nhl = StatsNHL()
+    # nhl.load()
+    # nhl.update()
     nfl = StatsNFL()
     nfl.load()
     nfl.update()
@@ -152,10 +149,10 @@ def meditate(force, stats, league):
         for market in markets:
             if league == "MLB":
                 stat_data = mlb
-            elif league == "NBA":
-                stat_data = nba
-            elif league == "NHL":
-                stat_data = nhl
+            # elif league == "NBA":
+            #     stat_data = nba
+            # elif league == "NHL":
+            #     stat_data = nhl
             elif league == "NFL":
                 stat_data = nfl
             else:
@@ -212,12 +209,10 @@ def meditate(force, stats, league):
                 dtrain = lgb.Dataset(X_train, label=y_train)
 
                 lgblss_dist_class = DistributionClass()
-                candidate_distributions = [Gaussian, Gamma, Poisson]
+                candidate_distributions = [Gaussian, Poisson]
 
                 dist = lgblss_dist_class.dist_select(
-                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100)
-
-                dist = dist.iloc[0, 1]
+                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100).iloc[0, 1]
 
                 params = {
                     "boosting_type": ["categorical", ["gbdt"]],
@@ -235,7 +230,7 @@ def meditate(force, stats, league):
                                             num_boost_round=999,
                                             nfold=5,
                                             early_stopping_rounds=20,
-                                            max_minutes=1,
+                                            max_minutes=30,
                                             n_trials=500,
                                             silence=True,
                                             )
@@ -268,10 +263,6 @@ def meditate(force, stats, league):
                 y_proba = norm.cdf(
                     X_test["Line"].replace(0, 0.5), prob_params["loc"], prob_params["scale"])
                 ev = prob_params["loc"]
-            elif dist == "Gamma":
-                y_proba = gamma.cdf(
-                    X_test["Line"].replace(0, 0.5), prob_params["concentration"], scale=1/prob_params["rate"])
-                ev = prob_params["concentration"]/prob_params["rate"]
 
             y_proba = np.array([y_proba, 1-y_proba]).transpose()
             y_class = (y_test["Result"] >
@@ -316,9 +307,6 @@ def meditate(force, stats, league):
             elif dist == "Gaussian":
                 X_test['EV'] = prob_params['loc']
                 X_test['STD'] = prob_params['scale']
-            elif dist == "Gamma":
-                X_test['alpha'] = prob_params['concentration']
-                X_test['beta'] = prob_params['rate']
 
             filename = "_".join(["test", league, market]
                                 ).replace(" ", "-") + ".csv"
