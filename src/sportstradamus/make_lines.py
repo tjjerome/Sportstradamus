@@ -40,7 +40,7 @@ for market in tqdm(markets, unit="markets", position=1):
         ):
             continue
         gameDate = game['gameday']
-        if datetime.strptime(gameDate, '%Y-%m-%d') < datetime(2022, 2, 28):
+        if datetime.strptime(gameDate, '%Y-%m-%d') > datetime(2022, 9, 1):
             continue
         NFL.bucket_stats(market, date=datetime.strptime(gameDate, "%Y-%m-%d"))
         player = game['player display name']

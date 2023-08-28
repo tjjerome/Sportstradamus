@@ -7,23 +7,50 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
-    roc_auc_score,
-    brier_score_loss
+    brier_score_loss,
+    r2_score,
 )
-from scipy.stats import norm
+from scipy.stats import (
+    norm,
+    poisson,
+    gamma,
+    lognorm
+)
 import lightgbm as lgb
 import pandas as pd
 import click
 import os
 from lightgbmlss.model import LightGBMLSS
-from lightgbmlss.distributions.Gaussian import Gaussian
+from lightgbmlss.distributions import (
+    Gaussian,
+    Poisson,
+    LogNormal,
+)
+from lightgbmlss.distributions.distribution_utils import DistributionClass
 
 
 @click.command()
-@click.option("-f", "--force", default=False, help="Display progress bars")
+@click.option("--force/--no-force", default=False, help="Force update of all models")
+@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
-def meditate(force, league):
+def meditate(force, stats, league):
+
+    dist_params = {
+        "stabilization": "None",
+        "response_fn": "exp",
+        "loss_fn": "nll"
+    }
+
+    distributions = {
+        "Gaussian": {"model": Gaussian.Gaussian(**dist_params),
+                     "eval": norm},
+        "Poisson": {"model": Poisson.Poisson(**dist_params),
+                    "eval": poisson},
+        "LogNormal": {"model": LogNormal.LogNormal(**dist_params),
+                      "eval": lognorm},
+    }
+
     mlb = StatsMLB()
     mlb.load()
     mlb.update()
@@ -138,10 +165,19 @@ def meditate(force, league):
             else:
                 continue
 
+            need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
             filepath = pkg_resources.files(data) / filename
             if os.path.isfile(filepath) and not force:
-                continue
+                if stats:
+                    with open(filepath, 'rb') as infile:
+                        filedict = pickle.load(infile)
+                        model = filedict['model']
+                        params = filedict['params']
+                        dist = filedict['distribution']
+                    need_model = False
+                else:
+                    continue
 
             print(f"Training {league} - {market}")
             filename = "_".join([league, market]).replace(" ", "-")
@@ -155,28 +191,12 @@ def meditate(force, league):
             if M.empty:
                 continue
 
-            M = M.loc[(M['Combo'] == 0) & (M['Rival'] == 0)
-                      ].reset_index(drop=True)
-
             y = M[['Result']]
             X = M.drop(columns=['Result'])
-
-            columns = ['Avg5', 'Avg10', 'AvgH2H', 'Meeting 1', 'Meeting 2', 'Meeting 3', 'Meeting 4', 'Meeting 5',
-                       'Game 1', 'Game 2', 'Game 3', 'Game 4', 'Game 5', 'Game 6']
-            for column in columns:
-                X.loc[X[column] != 0, column] = X.loc[X[column]
-                                                      != 0, column] + X.loc[X[column] != 0, "Line"]
-            y['Result'] = y['Result'] + X['Line']
-            X.drop(columns=['Last5', 'Last10', 'H2H',
-                   'Combo', 'Rival'], inplace=True)
 
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
-
-            y_train = np.ravel(y_train.to_numpy())
-            if len(X_train) < 800:
-                continue
 
             categories = ["Home", "Position"]
             if "Position" not in X.columns:
@@ -188,73 +208,89 @@ def meditate(force, league):
 
             categories = "name:"+",".join(categories)
 
-            dtrain = lgb.Dataset(X_train, label=y_train)
+            if need_model:
+                y_train = np.ravel(y_train.to_numpy())
+                if len(X_train) < 500:
+                    continue
 
-            params = {
-                "boosting_type": ["categorical", ["gbdt"]],
-                "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
-                "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
-                "min_child_weight": ["float", {"low": 1e-2, "high": len(X)*.8/1000, "log": True}],
-                "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                "bagging_freq": ["int", {"low": 1, "high": 1, "log": False}]
-            }
+                dtrain = lgb.Dataset(X_train, label=y_train)
 
-            model = LightGBMLSS(
-                Gaussian(stabilization="None",
-                         response_fn="exp",
-                         loss_fn="nll"
-                         )
-            )
-            opt_param = model.hyper_opt(params,
-                                        dtrain,
-                                        num_boost_round=999,
-                                        nfold=5,
-                                        early_stopping_rounds=20,
-                                        max_minutes=20,
-                                        n_trials=500,
-                                        silence=True,
-                                        )
-            opt_params = opt_param.copy()
-            n_rounds = opt_params["opt_rounds"]
-            del opt_params["opt_rounds"]
+                lgblss_dist_class = DistributionClass()
+                candidate_distributions = [Gaussian, LogNormal, Poisson]
 
-            model.train(opt_params,
-                        dtrain,
-                        num_boost_round=n_rounds
-                        )
+                dist = lgblss_dist_class.dist_select(
+                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100).iloc[0, 1]
+
+                params = {
+                    "boosting_type": ["categorical", ["gbdt"]],
+                    "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
+                    "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
+                    "min_child_weight": ["float", {"low": 1e-2, "high": len(X)*.8/1000, "log": True}],
+                    "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                    "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                    "bagging_freq": ["int", {"low": 1, "high": 1, "log": False}]
+                }
+
+                model = LightGBMLSS(distributions[dist]["model"])
+                opt_param = model.hyper_opt(params,
+                                            dtrain,
+                                            num_boost_round=999,
+                                            nfold=5,
+                                            early_stopping_rounds=20,
+                                            max_minutes=30,
+                                            n_trials=500,
+                                            silence=True,
+                                            )
+                opt_params = opt_param.copy()
+                n_rounds = opt_params["opt_rounds"]
+                del opt_params["opt_rounds"]
+
+                model.train(opt_params,
+                            dtrain,
+                            num_boost_round=n_rounds
+                            )
 
             threshold = 0.545
             acc = 0
             null = 0
             preco = 0
             precu = 0
-            roc = 0
             bs = 0
+            r2 = 0
 
             prob_params = model.predict(X_test, pred_type="parameters")
-            y_proba = norm.cdf(
-                X_test["Line"], prob_params["loc"], prob_params["scale"])
+            statmodel = distributions[dist]["eval"]
+            if dist == "Poisson":
+                under = statmodel.cdf(
+                    X_test["Line"].replace(0, 0.5), prob_params["rate"])
+                push = statmodel.pmf(
+                    X_test["Line"].replace(0, 0.5), prob_params["rate"])
+                y_proba = under - push/2
+            else:
+                y_proba = statmodel.cdf(
+                    X_test["Line"].replace(0, 0.5), prob_params["loc"], prob_params["scale"])
+
             y_proba = np.array([y_proba, 1-y_proba]).transpose()
-            y_test = (y_test["Result"] - X_test["Line"]).clip(0, 1).astype(int)
-            y_test = np.ravel(y_test.to_numpy())
+            y_class = (y_test["Result"] >
+                       X_test["Line"].replace(0, 0.5)).astype(int)
+            y_class = np.ravel(y_class.to_numpy())
             y_pred = (y_proba > threshold).astype(int)
             null = 1 - np.mean(np.sum(y_pred, axis=1))
             if null > .98:
                 continue
             preco = precision_score(
-                (y_test == 1).astype(int), y_pred[:, 1])
+                (y_class == 1).astype(int), y_pred[:, 1])
             precu = precision_score(
-                (y_test == 0).astype(int), y_pred[:, 0])
+                (y_class == 0).astype(int), y_pred[:, 0])
             y_pred = y_pred[:, 1]
             acc = accuracy_score(
-                y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
+                y_class[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
                     y_proba, axis=1) > threshold]
             )
-            roc = roc_auc_score(y_test[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
-                y_proba, axis=1) > threshold], average="weighted")
 
-            bs = brier_score_loss(y_test, y_proba[:, 1], pos_label=1)
+            bs = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
+
+            r2 = r2_score(y_test, prob_params["loc"])
 
             filedict = {
                 "model": model,
@@ -263,11 +299,27 @@ def meditate(force, league):
                     "Null Points": null,
                     "Precision_Over": preco,
                     "Precision_Under": precu,
-                    "ROC_AUC": roc,
                     "Brier Score Loss": bs,
+                    "R2 Score": r2
                 },
-                "params": params
+                "params": params,
+                "distribution": dist
             }
+
+            X_test['Result'] = y_test['Result']
+            X_test.reset_index(inplace=True, drop=True)
+            if dist == "Poisson":
+                X_test['EV'] = prob_params['rate']
+            else:
+                X_test['EV'] = prob_params['loc']
+                X_test['STD'] = prob_params['scale']
+
+            filename = "_".join(["test", league, market]
+                                ).replace(" ", "-") + ".csv"
+
+            filepath = pkg_resources.files(data) / filename
+            with open(filepath, "wb") as outfile:
+                X_test.to_csv(filepath)
 
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
 
@@ -292,11 +344,13 @@ def report():
             name = model_str.split("_")
             league = name[0]
             market = name[1].replace("-", " ").replace(".mdl", "")
+            dist = model["distribution"]
 
-            f.write(f" {league} {market} ".center(89, "="))
+            f.write(f" {league} {market} ".center(83, "="))
             f.write("\n")
+            f.write(f" Distribution Model: {dist}\n")
             f.write(pd.DataFrame(model['stats'], index=[
-                    ['Normal', 'Combo', 'Rival']]).to_string())
+                    ['Stats']]).to_string(index=False))
             f.write("\n\n")
 
 

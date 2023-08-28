@@ -1360,6 +1360,7 @@ class StatsMLB(Stats):
             odds = 0
 
         data = {
+            "DVPOA": 0,
             "Odds": odds,
             "Line": line,
             "Avg5": np.mean(game_res[-5:])
@@ -1405,26 +1406,26 @@ class StatsMLB(Stats):
         data.update({"Game " + str(i + 1): game_res[-6 + i] for i in range(6)})
 
         player_data = self.playerProfile.loc[player, [
-            'avg', 'home', 'away']].mean()
+            'avg', 'home', 'away']]
         data.update(
             {"Player " + col: player_data[col] for col in ['avg', 'home', 'away']})
 
+        other_player_data = self.playerProfile.loc[player, self.playerProfile.columns.difference(
+            ['avg', 'home', 'away'])]
+        data.update(
+            {"Player " + col: other_player_data[col] for col in other_player_data.index})
+
         if any([string in market for string in ["allowed", "pitch"]]):
             defense_data = self.defenseProfile.loc[opponent, [
-                'avg', 'home', 'away', 'moneyline gain', 'totals gain']].mean()
+                'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
         else:
             defense_data = self.pitcherProfile.loc[pitcher, [
-                'avg', 'home', 'away', 'moneyline gain', 'totals gain']].mean()
+                'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
 
         data.update(
             {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
 
         data["DVPOA"] = data.pop("Defense avg")
-
-        other_player_data = np.mean(self.playerProfile.loc[player, self.playerProfile.columns.difference(
-            ['avg', 'home', 'away'])], axis=0)
-        data.update(
-            {"Player " + col: other_player_data[col] for col in other_player_data.index})
 
         return data
 
@@ -1470,11 +1471,14 @@ class StatsMLB(Stats):
                 continue
 
             data = archive["MLB"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {name: {0: [0.5]*4}})[name]
+                "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
 
             lines = [k for k, v in data.items()]
             if "Closing Lines" in lines:
                 lines.remove("Closing Lines")
+
+            if len(lines) == 0:
+                continue
 
             line = lines[-1]
 
@@ -1873,6 +1877,9 @@ class StatsNFL(Stats):
         if position == '':
             return 0
 
+        if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]) and position != "QB":
+            return 0
+
         headtohead = player_games.loc[player_games["opponent"] == opponent]
 
         game_res = (player_games[market]).to_list()
@@ -1911,20 +1918,20 @@ class StatsNFL(Stats):
         data.update({"Game " + str(i + 1): game_res[-6 + i] for i in range(6)})
 
         player_data = self.playerProfile.loc[player, [
-            'avg', 'home', 'away']].mean()
+            'avg', 'home', 'away']]
         data.update(
             {"Player " + col: player_data[col] for col in ['avg', 'home', 'away']})
 
+        other_player_data = self.playerProfile.loc[player, self.playerProfile.columns.difference(
+            ['avg', 'home', 'away'])]
+        data.update(
+            {"Player " + col: other_player_data[col] for col in other_player_data.index})
+
         defense_data = self.defenseProfile.loc[opponent, [
-            'avg', 'home', 'away', 'moneyline gain', 'totals gain']].mean()
+            'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
 
         data.update(
             {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
-
-        other_player_data = np.mean(self.playerProfile.loc[player, self.playerProfile.columns.difference(
-            ['avg', 'home', 'away'])], axis=0)
-        data.update(
-            {"Player " + col: other_player_data[col] for col in other_player_data.index})
 
         return data
 
@@ -1951,13 +1958,16 @@ class StatsNFL(Stats):
                 continue
             data = {}
             self.profile_market(market, date=gameDate)
-            name = game['playerName']
+            name = game['player display name']
 
             if name not in self.playerProfile.index:
                 continue
 
+            if game[market] <= 0 and "td" not in market and "interception" not in market:
+                continue
+
             data = archive["NFL"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {name: {0: [0.5]*4}})[name]
+                "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
 
             lines = [k for k, v in data.items()]
             if "Closing Lines" in lines:
