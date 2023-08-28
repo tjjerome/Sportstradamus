@@ -1,24 +1,5 @@
-=================================== NFL passing yards ===================================
-        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.642857      0.24878        0.629032         0.652174  0.636094          0.232812
-Combo   0.642857      0.24878        0.629032         0.652174  0.636094          0.232812
-Rival   0.642857      0.24878        0.629032         0.652174  0.636094          0.232812
-
-================================== NFL receiving yards ==================================
-        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.584507     0.209228        0.548246         0.664516  0.591441           0.24769
-Combo   0.584507     0.209228        0.548246         0.664516  0.591441           0.24769
-Rival   0.584507     0.209228        0.548246         0.664516  0.591441           0.24769
-
-=================================== NFL rushing yards ===================================
-        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.477318      0.21028        0.418848            0.656  0.528957           0.27705
-Combo   0.477318      0.21028        0.418848            0.656  0.528957           0.27705
-Rival   0.477318      0.21028        0.418848            0.656  0.528957           0.27705
-
-======================================= NFL yards =======================================
-        Accuracy  Null Points  Precision_Over  Precision_Under   ROC_AUC  Brier Score Loss
-Normal  0.548564      0.28263        0.512381         0.640777  0.562231          0.252522
-Combo   0.548564      0.28263        0.512381         0.640777  0.562231          0.252522
-Rival   0.548564      0.28263        0.512381         0.640777  0.562231          0.252522
+=============================== NFL passing yards ================================
+Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.678571      0.23913        0.703704         0.662791          0.219644   0.11182
 
