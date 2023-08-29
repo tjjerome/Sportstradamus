@@ -170,7 +170,8 @@
             "Passing TDs": "passing tds",
             "Receiving TDs": "receiving tds",
             "Rushing TDs": "rushing tds",
-            "Rushing + Receiving TDs": "tds"
+            "Rushing + Receiving TDs": "tds",
+            "Receptions": "receptions"
         }
     },
     "Thrive": {

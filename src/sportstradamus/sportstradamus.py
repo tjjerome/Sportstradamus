@@ -235,7 +235,7 @@ def process_offers(offer_dict, book, datasets, stats):
                         )
                     else:
                         modeled_offers = model_prob(
-                            offers, league, market, book, datasets, stat_data, playerStats
+                            offers, league, market, book, stat_data, playerStats
                         )
                         # Add the matched offers to the new_offers list
                         new_offers.extend(modeled_offers)
@@ -344,11 +344,17 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
     stat_data.profile_market(market)
 
     playerStats = []
-    players = []
+    playerNames = []
 
     for o in tqdm(offers, leave=False, disable=not pbar):
         if " + " in o["Player"] or " vs. " in o["Player"]:
             players = o["Player"].replace(" vs. ", " + ").split(" + ")
+            teams = o["Team"].split("/")
+            if len(teams) == 1:
+                teams = teams*2
+            opponents = o["Opponent"].split("/")
+            if len(opponents) == 1:
+                opponents = opponents*2
             for i, player in enumerate(players):
                 if len(player.split(" ")[0].replace(".", "")) == 1:
                     if league == "NFL":
@@ -363,6 +369,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
                         pass
                     else:
                         players[i] = name_df.iloc[0, 2]
+                        player = name_df.iloc[0, 2]
 
                 lines = list(archive.archive.get(league, {}).get(
                     market, {}).get(o["Date"], {}).get(player, {}).keys())
@@ -374,7 +381,13 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
                     line = 0
 
                 stats = stat_data.get_stats(
-                    o | {"Player": player, "Line": line, "Market": market}, date=o["Date"])
+                    o | {
+                        "Player": player,
+                        "Line": line,
+                        "Market": market,
+                        "Team": teams[i],
+                        "Opponent": opponents[i]
+                    }, date=o["Date"])
 
                 if type(stats) is int:
                     logger.warning(f"{o['Player']}, {market} stat error")
@@ -382,7 +395,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
                     continue
 
                 playerStats.append(stats)
-                players.append(player)
+                playerNames.append(player)
         else:
             v = []
             lines = []
@@ -415,15 +428,15 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
 
             archive.add(o, lines, stat_map["Stats"])
             playerStats.append(stats)
-            players.append(o["Player"])
+            playerNames.append(o["Player"])
 
         pbar.update()
 
-    playerStats = pd.DataFrame(playerStats, index=players)
+    playerStats = pd.DataFrame(playerStats, index=playerNames)
     return playerStats[~playerStats.index.duplicated(keep='last')]
 
 
-def model_prob(offers, league, book_market, platform, datasets, stat_data, playerStats):
+def model_prob(offers, league, book_market, platform, stat_data, playerStats):
     """
     Matches offers with statistical data and applies various calculations and transformations.
 
@@ -482,6 +495,7 @@ def model_prob(offers, league, book_market, platform, datasets, stat_data, playe
                         pass
                     else:
                         players[i] = name_df.iloc[0, 2]
+                        player = name_df.iloc[0, 2]
 
                 if player not in playerStats.index:
                     stats.append(0)
@@ -513,14 +527,17 @@ def model_prob(offers, league, book_market, platform, datasets, stat_data, playe
                     params.append(prob_params.loc[player])
 
                 if dist == "Poisson":
-                    rate = np.sum([r["rate"] for r in prob_params])
-                    under = poisson.cdf(o["Line"], rate)
-                    push = poisson.pmf(o["Line"], rate)
+                    under = poisson.cdf(
+                        o["Line"], params[1]["rate"] + params[0]["rate"])
+                    push = poisson.sf(
+                        o["Line"], params[1]["rate"] + params[0]["rate"])
                     under -= push/2
                 elif dist == "Gaussian":
-                    loc = np.sum([r["loc"] for r in prob_params])
-                    scale = np.sum([r["scale"] for r in prob_params])
-                    under = norm.cdf(o["Line"], loc, scale)
+                    under = norm.cdf(o["Line"],
+                                     params[1]["loc"] +
+                                     params[0]["loc"],
+                                     params[1]["scale"] +
+                                     params[0]["scale"])
 
             elif " vs. " in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
