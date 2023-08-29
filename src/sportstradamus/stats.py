@@ -1319,7 +1319,7 @@ class StatsMLB(Stats):
             else:
                 pitcher = self.pitchers.get(opponent)
 
-            if pitcher not in self.pitcherProfile.index:
+            if pitcher is not None and pitcher not in self.pitcherProfile.index:
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
 

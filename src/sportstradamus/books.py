@@ -871,7 +871,8 @@ def get_ud():
         opponent2 = game2["Home"]
         if opponent2 == player2["Team"]:
             opponent2 = game2["Away"]
-        bet = o["options"][0]["appearance_stat"]["display_stat"]
+        bet = o["options"][0]["appearance_stat"]["display_stat"].replace(
+            "Fewer ", "")
         n = {
             "Player": remove_accents(player1["Name"])
             + " vs. "
@@ -879,7 +880,7 @@ def get_ud():
             "League": player1["League"],
             "Team": player1["Team"] + "/" + player2["Team"],
             "Date": game1["Date"],
-            "Market": "H2H " + bet.replace("Fewer ", ""),
+            "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
             "Opponent": opponent1 + "/" + opponent2,
         }
