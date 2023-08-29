@@ -106,6 +106,8 @@ def remove_accents(input_str):
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
     if out_str == "Michael Porter":
         out_str = "Michael Porter Jr."
+    if out_str == "Gabriel Davis":
+        out_str = "Gabe Davis"
     out_str = out_str.replace(" III", "")
     return out_str
 
