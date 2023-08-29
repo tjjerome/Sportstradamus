@@ -1065,7 +1065,7 @@ def get_parp():
             n = {
                 "Player": remove_accents(player["player"]["fullName"]),
                 "League": player["match"]["league"]["leagueNameShort"],
-                "Team": player["player"]["team"]["teamAbbreviation"],
+                "Team": player["player"]["team"]["teamAbbreviation"].replace("CHW", "CWS"),
                 "Date": player["match"]["matchDate"].split("T")[0],
                 "Market": market,
                 "Line": float(stat["statValue"]),
@@ -1095,7 +1095,8 @@ def get_parp():
         players = []
         for player in combo['packageLegs']:
             players.append(remove_accents(player["player"]["fullName"]))
-            teams.append(player["player"]["team"]["teamAbbreviation"])
+            teams.append(player["player"]["team"]
+                         ["teamAbbreviation"].replace("CHW", "CWS"))
             opponents.append([team for team in
                               [player["match"]["homeTeam"]["teamAbbreviation"],
                                player["match"]["awayTeam"]["teamAbbreviation"]]
