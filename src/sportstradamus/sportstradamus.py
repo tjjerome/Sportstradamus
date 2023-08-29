@@ -10,13 +10,13 @@ from sportstradamus.books import (
     get_thrive,
     get_parp,
 )
-from sportstradamus.helpers import archive, prob_to_odds
+from sportstradamus.helpers import archive, prob_to_odds, get_ev
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 import click
-from scipy.stats import poisson, skellam
+from scipy.stats import poisson, skellam, norm, hmean
 import numpy as np
 import pickle
 import json
@@ -31,7 +31,7 @@ import importlib.resources as pkg_resources
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
@@ -210,6 +210,8 @@ def process_offers(offer_dict, book, datasets, stats):
         # Display a progress bar
         with tqdm(total=total, desc=f"Matching {book} Offers", unit="offer") as pbar:
             for league, markets in offer_dict.items():
+                if league == "MLB":
+                    continue
                 if league in stats:
                     stat_data = stats.get(league)
                 else:
@@ -223,19 +225,22 @@ def process_offers(offer_dict, book, datasets, stats):
 
                 for market, offers in markets.items():
                     # Match the offers with player statistics
-                    matched_offers = match_offers(
+                    playerStats = match_offers(
                         offers, league, market, book, datasets, stat_data, pbar
                     )
 
-                    if len(matched_offers) == 0:
+                    if len(playerStats) == 0:
                         # No matched offers found for the market
                         logger.info(f"{league}, {market} offers not matched")
                         untapped_markets.append(
                             {"Platform": book, "League": league, "Market": market}
                         )
                     else:
+                        modeled_offers = model_prob(
+                            offers, league, market, book, datasets, stat_data, playerStats
+                        )
                         # Add the matched offers to the new_offers list
-                        new_offers.extend(matched_offers)
+                        new_offers.extend(modeled_offers)
 
     logger.info(str(len(new_offers)) + " offers processed")
     return new_offers
@@ -272,7 +277,15 @@ def save_data(offers, book, gc):
             # Apply number formatting to the relevant columns
             if book == "ParlayPlay":
                 wks.format(
-                    "I:O", {"numberFormat": {
+                    "I:J", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
+                )
+                wks.format(
+                    "M:M", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
+                )
+                wks.format(
+                    "O:O", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
                 wks.update(
@@ -282,7 +295,15 @@ def save_data(offers, book, gc):
                 )
             else:
                 wks.format(
-                    "H:N", {"numberFormat": {
+                    "H:I", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
+                )
+                wks.format(
+                    "L:L", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
+                )
+                wks.format(
+                    "N:N", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
                 wks.update(
@@ -295,7 +316,7 @@ def save_data(offers, book, gc):
             logger.exception(f"Error writing {book} offers")
 
 
-def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
+def match_offers(offers, league, book_market, platform, datasets, stat_data, pbar):
     """
     Matches offers with statistical data and applies various calculations and transformations.
 
@@ -315,11 +336,118 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
         stat_map = json.load(infile)
 
     stat_map = stat_map[platform]
-    market = stat_map["Stats"].get(market, market)
+    market = stat_map["Stats"].get(book_market, book_market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
         pbar.update(len(offers))
+        logger.warning(f"{filename} missing")
+        return []
+    stat_data.profile_market(market)
+
+    playerStats = []
+    players = []
+
+    for o in tqdm(offers, leave=False, disable=not pbar):
+        if " + " in o["Player"] or " vs. " in o["Player"]:
+            players = o["Player"].replace(" vs. ", " + ").split(" + ")
+            for i, player in enumerate(players):
+                if len(player.split(" ")[0].replace(".", "")) == 1:
+                    if league == "NFL":
+                        nameStr = 'player display name'
+                    elif league == "NBA":
+                        nameStr = 'PLAYER_NAME'
+                    else:
+                        nameStr = "playerName"
+                    name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
+                        " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
+                    if name_df.empty:
+                        pass
+                    else:
+                        players[i] = name_df.iloc[0, 2]
+
+                lines = list(archive.archive.get(league, {}).get(
+                    market, {}).get(o["Date"], {}).get(player, {}).keys())
+                if len(lines) > 0:
+                    if "Closing Lines" in lines:
+                        lines.remove("Closing Lines")
+                    line = lines[-1]
+                else:
+                    line = 0
+
+                stats = stat_data.get_stats(
+                    o | {"Player": player, "Line": line, "Market": market}, date=o["Date"])
+
+                if type(stats) is int:
+                    logger.warning(f"{o['Player']}, {market} stat error")
+                    pbar.update()
+                    continue
+
+                playerStats.append(stats)
+                players.append(player)
+        else:
+            v = []
+            lines = []
+            stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
+            if type(stats) is int:
+                logger.warning(f"{o['Player']}, {market} stat error")
+                pbar.update()
+                continue
+
+            for book, dataset in datasets.items():
+                codex = stat_map[book]
+                offer = dataset.get(o["Player"], {}).get(
+                    codex.get(book_market, book_market)
+                )
+                if offer is not None:
+                    v.append(offer["EV"])
+
+                lines.append(offer)
+
+            if v:
+                v = np.mean(v)
+                line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                push = 1 - p[1] - p[0]
+                p[0] += push / 2
+                p[1] += push / 2
+                stats["Odds"] = p[1] - 0.5
+            else:
+                p = [0.5] * 2
+
+            archive.add(o, lines, stat_map["Stats"])
+            playerStats.append(stats)
+            players.append(o["Player"])
+
+        pbar.update()
+
+    playerStats = pd.DataFrame(playerStats, index=players)
+    return playerStats[~playerStats.index.duplicated(keep='last')]
+
+
+def model_prob(offers, league, book_market, platform, datasets, stat_data, playerStats):
+    """
+    Matches offers with statistical data and applies various calculations and transformations.
+
+    Args:
+        offers (list): List of offers to match.
+        league (str): League name.
+        market (str): Market name.
+        platform (str): Platform name.
+        datasets (dict): Dictionary of datasets.
+        stat_data (obj): Statistical data object.
+
+    Returns:
+        list: List of matched offers.
+    """
+    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
+        stat_map = json.load(infile)
+
+    stat_map = stat_map[platform]
+    market = stat_map["Stats"].get(book_market, book_market)
+    filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
+    filepath = pkg_resources.files(data) / filename
+    if not os.path.isfile(filepath):
         logger.warning(f"{filename} missing")
         return []
 
@@ -327,154 +455,138 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
     model = filedict["model"]
-    stat_data.profile_market(market)
+    dist = filedict["distribution"]
 
-    for o in tqdm(offers, leave=False, disable=not pbar):
-        stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
-        if type(stats) is int:
-            logger.warning(f"{o['Player']}, {market} stat error")
-            pbar.update()
-            continue
+    categories = ["Home", "Position"]
+    if "Position" not in playerStats.columns:
+        categories.remove("Position")
+    for c in categories:
+        playerStats[c] = playerStats[c].astype('category')
 
-        try:
-            v = []
-            lines = []
+    prob_params = model.predict(playerStats, pred_type="parameters")
+    prob_params.index = playerStats.index
+
+    for o in tqdm(offers, leave=False):
+        if " + " in o["Player"] or " vs. " in o["Player"]:
+            players = o["Player"].replace(" vs. ", " + ").split(" + ")
+            stats = []
+            for i, player in enumerate(players):
+                if len(player.split(" ")[0].replace(".", "")) == 1:
+                    if league == "NFL":
+                        nameStr = 'player display name'
+                    elif league == "NBA":
+                        nameStr = 'PLAYER_NAME'
+                    else:
+                        nameStr = "playerName"
+                    name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
+                        " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
+                    if name_df.empty:
+                        pass
+                    else:
+                        players[i] = name_df.iloc[0, 2]
+
+                if player not in playerStats.index:
+                    stats.append(0)
+                else:
+                    stats.append(playerStats.loc[player])
+
+            if any([type(s) is int for s in stats]):
+                logger.warning(f"{o['Player']}, {market} stat error")
+                continue
 
             if " + " in o["Player"]:
-                for book, dataset in datasets.items():
-                    codex = stat_map[book]
-                    offer = dataset.get(
-                        o["Player"],
-                        dataset.get(
-                            " + ".join(o["Player"].split(" + ")[::-1]), {}),
-                    ).get(codex.get(o["Market"], o["Market"]))
+                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
+                             ["Odds"]) if stats[0]["Odds"] != 0 else None
+                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
+                             ["Odds"]) if stats[1]["Odds"] != 0 else None
 
-                    if offer is not None:
-                        v.append(offer["EV"])
-                    else:
-                        players = o["Player"].split(" + ")
-                        for i, player in enumerate(players):
-                            if len(player.split(" ")[0].replace(".", "")) == 1:
-                                if league == "NFL":
-                                    nameStr = 'player display name'
-                                elif league == "NBA":
-                                    nameStr = 'PLAYER_NAME'
-                                else:
-                                    nameStr = "playerName"
-                                name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
-                                    " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
-                                if name_df.empty:
-                                    continue
-                                else:
-                                    players[i] = name_df.iloc[0, 2]
-                        ev1 = dataset.get(players[0], {players[0]: None}).get(
-                            codex.get(o["Market"], o["Market"])
-                        )
-                        ev2 = dataset.get(players[1], {players[1]: None}).get(
-                            codex.get(o["Market"], o["Market"])
-                        )
-
-                        if ev1 is not None and ev2 is not None:
-                            ev = ev1["EV"] + ev2["EV"]
-                            l = np.round(ev - 0.5)
-                            v.append(ev)
-                            offer = {
-                                "Line": str(l + 0.5),
-                                "Over": str(prob_to_odds(poisson.sf(l, ev))),
-                                "Under": str(prob_to_odds(poisson.cdf(l, ev))),
-                                "EV": ev,
-                            }
-
-                    lines.append(offer)
-
-                if v:
-                    v = np.mean(v)
+                if ev1 is not None and ev2 is not None:
+                    ev = ev1 + ev2
                     line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                    p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
-                    stats["Odds"] = p[1] - 0.5
                 else:
                     p = [0.5] * 2
+
+                params = []
+                for player in players:
+                    params.append(prob_params.loc[player])
+
+                if dist == "Poisson":
+                    rate = np.sum([r["rate"] for r in prob_params])
+                    under = poisson.cdf(o["Line"], rate)
+                    push = poisson.pmf(o["Line"], rate)
+                    under -= push/2
+                elif dist == "Gaussian":
+                    loc = np.sum([r["loc"] for r in prob_params])
+                    scale = np.sum([r["scale"] for r in prob_params])
+                    under = norm.cdf(o["Line"], loc, scale)
 
             elif " vs. " in o["Player"]:
-                m = o["Market"].replace("H2H ", "")
-                v1 = []
-                v2 = []
-                for book, dataset in datasets.items():
-                    codex = stat_map[book]
-                    offer = dataset.get(
-                        o["Player"],
-                        dataset.get(" vs. ".join(
-                            o["Player"].split(" + ")[::-1]), {}),
-                    ).get(codex.get(m, m))
-                    if offer is not None:
-                        v.append(offer["EV"])
-                    else:
-                        players = o["Player"].split(" vs. ")
-                        ev1 = dataset.get(players[0], {players[0]: None}).get(
-                            codex.get(m, m)
-                        )
-                        ev2 = dataset.get(players[1], {players[1]: None}).get(
-                            codex.get(m, m)
-                        )
-                        if ev1 is not None and ev2 is not None:
-                            v1.append(ev1["EV"])
-                            v2.append(ev2["EV"])
-                            l = np.round(ev2["EV"] - ev1["EV"] - 0.5)
-                            offer = {
-                                "Line": str(l + 0.5),
-                                "Under": str(
-                                    prob_to_odds(skellam.cdf(
-                                        l, ev2["EV"], ev1["EV"]))
-                                ),
-                                "Over": str(
-                                    prob_to_odds(skellam.sf(
-                                        l, ev2["EV"], ev1["EV"]))
-                                ),
-                                "EV": (ev1["EV"], ev2["EV"]),
-                            }
-
-                    lines.append(offer)
-
-                if v1 and v2:
-                    v1 = np.mean(v1)
-                    v2 = np.mean(v2)
+                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
+                             ["Odds"]) if stats[0]["Odds"] != 0 else None
+                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
+                             ["Odds"]) if stats[1]["Odds"] != 0 else None
+                if ev1 is not None and ev2 is not None:
                     line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [skellam.cdf(line[0], v2, v1),
-                         skellam.sf(line[1], v2, v1)]
+                    p = [skellam.cdf(line[0], ev2, ev1),
+                         skellam.sf(line[1], ev2, ev1)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
-                    stats["Odds"] = p[1] - 0.5
                 else:
                     p = [0.5] * 2
 
+                params = []
+                for player in players:
+                    params.append(prob_params.loc[player])
+
+                if dist == "Poisson":
+                    under = skellam.cdf(
+                        o["Line"], params[1]["rate"], params[0]["rate"])
+                    push = skellam.sf(
+                        o["Line"], params[1]["rate"], params[0]["rate"])
+                    under -= push/2
+                elif dist == "Gaussian":
+                    under = norm.cdf(o["Line"],
+                                     params[1]["loc"] -
+                                     params[0]["loc"],
+                                     params[1]["scale"] +
+                                     params[0]["scale"])
+
+        else:
+            if o["Player"] not in playerStats.index:
+                continue
+            stats = playerStats.loc[o["Player"]]
+            if type(stats) is int:
+                logger.warning(f"{o['Player']}, {market} stat error")
+                continue
+
+            ev = get_ev(stats["Line"], 1-stats["Odds"]
+                        ) if stats["Odds"] != 0 else None
+
+            if ev is not None:
+                line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
+                push = 1 - p[1] - p[0]
+                p[0] += push / 2
+                p[1] += push / 2
             else:
-                for book, dataset in datasets.items():
-                    codex = stat_map[book]
-                    offer = dataset.get(o["Player"], {}).get(
-                        codex.get(o["Market"], o["Market"])
-                    )
-                    if offer is not None:
-                        v.append(offer["EV"])
+                p = [0.5] * 2
 
-                    lines.append(offer)
+            params = prob_params.loc[o["Player"]]
+            if dist == "Poisson":
+                under = poisson.cdf(o["Line"], params["rate"])
+                push = poisson.pmf(o["Line"], params["rate"])
+                under -= push/2
+            elif dist == "Gaussian":
+                under = norm.cdf(
+                    o["Line"], params["loc"], params["scale"])
 
-                if v:
-                    v = np.mean(v)
-                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
-                    push = 1 - p[1] - p[0]
-                    p[0] += push / 2
-                    p[1] += push / 2
-                    stats["Odds"] = p[1] - 0.5
-                else:
-                    p = [0.5] * 2
-
-            proba = model.predict_proba(
-                np.array(list(stats.values())).reshape(1, -1))[0, :]
+        try:
+            proba = [under, 1-under]
 
             if proba[1] > proba[0]:
                 o["Bet"] = "Over"
@@ -485,16 +597,35 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 o["Books"] = p[0]
                 o["Model"] = proba[0]
 
-            o["Avg 10"] = (
-                (stats["Avg10"]) /
-                o["Line"] if " vs. " not in o["Player"] else 0
-            )
-            o["Last 5"] = stats["Last5"] + 0.5
-            o["Last 10"] = stats["Last10"] + 0.5
-            o["H2H"] = stats["H2H"] + 0.5
-            o["DvPOA"] = stats["DVPOA"]
+            if " + " in o["Player"]:
+                avg5 = np.sum([s["Avg5"] for s in stats])
+                o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
+                avgh2h = np.sum([s["AvgH2H"] for s in stats])
+                o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
+                o["Moneyline"] = np.mean([s["Moneyline"] for s in stats])
+                o["O/U"] = np.mean([s["Total"] for s in stats])
+                o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
+            elif " vs. " in o["Player"]:
+                avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
+                o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
+                avgh2h = stats[0]["AvgH2H"] - stats[1]["AvgH2H"]
+                o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
+                o["Moneyline"] = np.mean(
+                    [stats[0]["Moneyline"], 1-stats[1]["Moneyline"]])
+                o["O/U"] = np.mean([s["Total"] for s in stats])
+                o["DVPOA"] = hmean(
+                    [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
+            else:
+                o["Avg 5"] = stats["Avg5"] - \
+                    o["Line"] if stats["Avg5"] != 0 else 0
+                o["Avg H2H"] = stats["AvgH2H"] - \
+                    o["Line"] if stats["AvgH2H"] != 0 else 0
+                o["Moneyline"] = stats["Moneyline"]
+                o["O/U"] = stats["Total"]
+                o["DVPOA"] = stats["DVPOA"]
 
-            archive.add(o, lines, stat_map["Stats"])
+            lines = archive.archive.get(league, {}).get(market, {}).get(
+                o["Date"], {}).get(o["Player"], {}).get("Closing Lines", [None]*4)
 
             o["DraftKings"] = (
                 lines[0]["Line"] + "/" +
@@ -518,8 +649,6 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
 
         except Exception:
             logger.exception(o["Player"] + ", " + o["Market"])
-
-        pbar.update()
 
     return new_offers
 
