@@ -210,8 +210,6 @@ def process_offers(offer_dict, book, datasets, stats):
         # Display a progress bar
         with tqdm(total=total, desc=f"Matching {book} Offers", unit="offer") as pbar:
             for league, markets in offer_dict.items():
-                if league == "MLB":
-                    continue
                 if league in stats:
                     stat_data = stats.get(league)
                 else:
