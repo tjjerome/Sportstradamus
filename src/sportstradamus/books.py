@@ -1074,7 +1074,7 @@ def get_parp():
                     team
                     for team in teams
                     if team != player["player"]["team"]["teamAbbreviation"]
-                ][0],
+                ][0].replace("CHW", "CWS"),
             }
 
             if n["League"] not in offers:
@@ -1100,7 +1100,7 @@ def get_parp():
             opponents.append([team for team in
                               [player["match"]["homeTeam"]["teamAbbreviation"],
                                player["match"]["awayTeam"]["teamAbbreviation"]]
-                              if team != player["player"]["team"]["teamAbbreviation"]][0])
+                              if team != player["player"]["team"]["teamAbbreviation"]][0]).replace("CHW", "CWS")
 
         market = combo['pickType']['challengeName']
         if "Fantasy" in market:

@@ -1315,11 +1315,11 @@ class StatsMLB(Stats):
 
         try:
             if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
-                pitcher = offer.get("Pitcher")
+                pitcher = offer.get("Pitcher", "")
             else:
-                pitcher = self.pitchers.get(opponent)
+                pitcher = self.pitchers.get(opponent, "")
 
-            if pitcher is not None and pitcher not in self.pitcherProfile.index:
+            if pitcher not in self.pitcherProfile.index:
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
 
@@ -1382,7 +1382,8 @@ class StatsMLB(Stats):
                     pd.to_datetime(self.gamelog.gameId.str[:10]) == date)]
                 position = game.iloc[0]['battingOrder']
             else:
-                order = self.upcoming_games[team]['Batting Order']
+                order = self.upcoming_games.get(
+                    team, {}).get('Batting Order', [])
                 if player in order:
                     position = order.index(player)
                 elif player_games.empty:

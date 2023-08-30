@@ -422,7 +422,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
                 push = 1 - p[1] - p[0]
                 p[0] += push / 2
                 p[1] += push / 2
-                stats["Odds"] = p[1] - 0.5
+                stats["Odds"] = p[1]
             else:
                 p = [0.5] * 2
 
@@ -529,7 +529,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 if dist == "Poisson":
                     under = poisson.cdf(
                         o["Line"], params[1]["rate"] + params[0]["rate"])
-                    push = poisson.sf(
+                    push = poisson.pmf(
                         o["Line"], params[1]["rate"] + params[0]["rate"])
                     under -= push/2
                 elif dist == "Gaussian":
@@ -561,7 +561,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 if dist == "Poisson":
                     under = skellam.cdf(
                         o["Line"], params[1]["rate"], params[0]["rate"])
-                    push = skellam.sf(
+                    push = skellam.pmf(
                         o["Line"], params[1]["rate"], params[0]["rate"])
                     under -= push/2
                 elif dist == "Gaussian":
