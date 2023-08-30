@@ -1167,13 +1167,13 @@ class StatsMLB(Stats):
         gamelog_df["totals"] = gamelog_df.apply(lambda row: archive["MLB"]["Totals"].get(
             row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 8.3), axis=1)
 
-        # Filter players with at least 5 non-zero entries
+        # Filter players with at least 2 entries
         playerGroups = gamelog_df.groupby('playerName').filter(
-            lambda x: len(x[x[market] != 0]) > 4).groupby('playerName')
+            lambda x: x[market].count() > 1).groupby('playerName')
 
         defenseGroups = gamelog_df.groupby('opponent')
         pitcherGroups = gamelog_df.groupby('opponent pitcher').filter(
-            lambda x: len(x[x[market] != 0]) > 4).groupby('opponent pitcher')
+            lambda x: x[market].count() > 1).groupby('opponent pitcher')
 
         # Compute league average
         leagueavg = playerGroups[market].mean().mean()
@@ -1728,7 +1728,7 @@ class StatsNFL(Stats):
 
         playerGroups = gamelog.\
             groupby('player display name').\
-            filter(lambda x: len(x[x[market] > 0]) > 2).\
+            filter(lambda x: x[market].count() > 1).\
             groupby('player display name')
 
         defenseGroups = gamelog.groupby('opponent')
