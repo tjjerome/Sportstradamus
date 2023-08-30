@@ -28,7 +28,7 @@ pytz = "^2023.3"
 scikit-learn = "=1.2.2"
 flask = "^2.3.2"
 flask-table = "^0.5.0"
-torch = {version = "^2.0.1+cpu", source = "torch-cpu"}
+torch = {version = "^2.0.1", source = "torch-cpu"}
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
 
 [tool.poetry.scripts]

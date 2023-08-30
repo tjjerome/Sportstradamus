@@ -27,6 +27,7 @@ import pandas as pd
 import os.path
 import datetime
 import importlib.resources as pkg_resources
+import warnings
 
 
 @click.command()
@@ -341,7 +342,9 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
         pbar.update(len(offers))
         logger.warning(f"{filename} missing")
         return []
-    stat_data.profile_market(market)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        stat_data.profile_market(market)
 
     playerStats = []
     playerNames = []
@@ -433,7 +436,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
         pbar.update()
 
     playerStats = pd.DataFrame(playerStats, index=playerNames)
-    return playerStats[~playerStats.index.duplicated(keep='last')]
+    return playerStats[~playerStats.index.duplicated(keep='last')].fillna(0)
 
 
 def model_prob(offers, league, book_market, platform, stat_data, playerStats):
@@ -482,7 +485,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
             players = o["Player"].replace(" vs. ", " + ").split(" + ")
             stats = []
             for i, player in enumerate(players):
-                if len(player.split(" ")[0].replace(".", "")) == 1:
+                if len(player.split(" ")[0].replace(".", "")) <= 2:
                     if league == "NFL":
                         nameStr = 'player display name'
                     elif league == "NBA":
