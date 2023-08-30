@@ -1100,7 +1100,7 @@ def get_parp():
             opponents.append([team for team in
                               [player["match"]["homeTeam"]["teamAbbreviation"],
                                player["match"]["awayTeam"]["teamAbbreviation"]]
-                              if team != player["player"]["team"]["teamAbbreviation"]][0]).replace("CHW", "CWS")
+                              if team != player["player"]["team"]["teamAbbreviation"]][0].replace("CHW", "CWS"))
 
         market = combo['pickType']['challengeName']
         if "Fantasy" in market:
