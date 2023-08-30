@@ -28,9 +28,8 @@ pytz = "^2023.3"
 scikit-learn = "=1.2.2"
 flask = "^2.3.2"
 flask-table = "^0.5.0"
-torch = {file = "https://download.pytorch.org/whl/torch-2.0.1-cp311-cp311-manylinux2014_aarch64.whl"}
-shap = "^0.42.1"
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
+shap = "^0.42.1"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"
