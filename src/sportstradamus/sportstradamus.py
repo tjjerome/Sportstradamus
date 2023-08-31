@@ -32,7 +32,7 @@ import warnings
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
@@ -152,9 +152,9 @@ def main(progress, books):
 
     # PrizePicks
 
-    pp_dict = get_pp()
-    pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
-    save_data(pp_offers, "PrizePicks", gc)
+    # pp_dict = get_pp()
+    # pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
+    # save_data(pp_offers, "PrizePicks", gc)
 
     # Underdog
 
@@ -352,6 +352,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
     for o in tqdm(offers, leave=False, disable=not pbar):
         if " + " in o["Player"] or " vs. " in o["Player"]:
             players = o["Player"].replace(" vs. ", " + ").split(" + ")
+            players = [player.strip() for player in players]
             teams = o["Team"].split("/")
             if len(teams) == 1:
                 teams = teams*2
@@ -483,6 +484,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
     for o in tqdm(offers, leave=False):
         if " + " in o["Player"] or " vs. " in o["Player"]:
             players = o["Player"].replace(" vs. ", " + ").split(" + ")
+            players = [player.strip() for player in players]
             stats = []
             for i, player in enumerate(players):
                 if len(player.split(" ")[0].replace(".", "")) <= 2:

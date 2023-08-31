@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Sportstradamus"
-version = "2.0.0"
+version = "2.0.1"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
@@ -31,6 +31,7 @@ flask-table = "^0.5.0"
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
 shap = "^0.42.1"
 seaborn = "^0.12.2"
+torch = {version = "^2.0.1+cpu", source = "torch-cpu"}
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"
@@ -44,7 +45,7 @@ sphinx-pyproject = "^0.1.0"
 lightgbm = "^3.3.5"
 pytest = "^7.3.2"
 matplotlib = "^3.7.1"
-optuna = ">=3.1.1,<3.2.0"
+optuna = ">=3.2.0,<3.3.0"
 optuna-dashboard = "^0.10.2"
 imbalanced-learn = "^0.10.1"
 

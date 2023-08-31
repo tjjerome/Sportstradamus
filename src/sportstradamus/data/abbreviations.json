@@ -8,6 +8,7 @@
         "Chicago White Sox": "CWS",
         "Cincinnati Reds": "CIN",
         "Cleveland Guardians": "CLE",
+        "Cleveland Indians": "CLE",
         "Colorado Rockies": "COL",
         "Detroit Tigers": "DET",
         "Houston Astros": "HOU",
@@ -25,6 +26,7 @@
         "San Diego Padres": "SD",
         "San Francisco Giants": "SF",
         "Seattle Mariners": "SEA",
+        "St Louis Cardinals": "STL",
         "St. Louis Cardinals": "STL",
         "Tampa Bay Rays": "TB",
         "Texas Rangers": "TEX",
@@ -58,6 +60,7 @@
         "San Jose Sharks": "SJ",
         "Seattle Kraken": "SEA",
         "St. Louis Blues": "STL",
+        "St Louis Blues": "STL",
         "Tampa Bay Lightning": "TB",
         "Toronto Maple Leafs": "TOR",
         "Vancouver Canucks": "VAN",
@@ -129,6 +132,7 @@
         "Seattle Seahawks": "SEA",
         "Tampa Bay Buccaneers": "TB",
         "Tennessee Titans": "TEN",
-        "Washington Commanders": "WSH"
+        "Washington Commanders": "WSH",
+        "Washington Football Team": "WSH"
     }
 }
