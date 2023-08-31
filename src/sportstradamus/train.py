@@ -47,12 +47,12 @@ def meditate(force, stats, league):
     mlb = StatsMLB()
     mlb.load()
     mlb.update()
-    # nba = StatsNBA()
-    # nba.load()
-    # nba.update()
-    # nhl = StatsNHL()
-    # nhl.load()
-    # nhl.update()
+    nba = StatsNBA()
+    nba.load()
+    nba.update()
+    nhl = StatsNHL()
+    nhl.load()
+    nhl.update()
     nfl = StatsNFL()
     nfl.load()
     nfl.update()
@@ -100,48 +100,48 @@ def meditate(force, stats, league):
             "pitcher fantasy points parlay",
             "singles",
         ],
-        # "NBA": [
-        #     "PTS",
-        #     "REB",
-        #     "AST",
-        #     "PRA",
-        #     "PR",
-        #     "RA",
-        #     "PA",
-        #     "FG3M",
-        #     "fantasy score",
-        #     "fantasy points parlay",
-        #     "TOV",
-        #     "BLK",
-        #     "STL",
-        #     "BLST",
-        #     "FG3A",
-        #     "FTM",
-        #     "FGM",
-        #     "FGA",
-        #     "OREB",
-        #     "DREB",
-        #     "PF",
-        #     "MIN",
-        # ],
-        # "NHL": [
-        #     "points",
-        #     "saves",
-        #     "goalsAgainst",
-        #     "shots",
-        #     "sogBS",
-        #     "fantasy score",
-        #     "goalie fantasy points underdog",
-        #     "skater fantasy points underdog",
-        #     "goalie fantasy points parlay",
-        #     "skater fantasy points parlay",
-        #     "blocked",
-        #     "hits",
-        #     "goals",
-        #     "assists",
-        #     "faceOffWins",
-        #     "timeOnIce",
-        # ],
+        "NBA": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy score",
+            "fantasy points parlay",
+            "TOV",
+            "BLK",
+            "STL",
+            "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN",
+        ],
+        "NHL": [
+            "points",
+            "saves",
+            "goalsAgainst",
+            "shots",
+            "sogBS",
+            "fantasy score",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "goalie fantasy points parlay",
+            "skater fantasy points parlay",
+            "blocked",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -149,10 +149,10 @@ def meditate(force, stats, league):
         for market in markets:
             if league == "MLB":
                 stat_data = mlb
-            # elif league == "NBA":
-            #     stat_data = nba
-            # elif league == "NHL":
-            #     stat_data = nhl
+            elif league == "NBA":
+                stat_data = nba
+            elif league == "NHL":
+                stat_data = nhl
             elif league == "NFL":
                 stat_data = nfl
             else:

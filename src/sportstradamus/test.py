@@ -1,17 +1,19 @@
-from sportstradamus.stats import StatsMLB
+from sportstradamus.stats import StatsNHL
+from datetime import datetime
+import pandas as pd
 
-MLB = StatsMLB()
-MLB.load()
-MLB.update()
+NHL = StatsNHL()
+NHL.load()
+NHL.update()
 
 offer = {
-    "Player": "Jorge Soler",
-    "Market": "runs",
-    "Date": "2023-08-25",
-    "Line": 0.5,
-    "League": "MLB",
-    "Team": "MIA",
-    "Opponent": "WSH"
+    "Player": "Jack Hughes",
+    "Market": "shots",
+    "Date": "2021-12-31",
+    "Line": 5.5,
+    "League": "NHL",
+    "Team": "NJ",
+    "Opponent": "EDM"
 }
-MLB.profile_market(offer["Market"])
-MLB.get_stats(offer, date=offer['Date'])
+NHL.profile_market(offer["Market"], date=offer["Date"])
+NHL.get_stats(offer, date=offer['Date'])
