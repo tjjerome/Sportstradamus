@@ -95,6 +95,9 @@ def main(progress, books):
         # logger.info("Getting FanDuel NHL lines")
         # fd_data.update(
         #    get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
+        logger.info("Getting FanDuel NFL lines")
+        fd_data.update(
+            get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props']))
         logger.info(str(len(fd_data)) + " offers found")
 
         logger.info("Getting Pinnacle MLB lines")
@@ -117,10 +120,10 @@ def main(progress, books):
         # sport = "icehockey"
         # league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
         # csb_data.update(get_caesars(sport, league))
-        # logger.info("Getting Caesars NFL Lines")
-        # sport = "americanfootball"
-        # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-        # csb_data.update(get_caesars(sport, league))
+        logger.info("Getting Caesars NFL Lines")
+        sport = "americanfootball"
+        league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+        csb_data.update(get_caesars(sport, league))
         logger.info(str(len(csb_data)) + " offers found")
 
     datasets = {
