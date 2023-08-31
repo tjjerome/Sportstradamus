@@ -10,14 +10,14 @@ filepath = pkg_resources.files(data) / "archive.dat"
 with open(filepath, "rb") as infile:
     archive = pickle.load(infile)
 
-apikey = "38c4614a42f2ae7ea623bb87e20edc84"
+apikey = "29311eba87f90e2741845d5c70ca4c14"
 
-sport = "baseball_mlb"
-league = "MLB"
+sport = "icehockey_nhl"
+league = "NHL"
 
-Date = datetime.strptime("2022-06-05T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2021-10-12T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
-while Date < datetime.today():
+while Date < datetime.strptime("2022-06-27T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
     date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
     url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals&date={date}&apiKey={apikey}"
     res = scraper.get(url)["data"]

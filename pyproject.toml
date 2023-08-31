@@ -28,10 +28,10 @@ pytz = "^2023.3"
 scikit-learn = "=1.2.2"
 shap = "^0.42.1"
 seaborn = "^0.12.2"
-torch = {version = "2.0.*", source = "torch-cpu"}
 flask = "^2.3.2"
 flask-table = "^0.5.0"
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
+torch = "^2.0.1"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"
