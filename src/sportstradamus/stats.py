@@ -548,10 +548,11 @@ class StatsNBA(Stats):
 
         player_games = self.gamelog.loc[(self.gamelog["PLAYER_NAME"] == player) & (
             pd.to_datetime(self.gamelog["GAME_DATE"]) < date)]
-        position = self.players.get(player, "")
 
-        if position == '':
-            return 0
+        if len(player_games) > 0:
+            position = player_games.iat[0, 34]
+        else:
+            position = "Guard"
 
         headtohead = player_games.loc[player_games["OPP"] == opponent]
 
