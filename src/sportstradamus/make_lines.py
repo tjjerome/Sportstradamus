@@ -12,23 +12,8 @@ NFL.load()
 NFL.update()
 archive.__init__("NFL")
 markets = [
-    "passing yards",
-    "rushing yards",
-    "receiving yards",
-    "yards",
-    "fantasy points prizepicks",
-    "fantasy points underdog",
-    "fantasy points parlayplay",
-    "passing tds",
-    "rushing tds",
-    "receiving tds",
-    "tds",
-    "completions",
-    "carries",
-    "receptions",
-    "interceptions",
-    "attempts",
-    "targets",
+    "qb yards",
+    "qb tds"
 ]
 for market in tqdm(markets, unit="markets", position=1):
 
@@ -40,7 +25,7 @@ for market in tqdm(markets, unit="markets", position=1):
         ):
             continue
         gameDate = game['gameday']
-        if datetime.strptime(gameDate, '%Y-%m-%d') > datetime(2022, 9, 1):
+        if datetime.strptime(gameDate, '%Y-%m-%d') < datetime(2021, 9, 1):
             continue
         NFL.bucket_stats(market, date=datetime.strptime(gameDate, "%Y-%m-%d"))
         player = game['player display name']

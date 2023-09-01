@@ -1518,15 +1518,16 @@ class StatsNFL(Stats):
         sched = nfl.import_schedules([self.season_start.year])
         upcoming_games = sched.loc[pd.to_datetime(sched['gameday']) >= datetime.today(), [
             'gameday', 'away_team', 'home_team']]
-        df1 = upcoming_games.rename(
-            columns={'home_team': 'Team', 'away_team': 'Opponent'})
-        df2 = upcoming_games.rename(
-            columns={'away_team': 'Team', 'home_team': 'Opponent'})
-        df1['Home'] = 1
-        df2['Home'] = 0
-        upcoming_games = pd.concat([df1, df2]).sort_values('gameday')
-        self.upcoming_games = upcoming_games.groupby("Team").apply(
-            lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home']].to_dict(orient='index')
+        if not upcoming_games.empty:
+            df1 = upcoming_games.rename(
+                columns={'home_team': 'Team', 'away_team': 'Opponent'})
+            df2 = upcoming_games.rename(
+                columns={'away_team': 'Team', 'home_team': 'Opponent'})
+            df1['Home'] = 1
+            df2['Home'] = 0
+            upcoming_games = pd.concat([df1, df2]).sort_values('gameday')
+            self.upcoming_games = upcoming_games.groupby("Team").apply(
+                lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home']].to_dict(orient='index')
 
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
