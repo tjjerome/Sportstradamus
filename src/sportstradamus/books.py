@@ -177,7 +177,7 @@ def get_fd(sport, tabs):
         if datetime.strptime(event["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
         > datetime.now()
         and datetime.strptime(event["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
-        - timedelta(days=5)
+        - timedelta(days=10)
         < datetime.today()
     ]
 
@@ -390,7 +390,8 @@ def get_pinnacle(league):
         try:
             outcomes = sorted(market["participants"]
                               [:2], key=lambda x: x["name"])
-            line = lines[market["id"]]["s;0;ou"][outcomes[1]["id"]]["Line"]
+            line = lines[market["id"]]["s;0;ou"][outcomes[1]
+                                                 ["id"]].get("Line", 0.5)
             prices = [
                 lines[market["id"]]["s;0;ou"][participant["id"]]["Price"]
                 for participant in outcomes
