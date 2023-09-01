@@ -639,7 +639,7 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            data = archive["NBA"][market].get(gameDate.strftime(
+            data = archive["NBA"].get(market, {}).get(gameDate.strftime(
                 "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
 
             lines = [k for k, v in data.items()]
@@ -1482,7 +1482,7 @@ class StatsNFL(Stats):
                 'rushing fumbles', 'rushing fumbles lost', 'rushing 2pt conversions',
                 'receptions', 'targets', 'receiving yards', 'receiving tds',
                 'receiving fumbles', 'receiving fumbles lost', 'receiving 2pt conversions',
-                'special teams tds', 'fumbles', 'fumbles lost', 'yards', 'tds',
+                'special teams tds', 'fumbles', 'fumbles lost', 'yards', 'tds', 'qb yards', 'qb tds',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlayplay',
                 'home', 'moneyline', 'totals', 'opponent', 'gameday', 'game id']
         self.gamelog = pd.DataFrame(columns=cols)
@@ -1535,7 +1535,10 @@ class StatsNFL(Stats):
             nfl_data['receiving_fumbles_lost']
         nfl_data['yards'] = nfl_data['receiving_yards'] + \
             nfl_data['rushing_yards']
+        nfl_data['qb_yards'] = nfl_data['passing_yards'] + \
+            nfl_data['rushing_yards']
         nfl_data['tds'] = nfl_data['rushing_tds'] + nfl_data['receiving_tds']
+        nfl_data['qb_tds'] = nfl_data['rushing_tds'] + nfl_data['passing_tds']
 
         nfl_data['fantasy_points_prizepicks'] = nfl_data['passing_yards']/25 + nfl_data['passing_tds']*4 - \
             nfl_data['interceptions'] + nfl_data['yards']/10 + nfl_data['tds']*6 + \
@@ -1702,7 +1705,7 @@ class StatsNFL(Stats):
             lambda x: x.loc[~x['home'].astype(bool), market].mean()/x[market].mean())-1
 
         positions = ['QB', 'WR', 'RB', 'TE']
-        if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]):
+        if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]):
             positions = ['QB']
         for position in positions:
             positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
@@ -1827,7 +1830,7 @@ class StatsNFL(Stats):
         if position == '':
             return 0
 
-        if any([string in market for string in ["pass", "completions", "attempts", "interceptions"]]) and position != "QB":
+        if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]) and position != "QB":
             return 0
 
         headtohead = player_games.loc[player_games["opponent"] == opponent]
@@ -2532,7 +2535,7 @@ class StatsNHL(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            data = archive["NHL"][market].get(gameDate.strftime(
+            data = archive["NHL"].get(market, {}).get(gameDate.strftime(
                 "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
 
             lines = [k for k, v in data.items()]
