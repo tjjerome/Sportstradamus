@@ -380,6 +380,8 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
                     else:
                         players[i] = name_df.iloc[0, 2]
                         player = name_df.iloc[0, 2]
+                        if teams[i] == "":
+                            pass  # TODO: finish this. make the previous lines league-agnostic
 
                 lines = list(archive.archive.get(league, {}).get(
                     market, {}).get(o["Date"], {}).get(player, {}).keys())
