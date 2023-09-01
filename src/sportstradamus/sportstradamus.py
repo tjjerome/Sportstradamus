@@ -82,8 +82,9 @@ def main(progress, books):
         #    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
         # logger.info("Getting DraftKings NHL lines")
         # dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
+        logger.info("Getting DraftKings NFL lines")
+        dk_data.update(get_dk(88808, [1000, 1001]))  # NFL
         # dk_data.update(get_dk(92893, [488, 633])) # Tennis
-        # dk_data.update(get_dk(91581, [488, 633])) # Tennis
         logger.info(str(len(dk_data)) + " offers found")
 
         logger.info("Getting FanDuel MLB lines")
@@ -106,6 +107,8 @@ def main(progress, books):
         # pin_data.update(get_pinnacle(487))  # NBA
         # logger.info("Getting Pinnacle NHL lines")
         # pin_data.update(get_pinnacle(1456))  # NHL
+        logger.info("Getting Pinnacle NFL lines")
+        pin_data.update(get_pinnacle(889))  # NFL
         logger.info(str(len(pin_data)) + " offers found")
 
         logger.info("Getting Caesars MLB Lines")
