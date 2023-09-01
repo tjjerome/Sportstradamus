@@ -1246,7 +1246,7 @@ class StatsMLB(Stats):
             logger.exception(f"{market} not profiled")
             return 0
         line = offer["Line"]
-        opponent = offer["Opponent"]
+        opponent = offer["Opponent"].split(" (")[0]
         home = offer.get("Home")
         if home is None:
             home = self.upcoming_games.get(team, {}).get("Home", 0)
