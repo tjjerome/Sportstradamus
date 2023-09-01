@@ -493,7 +493,7 @@ def get_caesars(sport, league):
             for game in api["competitions"][0]["events"]
             if game["type"] == "MATCH"
             and not game["started"]
-            and game["marketCountActivePreMatch"] > 100
+            and game["marketCountActivePreMatch"] > 20
         ]
 
     except Exception as exc:
@@ -506,7 +506,7 @@ def get_caesars(sport, league):
         params["url"] = caesars
 
         # Sleep for a random interval to avoid overloading the API
-        sleep(random.uniform(5, 10))
+        sleep(random.uniform(1, 5))
 
         try:
             # Make a GET request to the Caesars API for each game ID
