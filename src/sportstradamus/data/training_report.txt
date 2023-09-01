@@ -113,6 +113,121 @@
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.749349     0.051712        0.648464         0.752076          0.181297  0.096849
 
+===================================== NBA AST =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.757284     0.092709        0.770203         0.579158          0.168711  0.514519
+
+===================================== NBA BLK =====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.710657     0.109308        0.629941         0.726507          0.203968  0.206312
+
+===================================== NBA BLST ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.690651      0.09775        0.695235         0.666947          0.209242  0.123912
+
+===================================== NBA DREB ====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.780456     0.153203        0.810237         0.593882           0.15586  0.383274
+
+===================================== NBA FG3A ====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.803503     0.136481        0.828167         0.735089          0.145148   0.54343
+
+===================================== NBA FG3M ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.727623     0.107095        0.718031         0.748264          0.186582  0.307127
+
+===================================== NBA FGA =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.817914     0.122833        0.856514         0.581419          0.128111  0.595341
+
+===================================== NBA FGM =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.790789     0.183081        0.811894         0.560144          0.151788  0.423689
+
+===================================== NBA FTM =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.568655     0.202139        0.559035         0.617925          0.240669  0.376435
+
+===================================== NBA MIN =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.838692     0.105127        0.891113         0.554674          0.115231  0.514724
+
+===================================== NBA OREB ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.643858     0.157261        0.648067         0.640154          0.225039  0.301515
+
+====================================== NBA PA =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.910792     0.119267        0.940033              0.5          0.075123  0.549438
+
+====================================== NBA PF =====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.753888     0.185663        0.809266         0.585217          0.179139  0.121188
+
+====================================== NBA PR =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.918757     0.097996        0.948538         0.508065          0.065956  0.497875
+
+===================================== NBA PRA =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.921415     0.123817         0.94729         0.517483          0.069258  0.545937
+
+===================================== NBA PTS =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.881101      0.15099        0.906478         0.532051          0.101163  0.465322
+
+====================================== NBA RA =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.906939       0.0857        0.932648         0.573308          0.072907  0.457357
+
+===================================== NBA REB =====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.865957     0.111152        0.889403         0.568998          0.107623  0.455903
+
+===================================== NBA STL =====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.613981     0.319316        0.611976         0.617031          0.238894  0.073679
+
+===================================== NBA TOV =====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.658601     0.207304        0.677581         0.612004          0.218863  0.287882
+
+============================ NBA fantasy points parlay ============================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+  0.82377     0.157875        0.858741         0.580233          0.128398  0.489378
+
+========================== NBA fantasy points prizepicks ==========================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.998647          0.0        0.998647              0.0          0.001662  0.487469
+
+=========================== NBA fantasy points underdog ===========================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.998647          0.0        0.998647              0.0          0.001662  0.487469
+
 =================================== NFL attempts ==================================
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
