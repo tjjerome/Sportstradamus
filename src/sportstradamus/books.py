@@ -1052,9 +1052,13 @@ def get_parp():
     offers = {}
     for player in tqdm(api["players"], desc="Getting ParlayPlay Offers", unit="offer"):
         teams = [
-            player["match"]["homeTeam"]["teamAbbreviation"],
-            player["match"]["awayTeam"]["teamAbbreviation"],
+            player["match"]["homeTeam"]["teamAbbreviation"].replace(
+                "CHW", "CWS"),
+            player["match"]["awayTeam"]["teamAbbreviation"].replace(
+                "CHW", "CWS"),
         ]
+        player_team = player["player"]["team"]["teamAbbreviation"].replace(
+            "CHW", "CWS")
         for stat in player["stats"]:
             market = stat["challengeName"]
             if "Fantasy" in market:
@@ -1074,8 +1078,8 @@ def get_parp():
                 "Opponent": [
                     team
                     for team in teams
-                    if team != player["player"]["team"]["teamAbbreviation"]
-                ][0].replace("CHW", "CWS"),
+                    if team != player_team
+                ][0],
             }
 
             if n["League"] not in offers:
@@ -1099,9 +1103,9 @@ def get_parp():
             teams.append(player["player"]["team"]
                          ["teamAbbreviation"].replace("CHW", "CWS"))
             opponents.append([team for team in
-                              [player["match"]["homeTeam"]["teamAbbreviation"],
-                               player["match"]["awayTeam"]["teamAbbreviation"]]
-                              if team != player["player"]["team"]["teamAbbreviation"]][0].replace("CHW", "CWS"))
+                              [player["match"]["homeTeam"]["teamAbbreviation"].replace("CHW", "CWS"),
+                               player["match"]["awayTeam"]["teamAbbreviation"].replace("CHW", "CWS")]
+                              if team != player["player"]["team"]["teamAbbreviation"].replace("CHW", "CWS")][0])
 
         market = combo['pickType']['challengeName']
         if "Fantasy" in market:
