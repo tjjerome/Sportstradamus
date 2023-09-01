@@ -17,7 +17,13 @@
             "Rebs+Asts": "Ast + Reb",
             "3-PT Made": "Threes",
             "Goalie Saves": "Saves",
-            "Shots On Goal": "Player Shots on Goal"
+            "Shots On Goal": "Player Shots on Goal",
+            "Pass Yards": "Pass Yds",
+            "Pass+Rush Yds": "Pass + Rush Yds",
+            "INT": "Interceptions",
+            "Rush Yards": "Rush Yds",
+            "Receiving Yards": "Rec Yds",
+            "Rush+Rec Yds": "Rush + Rec Yds"
         },
         "FanDuel": {
             "Blocked Shots": "Blocks",
@@ -29,12 +35,22 @@
             "Pitcher Strikeouts": "Strikeouts",
             "1st Inning Runs Allowed": "1st Inning Over/Under 0.5 Runs",
             "Goalie Saves": "Saves",
-            "Shots On Goal": "Shots on Goal"
+            "Shots On Goal": "Shots on Goal",
+            "Pass Yards": "Passing Yds",
+            "Rush Yards": "Rushing Yds",
+            "Rush+Rec Yds": "Rushing + Receiving Yds",
+            "Receiving Yards": "Receiving Yds"
         },
         "Pinnacle": {
             "Pitcher Strikeouts": "Total Strikeouts",
             "3-PT Made": "3 Point FG",
-            "Goalie Saves": "Saves"
+            "Goalie Saves": "Saves",
+            "Pass Yards": "Pass Yds",
+            "Rush Yards": "Rush Yds",
+            "Receiving Yards": "Receiving Yds",
+            "Pass TDs": "TD Passes",
+            "Rush+Rec TDs": "Anytime TD",
+            "INT": "Interceptions"
         },
         "Caesars": {
             "Shots On Goal": "Shots",
@@ -44,7 +60,11 @@
             "Blks+Stls": "Blocks + Steals",
             "Pts+Asts": "Points + Assists",
             "Pts+Rebs": "Points + Rebounds",
-            "Rebs+Asts": "Rebounds + Assists"
+            "Rebs+Asts": "Rebounds + Assists",
+            "Pass Yards": "Passing Yards",
+            "Rush+Rec Yds": "Rushing + Receiving Yards",
+            "Pass TDs": "Passing TDs",
+            "INT": "Interceptions"
         },
         "Stats": {
             "3-PT Made": "FG3M",
@@ -91,11 +111,15 @@
             "Hits": "hits",
             "Pass Yards": "passing yards",
             "Rush Yards": "rushing yards",
+            "Pass+Rush Yds": "qb yards",
+            "Rush+Rec Yds": "yards",
             "Receiving Yards": "receiving yards",
             "Pass TDs": "passing tds",
             "Rec TDs": "receiving tds",
             "Rush TDs": "rushing tds",
-            "Fantasy Points": "fantasy points prizepicks"
+            "Rush+Rec TDs": "tds",
+            "Fantasy Points": "fantasy points prizepicks",
+            "INT": "interceptions"
         }
     },
     "Underdog": {
@@ -109,7 +133,13 @@
             "Blocks + Steals": "Steals + Blocks",
             "3-Pointers Made": "Threes",
             "Shots": "Player Shots on Goal",
-            "Games won": "Player Games Won"
+            "Games won": "Player Games Won",
+            "Passing TDs": "Pass TDs",
+            "Passing Yards": "Pass Yds",
+            "Passing + Rushing Yards": "Pass + Rush Yds",
+            "Rushing Yards": "Rush Yds",
+            "Receiving Yards": "Rec Yds",
+            "Rushing + Receiving Yards": "Rush + Rec Yds"
         },
         "FanDuel": {
             "Points + Assists": "Pts + Ast",
@@ -117,13 +147,22 @@
             "Pts + Rebs + Asts": "Pts + Reb + Ast",
             "Rebounds + Assists": "Reb + Ast",
             "3-Pointers Made": "Made Threes",
-            "Shots": "Shots on Goal"
+            "Shots": "Shots on Goal",
+            "Passing Yards": "Passing Yds",
+            "Receiving Yards": "Receiving Yds",
+            "Rushing Yards": "Rushing Yds",
+            "Rushing + Receiving Yards": "Rushing + Receiving Yds"
         },
         "Pinnacle": {
             "Shots": "Shots on Goal",
             "Strikeouts": "Total Strikeouts",
             "3-Pointers Made": "3 Point FG",
-            "Pts + Rebs + Asts": "Pts+Rebs+Asts"
+            "Pts + Rebs + Asts": "Pts+Rebs+Asts",
+            "Passing Yards": "Pass Yds",
+            "Receiving Yards": "Receiving Yds",
+            "Rushing Yards": "Rush Yds",
+            "Passing TDs": "TD Passes",
+            "Rushing + Receiving TDs": "Anytime TD"
         },
         "Caesars": {
             "Strikeouts": "Pitching Strikeouts",
@@ -166,12 +205,16 @@
             "Receiving Yards": "receiving yards",
             "Rushing Yards": "rushing yards",
             "Rushing + Receiving Yards": "yards",
+            "Total Yards": "qb yards",
             "Fantasy Points": "fantasy points underdog",
             "Passing TDs": "passing tds",
             "Receiving TDs": "receiving tds",
             "Rushing TDs": "rushing tds",
             "Rushing + Receiving TDs": "tds",
-            "Receptions": "receptions"
+            "Receptions": "receptions",
+            "Interceptions": "interceptions",
+            "Passing Attempts": "attempts",
+            "Completions": "completions"
         }
     },
     "Thrive": {
@@ -190,7 +233,12 @@
             "REBS + ASTS": "Ast + Reb",
             "RUNs": "Runs Scored",
             "SAVs": "Saves",
-            "STLS": "Steals"
+            "STLS": "Steals",
+            "Pass YDS": "Pass Yds",
+            "Pass YDS + Rush YDS": "Pass + Rush Yds",
+            "Rush YDS": "Rush Yds",
+            "Rec YDS": "Rec Yds",
+            "Rush YDS + Rec YDS": "Rush + Rec Yds"
         },
         "FanDuel": {
             "ASTS": "Assists",
@@ -203,7 +251,11 @@
             "REBS": "Rebounds",
             "REBS + ASTS": "Reb + Ast",
             "SAVs": "Saves",
-            "STLS": "Steals"
+            "STLS": "Steals",
+            "Pass YDS": "Passing Yds",
+            "Rec YDS": "Receiving Yds",
+            "Rush YDS": "Rushing Yds",
+            "Rush YDS + Rec YDS": "Rushing + Receiving Yds"
         },
         "Pinnacle": {
             "ASTS": "Assists",
@@ -214,7 +266,10 @@
             "PTS + REBS + ASTS": "Pts+Rebs+Asts",
             "REBS": "Rebounds",
             "SAVs": "Saves",
-            "STLS": "Steals"
+            "STLS": "Steals",
+            "Pass YDS": "Pass Yds",
+            "Rec YDS": "Receiving Yds",
+            "Rush YDS": "Rush Yds"
         },
         "Caesars": {
             "ASTS": "Assists",
@@ -229,7 +284,11 @@
             "REBS": "Rebounds",
             "REBS + ASTS": "Rebounds + Assists",
             "SAVs": "Saves",
-            "STLS": "Steals"
+            "STLS": "Steals",
+            "Pass YDS": "Passing Yards",
+            "Rec YDS": "Peceiving Yards",
+            "Rush YDS": "Rushing Yards",
+            "Rush YDS + Rec YDS": "Rushing + Receiving Yards"
         },
         "Stats": {
             "GOLs + ASTs": "PTS",
@@ -253,7 +312,8 @@
             "Pass YDS": "passing yards",
             "Rec YDS": "receiving yards",
             "Rush YDS": "rushing yards",
-            "Rush YDS + Rec YDS": "yards"
+            "Rush YDS + Rec YDS": "yards",
+            "Pass YDS + Rush YDS": "qb yards"
         }
     },
     "ParlayPlay": {
@@ -266,18 +326,31 @@
             "Shots on Goal": "Player Shots on Goal",
             "Stl + Blk": "Steals + Blocks",
             "Strikeouts (K)": "Strikeouts",
-            "Strikeouts": "Strikeouts"
+            "Strikeouts": "Strikeouts",
+            "Passing TDs": "Pass TDs",
+            "Passing Yards": "Pass Yds",
+            "Passing + Rushing Yards": "Pass + Rush Yds",
+            "Rushing Yards": "Rush Yds",
+            "Receiving Yards": "Rec Yds",
+            "Rushing + Receiving Yards": "Rush + Rec Yds"
         },
         "FanDuel": {
             "Blocked Shots": "Blocks",
             "Shots": "Shots on Goal",
-            "Strikeouts (K)": "Strikeouts"
+            "Strikeouts (K)": "Strikeouts",
+            "Passing Yards": "Passing Yds",
+            "Rushing Yards": "Rushing Yds",
+            "Receiving Yards": "Receiving Yds"
         },
         "Pinnacle": {
             "Blocked Shots": "Blocks",
             "Pts + Reb + Ast": "Pts+Rebs+Asts",
             "Shots": "Shots on Goal",
-            "Strikeouts (K)": "Total Strikeouts"
+            "Strikeouts (K)": "Total Strikeouts",
+            "Passing Yards": "Pass Yds",
+            "Rushing Yards": "Rush Yds",
+            "Receiving Yards": "Receiving Yds",
+            "Passing TDs": "TD Passes"
         },
         "Caesars": {
             "Blocked Shots": "Blocks",
@@ -288,8 +361,7 @@
             "Reb + Ast": "Rebounds + Assists",
             "Shots on Goal": "Shots",
             "Stl + Blk": "Blocks and Steals",
-            "Strikeouts (K)": "Pitching Strikeouts",
-            "Strikeouts": "Strikeouts"
+            "Strikeouts (K)": "Pitching Strikeouts"
         },
         "Stats": {
             "3PT Made": "FG3M",
@@ -325,7 +397,10 @@
             "Passing Yards": "passing yards",
             "Rushing Yards": "rushing yards",
             "Receiving Yards": "receiving yards",
-            "Fantasy Points": "fantasy points parlay"
+            "Fantasy Points": "fantasy points parlay",
+            "Passing TDs": "passing tds",
+            "Rushing TDs": "rushing tds",
+            "Receiving TDs": "receiving tds"
         }
     }
 }
