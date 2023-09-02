@@ -221,12 +221,12 @@
 ========================== NBA fantasy points prizepicks ==========================
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.998647          0.0        0.998647              0.0          0.001662  0.487469
+ 0.815631      0.14103         0.85209         0.571586          0.129334   0.47634
 
 =========================== NBA fantasy points underdog ===========================
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.998647          0.0        0.998647              0.0          0.001662  0.487469
+ 0.815631      0.14103         0.85209         0.571586          0.129334   0.47634
 
 =================================== NFL attempts ==================================
  Distribution Model: Gaussian
@@ -273,6 +273,21 @@
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.678571      0.23913        0.703704         0.662791          0.219644   0.11182
 
+==================================== NFL qb tds ===================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.532164     0.226244        0.510204         0.540984          0.255826  0.151383
+
+=================================== NFL qb yards ==================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.712575     0.215962        0.736842         0.692308          0.208092  0.142776
+
+================================ NFL receiving tds ================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.844492          0.0             0.0         0.844492          0.118949  0.093322
+
 =============================== NFL receiving yards ===============================
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
@@ -282,6 +297,11 @@
  Distribution Model: Poisson
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.576331     0.262009        0.562172         0.605839          0.242647  0.338042
+
+================================= NFL rushing tds =================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.922234     0.014039             0.6         0.923119          0.060559  0.196672
 
 ================================ NFL rushing yards ================================
  Distribution Model: Gaussian
@@ -302,4 +322,79 @@
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.658433     0.175562        0.670342         0.617978          0.214568  0.324885
+
+=================================== NHL assists ===================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.763213     0.045938        0.533679          0.76575          0.176427  0.077365
+
+=================================== NHL blocked ===================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.666731     0.154786        0.684126         0.661259          0.221702  0.232053
+
+================================= NHL faceOffWins =================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.890876     0.051073        0.784671         0.924008          0.086937  0.764629
+
+========================== NHL fantasy points prizepicks ==========================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.709071     0.096795        0.711844         0.572289          0.177813  0.191092
+
+======================== NHL goalie fantasy points underdog =======================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.916822     0.016544        0.992679         0.782946          0.066012  0.061893
+
+==================================== NHL goals ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+   0.8395     0.000919             0.0           0.8395          0.126433  0.067549
+
+================================= NHL goalsAgainst ================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.848352     0.163603        0.905013         0.565789          0.132033   0.05228
+
+===================================== NHL hits ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.685449     0.178025        0.707867         0.660348          0.211464  0.310615
+
+==================================== NHL points ===================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.705308     0.114198        0.627752           0.7158          0.205227   0.14581
+
+==================================== NHL saves ====================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.872999     0.138787        0.934177         0.544218          0.095357  0.054539
+
+==================================== NHL shots ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.702899     0.159217          0.7514         0.611049          0.201683  0.228463
+
+========================= NHL skater fantasy points parlay ========================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.770301     0.196022        0.774196         0.597561          0.160509  0.171927
+
+======================== NHL skater fantasy points underdog =======================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.778658     0.167865        0.783639         0.547692          0.148217  0.175312
+
+==================================== NHL sogBS ====================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.768283     0.206291        0.819679         0.575405          0.172395  0.191799
+
+================================== NHL timeOnIce ==================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.859815     0.101335        0.901324         0.598332           0.10177  0.715919
 

@@ -7,13 +7,13 @@ NHL.load()
 NHL.update()
 
 offer = {
-    "Player": "Jack Hughes",
-    "Market": "shots",
-    "Date": "2021-12-31",
-    "Line": 5.5,
+    "Player": "Jake Oettinger",
+    "Market": "goalie fantasy points underdog",
+    "Date": "2022-01-18",
+    "Line": 15.5,
     "League": "NHL",
-    "Team": "NJ",
-    "Opponent": "EDM"
+    "Team": "DAL",
+    "Opponent": "MTL"
 }
 NHL.profile_market(offer["Market"], date=offer["Date"])
 NHL.get_stats(offer, date=offer['Date'])
