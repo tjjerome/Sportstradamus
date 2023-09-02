@@ -2393,9 +2393,16 @@ class StatsNHL(Stats):
         if type(date) is datetime:
             date = date.strftime("%Y-%m-%d")
 
+        stat_map = {
+            "PTS": "points",
+            "AST": "assists",
+            "BLK": "blocked"
+        }
+
         player = offer["Player"]
         team = offer["Team"]
         market = offer["Market"]
+        market = stat_map.get(market, market)
         if self.defenseProfile.empty:
             logger.exception(f"{market} not profiled")
             return 0
