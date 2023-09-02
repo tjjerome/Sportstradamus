@@ -964,7 +964,7 @@ def get_thrive():
     offers = {}
     for line in tqdm(lines, desc="Getting Thrive Offers", unit="offer"):
         o = line.get("contestProp")
-        team = o["player1"]["teamAbbr"]
+        team = o["player1"]["teamAbbr"].upper()
         opponent = str(o.get("team2Abbr", "") or "").upper()
         if team == opponent:
             opponent = str(o.get("team1Abbr", "") or "").upper()
