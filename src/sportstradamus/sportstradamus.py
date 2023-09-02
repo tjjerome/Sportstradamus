@@ -625,13 +625,21 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 o["Books"] = p[0]
                 o["Model"] = proba[0]
 
+            totals_map = {
+                "NBA": 220,
+                "NFL": 45,
+                "MLB": 8.3,
+                "NHL": 5.5
+            }
+
             if " + " in o["Player"]:
                 avg5 = np.sum([s["Avg5"] for s in stats])
                 o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
                 avgh2h = np.sum([s["AvgH2H"] for s in stats])
                 o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
                 o["Moneyline"] = np.mean([s["Moneyline"] for s in stats])
-                o["O/U"] = np.mean([s["Total"] for s in stats])
+                o["O/U"] = np.mean([s["Total"] for s in stats]) / \
+                    totals_map.get(o["League"], 1)
                 o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
             elif " vs. " in o["Player"]:
                 avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
@@ -640,7 +648,8 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
                 o["Moneyline"] = np.mean(
                     [stats[0]["Moneyline"], 1-stats[1]["Moneyline"]])
-                o["O/U"] = np.mean([s["Total"] for s in stats])
+                o["O/U"] = np.mean([s["Total"] for s in stats]) / \
+                    totals_map.get(o["League"], 1)
                 o["DVPOA"] = hmean(
                     [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
             else:
@@ -649,7 +658,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 o["Avg H2H"] = stats["AvgH2H"] - \
                     o["Line"] if stats["AvgH2H"] != 0 else 0
                 o["Moneyline"] = stats["Moneyline"]
-                o["O/U"] = stats["Total"]
+                o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
                 o["DVPOA"] = stats["DVPOA"]
 
             lines = archive.archive.get(league, {}).get(market, {}).get(
