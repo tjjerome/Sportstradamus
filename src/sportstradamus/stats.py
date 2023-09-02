@@ -2284,7 +2284,7 @@ class StatsNHL(Stats):
             lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
 
         positions = ["C", "R", "L", "D"]
-        if not any([string in market for string in ["Against", "saves"]]):
+        if not any([string in market for string in ["Against", "saves", "goalie"]]):
             for position in positions:
                 positionGroups = gamelog_df.loc[gamelog_df['position'] == position].groupby(
                     'opponent')
@@ -2428,7 +2428,7 @@ class StatsNHL(Stats):
 
         date = datetime.strptime(date, "%Y-%m-%d")
 
-        if any([string in market for string in ["Against", "saves"]]):
+        if any([string in market for string in ["Against", "saves", "goalie"]]):
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
                 pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] == "G")]
 
@@ -2464,7 +2464,7 @@ class StatsNHL(Stats):
             "Home": home
         }
         positions = ["C", "R", "L", "D"]
-        if not any([string in market for string in ["Against", "saves"]]):
+        if not any([string in market for string in ["Against", "saves", "goalie"]]):
             if len(player_games) > 0:
                 position = player_games.iat[0, 7]
             else:
@@ -2500,7 +2500,7 @@ class StatsNHL(Stats):
         data.update(
             {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
 
-        if any([string in market for string in ["Against", "saves"]]):
+        if any([string in market for string in ["Against", "saves", "goalie"]]):
             data["DVPOA"] = data.pop("Defense avg")
         else:
             data["DVPOA"] = self.defenseProfile.loc[opponent, position]
