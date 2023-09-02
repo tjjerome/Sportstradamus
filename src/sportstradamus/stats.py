@@ -2245,7 +2245,7 @@ class StatsNHL(Stats):
             one_year_ago <= gameDates) & (gameDates < date)]
 
         # Filter non-starting goalies or non-starting skaters depending on the market
-        if any([string in market for string in ["Against", "save"]]):
+        if any([string in market for string in ["Against", "saves", "goalie"]]):
             gamelog_df = gamelog_df[gamelog_df["position"] == "G"]
         else:
             gamelog_df = gamelog_df[gamelog_df["position"] != "G"]
