@@ -343,6 +343,11 @@
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.709071     0.096795        0.711844         0.572289          0.177813  0.191092
 
+========================= NHL goalie fantasy points parlay ========================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.807825     0.201287        0.850889          0.57971          0.157053  0.032394
+
 ======================== NHL goalie fantasy points underdog =======================
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
