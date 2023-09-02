@@ -1052,13 +1052,21 @@ def get_parp():
     offers = {}
     for player in tqdm(api["players"], desc="Getting ParlayPlay Offers", unit="offer"):
         teams = [
-            player["match"]["homeTeam"]["teamAbbreviation"].replace(
-                "CHW", "CWS"),
-            player["match"]["awayTeam"]["teamAbbreviation"].replace(
-                "CHW", "CWS"),
+            player["match"]["homeTeam"]["teamAbbreviation"],
+            player["match"]["awayTeam"]["teamAbbreviation"],
         ]
-        player_team = player["player"]["team"]["teamAbbreviation"].replace(
-            "CHW", "CWS")
+
+        player_team = player["player"]["team"]["teamAbbreviation"]
+        opponent_team = [team for team in
+                         [player["match"]["homeTeam"]["teamAbbreviation"],
+                             player["match"]["awayTeam"]["teamAbbreviation"]]
+                         if team != player_team][0]
+
+        if player_team is not None:
+            player_team = player_team.replace("CHW", "CWS")
+        if opponent_team is not None:
+            opponent_team = opponent_team.replace("CHW", "CWS")
+
         for stat in player["stats"]:
             market = stat["challengeName"]
             if "Fantasy" in market:
@@ -1070,16 +1078,12 @@ def get_parp():
             n = {
                 "Player": remove_accents(player["player"]["fullName"]),
                 "League": player["match"]["league"]["leagueNameShort"],
-                "Team": player["player"]["team"]["teamAbbreviation"].replace("CHW", "CWS"),
+                "Team": player_team,
                 "Date": player["match"]["matchDate"].split("T")[0],
                 "Market": market,
                 "Line": float(stat["statValue"]),
                 "Slide": "N",
-                "Opponent": [
-                    team
-                    for team in teams
-                    if team != player_team
-                ][0],
+                "Opponent": opponent_team,
             }
 
             if n["League"] not in offers:
@@ -1100,12 +1104,17 @@ def get_parp():
         players = []
         for player in combo['packageLegs']:
             players.append(remove_accents(player["player"]["fullName"]))
-            teams.append(player["player"]["team"]
-                         ["teamAbbreviation"].replace("CHW", "CWS"))
-            opponents.append([team for team in
-                              [player["match"]["homeTeam"]["teamAbbreviation"].replace("CHW", "CWS"),
-                               player["match"]["awayTeam"]["teamAbbreviation"].replace("CHW", "CWS")]
-                              if team != player["player"]["team"]["teamAbbreviation"].replace("CHW", "CWS")][0])
+
+            player_team = player["player"]["team"]["teamAbbreviation"]
+            if player_team is not None:
+                teams.append(player_team.replace("CHW", "CWS"))
+
+            opponent_team = [team for team in
+                             [player["match"]["homeTeam"]["teamAbbreviation"],
+                              player["match"]["awayTeam"]["teamAbbreviation"]]
+                             if team != player_team][0]
+            if opponent_team is not None:
+                opponents.append(opponent_team.replace("CHW", "CWS"))
 
         market = combo['pickType']['challengeName']
         if "Fantasy" in market:
