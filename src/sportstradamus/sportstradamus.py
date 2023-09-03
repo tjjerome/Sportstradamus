@@ -32,7 +32,7 @@ import warnings
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
@@ -579,10 +579,10 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                     under -= push/2
                 elif dist == "Gaussian":
                     under = norm.cdf(o["Line"],
-                                     params[1]["loc"] -
-                                     params[0]["loc"],
-                                     params[1]["scale"] +
-                                     params[0]["scale"])
+                                     params[0]["loc"] -
+                                     params[1]["loc"],
+                                     params[0]["scale"] +
+                                     params[1]["scale"])
 
         else:
             if o["Player"] not in playerStats.index:
