@@ -119,7 +119,8 @@
             "Rush TDs": "rushing tds",
             "Rush+Rec TDs": "tds",
             "Fantasy Points": "fantasy points prizepicks",
-            "INT": "interceptions"
+            "INT": "interceptions",
+            "Receptions": "receptions"
         }
     },
     "Underdog": {
