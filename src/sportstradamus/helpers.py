@@ -108,6 +108,10 @@ def remove_accents(input_str):
         out_str = "Michael Porter Jr."
     if out_str == "Gabriel Davis":
         out_str = "Gabe Davis"
+    if out_str == "Marvin Jones Jr.":
+        out_str = "Marvin Jones"
+    if out_str == "D.K. Metcalf":
+        out_str = "DK Metcalf"
     out_str = out_str.replace(" III", "")
     return out_str
 
