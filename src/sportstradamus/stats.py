@@ -1828,8 +1828,11 @@ class StatsNFL(Stats):
             pd.to_datetime(self.gamelog["gameday"]) < date)]
         position = self.players.get(player, "")
 
-        if position == '':
-            return 0
+        if position == "":
+            if len(player_games) > 0:
+                position = player_games.iat[0, 2]
+            else:
+                position = "WR"
 
         if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]) and position != "QB":
             return 0
