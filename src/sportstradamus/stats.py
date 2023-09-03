@@ -1254,6 +1254,9 @@ class StatsMLB(Stats):
         if player not in self.playerProfile.index:
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
+        if defense not in self.defenseProfile.index:
+            self.defenseProfile.loc[defense] = np.zeros_like(
+                self.defenseProfile.columns)
 
         try:
             if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
