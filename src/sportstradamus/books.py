@@ -964,10 +964,12 @@ def get_thrive():
     offers = {}
     for line in tqdm(lines, desc="Getting Thrive Offers", unit="offer"):
         o = line.get("contestProp")
-        team = o["player1"]["teamAbbr"].upper()
-        opponent = str(o.get("team2Abbr", "") or "").upper()
+        team = o["player1"]["teamAbbr"].upper().replace("WAS", "WSH")
+        opponent = str(o.get("team2Abbr", "")
+                       or "").upper().replace("WAS", "WSH")
         if team == opponent:
-            opponent = str(o.get("team1Abbr", "") or "").upper()
+            opponent = str(o.get("team1Abbr", "")
+                           or "").upper().replace("WAS", "WSH")
         n = {
             "Player": remove_accents(
                 " ".join([o["player1"]["firstName"], o["player1"]["lastName"]])
