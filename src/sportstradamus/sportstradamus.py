@@ -356,8 +356,8 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
     playerNames = []
 
     for o in tqdm(offers, leave=False, disable=not pbar):
-        if " + " in o["Player"] or " vs. " in o["Player"]:
-            players = o["Player"].replace(" vs. ", " + ").split(" + ")
+        if "+" in o["Player"] or "vs." in o["Player"]:
+            players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
             teams = o["Team"].split("/")
             if len(teams) == 1:
@@ -366,7 +366,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
             if len(opponents) == 1:
                 opponents = opponents*2
             for i, player in enumerate(players):
-                if len(player.split(" ")[0].replace(".", "")) == 1:
+                if len(player.split(" ")[0].replace(".", "")) <= 2:
                     if league == "NFL":
                         nameStr = 'player display name'
                     elif league == "NBA":
@@ -490,8 +490,8 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
     prob_params.index = playerStats.index
 
     for o in tqdm(offers, leave=False):
-        if " + " in o["Player"] or " vs. " in o["Player"]:
-            players = o["Player"].replace(" vs. ", " + ").split(" + ")
+        if "+" in o["Player"] or "vs." in o["Player"]:
+            players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
             stats = []
             for i, player in enumerate(players):
@@ -519,7 +519,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
 
-            if " + " in o["Player"]:
+            if "+" in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
                              ["Odds"]) if stats[0]["Odds"] != 0 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
@@ -552,7 +552,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                                      params[1]["scale"] +
                                      params[0]["scale"])
 
-            elif " vs. " in o["Player"]:
+            elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
                              ["Odds"]) if stats[0]["Odds"] != 0 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
@@ -632,7 +632,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 "NHL": 5.5
             }
 
-            if " + " in o["Player"]:
+            if "+" in o["Player"]:
                 avg5 = np.sum([s["Avg5"] for s in stats])
                 o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
                 avgh2h = np.sum([s["AvgH2H"] for s in stats])
@@ -641,7 +641,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 o["O/U"] = np.mean([s["Total"] for s in stats]) / \
                     totals_map.get(o["League"], 1)
                 o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
-            elif " vs. " in o["Player"]:
+            elif "vs." in o["Player"]:
                 avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
                 o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
                 avgh2h = stats[0]["AvgH2H"] - stats[1]["AvgH2H"]
