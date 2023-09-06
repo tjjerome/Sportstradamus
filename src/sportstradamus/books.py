@@ -729,7 +729,7 @@ def get_ud():
 
     team_ids = {}
     for i in teams["teams"]:
-        team_ids[i["id"]] = i["abbr"]
+        team_ids[i["id"]] = i["abbr"].replace("WAS", "WSH")
 
     api = scraper.get(
         "https://api.underdogfantasy.com/beta/v3/over_under_lines")
@@ -747,8 +747,8 @@ def get_ud():
     match_ids = {}
     for i in api["games"]:
         match_ids[i["id"]] = {
-            "Home": team_ids[i["home_team_id"]],
-            "Away": team_ids[i["away_team_id"]],
+            "Home": team_ids[i["home_team_id"]].replace("WAS", "WSH"),
+            "Away": team_ids[i["away_team_id"]].replace("WAS", "WSH"),
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
                 datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -761,8 +761,8 @@ def get_ud():
         if " vs " in i["title"]:
             i["title"] = " @ ".join(i["title"].split(" vs ")[::-1])
         match_ids[i["id"]] = {
-            "Home": i["title"].split(" @ ")[1],
-            "Away": i["title"].split(" @ ")[0],
+            "Home": i["title"].split(" @ ")[1].replace("WAS", "WSH"),
+            "Away": i["title"].split(" @ ")[0].replace("WAS", "WSH"),
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
                 datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
