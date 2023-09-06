@@ -678,7 +678,7 @@ def get_pp():
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
-                "Opponent": o["attributes"]["description"],
+                "Opponent": o["attributes"]["description"].replace("JAC", "JAX"),
             }
 
             if o["attributes"]["is_promo"]:
