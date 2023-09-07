@@ -119,8 +119,13 @@
             "Rush TDs": "rushing tds",
             "Rush+Rec TDs": "tds",
             "Fantasy Points": "fantasy points prizepicks",
+            "Fantasy Score": "fantasy points prizepicks",
             "INT": "interceptions",
-            "Receptions": "receptions"
+            "Receptions": "receptions",
+            "Pass Completions": "completions",
+            "Pass Attempts": "attempts",
+            "Rush Attempts": "carries",
+            "Rec Targets": "targets"
         }
     },
     "Underdog": {
@@ -215,7 +220,8 @@
             "Receptions": "receptions",
             "Interceptions": "interceptions",
             "Passing Attempts": "attempts",
-            "Completions": "completions"
+            "Completions": "completions",
+            "Rushing Attempts": "carries"
         }
     },
     "Thrive": {
@@ -314,7 +320,10 @@
             "Rec YDS": "receiving yards",
             "Rush YDS": "rushing yards",
             "Rush YDS + Rec YDS": "yards",
-            "Pass YDS + Rush YDS": "qb yards"
+            "Pass YDS + Rush YDS": "qb yards",
+            "REC": "receptions",
+            "CMP": "completions",
+            "Pass TD's": "passing tds"
         }
     },
     "ParlayPlay": {
@@ -398,10 +407,15 @@
             "Passing Yards": "passing yards",
             "Rushing Yards": "rushing yards",
             "Receiving Yards": "receiving yards",
-            "Fantasy Points": "fantasy points parlay",
+            "Fantasy Points": "fantasy points parlayplay",
             "Passing TDs": "passing tds",
             "Rushing TDs": "rushing tds",
-            "Receiving TDs": "receiving tds"
+            "Receiving TDs": "receiving tds",
+            "Pass Attempts": "attempts",
+            "Pass Completions": "completions",
+            "Rush Attempts": "carries",
+            "Receptions": "receptions",
+            "Receiving Targets": "targets"
         }
     }
 }
