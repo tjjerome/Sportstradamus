@@ -1837,6 +1837,9 @@ class StatsNFL(Stats):
             else:
                 position = "WR"
 
+        if position not in ["WR", "QB", "RB", "TE"]:
+            return 0
+
         if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]) and position != "QB":
             return 0
 
