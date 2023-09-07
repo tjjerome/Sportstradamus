@@ -741,7 +741,7 @@ def get_ud():
     for i in api["players"]:
         player_ids[i["id"]] = {
             "Name": str(i["first_name"] or "") + " " + str(i["last_name"] or ""),
-            "League": i["sport_id"].replace("COMBOS", ""),
+            "League": i["sport_id"].replace("COMBOS", "").replace("COMBO", ""),
         }
 
     match_ids = {}
