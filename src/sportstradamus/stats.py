@@ -553,6 +553,8 @@ class StatsNBA(Stats):
         else:
             position = "Guard"
 
+        one_year_ago = len(player_games.loc[pd.to_datetime(
+            self.gamelog["gameday"]) > date-timedelta(days=300)])
         headtohead = player_games.loc[player_games["OPP"] == opponent]
 
         game_res = (player_games[market]).to_list()
@@ -571,9 +573,12 @@ class StatsNBA(Stats):
             "DVPOA": dvpoa,
             "Odds": odds,
             "Line": line,
-            "Avg5": np.mean(game_res[-5:]) if game_res else 0,
-            "Avg10": np.mean(game_res[-10:]) if game_res else 0,
-            "AvgH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
+            "Avg5": np.median(game_res[-5:]) if game_res else 0,
+            "Avg10": np.median(game_res[-10:]) if game_res else 0,
+            "AvgYr": np.median(game_res[-one_year_ago:]) if game_res else 0,
+            "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
+            "IQR10": iqr(game_res[-10:]) if game_res else 0,
+            "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -1295,6 +1300,8 @@ class StatsMLB(Stats):
 
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
+        one_year_ago = len(player_games.loc[pd.to_datetime(
+            self.gamelog["gameday"]) > date-timedelta(days=300)])
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
@@ -1307,15 +1314,12 @@ class StatsMLB(Stats):
             "DVPOA": 0,
             "Odds": odds,
             "Line": line,
-            "Avg5": np.mean(game_res[-5:])
-            if game_res
-            else 0,
-            "Avg10": np.mean(game_res[-10:])
-            if game_res
-            else 0,
-            "AvgH2H": np.mean(h2h_res[-5:])
-            if h2h_res
-            else 0,
+            "Avg5": np.median(game_res[-5:]) if game_res else 0,
+            "Avg10": np.median(game_res[-10:]) if game_res else 0,
+            "AvgYr": np.median(game_res[-one_year_ago:]) if game_res else 0,
+            "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
+            "IQR10": iqr(game_res[-10:]) if game_res else 0,
+            "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -2462,6 +2466,9 @@ class StatsNHL(Stats):
 
         headtohead = player_games.loc[player_games["opponent"] == opponent]
 
+        one_year_ago = len(player_games.loc[pd.to_datetime(
+            self.gamelog["gameday"]) > date-timedelta(days=300)])
+
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
@@ -2474,15 +2481,12 @@ class StatsNHL(Stats):
             "DVPOA": 0,
             "Odds": odds,
             "Line": line,
-            "Avg5": np.mean(game_res[-5:])
-            if game_res
-            else 0,
-            "Avg10": np.mean(game_res[-10:])
-            if game_res
-            else 0,
-            "AvgH2H": np.mean(h2h_res[-5:])
-            if h2h_res
-            else 0,
+            "Avg5": np.median(game_res[-5:]) if game_res else 0,
+            "Avg10": np.median(game_res[-10:]) if game_res else 0,
+            "AvgYr": np.median(game_res[-one_year_ago:]) if game_res else 0,
+            "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
+            "IQR10": iqr(game_res[-10:]) if game_res else 0,
+            "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home
