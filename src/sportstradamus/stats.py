@@ -8,9 +8,8 @@ from sportstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
-from nba_api.stats.static import players as nba_static
 import nfl_data_py as nfl
-from scipy.stats import hmean
+from scipy.stats import iqr
 from time import sleep
 from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents
 import pandas as pd
@@ -1830,6 +1829,8 @@ class StatsNFL(Stats):
         player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
             pd.to_datetime(self.gamelog["gameday"]) < date)]
         position = self.players.get(player, "")
+        one_year_ago = len(player_games.loc[pd.to_datetime(
+            self.gamelog["gameday"]) > date-timedelta(days=300)])
 
         if position == "":
             if len(player_games) > 0:
@@ -1859,9 +1860,12 @@ class StatsNFL(Stats):
             "DVPOA": dvpoa,
             "Odds": odds,
             "Line": line,
-            "Avg5": np.mean(game_res[-5:]) if game_res else 0,
-            "Avg10": np.mean(game_res[-10:]) if game_res else 0,
-            "AvgH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
+            "Avg5": np.median(game_res[-5:]) if game_res else 0,
+            "Avg10": np.median(game_res[-10:]) if game_res else 0,
+            "AvgYr": np.median(game_res[-one_year_ago:]) if game_res else 0,
+            "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
+            "IQR10": iqr(game_res[-10:]) if game_res else 0,
+            "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
