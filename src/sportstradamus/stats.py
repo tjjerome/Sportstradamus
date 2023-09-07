@@ -1595,6 +1595,10 @@ class StatsNFL(Stats):
                          == 'LA', 'recent team'] = "LAR"
         self.gamelog.loc[self.gamelog['opponent']
                          == 'LA', 'opponent'] = "LAR"
+        self.gamelog.loc[self.gamelog['recent team']
+                         == 'WAS', 'recent team'] = "WSH"
+        self.gamelog.loc[self.gamelog['opponent']
+                         == 'WAS', 'opponent'] = "WSH"
         self.gamelog = self.gamelog.sort_values('gameday')
 
         self.players = nfl.import_ids()
