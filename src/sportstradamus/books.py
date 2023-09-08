@@ -662,7 +662,7 @@ def get_pp():
             if p["type"] == "new_player":
                 player_ids[p["id"]] = {
                     "Name": p["attributes"]["name"].replace("\t", "").strip(),
-                    "Team": p["attributes"]["team"].replace("JAC", "JAX").replace("WAS", "WSH"),
+                    "Team": p["attributes"]["team"].replace("JAC", "JAX"),
                 }
             elif p["type"] == "league":
                 league = p["attributes"]["name"].replace("CMB", "")
@@ -678,7 +678,7 @@ def get_pp():
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
-                "Opponent": o["attributes"]["description"].replace("JAC", "JAX").replace("WAS", "WSH"),
+                "Opponent": o["attributes"]["description"].replace("JAC", "JAX"),
             }
 
             if o["attributes"]["is_promo"]:
@@ -729,7 +729,7 @@ def get_ud():
 
     team_ids = {}
     for i in teams["teams"]:
-        team_ids[i["id"]] = i["abbr"].replace("WAS", "WSH")
+        team_ids[i["id"]] = i["abbr"]
 
     api = scraper.get(
         "https://api.underdogfantasy.com/beta/v3/over_under_lines")
@@ -747,8 +747,8 @@ def get_ud():
     match_ids = {}
     for i in api["games"]:
         match_ids[i["id"]] = {
-            "Home": team_ids[i["home_team_id"]].replace("WAS", "WSH"),
-            "Away": team_ids[i["away_team_id"]].replace("WAS", "WSH"),
+            "Home": team_ids[i["home_team_id"]],
+            "Away": team_ids[i["away_team_id"]],
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
                 datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -761,8 +761,8 @@ def get_ud():
         if " vs " in i["title"]:
             i["title"] = " @ ".join(i["title"].split(" vs ")[::-1])
         match_ids[i["id"]] = {
-            "Home": i["title"].split(" @ ")[1].replace("WAS", "WSH"),
-            "Away": i["title"].split(" @ ")[0].replace("WAS", "WSH"),
+            "Home": i["title"].split(" @ ")[1],
+            "Away": i["title"].split(" @ ")[0],
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
                 datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -964,12 +964,12 @@ def get_thrive():
     offers = {}
     for line in tqdm(lines, desc="Getting Thrive Offers", unit="offer"):
         o = line.get("contestProp")
-        team = o["player1"]["teamAbbr"].upper().replace("WAS", "WSH")
+        team = o["player1"]["teamAbbr"].upper()
         opponent = str(o.get("team2Abbr", "")
-                       or "").upper().replace("WAS", "WSH")
+                       or "").upper()
         if team == opponent:
             opponent = str(o.get("team1Abbr", "")
-                           or "").upper().replace("WAS", "WSH")
+                           or "").upper()
         n = {
             "Player": remove_accents(
                 " ".join([o["player1"]["firstName"], o["player1"]["lastName"]])
@@ -1054,8 +1054,10 @@ def get_parp():
     offers = {}
     for player in tqdm(api["players"], desc="Getting ParlayPlay Offers", unit="offer"):
         teams = [
-            player["match"]["homeTeam"]["teamAbbreviation"],
-            player["match"]["awayTeam"]["teamAbbreviation"],
+            player["match"]["homeTeam"]["teamAbbreviation"].replace(
+                "CHW", "CWS").replace("WSH", "WAS"),
+            player["match"]["awayTeam"]["teamAbbreviation"].replace(
+                "CHW", "CWS").replace("WSH", "WAS"),
         ]
 
         player_team = player["player"]["team"]["teamAbbreviation"]
@@ -1065,9 +1067,11 @@ def get_parp():
                          if team != player_team][0]
 
         if player_team is not None:
-            player_team = player_team.replace("CHW", "CWS")
+            player_team = player_team.replace(
+                "CHW", "CWS").replace("WSH", "WAS")
         if opponent_team is not None:
-            opponent_team = opponent_team.replace("CHW", "CWS")
+            opponent_team = opponent_team.replace(
+                "CHW", "CWS").replace("WSH", "WAS")
 
         for stat in player["stats"]:
             market = stat["challengeName"]
@@ -1109,14 +1113,16 @@ def get_parp():
 
             player_team = player["player"]["team"]["teamAbbreviation"]
             if player_team is not None:
-                teams.append(player_team.replace("CHW", "CWS"))
+                teams.append(player_team.replace(
+                    "CHW", "CWS").replace("WSH", "WAS"))
 
             opponent_team = [team for team in
                              [player["match"]["homeTeam"]["teamAbbreviation"],
                               player["match"]["awayTeam"]["teamAbbreviation"]]
                              if team != player_team][0]
             if opponent_team is not None:
-                opponents.append(opponent_team.replace("CHW", "CWS"))
+                opponents.append(opponent_team.replace(
+                    "CHW", "CWS").replace("WSH", "WAS"))
 
         market = combo['pickType']['challengeName']
         if "Fantasy" in market:
