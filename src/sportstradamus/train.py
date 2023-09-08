@@ -59,6 +59,7 @@ def meditate(force, stats, league):
 
     all_markets = {
         "NFL": [
+            "tds",
             "passing yards",
             "rushing yards",
             "receiving yards",
@@ -68,7 +69,6 @@ def meditate(force, stats, league):
             "fantasy points underdog",
             "fantasy points parlayplay",
             "passing tds",
-            "tds",
             "rushing tds",
             "receiving tds",
             "qb tds",

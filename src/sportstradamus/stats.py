@@ -307,7 +307,7 @@ class StatsNBA(Stats):
         for game in self.gamelog:
             if datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() > date.date():
                 continue
-            elif datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
+            elif datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() < (date - timedelta(days=300)).date():
                 continue
             player_name = game["PLAYER_NAME"]
 
@@ -371,10 +371,10 @@ class StatsNBA(Stats):
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
-        one_year_ago = date - timedelta(days=260)
+        one_year_ago = date - timedelta(days=300)
         gameDates = pd.to_datetime(self.gamelog["GAME_DATE"]).dt.date
-        gamelog = self.gamelog[(
-            one_year_ago <= gameDates) & (gameDates < date)]
+        gamelog = self.gamelog[(one_year_ago <= gameDates)
+                               & (gameDates < date)]
 
         # Retrieve moneyline and totals data from archive
         gamelog["moneyline"] = gamelog.apply(lambda row: archive["NBA"]["Moneyline"].get(
@@ -384,10 +384,16 @@ class StatsNBA(Stats):
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
-            filter(lambda x: x[market].count() > 1).\
+            filter(lambda x: x[market].mean() > 0).\
             groupby('PLAYER_NAME')
 
-        defenseGroups = gamelog.groupby('OPP')
+        defenseGroups = gamelog.groupby(['OPP', 'GAME_ID'])
+        defenseGames = pd.DataFrame()
+        defenseGames[market] = defenseGroups[market].sum()
+        defenseGames['HOME'] = defenseGroups['HOME'].mean().astype(int)
+        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
+        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGroups = defenseGames.groupby('OPP')
 
         leagueavg = playerGroups[market].mean().mean()
         if np.isnan(leagueavg):
@@ -404,15 +410,21 @@ class StatsNBA(Stats):
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
         self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x['HOME'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['HOME'] == 1, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[~x['HOME'].astype(bool), market].mean()/x[market].mean())-1
+            lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
         positions = ['Guard', 'Forward', 'Center',
                      'Guard-Forward', 'Forward-Center']
         for position in positions:
             positionGroups = gamelog.loc[gamelog['POS'] == position].groupby(
-                'OPP')
+                ['OPP', 'GAME_ID'])
+            defenseGames = pd.DataFrame()
+            defenseGames[market] = positionGroups[market].sum()
+            defenseGames['HOME'] = positionGroups['HOME'].mean().astype(int)
+            defenseGames['moneyline'] = positionGroups['moneyline'].mean()
+            defenseGames['totals'] = positionGroups['totals'].mean()
+            positionGroups = defenseGames.groupby('OPP')
             leagueavg = positionGroups[market].mean().mean()
             if leagueavg == 0:
                 self.defenseProfile[position] = 0
@@ -469,7 +481,7 @@ class StatsNBA(Stats):
         for game in self.gamelog:
             if datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() > date.date():
                 continue
-            elif datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
+            elif datetime.strptime(game['GAME_DATE'][:10], '%Y-%m-%d').date() < (date - timedelta(days=300)).date():
                 continue
             if game["POS"] == position or game["POS"] == "-".join(
                 position.split("-")[::-1]
@@ -579,14 +591,15 @@ class StatsNBA(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
             "Position": positions.index(position)
         }
 
-        if len(game_res) < 6:
-            i = 6 - len(game_res)
+        if len(game_res) < 5:
+            i = 5 - len(game_res)
             game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
@@ -595,7 +608,7 @@ class StatsNBA(Stats):
         # Update the data dictionary with additional values
         data.update(
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
-        data.update({"Game " + str(i + 1): game_res[-6 + i] for i in range(6)})
+        data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player, [
             'avg', 'home', 'away']]
@@ -1096,29 +1109,43 @@ class StatsMLB(Stats):
         self.pitcherProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
         # Filter gamelog for games within the date range
-        one_year_ago = (date - timedelta(days=260))
+        one_year_ago = (date - timedelta(days=300))
         gameDates = pd.to_datetime(self.gamelog["gameId"].str[:10]).dt.date
-        gamelog_df = self.gamelog[(
+        gamelog = self.gamelog[(
             one_year_ago <= gameDates) & (gameDates < date)]
 
         # Filter non-starting pitchers or non-starting batters depending on the market
         if any([string in market for string in ["allowed", "pitch"]]):
-            gamelog_df = gamelog_df[gamelog_df["starting pitcher"]]
+            gamelog = gamelog[gamelog["starting pitcher"]]
         else:
-            gamelog_df = gamelog_df[gamelog_df["starting batter"]]
+            gamelog = gamelog[gamelog["starting batter"]]
 
         # Retrieve moneyline and totals data from archive
-        gamelog_df["moneyline"] = gamelog_df.apply(lambda row: archive["MLB"]["Moneyline"].get(
+        gamelog["moneyline"] = gamelog.apply(lambda row: archive["MLB"]["Moneyline"].get(
             row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 0.5), axis=1)
-        gamelog_df["totals"] = gamelog_df.apply(lambda row: archive["MLB"]["Totals"].get(
+        gamelog["totals"] = gamelog.apply(lambda row: archive["MLB"]["Totals"].get(
             row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 8.3), axis=1)
 
         # Filter players with at least 2 entries
-        playerGroups = gamelog_df.groupby('playerName').filter(
-            lambda x: x[market].count() > 1).groupby('playerName')
+        playerGroups = gamelog.groupby('playerName').filter(
+            lambda x: x[market].mean() > 0).groupby('playerName')
 
-        defenseGroups = gamelog_df.groupby('opponent')
-        pitcherGroups = gamelog_df.groupby('opponent pitcher').filter(
+        defenseGroups = gamelog.groupby('opponent')
+        defenseGroups = gamelog.groupby(['opponent', 'gameId'])
+        defenseGames = pd.DataFrame()
+        defenseGames[market] = defenseGroups[market].sum()
+        defenseGames['home'] = defenseGroups['home'].mean().astype(int)
+        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
+        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGroups = defenseGames.groupby('opponent')
+
+        pitcherGroups = gamelog.groupby(['opponent pitcher', 'gameId'])
+        pitcherGames = pd.DataFrame()
+        pitcherGames[market] = pitcherGroups[market].sum()
+        pitcherGames['home'] = pitcherGroups['home'].mean().astype(int)
+        pitcherGames['moneyline'] = pitcherGroups['moneyline'].mean()
+        pitcherGames['totals'] = pitcherGroups['totals'].mean()
+        pitcherGroups = pitcherGames.groupby('opponent pitcher').filter(
             lambda x: x[market].count() > 1).groupby('opponent pitcher')
 
         # Compute league average
@@ -1138,9 +1165,9 @@ class StatsMLB(Stats):
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
         self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
 
         leagueavg = pitcherGroups[market].mean().mean()
         self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
@@ -1207,7 +1234,7 @@ class StatsMLB(Stats):
         if type(date) is datetime:
             date = date.date()
 
-        one_year_ago = (date - timedelta(days=365))
+        one_year_ago = (date - timedelta(days=300))
         gamelog = self.gamelog[self.gamelog["gameId"].str[:10].apply(
             lambda x: one_year_ago <= datetime.strptime(x, '%Y/%m/%d').date() <= date)]
 
@@ -1320,6 +1347,7 @@ class StatsMLB(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -1342,8 +1370,8 @@ class StatsMLB(Stats):
 
             data = data | {"Position": position}
 
-        if len(game_res) < 6:
-            i = 6 - len(game_res)
+        if len(game_res) < 5:
+            i = 5 - len(game_res)
             game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
@@ -1352,7 +1380,7 @@ class StatsMLB(Stats):
         # Update the data dictionary with additional values
         data.update(
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
-        data.update({"Game " + str(i + 1): game_res[-6 + i] for i in range(6)})
+        data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player, [
             'avg', 'home', 'away']]
@@ -1644,8 +1672,11 @@ class StatsNFL(Stats):
         self.edges = []
 
         # Collect stats for each player
-        gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameday"]) < date) &
-                                   (pd.to_datetime(self.gamelog["gameday"]) > date - timedelta(days=365))]
+        one_year_ago = date - timedelta(days=300)
+        gameDates = pd.to_datetime(self.gamelog["gameday"]).dt.date
+        gamelog = self.gamelog[(one_year_ago <= gameDates)
+                               & (gameDates < date)]
+
         playerGroups = gamelog.\
             groupby('player display name').\
             filter(lambda x: len(x[x[market] != 0]) > 4).\
@@ -1684,17 +1715,23 @@ class StatsNFL(Stats):
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
-        one_year_ago = date - timedelta(days=260)
+        one_year_ago = date - timedelta(days=300)
         gameDates = pd.to_datetime(self.gamelog["gameday"]).dt.date
         gamelog = self.gamelog[(
             one_year_ago <= gameDates) & (gameDates < date)]
 
         playerGroups = gamelog.\
             groupby('player display name').\
-            filter(lambda x: x[market].count() > 1).\
+            filter(lambda x: x[market].mean() > 0).\
             groupby('player display name')
 
-        defenseGroups = gamelog.groupby('opponent')
+        defenseGroups = gamelog.groupby(['opponent', 'game id'])
+        defenseGames = pd.DataFrame()
+        defenseGames[market] = defenseGroups[market].sum()
+        defenseGames['home'] = defenseGroups['home'].mean().astype(int)
+        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
+        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGroups = defenseGames.groupby('opponent')
 
         leagueavg = playerGroups[market].mean().mean()
         if np.isnan(leagueavg):
@@ -1711,16 +1748,22 @@ class StatsNFL(Stats):
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
         self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[~x['home'].astype(bool), market].mean()/x[market].mean())-1
+            lambda x: x.loc[x['home'] == 0, market].mean()/x[market].mean())-1
 
         positions = ['QB', 'WR', 'RB', 'TE']
         if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]):
             positions = ['QB']
         for position in positions:
             positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
-                'opponent')
+                ['opponent', 'game id'])
+            defenseGames = pd.DataFrame()
+            defenseGames[market] = positionGroups[market].sum()
+            defenseGames['home'] = positionGroups['home'].mean().astype(int)
+            defenseGames['moneyline'] = positionGroups['moneyline'].mean()
+            defenseGames['totals'] = positionGroups['totals'].mean()
+            positionGroups = defenseGames.groupby('opponent')
             leagueavg = positionGroups[market].mean().mean()
             if leagueavg == 0:
                 self.defenseProfile[position] = 0
@@ -1874,14 +1917,15 @@ class StatsNFL(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
             "Position": ["QB", "WR", "RB", "TE"].index(position)
         }
 
-        if len(game_res) < 6:
-            i = 6 - len(game_res)
+        if len(game_res) < 5:
+            i = 5 - len(game_res)
             game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
@@ -1890,7 +1934,7 @@ class StatsNFL(Stats):
         # Update the data dictionary with additional values
         data.update(
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
-        data.update({"Game " + str(i + 1): game_res[-6 + i] for i in range(6)})
+        data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player, [
             'avg', 'home', 'away']]
@@ -2178,7 +2222,7 @@ class StatsNHL(Stats):
         for game in self.gamelog:
             if datetime.strptime(game['gameDate'], '%Y-%m-%d').date() > date.date():
                 continue
-            elif datetime.strptime(game['gameDate'], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
+            elif datetime.strptime(game['gameDate'], '%Y-%m-%d').date() < (date - timedelta(days=300)).date():
                 continue
             if (market in ['goalsAgainst', 'saves'] or "goalie fantasy" in market) and game['position'] != "G":
                 continue
@@ -2260,28 +2304,34 @@ class StatsNHL(Stats):
         self.pitcherProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
         # Filter gamelog for games within the date range
-        one_year_ago = (date - timedelta(days=260))
+        one_year_ago = (date - timedelta(days=300))
         gameDates = pd.to_datetime(self.gamelog["gameDate"]).dt.date
-        gamelog_df = self.gamelog[(
+        gamelog = self.gamelog[(
             one_year_ago <= gameDates) & (gameDates < date)]
 
         # Filter non-starting goalies or non-starting skaters depending on the market
         if any([string in market for string in ["Against", "saves", "goalie"]]):
-            gamelog_df = gamelog_df[gamelog_df["position"] == "G"]
+            gamelog = gamelog[gamelog["position"] == "G"]
         else:
-            gamelog_df = gamelog_df[gamelog_df["position"] != "G"]
+            gamelog = gamelog[gamelog["position"] != "G"]
 
         # Retrieve moneyline and totals data from archive
-        gamelog_df["moneyline"] = gamelog_df.apply(lambda row: archive["NHL"]["Moneyline"].get(
+        gamelog["moneyline"] = gamelog.apply(lambda row: archive["NHL"]["Moneyline"].get(
             row["gameDate"], {}).get(row["team"], 0.5), axis=1)
-        gamelog_df["totals"] = gamelog_df.apply(lambda row: archive["NHL"]["Totals"].get(
+        gamelog["totals"] = gamelog.apply(lambda row: archive["NHL"]["Totals"].get(
             row["gameDate"], {}).get(row["team"], 5.5), axis=1)
 
         # Filter players with at least 2 entries
-        playerGroups = gamelog_df.groupby('playerName').filter(
-            lambda x: x[market].count() > 1).groupby('playerName')
+        playerGroups = gamelog.groupby('playerName').filter(
+            lambda x: x[market].mean() > 0).groupby('playerName')
 
-        defenseGroups = gamelog_df.groupby('opponent')
+        defenseGroups = gamelog.groupby(['opponent', 'gameDate'])
+        defenseGames = pd.DataFrame()
+        defenseGames[market] = defenseGroups[market].sum()
+        defenseGames['home'] = defenseGroups['home'].mean().astype(int)
+        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
+        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGroups = defenseGames.groupby('opponent')
 
         # Compute league average
         leagueavg = playerGroups[market].mean().mean()
@@ -2307,8 +2357,15 @@ class StatsNHL(Stats):
         positions = ["C", "R", "L", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             for position in positions:
-                positionGroups = gamelog_df.loc[gamelog_df['position'] == position].groupby(
+                positionGroups = gamelog.loc[gamelog['position'] == position].groupby(
                     'opponent')
+                defenseGames = pd.DataFrame()
+                defenseGames[market] = positionGroups[market].sum()
+                defenseGames['home'] = positionGroups['home'].mean().astype(
+                    int)
+                defenseGames['moneyline'] = positionGroups['moneyline'].mean()
+                defenseGames['totals'] = positionGroups['totals'].mean()
+                positionGroups = defenseGames.groupby('opponent')
                 leagueavg = positionGroups[market].mean().mean()
                 if leagueavg == 0:
                     self.defenseProfile[position] = 0
@@ -2371,7 +2428,7 @@ class StatsNHL(Stats):
         for game in self.gamelog:
             if datetime.strptime(game['gameDate'], '%Y-%m-%d').date() > date.date():
                 continue
-            elif datetime.strptime(game['gameDate'], '%Y-%m-%d').date() < (date - timedelta(days=365)).date():
+            elif datetime.strptime(game['gameDate'], '%Y-%m-%d').date() < (date - timedelta(days=300)).date():
                 continue
             if (market in ['goalsAgainst', 'saves'] or "goalie fantasy" in market) and game['position'] != "G":
                 continue
@@ -2487,6 +2544,7 @@ class StatsNHL(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home
@@ -2500,8 +2558,8 @@ class StatsNHL(Stats):
 
             data.update({"Position": positions.index(position)})
 
-        if len(game_res) < 6:
-            i = 6 - len(game_res)
+        if len(game_res) < 5:
+            i = 5 - len(game_res)
             game_res = [0] * i + game_res
         if len(h2h_res) < 5:
             i = 5 - len(h2h_res)
@@ -2510,7 +2568,7 @@ class StatsNHL(Stats):
         # Update the data dictionary with additional values
         data.update(
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
-        data.update({"Game " + str(i + 1): game_res[-6 + i] for i in range(6)})
+        data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player, [
             'avg', 'home', 'away']]
