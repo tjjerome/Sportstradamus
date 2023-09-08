@@ -31,7 +31,7 @@
         "Tampa Bay Rays": "TB",
         "Texas Rangers": "TEX",
         "Toronto Blue Jays": "TOR",
-        "Washington Nationals": "WSH"
+        "Washington Nationals": "WAS"
     },
     "NHL": {
         "Anaheim Ducks": "ANA",
@@ -65,7 +65,7 @@
         "Toronto Maple Leafs": "TOR",
         "Vancouver Canucks": "VAN",
         "Vegas Golden Knights": "VGK",
-        "Washington Capitals": "WSH",
+        "Washington Capitals": "WAS",
         "Winnipeg Jets": "WPG"
     },
     "NBA": {
@@ -97,8 +97,8 @@
         "Sacramento Kings": "SAC",
         "San Antonio Spurs": "SA",
         "Toronto Raptors": "TOR",
-        "Utah Jazz": "UTAH",
-        "Washington Wizards": "WSH"
+        "Utah Jazz": "UTA",
+        "Washington Wizards": "WAS"
     },
     "NFL": {
         "Arizona Cardinals": "ARI",
@@ -132,7 +132,7 @@
         "Seattle Seahawks": "SEA",
         "Tampa Bay Buccaneers": "TB",
         "Tennessee Titans": "TEN",
-        "Washington Commanders": "WSH",
-        "Washington Football Team": "WSH"
+        "Washington Commanders": "WAS",
+        "Washington Football Team": "WAS"
     }
 }
