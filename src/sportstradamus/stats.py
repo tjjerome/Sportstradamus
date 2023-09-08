@@ -554,7 +554,7 @@ class StatsNBA(Stats):
             position = "Guard"
 
         one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameday"]) > date-timedelta(days=300)])
+            self.gamelog["GAME_DATE"]) > date-timedelta(days=300)])
         headtohead = player_games.loc[player_games["OPP"] == opponent]
 
         game_res = (player_games[market]).to_list()
@@ -1300,8 +1300,8 @@ class StatsMLB(Stats):
 
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
-        one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameday"]) > date-timedelta(days=300)])
+        one_year_ago = len(player_games.loc[
+            pd.to_datetime(self.gamelog.gameId.str[:10]) > date-timedelta(days=300)])
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
@@ -2467,7 +2467,7 @@ class StatsNHL(Stats):
         headtohead = player_games.loc[player_games["opponent"] == opponent]
 
         one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameday"]) > date-timedelta(days=300)])
+            self.gamelog["gameDate"]) > date-timedelta(days=300)])
 
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
