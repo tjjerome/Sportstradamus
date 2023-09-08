@@ -78,6 +78,11 @@
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.762346     0.125506        0.775618         0.670732          0.164844  0.366741
 
+=================================== NFL targets ===================================
+ Distribution Model: Gaussian
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.570598     0.273824        0.551597         0.610256          0.248625  0.416718
+
 ===================================== NFL tds =====================================
  Distribution Model: Poisson
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
