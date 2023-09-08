@@ -666,6 +666,8 @@ class StatsNBA(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
+                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
+                        continue
                     new_get_stats.update(
                         {"Result": game[market]}
                     )
@@ -1448,6 +1450,8 @@ class StatsMLB(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
+                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
+                        continue
                     # Determine the result
                     new_get_stats.update(
                         {"Result": game[market]}
@@ -1964,6 +1968,8 @@ class StatsNFL(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
+                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
+                        continue
                     new_get_stats.update(
                         {"Result": game[market]}
                     )
@@ -2587,6 +2593,8 @@ class StatsNHL(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
+                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
+                        continue
                     new_get_stats.update(
                         {"Result": game[market]}
                     )
