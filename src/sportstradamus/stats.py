@@ -1146,9 +1146,9 @@ class StatsMLB(Stats):
         self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
             leagueavg) - 1
         self.pitcherProfile['home'] = pitcherGroups.apply(
-            lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
         self.pitcherProfile['away'] = pitcherGroups.apply(
-            lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
