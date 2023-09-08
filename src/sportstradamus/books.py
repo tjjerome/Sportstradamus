@@ -662,7 +662,7 @@ def get_pp():
             if p["type"] == "new_player":
                 player_ids[p["id"]] = {
                     "Name": p["attributes"]["name"].replace("\t", "").strip(),
-                    "Team": p["attributes"]["team"].replace("JAC", "JAX"),
+                    "Team": p["attributes"]["team"].replace("JAC", "JAX").replace("WAS", "WSH"),
                 }
             elif p["type"] == "league":
                 league = p["attributes"]["name"].replace("CMB", "")
@@ -678,7 +678,7 @@ def get_pp():
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
-                "Opponent": o["attributes"]["description"].replace("JAC", "JAX"),
+                "Opponent": o["attributes"]["description"].replace("JAC", "JAX").replace("WAS", "WSH"),
             }
 
             if o["attributes"]["is_promo"]:
