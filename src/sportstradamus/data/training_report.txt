@@ -1,3 +1,13 @@
+=========================== MLB 1st inning hits allowed ===========================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.568908     0.017341        0.568908              0.0          0.246596  0.011349
+
+=========================== MLB 1st inning runs allowed ===========================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.729412     0.417808             0.0         0.738095          0.229786  0.005083
+
 ================================= MLB hits allowed ================================
  Distribution Model: Poisson
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
@@ -17,6 +27,11 @@
  Distribution Model: Gaussian
  Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
  0.687914     0.283511        0.718519         0.429688          0.200202  0.175046
+
+================================= MLB runs allowed ================================
+ Distribution Model: Poisson
+ Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
+ 0.792291      0.15704        0.814996         0.632184          0.170622  0.033057
 
 =================================== NFL attempts ==================================
  Distribution Model: Gaussian
