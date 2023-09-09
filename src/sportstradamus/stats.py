@@ -377,9 +377,9 @@ class StatsNBA(Stats):
                                & (gameDates < date)]
 
         # Retrieve moneyline and totals data from archive
-        gamelog["moneyline"] = gamelog.apply(lambda row: archive["NBA"]["Moneyline"].get(
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["NBA"]["Moneyline"].get(
             row["GAME_DATE"].split("T")[0], {}).get(row["TEAM_ABBREVIATION"], 0.5), axis=1)
-        gamelog["totals"] = gamelog.apply(lambda row: archive["NBA"]["Totals"].get(
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["NBA"]["Totals"].get(
             row["GAME_DATE"].split("T")[0], {}).get(row["TEAM_ABBREVIATION"], 220), axis=1)
 
         playerGroups = gamelog.\
@@ -563,7 +563,8 @@ class StatsNBA(Stats):
         if len(player_games) > 0:
             position = player_games.iat[0, 34]
         else:
-            position = "Guard"
+            logger.warning(f"{player} not found")
+            return 0
 
         one_year_ago = len(player_games.loc[pd.to_datetime(
             self.gamelog["GAME_DATE"]) > date-timedelta(days=300)])
@@ -1123,9 +1124,9 @@ class StatsMLB(Stats):
             gamelog = gamelog[gamelog["starting batter"]]
 
         # Retrieve moneyline and totals data from archive
-        gamelog["moneyline"] = gamelog.apply(lambda row: archive["MLB"]["Moneyline"].get(
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["MLB"]["Moneyline"].get(
             row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 0.5), axis=1)
-        gamelog["totals"] = gamelog.apply(lambda row: archive["MLB"]["Totals"].get(
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["MLB"]["Totals"].get(
             row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 8.3), axis=1)
 
         # Filter players with at least 2 entries
@@ -1621,11 +1622,6 @@ class StatsNFL(Stats):
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent team']), 'game_id'].values[0]
 
-                self.gamelog.at[i, 'moneyline'] = float(archive['NFL']['Moneyline'].get(
-                    self.gamelog.at[i, 'gameday'], {}).get(row['recent team'], 0.5))
-                self.gamelog.at[i, 'totals'] = float(archive['NFL']['Totals'].get(
-                    self.gamelog.at[i, 'gameday'], {}).get(row['recent team'], 45.0))
-
         self.gamelog.loc[self.gamelog['recent team']
                          == 'LA', 'recent team'] = "LAR"
         self.gamelog.loc[self.gamelog['opponent']
@@ -1726,10 +1722,10 @@ class StatsNFL(Stats):
             one_year_ago <= gameDates) & (gameDates < date)]
 
         # Retrieve moneyline and totals data from archive
-        gamelog["moneyline"] = gamelog.apply(lambda row: archive["NFL"]["Moneyline"].get(
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["NFL"]["Moneyline"].get(
             row["gameday"], {}).get(row["recent team"], 0.5), axis=1)
-        gamelog["totals"] = gamelog.apply(lambda row: archive["NFL"]["Totals"].get(
-            row["gameday"], {}).get(row["recent team"], 45), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["NFL"]["Totals"].get(
+            row["gameday"], {}).get(row["recent team"], 45), axis=1).copy()
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -1898,6 +1894,7 @@ class StatsNFL(Stats):
             if len(player_games) > 0:
                 position = player_games.iat[0, 2]
             else:
+                logger.warning(f"{player} not found")
                 return 0
 
         if position not in ["WR", "QB", "RB", "TE"]:
@@ -2329,9 +2326,9 @@ class StatsNHL(Stats):
             gamelog = gamelog[gamelog["position"] != "G"]
 
         # Retrieve moneyline and totals data from archive
-        gamelog["moneyline"] = gamelog.apply(lambda row: archive["NHL"]["Moneyline"].get(
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["NHL"]["Moneyline"].get(
             row["gameDate"], {}).get(row["team"], 0.5), axis=1)
-        gamelog["totals"] = gamelog.apply(lambda row: archive["NHL"]["Totals"].get(
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["NHL"]["Totals"].get(
             row["gameDate"], {}).get(row["team"], 5.5), axis=1)
 
         # Filter players with at least 2 entries
@@ -2567,7 +2564,8 @@ class StatsNHL(Stats):
             if len(player_games) > 0:
                 position = player_games.iat[0, 7]
             else:
-                position = "C"
+                logger.warning(f"{player} not found")
+                return 0
 
             data.update({"Position": positions.index(position)})
 
