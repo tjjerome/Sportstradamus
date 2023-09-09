@@ -92,6 +92,10 @@ class Scrape:
             return None
 
 
+with open((pkg_resources.files(data) / "name_map.json"), "r") as infile:
+    name_map = json.load(infile)
+
+
 def remove_accents(input_str):
     """
     Remove accents from the input string.
@@ -104,16 +108,7 @@ def remove_accents(input_str):
     """
     nfkd_form = unicodedata.normalize("NFKD", input_str)
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
-    if out_str == "Michael Porter":
-        out_str = "Michael Porter Jr."
-    if out_str == "Gabriel Davis":
-        out_str = "Gabe Davis"
-    if out_str == "Marvin Jones Jr.":
-        out_str = "Marvin Jones"
-    if out_str == "D.K. Metcalf":
-        out_str = "DK Metcalf"
-    out_str = out_str.replace(" III", "")
-    return out_str
+    return name_map.get(out_str, out_str)
 
 
 def odds_to_prob(odds):

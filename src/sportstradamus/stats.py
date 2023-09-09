@@ -646,7 +646,7 @@ class StatsNBA(Stats):
             gameDate = datetime.strptime(
                 game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
 
-            if gameDate < datetime(2021, 11, 20):
+            if gameDate < datetime(2022, 10, 1):
                 continue
 
             data = {}
@@ -1440,7 +1440,7 @@ class StatsMLB(Stats):
             # Retrieve data from the archive based on game date and player name
             data = {}
             gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
-            if gameDate < datetime(2022, 4, 7):
+            if gameDate < datetime(2022, 3, 1):
                 continue
 
             self.profile_market(market, date=gameDate.date())
@@ -1891,7 +1891,7 @@ class StatsNFL(Stats):
             if len(player_games) > 0:
                 position = player_games.iat[0, 2]
             else:
-                position = "WR"
+                return 0
 
         if position not in ["WR", "QB", "RB", "TE"]:
             return 0
@@ -1977,7 +1977,7 @@ class StatsNFL(Stats):
             gameDate = datetime.strptime(
                 game["gameday"], "%Y-%m-%d")
 
-            if gameDate < datetime(2021, 9, 20):
+            if gameDate < datetime(2021, 9, 1):
                 continue
             data = {}
             self.profile_market(market, date=gameDate)
@@ -2618,7 +2618,7 @@ class StatsNHL(Stats):
         # Iterate over each game in the gamelog
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
-            if gameDate < datetime(2021, 11, 7):
+            if gameDate < datetime(2022, 10, 1):
                 continue
 
             data = {}

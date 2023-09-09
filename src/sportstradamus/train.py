@@ -9,6 +9,7 @@ from sklearn.metrics import (
     accuracy_score,
     brier_score_loss,
     mean_tweedie_deviance,
+    mean_squared_log_error
 )
 from scipy.stats import (
     norm,
@@ -253,24 +254,27 @@ def meditate(force, stats, league):
             dev = 0
             rmlse = 0
 
+            X_test.loc[X_test["Line"] == 0, "Line"] = X_test.loc[X_test["Line"]
+                                                                 == 0, "Avg10"].apply(np.ceil)-0.5
+            X_test.loc[X_test["Line"] <= 0, "Line"] = 0.5
             prob_params = model.predict(X_test, pred_type="parameters")
             if dist == "Poisson":
                 under = poisson.cdf(
-                    X_test["Line"].replace(0, 0.5), prob_params["rate"])
+                    X_test["Line"], prob_params["rate"])
                 push = poisson.pmf(
-                    X_test["Line"].replace(0, 0.5), prob_params["rate"])
+                    X_test["Line"], prob_params["rate"])
                 y_proba = under - push/2
                 p = 1
                 ev = prob_params["rate"]
             elif dist == "Gaussian":
                 y_proba = norm.cdf(
-                    X_test["Line"].replace(0, 0.5), prob_params["loc"], prob_params["scale"])
+                    X_test["Line"], prob_params["loc"], prob_params["scale"])
                 p = 0
                 ev = prob_params["loc"]
 
             y_proba = np.array([y_proba, 1-y_proba]).transpose()
             y_class = (y_test["Result"] >
-                       X_test["Line"].replace(0, 0.5)).astype(int)
+                       X_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
             y_pred = (y_proba > .5).astype(int)
             preco = precision_score(
@@ -285,7 +289,9 @@ def meditate(force, stats, league):
 
             bs = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
 
-            dev = mean_tweedie_deviance(y_test, ev, p)
+            dev = mean_tweedie_deviance(y_test, ev, power=p)
+
+            rmlse = mean_squared_log_error(y_test, ev, squared=False)
 
             filedict = {
                 "model": model,
@@ -341,7 +347,7 @@ def report():
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
 
-            f.write(f" {league} {market} ".center(83, "="))
+            f.write(f" {league} {market} ".center(80, "="))
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
             f.write(pd.DataFrame(model['stats'], index=[

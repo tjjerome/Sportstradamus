@@ -12,12 +12,12 @@ with open(filepath, "rb") as infile:
 
 apikey = "29311eba87f90e2741845d5c70ca4c14"
 
-sport = "icehockey_nhl"
-league = "NHL"
+sport = "americanfootball_nfl"
+league = "NFL"
 
-Date = datetime.strptime("2021-10-12T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2020-09-09T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
-while Date < datetime.strptime("2022-06-27T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
+while Date < datetime.strptime("2021-02-14T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
     date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
     url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals&date={date}&apiKey={apikey}"
     res = scraper.get(url)["data"]

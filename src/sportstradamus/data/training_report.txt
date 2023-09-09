@@ -1,130 +1,40 @@
-=========================== MLB 1st inning hits allowed ===========================
+======================== NFL fantasy points prizepicks =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.564918        0.551077         0.609375           0.24598 45.654048 0.702627
+
+========================= NFL fantasy points underdog ==========================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+  0.54067        0.523416         0.599068           0.25066 36.349098 0.706591
+
+============================== NFL passing yards ===============================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss    Deviance    RMLSE
+ 0.607143        0.530612         0.666667          0.235139 7269.976584 0.768022
+
+================================= NFL qb yards =================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss    Deviance    RMLSE
+ 0.606987        0.580645            0.625          0.245901 7024.449706 0.826698
+
+============================= NFL receiving yards ==============================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance  RMLSE
+ 0.595322        0.589878         0.618868           0.22967  747.4147 0.8623
+
+============================== NFL rushing yards ===============================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss   Deviance    RMLSE
+ 0.626707         0.61167          0.67284          0.224512 723.245525 0.948717
+
+=================================== NFL tds ====================================
  Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.568908     0.017341        0.568908              0.0          0.246596  0.011349
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+  0.64876        0.545455         0.659091          0.218692  0.912593 0.398353
 
-=========================== MLB 1st inning runs allowed ===========================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.729412     0.417808             0.0         0.738095          0.229786  0.005083
-
-================================= MLB hits allowed ================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.668624     0.293001        0.675287         0.621622          0.211786  0.069836
-
-============================== MLB pitcher strikeouts =============================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.819081     0.160735        0.884083         0.528958          0.126398   0.20913
-
-================================ MLB pitches thrown ===============================
+================================== NFL yards ===================================
  Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.710853     0.265368        0.748622         0.596667          0.196871  0.314783
-
-================================ MLB pitching outs ================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.687914     0.283511        0.718519         0.429688          0.200202  0.175046
-
-================================= MLB runs allowed ================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.792291      0.15704        0.814996         0.632184          0.170622  0.033057
-
-=================================== NFL attempts ==================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.770115     0.236842        0.892157         0.597222          0.176313  0.228767
-
-=================================== NFL carries ===================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.742448     0.153432        0.761616         0.671642          0.170735  0.483937
-
-================================= NFL completions =================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
-  0.74026       0.3125        0.862069          0.58209          0.180965  0.300612
-
-========================== NFL fantasy points parlayplay ==========================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.719856     0.241096        0.741563         0.625483          0.194728  0.345194
-
-========================== NFL fantasy points prizepicks ==========================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.725687     0.199248        0.753539         0.610345          0.185559  0.307924
-
-=========================== NFL fantasy points underdog ===========================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.712283     0.192888        0.737692         0.590734          0.187568  0.348619
-
-================================ NFL interceptions ================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.787879     0.731707        0.722222         0.866667          0.233219 -0.001406
-
-================================= NFL passing tds =================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.628571     0.107143        0.651515         0.614679          0.228452  0.090838
-
-================================ NFL passing yards ================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.668571     0.215247        0.860465         0.483146          0.188705  0.160144
-
-==================================== NFL qb tds ===================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.555556     0.161765         0.52381         0.565891          0.251032  0.087161
-
-=================================== NFL qb yards ==================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.730337     0.226087        0.821429         0.648936          0.193764  0.178408
-
-================================ NFL receiving tds ================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.733333     0.018692             0.0         0.733333          0.194017  0.016649
-
-=============================== NFL receiving yards ===============================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.714901     0.156863        0.725049         0.640288          0.185431  0.287962
-
-================================== NFL receptions =================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.578441      0.26831         0.56044         0.620579          0.240253  0.321482
-
-================================= NFL rushing tds =================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.722222          0.2             0.5         0.758065           0.19696    0.0654
-
-================================ NFL rushing yards ================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.728242     0.136503         0.74739         0.619048          0.179027  0.368087
-
-=================================== NFL targets ===================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.565371     0.304668        0.534332         0.640483          0.248429  0.413353
-
-===================================== NFL tds =====================================
- Distribution Model: Poisson
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.693023     0.081197             0.0         0.693023          0.208493   0.06694
-
-==================================== NFL yards ====================================
- Distribution Model: Gaussian
- Accuracy  Null Points  Precision_Over  Precision_Under  Brier Score Loss  R2 Score
- 0.728445     0.166384        0.734127         0.694836          0.183219  0.336529
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss   Deviance    RMLSE
+  0.57429        0.571321         0.582627          0.240622 916.455786 0.885531
 
