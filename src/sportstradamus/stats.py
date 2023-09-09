@@ -1724,6 +1724,12 @@ class StatsNFL(Stats):
         gamelog = self.gamelog[(
             one_year_ago <= gameDates) & (gameDates < date)]
 
+        # Retrieve moneyline and totals data from archive
+        gamelog["moneyline"] = gamelog.apply(lambda row: archive["NFL"]["Moneyline"].get(
+            row["gameday"], {}).get(row["recent team"], 0.5), axis=1)
+        gamelog["totals"] = gamelog.apply(lambda row: archive["NFL"]["Totals"].get(
+            row["gameday"], {}).get(row["recent team"], 45), axis=1)
+
         playerGroups = gamelog.\
             groupby('player display name').\
             filter(lambda x: (x[market].median() > 0) & (x[market].count() > 1)).\
