@@ -208,8 +208,6 @@ def meditate(force, stats, league):
 
             if need_model:
                 y_train = np.ravel(y_train.to_numpy())
-                if len(X_train) < 500:
-                    continue
 
                 dtrain = lgb.Dataset(X_train, label=y_train)
 
