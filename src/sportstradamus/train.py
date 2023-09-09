@@ -8,7 +8,7 @@ from sklearn.metrics import (
     precision_score,
     accuracy_score,
     brier_score_loss,
-    r2_score,
+    mean_tweedie_deviance,
 )
 from scipy.stats import (
     norm,
@@ -246,13 +246,12 @@ def meditate(force, stats, league):
                             num_boost_round=n_rounds
                             )
 
-            threshold = 0.545
             acc = 0
-            null = 0
             preco = 0
             precu = 0
             bs = 0
-            r2 = 0
+            dev = 0
+            rmlse = 0
 
             prob_params = model.predict(X_test, pred_type="parameters")
             if dist == "Poisson":
@@ -261,43 +260,42 @@ def meditate(force, stats, league):
                 push = poisson.pmf(
                     X_test["Line"].replace(0, 0.5), prob_params["rate"])
                 y_proba = under - push/2
+                p = 1
                 ev = prob_params["rate"]
             elif dist == "Gaussian":
                 y_proba = norm.cdf(
                     X_test["Line"].replace(0, 0.5), prob_params["loc"], prob_params["scale"])
+                p = 0
                 ev = prob_params["loc"]
 
             y_proba = np.array([y_proba, 1-y_proba]).transpose()
             y_class = (y_test["Result"] >
                        X_test["Line"].replace(0, 0.5)).astype(int)
             y_class = np.ravel(y_class.to_numpy())
-            y_pred = (y_proba > threshold).astype(int)
-            null = 1 - np.mean(np.sum(y_pred, axis=1))
-            if null > .98:
-                continue
+            y_pred = (y_proba > .5).astype(int)
             preco = precision_score(
                 (y_class == 1).astype(int), y_pred[:, 1])
             precu = precision_score(
                 (y_class == 0).astype(int), y_pred[:, 0])
             y_pred = y_pred[:, 1]
             acc = accuracy_score(
-                y_class[np.max(y_proba, axis=1) > threshold], y_pred[np.max(
-                    y_proba, axis=1) > threshold]
+                y_class[np.max(y_proba, axis=1) > 0.5], y_pred[np.max(
+                    y_proba, axis=1) > 0.5]
             )
 
             bs = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
 
-            r2 = r2_score(y_test, ev)
+            dev = mean_tweedie_deviance(y_test, ev, p)
 
             filedict = {
                 "model": model,
                 "stats": {
                     "Accuracy": acc,
-                    "Null Points": null,
                     "Precision_Over": preco,
                     "Precision_Under": precu,
                     "Brier Score Loss": bs,
-                    "R2 Score": r2
+                    "Deviance": dev,
+                    "RMLSE": rmlse
                 },
                 "params": params,
                 "distribution": dist

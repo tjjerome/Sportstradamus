@@ -167,3 +167,6 @@ docs/build
 *.csv*
 *.
 .lprof
+*refactor.py
+*test.py
+*.txt
