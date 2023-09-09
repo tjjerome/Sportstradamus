@@ -1054,10 +1054,8 @@ def get_parp():
     offers = {}
     for player in tqdm(api["players"], desc="Getting ParlayPlay Offers", unit="offer"):
         teams = [
-            player["match"]["homeTeam"]["teamAbbreviation"].replace(
-                "CHW", "CWS").replace("WSH", "WAS"),
-            player["match"]["awayTeam"]["teamAbbreviation"].replace(
-                "CHW", "CWS").replace("WSH", "WAS"),
+            player["match"]["homeTeam"]["teamAbbreviation"],
+            player["match"]["awayTeam"]["teamAbbreviation"],
         ]
 
         player_team = player["player"]["team"]["teamAbbreviation"]
