@@ -1,3 +1,8 @@
+======================== NFL fantasy points parlayplay =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.563715        0.549897         0.614035          0.246671 61.410029 0.744397
+
 ======================== NFL fantasy points prizepicks =========================
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE

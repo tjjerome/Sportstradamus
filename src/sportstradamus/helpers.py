@@ -108,7 +108,17 @@ def remove_accents(input_str):
     """
     nfkd_form = unicodedata.normalize("NFKD", input_str)
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
-    return name_map.get(out_str, out_str)
+    if "+" in out_str:
+        names = out_str.split("+")
+        out_str = " + ".join([name_map.get(n.strip(), n.strip())
+                             for n in names])
+    elif "vs." in out_str:
+        names = out_str.split("vs.")
+        out_str = " vs. ".join(
+            [name_map.get(n.strip(), n.strip()) for n in names])
+    else:
+        out_str = name_map.get(out_str, out_str)
+    return out_str
 
 
 def odds_to_prob(odds):
