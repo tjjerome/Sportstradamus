@@ -181,8 +181,6 @@ def meditate(force, stats, league):
             filepath = pkg_resources.files(data) / (filename + ".csv")
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0)
-                M = M.loc[(M["IQR10"] > 0) | (M["Avg10"] > 0)
-                          ].reset_index(drop=True)
                 M.to_csv(filepath)
             else:
                 M = stat_data.get_training_matrix(market)

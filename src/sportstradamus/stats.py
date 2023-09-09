@@ -384,7 +384,7 @@ class StatsNBA(Stats):
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
-            filter(lambda x: x[market].count() > 1).\
+            filter(lambda x: x[market].median() > 0).\
             groupby('PLAYER_NAME')
 
         defenseGroups = gamelog.groupby('OPP')
@@ -1117,11 +1117,11 @@ class StatsMLB(Stats):
 
         # Filter players with at least 2 entries
         playerGroups = gamelog_df.groupby('playerName').filter(
-            lambda x: x[market].count() > 1).groupby('playerName')
+            lambda x: x[market].median() > 0).groupby('playerName')
 
         defenseGroups = gamelog_df.groupby('opponent')
         pitcherGroups = gamelog_df.groupby('opponent pitcher').filter(
-            lambda x: x[market].count() > 1).groupby('opponent pitcher')
+            lambda x: x[market].median() > 0).groupby('opponent pitcher')
 
         # Compute league average
         leagueavg = playerGroups[market].mean().mean()
@@ -1695,7 +1695,7 @@ class StatsNFL(Stats):
 
         playerGroups = gamelog.\
             groupby('player display name').\
-            filter(lambda x: x[market].count() > 1).\
+            filter(lambda x: x[market].median() > 0).\
             groupby('player display name')
 
         defenseGroups = gamelog.groupby('opponent')
@@ -2285,7 +2285,7 @@ class StatsNHL(Stats):
 
         # Filter players with at least 2 entries
         playerGroups = gamelog_df.groupby('playerName').filter(
-            lambda x: x[market].count() > 1).groupby('playerName')
+            lambda x: x[market].median() > 0).groupby('playerName')
 
         defenseGroups = gamelog_df.groupby('opponent')
 
