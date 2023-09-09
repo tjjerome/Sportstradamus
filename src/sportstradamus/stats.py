@@ -384,7 +384,7 @@ class StatsNBA(Stats):
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
-            filter(lambda x: (x[market].median() > 0) & (x[market].count() > 1)).\
+            filter(lambda x: (x[market].clip(0, 1).mean() > 0.3) & (x[market].count() > 1)).\
             groupby('PLAYER_NAME')
 
         defenseGroups = gamelog.groupby(['OPP', 'GAME_ID'])
@@ -1130,7 +1130,7 @@ class StatsMLB(Stats):
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
-            lambda x: (x[market].median() > 0) & (x[market].count() > 1)).groupby('playerName')
+            lambda x: (x[market].clip(0, 1).mean() > 0.3) & (x[market].count() > 1)).groupby('playerName')
 
         defenseGroups = gamelog.groupby('opponent')
         defenseGroups = gamelog.groupby(['opponent', 'gameId'])
@@ -1641,6 +1641,7 @@ class StatsNFL(Stats):
             'QB', 'RB', 'WR', 'TE'])]
         self.players = self.players.groupby(
             'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
+        self.players["Kenneth Walker"] = self.players.pop("Kenneth Walker III")
 
         # Remove old games to prevent file bloat
         three_years_ago = datetime.today().date() - timedelta(days=1096)
@@ -1732,7 +1733,7 @@ class StatsNFL(Stats):
 
         playerGroups = gamelog.\
             groupby('player display name').\
-            filter(lambda x: (x[market].median() > 0) & (x[market].count() > 1)).\
+            filter(lambda x: (x[market].clip(0, 1).mean() > 0.3) & (x[market].count() > 1)).\
             groupby('player display name')
 
         defenseGroups = gamelog.groupby(['opponent', 'game id'])
@@ -2335,7 +2336,7 @@ class StatsNHL(Stats):
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
-            lambda x: (x[market].median() > 0) & (x[market].count() > 1)).groupby('playerName')
+            lambda x: (x[market].clip(0, 1).mean() > 0.3) & (x[market].count() > 1)).groupby('playerName')
 
         defenseGroups = gamelog.groupby(['opponent', 'gameDate'])
         defenseGames = pd.DataFrame()
