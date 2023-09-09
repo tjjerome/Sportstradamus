@@ -170,3 +170,4 @@ docs/build
 *refactor.py
 *test.py
 *.txt
+src/sportstradamus/data/training_report.txt
