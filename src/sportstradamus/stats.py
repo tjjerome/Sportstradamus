@@ -592,6 +592,10 @@ class StatsNBA(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "Mean5": np.mean(game_res[-5:]) if game_res else 0,
+            "Mean10": np.mean(game_res[-10:]) if game_res else 0,
+            "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
@@ -663,6 +667,8 @@ class StatsNBA(Stats):
             lines = [k for k, v in data.items()]
             if "Closing Lines" in lines:
                 lines.remove("Closing Lines")
+                lines.append(
+                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
 
             line = lines[-1]
 
@@ -1350,6 +1356,10 @@ class StatsMLB(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "Mean5": np.mean(game_res[-5:]) if game_res else 0,
+            "Mean10": np.mean(game_res[-10:]) if game_res else 0,
+            "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
@@ -1456,9 +1466,8 @@ class StatsMLB(Stats):
             lines = [k for k, v in data.items()]
             if "Closing Lines" in lines:
                 lines.remove("Closing Lines")
-
-            if len(lines) == 0:
-                continue
+                lines.append(
+                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
 
             line = lines[-1]
 
@@ -1925,6 +1934,10 @@ class StatsNFL(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "Mean5": np.mean(game_res[-5:]) if game_res else 0,
+            "Mean10": np.mean(game_res[-10:]) if game_res else 0,
+            "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
@@ -1983,14 +1996,14 @@ class StatsNFL(Stats):
 
             if gameDate < datetime(2021, 9, 1):
                 continue
-            data = {}
+
             self.profile_market(market, date=gameDate)
             name = game['player display name']
 
             if name not in self.playerProfile.index:
                 continue
 
-            if game[market] <= 0 and "td" not in market and "interception" not in market:
+            if game[market] < 0:
                 continue
 
             data = archive["NFL"][market].get(gameDate.strftime(
@@ -1999,6 +2012,8 @@ class StatsNFL(Stats):
             lines = [k for k, v in data.items()]
             if "Closing Lines" in lines:
                 lines.remove("Closing Lines")
+                lines.append(
+                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
 
             line = lines[-1]
 
@@ -2016,8 +2031,22 @@ class StatsNFL(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
-                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
-                        continue
+                    if "td" in market or "interception" in market:
+                        if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] < 0.5:
+                            continue
+                    elif "yards" in market:
+                        if new_get_stats["Avg10"] <= 10:
+                            continue
+                    elif "fantasy" in market:
+                        if new_get_stats["Avg10"] <= 6:
+                            continue
+                    elif market == "receptions":
+                        if new_get_stats["Avg10"] <= 1:
+                            continue
+                    else:
+                        if new_get_stats["Avg10"] <= 4:
+                            continue
+
                     new_get_stats.update(
                         {"Result": game[market]}
                     )
@@ -2554,6 +2583,10 @@ class StatsNHL(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "Mean5": np.mean(game_res[-5:]) if game_res else 0,
+            "Mean10": np.mean(game_res[-10:]) if game_res else 0,
+            "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
             "Moneyline": moneyline,
             "Total": total,
@@ -2639,6 +2672,8 @@ class StatsNHL(Stats):
             lines = [k for k, v in data.items()]
             if "Closing Lines" in lines:
                 lines.remove("Closing Lines")
+                lines.append(
+                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
 
             line = lines[-1]
 
