@@ -247,13 +247,6 @@ def meditate(force, stats, league):
                             num_boost_round=n_rounds
                             )
 
-            acc = 0
-            preco = 0
-            precu = 0
-            bs = 0
-            dev = 0
-            rmlse = 0
-
             X_test.loc[X_test["Line"] == 0, "Line"] = X_test.loc[X_test["Line"]
                                                                  == 0, "Avg10"].apply(np.ceil)-0.5
             X_test.loc[X_test["Line"] <= 0, "Line"] = 0.5
@@ -276,22 +269,30 @@ def meditate(force, stats, league):
             y_class = (y_test["Result"] >
                        X_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
-            y_pred = (y_proba > .5).astype(int)
+            y_pred = (y_proba > .54).astype(int)
             preco = precision_score(
                 (y_class == 1).astype(int), y_pred[:, 1])
             precu = precision_score(
                 (y_class == 0).astype(int), y_pred[:, 0])
             y_pred = y_pred[:, 1]
             acc = accuracy_score(
-                y_class[np.max(y_proba, axis=1) > 0.5], y_pred[np.max(
-                    y_proba, axis=1) > 0.5]
+                y_class[np.max(y_proba, axis=1) > 0.54], y_pred[np.max(
+                    y_proba, axis=1) > 0.54]
             )
 
             bs = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
+            bs0 = brier_score_loss(
+                y_class, 0.5*np.ones_like(y_class), pos_label=1)
+            bs = 1 - bs/bs0
 
             dev = mean_tweedie_deviance(y_test, ev, power=p)
+            dev0 = mean_tweedie_deviance(y_test, X_test["Line"], power=p)
+            dev = 1 - dev/dev0
 
             rmlse = mean_squared_log_error(y_test, ev, squared=False)
+            rmlse0 = mean_squared_log_error(
+                y_test, X_test["Line"], squared=False)
+            rmlse = 1 - rmlse/rmlse0
 
             filedict = {
                 "model": model,

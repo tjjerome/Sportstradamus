@@ -1,45 +1,95 @@
-======================== NFL fantasy points parlayplay =========================
+================================= NFL attempts =================================
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.563715        0.549897         0.614035          0.246671 61.410029 0.744397
+ 0.655367        0.709091         0.631148          0.062752  0.044888 0.016798
+
+================================= NFL carries ==================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.622291        0.582278         0.660606          0.035538  0.073961 0.029087
+
+=============================== NFL completions ================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.589595        0.516667         0.628319          0.009807  0.025217 -0.084334
+
+======================== NFL fantasy points parlayplay =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.565823        0.523913         0.624242          0.007898  0.018996 -0.017311
 
 ======================== NFL fantasy points prizepicks =========================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.564918        0.551077         0.609375           0.24598 45.654048 0.702627
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.548843        0.505423         0.611987          0.010407  0.039925 -0.005473
 
 ========================= NFL fantasy points underdog ==========================
  Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+  0.54964        0.490364         0.671053          0.000091   0.03112 -0.012532
+
+============================== NFL interceptions ===============================
+ Distribution Model: Poisson
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.54067        0.523416         0.599068           0.25066 36.349098 0.706591
+ 0.554455        0.451613              0.6          0.044913  0.105836 0.045793
+
+=============================== NFL passing tds ================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.572816             0.5         0.605634          0.033607  0.110178 0.036862
 
 ============================== NFL passing yards ===============================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss    Deviance    RMLSE
- 0.607143        0.530612         0.666667          0.235139 7269.976584 0.768022
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.632184        0.648148            0.625          0.032439    0.0262 -0.058847
+
+================================== NFL qb tds ==================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.552632        0.517241         0.559006          0.000208  0.046651 0.011675
 
 ================================= NFL qb yards =================================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss    Deviance    RMLSE
- 0.606987        0.580645            0.625          0.245901 7024.449706 0.826698
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
+ 0.630952        0.616667         0.638889          0.064313  0.148245 0.04272
+
+============================== NFL receiving tds ===============================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.717105             0.0         0.717105           0.20406  0.076199 0.096705
 
 ============================= NFL receiving yards ==============================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance  RMLSE
- 0.595322        0.589878         0.618868           0.22967  747.4147 0.8623
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.560841        0.507154         0.683636          0.008118  0.055042 -0.023712
+
+================================ NFL receptions ================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.578089        0.518828         0.600969          0.011639  0.023591 0.006922
+
+=============================== NFL rushing tds ================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.670213             0.5         0.673913          0.131852  0.021214 0.050343
 
 ============================== NFL rushing yards ===============================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss   Deviance    RMLSE
- 0.626707         0.61167          0.67284          0.224512 723.245525 0.948717
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.559796        0.524164         0.637097         -0.018427  0.058798 -0.028774
+
+================================= NFL targets ==================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.582751         0.56383          0.59751          0.007664  0.007511 0.000751
 
 =================================== NFL tds ====================================
  Distribution Model: Poisson
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.64876        0.545455         0.659091          0.218692  0.912593 0.398353
+ 0.693916            0.25         0.700772          0.160642  0.065448 0.068769
 
 ================================== NFL yards ===================================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss   Deviance    RMLSE
-  0.57429        0.571321         0.582627          0.240622 916.455786 0.885531
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.566236        0.520908         0.660848         -0.005843  0.049843 -0.041248
 
