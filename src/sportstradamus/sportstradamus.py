@@ -504,17 +504,23 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 if len(player.split(" ")[0].replace(".", "")) <= 2:
                     if league == "NFL":
                         nameStr = 'player display name'
+                        namePos = 1
                     elif league == "NBA":
                         nameStr = 'PLAYER_NAME'
-                    else:
+                        namePos = 2
+                    elif league == "MLB":
                         nameStr = "playerName"
+                        namePos = 2
+                    elif league == "NHL":
+                        nameStr = "playerName"
+                        namePos = 6
                     name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
                         " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
                     if name_df.empty:
                         pass
                     else:
-                        players[i] = name_df.iloc[0, 2]
-                        player = name_df.iloc[0, 2]
+                        players[i] = name_df.iloc[0, namePos]
+                        player = name_df.iloc[0, namePos]
 
                 if player not in playerStats.index:
                     stats.append(0)
