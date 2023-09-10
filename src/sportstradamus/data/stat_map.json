@@ -415,7 +415,8 @@
             "Pass Completions": "completions",
             "Rush Attempts": "carries",
             "Receptions": "receptions",
-            "Receiving Targets": "targets"
+            "Receiving Targets": "targets",
+            "Interception": "interceptions"
         }
     }
 }
