@@ -651,6 +651,9 @@ class StatsNBA(Stats):
             gameDate = datetime.strptime(
                 game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
 
+            if game[market] < 0:
+                continue
+
             if gameDate < datetime(2022, 10, 1):
                 continue
 
@@ -1448,6 +1451,9 @@ class StatsMLB(Stats):
             ):
                 continue
 
+            if game[market] < 0:
+                continue
+
             # Retrieve data from the archive based on game date and player name
             data = {}
             gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
@@ -1647,6 +1653,7 @@ class StatsNFL(Stats):
         self.players = self.players.groupby(
             'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
         self.players["Kenneth Walker"] = self.players.pop("Kenneth Walker III")
+        self.players["Gabe Davis"] = self.players.pop("Gabriel Davis")
 
         # Remove old games to prevent file bloat
         three_years_ago = datetime.today().date() - timedelta(days=1096)
@@ -2657,6 +2664,9 @@ class StatsNHL(Stats):
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
             if gameDate < datetime(2022, 10, 1):
+                continue
+
+            if game[market] < 0:
                 continue
 
             data = {}
