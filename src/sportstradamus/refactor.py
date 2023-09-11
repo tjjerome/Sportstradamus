@@ -8,25 +8,19 @@ from sportstradamus import creds, data
 import json
 import numpy as np
 
-archive = Archive("NFL")
-stats = StatsNFL()
-stats.load()
-stats.update()
-
-for market in [
-    "tds",
-    "rushing tds",
-    "receiving tds"
-]:
-    for date in tqdm(list(archive["NFL"][market].keys()), desc=market):
-        if datetime.strptime(date, "%Y-%m-%d") < datetime(2023, 9, 1):
-            archive["NFL"][market].pop(date)
+archive = Archive("All")
 
 for league in ["NFL", "NBA", "NHL", "MLB"]:
     for date in tqdm(list(archive[league]["Moneyline"].keys()), desc=league):
         for market in ["Moneyline", "Totals"]:
+            if "CHW" in archive[league][market][date]:
+                archive[league][market][date]["CWS"] = archive[league][market][date].pop(
+                    "CHW")
             if "WSH" in archive[league][market][date]:
                 archive[league][market][date]["WAS"] = archive[league][market][date].pop(
                     "WSH")
+            if "AZ" in archive[league][market][date]:
+                archive[league][market][date]["ARI"] = archive[league][market][date].pop(
+                    "AZ")
 
 archive.write()

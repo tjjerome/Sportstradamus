@@ -1,3 +1,78 @@
+========================= MLB 1st inning hits allowed ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
+ 0.591656        0.570318         0.772455          0.052461  0.207466 0.02949
+
+========================= MLB 1st inning runs allowed ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.682093        0.266667         0.708779          0.105569  0.017666 -0.000423
+
+============================== MLB hits+runs+rbi ===============================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.618434        0.603159         0.653609          0.026645   0.25212 0.037474
+
+=============================== MLB hits allowed ===============================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.613845        0.627835         0.554585          0.037156  0.075907 -0.007457
+
+====================== MLB hitter fantasy points underdog ======================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.575646        0.551962          0.68314          0.018427  0.068652 -0.006589
+
+=========================== MLB hitter fantasy score ===========================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.584335        0.559251         0.691667          0.018291  0.085685 -0.005734
+
+===================== MLB pitcher fantasy points underdog ======================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.629904        0.622685          0.64271          0.095259   0.18893 0.104836
+
+========================== MLB pitcher fantasy score ===========================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+  0.61678        0.619701         0.612284          0.066296  0.167766 0.087672
+
+============================ MLB pitcher strikeouts ============================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.609299        0.600252         0.625866          0.052427  0.083564 0.003089
+
+============================== MLB pitches thrown ==============================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+  0.64107        0.660671         0.590769          0.055126  0.025543 -0.037457
+
+============================== MLB pitching outs ===============================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.592035        0.613229         0.512605          0.018499  0.009605 -0.019261
+
+=============================== MLB runs allowed ===============================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.640761        0.641618         0.638889          0.072988  0.250267 0.049345
+
+=============================== MLB stolen bases ===============================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
+ 0.798077             0.0         0.798077          0.344778  0.195404 0.18948
+
+=============================== MLB total bases ================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.598069        0.587162         0.683346         -0.009287  0.275707 0.021939
+
+================================== MLB walks ===================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.663596             0.0         0.663596          0.117263  0.039304 0.051602
+
 ================================= NFL attempts =================================
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
