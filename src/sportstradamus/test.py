@@ -1,19 +1,21 @@
-from sportstradamus.stats import StatsNHL
-from datetime import datetime
-import pandas as pd
+from sportstradamus.stats import StatsNFL, StatsMLB, StatsNBA, StatsNHL
+
+NFL = StatsNFL()
+NFL.load()
+NFL.profile_market('passing yards')
+print(NFL.defenseProfile)
+
+MLB = StatsMLB()
+MLB.load()
+MLB.profile_market('pitcher strikeouts')
+print(MLB.defenseProfile)
+
+NBA = StatsNBA()
+NBA.load()
+NBA.profile_market('PTS')
+print(NBA.defenseProfile)
 
 NHL = StatsNHL()
 NHL.load()
-NHL.update()
-
-offer = {
-    "Player": "Jake Oettinger",
-    "Market": "goalie fantasy points underdog",
-    "Date": "2022-01-18",
-    "Line": 15.5,
-    "League": "NHL",
-    "Team": "DAL",
-    "Opponent": "MTL"
-}
-NHL.profile_market(offer["Market"], date=offer["Date"])
-NHL.get_stats(offer, date=offer['Date'])
+NHL.profile_market('shots')
+print(NHL.defenseProfile)

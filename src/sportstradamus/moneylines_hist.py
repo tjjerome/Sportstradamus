@@ -12,12 +12,12 @@ with open(filepath, "rb") as infile:
 
 apikey = "29311eba87f90e2741845d5c70ca4c14"
 
-sport = "americanfootball_nfl"
-league = "NFL"
+sport = "baseball_mlb"
+league = "MLB"
 
-Date = datetime.strptime("2020-09-09T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2023-03-30T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
-while Date < datetime.strptime("2021-02-14T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
+while Date < datetime.strptime("2023-09-11T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
     date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
     url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals&date={date}&apiKey={apikey}"
     res = scraper.get(url)["data"]
@@ -27,6 +27,8 @@ while Date < datetime.strptime("2021-02-14T08:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
             game["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
         gameDate = (gameDate - timedelta(hours=5)).strftime("%Y-%m-%d")
 
+        if "League" in game["home_team"]:
+            continue
         homeTeam = abbreviations[league][remove_accents(game["home_team"])]
         awayTeam = abbreviations[league][remove_accents(game["away_team"])]
 

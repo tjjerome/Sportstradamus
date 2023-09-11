@@ -374,13 +374,20 @@ class StatsNBA(Stats):
         one_year_ago = date - timedelta(days=300)
         gameDates = pd.to_datetime(self.gamelog["GAME_DATE"]).dt.date
         gamelog = self.gamelog[(one_year_ago <= gameDates)
-                               & (gameDates < date)]
+                               & (gameDates < date)].copy()
 
         # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["NBA"]["Moneyline"].get(
-            row["GAME_DATE"].split("T")[0], {}).get(row["TEAM_ABBREVIATION"], 0.5), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["NBA"]["Totals"].get(
-            row["GAME_DATE"].split("T")[0], {}).get(row["TEAM_ABBREVIATION"], 220), axis=1)
+        k = [[(date, team) for team in teams.keys()]
+             for date, teams in archive["NBA"]["Moneyline"].items()]
+        k = [item for row in k for item in row]
+        flat_money = {t: archive["NBA"]["Moneyline"].get(
+            t[0], {}).get(t[1], 0.5) for t in k}
+        flat_total = {t: archive["NBA"]["Totals"].get(
+            t[0], {}).get(t[1], 220) for t in k}
+        tup_s = pd.Series(
+            zip(gamelog['GAME_DATE'].str[:10], gamelog['TEAM_ABBREVIATION']), index=gamelog.index)
+        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
+        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
@@ -1128,15 +1135,22 @@ class StatsMLB(Stats):
 
         # Filter non-starting pitchers or non-starting batters depending on the market
         if any([string in market for string in ["allowed", "pitch"]]):
-            gamelog = gamelog[gamelog["starting pitcher"]]
+            gamelog = gamelog[gamelog["starting pitcher"]].copy()
         else:
-            gamelog = gamelog[gamelog["starting batter"]]
+            gamelog = gamelog[gamelog["starting batter"]].copy()
 
         # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["MLB"]["Moneyline"].get(
-            row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 0.5), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["MLB"]["Totals"].get(
-            row["gameId"][:10].replace('/', '-'), {}).get(row["team"], 8.3), axis=1)
+        k = [[(date, team) for team in teams.keys()]
+             for date, teams in archive["MLB"]["Moneyline"].items()]
+        k = [item for row in k for item in row]
+        flat_money = {t: archive["MLB"]["Moneyline"].get(
+            t[0], {}).get(t[1], 0.5) for t in k}
+        flat_total = {t: archive["MLB"]["Totals"].get(
+            t[0], {}).get(t[1], 8.5) for t in k}
+        tup_s = pd.Series(
+            zip(gamelog['gameId'].str[:10].str.replace("/", "-"), gamelog['team']), index=gamelog.index)
+        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
+        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -1196,7 +1210,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.3 - x.totals.fillna(8.3).mean(),
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.5 - x.totals.fillna(8.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.apply(
@@ -1204,7 +1218,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.3 - x.totals.fillna(8.3).mean(),
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.5 - x.totals.fillna(8.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['moneyline gain'] = pitcherGroups.apply(
@@ -1212,7 +1226,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['totals gain'] = pitcherGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.3 - x.totals.fillna(8.3).mean(),
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.5 - x.totals.fillna(8.3).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if any([string in market for string in ["allowed", "pitch"]]):
@@ -1529,7 +1543,7 @@ class StatsNFL(Stats):
         super().__init__()
         self.season_start = datetime.strptime("2023-09-07", "%Y-%m-%d").date()
         cols = ['player id', 'player display name', 'position group',
-                'recent team', 'season', 'week', 'season type',
+                'recent team', 'season', 'week', 'season type', 'snap pct',
                 'completions', 'attempts', 'passing yards', 'passing tds',
                 'interceptions', 'sacks', 'sack fumbles', 'sack fumbles lost',
                 'passing 2pt conversions', 'carries', 'rushing yards', 'rushing tds',
@@ -1538,7 +1552,7 @@ class StatsNFL(Stats):
                 'receiving fumbles', 'receiving fumbles lost', 'receiving 2pt conversions',
                 'special teams tds', 'fumbles', 'fumbles lost', 'yards', 'tds', 'qb yards', 'qb tds',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlayplay',
-                'home', 'moneyline', 'totals', 'opponent', 'gameday', 'game id']
+                'home', 'opponent', 'gameday', 'game id']
         self.gamelog = pd.DataFrame(columns=cols)
 
     def load(self):
@@ -1569,6 +1583,7 @@ class StatsNFL(Stats):
         except:
             nfl_data = pd.DataFrame(columns=cols)
 
+        snaps = nfl.import_snap_counts([self.season_start.year])
         sched = nfl.import_schedules([self.season_start.year])
         upcoming_games = sched.loc[pd.to_datetime(sched['gameday']) >= datetime.today(), [
             'gameday', 'away_team', 'home_team']]
@@ -1582,6 +1597,24 @@ class StatsNFL(Stats):
             upcoming_games = pd.concat([df1, df2]).sort_values('gameday')
             self.upcoming_games = upcoming_games.groupby("Team").apply(
                 lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home']].to_dict(orient='index')
+
+        nfl_data = nfl_data.loc[nfl_data["position_group"].isin(
+            ["QB", "WR", "RB", "TE"])]
+        snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
+        snaps['player_display_name'] = snaps['player']
+        snaps['snap_pct'] = snaps['offense_pct']
+        snaps = snaps[['player_display_name', 'season', 'week', 'snap_pct']]
+
+        nfl_data = nfl_data.merge(
+            snaps, on=['player_display_name', 'season', 'week'])
+        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'QB') | (
+            nfl_data['snap_pct'] > 0.8)]
+        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'WR') | (
+            nfl_data['snap_pct'] > 0.5)]
+        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'RB') | (
+            nfl_data['snap_pct'] > 0.3)]
+        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
+            nfl_data['snap_pct'] > 0.5)]
 
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
@@ -1735,13 +1768,20 @@ class StatsNFL(Stats):
         one_year_ago = date - timedelta(days=300)
         gameDates = pd.to_datetime(self.gamelog["gameday"]).dt.date
         gamelog = self.gamelog[(
-            one_year_ago <= gameDates) & (gameDates < date)]
+            one_year_ago <= gameDates) & (gameDates < date)].copy()
 
         # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["NFL"]["Moneyline"].get(
-            row["gameday"], {}).get(row["recent team"], 0.5), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["NFL"]["Totals"].get(
-            row["gameday"], {}).get(row["recent team"], 45), axis=1).copy()
+        k = [[(date, team) for team in teams.keys()]
+             for date, teams in archive["NFL"]["Moneyline"].items()]
+        k = [item for row in k for item in row]
+        flat_money = {t: archive["NFL"]["Moneyline"].get(
+            t[0], {}).get(t[1], 0.5) for t in k}
+        flat_total = {t: archive["NFL"]["Totals"].get(
+            t[0], {}).get(t[1], 45) for t in k}
+        tup_s = pd.Series(
+            zip(gamelog['gameday'], gamelog['recent team']), index=gamelog.index)
+        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
+        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -2038,21 +2078,21 @@ class StatsNFL(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
-                    if "td" in market or "interception" in market:
-                        if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] < 0.5:
-                            continue
-                    elif "yards" in market:
-                        if new_get_stats["Avg10"] <= 10:
-                            continue
-                    elif "fantasy" in market:
-                        if new_get_stats["Avg10"] <= 6:
-                            continue
-                    elif market == "receptions":
-                        if new_get_stats["Avg10"] <= 1:
-                            continue
-                    else:
-                        if new_get_stats["Avg10"] <= 4:
-                            continue
+                    # if "td" in market or "interception" in market:
+                    #     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] < 0.5:
+                    #         continue
+                    # elif "yards" in market:
+                    #     if new_get_stats["Avg10"] <= 10:
+                    #         continue
+                    # elif "fantasy" in market:
+                    #     if new_get_stats["Avg10"] <= 6:
+                    #         continue
+                    # elif market == "receptions":
+                    #     if new_get_stats["Avg10"] <= 1:
+                    #         continue
+                    # else:
+                    #     if new_get_stats["Avg10"] <= 4:
+                    #         continue
 
                     new_get_stats.update(
                         {"Result": game[market]}
@@ -2357,15 +2397,22 @@ class StatsNHL(Stats):
 
         # Filter non-starting goalies or non-starting skaters depending on the market
         if any([string in market for string in ["Against", "saves", "goalie"]]):
-            gamelog = gamelog[gamelog["position"] == "G"]
+            gamelog = gamelog[gamelog["position"] == "G"].copy()
         else:
-            gamelog = gamelog[gamelog["position"] != "G"]
+            gamelog = gamelog[gamelog["position"] != "G"].copy()
 
         # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda row: archive["NHL"]["Moneyline"].get(
-            row["gameDate"], {}).get(row["team"], 0.5), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda row: archive["NHL"]["Totals"].get(
-            row["gameDate"], {}).get(row["team"], 5.5), axis=1)
+        k = [[(date, team) for team in teams.keys()]
+             for date, teams in archive["NHL"]["Moneyline"].items()]
+        k = [item for row in k for item in row]
+        flat_money = {t: archive["NHL"]["Moneyline"].get(
+            t[0], {}).get(t[1], 0.5) for t in k}
+        flat_total = {t: archive["NHL"]["Totals"].get(
+            t[0], {}).get(t[1], 5.5) for t in k}
+        tup_s = pd.Series(
+            zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
+        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
+        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -2396,9 +2443,9 @@ class StatsNHL(Stats):
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
         self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
 
         positions = ["C", "R", "L", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
