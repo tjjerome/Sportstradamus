@@ -237,11 +237,23 @@ class Archive:
                 self.archive = pickle.load(infile)
 
         if league != "None" and league != "All":
-            self.merge(pkg_resources.files(data) / f"archive_{league}.dat")
+            filepath = pkg_resources.files(data) / f"archive_{league}.dat"
+            if os.path.isfile(filepath):
+                with open(filepath, 'rb') as infile:
+                    new_archive = pickle.load(infile)
+
+                if type(new_archive) is dict:
+                    self.archive = merge_dict(new_archive, self.archive)
         elif league == "All":
             leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
             for league in leagues:
-                self.merge(pkg_resources.files(data) / f"archive_{league}.dat")
+                filepath = pkg_resources.files(data) / f"archive_{league}.dat"
+                if os.path.isfile(filepath):
+                    with open(filepath, 'rb') as infile:
+                        new_archive = pickle.load(infile)
+
+                    if type(new_archive) is dict:
+                        self.archive = merge_dict(new_archive, self.archive)
 
     def __getitem__(self, item):
         """
