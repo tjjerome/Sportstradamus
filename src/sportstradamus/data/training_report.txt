@@ -113,6 +113,16 @@
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
  0.663596             0.0         0.663596          0.117263  0.039304 0.051602
 
+=================================== NBA AST ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.613685        0.617078         0.599359          0.046612  0.063418 0.026734
+
+=================================== NBA PRA ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.559197        0.560317         0.555716          0.010049  0.030133 0.001496
+
 =================================== NBA PTS ====================================
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE

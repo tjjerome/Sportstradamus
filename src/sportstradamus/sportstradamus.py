@@ -206,10 +206,10 @@ def main(progress, books):
     positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
     prob_params['Position'] = playerStats.Position.map(positions)
     prob_params['Projection'] = prob_params['loc'].round(1)
-    prob_params['Floor'] = norm.ppf(.1, loc=prob_params['loc'],
+    prob_params['Floor'] = norm.ppf(.2, loc=prob_params['loc'],
                                     scale=prob_params['scale'])
     prob_params['Floor'] = prob_params['Floor'].clip(0).round(1)
-    prob_params['Ceiling'] = norm.ppf(.9, loc=prob_params['loc'],
+    prob_params['Ceiling'] = norm.ppf(.95, loc=prob_params['loc'],
                                       scale=prob_params['scale'])
     prob_params['Ceiling'] = prob_params['Ceiling'].clip(0).round(1)
     prob_params = prob_params[['Player', 'Position',
