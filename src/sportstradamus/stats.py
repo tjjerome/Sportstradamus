@@ -1587,6 +1587,10 @@ class StatsNFL(Stats):
         sched = nfl.import_schedules([self.season_start.year])
         upcoming_games = sched.loc[pd.to_datetime(sched['gameday']) >= datetime.today(), [
             'gameday', 'away_team', 'home_team']]
+        upcoming_games.loc[upcoming_games['away_team']
+                           == 'LA', 'away_team'] = "LAR"
+        upcoming_games.loc[upcoming_games['home_team']
+                           == 'LA', 'home_team'] = "LAR"
         if not upcoming_games.empty:
             df1 = upcoming_games.rename(
                 columns={'home_team': 'Team', 'away_team': 'Opponent'})
@@ -1596,7 +1600,7 @@ class StatsNFL(Stats):
             df2['Home'] = 0
             upcoming_games = pd.concat([df1, df2]).sort_values('gameday')
             self.upcoming_games = upcoming_games.groupby("Team").apply(
-                lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home']].to_dict(orient='index')
+                lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home', 'gameday']].to_dict(orient='index')
 
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(
             ["QB", "WR", "RB", "TE"])]
@@ -2101,6 +2105,72 @@ class StatsNFL(Stats):
                     matrix.append(new_get_stats)
 
         M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+
+        return M
+
+    def get_fantasy(self):
+        """
+        Retrieves fantasy points stats.
+
+        Args:
+
+        Returns:
+            tuple: A tuple containing the feature matrix (X) and the target vector (y).
+        """
+
+        # Initialize an empty list for the target labels
+        matrix = []
+        i = []
+
+        self.profile_market('fantasy points underdog')
+        depth = nfl.import_depth_charts([self.season_start.year])
+        depth = depth.loc[depth.position.isin(["QB", "WR", "RB", "TE"])]
+        depth = depth.loc[depth.week == depth.week.max()]
+        depth = depth.loc[(depth.depth_team.astype(int) == 1) | ~(
+            depth.position.isin(["QB", "TE"]))]
+        depth = depth.loc[depth.depth_team.astype(int) <= 2]
+        depth.loc[depth['club_code'] == 'LA', 'club_code'] = "LAR"
+        players = pd.Series(zip(depth['full_name'].map(
+            remove_accents), depth['club_code'])).drop_duplicates().to_list()
+
+        for player, team in tqdm(players, unit="player"):
+
+            gameDate = self.upcoming_games.get(team, {}).get(
+                'gameday', datetime.today().strftime("%Y-%m-%d"))
+            opponent = self.upcoming_games.get(team, {}).get(
+                'Opponent', datetime.today().strftime("%Y-%m-%d"))
+            home = self.upcoming_games.get(team, {}).get(
+                'Home', datetime.today().strftime("%Y-%m-%d"))
+            data = archive["NFL"]['fantasy points underdog'].get(
+                gameDate, {}).get(player, {0: [0.5]*4})
+
+            lines = [k for k, v in data.items()]
+            if "Closing Lines" in lines:
+                lines.remove("Closing Lines")
+                lines.append(
+                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
+
+            line = lines[-1]
+
+            offer = {
+                "Player": player,
+                "Team": team,
+                "Market": 'fantasy points underdog',
+                "Opponent": opponent,
+                "Home": home
+            }
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                new_get_stats = self.get_stats(
+                    offer | {"Line": line}, gameDate
+                )
+                if type(new_get_stats) is dict:
+                    matrix.append(new_get_stats)
+                    i.append(player)
+
+        M = pd.DataFrame(matrix, index=i).fillna(
+            0.0).replace([np.inf, -np.inf], 0)
 
         return M
 
