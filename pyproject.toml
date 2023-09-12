@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Sportstradamus"
-version = "2.1.0"
+version = "2.2.0"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"

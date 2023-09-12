@@ -211,9 +211,9 @@ def main(progress, books):
     prob_params['Floor'] = prob_params['Floor'].clip(0).round(1)
     prob_params['Ceiling'] = norm.ppf(.9, loc=prob_params['loc'],
                                       scale=prob_params['scale'])
-    prob_params['Ceiling'] = prob_params['ceiling'].clip(0).round(1)
+    prob_params['Ceiling'] = prob_params['Ceiling'].clip(0).round(1)
     prob_params = prob_params[['Player', 'Position',
-                               'Projection', 'Floor', 'Ceiling']]
+                               'Projection', 'Floor', 'Ceiling']].sort_values("Projection", ascending=False)
 
     if len(prob_params) > 0:
         wks = gc.open("Sportstradamus").worksheet("Fantasy")
