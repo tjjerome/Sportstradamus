@@ -1601,7 +1601,7 @@ class StatsNFL(Stats):
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(
             ["QB", "WR", "RB", "TE"])]
         snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
-        snaps['player_display_name'] = snaps['player']
+        snaps['player_display_name'] = snaps['player'].map(remove_accents)
         snaps['snap_pct'] = snaps['offense_pct']
         snaps = snaps[['player_display_name', 'season', 'week', 'snap_pct']]
 
