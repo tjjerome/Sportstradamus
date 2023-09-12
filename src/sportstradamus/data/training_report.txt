@@ -118,6 +118,11 @@
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
  0.564633        0.560775         0.576197          0.007002  0.011696 -0.015899
 
+=================================== NBA REB ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.573452          0.5708         0.582329          0.023903  0.051044 0.010924
+
 ================================= NFL attempts =================================
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
