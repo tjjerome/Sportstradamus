@@ -180,6 +180,8 @@ def main(progress, books):
     th_offers = process_offers(th_dict, "Thrive", datasets, stats)
     save_data(th_offers, "Thrive", gc)
 
+    archive.write()
+
     if len(untapped_markets) > 0:
         untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
         wks = gc.open("Sportstradamus").worksheet("Untapped Markets")
@@ -188,7 +190,38 @@ def main(progress, books):
                    untapped_df.values.tolist())
         wks.set_basic_filter()
 
-    archive.write()
+    filepath = pkg_resources.files(data) / "NFL_fantasy-points-underdog.mdl"
+    with open(filepath, "rb") as infile:
+        filedict = pickle.load(infile)
+    model = filedict["model"]
+
+    playerStats = nfl.get_fantasy()
+    categories = ["Home", "Position"]
+    for c in categories:
+        playerStats[c] = playerStats[c].astype('category')
+
+    prob_params = model.predict(playerStats, pred_type="parameters")
+    prob_params.index = playerStats.index
+    prob_params['Player'] = playerStats.index
+    positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
+    prob_params['Position'] = playerStats.Position.map(positions)
+    prob_params['Projection'] = prob_params['loc'].round(1)
+    prob_params['Floor'] = norm.ppf(.1, loc=prob_params['loc'],
+                                    scale=prob_params['scale'])
+    prob_params['Floor'] = prob_params['Floor'].clip(0).round(1)
+    prob_params['Ceiling'] = norm.ppf(.9, loc=prob_params['loc'],
+                                      scale=prob_params['scale'])
+    prob_params['Ceiling'] = prob_params['ceiling'].clip(0).round(1)
+    prob_params = prob_params[['Player', 'Position',
+                               'Projection', 'Floor', 'Ceiling']]
+
+    if len(prob_params) > 0:
+        wks = gc.open("Sportstradamus").worksheet("Fantasy")
+        wks.clear()
+        wks.update([prob_params.columns.values.tolist()] +
+                   prob_params.values.tolist())
+        wks.set_basic_filter()
+
     logger.info("Success!")
 
 
