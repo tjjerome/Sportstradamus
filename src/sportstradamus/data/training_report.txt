@@ -118,6 +118,21 @@
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
  0.613685        0.617078         0.599359          0.046612  0.063418 0.026734
 
+=================================== NBA FG3M ===================================
+ Distribution Model: Poisson
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.614673        0.620904         0.605057          0.054359  0.161511 0.023646
+
+==================================== NBA PA ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.560738        0.560212         0.562706          0.009346  0.017924 -0.009406
+
+==================================== NBA PR ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
+ 0.567458        0.561887           0.5822          0.013111  0.034915 -0.005154
+
 =================================== NBA PRA ====================================
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
@@ -127,6 +142,11 @@
  Distribution Model: Gaussian
  Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
  0.564633        0.560775         0.576197          0.007002  0.011696 -0.015899
+
+==================================== NBA RA ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
+ 0.594469          0.5875         0.618209          0.030597  0.064312 0.010372
 
 =================================== NBA REB ====================================
  Distribution Model: Gaussian
