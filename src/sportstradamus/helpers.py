@@ -11,6 +11,7 @@ from sportstradamus import creds, data
 from time import sleep
 from scipy.stats import poisson, skellam
 from scipy.optimize import fsolve
+from scipy.integrate import dblquad
 import numpy as np
 import statsapi as mlb
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
@@ -424,3 +425,8 @@ mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
 
 with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)
+
+
+def prob_difference(X, Y, line):
+    def joint_pdf(x, y): return X(x)*Y(y)
+    return dblquad(joint_pdf, line, np.inf, lambda x: 0, lambda x: x - line)
