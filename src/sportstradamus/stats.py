@@ -285,6 +285,18 @@ class StatsNBA(Stats):
                          == 'NOP', 'TEAM_ABBREVIATION'] = "NO"
         self.gamelog.loc[self.gamelog['OPP']
                          == 'NOP', 'OPP'] = "NO"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'GS', 'TEAM_ABBREVIATION'] = "GSW"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'GS', 'OPP'] = "GSW"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'NY', 'TEAM_ABBREVIATION'] = "NYK"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'NY', 'OPP'] = "NYK"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'SA', 'TEAM_ABBREVIATION'] = "SAS"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'SA', 'OPP'] = "SAS"
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
