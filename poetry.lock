@@ -1726,12 +1726,12 @@ test = ["codecov (>=2.1)", "pytest (>=7.2)", "pytest-cov (>=4.0)"]
 
 [[package]]
 name = "nfl-data-py"
-version = "0.3.0"
+version = "0.3.1"
 description = "python library for interacting with NFL data sourced from nflfastR"
 optional = false
 python-versions = ">=3.6.0"
 files = [
-    {file = "nfl_data_py-0.3.0.tar.gz", hash = "sha256:3a718721e575448df94862d9cde39808b86d06227bbf7939cb112fe04922fad2"},
+    {file = "nfl_data_py-0.3.1.tar.gz", hash = "sha256:9eb5c2af30d5a4370a21998dbf21bdab00602f278e8f54646abe7a7a29bcb3aa"},
 ]
 
 [package.dependencies]

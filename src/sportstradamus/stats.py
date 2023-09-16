@@ -277,6 +277,15 @@ class StatsNBA(Stats):
             self.gamelog["GAME_DATE"]).dt.date >= two_years_ago]
         self.gamelog.drop_duplicates(inplace=True)
 
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'UTAH', 'TEAM_ABBREVIATION'] = "UTA"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'UTAH', 'OPP'] = "UTA"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'NOP', 'TEAM_ABBREVIATION'] = "NO"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'NOP', 'OPP'] = "NO"
+
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
             pickle.dump({"players": self.players,
@@ -383,7 +392,7 @@ class StatsNBA(Stats):
         flat_money = {t: archive["NBA"]["Moneyline"].get(
             t[0], {}).get(t[1], 0.5) for t in k}
         flat_total = {t: archive["NBA"]["Totals"].get(
-            t[0], {}).get(t[1], 220) for t in k}
+            t[0], {}).get(t[1], 110) for t in k}
         tup_s = pd.Series(
             zip(gamelog['GAME_DATE'].str[:10], gamelog['TEAM_ABBREVIATION']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
@@ -446,7 +455,7 @@ class StatsNBA(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(220).values.astype(float) / 220 - x.totals.fillna(220).mean(),
+                apply(lambda x: np.polyfit(x.totals.fillna(110).values.astype(float) / 110 - x.totals.fillna(110).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.\
@@ -454,7 +463,7 @@ class StatsNBA(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(220).values.astype(float) / 220 - x.totals.fillna(220).mean(),
+                apply(lambda x: np.polyfit(x.totals.fillna(110).values.astype(float) / 110 - x.totals.fillna(110).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
@@ -1146,7 +1155,7 @@ class StatsMLB(Stats):
         flat_money = {t: archive["MLB"]["Moneyline"].get(
             t[0], {}).get(t[1], 0.5) for t in k}
         flat_total = {t: archive["MLB"]["Totals"].get(
-            t[0], {}).get(t[1], 8.5) for t in k}
+            t[0], {}).get(t[1], 4.5) for t in k}
         tup_s = pd.Series(
             zip(gamelog['gameId'].str[:10].str.replace("/", "-"), gamelog['team']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
@@ -1210,7 +1219,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.5 - x.totals.fillna(8.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.apply(
@@ -1218,7 +1227,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.5 - x.totals.fillna(8.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['moneyline gain'] = pitcherGroups.apply(
@@ -1226,7 +1235,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['totals gain'] = pitcherGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 8.5 - x.totals.fillna(8.3).mean(),
+                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if any([string in market for string in ["allowed", "pitch"]]):
@@ -1781,7 +1790,7 @@ class StatsNFL(Stats):
         flat_money = {t: archive["NFL"]["Moneyline"].get(
             t[0], {}).get(t[1], 0.5) for t in k}
         flat_total = {t: archive["NFL"]["Totals"].get(
-            t[0], {}).get(t[1], 45) for t in k}
+            t[0], {}).get(t[1], 22.5) for t in k}
         tup_s = pd.Series(
             zip(gamelog['gameday'], gamelog['recent team']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
@@ -1845,7 +1854,7 @@ class StatsNFL(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(45).values.astype(float) / 45 - x.totals.fillna(45).mean(),
+                apply(lambda x: np.polyfit(x.totals.fillna(22.5).values.astype(float) / 22.5 - x.totals.fillna(22.5).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.\
@@ -1853,7 +1862,7 @@ class StatsNFL(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(45).values.astype(float) / 45 - x.totals.fillna(45).mean(),
+                apply(lambda x: np.polyfit(x.totals.fillna(22.5).values.astype(float) / 22.5 - x.totals.fillna(22.5).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
@@ -2478,7 +2487,7 @@ class StatsNHL(Stats):
         flat_money = {t: archive["NHL"]["Moneyline"].get(
             t[0], {}).get(t[1], 0.5) for t in k}
         flat_total = {t: archive["NHL"]["Totals"].get(
-            t[0], {}).get(t[1], 5.5) for t in k}
+            t[0], {}).get(t[1], 2.5) for t in k}
         tup_s = pd.Series(
             zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
@@ -2543,7 +2552,7 @@ class StatsNHL(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(5.5).values.astype(float) / 8.3 - x.totals.fillna(5.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(2.5).values.astype(float) / 8.3 - x.totals.fillna(2.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.apply(
@@ -2551,7 +2560,7 @@ class StatsNHL(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(5.5).values.astype(float) / 8.3 - x.totals.fillna(5.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(2.5).values.astype(float) / 8.3 - x.totals.fillna(2.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
