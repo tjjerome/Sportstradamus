@@ -37,7 +37,7 @@ def get_moneylines():
 
     # Retrieve odds data for each sport
     for sport, league in sports:
-        url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets=h2h,totals&apiKey={apikey}"
+        url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets=h2h,totals,spreads&apiKey={apikey}"
         res = scraper.get(url)
 
         # Process odds data for each game
@@ -51,6 +51,7 @@ def get_moneylines():
 
             moneyline = []
             totals = []
+            spread = []
 
             # Extract moneyline and totals data from bookmakers and markets
             for book in game["bookmakers"]:
@@ -64,9 +65,15 @@ def get_moneylines():
                             moneyline.append(odds[1])
                     elif market["key"] == "totals":
                         totals.append(market["outcomes"][0]["point"])
+                    elif market["key"] == "spreads" and market["outcomes"][0].get("point"):
+                        if market["outcomes"][0]["name"] == game["home_team"]:
+                            spread.append(market["outcomes"][0]["point"])
+                        else:
+                            spread.append(market["outcomes"][1]["point"])
 
             moneyline = np.mean(moneyline)
             totals = np.mean(totals)
+            spread = np.mean(spread)
 
             # Update archive data with the processed odds
             if league not in archive:
@@ -85,8 +92,8 @@ def get_moneylines():
             archive[league]["Moneyline"][gameDate][awayTeam] = 1 - moneyline
             archive[league]["Moneyline"][gameDate][homeTeam] = moneyline
 
-            archive[league]["Totals"][gameDate][awayTeam] = totals
-            archive[league]["Totals"][gameDate][homeTeam] = totals
+            archive[league]["Totals"][gameDate][awayTeam] = (totals+spread)/2
+            archive[league]["Totals"][gameDate][homeTeam] = (totals-spread)/2
 
     # Save updated archive data to file
     filepath = pkg_resources.files(data) / "archive.dat"

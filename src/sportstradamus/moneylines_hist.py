@@ -10,16 +10,19 @@ filepath = pkg_resources.files(data) / "archive.dat"
 with open(filepath, "rb") as infile:
     archive = pickle.load(infile)
 
-apikey = "29311eba87f90e2741845d5c70ca4c14"
+apikey = "02a4dcf96364c282ed62cdfba33cc460"
 
-sport = "basketball_nba"
-league = "NBA"
+sport = "americanfootball_nfl"
+league = "NFL"
 
-Date = datetime.strptime("2021-10-19T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2022-10-18T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
-while Date < datetime.strptime("2022-06-17T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
-    date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals&date={date}&apiKey={apikey}"
+# while Date < datetime.strptime("2023-06-13T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
+for date in ['2020-10-13', '2020-12-19', '2021-12-26', '2022-01-02', '2022-11-20',
+             '2022-12-25', '2023-01-01', '2023-01-08', '2023-09-07', '2023-09-10',
+             '2023-09-11', '2023-09-14']:
+    # date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
+    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals,spreads&date={date}&apiKey={apikey}"
     res = scraper.get(url)["data"]
 
     for game in res:
@@ -34,6 +37,7 @@ while Date < datetime.strptime("2022-06-17T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
 
         moneyline = []
         totals = []
+        spread = []
         for book in game["bookmakers"]:
             for market in book["markets"]:
                 if market["key"] == "h2h" and market["outcomes"][0].get("price"):
@@ -45,9 +49,15 @@ while Date < datetime.strptime("2022-06-17T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
                         moneyline.append(odds[1])
                 elif market["key"] == "totals" and market["outcomes"][0].get("point"):
                     totals.append(market["outcomes"][0]["point"])
+                elif market["key"] == "spreads" and market["outcomes"][0].get("point"):
+                    if market["outcomes"][0]["name"] == game["home_team"]:
+                        spread.append(market["outcomes"][0]["point"])
+                    else:
+                        spread.append(market["outcomes"][1]["point"])
 
         moneyline = np.mean(moneyline)
         totals = np.mean(totals)
+        spread = np.mean(spread)
 
         if not league in archive:
             archive[league] = {}
@@ -65,8 +75,8 @@ while Date < datetime.strptime("2022-06-17T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
         archive[league]["Moneyline"][gameDate][awayTeam] = 1 - moneyline
         archive[league]["Moneyline"][gameDate][homeTeam] = moneyline
 
-        archive[league]["Totals"][gameDate][awayTeam] = totals
-        archive[league]["Totals"][gameDate][homeTeam] = totals
+        archive[league]["Totals"][gameDate][awayTeam] = (totals+spread)/2
+        archive[league]["Totals"][gameDate][homeTeam] = (totals-spread)/2
 
     Date = Date + timedelta(days=1)
 

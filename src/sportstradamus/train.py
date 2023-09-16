@@ -13,7 +13,9 @@ from sklearn.metrics import (
 )
 from scipy.stats import (
     norm,
-    poisson
+    poisson,
+    gamma,
+    nbinom
 )
 import lightgbm as lgb
 import pandas as pd
@@ -22,7 +24,9 @@ import os
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions import (
     Gaussian,
-    Poisson
+    Poisson,
+    Gamma,
+    NegativeBinomial
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 
@@ -36,13 +40,15 @@ def meditate(force, stats, league):
 
     dist_params = {
         "stabilization": "None",
-        "response_fn": "exp",
+        # "response_fn": "exp",
         "loss_fn": "nll"
     }
 
     distributions = {
         "Gaussian": Gaussian.Gaussian(**dist_params),
-        "Poisson": Poisson.Poisson(**dist_params)
+        "Poisson": Poisson.Poisson(**dist_params),
+        "Gamma": Gamma.Gamma(**dist_params),
+        "NegativeBinomial": NegativeBinomial.NegativeBinomial(**dist_params)
     }
 
     mlb = StatsMLB()
@@ -216,7 +222,9 @@ def meditate(force, stats, league):
                 candidate_distributions = [Gaussian, Poisson]
 
                 dist = lgblss_dist_class.dist_select(
-                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100).iloc[0, 1]
+                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100)
+
+                dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
 
                 params = {
                     "boosting_type": ["categorical", ["gbdt"]],
@@ -264,6 +272,17 @@ def meditate(force, stats, league):
                     X_test["Line"], prob_params["loc"], prob_params["scale"])
                 p = 0
                 ev = prob_params["loc"]
+            elif dist == "Gamma":
+                y_proba = gamma.cdf(
+                    X_test["Line"], prob_params["concentration"], scale=1/prob_params["rate"])
+                p = 2
+                ev = prob_params["concentration"]/prob_params["rate"]
+            elif dist == "NegativeBinomial":
+                y_proba = nbinom.cdf(
+                    X_test["Line"], prob_params["total_count"], prob_params["probs"])
+                p = 1
+                ev = prob_params["total_count"] * \
+                    (1-prob_params["probs"])/prob_params["probs"]
 
             y_proba = np.array([y_proba, 1-y_proba]).transpose()
             y_class = (y_test["Result"] >
@@ -315,6 +334,12 @@ def meditate(force, stats, league):
             elif dist == "Gaussian":
                 X_test['EV'] = prob_params['loc']
                 X_test['STD'] = prob_params['scale']
+            elif dist == "Gamma":
+                X_test['alpha'] = prob_params['concentration']
+                X_test['beta'] = prob_params['rate']
+            elif dist == "NegativeBinomial":
+                X_test['N'] = prob_params['total_count']
+                X_test['P'] = prob_params['probs']
 
             filename = "_".join(["test", league, market]
                                 ).replace(" ", "-") + ".csv"
