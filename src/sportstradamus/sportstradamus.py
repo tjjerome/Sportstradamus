@@ -111,23 +111,23 @@ def main(progress, books):
         pin_data.update(get_pinnacle(889))  # NFL
         logger.info(str(len(pin_data)) + " offers found")
 
-        logger.info("Getting Caesars MLB Lines")
-        sport = "baseball"
-        league = "04f90892-3afa-4e84-acce-5b89f151063d"
-        csb_data.update(get_caesars(sport, league))
-        # logger.info("Getting Caesars NBA Lines")
-        # sport = "basketball"
-        # league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+        # logger.info("Getting Caesars MLB Lines")
+        # sport = "baseball"
+        # league = "04f90892-3afa-4e84-acce-5b89f151063d"
         # csb_data.update(get_caesars(sport, league))
-        # logger.info("Getting Caesars NHL Lines")
-        # sport = "icehockey"
-        # league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+        # # logger.info("Getting Caesars NBA Lines")
+        # # sport = "basketball"
+        # # league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+        # # csb_data.update(get_caesars(sport, league))
+        # # logger.info("Getting Caesars NHL Lines")
+        # # sport = "icehockey"
+        # # league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+        # # csb_data.update(get_caesars(sport, league))
+        # logger.info("Getting Caesars NFL Lines")
+        # sport = "americanfootball"
+        # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
         # csb_data.update(get_caesars(sport, league))
-        logger.info("Getting Caesars NFL Lines")
-        sport = "americanfootball"
-        league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-        csb_data.update(get_caesars(sport, league))
-        logger.info(str(len(csb_data)) + " offers found")
+        # logger.info(str(len(csb_data)) + " offers found")
 
     datasets = {
         "DraftKings": dk_data,
