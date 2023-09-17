@@ -688,7 +688,7 @@ def get_pp():
                 n["Line"] = o["attributes"]["flash_sale_line_score"]
 
             if league == "NFL" and n["Market"] == "Pass+Rush+Rec TDs":
-                if player_ids[o["relationships"]["new_player"]["data"]["id"]]["Position"] == "QB":
+                if player_ids[o["relationships"]["new_player"]["data"]["id"]].get("Position") == "QB":
                     n["Market"] = "Pass+Rush TDs"
                 else:
                     n["Market"] = "Rush+Rec TDs"
