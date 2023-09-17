@@ -2215,7 +2215,7 @@ class StatsNFL(Stats):
         self.profile_market('fantasy points underdog')
         depth = nfl.import_depth_charts([self.season_start.year])
         depth = depth.loc[depth.position.isin(["QB", "WR", "RB", "TE"])]
-        depth = depth.loc[depth.week == depth.week.max()]
+        depth = depth.loc[depth.week == depth.week.iloc[-500:].mode().iloc[0]]
         depth = depth.loc[(depth.depth_team.astype(int) == 1) | ~(
             depth.position.isin(["QB", "TE"]))]
         depth = depth.loc[depth.depth_team.astype(int) <= 2]
