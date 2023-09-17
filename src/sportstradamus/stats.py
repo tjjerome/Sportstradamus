@@ -1585,7 +1585,7 @@ class StatsNFL(Stats):
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 pdata = pickle.load(infile)
-                if pdata is dict:
+                if type(pdata) is dict:
                     self.gamelog = pdata["gamelog"]
                     self.teamlog = pdata["teamlog"]
                 else:
