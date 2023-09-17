@@ -1575,6 +1575,7 @@ class StatsNFL(Stats):
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlayplay',
                 'home', 'opponent', 'gameday', 'game id']
         self.gamelog = pd.DataFrame(columns=cols)
+        self.teamlog = pd.DataFrame()
 
     def load(self):
         """
@@ -1583,7 +1584,12 @@ class StatsNFL(Stats):
         filepath = pkg_resources.files(data) / "nfl_data.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
-                self.gamelog = pickle.load(infile)
+                pdata = pickle.load(infile)
+                if pdata is dict:
+                    self.gamelog = pdata["gamelog"]
+                    self.teamlog = pdata["teamlog"]
+                else:
+                    self.gamelog = pdata
 
     def update(self):
         """
@@ -1676,8 +1682,12 @@ class StatsNFL(Stats):
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates().reset_index(drop=True)
 
+        need_pbp = True
         for i, row in tqdm(self.gamelog.iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
             if row['opponent'] != row['opponent']:
+                if need_pbp:
+                    self.pbp = nfl.import_pbp_data([self.season_start.year])
+                    need_pbp = False
                 if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
@@ -1722,7 +1732,13 @@ class StatsNFL(Stats):
         self.gamelog.drop_duplicates(inplace=True)
 
         # Save the updated player data
-        self.gamelog.to_pickle(pkg_resources.files(data) / "nfl_data.dat")
+        filepath = pkg_resources.files(data) / "nfl_data.dat"
+        with open(filepath, 'wb') as outfile:
+            pickle.dump({'gamelog': self.gamelog,
+                        'teamlog': self.teamlog}, outfile, -1)
+
+    def parse_pbp(self, gameId, playerName):
+        pass
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
         """
