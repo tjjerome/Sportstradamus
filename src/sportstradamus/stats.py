@@ -1647,6 +1647,9 @@ class StatsNFL(Stats):
         nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
             nfl_data['snap_pct'] > 0.5)]
 
+        nfl_data['player_display_name'] = nfl_data['player_display_name'].map(
+            remove_accents)
+
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
         nfl_data['fumbles_lost'] = nfl_data['sack_fumbles_lost'] + \
@@ -1687,6 +1690,22 @@ class StatsNFL(Stats):
             if row['opponent'] != row['opponent']:
                 if need_pbp:
                     self.pbp = nfl.import_pbp_data([self.season_start.year])
+                    self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
+                        ['run', 'pass'])]
+                    self.pbp.loc[:, 'success'] = 0
+                    self.pbp.loc[self.pbp['down'] == 1, 'success'] = (
+                        self.pbp.loc[self.pbp['down'] == 1, 'ydstogo']*.4 < self.pbp.loc[self.pbp['down'] == 1, 'yards_gained']).astype(int)
+                    self.pbp.loc[self.pbp['down'] == 2, 'success'] = (
+                        self.pbp.loc[self.pbp['down'] == 2, 'ydstogo']*.6 < self.pbp.loc[self.pbp['down'] == 2, 'yards_gained']).astype(int)
+                    self.pbp.loc[self.pbp['down'] > 2, 'success'] = (
+                        self.pbp.loc[self.pbp['down'] > 2, 'ydstogo'] < self.pbp.loc[self.pbp['down'] > 2, 'yards_gained']).astype(int)
+                    self.ngs = pd.concat([nfl.import_ngs_data('passing', [self.season_start.year]),
+                                          nfl.import_ngs_data(
+                                              'receiving', [self.season_start.year]),
+                                          nfl.import_ngs_data('rushing', [self.season_start.year])])
+                    ids = self.ngs[['player_display_name', 'player_gsis_id']]
+                    ids.index = ids.player_display_name.apply(remove_accents)
+                    self.ids = ids.player_gsis_id.to_dict()
                     need_pbp = False
                 if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
@@ -1718,10 +1737,9 @@ class StatsNFL(Stats):
         self.players = nfl.import_ids()
         self.players = self.players.loc[self.players['position'].isin([
             'QB', 'RB', 'WR', 'TE'])]
+        self.players.name = self.players.name.apply(remove_accents)
         self.players = self.players.groupby(
             'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
-        self.players["Kenneth Walker"] = self.players.pop("Kenneth Walker III")
-        self.players["Gabe Davis"] = self.players.pop("Gabriel Davis")
 
         # Remove old games to prevent file bloat
         three_years_ago = datetime.today().date() - timedelta(days=1096)
@@ -1737,8 +1755,43 @@ class StatsNFL(Stats):
             pickle.dump({'gamelog': self.gamelog,
                         'teamlog': self.teamlog}, outfile, -1)
 
-    def parse_pbp(self, gameId, playerName):
-        pass
+    def parse_pbp(self, gameId, team, playerName=""):
+        pbp = self.pbp.loc[self.pbp.game_id == gameId]
+        pbp_off = pbp.loc[pbp.posteam == team]
+        pbp_def = pbp.loc[pbp.posteam != team]
+        if playerName == "":
+            proe = pbp_off['pass'].mean() - pbp_off['xpass'].mean()
+            off_rush_sr = pbp_off.loc[pbp_off['rush'].astype(
+                bool), 'success'].mean()
+            off_pass_sr = pbp_off.loc[pbp_off['pass'].astype(
+                bool), 'success'].mean()
+            def_rush_sr = pbp_def.loc[pbp_def['rush'].astype(
+                bool), 'success'].mean()
+            def_pass_sr = pbp_def.loc[pbp_def['pass'].astype(
+                bool), 'success'].mean()
+            off_rush_epa = pbp_off.loc[pbp_off['rush'].astype(
+                bool), 'epa'].mean()
+            off_pass_epa = pbp_off.loc[pbp_off['pass'].astype(
+                bool), 'epa'].mean()
+            def_rush_epa = pbp_def.loc[pbp_def['rush'].astype(
+                bool), 'epa'].mean()
+            def_pass_epa = pbp_def.loc[pbp_def['pass'].astype(
+                bool), 'epa'].mean()
+            def_rush_ypa = pbp_def.loc[pbp_def['rush'].astype(
+                bool), 'yards_gained'].mean()
+            def_pass_ypa = pbp_def.loc[pbp_def['pass'].astype(
+                bool), 'yards_gained'].mean()
+            def_comp = pbp_def.loc[pbp_def['pass'].astype(
+                bool), 'complete_pass'].mean()
+            def_press = pbp_def.loc[pbp_def['pass'].astype(
+                bool), 'qb_hit'].mean()
+            def_stuff = (pbp_def.loc[pbp_def['rush'].astype(
+                bool), 'yards_gained'] <= 0).mean()
+            off_stuff = (pbp_off.loc[pbp_off['rush'].astype(
+                bool), 'yards_gained'] <= 0).mean()
+            rush_ngs = self.ngs.loc[(self.ngs['player_position'] == 'RB') & (self.ngs['team_abbr'] == team) & (
+                self.ngs['week'] == pbp.week.max()), ['expected_rush_yards', 'rush_attempts']].sum()
+            off_rush_xya = rush_ngs.iloc[0]/rush_ngs.iloc[1]
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
         """
