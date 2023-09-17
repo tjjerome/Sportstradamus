@@ -666,7 +666,7 @@ def get_pp():
                 }
                 if "position" in p["attributes"]:
                     player_ids[p["id"]].update(
-                        {"Position": p["attributes"]["team"]["position"]})
+                        {"Position": p["attributes"]["position"]})
             elif p["type"] == "league":
                 league = p["attributes"]["name"].replace("CMB", "")
 
