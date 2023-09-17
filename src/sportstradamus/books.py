@@ -664,6 +664,9 @@ def get_pp():
                     "Name": p["attributes"]["name"].replace("\t", "").strip(),
                     "Team": p["attributes"]["team"].replace("JAC", "JAX").replace("WSH", "WAS"),
                 }
+                if "position" in p["attributes"]:
+                    player_ids[p["id"]].update(
+                        {"Position": p["attributes"]["team"]["position"]})
             elif p["type"] == "league":
                 league = p["attributes"]["name"].replace("CMB", "")
 
@@ -683,6 +686,12 @@ def get_pp():
 
             if o["attributes"]["is_promo"]:
                 n["Line"] = o["attributes"]["flash_sale_line_score"]
+
+            if league == "NFL" and n["Market"] == "Pass+Rush+Rec TDs":
+                if player_ids[o["relationships"]["new_player"]["data"]["id"]]["Position"] == "QB":
+                    n["Market"] = "Pass+Rush TDs"
+                else:
+                    n["Market"] = "Rush+Rec TDs"
 
             if league not in offers:
                 offers[league] = {}
