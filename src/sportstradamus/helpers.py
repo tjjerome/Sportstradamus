@@ -92,6 +92,44 @@ class Scrape:
             logger.warning("Max Attempts Reached")
             return None
 
+    def post(self, url, max_attempts=5, headers={}, params={}):
+        """
+        Perform a GET request to the specified URL with the provided headers and parameters.
+
+        Args:
+            url (str): The URL to fetch.
+            max_attempts (int): Maximum number of attempts to make the request.
+            headers (dict): Additional headers to include in the request.
+            params (dict): Parameters to include in the request.
+
+        Returns:
+            dict or None: The response JSON if the request is successful (status code 200), otherwise None.
+
+        Raises:
+            Exception: If an exception occurs during the request attempts.
+        """
+        with logging_redirect_tqdm():
+            for i in range(1, max_attempts + 1):
+                if i > 1:
+                    self._new_headers()
+                    sleep(random.uniform(3, 5))
+                try:
+                    response = requests.post(
+                        url, headers=self.header | headers, params=params
+                    )
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        logger.debug(
+                            "Attempt " + str(i) + ", Error " +
+                            str(response.status_code)
+                        )
+                except Exception as exc:
+                    logger.exception("Attempt " + str(i) + ",")
+
+            logger.warning("Max Attempts Reached")
+            return None
+
 
 with open((pkg_resources.files(data) / "name_map.json"), "r") as infile:
     name_map = json.load(infile)
@@ -427,6 +465,25 @@ with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)
 
 
-def prob_difference(X, Y, line):
+def prob_diff(X, Y, line):
     def joint_pdf(x, y): return X(x)*Y(y)
-    return dblquad(joint_pdf, line, np.inf, lambda x: 0, lambda x: x - line)
+    return dblquad(joint_pdf, -np.inf, np.inf, lambda x: x - line, np.inf)
+
+
+def prob_sum(X, Y, line):
+    def joint_pdf(x, y): return X(x)*Y(y)
+    return dblquad(joint_pdf, -np.inf, np.inf, -np.inf, lambda x: line - x)
+
+
+def hmean(items):
+    total = 0
+    count = 0
+    for i in items:
+        if (i != 0) and type(i) is not str:
+            count += 1
+            total += 1/i
+
+    if total != 0:
+        return count/total
+    else:
+        return 0

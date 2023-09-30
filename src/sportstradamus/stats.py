@@ -11,7 +11,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents, hmean
 import pandas as pd
 import warnings
 
@@ -1563,18 +1563,47 @@ class StatsNFL(Stats):
         """
         super().__init__()
         self.season_start = datetime.strptime("2023-09-07", "%Y-%m-%d").date()
-        cols = ['player id', 'player display name', 'position group',
-                'recent team', 'season', 'week', 'season type', 'snap pct',
-                'completions', 'attempts', 'passing yards', 'passing tds',
-                'interceptions', 'sacks', 'sack fumbles', 'sack fumbles lost',
-                'passing 2pt conversions', 'carries', 'rushing yards', 'rushing tds',
-                'rushing fumbles', 'rushing fumbles lost', 'rushing 2pt conversions',
-                'receptions', 'targets', 'receiving yards', 'receiving tds',
-                'receiving fumbles', 'receiving fumbles lost', 'receiving 2pt conversions',
-                'special teams tds', 'fumbles', 'fumbles lost', 'yards', 'tds', 'qb yards', 'qb tds',
-                'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlayplay',
-                'home', 'opponent', 'gameday', 'game id']
+        cols = ['player id', 'player display name', 'position group', 'recent team', 'season', 'week', 'season type',
+                'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
+                'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
+                'rushing tds', 'rushing fumbles', 'rushing fumbles lost', 'rushing 2pt conversions', 'receptions',
+                'targets', 'receiving yards', 'receiving tds', 'receiving fumbles', 'receiving fumbles lost',
+                'receiving 2pt conversions', 'fumbles', 'fumbles lost', 'yards', 'tds', 'qb yards', 'qb tds',
+                'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlayplay', 'home', 'opponent',
+                'gameday', 'game id', 'target share', 'air yards share', 'wopr', 'yards per target',
+                'completion percentage over expected', 'completion_percentage' 'passer rating', 'passer adot',
+                'passer_adot_differential', 'time_to_throw', 'aggressiveness', 'pass_yards_per_attempt',
+                'rushing yards over expected', 'rushing success rate', 'yac over expected', 'separation created',
+                'targets per route run', 'first read targets per route run', 'route participation',
+                'yards per route run', 'average depth of target', 'receiver cp over expected',
+                'first read target share', 'redzone target share', 'redzone carry share', 'carry share']
         self.gamelog = pd.DataFrame(columns=cols)
+        team_cols = ['season', 'week', 'team', 'pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
+                     'rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_per_rush', 'epa_per_pass',
+                     'epa_allowed_per_rush', 'epa_allowed_per_pass', 'yards_allowed_per_rush', 'yards_allowed_per_pass',
+                     'completion_percentage_allowed', 'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush',
+                     'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
+                     'blitz_rate', 'epa_per_blitz']
+        self.teamlog = pd.DataFrame(columns=team_cols)
+        self.stat_types = {
+            'passing': ['completion percentage over expected', 'completion_percentage' 'passer rating',
+                        'passer adot', 'passer_adot_differential', 'time_to_throw', 'aggressiveness',
+                        'pass_yards_per_attempt'],
+            'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
+                          'yac over expected', 'separation created', 'targets per route run',
+                          'first read targets per route run', 'route participation', 'yards per route run',
+                          'average depth of target', 'receiver cp over expected',
+                          'first read target share', 'redzone target share'],
+            'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate',
+                        'redzone carry share', 'carry share'],
+            'offense': ['pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
+                        'epa_per_rush', 'epa_per_pass', 'pressure_allowed_per_pass',
+                        'stuffs_allowed_per_rush', 'expected_yards_per_rush', 'epa_per_blitz'],
+            'defense': ['rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_allowed_per_rush',
+                        'epa_allowed_per_pass', 'yards_allowed_per_rush', 'yards_allowed_per_pass',
+                        'completion_percentage_allowed', 'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush',
+                        'blitz_rate']
+        }
 
     def load(self):
         """
@@ -1583,7 +1612,12 @@ class StatsNFL(Stats):
         filepath = pkg_resources.files(data) / "nfl_data.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
-                self.gamelog = pickle.load(infile)
+                pdata = pickle.load(infile)
+                if type(pdata) is dict:
+                    self.gamelog = pdata["gamelog"]
+                    self.teamlog = pdata["teamlog"]
+                else:
+                    self.gamelog = pdata
 
     def update(self):
         """
@@ -1598,7 +1632,7 @@ class StatsNFL(Stats):
                 'rushing_fumbles', 'rushing_fumbles_lost', 'rushing_2pt_conversions',
                 'receptions', 'targets', 'receiving_yards', 'receiving_tds',
                 'receiving_fumbles', 'receiving_fumbles_lost', 'receiving_2pt_conversions',
-                'special_teams_tds']
+                'target_share', 'air_yards_share', 'wopr']
         try:
             nfl_data = nfl.import_weekly_data([self.season_start.year], cols)
         except:
@@ -1641,6 +1675,9 @@ class StatsNFL(Stats):
         nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
             nfl_data['snap_pct'] > 0.5)]
 
+        nfl_data['player_display_name'] = nfl_data['player_display_name'].map(
+            remove_accents)
+
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
         nfl_data['fumbles_lost'] = nfl_data['sack_fumbles_lost'] + \
@@ -1656,7 +1693,7 @@ class StatsNFL(Stats):
         nfl_data['fantasy_points_prizepicks'] = nfl_data['passing_yards']/25 + nfl_data['passing_tds']*4 - \
             nfl_data['interceptions'] + nfl_data['yards']/10 + nfl_data['tds']*6 + \
             nfl_data['receptions'] - nfl_data['fumbles_lost'] + \
-            nfl_data['special_teams_tds'] + nfl_data['passing_2pt_conversions']*2 + \
+            nfl_data['passing_2pt_conversions']*2 + \
             nfl_data['rushing_2pt_conversions']*2 + \
             nfl_data['receiving_2pt_conversions']*2
 
@@ -1671,13 +1708,86 @@ class StatsNFL(Stats):
             nfl_data['interceptions']*5 + nfl_data['yards']/5 + nfl_data['tds']*5 - \
             nfl_data['fumbles_lost']*3
 
+        nfl_data['yards_per_target'] = nfl_data['receiving_yards'] / \
+            nfl_data['targets']
+
         nfl_data.rename(
             columns=lambda x: x.replace("_", " "), inplace=True)
         self.gamelog = pd.concat(
-            [self.gamelog, nfl_data], ignore_index=True).drop_duplicates().reset_index(drop=True)
+            [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
 
+        self.players = nfl.import_ids()
+        self.players = self.players.loc[self.players['position'].isin([
+            'QB', 'RB', 'WR', 'TE'])]
+        self.players.name = self.players.name.apply(remove_accents)
+        ids = self.players[['name', 'gsis_id']].dropna()
+        ids.index = ids.name
+        self.ids = ids.gsis_id.to_dict()
+        self.players = self.players.groupby(
+            'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
+
+        need_pbp = True
+        teamDataList = []
         for i, row in tqdm(self.gamelog.iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
             if row['opponent'] != row['opponent']:
+                if need_pbp:
+                    self.pbp = nfl.import_pbp_data([self.season_start.year])
+                    self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
+                        ['run', 'pass'])]
+                    self.pbp.loc[:, 'success'] = 0
+                    self.pbp.loc[self.pbp['down'] == 1, 'success'] = (
+                        self.pbp.loc[self.pbp['down'] == 1, 'ydstogo']*.4 < self.pbp.loc[self.pbp['down'] == 1, 'yards_gained']).astype(int)
+                    self.pbp.loc[self.pbp['down'] == 2, 'success'] = (
+                        self.pbp.loc[self.pbp['down'] == 2, 'ydstogo']*.6 < self.pbp.loc[self.pbp['down'] == 2, 'yards_gained']).astype(int)
+                    self.pbp.loc[self.pbp['down'] > 2, 'success'] = (
+                        self.pbp.loc[self.pbp['down'] > 2, 'ydstogo'] < self.pbp.loc[self.pbp['down'] > 2, 'yards_gained']).astype(int)
+                    if self.season_start.year > 2021:
+                        ftn = nfl.import_ftn_data([self.season_start.year])
+                        ftn['game_id'] = ftn['nflverse_game_id']
+                        ftn['play_id'] = ftn['nflverse_play_id']
+                        self.pbp = self.pbp.merge(ftn)
+                    else:
+                        self.pbp['is_qb_out_of_pocket'] = False
+                        self.pbp['is_throw_away'] = False
+                        self.pbp['read_thrown'] = 0
+                        self.pbp['n_blitzers'] = 0
+
+                    self.pbp['pass'] = self.pbp['pass'].astype(bool)
+                    self.pbp['rush'] = self.pbp['rush'].astype(bool)
+                    self.pbp['qb_hit'] = self.pbp['qb_hit'].astype(bool)
+                    self.pbp['sack'] = self.pbp['sack'].astype(bool)
+                    self.pbp['qb_dropback'] = self.pbp['qb_dropback'].astype(
+                        bool)
+                    self.pbp['pass_attempt'] = self.pbp['pass_attempt'].astype(
+                        bool)
+                    self.pbp['drive_inside20'] = self.pbp['drive_inside20'].astype(
+                        bool)
+                    self.ngs = pd.concat([nfl.import_ngs_data('passing', [self.season_start.year]),
+                                          nfl.import_ngs_data(
+                                              'receiving', [self.season_start.year]),
+                                          nfl.import_ngs_data('rushing', [self.season_start.year])])
+                    need_pbp = False
+
+                playerData = self.parse_pbp(
+                    row['week'], row['recent team'], row['player display name'])
+                if type(playerData) is int:
+                    self.gamelog.drop(index=i, inplace=True)
+                    continue
+                if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
+                                                              (self.teamlog.week == row.week), 'team'] and \
+                        (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
+                    teamData = {
+                        "season": row.season,
+                        "week": row.week,
+                        "team": row['recent team']
+                    }
+                    teamData.update(self.parse_pbp(
+                        row['week'], row['recent team']))
+                    teamDataList.append(teamData)
+
+                for k, v in playerData.items():
+                    self.gamelog.at[i, k.replace("_", " ")] = v
+
                 if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
@@ -1695,23 +1805,21 @@ class StatsNFL(Stats):
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent team']), 'game_id'].values[0]
 
+        self.teamlog = pd.concat(
+            [self.teamlog, pd.DataFrame.from_records(teamDataList)], ignore_index=True)
+        self.teamlog.loc[self.teamlog['team']
+                         == 'LA', 'team'] = "LAR"
+        self.teamlog = self.teamlog.sort_values(['season', 'week']).fillna(0)
+
         self.gamelog.loc[self.gamelog['recent team']
                          == 'LA', 'recent team'] = "LAR"
-        self.gamelog.loc[self.gamelog['opponent']
-                         == 'LA', 'opponent'] = "LAR"
         self.gamelog.loc[self.gamelog['recent team']
                          == 'WSH', 'recent team'] = "WAS"
         self.gamelog.loc[self.gamelog['opponent']
+                         == 'LA', 'opponent'] = "LAR"
+        self.gamelog.loc[self.gamelog['opponent']
                          == 'WSH', 'opponent'] = "WAS"
         self.gamelog = self.gamelog.sort_values('gameday')
-
-        self.players = nfl.import_ids()
-        self.players = self.players.loc[self.players['position'].isin([
-            'QB', 'RB', 'WR', 'TE'])]
-        self.players = self.players.groupby(
-            'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
-        self.players["Kenneth Walker"] = self.players.pop("Kenneth Walker III")
-        self.players["Gabe Davis"] = self.players.pop("Gabriel Davis")
 
         # Remove old games to prevent file bloat
         three_years_ago = datetime.today().date() - timedelta(days=1096)
@@ -1722,7 +1830,181 @@ class StatsNFL(Stats):
         self.gamelog.drop_duplicates(inplace=True)
 
         # Save the updated player data
-        self.gamelog.to_pickle(pkg_resources.files(data) / "nfl_data.dat")
+        filepath = pkg_resources.files(data) / "nfl_data.dat"
+        with open(filepath, 'wb') as outfile:
+            pickle.dump({'gamelog': self.gamelog,
+                        'teamlog': self.teamlog}, outfile, -1)
+
+    def parse_pbp(self, week, team, playerName=""):
+        pbp = self.pbp.loc[(self.pbp.week == week) & (
+            (self.pbp.home_team == team) | (self.pbp.away_team == team))]
+        if pbp.empty:
+            return 0
+        pbp_off = pbp.loc[pbp.posteam == team]
+        pbp_def = pbp.loc[pbp.posteam != team]
+        if playerName == "":
+            proe = pbp_off['pass'].mean() - pbp_off['xpass'].mean()
+            off_rush_sr = pbp_off.loc[pbp_off['rush'], 'success'].mean()
+            off_pass_sr = pbp_off.loc[pbp_off['pass'], 'success'].mean()
+            def_rush_sr = pbp_def.loc[pbp_def['rush'], 'success'].mean()
+            def_pass_sr = pbp_def.loc[pbp_def['pass'], 'success'].mean()
+            off_rush_epa = pbp_off.loc[pbp_off['rush'], 'epa'].mean()
+            off_pass_epa = pbp_off.loc[pbp_off['pass'], 'epa'].mean()
+            def_rush_epa = pbp_def.loc[pbp_def['rush'], 'epa'].mean()
+            def_pass_epa = pbp_def.loc[pbp_def['pass'], 'epa'].mean()
+            def_rush_ypa = pbp_def.loc[pbp_def['rush'], 'yards_gained'].mean()
+            def_pass_ypa = pbp_def.loc[pbp_def['pass'], 'yards_gained'].mean()
+            def_cpoe = pbp_def.loc[pbp_def['pass'], 'cpoe'].mean() / 100
+            def_cp = pbp_def.loc[pbp_def['pass'], 'complete_pass'].mean()
+            pressure_mask = pbp_def['is_qb_out_of_pocket'] | pbp_def['sack'] | pbp_def['qb_hit']
+            def_press = pbp_def.loc[pbp_def['pass'] & pressure_mask, 'pass'].count(
+            ) / len(pbp_def.loc[pbp_def['qb_dropback']])
+            def_stuff = (pbp_def.loc[pbp_def['rush'],
+                         'yards_gained'] <= 0).mean()
+            pressure_mask = pbp_off['is_qb_out_of_pocket'] | pbp_off['sack'] | pbp_off['qb_hit']
+            off_press = pbp_off.loc[pbp_off['pass'] & pressure_mask, 'pass'].count(
+            ) / len(pbp_off.loc[pbp_off['qb_dropback']])
+            off_stuff = (pbp_off.loc[pbp_off['rush'],
+                         'yards_gained'] <= 0).mean()
+            rush_ngs = self.ngs.loc[(self.ngs['player_position'] == 'RB') & (self.ngs['team_abbr'] == team) & (
+                self.ngs['week'] == pbp.week.max()), ['expected_rush_yards', 'rush_attempts']].sum()
+            off_rush_xya = rush_ngs.iloc[0]/rush_ngs.iloc[1]
+            blitz_rate = pbp_def.loc[pbp_def['pass'] & (pbp_def['n_blitzers'] > 0), 'n_blitzers'].count(
+            ) / len(pbp_def.loc[pbp_def['qb_dropback']])
+            blitz_epa = pbp_def.loc[pbp_def['pass'] & (
+                pbp_def['n_blitzers'] > 0), 'epa'].mean()
+
+            return {
+                "pass_rate_over_expected": proe,
+                "rush_success_rate": off_rush_sr,
+                "pass_success_rate": off_pass_sr,
+                "rush_success_rate_allowed": def_rush_sr,
+                "pass_success_rate_allowed": def_pass_sr,
+                "epa_per_rush": off_rush_epa,
+                "epa_per_pass": off_pass_epa,
+                "epa_allowed_per_rush": def_rush_epa,
+                "epa_allowed_per_pass": def_pass_epa,
+                "yards_allowed_per_rush": def_rush_ypa,
+                "yards_allowed_per_pass": def_pass_ypa,
+                "completion_percentage_allowed": def_cp,
+                "cpoe_allowed": def_cpoe,
+                "pressure_per_pass": def_press,
+                "stuffs_per_rush": def_stuff,
+                "pressure_allowed_per_pass": off_press,
+                "stuffs_allowed_per_rush": off_stuff,
+                "expected_yards_per_rush": off_rush_xya,
+                "blitz_rate": blitz_rate,
+                "epa_per_blitz": blitz_epa
+            }
+
+        else:
+            if self.ids.get(playerName) is None:
+                return {
+                    "completion_percentage_over_expected": 0,
+                    "completion_percentage": 0,
+                    "passer_rating": 0,
+                    "passer_adot": 0,
+                    "passer_adot_differential": 0,
+                    "time_to_throw": 0,
+                    "aggressiveness": 0,
+                    "pass_yards_per_attempt": 0,
+                    "rushing_yards_over_expected": 0,
+                    "rushing_success_rate": 0,
+                    "yac_over_expected": 0,
+                    "separation_created": 0,
+                    "targets_per_route_run": 0,
+                    "first_read_targets_per_route_run": 0,
+                    "route_participation": 0,
+                    "yards_per_route_run": 0,
+                    "average_depth_of_target": 0,
+                    "receiver_cp_over_expected": 0,
+                    "first_read_target_share": 0,
+                    "redzone_target_share": 0,
+                    "redzone_carry_share": 0,
+                    "carry_share": 0
+                }
+
+            cpoe = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'completion_percentage_above_expectation'].mean() / 100
+            cp = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'completion_percentage'].mean() / 100
+            qbr = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'passer_rating'].mean()
+            pass_adot = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'avg_intended_air_yards'].mean()
+            pass_adot_diff = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'avg_air_yards_differential'].mean()
+            time_to_throw = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'avg_time_to_throw'].mean()
+            aggressiveness = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'aggressiveness'].mean()
+            ryoe = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'rush_yards_over_expected'].mean()
+            rush_sr = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'rush_pct_over_expected'].mean()
+            yacoe = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'avg_yac_above_expectation'].mean()
+            sep = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                self.ngs['week'] == pbp.week.max()), 'avg_separation'].mean() - \
+                self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
+                    self.ngs['week'] == pbp.week.max()), 'avg_cushion'].mean()
+            pass_ypa = pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(
+                playerName), 'yards_gained'].sum() / pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(playerName), 'qb_dropback'].sum()
+            routes_run = len(pbp_off.loc[pbp_off.offense_players.str.contains(
+                self.ids.get(playerName)) & pbp_off['pass']])
+            targets = len(
+                pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(playerName)])
+            fr_targets = len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
+                playerName)) & (pbp_off['read_thrown'] == "1")])
+            pass_attempts = len(pbp_off.loc[pbp_off['pass']])
+            fr_pass_attempts = len(
+                pbp_off.loc[(pbp_off['pass']) & (pbp_off['read_thrown'] == "1")])
+            tprr = targets / routes_run if routes_run > 0 else np.nan
+            frtprr = fr_targets / routes_run if routes_run > 0 else np.nan
+            frt_pct = fr_targets / fr_pass_attempts if fr_pass_attempts > 0 else np.nan
+            route_participation = routes_run / pass_attempts if pass_attempts > 0 else np.nan
+            yprr = pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(
+                playerName), 'yards_gained'].sum() / routes_run if routes_run > 0 else np.nan
+            adot = pbp_off.loc[pbp_off['receiver_player_id']
+                               == self.ids.get(playerName), 'air_yards'].mean()
+            rec_cpoe = pbp_off.loc[pbp_off['receiver_player_id']
+                                   == self.ids.get(playerName), 'cpoe'].mean() / 100
+            rz_passes = len(
+                pbp_off.loc[pbp_off['pass_attempt'] & pbp_off['drive_inside20']])
+            rz_target_pct = len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
+                playerName)) & pbp_off['drive_inside20']]) / rz_passes if rz_passes > 0 else np.nan
+            rz_rushes = len(
+                pbp_off.loc[pbp_off['rush'] & pbp_off['drive_inside20']])
+            rz_attempt_pct = len(pbp_off.loc[(pbp_off['rusher_player_id'] == self.ids.get(
+                playerName)) & pbp_off['drive_inside20']]) / rz_rushes if rz_rushes > 0 else np.nan
+            rushes = len(pbp_off.loc[pbp_off['rush']])
+            attempt_pct = len(pbp_off.loc[pbp_off['rusher_player_id'] == self.ids.get(
+                playerName)]) / rushes if rushes > 0 else np.nan
+
+            return {
+                "completion_percentage_over_expected": cpoe,
+                "completion_percentage": cp,
+                "passer_rating": qbr,
+                "passer_adot": pass_adot,
+                "passer_adot_differential": pass_adot_diff,
+                "time_to_throw": time_to_throw,
+                "aggressiveness": aggressiveness,
+                "pass_yards_per_attempt": pass_ypa,
+                "rushing_yards_over_expected": ryoe,
+                "rushing_success_rate": rush_sr,
+                "yac_over_expected": yacoe,
+                "separation_created": sep,
+                "targets_per_route_run": tprr,
+                "first_read_targets_per_route_run": frtprr,
+                "route_participation": route_participation,
+                "yards_per_route_run": yprr,
+                "average_depth_of_target": adot,
+                "receiver_cp_over_expected": rec_cpoe,
+                "first_read_target_share": frt_pct,
+                "redzone_target_share": rz_target_pct,
+                "redzone_carry_share": rz_attempt_pct,
+                "carry_share": attempt_pct
+            }
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
         """
@@ -1808,6 +2090,9 @@ class StatsNFL(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
+        teamlog = self.teamlog.groupby('team').tail(5)
+        teamstats = teamlog.groupby('team')[teamlog.columns[3:]].mean()
+
         playerGroups = gamelog.\
             groupby('player display name').\
             filter(lambda x: (x[market].clip(0, 1).mean() > 0.3) & (x[market].count() > 1)).\
@@ -1840,9 +2125,28 @@ class StatsNFL(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 0, market].mean()/x[market].mean())-1
 
-        positions = ['QB', 'WR', 'RB', 'TE']
         if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]):
             positions = ['QB']
+            stat_types = self.stat_types['passing'] + \
+                self.stat_types['rushing']
+        elif any([string in market for string in ["rush", "carries"]]):
+            positions = ['QB', 'RB']
+            stat_types = self.stat_types['rushing']
+        elif any([string in market for string in ["receiving", "targets", "receptions"]]):
+            positions = ['WR', 'RB', 'TE']
+            stat_types = self.stat_types['receiving']
+        elif market == "tds" or market == "yards":
+            positions = ['WR', 'RB', 'TE']
+            stat_types = self.stat_types['receiving'] + \
+                self.stat_types['rushing']
+        else:
+            positions = ['QB', 'WR', 'RB', 'TE']
+            stat_types = self.stat_types['passing'] + \
+                self.stat_types['rushing'] + \
+                self.stat_types['receiving']
+
+        playerstats = gamelog.fillna(0).groupby('player display name')[
+            stat_types].mean(numeric_only=True)
         for position in positions:
             positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
                 ['opponent', 'game id'])
@@ -1876,6 +2180,16 @@ class StatsNFL(Stats):
             self.defenseProfile['totals gain'] = defenseGroups.\
                 apply(lambda x: np.polyfit(x.totals.fillna(22.5).values.astype(float) / 22.5 - x.totals.fillna(22.5).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+
+        i = self.defenseProfile.index
+        self.defenseProfile = self.defenseProfile.merge(
+            teamstats[self.stat_types['defense']], left_on='opponent', right_on='team')
+        self.defenseProfile.index = i
+
+        self.teamProfile = teamstats[self.stat_types['offense']]
+
+        self.playerProfile = self.playerProfile.merge(
+            playerstats[stat_types], on='player display name')
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -1978,10 +2292,7 @@ class StatsNFL(Stats):
                 logger.warning(f"{player} not found")
                 return 0
 
-        if position not in ["WR", "QB", "RB", "TE"]:
-            return 0
-
-        if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]) and position != "QB":
+        if position not in self.defenseProfile.columns:
             return 0
 
         headtohead = player_games.loc[player_games["opponent"] == opponent]
@@ -2029,21 +2340,17 @@ class StatsNFL(Stats):
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
-        player_data = self.playerProfile.loc[player, [
-            'avg', 'home', 'away']]
+        player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in ['avg', 'home', 'away']})
+            {"Player " + col: player_data[col] for col in player_data.index})
 
-        other_player_data = self.playerProfile.loc[player, self.playerProfile.columns.difference(
-            ['avg', 'home', 'away'])]
+        team_data = self.teamProfile.loc[team]
         data.update(
-            {"Player " + col: other_player_data[col] for col in other_player_data.index})
+            {"Team " + col: team_data[col] for col in team_data.index})
 
-        defense_data = self.defenseProfile.loc[opponent, [
-            'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
-
+        defense_data = self.defenseProfile.loc[opponent]
         data.update(
-            {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in ["QB", "WR", "RB", "TE"]})
 
         return data
 

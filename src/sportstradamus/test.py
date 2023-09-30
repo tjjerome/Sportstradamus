@@ -13,8 +13,8 @@ NFL.update()
 
 # NFL = StatsNFL()
 # NFL.load()
-# NFL.profile_market('passing yards')
-# print(NFL.defenseProfile)
+# NFL.update()
+# NFL.get_fantasy()
 
 # MLB = StatsMLB()
 # MLB.load()
