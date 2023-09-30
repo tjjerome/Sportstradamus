@@ -10,13 +10,13 @@ from sportstradamus.books import (
     get_thrive,
     get_parp,
 )
-from sportstradamus.helpers import archive, get_ev
+from sportstradamus.helpers import archive, get_ev, prob_diff, prob_sum
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 import click
-from scipy.stats import poisson, skellam, norm, hmean
+from scipy.stats import poisson, skellam, norm, hmean, gamma, nbinom
 import numpy as np
 import pickle
 import json
@@ -596,6 +596,18 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                                      params[0]["loc"],
                                      params[1]["scale"] +
                                      params[0]["scale"])
+                elif dist == "Gamma":
+                    under = gamma.cdf(o["Line"],
+                                      params[1]["concentration"] +
+                                      params[0]["concentration"],
+                                      scale=1/(params[1]["rate"] +
+                                               params[0]["rate"]))
+                elif dist == "NegativeBinomial":
+                    under = nbinom.cdf(o["Line"],
+                                       params[1]["concentration"] +
+                                       params[0]["concentration"],
+                                       scale=1/(params[1]["rate"] +
+                                                params[0]["rate"]))
 
             elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
