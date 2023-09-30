@@ -465,6 +465,25 @@ with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)
 
 
-def prob_difference(X, Y, line):
+def prob_diff(X, Y, line):
     def joint_pdf(x, y): return X(x)*Y(y)
-    return dblquad(joint_pdf, line, np.inf, lambda x: 0, lambda x: x - line)
+    return dblquad(joint_pdf, -np.inf, np.inf, lambda x: x - line, np.inf)
+
+
+def prob_sum(X, Y, line):
+    def joint_pdf(x, y): return X(x)*Y(y)
+    return dblquad(joint_pdf, -np.inf, np.inf, -np.inf, lambda x: line - x)
+
+
+def hmean(items):
+    total = 0
+    count = 0
+    for i in items:
+        if (i != 0) and type(i) is not str:
+            count += 1
+            total += 1/i
+
+    if total != 0:
+        return count/total
+    else:
+        return 0
