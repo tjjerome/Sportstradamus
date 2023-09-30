@@ -266,7 +266,7 @@ def meditate(force, stats, league, alt):
                     dist = "Gamma"
                     # X_train = X_train[y_train > 1]
                     # y_train = y_train[y_train > 1]
-                    y_train[y_train < 1] = 1
+                    y_train[y_train < 2] = 2
                 elif dist == "Poisson":
                     dist = "NegativeBinomial"
                 else:
