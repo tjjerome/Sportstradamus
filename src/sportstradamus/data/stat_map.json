@@ -212,17 +212,21 @@
             "Receiving Yards": "receiving yards",
             "Rushing Yards": "rushing yards",
             "Rushing + Receiving Yards": "yards",
+            "Rush + Rec Yards": "yards",
             "Total Yards": "qb yards",
+            "Pass + Rush Yards": "qb yards",
             "Fantasy Points": "fantasy points underdog",
             "Passing TDs": "passing tds",
             "Receiving TDs": "receiving tds",
             "Rushing TDs": "rushing tds",
             "Rushing + Receiving TDs": "tds",
+            "Rush + Rec TDs": "tds",
             "Receptions": "receptions",
             "Interceptions": "interceptions",
             "Passing Attempts": "attempts",
             "Completions": "completions",
-            "Rushing Attempts": "carries"
+            "Rushing Attempts": "carries",
+            "Targets": "targets"
         }
     },
     "Thrive": {
