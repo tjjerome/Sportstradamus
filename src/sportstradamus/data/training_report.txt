@@ -224,99 +224,99 @@
  0.587398        0.587676         0.586636          0.042473  0.077698 0.023953
 
 ========================== NFL attempts =========================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.587097   0.616162 0.163783   -0.015682    -0.012715  0.065522
+  0.54878   0.556818 0.206653   -0.011572     -0.01688  0.466797
 
 ========================== NFL carries ==========================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.565517   0.559486 0.114751   -0.012589    -0.006006  0.071126
+ 0.589404   0.595833 0.047035   -0.038442     -0.03078  0.169901
 
 ======================== NFL completions ========================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.496689   0.531915 0.072955   -0.052571    -0.065137  0.004862
+ 0.509091   0.544304 0.135348   -0.044824    -0.054774  0.380163
 
 ================= NFL fantasy points parlayplay =================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.607177   0.588313  0.32237    0.030973     0.041888  0.107222
+ 0.628825   0.622407 0.323029    0.044197      0.06032  0.217794
 
 ================= NFL fantasy points prizepicks =================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.564366   0.548148   0.2938    0.007405     0.009918  0.081547
+ 0.598433   0.580972 0.321033    0.037684     0.048951  0.170563
 
 ================== NFL fantasy points underdog ==================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.562795   0.545455 0.282821    0.010182     0.013524  0.093169
+ 0.610945   0.595661 0.288939    0.031569     0.043341  0.206426
 
 ======================= NFL interceptions =======================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.698795   0.630435 -0.096562    0.066072     0.083388  0.116766
+ Distribution Model: NegativeBinomial
+ Accuracy  Precision   Entropy  Likelihood  Brier Score     Deviance
+   0.4375     0.4375 -1.698397      -28.25        -1.25 -1345.286217
 
 ======================== NFL passing tds ========================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.686047       0.66 -0.093258     0.06444     0.094466  0.088213
+ Distribution Model: NegativeBinomial
+ Accuracy  Precision   Entropy  Likelihood  Brier Score     Deviance
+ 0.423645   0.423645 -1.314035  -28.970443    -1.305419 -7370.048508
 
 ======================= NFL passing yards =======================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.578947   0.554054 0.387059    0.030733     0.040826  0.135789
+ 0.596154   0.589286 0.447322    0.051887      0.06637  0.723593
 
 =========================== NFL qb tds ==========================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
-  0.58642   0.704545 -0.089884    0.034937      0.04452  0.123798
+ Distribution Model: NegativeBinomial
+ Accuracy  Precision   Entropy  Likelihood  Brier Score      Deviance
+ 0.529412   0.529412 -1.136102  -23.470588    -0.882353 -17257.944959
 
 ========================== NFL qb yards =========================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.578313   0.574468 0.368148    0.040708     0.048358  0.160739
+      0.6   0.626667 0.420654    0.045343     0.053549  0.501703
 
 ======================= NFL receiving tds =======================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
-  0.70122        0.0 -1.550642    0.143489     0.184867  0.091006
+ Distribution Model: NegativeBinomial
+ Accuracy  Precision   Entropy  Likelihood  Brier Score    Deviance
+  0.29878    0.29878 -3.566493  -15.526648    -1.804853 -195.969771
 
 ====================== NFL receiving yards ======================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
-  0.57483   0.554131 0.426952    0.007653     0.012805  0.071472
+ 0.611628   0.647416 0.453621    0.043474      0.05607   0.45772
 
 ========================= NFL receptions ========================
- Distribution Model: Poisson
+ Distribution Model: NegativeBinomial
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.589242   0.598174 -0.005366    0.016667     0.024115  0.115829
+ 0.512558   0.509615 -0.781899   -0.445015    -0.394692 -1.629887
 
 ======================== NFL rushing tds ========================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.686916        0.0 -1.354056    0.038317     0.148819 -0.055401
+ Distribution Model: NegativeBinomial
+ Accuracy  Precision   Entropy  Likelihood  Brier Score    Deviance
+ 0.313084   0.313084 -3.350092  -21.722367    -1.747663 -324.733936
 
 ======================= NFL rushing yards =======================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.585648   0.578212 0.425927    0.008249     0.013173  0.064271
+      0.6      0.625 0.441153    0.031202     0.039989  0.582945
 
 ========================== NFL targets ==========================
- Distribution Model: Gaussian
- Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.609339   0.587097 0.055667    0.019161     0.028182  0.095568
+ Distribution Model: Gamma
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.600425   0.583333 -0.012063    0.002398     0.015777  0.274515
 
 ============================ NFL tds ============================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.629981        0.0 -0.934781    0.059553      0.07999  0.029749
+ Distribution Model: NegativeBinomial
+ Accuracy  Precision   Entropy  Likelihood  Brier Score    Deviance
+ 0.370019   0.370019 -2.698462  -15.179614    -1.519922 -204.085684
 
 =========================== NFL yards ===========================
- Distribution Model: Gaussian
+ Distribution Model: Gamma
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.595291   0.584219 0.417098    0.027301     0.036212  0.089959
+ 0.603708   0.642458 0.454992     0.03267     0.043019  0.288377
 
 ========================== NHL assists ==========================
  Distribution Model: Poisson
