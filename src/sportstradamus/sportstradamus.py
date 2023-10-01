@@ -206,14 +206,25 @@ def main(progress, books):
     positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
     prob_params['Position'] = playerStats.Position.map(positions)
     prob_params['Projection'] = prob_params['loc'].round(1)
-    prob_params['Floor'] = norm.ppf(.1, loc=prob_params['loc'],
+    prob_params['Floor'] = norm.ppf(.1395, loc=prob_params['loc'],
                                     scale=prob_params['scale'])
     prob_params['Floor'] = prob_params['Floor'].clip(0).round(1)
-    prob_params['Ceiling'] = norm.ppf(.95, loc=prob_params['loc'],
+    prob_params['Ceiling'] = norm.ppf(.9561, loc=prob_params['loc'],
                                       scale=prob_params['scale'])
     prob_params['Ceiling'] = prob_params['Ceiling'].clip(0).round(1)
+    prob_params['Rank'] = prob_params.groupby('Position').rank(
+        ascending=False, method='dense')['Ceiling']
+    prob_params.loc[prob_params['Position'] == "QB", 'VORP'] = prob_params.loc[prob_params['Position'] == "QB",
+                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "QB") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "WR", 'VORP'] = prob_params.loc[prob_params['Position'] == "WR",
+                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "WR") & (prob_params["Rank"] == 31), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "RB", 'VORP'] = prob_params.loc[prob_params['Position'] == "RB",
+                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "RB") & (prob_params["Rank"] == 19), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "TE", 'VORP'] = prob_params.loc[prob_params['Position'] == "TE",
+                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
+
     prob_params = prob_params[['Player', 'Position',
-                               'Projection', 'Floor', 'Ceiling']].sort_values("Projection", ascending=False)
+                               'Projection', 'Floor', 'Ceiling', 'Rank', 'VORP']].sort_values("VORP", ascending=False)
 
     if len(prob_params) > 0:
         wks = gc.open("Sportstradamus").worksheet("Fantasy")
