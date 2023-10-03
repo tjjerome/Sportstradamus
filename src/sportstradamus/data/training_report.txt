@@ -190,8 +190,8 @@
 
 ============================ NBA PTS ============================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.560748        0.561354         0.558394          0.011406  0.017682 -0.016648
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.558442   0.553882 0.245001    0.008756     0.011979  0.025868
 
 ============================= NBA RA ============================
  Distribution Model: Gaussian
