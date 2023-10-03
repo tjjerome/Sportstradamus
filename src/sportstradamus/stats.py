@@ -148,6 +148,20 @@ class StatsNBA(Stats):
         super().__init__()
         self.season_start = datetime.strptime("2023-10-24", "%Y-%m-%d").date()
         self.season = "2023-24"
+        cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
+                'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
+                'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
+                'PLUS_MINUS', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
+                'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlay',
+                'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT', 'DREB_PCT', 'REB_PCT',
+                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
+        self.gamelog = pd.DataFrame(columns=cols)
+        team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE', 'OPP',
+                     'OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
+                     'TM_TOV_PCT', 'PACE', 'OPP_OFF_RATING', 'OPP_DEF_RATING',
+                     'OPP_EFG_PCT', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
+                     'OPP_TM_TOV_PCT', 'OPP_PACE']
+        self.teamlog = pd.DataFrame(columns=team_cols)
 
     def load(self):
         """
@@ -159,6 +173,7 @@ class StatsNBA(Stats):
                 nba_data = pickle.load(infile)
                 self.players = nba_data['players']
                 self.gamelog = nba_data['gamelog']
+                self.teamlog = nba_data['teamlog']
 
     def update(self):
         """
@@ -212,20 +227,53 @@ class StatsNBA(Stats):
         }
         nba_gamelog = nba.playergamelogs.PlayerGameLogs(
             **params).get_normalized_dict()["PlayerGameLogs"]
+        adv_gamelog = nba.playergamelogs.PlayerGameLogs(
+            **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"]
+        teamlog = nba.teamgamelogs.TeamGameLogs(
+            **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
         # Fetch playoffs game logs
         if today.month == 4 or True:
             params.update({'season_type_nullable': "PlayIn"})
             nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                 **params).get_normalized_dict()["PlayerGameLogs"])
+            adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
+            teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
         if 4 <= today.month <= 6 or True:
             params.update({'season_type_nullable': "Playoffs"})
             nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                 **params).get_normalized_dict()["PlayerGameLogs"])
+            adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
+            teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
+
+        nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
+        adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
+        teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+
+        team_df = []
+        for team1, team2 in tqdm(zip(*[iter(teamlog)]*2), desc="Getting NBA stats", unit='team'):
+            team1.update({"OPP_"+k: v for k, v in team2.items()
+                         if "OPP_"+k in self.teamlog.columns})
+            team1["OPP"] = team2['TEAM_ABBREVIATION']
+            team2.update({"OPP_"+k: v for k, v in team1.items()
+                         if "OPP_"+k in self.teamlog.columns})
+            team2["OPP"] = team1['TEAM_ABBREVIATION']
+            team_df.append(team1)
+            team_df.append(team2)
+
+        team_df = pd.DataFrame(team_df)
+
+        if not team_df.empty:
+            self.teamlog = pd.concat(
+                [team_df[self.teamlog.columns], self.teamlog]).sort_values("GAME_DATE").reset_index(drop=True)
 
         # Process each game
         nba_df = []
-        for game in tqdm(nba_gamelog, desc="Getting NBA stats"):
+        for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
             if game["MIN"] < 12:
                 continue
 
@@ -261,21 +309,26 @@ class StatsNBA(Stats):
             game["fantasy points parlay"] = game["PRA"] + \
                 game["BLST"]*2 - game["TOV"]
 
-            for col in list(game.keys()):
-                if any([string in col for string in ["PCT", "RANK", "AVAILABLE"]]):
-                    game.pop(col)
+            # game.update(
+            #     {k: v for k, v in adv_gamelog[i].items() if k in adv_stats})
+            game.update(adv_gamelog[i])
 
             nba_df.append(game)
 
         nba_df = pd.DataFrame(nba_df)
-        self.gamelog = pd.concat(
-            [nba_df, self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
+
+        if not nba_df.empty:
+            self.gamelog = pd.concat(
+                [nba_df[self.gamelog.columns], self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
 
         # Remove old games to prevent file bloat
         two_years_ago = today - timedelta(days=730)
         self.gamelog = self.gamelog[pd.to_datetime(
             self.gamelog["GAME_DATE"]).dt.date >= two_years_ago]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog = self.teamlog[pd.to_datetime(
+            self.teamlog["GAME_DATE"]).dt.date >= two_years_ago]
+        self.teamlog.drop_duplicates(inplace=True)
 
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
                          == 'UTAH', 'TEAM_ABBREVIATION'] = "UTA"
@@ -298,10 +351,32 @@ class StatsNBA(Stats):
         self.gamelog.loc[self.gamelog['OPP']
                          == 'SA', 'OPP'] = "SAS"
 
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'UTAH', 'TEAM_ABBREVIATION'] = "UTA"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'UTAH', 'OPP'] = "UTA"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'NOP', 'TEAM_ABBREVIATION'] = "NO"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'NOP', 'OPP'] = "NO"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'GS', 'TEAM_ABBREVIATION'] = "GSW"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'GS', 'OPP'] = "GSW"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'NY', 'TEAM_ABBREVIATION'] = "NYK"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'NY', 'OPP'] = "NYK"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'SA', 'TEAM_ABBREVIATION'] = "SAS"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'SA', 'OPP'] = "SAS"
+
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
             pickle.dump({"players": self.players,
-                        "gamelog": self.gamelog}, outfile)
+                         "gamelog": self.gamelog,
+                         "teamlog": self.teamlog}, outfile)
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
         """
@@ -410,6 +485,10 @@ class StatsNBA(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
+        teamlog = self.teamlog.groupby('TEAM_ABBREVIATION').tail(5)
+        teamstats = teamlog.groupby('TEAM_ABBREVIATION')[
+            teamlog.columns[6:]].mean()
+
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
             filter(lambda x: (x[market].clip(0, 1).mean() > 0.3) & (x[market].count() > 1)).\
@@ -442,6 +521,10 @@ class StatsNBA(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
+        stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
+                      'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
+        playerstats = gamelog.fillna(0).groupby('PLAYER_NAME')[
+            stat_types].mean(numeric_only=True)
         positions = ['Guard', 'Forward', 'Center',
                      'Guard-Forward', 'Forward-Center']
         for position in positions:
@@ -477,6 +560,20 @@ class StatsNBA(Stats):
             self.defenseProfile['totals gain'] = defenseGroups.\
                 apply(lambda x: np.polyfit(x.totals.fillna(110).values.astype(float) / 110 - x.totals.fillna(110).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+
+        team_stat_types = ['OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
+                           'TM_TOV_PCT', 'PACE', 'OPP_OFF_RATING', 'OPP_DEF_RATING',
+                           'OPP_EFG_PCT', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
+                           'OPP_TM_TOV_PCT']
+        i = self.defenseProfile.index
+        self.defenseProfile = self.defenseProfile.merge(
+            teamstats[team_stat_types], left_on='OPP', right_on='TEAM_ABBREVIATION')
+        self.defenseProfile.index = i
+
+        self.teamProfile = teamstats[team_stat_types]
+
+        self.playerProfile = self.playerProfile.merge(
+            playerstats[stat_types], on='PLAYER_NAME')
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -589,7 +686,7 @@ class StatsNBA(Stats):
             pd.to_datetime(self.gamelog["GAME_DATE"]) < date)]
 
         if len(player_games) > 0:
-            position = player_games.iat[0, 34]
+            position = player_games.iloc[0]['POS']
         else:
             logger.warning(f"{player} not found")
             return 0
@@ -643,21 +740,17 @@ class StatsNBA(Stats):
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
-        player_data = self.playerProfile.loc[player, [
-            'avg', 'home', 'away']]
+        player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in ['avg', 'home', 'away']})
+            {"Player " + col: player_data[col] for col in player_data.index})
 
-        other_player_data = self.playerProfile.loc[player, self.playerProfile.columns.difference(
-            ['avg', 'home', 'away'])]
+        team_data = self.teamProfile.loc[team]
         data.update(
-            {"Player " + col: other_player_data[col] for col in other_player_data.index})
+            {"Team " + col: team_data[col] for col in team_data.index})
 
-        defense_data = self.defenseProfile.loc[opponent, [
-            'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
-
+        defense_data = self.defenseProfile.loc[opponent]
         data.update(
-            {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in positions})
 
         return data
 
@@ -1664,6 +1757,9 @@ class StatsNFL(Stats):
         snaps['snap_pct'] = snaps['offense_pct']
         snaps = snaps[['player_display_name', 'season', 'week', 'snap_pct']]
 
+        nfl_data['player_display_name'] = nfl_data['player_display_name'].map(
+            remove_accents)
+
         nfl_data = nfl_data.merge(
             snaps, on=['player_display_name', 'season', 'week'])
         nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'QB') | (
@@ -1674,9 +1770,6 @@ class StatsNFL(Stats):
             nfl_data['snap_pct'] > 0.3)]
         nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
             nfl_data['snap_pct'] > 0.5)]
-
-        nfl_data['player_display_name'] = nfl_data['player_display_name'].map(
-            remove_accents)
 
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
@@ -2410,21 +2503,6 @@ class StatsNFL(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
-                    # if "td" in market or "interception" in market:
-                    #     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] < 0.5:
-                    #         continue
-                    # elif "yards" in market:
-                    #     if new_get_stats["Avg10"] <= 10:
-                    #         continue
-                    # elif "fantasy" in market:
-                    #     if new_get_stats["Avg10"] <= 6:
-                    #         continue
-                    # elif market == "receptions":
-                    #     if new_get_stats["Avg10"] <= 1:
-                    #         continue
-                    # else:
-                    #     if new_get_stats["Avg10"] <= 4:
-                    #         continue
 
                     new_get_stats.update(
                         {"Result": game[market]}
