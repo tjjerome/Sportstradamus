@@ -1,4 +1,4 @@
-from sportstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents
+from sportstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents, Archive
 import pickle
 import numpy as np
 from datetime import datetime, timedelta
@@ -12,16 +12,17 @@ with open(filepath, "rb") as infile:
 
 apikey = "02a4dcf96364c282ed62cdfba33cc460"
 
-sport = "americanfootball_nfl"
-league = "NFL"
+sport = "basketball_nba"
+league = "NBA"
 
 Date = datetime.strptime("2022-10-18T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
-# while Date < datetime.strptime("2023-06-13T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
-for date in ['2020-10-13', '2020-12-19', '2021-12-26', '2022-01-02', '2022-11-20',
-             '2022-12-25', '2023-01-01', '2023-01-08', '2023-09-07', '2023-09-10',
-             '2023-09-11', '2023-09-14']:
-    # date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
+while Date < datetime.strptime("2023-06-13T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
+    # for date in ['2020-10-13', '2020-12-19', '2021-12-26', '2022-01-02', '2022-11-20',
+    #              '2022-12-25', '2023-01-01', '2023-01-08', '2023-09-07', '2023-09-10',
+    #              '2023-09-11', '2023-09-14']:
+    date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(date)
     url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals,spreads&date={date}&apiKey={apikey}"
     res = scraper.get(url)["data"]
 
