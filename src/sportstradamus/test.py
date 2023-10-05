@@ -8,28 +8,36 @@ from sportstradamus import data
 import pickle
 from scipy.stats import norm
 
-# stats = StatsNBA()
+stats = StatsNHL()
+stats.load()
+stats.update()
+M = stats.get_training_matrix("saves")
+print(M)
+
+# stats = StatsMLB()
 # stats.load()
 # stats.update()
-# M = stats.get_training_matrix("PRA")
-# print(M)
-
-stats = StatsNFL()
-stats.season_start = datetime(2020, 9, 1)
-stats.update()
-stats.season_start = datetime(2021, 9, 1)
-stats.update()
-stats.season_start = datetime(2022, 9, 1)
-stats.update()
-stats.season_start = datetime(2023, 9, 1)
-stats.update()
-
-# NBA = StatsNBA()
-# NBA.load()
-# NBA.profile_market('PTS')
-# print(NBA.defenseProfile)
-
-# NHL = StatsNHL()
-# NHL.load()
-# NHL.profile_market('shots')
-# print(NHL.defenseProfile)
+# stats.profile_market('pitcher strikeouts')
+# offer = {
+#     'Player': 'Zac Gallen',
+#     'Line': 3.5,
+#     'Team': 'ARI',
+#     'Opponent': 'MIL',
+#     'Market': 'pitcher strikeouts',
+#     'League': 'MLB',
+#     'Date': '2023-10-04'
+# }
+# n = stats.get_stats(offer, date=offer['Date'])
+# stats.profile_market('total bases')
+# offer = {
+#     'Player': 'Kyle Schwarber',
+#     'Line': 0.5,
+#     'Team': 'PHI',
+#     'Opponent': 'MIA',
+#     'Market': 'total bases',
+#     'League': 'MLB',
+#     'Pitcher': 'Jesus Luzardo',
+#     'Date': '2023-10-03'
+# }
+# stats.get_stats(offer, date=offer['Date'])
+# print(stats.defenseProfile)
