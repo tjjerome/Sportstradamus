@@ -30,6 +30,7 @@ from lightgbmlss.distributions import (
     NegativeBinomial
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
+import smogn
 
 
 @click.command()
@@ -216,6 +217,13 @@ def meditate(force, stats, league, alt):
             categories = "name:"+",".join(categories)
 
             if need_model:
+                if (y_train["Result"] <= 0).mean() >= .2:
+                    m = X_train
+                    m["Result"] = y_train["Result"]
+                    m = smogn.smoter(data=m, y='Result', samp_method='balance')
+                    y_train = m[['Result']]
+                    X_train = m.drop(columns=['Result'])
+
                 y_train = np.ravel(y_train.to_numpy())
 
                 dtrain = lgb.Dataset(X_train, label=y_train)

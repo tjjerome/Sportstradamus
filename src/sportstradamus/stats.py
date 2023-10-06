@@ -1907,7 +1907,7 @@ class StatsMLB(Stats):
 
             # Retrieve data from the archive based on game date and player name
             data = {}
-            gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
             if gameDate < datetime(2022, 3, 1):
                 continue
 
