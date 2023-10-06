@@ -325,12 +325,12 @@ class StatsNBA(Stats):
                 [nba_df[self.gamelog.columns], self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
 
         # Remove old games to prevent file bloat
-        two_years_ago = today - timedelta(days=730)
+        four_years_ago = today - timedelta(days=1461)
         self.gamelog = self.gamelog[pd.to_datetime(
-            self.gamelog["GAME_DATE"]).dt.date >= two_years_ago]
+            self.gamelog["GAME_DATE"]).dt.date >= four_years_ago]
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog = self.teamlog[pd.to_datetime(
-            self.teamlog["GAME_DATE"]).dt.date >= two_years_ago]
+            self.teamlog["GAME_DATE"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
@@ -1302,6 +1302,11 @@ class StatsMLB(Stats):
                 self.gamelog = mlb_data["gamelog"]
                 self.teamlog = mlb_data["teamlog"]
                 self.players = mlb_data["players"]
+
+    def update(self):
+        """
+        Updates the MLB player statistics.
+        """
         filepath = pkg_resources.files(data) / "park_factor.json"
         if os.path.isfile(filepath):
             with open(filepath, 'r') as infile:
@@ -1317,10 +1322,6 @@ class StatsMLB(Stats):
             self.affinity = df.groupby('key1').apply(
                 lambda x: x.key2.to_list()).to_dict()
 
-    def update(self):
-        """
-        Updates the MLB player statistics.
-        """
         # Get the current MLB schedule
         today = datetime.today().date()
         if self.gamelog.empty:
@@ -1404,12 +1405,15 @@ class StatsMLB(Stats):
             self.parse_game(id)
 
         # Remove old games to prevent file bloat
-        two_years_ago = today - timedelta(days=730)
+        four_years_ago = today - timedelta(days=1461)
         self.gamelog = self.gamelog[self.gamelog["gameDate"].apply(
-            lambda x: two_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= today)]
+            lambda x: four_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= today)]
         self.gamelog = self.gamelog[~self.gamelog['opponent'].isin([
                                                                    "AL", "NL"])]
+        self.teamlog = self.teamlog[self.teamlog["gameDate"].apply(
+            lambda x: four_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= today)]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(inplace=True)
 
         # Write to file
         with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
@@ -1831,6 +1835,11 @@ class StatsMLB(Stats):
         if any([string in market for string in ["allowed", "pitch"]]):
             defense_data = self.defenseProfile.loc[team]
 
+            for batter in order:
+                if batter not in self.batterProfile.index:
+                    self.batterProfile.loc[batter] = self.defenseProfile.loc[opponent,
+                                                                             self.stat_types['batting']]
+
             if len(order) > 0:
                 defense_data[self.stat_types['batting']] = self.batterProfile.loc[order,
                                                                                   self.stat_types['batting']].mean()
@@ -1844,6 +1853,11 @@ class StatsMLB(Stats):
         else:
             defense_data = self.pitcherProfile.loc[pitcher]
             defense_data.loc['DER'] = self.defenseProfile.loc[opponent, 'DER']
+
+            for batter in order:
+                if batter not in self.teamProfile.index:
+                    self.teamProfile.loc[batter] = self.teamProfile.loc[team,
+                                                                        self.stat_types['batting']]
 
             if len(order) > 0:
                 team_data = self.playerProfile.loc[order,
@@ -2240,12 +2254,15 @@ class StatsNFL(Stats):
         self.gamelog = self.gamelog.sort_values('gameday')
 
         # Remove old games to prevent file bloat
-        three_years_ago = datetime.today().date() - timedelta(days=1096)
+        six_years_ago = datetime.today().date() - timedelta(days=2191)
         self.gamelog = self.gamelog[self.gamelog["gameday"].apply(
-            lambda x: three_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
+            lambda x: six_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
         self.gamelog = self.gamelog[~self.gamelog['opponent'].isin([
                                                                    "AFC", "NFC"])]
+        self.teamlog = self.teamlog[self.teamlog["gameday"].apply(
+            lambda x: six_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(inplace=True)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -3118,10 +3135,13 @@ class StatsNHL(Stats):
                 }
 
         # Remove old games to prevent file bloat
-        two_years_ago = today - timedelta(days=730)
+        four_years_ago = today - timedelta(days=1431)
         self.gamelog = self.gamelog[pd.to_datetime(
-            self.gamelog["gameDate"]).dt.date >= two_years_ago]
+            self.gamelog["gameDate"]).dt.date >= four_years_ago]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog = self.teamlog[pd.to_datetime(
+            self.teamlog["gameDate"]).dt.date >= four_years_ago]
+        self.teamlog.drop_duplicates(inplace=True)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:

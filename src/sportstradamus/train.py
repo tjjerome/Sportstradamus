@@ -30,7 +30,6 @@ from lightgbmlss.distributions import (
     NegativeBinomial
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
-import smogn
 
 
 @click.command()
@@ -68,27 +67,6 @@ def meditate(force, stats, league, alt):
     nfl.update()
 
     all_markets = {
-        "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
-            "yards",
-            "qb yards",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "fantasy points parlayplay",
-            "passing tds",
-            "rushing tds",
-            "receiving tds",
-            "tds",
-            "qb tds",
-            "completions",
-            "carries",
-            "receptions",
-            "interceptions",
-            "attempts",
-            "targets",
-        ],
         "MLB": [
             "pitcher strikeouts",
             "pitching outs",
@@ -113,6 +91,25 @@ def meditate(force, stats, league, alt):
             "hitter fantasy points parlay",
             "pitcher fantasy points parlay",
             "singles",
+        ],
+        "NFL": [
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "qb yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "fantasy points parlayplay",
+            "passing tds",
+            "tds",
+            "qb tds",
+            "completions",
+            "carries",
+            "receptions",
+            "interceptions",
+            "attempts",
+            "targets",
         ],
         "NBA": [
             "PTS",
@@ -217,13 +214,6 @@ def meditate(force, stats, league, alt):
             categories = "name:"+",".join(categories)
 
             if need_model:
-                if (y_train["Result"] <= 0).mean() >= .2:
-                    m = X_train
-                    m["Result"] = y_train["Result"]
-                    m = smogn.smoter(data=m, y='Result', samp_method='balance')
-                    y_train = m[['Result']]
-                    X_train = m.drop(columns=['Result'])
-
                 y_train = np.ravel(y_train.to_numpy())
 
                 dtrain = lgb.Dataset(X_train, label=y_train)

@@ -8,14 +8,34 @@ from sportstradamus import data
 import pickle
 from scipy.stats import norm
 
-stats = StatsNFL()
-stats.season_start = datetime(2020, 9, 1)
+stats = StatsMLB()
+stats.season_start = datetime(2021, 3, 1).date()
 stats.update()
-stats.season_start = datetime(2021, 9, 1)
 stats.update()
-stats.season_start = datetime(2022, 9, 1)
 stats.update()
-stats.season_start = datetime(2023, 9, 1)
+stats.season_start = datetime(2022, 3, 1).date()
+stats.update()
+stats.update()
+stats.update()
+stats.season_start = datetime(2023, 3, 1).date()
+stats.update()
+stats.update()
+stats.update()
+
+stats = StatsNBA()
+stats.season_start = datetime(2021, 10, 1).date()
+stats.update()
+stats.season_start = datetime(2022, 10, 1).date()
+stats.update()
+stats.season_start = datetime(2023, 10, 1).date()
+stats.update()
+
+stats = StatsNHL()
+stats.season_start = datetime(2021, 10, 1).date()
+stats.update()
+stats.season_start = datetime(2022, 10, 1).date()
+stats.update()
+stats.season_start = datetime(2023, 10, 1).date()
 stats.update()
 
 
