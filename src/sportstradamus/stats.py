@@ -1333,7 +1333,7 @@ class StatsMLB(Stats):
             next_day = self.season_start
         if next_day > today:
             next_day = today
-        end_date = next_day + timedelta(days=90)
+        end_date = next_day + timedelta(days=75)
         if end_date > today:
             end_date = today
         mlb_games = mlb.schedule(
