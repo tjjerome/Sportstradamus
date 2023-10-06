@@ -9,12 +9,8 @@ import pickle
 from scipy.stats import norm
 
 stats = StatsMLB()
-stats.season_start = datetime(2021, 3, 1).date()
-stats.update()
-stats.update()
-stats.update()
+stats.load()
 stats.season_start = datetime(2022, 3, 1).date()
-stats.update()
 stats.update()
 stats.update()
 stats.season_start = datetime(2023, 3, 1).date()
