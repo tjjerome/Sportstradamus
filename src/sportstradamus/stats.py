@@ -186,7 +186,9 @@ class StatsNBA(Stats):
         latest_date = self.season_start
         if not self.gamelog.empty:
             latest_date = datetime.strptime(
-                self.gamelog["GAME_DATE"].max().split("T")[0], "%Y-%m-%d") + timedelta(days=1)
+                self.gamelog["GAME_DATE"].max().split("T")[0], "%Y-%m-%d").date()
+            if latest_date < self.season_start:
+                latest_date = self.season_start
         today = datetime.today().date()
 
         self.upcoming_games = {}
