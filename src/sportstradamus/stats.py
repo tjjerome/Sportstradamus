@@ -2189,17 +2189,6 @@ class StatsNFL(Stats):
                 if type(playerData) is int:
                     self.gamelog.drop(index=i, inplace=True)
                     continue
-                if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
-                                                              (self.teamlog.week == row.week), 'team'] and \
-                        (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
-                    teamData = {
-                        "season": row.season,
-                        "week": row.week,
-                        "team": row['recent team']
-                    }
-                    teamData.update(self.parse_pbp(
-                        row['week'], row['recent team']))
-                    teamDataList.append(teamData)
 
                 for k, v in playerData.items():
                     self.gamelog.at[i, k.replace("_", " ")] = v
@@ -2220,6 +2209,19 @@ class StatsNFL(Stats):
                                                                                                 == row['recent team']), 'gameday'].values[0]
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent team']), 'game_id'].values[0]
+
+                if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
+                                                              (self.teamlog.week == row.week), 'team'] and \
+                        (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
+                    teamData = {
+                        "season": row.season,
+                        "week": row.week,
+                        "team": row['recent team'],
+                        "gameday": self.gamelog.at[i, 'gameday']
+                    }
+                    teamData.update(self.parse_pbp(
+                        row['week'], row['recent team']))
+                    teamDataList.append(teamData)
 
         self.teamlog = pd.concat(
             [self.teamlog, pd.DataFrame.from_records(teamDataList)], ignore_index=True)
@@ -2510,7 +2512,7 @@ class StatsNFL(Stats):
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         teamstats = teamlog.groupby('team').tail(5).groupby('team')[
-            teamlog.columns[3:]].mean()
+            teamlog.columns[3:-1]].mean()
 
         playerGroups = gamelog.\
             groupby('player display name').\

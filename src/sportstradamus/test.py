@@ -8,11 +8,16 @@ from sportstradamus import data
 import pickle
 from scipy.stats import norm
 
-stats = StatsNHL()
-stats.load()
+stats = StatsNFL()
+stats.season_start = datetime(2020, 9, 1)
 stats.update()
-M = stats.get_training_matrix("saves")
-print(M)
+stats.season_start = datetime(2021, 9, 1)
+stats.update()
+stats.season_start = datetime(2022, 9, 1)
+stats.update()
+stats.season_start = datetime(2023, 9, 1)
+stats.update()
+
 
 # stats = StatsMLB()
 # stats.load()
