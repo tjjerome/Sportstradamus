@@ -77,11 +77,11 @@ def main(progress, books):
     if books:
         logger.info("Getting DraftKings MLB lines")
         dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
-        # logger.info("Getting DraftKings NBA lines")
-        # dk_data.update(
-        #    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
-        # logger.info("Getting DraftKings NHL lines")
-        # dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
+        logger.info("Getting DraftKings NBA lines")
+        dk_data.update(
+            get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
+        logger.info("Getting DraftKings NHL lines")
+        dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
         logger.info("Getting DraftKings NFL lines")
         dk_data.update(get_dk(88808, [1000, 1001]))  # NFL
         # dk_data.update(get_dk(92893, [488, 633])) # Tennis
@@ -90,12 +90,12 @@ def main(progress, books):
         logger.info("Getting FanDuel MLB lines")
         fd_data.update(
             get_fd("mlb", ["batter-props", "pitcher-props", "innings"]))
-        # logger.info("Getting FanDuel NBA lines")
-        # fd_data.update(get_fd('nba', ['player-points', 'player-rebounds',
-        #                              'player-assists', 'player-threes', 'player-combos', 'player-defense']))
-        # logger.info("Getting FanDuel NHL lines")
-        # fd_data.update(
-        #    get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
+        logger.info("Getting FanDuel NBA lines")
+        fd_data.update(get_fd('nba', ['player-points', 'player-rebounds',
+                                      'player-assists', 'player-threes', 'player-combos', 'player-defense']))
+        logger.info("Getting FanDuel NHL lines")
+        fd_data.update(
+            get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
         logger.info("Getting FanDuel NFL lines")
         fd_data.update(
             get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props']))
@@ -103,10 +103,10 @@ def main(progress, books):
 
         logger.info("Getting Pinnacle MLB lines")
         pin_data.update(get_pinnacle(246))  # MLB
-        # logger.info("Getting Pinnacle NBA lines")
-        # pin_data.update(get_pinnacle(487))  # NBA
-        # logger.info("Getting Pinnacle NHL lines")
-        # pin_data.update(get_pinnacle(1456))  # NHL
+        logger.info("Getting Pinnacle NBA lines")
+        pin_data.update(get_pinnacle(487))  # NBA
+        logger.info("Getting Pinnacle NHL lines")
+        pin_data.update(get_pinnacle(1456))  # NHL
         logger.info("Getting Pinnacle NFL lines")
         pin_data.update(get_pinnacle(889))  # NFL
         logger.info(str(len(pin_data)) + " offers found")
@@ -139,20 +139,21 @@ def main(progress, books):
     """
     Start gathering player stats
     """
-    nba = StatsNBA()
-    nba.load()
-    nba.update()
-    mlb = StatsMLB()
-    mlb.load()
-    mlb.update()
-    nhl = StatsNHL()
-    nhl.load()
-    nhl.update()
+    # nba = StatsNBA()
+    # nba.load()
+    # nba.update()
+    # mlb = StatsMLB()
+    # mlb.load()
+    # mlb.update()
+    # nhl = StatsNHL()
+    # nhl.load()
+    # nhl.update()
     nfl = StatsNFL()
     nfl.load()
     nfl.update()
 
-    stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
+    # stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
+    stats = {"NFL": nfl}
 
     untapped_markets = []
 
@@ -646,7 +647,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                         o["Line"], params[1]["rate"], params[0]["rate"])
                     under -= push/2
                 elif dist == "Gaussian":
-                    under = norm.cdf(o["Line"],
+                    under = norm.cdf(-o["Line"],
                                      params[0]["loc"] -
                                      params[1]["loc"],
                                      params[0]["scale"] +
@@ -711,9 +712,9 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                 o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
             elif "vs." in o["Player"]:
                 avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
-                o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
+                o["Avg 5"] = avg5 + o["Line"]
                 avgh2h = stats[0]["AvgH2H"] - stats[1]["AvgH2H"]
-                o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
+                o["Avg H2H"] = avgh2h + o["Line"]
                 o["Moneyline"] = np.mean(
                     [stats[0]["Moneyline"], 1-stats[1]["Moneyline"]])
                 o["O/U"] = np.mean([s["Total"] for s in stats]) / \

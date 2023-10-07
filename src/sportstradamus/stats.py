@@ -3,6 +3,7 @@ import os.path
 import numpy as np
 from datetime import datetime, timedelta
 import pickle
+import json
 import importlib.resources as pkg_resources
 from sportstradamus import data
 from tqdm import tqdm
@@ -14,6 +15,7 @@ from time import sleep
 from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents, hmean
 import pandas as pd
 import warnings
+import requests
 
 
 class Stats:
@@ -40,6 +42,7 @@ class Stats:
 
     def __init__(self):
         self.gamelog = pd.DataFrame()
+        self.teamlog = pd.DataFrame()
         self.archive = {}
         self.players = {}
         self.season_start = datetime(year=1900, month=1, day=1).date()
@@ -183,7 +186,9 @@ class StatsNBA(Stats):
         latest_date = self.season_start
         if not self.gamelog.empty:
             latest_date = datetime.strptime(
-                self.gamelog["GAME_DATE"].max().split("T")[0], "%Y-%m-%d") + timedelta(days=1)
+                self.gamelog["GAME_DATE"].max().split("T")[0], "%Y-%m-%d").date()
+            if latest_date < self.season_start:
+                latest_date = self.season_start
         today = datetime.today().date()
 
         self.upcoming_games = {}
@@ -322,12 +327,12 @@ class StatsNBA(Stats):
                 [nba_df[self.gamelog.columns], self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
 
         # Remove old games to prevent file bloat
-        two_years_ago = today - timedelta(days=730)
+        four_years_ago = today - timedelta(days=1461)
         self.gamelog = self.gamelog[pd.to_datetime(
-            self.gamelog["GAME_DATE"]).dt.date >= two_years_ago]
+            self.gamelog["GAME_DATE"]).dt.date >= four_years_ago]
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog = self.teamlog[pd.to_datetime(
-            self.teamlog["GAME_DATE"]).dt.date >= two_years_ago]
+            self.teamlog["GAME_DATE"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
@@ -471,6 +476,9 @@ class StatsNBA(Stats):
         gameDates = pd.to_datetime(self.gamelog["GAME_DATE"]).dt.date
         gamelog = self.gamelog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
+        gameDates = pd.to_datetime(self.teamlog["GAME_DATE"]).dt.date
+        teamlog = self.teamlog[(one_year_ago <= gameDates)
+                               & (gameDates < date)].copy()
 
         # Retrieve moneyline and totals data from archive
         k = [[(date, team) for team in teams.keys()]
@@ -485,8 +493,7 @@ class StatsNBA(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamlog = self.teamlog.groupby('TEAM_ABBREVIATION').tail(5)
-        teamstats = teamlog.groupby('TEAM_ABBREVIATION')[
+        teamstats = teamlog.groupby('TEAM_ABBREVIATION').tail(10).groupby('TEAM_ABBREVIATION')[
             teamlog.columns[6:]].mean()
 
         playerGroups = gamelog.\
@@ -846,6 +853,14 @@ class StatsMLB(Stats):
         self.pitchers = mlb_pitchers
         self.gameIds = []
         self.gamelog = pd.DataFrame()
+        self.teamlog = pd.DataFrame()
+        self.park_factors = {}
+        self.players = {}
+        self.stat_types = {
+            "batting": ["OBP", "AVG", "SLG", "PASO", "BABIP"],
+            "fielding": ["DER"],
+            "pitching": ["FIP", "WHIP", "ERA", "K9", "BB9", "PA9", "IP"]
+        }
 
     def parse_game(self, gameId):
         """
@@ -854,42 +869,73 @@ class StatsMLB(Stats):
         Args:
             gameId (int): The ID of the game to parse.
         """
-        game = mlb.boxscore_data(gameId)
+        # game = mlb.boxscore_data(gameId)
+        game = scraper.get(
+            f"https://baseballsavant.mlb.com/gf?game_pk={gameId}")
         new_games = []
         if game:
-            linescore = mlb.get("game_linescore", {"gamePk": str(gameId)})
-            awayTeam = game["teamInfo"]["away"]["abbreviation"].replace(
-                "AZ", "ARI")
-            homeTeam = game["teamInfo"]["home"]["abbreviation"].replace(
-                "AZ", "ARI")
-            awayPitcher = game["awayPitchers"][1]["personId"]
-            awayPitcher = game["away"]["players"]["ID" + str(awayPitcher)]["person"][
+            linescore = game["scoreboard"]["linescore"]
+            boxscore = game["boxscore"]
+            awayTeam = game["away_team_data"]["abbreviation"].replace(
+                "AZ", "ARI").replace("WSH", "WAS")
+            homeTeam = game["home_team_data"]["abbreviation"].replace(
+                "AZ", "ARI").replace("WSH", "WAS")
+            bpf = self.park_factors[homeTeam]
+            awayPitcherId = game["away_pitcher_lineup"][0]
+            awayPitcher = boxscore["teams"]["away"]["players"]["ID" + str(awayPitcherId)]["person"][
                 "fullName"
             ]
-            homePitcher = game["homePitchers"][1]["personId"]
-            homePitcher = game["home"]["players"]["ID" + str(homePitcher)]["person"][
+            if awayPitcherId in self.players and "throws" in self.players[awayPitcherId]:
+                awayPitcherHand = self.players[awayPitcherId]["throws"]
+            else:
+                if str(awayPitcherId) not in game["away_pitchers"]:
+                    return
+                awayPitcherHand = game["away_pitchers"][str(
+                    awayPitcherId)][0]["p_throws"]
+                if awayPitcherId not in self.players:
+                    self.players[awayPitcherId] = {
+                        "name": awayPitcher, "throws": awayPitcherHand}
+                else:
+                    self.players[awayPitcherId]["throws"] = awayPitcherHand
+            homePitcherId = game["home_pitcher_lineup"][0]
+            homePitcher = boxscore["teams"]["home"]["players"]["ID" + str(homePitcherId)]["person"][
                 "fullName"
             ]
+            if homePitcherId in self.players and "throws" in self.players[homePitcherId]:
+                homePitcherHand = self.players[homePitcherId]["throws"]
+            else:
+                if str(homePitcherId) not in game["home_pitchers"]:
+                    return
+                homePitcherHand = game["home_pitchers"][str(
+                    homePitcherId)][0]["p_throws"]
+                if homePitcherId not in self.players:
+                    self.players[homePitcherId] = {
+                        "name": homePitcher, "throws": homePitcherHand}
+                else:
+                    self.players[homePitcherId]["throws"] = homePitcherHand
             awayInning1Runs = linescore["innings"][0]["away"]["runs"]
             homeInning1Runs = linescore["innings"][0]["home"]["runs"]
             awayInning1Hits = linescore["innings"][0]["away"]["hits"]
             homeInning1Hits = linescore["innings"][0]["home"]["hits"]
-            for v in game["away"]["players"].values():
-                if (v["person"]["id"] == game["awayPitchers"][1]["personId"] or
-                        v["person"]["id"] in game["away"]["battingOrder"]):
+            for v in boxscore["teams"]["away"]["players"].values():
+                if (v["person"]["id"] == awayPitcherId or
+                        v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"]):
                     n = {
-                        "gameId": game["gameId"],
+                        "gameId": gameId,
+                        "gameDate": game["game_date"],
                         "playerId": v["person"]["id"],
                         "playerName": v["person"]["fullName"],
                         "position": v.get("position", {"abbreviation": ""})["abbreviation"],
                         "team": awayTeam,
                         "opponent": homeTeam,
                         "opponent pitcher": homePitcher,
+                        "opponent pitcher id": homePitcherId,
+                        "opponent pitcher hand": homePitcherHand,
                         "home": False,
-                        "starting pitcher": v["person"]["id"] == game["awayPitchers"][1]["personId"],
-                        "starting batter": v["person"]["id"] in game["away"]["battingOrder"],
-                        "battingOrder": game["away"]["battingOrder"].index(v["person"]["id"]) + 1
-                        if v["person"]["id"] in game["away"]["battingOrder"] else 0,
+                        "starting pitcher": v["person"]["id"] == awayPitcherId,
+                        "starting batter": v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"],
+                        "battingOrder": boxscore["teams"]["away"]["battingOrder"].index(v["person"]["id"]) + 1
+                        if v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"] else 0,
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("doubles", 0) +
                         2 * v["stats"]["batting"].get("triples", 0) +
@@ -897,26 +943,28 @@ class StatsMLB(Stats):
                         "singles": v["stats"]["batting"].get("hits", 0) - v["stats"]["batting"].get("doubles", 0) -
                         v["stats"]["batting"].get(
                             "triples", 0) - v["stats"]["batting"].get("homeRuns", 0),
+                        "home runs": v["stats"]["batting"].get("homeRuns", 0),
                         "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
                         "runs": v["stats"]["batting"].get("runs", 0),
                         "rbi": v["stats"]["batting"].get("rbi", 0),
                         "hits+runs+rbi": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("runs", 0) +
                         v["stats"]["batting"].get("rbi", 0),
-                        "walks": v["stats"]["batting"].get("baseOnBalls", 0),
+                        "walks": v["stats"]["batting"].get("baseOnBalls", 0) + v["stats"]["batting"].get("hitByPitch", 0),
                         "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
                         "atBats": v["stats"]["batting"].get("atBats", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
-                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
+                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0),
                         "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
                         "runs allowed": v["stats"]["pitching"].get("runs", 0),
                         "hits allowed": v["stats"]["pitching"].get("hits", 0),
+                        "home runs allowed": v["stats"]["pitching"].get("homeRuns", 0),
                         "pitching outs": 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1]),
                         "1st inning runs allowed": homeInning1Runs if v["person"]["id"] ==
-                        game["awayPitchers"][1]["personId"] else 0,
+                        game["away_pitcher_lineup"][0] else 0,
                         "1st inning hits allowed": homeInning1Hits if v["person"]["id"] ==
-                        game["awayPitchers"][1]["personId"] else 0,
+                        game["away_pitcher_lineup"][0] else 0,
                         "hitter fantasy score": 3*v["stats"]["batting"].get("hits", 0) +
                         2*v["stats"]["batting"].get("doubles", 0) +
                         5*v["stats"]["batting"].get("triples", 0) +
@@ -924,6 +972,7 @@ class StatsMLB(Stats):
                         2*v["stats"]["batting"].get("runs", 0) +
                         2*v["stats"]["batting"].get("rbi", 0) +
                         2*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        2*v["stats"]["batting"].get("hitByPitch", 0) +
                         5*v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher fantasy score": 6*v["stats"]["pitching"].get("wins", 0) +
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
@@ -940,6 +989,7 @@ class StatsMLB(Stats):
                         2*v["stats"]["batting"].get("runs", 0) +
                         2*v["stats"]["batting"].get("rbi", 0) +
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        3*v["stats"]["batting"].get("hitByPitch", 0) +
                         4*v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher fantasy points underdog": 5*v["stats"]["pitching"].get("wins", 0) +
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
@@ -954,6 +1004,7 @@ class StatsMLB(Stats):
                         3*v["stats"]["batting"].get("runs", 0) +
                         3*v["stats"]["batting"].get("rbi", 0) +
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        3*v["stats"]["batting"].get("hitByPitch", 0) +
                         6*v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher fantasy points parlay": 6*v["stats"]["pitching"].get("wins", 0) +
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
@@ -962,14 +1013,64 @@ class StatsMLB(Stats):
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1])
                     }
+                    if (n["starting batter"] and n["atBats"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
+                        continue
+                    if n["starting batter"]:
+                        if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
+                            batSide = self.players[n["playerId"]]["bats"]
+                        else:
+                            batSide = game["away_batters"][str(
+                                n["playerId"])][0]["stand"]
+                            if n["playerId"] not in self.players:
+                                self.players[n["playerId"]] = {
+                                    "name": n["playerName"], "bats": batSide}
+                            else:
+                                self.players[n["playerId"]]["bats"] = batSide
+
+                    adj = {
+                        "R": n["runs"]/bpf["R"],
+                        "RBI": n["rbi"]/bpf["R"],
+                        "H": n["hits"]/bpf["H"],
+                        "1B": n["singles"]/bpf["1B"],
+                        "2B": v["stats"]["batting"].get("doubles", 0)/bpf["2B"],
+                        "3B": v["stats"]["batting"].get("triples", 0)/bpf["3B"],
+                        "HR": n["home runs"]/bpf["HR"],
+                        "W": n["walks"]/bpf["BB"],
+                        "SO": n["batter strikeouts"]/bpf["K"],
+                        "RA": n["runs allowed"]/bpf["R"],
+                        "HA": n["hits allowed"]/bpf["H"],
+                        "HRA": n["home runs allowed"]/bpf["HR"],
+                        "BB": n["walks allowed"]/bpf["BB"],
+                        "K": n["pitcher strikeouts"]/bpf["K"]
+                    }
+
+                    BIP = (n["atBats"] - n["batter strikeouts"] - n["home runs"] -
+                           v["stats"]["batting"].get("sacFlies", 0))
+                    n.update({
+                        "FIP": (3*(13*adj["HRA"] + 3*adj["BB"] - 2*adj["K"])/n["pitching outs"] + 3.2) if n["starting pitcher"] else 0,
+                        "WHIP": (3*(adj["BB"] + adj["HA"])/n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "ERA": (9*adj["RA"]/n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "K9": (27*adj["K"] / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "BB9": (27*adj["BB"] / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
+                        "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["starting batter"] else 0,
+                        "AVG": (n["hits"]/n["atBats"]) if n["starting batter"] else 0,
+                        "SLG": (n["total bases"]/n["atBats"]) if n["starting batter"] else 0,
+                        "PASO": (v["stats"]["batting"].get("plateAppearances", 0) / adj["SO"]) if (n["starting batter"] and adj["SO"]) else v["stats"]["batting"].get("plateAppearances", 0),
+                        "BABIP": ((n["hits"] - n["home runs"]) / BIP) if (n["starting batter"] and BIP) else 0,
+                        "batSide": batSide if n["starting batter"] else 0
+                    })
+
                     if (n["starting batter"] and n["atBats"] > 1) or (n["starting pitcher"]):
                         new_games.append(n)
 
-            for v in game["home"]["players"].values():
-                if (v["person"]["id"] == game["homePitchers"][1]["personId"] or
-                        v["person"]["id"] in game["home"]["battingOrder"]):
+            for v in boxscore["teams"]["home"]["players"].values():
+                if (v["person"]["id"] == homePitcherId or
+                        v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"]):
                     n = {
-                        "gameId": game["gameId"],
+                        "gameId": gameId,
+                        "gameDate": game["game_date"],
                         "playerId": v["person"]["id"],
                         "playerName": v["person"]["fullName"],
                         "position": v.get("position", {"abbreviation": ""})[
@@ -978,12 +1079,13 @@ class StatsMLB(Stats):
                         "team": homeTeam,
                         "opponent": awayTeam,
                         "opponent pitcher": awayPitcher,
+                        "opponent pitcher id": awayPitcherId,
+                        "opponent pitcher hand": awayPitcherHand,
                         "home": True,
-                        "starting pitcher": v["person"]["id"]
-                        == game["homePitchers"][1]["personId"],
-                        "starting batter": v["person"]["id"] in game["home"]["battingOrder"],
-                        "battingOrder": game["home"]["battingOrder"].index(v["person"]["id"]) + 1
-                        if v["person"]["id"] in game["home"]["battingOrder"] else 0,
+                        "starting pitcher": v["person"]["id"] == homePitcherId,
+                        "starting batter": v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"],
+                        "battingOrder": boxscore["teams"]["home"]["battingOrder"].index(v["person"]["id"]) + 1
+                        if v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"] else 0,
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0)
                         + v["stats"]["batting"].get("doubles", 0)
@@ -993,24 +1095,26 @@ class StatsMLB(Stats):
                         - v["stats"]["batting"].get("doubles", 0)
                         - v["stats"]["batting"].get("triples", 0)
                         - v["stats"]["batting"].get("homeRuns", 0),
+                        "home runs": v["stats"]["batting"].get("homeRuns", 0),
                         "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
                         "runs": v["stats"]["batting"].get("runs", 0),
                         "rbi": v["stats"]["batting"].get("rbi", 0),
                         "hits+runs+rbi": v["stats"]["batting"].get("hits", 0)
                         + v["stats"]["batting"].get("runs", 0)
                         + v["stats"]["batting"].get("rbi", 0),
-                        "walks": v["stats"]["batting"].get("baseOnBalls", 0),
+                        "walks": v["stats"]["batting"].get("baseOnBalls", 0) + v["stats"]["batting"].get("hitByPitch", 0),
                         "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
                         "atBats": v["stats"]["batting"].get("atBats", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get(
                             "strikeOuts", 0
                         ),
-                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0),
+                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0),
                         "pitches thrown": v["stats"]["pitching"].get(
                             "numberOfPitches", 0
                         ),
                         "runs allowed": v["stats"]["pitching"].get("runs", 0),
                         "hits allowed": v["stats"]["pitching"].get("hits", 0),
+                        "home runs allowed": v["stats"]["pitching"].get("homeRuns", 0),
                         "pitching outs": 3
                         * int(
                             v["stats"]["pitching"]
@@ -1023,9 +1127,9 @@ class StatsMLB(Stats):
                             .split(".")[1]
                         ),
                         "1st inning runs allowed": awayInning1Runs if v["person"]["id"] ==
-                        game["homePitchers"][1]["personId"] else 0,
+                        game["home_pitcher_lineup"][0] else 0,
                         "1st inning hits allowed": awayInning1Hits if v["person"]["id"] ==
-                        game["homePitchers"][1]["personId"] else 0,
+                        game["home_pitcher_lineup"][0] else 0,
                         "hitter fantasy score": 3*v["stats"]["batting"].get("hits", 0) +
                         2*v["stats"]["batting"].get("doubles", 0) +
                         5*v["stats"]["batting"].get("triples", 0) +
@@ -1033,6 +1137,7 @@ class StatsMLB(Stats):
                         2*v["stats"]["batting"].get("runs", 0) +
                         2*v["stats"]["batting"].get("rbi", 0) +
                         2*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        2*v["stats"]["batting"].get("hitByPitch", 0) +
                         5*v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher fantasy score": 6*v["stats"]["pitching"].get("wins", 0) +
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
@@ -1049,6 +1154,7 @@ class StatsMLB(Stats):
                         2*v["stats"]["batting"].get("runs", 0) +
                         2*v["stats"]["batting"].get("rbi", 0) +
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        3*v["stats"]["batting"].get("hitByPitch", 0) +
                         4*v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher fantasy points underdog": 5*v["stats"]["pitching"].get("wins", 0) +
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
@@ -1063,6 +1169,7 @@ class StatsMLB(Stats):
                         3*v["stats"]["batting"].get("runs", 0) +
                         3*v["stats"]["batting"].get("rbi", 0) +
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
+                        3*v["stats"]["batting"].get("hitByPitch", 0) +
                         6*v["stats"]["batting"].get("stolenBases", 0),
                         "pitcher fantasy points parlay": 6*v["stats"]["pitching"].get("wins", 0) +
                         3*v["stats"]["pitching"].get("strikeOuts", 0) -
@@ -1071,11 +1178,120 @@ class StatsMLB(Stats):
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1])
                     }
+                    if (n["starting batter"] and n["atBats"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
+                        continue
+                    if n["starting batter"]:
+                        if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
+                            batSide = self.players[n["playerId"]]["bats"]
+                        else:
+                            batSide = game["home_batters"][str(
+                                n["playerId"])][0]["stand"]
+                            if n["playerId"] not in self.players:
+                                self.players[n["playerId"]] = {
+                                    "name": n["playerName"], "bats": batSide}
+                            else:
+                                self.players[n["playerId"]]["bats"] = batSide
+
+                    adj = {
+                        "R": n["runs"]/bpf["R"],
+                        "RBI": n["rbi"]/bpf["R"],
+                        "H": n["hits"]/bpf["H"],
+                        "1B": n["singles"]/bpf["1B"],
+                        "2B": v["stats"]["batting"].get("doubles", 0)/bpf["2B"],
+                        "3B": v["stats"]["batting"].get("triples", 0)/bpf["3B"],
+                        "HR": n["home runs"]/bpf["HR"],
+                        "W": n["walks"]/bpf["BB"],
+                        "SO": n["batter strikeouts"]/bpf["K"],
+                        "RA": n["runs allowed"]/bpf["R"],
+                        "HA": n["hits allowed"]/bpf["H"],
+                        "HRA": n["home runs allowed"]/bpf["HR"],
+                        "BB": n["walks allowed"]/bpf["BB"],
+                        "K": n["pitcher strikeouts"]/bpf["K"]
+                    }
+
+                    BIP = (n["atBats"] - n["batter strikeouts"] - n["home runs"] -
+                           v["stats"]["batting"].get("sacFlies", 0))
+                    n.update({
+                        "FIP": (3*(13*adj["HRA"] + 3*adj["BB"] - 2*adj["K"])/n["pitching outs"] + 3.2) if n["starting pitcher"] else 0,
+                        "WHIP": (3*(adj["BB"] + adj["HA"])/n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "ERA": (9*adj["RA"]/n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "K9": (27*adj["K"] / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "BB9": (27*adj["BB"] / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
+                        "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["starting batter"] else 0,
+                        "AVG": (n["hits"]/n["atBats"]) if n["starting batter"] else 0,
+                        "SLG": (n["total bases"]/n["atBats"]) if n["starting batter"] else 0,
+                        "PASO": (v["stats"]["batting"].get("plateAppearances", 0) / adj["SO"]) if (n["starting batter"] and adj["SO"]) else v["stats"]["batting"].get("plateAppearances", 0),
+                        "BABIP": ((n["hits"] - n["home runs"]) / BIP) if (n["starting batter"] and BIP) else 0,
+                        "batSide": batSide if n["starting batter"] else 0
+                    })
+
                     if (n["starting batter"] and n["atBats"] > 1) or (n["starting pitcher"]):
                         new_games.append(n)
 
         self.gamelog = pd.concat(
             [self.gamelog, pd.DataFrame.from_records(new_games)], ignore_index=True)
+
+        teams = [
+            {
+                "team": homeTeam,
+                "opponent": awayTeam,
+                "gameId": gameId,
+                "gameDate": game["game_date"],
+                "OBP": float(boxscore["teams"]["home"]["teamStats"]["batting"]["obp"])/bpf["OBP"],
+                "AVG": float(boxscore["teams"]["home"]["teamStats"]["batting"]["avg"]),
+                "SLG": float(boxscore["teams"]["home"]["teamStats"]["batting"]["slg"]),
+                "PASO": (boxscore["teams"]["home"]["teamStats"]["batting"]["plateAppearances"] /
+                         boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]) if
+                boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"] else
+                boxscore["teams"]["home"]["teamStats"]["batting"]["plateAppearances"],
+                "BABIP": (boxscore["teams"]["home"]["teamStats"]["batting"]["hits"] -
+                          boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"]) /
+                (boxscore["teams"]["home"]["teamStats"]["batting"]["atBats"] -
+                 boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"] -
+                 boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"] -
+                 boxscore["teams"]["home"]["teamStats"]["batting"]["sacFlies"]),
+                "DER": 1 - ((boxscore["teams"]["away"]["teamStats"]["batting"]["hits"] +
+                             boxscore["teams"]["home"]["teamStats"]["fielding"]["errors"] -
+                             boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"]) /
+                            (boxscore["teams"]["away"]["teamStats"]["batting"]["plateAppearances"] -
+                            boxscore["teams"]["away"]["teamStats"]["batting"]["baseOnBalls"] -
+                            boxscore["teams"]["away"]["teamStats"]["batting"]["hitByPitch"] -
+                            boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"] -
+                            boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]))
+            },
+            {
+                "team": awayTeam,
+                "opponent": homeTeam,
+                "gameId": gameId,
+                "gameDate": game["game_date"],
+                "OBP": float(boxscore["teams"]["away"]["teamStats"]["batting"]["obp"])/bpf["OBP"],
+                "AVG": float(boxscore["teams"]["away"]["teamStats"]["batting"]["avg"]),
+                "SLG": float(boxscore["teams"]["away"]["teamStats"]["batting"]["slg"]),
+                "PASO": (boxscore["teams"]["away"]["teamStats"]["batting"]["plateAppearances"] /
+                         boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]) if
+                boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"] else
+                boxscore["teams"]["away"]["teamStats"]["batting"]["plateAppearances"],
+                "BABIP": (boxscore["teams"]["away"]["teamStats"]["batting"]["hits"] -
+                          boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"]) /
+                (boxscore["teams"]["away"]["teamStats"]["batting"]["atBats"] -
+                 boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"] -
+                 boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"] -
+                 boxscore["teams"]["away"]["teamStats"]["batting"]["sacFlies"]),
+                "DER": 1 - ((boxscore["teams"]["home"]["teamStats"]["batting"]["hits"] +
+                             boxscore["teams"]["away"]["teamStats"]["fielding"]["errors"] -
+                             boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"]) /
+                            (boxscore["teams"]["home"]["teamStats"]["batting"]["plateAppearances"] -
+                            boxscore["teams"]["home"]["teamStats"]["batting"]["baseOnBalls"] -
+                            boxscore["teams"]["home"]["teamStats"]["batting"]["hitByPitch"] -
+                            boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"] -
+                            boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]))
+            },
+        ]
+
+        self.teamlog = pd.concat(
+            [self.teamlog, pd.DataFrame.from_records(teams)], ignore_index=True)
 
     def load(self):
         """
@@ -1083,24 +1299,48 @@ class StatsMLB(Stats):
         """
         filepath = pkg_resources.files(data) / "mlb_data.dat"
         if os.path.isfile(filepath):
-            self.gamelog = pd.read_pickle(filepath)
+            with open(filepath, "rb") as infile:
+                mlb_data = pickle.load(infile)
+                self.gamelog = mlb_data["gamelog"]
+                self.teamlog = mlb_data["teamlog"]
+                self.players = mlb_data["players"]
 
     def update(self):
         """
         Updates the MLB player statistics.
         """
+        filepath = pkg_resources.files(data) / "park_factor.json"
+        if os.path.isfile(filepath):
+            with open(filepath, 'r') as infile:
+                self.park_factors = json.load(infile)
+        filepath = pkg_resources.files(
+            data) / "affinity_pitchersBySHV_matchScores.csv"
+        if os.path.isfile(filepath):
+            df = pd.read_csv(filepath)
+            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) &
+                        (df.match_score >= 0.6)]
+            df.key1 = df.key1.str[:-2].astype(int)
+            df.key2 = df.key2.str[:-2].astype(int)
+            self.affinity = df.groupby('key1').apply(
+                lambda x: x.key2.to_list()).to_dict()
+
         # Get the current MLB schedule
         today = datetime.today().date()
         if self.gamelog.empty:
             next_day = self.season_start
         else:
             next_day = pd.to_datetime(
-                self.gamelog.gameId.str[:10]).max().date() + timedelta(days=1)
+                self.gamelog.gameDate).max().date()
+        if next_day < self.season_start:
+            next_day = self.season_start
         if next_day > today:
             next_day = today
+        end_date = next_day + timedelta(days=75)
+        if end_date > today:
+            end_date = today
         mlb_games = mlb.schedule(
             start_date=next_day.strftime('%Y-%m-%d'),
-            end_date=today.strftime('%Y-%m-%d'),
+            end_date=end_date.strftime('%Y-%m-%d')
         )
         mlb_teams = mlb.get("teams", {"sportId": 1})
         mlb_upcoming_games = {}
@@ -1148,6 +1388,10 @@ class StatsMLB(Stats):
 
         self.upcoming_games = mlb_upcoming_games
 
+        if self.gamelog.empty:
+            prev_game_ids = []
+        else:
+            prev_game_ids = self.gamelog.gameId.unique()
         mlb_game_ids = [
             game["game_id"]
             for game in mlb_games
@@ -1155,6 +1399,7 @@ class StatsMLB(Stats):
             and game["game_type"] != "E"
             and game["game_type"] != "S"
             and game["game_type"] != "A"
+            and game["game_id"] not in prev_game_ids
         ]
 
         # Parse the game stats
@@ -1162,15 +1407,21 @@ class StatsMLB(Stats):
             self.parse_game(id)
 
         # Remove old games to prevent file bloat
-        two_years_ago = today - timedelta(days=730)
-        self.gamelog = self.gamelog[self.gamelog["gameId"].str[:10].apply(
-            lambda x: two_years_ago <= datetime.strptime(x, '%Y/%m/%d').date() <= today)]
+        four_years_ago = today - timedelta(days=1461)
+        self.gamelog = self.gamelog[self.gamelog["gameDate"].apply(
+            lambda x: four_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= today)]
         self.gamelog = self.gamelog[~self.gamelog['opponent'].isin([
                                                                    "AL", "NL"])]
+        self.teamlog = self.teamlog[self.teamlog["gameDate"].apply(
+            lambda x: four_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= today)]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(inplace=True)
 
         # Write to file
-        self.gamelog.to_pickle((pkg_resources.files(data) / "mlb_data.dat"))
+        with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
+            pickle.dump({"players": self.players,
+                         "gamelog": self.gamelog,
+                         "teamlog": self.teamlog}, outfile, -1)
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
         """
@@ -1194,12 +1445,12 @@ class StatsMLB(Stats):
         self.edges = []
 
         # Collect stats for each player
-        gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameId"].str[:10]) < date) &
-                                   (pd.to_datetime(self.gamelog["gameId"].str[:10]) > date - timedelta(days=60))]
+        gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameDate"]) < date) &
+                                   (pd.to_datetime(self.gamelog["gameDate"]) > date - timedelta(days=60))]
 
         if gamelog.empty:
-            gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameId"].str[:10]) < date) &
-                                       (pd.to_datetime(self.gamelog["gameId"].str[:10]) > date - timedelta(days=240))]
+            gamelog = self.gamelog.loc[(pd.to_datetime(self.gamelog["gameDate"]) < date) &
+                                       (pd.to_datetime(self.gamelog["gameDate"]) > date - timedelta(days=240))]
 
         playerGroups = gamelog.\
             groupby('playerName').\
@@ -1243,14 +1494,19 @@ class StatsMLB(Stats):
 
         # Filter gamelog for games within the date range
         one_year_ago = (date - timedelta(days=300))
-        gameDates = pd.to_datetime(self.gamelog["gameId"].str[:10]).dt.date
+        gameDates = pd.to_datetime(self.gamelog["gameDate"]).dt.date
         gamelog = self.gamelog[(
+            one_year_ago <= gameDates) & (gameDates < date)]
+        gameDates = pd.to_datetime(self.teamlog["gameDate"]).dt.date
+        teamlog = self.teamlog[(
             one_year_ago <= gameDates) & (gameDates < date)]
 
         # Filter non-starting pitchers or non-starting batters depending on the market
         if any([string in market for string in ["allowed", "pitch"]]):
+            gamelog2 = gamelog[gamelog["starting batter"]].copy()
             gamelog = gamelog[gamelog["starting pitcher"]].copy()
         else:
+            gamelog2 = gamelog[gamelog["starting pitcher"]].copy()
             gamelog = gamelog[gamelog["starting batter"]].copy()
 
         # Retrieve moneyline and totals data from archive
@@ -1262,9 +1518,12 @@ class StatsMLB(Stats):
         flat_total = {t: archive["MLB"]["Totals"].get(
             t[0], {}).get(t[1], 4.5) for t in k}
         tup_s = pd.Series(
-            zip(gamelog['gameId'].str[:10].str.replace("/", "-"), gamelog['team']), index=gamelog.index)
+            zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
+
+        teamstats = teamlog.groupby('team').tail(10).groupby('team')[
+            teamlog.columns[4:]].mean()
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -1344,8 +1603,46 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if any([string in market for string in ["allowed", "pitch"]]):
-            self.playerProfile['days off'] = playerGroups['gameId'].apply(lambda x: np.diff(
-                [datetime.strptime(g[:10], "%Y/%m/%d") for g in x.iloc[-2:]])[0].days)
+            self.playerProfile['days off'] = playerGroups['gameDate'].apply(lambda x: np.diff(
+                [datetime.strptime(g, "%Y-%m-%d") for g in x.iloc[-2:]])[0].days)
+
+            playerstats = gamelog.fillna(0).groupby('playerName')[
+                self.stat_types['pitching']].mean(numeric_only=True)\
+
+            batterstats = gamelog2.groupby('playerName')[
+                self.stat_types['batting']].mean(numeric_only=True)
+
+            i = self.defenseProfile.index
+            self.defenseProfile = self.defenseProfile.merge(
+                teamstats[self.stat_types['batting']], left_on='opponent', right_on='team')
+            self.defenseProfile.index = i
+
+            self.teamProfile = teamstats[self.stat_types['fielding']]
+
+            self.batterProfile = batterstats
+
+            self.playerProfile = self.playerProfile.merge(
+                playerstats, on='playerName')
+
+        else:
+            playerstats = gamelog.fillna(0).groupby('playerName')[
+                self.stat_types['batting']].mean(numeric_only=True)
+            pitcherstats = gamelog2.drop(columns='opponent pitcher').rename(
+                columns={'playerName': 'opponent pitcher'}).groupby('opponent pitcher')[
+                self.stat_types['pitching']].mean(numeric_only=True)
+
+            i = self.defenseProfile.index
+            self.defenseProfile = self.defenseProfile.merge(
+                teamstats[self.stat_types['fielding']], left_on='opponent', right_on='team')
+            self.defenseProfile.index = i
+
+            self.teamProfile = teamstats[self.stat_types['batting']]
+
+            self.playerProfile = self.playerProfile.merge(
+                playerstats, on='playerName')
+
+            self.pitcherProfile = self.pitcherProfile.merge(
+                pitcherstats, on='opponent pitcher')
 
     def dvpoa(self, team, market, date=datetime.today().date()):
         """
@@ -1375,7 +1672,7 @@ class StatsMLB(Stats):
             date = date.date()
 
         one_year_ago = (date - timedelta(days=300))
-        gamelog = self.gamelog[self.gamelog["gameId"].str[:10].apply(
+        gamelog = self.gamelog[self.gamelog["gameDate"].apply(
             lambda x: one_year_ago <= datetime.strptime(x, '%Y/%m/%d').date() <= date)]
 
         # Calculate DVP (Defense Versus Position) and league average for the specified team and market
@@ -1458,17 +1755,25 @@ class StatsMLB(Stats):
 
         if any([string in market for string in ["allowed", "pitch"]]):
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameId.str[:10]) < date) & self.gamelog["starting pitcher"]]
+                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"]]
 
             headtohead = player_games.loc[player_games["opponent"] == opponent]
+
+            pid = self.gamelog.loc[self.gamelog['playerName']
+                                   == player, 'playerId'].iat[0]
         else:
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameId.str[:10]) < date) & self.gamelog["starting batter"]]
+                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting batter"]]
 
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
+            pid = self.gamelog.loc[self.gamelog['opponent pitcher']
+                                   == pitcher, 'opponent pitcher id'].iat[0]
+
+        affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
+
         one_year_ago = len(player_games.loc[
-            pd.to_datetime(self.gamelog.gameId.str[:10]) > date-timedelta(days=300)])
+            pd.to_datetime(self.gamelog.gameDate) > date-timedelta(days=300)])
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
@@ -1496,23 +1801,24 @@ class StatsMLB(Stats):
             "Total": total,
             "Home": home,
         }
-        if not any([string in market for string in ["allowed", "pitch"]]):
-            if date.date() < datetime.today().date():
-                game = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                    pd.to_datetime(self.gamelog.gameId.str[:10]) == date)]
-                position = game.iloc[0]['battingOrder']
-            else:
-                order = self.upcoming_games.get(
-                    team, {}).get('Batting Order', [])
-                if player in order:
-                    position = order.index(player)
-                elif player_games.empty:
-                    position = 9
-                else:
-                    position = int(
-                        player_games['battingOrder'].iloc[-10:].median())
 
-            data = data | {"Position": position}
+        if date.date() < datetime.today().date():
+            game = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
+                pd.to_datetime(self.gamelog.gameDate) == date)]
+            position = game.iloc[0]['battingOrder']
+            order = self.gamelog.loc[(self.gamelog.gameId == game.iloc[0]['gameId']) & (
+                self.gamelog.team == game.iloc[0]['team']) & self.gamelog['starting batter'], 'playerName'].to_list()
+
+        else:
+            order = self.upcoming_games.get(
+                team, {}).get('Batting Order', [])
+            if player in order:
+                position = order.index(player)
+            elif player_games.empty:
+                position = 9
+            else:
+                position = int(
+                    player_games['battingOrder'].iloc[-10:].median())
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -1526,25 +1832,60 @@ class StatsMLB(Stats):
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
-        player_data = self.playerProfile.loc[player, [
-            'avg', 'home', 'away']]
+        player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in ['avg', 'home', 'away']})
-
-        other_player_data = self.playerProfile.loc[player, self.playerProfile.columns.difference(
-            ['avg', 'home', 'away'])]
-        data.update(
-            {"Player " + col: other_player_data[col] for col in other_player_data.index})
+            {"Player " + col: player_data[col] for col in player_data.index})
 
         if any([string in market for string in ["allowed", "pitch"]]):
-            defense_data = self.defenseProfile.loc[opponent, [
-                'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
+            defense_data = self.defenseProfile.loc[team]
+
+            for batter in order:
+                if batter not in self.batterProfile.index:
+                    self.batterProfile.loc[batter] = self.defenseProfile.loc[opponent,
+                                                                             self.stat_types['batting']]
+
+            if len(order) > 0:
+                defense_data[self.stat_types['batting']] = self.batterProfile.loc[order,
+                                                                                  self.stat_types['batting']].mean()
+
+            team_data = self.teamProfile.loc[team, self.stat_types['fielding']]
+
+            affine = self.gamelog.loc[(self.gamelog["opponent"] == opponent) & (
+                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"] & (
+                self.gamelog["playerId"].isin(affine_pitchers))]
+            aff_data = affine[self.stat_types['pitching']].mean()
         else:
-            defense_data = self.pitcherProfile.loc[pitcher, [
-                'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
+            defense_data = self.pitcherProfile.loc[pitcher]
+            defense_data.loc['DER'] = self.defenseProfile.loc[opponent, 'DER']
+
+            for batter in order:
+                if batter not in self.teamProfile.index:
+                    self.teamProfile.loc[batter] = self.teamProfile.loc[team,
+                                                                        self.stat_types['batting']]
+
+            if len(order) > 0:
+                team_data = self.playerProfile.loc[order,
+                                                   self.stat_types['batting']].mean()
+            else:
+                team_data = self.teamProfile.loc[team,
+                                                 self.stat_types['batting']]
+
+            data.update({"Position": position})
+
+            affine = player_games.loc[player_games['opponent pitcher id'].isin(
+                affine_pitchers)]
+            aff_data = affine[self.stat_types['batting']].mean()
+
+        data.update({"H2H " + col: aff_data[col] for col in aff_data.index})
+
+        data.update({"Team " + col: team_data[col] for col in team_data.index})
 
         data.update(
-            {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
+            {"Defense " + col: defense_data[col] for col in defense_data.index})
+
+        park = team if home else opponent
+        park_factors = self.park_factors[park]
+        data.update({"PF " + col: v for col, v in park_factors.items()})
 
         data["DVPOA"] = data.pop("Defense avg")
 
@@ -1584,7 +1925,7 @@ class StatsMLB(Stats):
 
             # Retrieve data from the archive based on game date and player name
             data = {}
-            gameDate = datetime.strptime(game["gameId"][:10], "%Y/%m/%d")
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
             if gameDate < datetime(2022, 3, 1):
                 continue
 
@@ -1866,17 +2207,6 @@ class StatsNFL(Stats):
                 if type(playerData) is int:
                     self.gamelog.drop(index=i, inplace=True)
                     continue
-                if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
-                                                              (self.teamlog.week == row.week), 'team'] and \
-                        (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
-                    teamData = {
-                        "season": row.season,
-                        "week": row.week,
-                        "team": row['recent team']
-                    }
-                    teamData.update(self.parse_pbp(
-                        row['week'], row['recent team']))
-                    teamDataList.append(teamData)
 
                 for k, v in playerData.items():
                     self.gamelog.at[i, k.replace("_", " ")] = v
@@ -1898,6 +2228,19 @@ class StatsNFL(Stats):
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent team']), 'game_id'].values[0]
 
+                if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
+                                                              (self.teamlog.week == row.week), 'team'] and \
+                        (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
+                    teamData = {
+                        "season": row.season,
+                        "week": row.week,
+                        "team": row['recent team'],
+                        "gameday": self.gamelog.at[i, 'gameday']
+                    }
+                    teamData.update(self.parse_pbp(
+                        row['week'], row['recent team']))
+                    teamDataList.append(teamData)
+
         self.teamlog = pd.concat(
             [self.teamlog, pd.DataFrame.from_records(teamDataList)], ignore_index=True)
         self.teamlog.loc[self.teamlog['team']
@@ -1915,12 +2258,15 @@ class StatsNFL(Stats):
         self.gamelog = self.gamelog.sort_values('gameday')
 
         # Remove old games to prevent file bloat
-        three_years_ago = datetime.today().date() - timedelta(days=1096)
+        six_years_ago = datetime.today().date() - timedelta(days=2191)
         self.gamelog = self.gamelog[self.gamelog["gameday"].apply(
-            lambda x: three_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
+            lambda x: six_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
         self.gamelog = self.gamelog[~self.gamelog['opponent'].isin([
                                                                    "AFC", "NFC"])]
+        self.teamlog = self.teamlog[self.teamlog["gameday"].apply(
+            lambda x: six_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(inplace=True)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -2169,6 +2515,9 @@ class StatsNFL(Stats):
         gameDates = pd.to_datetime(self.gamelog["gameday"]).dt.date
         gamelog = self.gamelog[(
             one_year_ago <= gameDates) & (gameDates < date)].copy()
+        gameDates = pd.to_datetime(self.teamlog["gameday"]).dt.date
+        teamlog = self.teamlog[(
+            one_year_ago <= gameDates) & (gameDates < date)].copy()
 
         # Retrieve moneyline and totals data from archive
         k = [[(date, team) for team in teams.keys()]
@@ -2183,8 +2532,8 @@ class StatsNFL(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamlog = self.teamlog.groupby('team').tail(5)
-        teamstats = teamlog.groupby('team')[teamlog.columns[3:]].mean()
+        teamstats = teamlog.groupby('team').tail(5).groupby('team')[
+            teamlog.columns[3:-1]].mean()
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -2377,6 +2726,8 @@ class StatsNFL(Stats):
         position = self.players.get(player, "")
         one_year_ago = len(player_games.loc[pd.to_datetime(
             self.gamelog["gameday"]) > date-timedelta(days=300)])
+        if one_year_ago < 2:
+            return 0
 
         if position == "":
             if len(player_games) > 0:
@@ -2612,87 +2963,119 @@ class StatsNHL(Stats):
         filepath = pkg_resources.files(data) / "nhl_data.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
-                self.gamelog = pickle.load(infile)
+                nhl_data = pickle.load(infile)
+                self.gamelog = nhl_data["gamelog"]
+                self.teamlog = nhl_data["teamlog"]
 
     def parse_game(self, gameId, gameDate):
         game = scraper.get(
-            f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/boxscore")
+            f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/linescore")
+        season = str(gameId)[:4]
+        season = season + str(int(season)+1)
+        res = requests.get(
+            f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv").text
+        res = [row.split(',') for row in res.split('\n')]
+        if res[1][0] != str(gameId):
+            return 0
+        game_df = pd.DataFrame(res[1:-1], columns=res[0])
+        pp_df = game_df.loc[game_df.situation == '5on4']
+        game_df = game_df.loc[game_df.situation == 'all']
         gamelog = []
-        if game:
+        teamlog = []
+        if game and not game_df.empty:
             awayTeam = abbreviations['NHL'][remove_accents(game['teams']
                                             ['away']['team']['name'])]
             homeTeam = abbreviations['NHL'][remove_accents(game['teams']
                                             ['home']['team']['name'])]
 
-            for player in game['teams']['away']['players'].values():
-                n = {
-                    "gameId": gameId,
-                    "gameDate": gameDate,
-                    "team": awayTeam,
-                    "opponent": homeTeam,
-                    "home": False,
-                    "playerId": player['person']['id'],
-                    "playerName": player['person']['fullName'],
-                    "position": player['position']['code']
-                }
-                stats = player['stats']['goalieStats'] if n['position'] == 'G' else player['stats'].get(
-                    'skaterStats', {})
-                for col in list(stats.keys()):
-                    if any([string in col for string in ["Percentage", "decision"]]):
-                        stats.pop(col)
-                timeOnIce = stats.get('timeOnIce', "0:00").split(":")
-                stats = stats | {
-                    'timeOnIce': float(timeOnIce[0]) + float(timeOnIce[1])/60.0,
-                    'sogBS': stats.get('shots', 0) + stats.get('blocked', 0) if n['position'] != "G" else 0,
-                    'points': stats.get('goals', 0) + stats.get('assists', 0) if n['position'] != "G" else 0,
-                    'powerPlayPoints': stats.get('powerPlayGoals', 0) + stats.get('powerPlayAssists', 0) if n['position'] != "G" else 0,
-                    'goalsAgainst': stats.get('shots', 0) - stats.get('saves', 0) if n['position'] == "G" else 0
-                }
-                stats = stats | {
-                    'fantasy points prizepicks': stats.get('goals', 0)*8 + stats.get('assists', 0)*5 + stats.get('sogBS', 0)*1.5,
-                    'goalie fantasy points underdog': int(stats.get('decision', 'L') == 'W')*6 + stats.get('saves', 0)*.6 - stats.get('goalsAgainst', 0)*.6,
-                    'skater fantasy points underdog': stats.get('goals', 0)*6 + stats.get('assists', 0)*4 + stats.get('sogBS', 0) + stats.get('hits', 0) + stats.get('powerPlayPoints', 0)*.5,
-                    'goalie fantasy points parlay': stats.get('saves', 0)*.25 - stats.get('goalsAgainst', 0),
-                    'skater fantasy points parlay': stats.get('goals', 0)*3 + stats.get('assists', 0)*2 + stats.get('shots', 0)*.5 + stats.get('hits', 0) + stats.get('blocked', 0),
-                }
-                if stats["timeOnIce"] > 6:
-                    gamelog.append(n | stats)
+            team_map = {
+                "SJS": "SJ",
+                "LAK": "LA",
+                "NJD": "NJ",
+                "TBL": "TB",
+                "WSH": "WAS"
+            }
 
-            for player in game['teams']['home']['players'].values():
-                n = {
-                    "gameId": gameId,
-                    "gameDate": gameDate,
-                    "team": homeTeam,
-                    "opponent": awayTeam,
-                    "home": True,
-                    "playerId": player['person']['id'],
-                    "playerName": player['person']['fullName'],
-                    "position": player['position']['code']
-                }
-                stats = player['stats']['goalieStats'] if n['position'] == 'G' else player['stats'].get(
-                    'skaterStats', {})
-                for col in list(stats.keys()):
-                    if any([string in col for string in ["Percentage", "decision"]]):
-                        stats.pop(col)
-                timeOnIce = stats.get('timeOnIce', "0:00").split(":")
-                stats = stats | {
-                    'timeOnIce': float(timeOnIce[0]) + float(timeOnIce[1])/60.0,
-                    'sogBS': stats.get('shots', 0) + stats.get('blocked', 0) if n['position'] != "G" else 0,
-                    'points': stats.get('goals', 0) + stats.get('assists', 0) if n['position'] != "G" else 0,
-                    'powerPlayPoints': stats.get('powerPlayGoals', 0) + stats.get('powerPlayAssists', 0) if n['position'] != "G" else 0,
-                    'goalsAgainst': stats.get('shots', 0) - stats.get('saves', 0) if n['position'] == "G" else 0
-                }
-                stats = stats | {
-                    'fantasy points prizepicks': stats.get('goals', 0)*8 + stats.get('assists', 0)*5 + stats.get('sogBS', 0)*1.5,
-                    'goalie fantasy points underdog': int(stats.get('decision', 'L') == 'W')*6 + stats.get('saves', 0)*.6 - stats.get('goalsAgainst', 0)*.6,
-                    'skater fantasy points underdog': stats.get('goals', 0)*6 + stats.get('assists', 0)*4 + stats.get('sogBS', 0) + stats.get('hits', 0) + stats.get('powerPlayPoints', 0)*.5,
-                    'goalie fantasy points parlay': stats.get('saves', 0)*.25 - stats.get('goalsAgainst', 0),
-                    'skater fantasy points parlay': stats.get('goals', 0)*3 + stats.get('assists', 0)*2 + stats.get('shots', 0)*.5 + stats.get('hits', 0) + stats.get('blocked', 0),
-                }
-                if stats["timeOnIce"] > 6:
-                    gamelog.append(n | stats)
+            for i, player in game_df.iterrows():
+                team = player['team']
+                team = team_map.get(team, team)
+                home = team == homeTeam
+                opponent = awayTeam if home else homeTeam
+                win = (game['teams']['home']['goals'] >
+                       game['teams']['away']['goals']) == home
 
-        return gamelog
+                if player['position'] == 'Team Level':
+                    n = {
+                        "gameId": gameId,
+                        "gameDate": gameDate,
+                        "team": team,
+                        "opponent": opponent,
+                        "home": home
+                    }
+                    stats = {
+                        "Corsi": float(player["OffIce_shotAttempts_For_Percentage"]),
+                        "Fenwick": float(player["OffIce_unblockedShotAttempts_For_Percentage"]),
+                        "Hits": float(player["OffIce_hits_For_Percentage"]),
+                        "Takeaways": float(player["OffIce_takeaways_For_Percentage"]),
+                        "xGoals": float(player["OffIce_flurryScoreVenueAdjustedxGoals_For_Percentage"]),
+                        "PIM": float(player["OffIce_penalityMinutes_For_Percentage"])
+                    }
+                    stats["GOE"] = float(
+                        player["OffIce_F_goals"]) - stats["xGoals"]
+                    teamlog.append(n | stats)
+                else:
+                    n = {
+                        "gameId": gameId,
+                        "gameDate": gameDate,
+                        "team": team,
+                        "opponent": opponent,
+                        "opponent goalie": game_df.loc[(game_df.position == "G") & (game_df.team != team), 'playerName'].iat[0],
+                        "home": home,
+                        "playerId": player['playerId'],
+                        "playerName": player['playerName'],
+                        "position": player['position']
+                    }
+                    stats = {
+                        "points": float(player["I_F_points"]),
+                        "shots": float(player["I_F_shotsOnGoal"]),
+                        "blocked": float(player["I_A_blockedShotAttempts"]),
+                        "sogBS": float(player["I_F_shotsOnGoal"]) + float(player["I_A_blockedShotAttempts"]),
+                        "goals": float(player["I_F_goals"]),
+                        "assists": float(player["I_F_primaryAssists"]) + float(player["I_F_secondaryAssists"]),
+                        "hits": float(player["I_F_hits"]),
+                        "faceOffWins": float(player["I_F_faceOffsWon"]),
+                        "timeOnIce": float(player["I_F_iceTime"])/60,
+                        "saves": float(player["OnIce_A_savedShotsOnGoal"]),
+                        "goalsAgainst": float(player["OnIce_A_goals"])
+                    }
+                    if player["playerName"] in pp_df["playerName"].to_list():
+                        stats["powerPlayPoints"] = float(
+                            pp_df.loc[pp_df["playerName"] == player["playerName"]]["I_F_points"].iat[0])
+                    else:
+                        stats["powerPlayPoints"] = 0
+                    stats.update({
+                        "fantasy points prizepicks": stats.get("goals", 0)*8 + stats.get("assists", 0)*5 + stats.get("sogBS", 0)*1.5,
+                        "goalie fantasy points underdog": int(win)*6 + stats.get("saves", 0)*.6 - stats.get("goalsAgainst", 0)*.6,
+                        "skater fantasy points underdog": stats.get("goals", 0)*6 + stats.get("assists", 0)*4 + stats.get("sogBS", 0) + stats.get("hits", 0) + stats.get("powerPlayPoints", 0)*.5,
+                        "goalie fantasy points parlay": stats.get("saves", 0)*.25 - stats.get("goalsAgainst", 0),
+                        "skater fantasy points parlay": stats.get("goals", 0)*3 + stats.get("assists", 0)*2 + stats.get("shots", 0)*.5 + stats.get("hits", 0) + stats.get("blocked", 0),
+                    })
+                    team = {v: k for k, v in team_map.items()}.get(team, team)
+                    stats.update({
+                        "GOE": stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"]),
+                        "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
+                        "TimeShare": stats["timeOnIce"]/(float(game_df.loc[game_df["playerName"] == team, "OffIce_F_iceTime"].iat[0])/60),
+                        "ShotShare": stats["shots"]/float(game_df.loc[game_df["playerName"] == team, "OffIce_F_shotsOnGoal"].iat[0]),
+                        "Shot60": stats["shots"]*60/stats["timeOnIce"],
+                        "Blk60": stats["blocked"]*60/stats["timeOnIce"],
+                        "Hit60": stats["hits"]*60/stats["timeOnIce"],
+                        "Ast60": stats["assists"]*60/stats["timeOnIce"],
+                        "SOE": float(player["OnIce_A_xGoals"]) - stats["goalsAgainst"]
+                    })
+                    if stats["timeOnIce"] > 6:
+                        gamelog.append(n | stats)
+
+        return gamelog, teamlog
 
     def update(self):
         """
@@ -2723,11 +3106,18 @@ class StatsNHL(Stats):
 
         # Parse the game stats
         nhl_gamelog = []
+        nhl_teamlog = []
         for gameId, date in tqdm(ids, desc="Getting NHL Stats"):
-            nhl_gamelog.extend(self.parse_game(gameId, date))
+            gamelog, teamlog = self.parse_game(gameId, date)
+            if type(gamelog) is list:
+                nhl_gamelog.extend(gamelog)
+            if type(teamlog) is list:
+                nhl_teamlog.extend(teamlog)
 
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0)
         self.gamelog = pd.concat([nhl_df, self.gamelog]).sort_values(
+            "gameDate").reset_index(drop=True)
+        self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0), self.teamlog]).sort_values(
             "gameDate").reset_index(drop=True)
 
         self.upcoming_games = {}
@@ -2749,15 +3139,19 @@ class StatsNHL(Stats):
                 }
 
         # Remove old games to prevent file bloat
-        two_years_ago = today - timedelta(days=730)
+        four_years_ago = today - timedelta(days=1431)
         self.gamelog = self.gamelog[pd.to_datetime(
-            self.gamelog["gameDate"]).dt.date >= two_years_ago]
+            self.gamelog["gameDate"]).dt.date >= four_years_ago]
         self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog = self.teamlog[pd.to_datetime(
+            self.teamlog["gameDate"]).dt.date >= four_years_ago]
+        self.teamlog.drop_duplicates(inplace=True)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
-            pickle.dump(
-                self.gamelog, outfile)
+            pickle.dump({
+                "gamelog": self.gamelog,
+                "teamlog": self.teamlog}, outfile, -1)
 
     def bucket_stats(self, market, date=datetime.today()):
         """
@@ -2870,11 +3264,15 @@ class StatsNHL(Stats):
         gameDates = pd.to_datetime(self.gamelog["gameDate"]).dt.date
         gamelog = self.gamelog[(
             one_year_ago <= gameDates) & (gameDates < date)]
+        gameDates = pd.to_datetime(self.teamlog["gameDate"]).dt.date
+        teamlog = self.teamlog[(
+            one_year_ago <= gameDates) & (gameDates < date)]
 
         # Filter non-starting goalies or non-starting skaters depending on the market
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             gamelog = gamelog[gamelog["position"] == "G"].copy()
         else:
+            gamelog2 = gamelog[gamelog["position"] == "G"].copy()
             gamelog = gamelog[gamelog["position"] != "G"].copy()
 
         # Retrieve moneyline and totals data from archive
@@ -2889,6 +3287,9 @@ class StatsNHL(Stats):
             zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
+
+        teamstats = teamlog.groupby('team').tail(10).groupby('team')[
+            teamlog.columns[5:]].mean()
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -2959,6 +3360,31 @@ class StatsNHL(Stats):
             self.defenseProfile['totals gain'] = defenseGroups.apply(
                 lambda x: np.polyfit(x.totals.fillna(2.5).values.astype(float) / 8.3 - x.totals.fillna(2.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
+
+        skater_stats = ["GOE", "Fenwick", "TimeShare",
+                        "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
+        if any([string in market for string in ["Against", "saves", "goalie"]]):
+            playerstats = gamelog.fillna(0).groupby('playerName')[
+                'SOE'].mean(numeric_only=True)
+
+            self.playerProfile = self.playerProfile.merge(
+                playerstats, on='playerName')
+        else:
+            playerstats = gamelog.fillna(0).groupby('playerName')[
+                skater_stats].mean(numeric_only=True)
+
+            self.playerProfile = self.playerProfile.merge(
+                playerstats, on='playerName')
+
+            self.goalieProfile = gamelog2.fillna(0).groupby('playerName')[
+                'SOE'].mean(numeric_only=True)
+
+        i = self.defenseProfile.index
+        self.defenseProfile = self.defenseProfile.merge(
+            teamstats, left_on='opponent', right_on='team')
+        self.defenseProfile.index = i
+
+        self.teamProfile = teamstats
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -3064,6 +3490,15 @@ class StatsNHL(Stats):
                 self.playerProfile.columns)
 
         try:
+            if not any([string in market for string in ["Against", "saves", "goalie"]]):
+                if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
+                    goalie = offer.get("Goalie", "")
+                else:
+                    goalie = self.goalies.get(opponent, "")
+
+                if goalie not in self.goalieProfile.index:
+                    self.goalieProfile.loc[goalie] = 0
+
             stats = (
                 archive["NHL"]
                 .get(market, {})
@@ -3125,7 +3560,7 @@ class StatsNHL(Stats):
         positions = ["C", "R", "L", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             if len(player_games) > 0:
-                position = player_games.iat[0, 7]
+                position = player_games.iloc[0]['position']
             else:
                 logger.warning(f"{player} not found")
                 return 0
@@ -3144,26 +3579,25 @@ class StatsNHL(Stats):
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
-        player_data = self.playerProfile.loc[player, [
-            'avg', 'home', 'away']]
+        player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in ['avg', 'home', 'away']})
+            {"Player " + col: player_data[col] for col in player_data.index})
 
-        other_player_data = self.playerProfile.loc[player, self.playerProfile.columns.difference(
-            ['avg', 'home', 'away'])]
-        data.update(
-            {"Player " + col: other_player_data[col] for col in other_player_data.index})
-
-        defense_data = self.defenseProfile.loc[opponent, [
-            'avg', 'home', 'away', 'moneyline gain', 'totals gain']]
+        defense_data = self.defenseProfile.loc[opponent]
 
         data.update(
-            {"Defense " + col: defense_data[col] for col in ['avg', 'home', 'away', 'moneyline gain', 'totals gain']})
+            {"Defense " + col: defense_data[col] for col in defense_data.index})
+
+        team_data = self.teamProfile.loc[team]
+
+        data.update(
+            {"Team " + col: team_data[col] for col in team_data.index})
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             data["DVPOA"] = data.pop("Defense avg")
         else:
             data["DVPOA"] = self.defenseProfile.loc[opponent, position]
+            data["Goalie SOE"] = self.goalieProfile.loc[goalie]
 
         return data
 
@@ -3215,6 +3649,7 @@ class StatsNHL(Stats):
                 "Team": game["team"],
                 "Market": market,
                 "Opponent": game["opponent"],
+                "Goalie": game["opponent goalie"],
                 "Home": int(game["home"])
             }
 

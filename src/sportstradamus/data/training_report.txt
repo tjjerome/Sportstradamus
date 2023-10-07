@@ -1,400 +1,95 @@
-================== MLB 1st inning hits allowed ==================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.598373        0.578541         0.721925          0.054318  0.230573 0.043544
-
-================== MLB 1st inning runs allowed ==================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.732743             0.0         0.732743           0.19105  0.091821 0.059384
-
-===================== MLB batter strikeouts =====================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.642789        0.645767         0.636388          0.070359  0.172772 0.038318
-
-======================= MLB hits+runs+rbi =======================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.642493        0.623361         0.678798          0.069385  0.282439 0.063062
-
-======================== MLB hits allowed =======================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
- 0.616162        0.638608         0.548822          0.044918  0.087778 0.00204
-
-============================ MLB hits ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.646714        0.639966         0.699489          0.080317   0.21309 0.037608
-
-================ MLB hitter fantasy points parlay ===============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.61652        0.591675         0.687428          0.052335  0.105362 0.001849
-
-=============== MLB hitter fantasy points underdog ==============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.596461        0.562889         0.692467          0.032026  0.088785 -0.000459
-
-==================== MLB hitter fantasy score ===================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.599191        0.565706         0.689629          0.036216  0.101186 0.005941
-
-=============== MLB pitcher fantasy points parlay ===============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.60626        0.610012         0.597183          0.039746  0.075253 0.015605
-
-============== MLB pitcher fantasy points underdog ==============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
- 0.671344         0.68434         0.651934          0.129617  0.227874 0.11759
-
-=================== MLB pitcher fantasy score ===================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.686377        0.705805           0.6609          0.132777   0.23688 0.125176
-
 ===================== MLB pitcher strikeouts ====================
  Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.625399        0.638272          0.60181           0.05767   0.13336 0.028619
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+   0.6097   0.621755 0.023164    0.036486     0.048102  0.112315
 
 ======================= MLB pitches thrown ======================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.632687        0.666255         0.560847          0.052198  0.031098 -0.007528
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.638675   0.642783 0.134515    0.043001     0.061718  0.033612
 
 ======================= MLB pitching outs =======================
  Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.635376        0.651456         0.571429          0.060599  0.064368 0.010193
-
-============================ MLB rbi ============================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.681486        0.514706         0.685336           0.12224    0.0288 0.018621
-
-======================== MLB runs allowed =======================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.658024        0.651786          0.66855          0.107308  0.268881 0.065215
-
-============================ MLB runs ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.628403        0.691176         0.626518          0.071479  0.040482 0.024644
-
-========================== MLB singles ==========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.567342        0.597964         0.565769          0.013827  0.036741 -0.008845
-
-======================== MLB stolen bases =======================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.772727             0.0         0.772727          0.266384 -0.004919 0.174872
-
-======================== MLB total bases ========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.603407        0.588438          0.69222         -0.009218  0.279682 0.025852
-
-======================= MLB walks allowed =======================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.653258         0.66759          0.55625          0.076919  0.226445 0.028146
-
-=========================== MLB walks ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
- 0.658814             0.0         0.658814          0.113464  0.040228 0.05427
-
-============================ NBA AST ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.59712        0.594634         0.609576          0.033437  0.052292 0.018547
-
-============================ NBA BLK ============================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.629023        0.595395         0.647593          0.058686  0.088814 0.008437
-
-============================ NBA BLST ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.639397        0.614721         0.667239          0.078082  0.164663 0.043066
-
-============================ NBA DREB ===========================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.587209        0.592351         0.572327          0.029879  0.052805 0.010352
-
-============================ NBA FG3A ===========================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.598563        0.582008         0.626024          0.040708  0.086846 0.021373
-
-============================ NBA FG3M ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.620249         0.62744         0.609322          0.060242  0.155483 0.025243
-
-============================ NBA FGA ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.601112         0.60508         0.591189          0.043754  0.083006 0.018935
-
-============================ NBA FGM ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.577346         0.58356         0.545988          0.022083  0.046029 -0.001648
-
-============================ NBA FTM ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.53238        0.450856         0.651529         -0.012159   0.04391 0.001165
-
-============================ NBA MIN ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
- 0.655571        0.702188         0.548747          0.124167  0.231994 0.17456
-
-============================ NBA OREB ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.599101        0.552158         0.628443          0.024498  0.070171 0.007286
-
-============================= NBA PA ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.555556        0.552046         0.567365          0.009311  0.023652 -0.009713
-
-============================= NBA PF ============================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.593905        0.620053         0.576261          0.025635  0.074372 0.003939
-
-============================= NBA PR ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.561915         0.56036         0.567119          0.012027  0.031885 -0.004309
-
-============================ NBA PRA ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.562014        0.563323         0.558201          0.006329  0.023913 -0.007522
-
-============================ NBA PTS ============================
- Distribution Model: Gaussian
- Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.558442   0.553882 0.245001    0.008756     0.011979  0.025868
-
-============================= NBA RA ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.572889        0.567901         0.590044           0.01555  0.035031 -0.000529
-
-============================ NBA REB ============================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.579737        0.577601         0.585995          0.017694  0.045816 0.000768
-
-============================ NBA STL ============================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.603923        0.587732         0.622098          0.032801  0.109748 0.007078
-
-============================ NBA TOV ============================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.585103        0.569012         0.593603           0.02977  0.069189 0.011741
-
-=================== NBA fantasy points parlay ===================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.596558        0.595726         0.598817          0.043837  0.078501 0.015391
-
-================= NBA fantasy points prizepicks =================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.587398        0.587676         0.586636          0.042473  0.077698 0.023953
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.638406   0.634907 -0.065271    0.054412     0.072434  0.071394
 
 ========================== NFL attempts =========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.587097   0.616162 0.163783   -0.015682    -0.012715  0.065522
+ 0.602339   0.618557 0.139267    0.004378     0.021747   0.06556
 
 ========================== NFL carries ==========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.565517   0.559486 0.114751   -0.012589    -0.006006  0.071126
+ 0.586907   0.572271 0.140358     0.01123     0.017272  0.106027
 
 ======================== NFL completions ========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.496689   0.531915 0.072955   -0.052571    -0.065137  0.004862
+ 0.585799   0.608696 0.052629   -0.029866    -0.023024   0.05528
 
 ================= NFL fantasy points parlayplay =================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.607177   0.588313  0.32237    0.030973     0.041888  0.107222
+ 0.562674   0.548619 0.309577    0.007699     0.010998  0.076519
 
 ================= NFL fantasy points prizepicks =================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.564366   0.548148   0.2938    0.007405     0.009918  0.081547
+ 0.597122   0.570048 0.288884    0.026095     0.034397  0.104323
 
 ================== NFL fantasy points underdog ==================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.562795   0.545455 0.282821    0.010182     0.013524  0.093169
+ 0.585793   0.572261 0.283268    0.028504     0.037999  0.105292
 
 ======================= NFL interceptions =======================
- Distribution Model: Poisson
+ Distribution Model: Gaussian
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.698795   0.630435 -0.096562    0.066072     0.083388  0.116766
+ 0.514124   0.484848 -0.492845   -0.396819    -0.373119  -0.44023
 
 ======================== NFL passing tds ========================
  Distribution Model: Poisson
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.686047       0.66 -0.093258     0.06444     0.094466  0.088213
+ 0.657754   0.698113 -0.129046      0.0627     0.085665  0.195412
 
 ======================= NFL passing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.578947   0.554054 0.387059    0.030733     0.040826  0.135789
+ 0.582278   0.551282 0.406791    0.045537     0.060655  0.073055
 
 =========================== NFL qb tds ==========================
  Distribution Model: Poisson
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
-  0.58642   0.704545 -0.089884    0.034937      0.04452  0.123798
+  0.65035   0.727273 -0.017183    0.063653     0.081453  0.156259
 
 ========================== NFL qb yards =========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.578313   0.574468 0.368148    0.040708     0.048358  0.160739
-
-======================= NFL receiving tds =======================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
-  0.70122        0.0 -1.550642    0.143489     0.184867  0.091006
+  0.62069   0.628571 0.383842    0.094639      0.11875  0.276054
 
 ====================== NFL receiving yards ======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
-  0.57483   0.554131 0.426952    0.007653     0.012805  0.071472
+ 0.603209   0.606695 0.438518    0.037586     0.050806  0.092269
 
 ========================= NFL receptions ========================
  Distribution Model: Poisson
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.589242   0.598174 -0.005366    0.016667     0.024115  0.115829
-
-======================== NFL rushing tds ========================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.686916        0.0 -1.354056    0.038317     0.148819 -0.055401
+ 0.582668   0.582609 -0.006683    0.006346     0.011133  0.081256
 
 ======================= NFL rushing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.585648   0.578212 0.425927    0.008249     0.013173  0.064271
+ 0.613793   0.613372 0.427261    0.036258     0.051801  0.136168
 
 ========================== NFL targets ==========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.609339   0.587097 0.055667    0.019161     0.028182  0.095568
-
-============================ NFL tds ============================
- Distribution Model: Poisson
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.629981        0.0 -0.934781    0.059553      0.07999  0.029749
+ 0.594382   0.591743  0.06758    0.015226     0.022498  0.110197
 
 =========================== NFL yards ===========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.595291   0.584219 0.417098    0.027301     0.036212  0.089959
-
-========================== NHL assists ==========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.628984        0.736842         0.628106          0.072028  0.016373 0.027611
-
-========================== NHL blocked ==========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.609334        0.536364         0.617758          0.044001  0.032253 0.011735
-
-======================== NHL faceOffWins ========================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.584226        0.551367         0.629592           0.03488  0.101697 0.062538
-
-================= NHL fantasy points prizepicks =================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
- 0.479933        0.477041         0.565693         -0.055302  0.070551 -0.018023
-
-================ NHL goalie fantasy points parlay ===============
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance     RMLSE
-  0.56266         0.57672         0.549505         -0.001844  0.044729 -0.011706
-
-=============== NHL goalie fantasy points underdog ==============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.748634        0.652174         0.757455          0.264618  0.299214 0.133645
-
-=========================== NHL goals ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.657718             0.0         0.657718          0.109035  0.013295 0.048954
-
-======================== NHL goalsAgainst =======================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.629442           0.625         0.632743          0.033803  0.059624 0.003751
-
-============================ NHL hits ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.624421        0.574349         0.640339           0.05968  0.070639 0.033667
-
-=========================== NHL points ==========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
-  0.62087         0.57074         0.630639          0.056293  0.054488 0.020236
-
-=========================== NHL saves ===========================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.587805        0.576687         0.595142          0.027596  0.055624 0.019382
-
-=========================== NHL shots ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.592338        0.539076         0.602555          0.029074  0.034374 0.016012
-
-================ NHL skater fantasy points parlay ===============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.525923        0.523256         0.585714          0.003034  0.071842 0.024895
-
-=============== NHL skater fantasy points underdog ==============
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.522561        0.520315         0.581227           0.00209  0.065677 0.010624
-
-=========================== NHL sogBS ===========================
- Distribution Model: Poisson
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance    RMLSE
- 0.592618        0.604643         0.581456          0.028804    0.0958 0.007774
-
-========================= NHL timeOnIce =========================
- Distribution Model: Gaussian
- Accuracy  Precision_Over  Precision_Under  Brier Score Loss  Deviance   RMLSE
-  0.65214        0.666936         0.624814          0.107977   0.41858 0.56009
+ 0.615301   0.600313 0.401365    0.027454     0.040298  0.084593
 
