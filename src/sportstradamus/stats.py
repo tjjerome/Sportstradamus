@@ -1767,8 +1767,10 @@ class StatsMLB(Stats):
 
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
-            opid = self.gamelog.loc[self.gamelog['opponent pitcher']
-                                    == pitcher, 'opponent pitcher id'].iat[0]
+            pid = self.gamelog.loc[self.gamelog['opponent pitcher']
+                                   == pitcher, 'opponent pitcher id'].iat[0]
+
+        affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
 
         one_year_ago = len(player_games.loc[
             pd.to_datetime(self.gamelog.gameDate) > date-timedelta(days=300)])
@@ -1850,7 +1852,7 @@ class StatsMLB(Stats):
 
             affine = self.gamelog.loc[(self.gamelog["opponent"] == opponent) & (
                 pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"] & (
-                self.gamelog["playerId"].isin(self.affinity[pid]))]
+                self.gamelog["playerId"].isin(affine_pitchers))]
             aff_data = affine[self.stat_types['pitching']].mean()
         else:
             defense_data = self.pitcherProfile.loc[pitcher]
@@ -1871,7 +1873,7 @@ class StatsMLB(Stats):
             data.update({"Position": position})
 
             affine = player_games.loc[player_games['opponent pitcher id'].isin(
-                self.affinity[opid])]
+                affine_pitchers)]
             aff_data = affine[self.stat_types['batting']].mean()
 
         data.update({"H2H " + col: aff_data[col] for col in aff_data.index})
