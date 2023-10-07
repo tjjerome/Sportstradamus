@@ -1,3 +1,18 @@
+===================== MLB pitcher strikeouts ====================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+   0.6097   0.621755 0.023164    0.036486     0.048102  0.112315
+
+======================= MLB pitches thrown ======================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.638675   0.642783 0.134515    0.043001     0.061718  0.033612
+
+======================= MLB pitching outs =======================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.638406   0.634907 -0.065271    0.054412     0.072434  0.071394
+
 ========================== NFL attempts =========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -53,11 +68,6 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
   0.62069   0.628571 0.383842    0.094639      0.11875  0.276054
 
-======================= NFL receiving tds =======================
- Distribution Model: Gaussian
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.255319   0.256098 -2.588746   -0.345629    -0.447872 -0.400841
-
 ====================== NFL receiving yards ======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -68,11 +78,6 @@
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
  0.582668   0.582609 -0.006683    0.006346     0.011133  0.081256
 
-======================== NFL rushing tds ========================
- Distribution Model: Gaussian
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.312217   0.309091 -1.862655   -0.417708    -0.530108 -0.590498
-
 ======================= NFL rushing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -82,11 +87,6 @@
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.594382   0.591743  0.06758    0.015226     0.022498  0.110197
-
-============================ NFL tds ============================
- Distribution Model: Gaussian
- Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
- 0.369485   0.368324 -1.261448    -0.37646    -0.468839 -0.361797
 
 =========================== NFL yards ===========================
  Distribution Model: Gaussian
