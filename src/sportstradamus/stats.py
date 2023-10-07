@@ -2880,15 +2880,12 @@ class StatsNFL(Stats):
         i = []
 
         self.profile_market('fantasy points underdog')
-        depth = nfl.import_depth_charts([self.season_start.year])
-        depth = depth.loc[depth.position.isin(["QB", "WR", "RB", "TE"])]
-        depth = depth.loc[depth.week == depth.week.iloc[-500:].mode().iloc[0]]
-        depth = depth.loc[(depth.depth_team.astype(int) == 1) | ~(
-            depth.position.isin(["QB", "TE"]))]
-        depth = depth.loc[depth.depth_team.astype(int) <= 2]
-        depth.loc[depth['club_code'] == 'LA', 'club_code'] = "LAR"
-        players = pd.Series(zip(depth['full_name'].map(
-            remove_accents), depth['club_code'])).drop_duplicates().to_list()
+        roster = nfl.import_weekly_rosters([self.season_start.year])
+        roster = roster.loc[(roster.status == "ACT") & roster.position.isin(
+            ['QB', 'RB', 'WR', 'TE']) & (roster.week == roster.week.max())]
+        roster.loc[roster['team'] == 'LA', 'team'] = "LAR"
+        players = pd.Series(zip(roster['player_name'].map(
+            remove_accents), roster['team'])).drop_duplicates().to_list()
 
         for player, team in tqdm(players, unit="player"):
 
