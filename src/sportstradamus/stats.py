@@ -1859,9 +1859,9 @@ class StatsMLB(Stats):
             defense_data.loc['DER'] = self.defenseProfile.loc[opponent, 'DER']
 
             for batter in order:
-                if batter not in self.teamProfile.index:
-                    self.teamProfile.loc[batter] = self.teamProfile.loc[team,
-                                                                        self.stat_types['batting']]
+                if batter not in self.playerProfile.index:
+                    self.playerProfile.loc[batter] = self.teamProfile.loc[team,
+                                                                          self.stat_types['batting']]
 
             if len(order) > 0:
                 team_data = self.playerProfile.loc[order,

@@ -1,3 +1,18 @@
+================== MLB 1st inning hits allowed ==================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.596196   0.588136 -0.027811     0.03945     0.051829  0.205801
+
+================== MLB 1st inning runs allowed ==================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.728916        0.0 -0.812469    0.140958     0.185119  0.064705
+
+======================== MLB hits allowed =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.631134   0.672705  0.03142    0.043966     0.058464  0.123007
+
 ===================== MLB pitcher strikeouts ====================
  Distribution Model: Poisson
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -12,6 +27,11 @@
  Distribution Model: Gaussian
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
  0.638406   0.634907 -0.065271    0.054412     0.072434  0.071394
+
+======================== MLB runs allowed =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.659532     0.6708 0.066802    0.095358     0.122567  0.271505
 
 ========================== NFL attempts =========================
  Distribution Model: Gaussian
