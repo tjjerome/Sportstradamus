@@ -139,21 +139,20 @@ def main(progress, books):
     """
     Start gathering player stats
     """
-    # nba = StatsNBA()
-    # nba.load()
-    # nba.update()
-    # mlb = StatsMLB()
-    # mlb.load()
-    # mlb.update()
-    # nhl = StatsNHL()
-    # nhl.load()
-    # nhl.update()
+    nba = StatsNBA()
+    nba.load()
+    nba.update()
+    mlb = StatsMLB()
+    mlb.load()
+    mlb.update()
+    nhl = StatsNHL()
+    nhl.load()
+    nhl.update()
     nfl = StatsNFL()
     nfl.load()
     nfl.update()
 
-    # stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
-    stats = {"NFL": nfl}
+    stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
 
     untapped_markets = []
 
@@ -215,17 +214,26 @@ def main(progress, books):
     prob_params['Ceiling'] = prob_params['Ceiling'].clip(0).round(1)
     prob_params['Rank'] = prob_params.groupby('Position').rank(
         ascending=False, method='dense')['Ceiling']
-    prob_params.loc[prob_params['Position'] == "QB", 'VORP'] = prob_params.loc[prob_params['Position'] == "QB",
-                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "QB") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
-    prob_params.loc[prob_params['Position'] == "WR", 'VORP'] = prob_params.loc[prob_params['Position'] == "WR",
-                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "WR") & (prob_params["Rank"] == 31), 'Ceiling'].mean()
-    prob_params.loc[prob_params['Position'] == "RB", 'VORP'] = prob_params.loc[prob_params['Position'] == "RB",
-                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "RB") & (prob_params["Rank"] == 19), 'Ceiling'].mean()
-    prob_params.loc[prob_params['Position'] == "TE", 'VORP'] = prob_params.loc[prob_params['Position'] == "TE",
-                                                                               'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "QB", 'VORP12'] = prob_params.loc[prob_params['Position'] == "QB",
+                                                                                 'Ceiling'] - prob_params.loc[(prob_params['Position'] == "QB") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "WR", 'VORP12'] = prob_params.loc[prob_params['Position'] == "WR",
+                                                                                 'Ceiling'] - prob_params.loc[(prob_params['Position'] == "WR") & (prob_params["Rank"] == 31), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "RB", 'VORP12'] = prob_params.loc[prob_params['Position'] == "RB",
+                                                                                 'Ceiling'] - prob_params.loc[(prob_params['Position'] == "RB") & (prob_params["Rank"] == 19), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "TE", 'VORP12'] = prob_params.loc[prob_params['Position'] == "TE",
+                                                                                 'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "QB", 'VORP6'] = prob_params.loc[prob_params['Position'] == "QB",
+                                                                                'Ceiling'] - prob_params.loc[(prob_params['Position'] == "QB") & (prob_params["Rank"] == 7), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "WR", 'VORP6'] = prob_params.loc[prob_params['Position'] == "WR",
+                                                                                'Ceiling'] - prob_params.loc[(prob_params['Position'] == "WR") & (prob_params["Rank"] == 19), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "RB", 'VORP6'] = prob_params.loc[prob_params['Position'] == "RB",
+                                                                                'Ceiling'] - prob_params.loc[(prob_params['Position'] == "RB") & (prob_params["Rank"] == 10), 'Ceiling'].mean()
+    prob_params.loc[prob_params['Position'] == "TE", 'VORP6'] = prob_params.loc[prob_params['Position'] == "TE",
+                                                                                'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 7), 'Ceiling'].mean()
 
-    prob_params = prob_params[['Player', 'Position',
-                               'Projection', 'Floor', 'Ceiling', 'Rank', 'VORP']].sort_values("VORP", ascending=False)
+    prob_params = prob_params[['Player', 'Position', 'Rank',
+                               'Projection', 'Floor', 'Ceiling',
+                               'VORP12', 'VORP6']].sort_values("VORP6", ascending=False)
 
     if len(prob_params) > 0:
         wks = gc.open("Sportstradamus").worksheet("Fantasy")
