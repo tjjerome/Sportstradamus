@@ -2924,6 +2924,22 @@ files = [
 ]
 
 [[package]]
+name = "smogn"
+version = "0.1.2"
+description = "A Python implementation of Synthetic Minority Over-Sampling Technique for Regression with Gaussian Noise (SMOGN)"
+optional = false
+python-versions = "*"
+files = [
+    {file = "smogn-0.1.2-py3-none-any.whl", hash = "sha256:3df02540674d2164713e661446ff73994f98bb3029d5ea7ad0107ffedb700fec"},
+    {file = "smogn-0.1.2.tar.gz", hash = "sha256:6555b907f2c9df223eae8813abd09054ad6491fc8509a23fccc9d578b3e76d89"},
+]
+
+[package.dependencies]
+numpy = "*"
+pandas = "*"
+tqdm = "*"
+
+[[package]]
 name = "sphinx-pdj-theme"
 version = "0.4.0"
 description = "A cool theme for sphinx documentation"
@@ -3340,4 +3356,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9,<3.12"
-content-hash = "67a60b8a2134a846c5aa271086ad868b5181e910d4cb80f39120466bc78cf4e2"
+content-hash = "91327c6d215544e0d72ec25d8975666c49068029468a198422f455543a3319a6"

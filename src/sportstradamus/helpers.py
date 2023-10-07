@@ -427,7 +427,7 @@ scraper = Scrape(apikey)
 archive = Archive()
 
 mlb_games = mlb.schedule(
-    start_date=datetime.date.today(), end_date=datetime.date.today()
+    start_date=datetime.date.today(), end_date=(datetime.date.today() + datetime.timedelta(days=7))
 )
 mlb_teams = mlb.get("teams", {"sportId": 1})
 mlb_pitchers = {}
@@ -444,17 +444,12 @@ for game in mlb_games:
             if team["id"] == game["home_id"]
         ][0]
         if game["game_num"] == 1:
-            mlb_pitchers[awayTeam] = remove_accents(
-                game["away_probable_pitcher"])
-            mlb_pitchers[homeTeam] = remove_accents(
-                game["home_probable_pitcher"])
-        elif game["game_num"] > 1:
-            mlb_pitchers[awayTeam + str(game["game_num"])] = remove_accents(
-                game["away_probable_pitcher"]
-            )
-            mlb_pitchers[homeTeam + str(game["game_num"])] = remove_accents(
-                game["home_probable_pitcher"]
-            )
+            if "away_probable_pitcher" in game and awayTeam not in mlb_pitchers:
+                mlb_pitchers[awayTeam] = remove_accents(
+                    game["away_probable_pitcher"])
+            if "home_probable_pitcher" in game and homeTeam not in mlb_pitchers:
+                mlb_pitchers[homeTeam] = remove_accents(
+                    game["home_probable_pitcher"])
 
 mlb_pitchers["LA"] = mlb_pitchers.get("LAD", "")
 mlb_pitchers["ANA"] = mlb_pitchers.get("LAA", "")
