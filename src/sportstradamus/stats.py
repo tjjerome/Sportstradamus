@@ -2075,12 +2075,14 @@ class StatsNFL(Stats):
         snaps = nfl.import_snap_counts([self.season_start.year])
         sched = nfl.import_schedules([self.season_start.year])
         upcoming_games = sched.loc[pd.to_datetime(sched['gameday']) >= datetime.today(), [
-            'gameday', 'away_team', 'home_team']]
-        upcoming_games.loc[upcoming_games['away_team']
-                           == 'LA', 'away_team'] = "LAR"
-        upcoming_games.loc[upcoming_games['home_team']
-                           == 'LA', 'home_team'] = "LAR"
+            'gameday', 'away_team', 'home_team', 'weekday', 'gametime']]
         if not upcoming_games.empty:
+            upcoming_games.loc[upcoming_games['away_team']
+                               == 'LA', 'away_team'] = "LAR"
+            upcoming_games.loc[upcoming_games['home_team']
+                               == 'LA', 'home_team'] = "LAR"
+            upcoming_games['gametime'] = upcoming_games['weekday'].str[:-
+                                                                       3] + " " + upcoming_games['gametime']
             df1 = upcoming_games.rename(
                 columns={'home_team': 'Team', 'away_team': 'Opponent'})
             df2 = upcoming_games.rename(
@@ -2089,7 +2091,7 @@ class StatsNFL(Stats):
             df2['Home'] = 0
             upcoming_games = pd.concat([df1, df2]).sort_values('gameday')
             self.upcoming_games = upcoming_games.groupby("Team").apply(
-                lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home', 'gameday']].to_dict(orient='index')
+                lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home', 'gameday', 'gametime']].to_dict(orient='index')
 
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(
             ["QB", "WR", "RB", "TE"])]
@@ -2159,6 +2161,7 @@ class StatsNFL(Stats):
         self.ids = ids.gsis_id.to_dict()
         self.players = self.players.groupby(
             'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
+        self.players["Michael Pittman"] = "WR"
 
         need_pbp = True
         teamDataList = []
@@ -2878,6 +2881,7 @@ class StatsNFL(Stats):
         # Initialize an empty list for the target labels
         matrix = []
         i = []
+        offers = []
 
         self.profile_market('fantasy points underdog')
         roster = nfl.import_weekly_rosters([self.season_start.year])
@@ -2891,6 +2895,8 @@ class StatsNFL(Stats):
 
             gameDate = self.upcoming_games.get(team, {}).get(
                 'gameday', datetime.today().strftime("%Y-%m-%d"))
+            gameTime = self.upcoming_games.get(team, {}).get(
+                'gametime', datetime.today().strftime("%Y-%m-%d"))
             opponent = self.upcoming_games.get(team, {}).get(
                 'Opponent', datetime.today().strftime("%Y-%m-%d"))
             home = self.upcoming_games.get(team, {}).get(
@@ -2911,7 +2917,8 @@ class StatsNFL(Stats):
                 "Team": team,
                 "Market": 'fantasy points underdog',
                 "Opponent": opponent,
-                "Home": home
+                "Home": home,
+                "Game": gameTime
             }
 
             with warnings.catch_warnings():
@@ -2922,11 +2929,17 @@ class StatsNFL(Stats):
                 if type(new_get_stats) is dict:
                     matrix.append(new_get_stats)
                     i.append(player)
+                    offer.pop("Market")
+                    offer.pop("Player")
+                    offers.append(offer)
 
         M = pd.DataFrame(matrix, index=i).fillna(
             0.0).replace([np.inf, -np.inf], 0)
 
-        return M
+        N = pd.DataFrame(offers, index=i).fillna(
+            0.0).replace([np.inf, -np.inf], 0)
+
+        return M, N
 
 
 class StatsNHL(Stats):

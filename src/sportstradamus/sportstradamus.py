@@ -195,7 +195,7 @@ def main(progress, books):
         filedict = pickle.load(infile)
     model = filedict["model"]
 
-    playerStats = nfl.get_fantasy()
+    playerStats, playerData = nfl.get_fantasy()
     categories = ["Home", "Position"]
     for c in categories:
         playerStats[c] = playerStats[c].astype('category')
