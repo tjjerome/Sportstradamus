@@ -437,12 +437,17 @@ for game in mlb_games:
             team["abbreviation"]
             for team in mlb_teams["teams"]
             if team["id"] == game["away_id"]
-        ][0]
+        ]
         homeTeam = [
             team["abbreviation"]
             for team in mlb_teams["teams"]
             if team["id"] == game["home_id"]
-        ][0]
+        ]
+        if len(awayTeam) == 1 and len(homeTeam) == 1:
+            awayTeam = awayTeam[0]
+            homeTeam = homeTeam[0]
+        else:
+            continue
         if game["game_num"] == 1:
             if "away_probable_pitcher" in game and awayTeam not in mlb_pitchers:
                 mlb_pitchers[awayTeam] = remove_accents(
