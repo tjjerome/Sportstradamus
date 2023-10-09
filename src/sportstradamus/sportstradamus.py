@@ -170,9 +170,9 @@ def main(progress, books):
 
     # ParlayPlay
 
-    parp_dict = get_parp()
-    parp_offers = process_offers(parp_dict, "ParlayPlay", datasets, stats)
-    save_data(parp_offers, "ParlayPlay", gc)
+    # parp_dict = get_parp()
+    # parp_offers = process_offers(parp_dict, "ParlayPlay", datasets, stats)
+    # save_data(parp_offers, "ParlayPlay", gc)
 
     # Thrive
 
