@@ -3131,21 +3131,29 @@ class StatsNHL(Stats):
             "gameDate").reset_index(drop=True)
 
         self.upcoming_games = {}
-        ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name']) for game in date['games'] if game['gameType']
+        ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name'], game["gamePk"]) for game in date['games'] if game['gameType']
                not in ["PR", "A"]] for date in res['dates'] if today <= datetime.strptime(date["date"], "%Y-%m-%d").date()]
         ug = [item for sublist in ug for item in sublist][:20]
-        for away, home in ug:
+        for away, home, gameId in ug:
+            game = scraper.get(
+                f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/boxscore")
             awayTeam = abbreviations['NHL'][remove_accents(away)]
             homeTeam = abbreviations['NHL'][remove_accents(home)]
+            awayGoalie = game["teams"]["away"]["goalies"]
+            awayGoalie = awayGoalie[0] if len(awayGoalie) > 0 else ""
+            homeGoalie = game["teams"]["home"]["goalies"]
+            homeGoalie = homeGoalie[0] if len(homeGoalie) > 0 else ""
             if awayTeam not in self.upcoming_games:
                 self.upcoming_games[awayTeam] = {
                     "Opponent": homeTeam,
-                    "Home": 0
+                    "Home": 0,
+                    "Goalie": awayGoalie
                 }
             if homeTeam not in self.upcoming_games:
                 self.upcoming_games[homeTeam] = {
                     "Opponent": awayTeam,
-                    "Home": 1
+                    "Home": 1,
+                    "Goalie": homeGoalie
                 }
 
         # Remove old games to prevent file bloat
@@ -3504,7 +3512,8 @@ class StatsNHL(Stats):
                 if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
                     goalie = offer.get("Goalie", "")
                 else:
-                    goalie = self.goalies.get(opponent, "")
+                    goalie = self.upcoming_games.get(
+                        opponent, {}).get("Goalie", "")
 
                 if goalie not in self.goalieProfile.index:
                     self.goalieProfile.loc[goalie] = 0
