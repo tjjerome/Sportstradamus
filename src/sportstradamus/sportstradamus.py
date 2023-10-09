@@ -374,7 +374,7 @@ def save_data(offers, book, gc):
             logger.exception(f"Error writing {book} offers")
 
 
-def match_offers(offers, league, book_market, platform, datasets, stat_data, pbar):
+def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     """
     Matches offers with statistical data and applies various calculations and transformations.
 
@@ -393,8 +393,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
 
-    stat_map = stat_map[platform]
-    market = stat_map["Stats"].get(book_market, book_market)
+    market = stat_map[platform].get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
@@ -428,10 +427,10 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
                         namePos = 2
                     elif league == "MLB":
                         nameStr = "playerName"
-                        namePos = 2
+                        namePos = 3
                     elif league == "NHL":
                         nameStr = "playerName"
-                        namePos = 6
+                        namePos = 7
                     name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
                         " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
                     if name_df.empty:
@@ -479,7 +478,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
             for book, dataset in datasets.items():
                 codex = stat_map[book]
                 offer = dataset.get(o["Player"], {}).get(
-                    codex.get(book_market, book_market)
+                    codex.get(market, market)
                 )
                 if offer is not None:
                     v.append(offer["EV"])
@@ -497,7 +496,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
             else:
                 p = [0.5] * 2
 
-            archive.add(o, lines, stat_map["Stats"])
+            archive.add(o, lines, stat_map[platform])
             playerStats.append(stats)
             playerNames.append(o["Player"])
 
@@ -507,7 +506,7 @@ def match_offers(offers, league, book_market, platform, datasets, stat_data, pba
     return playerStats[~playerStats.index.duplicated(keep='last')].fillna(0)
 
 
-def model_prob(offers, league, book_market, platform, stat_data, playerStats):
+def model_prob(offers, league, market, platform, stat_data, playerStats):
     """
     Matches offers with statistical data and applies various calculations and transformations.
 
@@ -525,8 +524,7 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
 
-    stat_map = stat_map[platform]
-    market = stat_map["Stats"].get(book_market, book_market)
+    market = stat_map[platform].get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
@@ -563,10 +561,10 @@ def model_prob(offers, league, book_market, platform, stat_data, playerStats):
                         namePos = 2
                     elif league == "MLB":
                         nameStr = "playerName"
-                        namePos = 2
+                        namePos = 3
                     elif league == "NHL":
                         nameStr = "playerName"
-                        namePos = 6
+                        namePos = 7
                     name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
                         " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
                     if name_df.empty:

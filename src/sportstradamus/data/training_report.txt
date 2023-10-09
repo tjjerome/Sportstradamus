@@ -308,3 +308,83 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.615301   0.600313 0.401365    0.027454     0.040298  0.084593
 
+========================== NHL assists ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.621384        1.0 -0.666518    0.051332     0.069558  0.036781
+
+========================== NHL blocked ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.606596   0.590994 -0.227893     0.02703     0.037262  0.028539
+
+======================== NHL faceOffWins ========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.574227   0.540541 0.026774    0.016822      0.02221  0.074069
+
+================= NHL fantasy points prizepicks =================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.493275   0.489337 0.264404   -0.036589    -0.048188  0.080557
+
+================ NHL goalie fantasy points parlay ===============
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.621984    0.62963 -0.011056    0.037633     0.051109  0.127909
+
+=============== NHL goalie fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.566298    0.53211 0.160629    0.008312     0.012947   0.04913
+
+=========================== NHL goals ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.666348        0.0 -1.153427    0.062378     0.122569 -0.008564
+
+======================== NHL goalsAgainst =======================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+  0.56982    0.59322 -0.067638    0.005226     0.008943   0.07083
+
+============================ NHL hits ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+  0.62194   0.585996 -0.135312    0.039378     0.055912  0.070977
+
+=========================== NHL points ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.633532   0.620278 -0.356583    0.049557     0.066077  0.066339
+
+=========================== NHL saves ===========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.561033   0.546584 0.192435   -0.001632     0.001172  0.000289
+
+=========================== NHL shots ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.607279    0.56918 -0.096843    0.029504     0.040361  0.043208
+
+================ NHL skater fantasy points parlay ===============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.535912   0.531379 0.090322    0.005156     0.005075  0.084016
+
+=============== NHL skater fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.524899   0.520376 0.204086    0.001431      0.00006     0.061
+
+=========================== NHL sogBS ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.598142   0.627849 -0.007522    0.025585     0.034622  0.113666
+
+========================= NHL timeOnIce =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.644916   0.667533 -0.413284    0.088996     0.109708  0.411704
+
