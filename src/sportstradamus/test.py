@@ -8,16 +8,16 @@ from sportstradamus import data
 import pickle
 from scipy.stats import norm
 
-stats = StatsNBA()
+# stats = StatsNBA()
 # stats.season = "2021-22"
 # stats.season_start = datetime(2021, 10, 1).date()
-stats.load()
-stats.season = "2022-23"
-stats.season_start = datetime(2022, 10, 1).date()
-stats.update()
-stats.season = "2023-24"
-stats.season_start = datetime(2023, 10, 1).date()
-stats.update()
+# stats.load()
+# stats.season = "2022-23"
+# stats.season_start = datetime(2022, 10, 1).date()
+# stats.update()
+# stats.season = "2023-24"
+# stats.season_start = datetime(2023, 10, 1).date()
+# stats.update()
 
 stats = StatsNHL()
 stats.season_start = datetime(2021, 10, 1).date()

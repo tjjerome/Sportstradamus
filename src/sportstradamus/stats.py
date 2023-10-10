@@ -1760,7 +1760,7 @@ class StatsMLB(Stats):
             headtohead = player_games.loc[player_games["opponent"] == opponent]
 
             pid = self.gamelog.loc[self.gamelog['playerName']
-                                   == player, 'playerId'].iat[0]
+                                   == player, 'playerId']
         else:
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
                 pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting batter"]]
@@ -1768,7 +1768,12 @@ class StatsMLB(Stats):
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
             pid = self.gamelog.loc[self.gamelog['opponent pitcher']
-                                   == pitcher, 'opponent pitcher id'].iat[0]
+                                   == pitcher, 'opponent pitcher id']
+
+        if pid.empty:
+            pid = 0
+        else:
+            pid = pid.iat[0]
 
         affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
 
@@ -3036,8 +3041,8 @@ class StatsNHL(Stats):
                         "xGoals": float(player["OffIce_F_flurryScoreVenueAdjustedxGoals"]),
                         "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"])
                     }
-                    stats["GOE"] = float(
-                        player["OffIce_F_goals"]) - stats["xGoals"]
+                    stats["GOE"] = (float(player["OffIce_F_goals"]) - stats["xGoals"]
+                                    ) / float(player["OffIce_F_unblockedShotAttempts"])
                     stats["SOE"] = (float(player["OffIce_A_goals"]) - stats["xGoalsAgainst"]
                                     ) / float(player["OffIce_A_unblockedShotAttempts"])
                     teamlog.append(n | stats)
@@ -3079,8 +3084,11 @@ class StatsNHL(Stats):
                         "skater fantasy points parlay": stats.get("goals", 0)*3 + stats.get("assists", 0)*2 + stats.get("shots", 0)*.5 + stats.get("hits", 0) + stats.get("blocked", 0),
                     })
                     team = {v: k for k, v in team_map.items()}.get(team, team)
+                    shots = float(player["I_F_unblockedShotAttempts"])
+                    shotsAgainst = float(
+                        player["OnIce_A_unblockedShotAttempts"])
                     stats.update({
-                        "GOE": (stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"])) / float(player["I_A_unblockedShotAttempts"]),
+                        "GOE": ((stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"])) / shots) if shots else 0,
                         "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
                         "TimeShare": stats["timeOnIce"]/(float(game_df.loc[game_df["playerName"] == team, "OffIce_F_iceTime"].iat[0])/60),
                         "ShotShare": stats["shots"]/float(game_df.loc[game_df["playerName"] == team, "OffIce_F_shotsOnGoal"].iat[0]),
@@ -3088,7 +3096,7 @@ class StatsNHL(Stats):
                         "Blk60": stats["blocked"]*60/stats["timeOnIce"],
                         "Hit60": stats["hits"]*60/stats["timeOnIce"],
                         "Ast60": stats["assists"]*60/stats["timeOnIce"],
-                        "SOE": (stats["goalsAgainst"] - float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])) / float(player["OnIce_A_unblockedShotAttempts"])
+                        "SOE": ((stats["goalsAgainst"] - float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])) / shotsAgainst) if shotsAgainst else 0
                     })
                     if stats["timeOnIce"] > 6:
                         gamelog.append(n | stats)
