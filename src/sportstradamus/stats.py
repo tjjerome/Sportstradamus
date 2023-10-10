@@ -1760,7 +1760,7 @@ class StatsMLB(Stats):
             headtohead = player_games.loc[player_games["opponent"] == opponent]
 
             pid = self.gamelog.loc[self.gamelog['playerName']
-                                   == player, 'playerId'].iat[0]
+                                   == player, 'playerId']
         else:
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
                 pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting batter"]]
@@ -1768,7 +1768,12 @@ class StatsMLB(Stats):
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
             pid = self.gamelog.loc[self.gamelog['opponent pitcher']
-                                   == pitcher, 'opponent pitcher id'].iat[0]
+                                   == pitcher, 'opponent pitcher id']
+
+        if pid.empty:
+            pid = 0
+        else:
+            pid = pid.iat[0]
 
         affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
 
@@ -3023,15 +3028,23 @@ class StatsNHL(Stats):
                         "home": home
                     }
                     stats = {
-                        "Corsi": float(player["OffIce_shotAttempts_For_Percentage"]),
-                        "Fenwick": float(player["OffIce_unblockedShotAttempts_For_Percentage"]),
-                        "Hits": float(player["OffIce_hits_For_Percentage"]),
-                        "Takeaways": float(player["OffIce_takeaways_For_Percentage"]),
-                        "xGoals": float(player["OffIce_flurryScoreVenueAdjustedxGoals_For_Percentage"]),
-                        "PIM": float(player["OffIce_penalityMinutes_For_Percentage"])
+                        "Corsi": float(player["OffIce_F_shotAttempts"]),
+                        "Fenwick": float(player["OffIce_F_unblockedShotAttempts"]),
+                        "Hits": float(player["OffIce_F_hits"]),
+                        "Takeaways": float(player["OffIce_F_takeaways"]),
+                        "PIM": float(player["OffIce_F_penalityMinutes"]),
+                        "Corsi_Pct": float(player["OffIce_shotAttempts_For_Percentage"]),
+                        "Fenwick_Pct": float(player["OffIce_unblockedShotAttempts_For_Percentage"]),
+                        "Hits_Pct": float(player["OffIce_hits_For_Percentage"]),
+                        "Takeaways_Pct": float(player["OffIce_takeaways_For_Percentage"]),
+                        "PIM_Pct": float(player["OffIce_penalityMinutes_For_Percentage"]),
+                        "xGoals": float(player["OffIce_F_flurryScoreVenueAdjustedxGoals"]),
+                        "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"])
                     }
-                    stats["GOE"] = float(
-                        player["OffIce_F_goals"]) - stats["xGoals"]
+                    stats["GOE"] = (float(player["OffIce_F_goals"]) - stats["xGoals"]
+                                    ) / float(player["OffIce_F_unblockedShotAttempts"])
+                    stats["SOE"] = (float(player["OffIce_A_goals"]) - stats["xGoalsAgainst"]
+                                    ) / float(player["OffIce_A_unblockedShotAttempts"])
                     teamlog.append(n | stats)
                 else:
                     n = {
@@ -3071,8 +3084,11 @@ class StatsNHL(Stats):
                         "skater fantasy points parlay": stats.get("goals", 0)*3 + stats.get("assists", 0)*2 + stats.get("shots", 0)*.5 + stats.get("hits", 0) + stats.get("blocked", 0),
                     })
                     team = {v: k for k, v in team_map.items()}.get(team, team)
+                    shots = float(player["I_F_unblockedShotAttempts"])
+                    shotsAgainst = float(
+                        player["OnIce_A_unblockedShotAttempts"])
                     stats.update({
-                        "GOE": stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"]),
+                        "GOE": ((stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"])) / shots) if shots else 0,
                         "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
                         "TimeShare": stats["timeOnIce"]/(float(game_df.loc[game_df["playerName"] == team, "OffIce_F_iceTime"].iat[0])/60),
                         "ShotShare": stats["shots"]/float(game_df.loc[game_df["playerName"] == team, "OffIce_F_shotsOnGoal"].iat[0]),
@@ -3080,7 +3096,7 @@ class StatsNHL(Stats):
                         "Blk60": stats["blocked"]*60/stats["timeOnIce"],
                         "Hit60": stats["hits"]*60/stats["timeOnIce"],
                         "Ast60": stats["assists"]*60/stats["timeOnIce"],
-                        "SOE": float(player["OnIce_A_xGoals"]) - stats["goalsAgainst"]
+                        "SOE": ((stats["goalsAgainst"] - float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])) / shotsAgainst) if shotsAgainst else 0
                     })
                     if stats["timeOnIce"] > 6:
                         gamelog.append(n | stats)
@@ -3131,21 +3147,29 @@ class StatsNHL(Stats):
             "gameDate").reset_index(drop=True)
 
         self.upcoming_games = {}
-        ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name']) for game in date['games'] if game['gameType']
+        ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name'], game["gamePk"]) for game in date['games'] if game['gameType']
                not in ["PR", "A"]] for date in res['dates'] if today <= datetime.strptime(date["date"], "%Y-%m-%d").date()]
         ug = [item for sublist in ug for item in sublist][:20]
-        for away, home in ug:
+        for away, home, gameId in ug:
+            game = scraper.get(
+                f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/boxscore")
             awayTeam = abbreviations['NHL'][remove_accents(away)]
             homeTeam = abbreviations['NHL'][remove_accents(home)]
+            awayGoalie = game["teams"]["away"]["goalies"]
+            awayGoalie = awayGoalie[0] if len(awayGoalie) > 0 else ""
+            homeGoalie = game["teams"]["home"]["goalies"]
+            homeGoalie = homeGoalie[0] if len(homeGoalie) > 0 else ""
             if awayTeam not in self.upcoming_games:
                 self.upcoming_games[awayTeam] = {
                     "Opponent": homeTeam,
-                    "Home": 0
+                    "Home": 0,
+                    "Goalie": awayGoalie
                 }
             if homeTeam not in self.upcoming_games:
                 self.upcoming_games[homeTeam] = {
                     "Opponent": awayTeam,
-                    "Home": 1
+                    "Home": 1,
+                    "Goalie": homeGoalie
                 }
 
         # Remove old games to prevent file bloat
@@ -3504,10 +3528,11 @@ class StatsNHL(Stats):
                 if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
                     goalie = offer.get("Goalie", "")
                 else:
-                    goalie = self.goalies.get(opponent, "")
+                    goalie = self.upcoming_games.get(
+                        opponent, {}).get("Goalie", "")
 
                 if goalie not in self.goalieProfile.index:
-                    self.goalieProfile.loc[goalie] = 0
+                    self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent, "SOE"]
 
             stats = (
                 archive["NHL"]
@@ -3596,7 +3621,7 @@ class StatsNHL(Stats):
         defense_data = self.defenseProfile.loc[opponent]
 
         data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in positions})
 
         team_data = self.teamProfile.loc[team]
 
@@ -3609,6 +3634,8 @@ class StatsNHL(Stats):
             data["DVPOA"] = self.defenseProfile.loc[opponent, position]
             data["Goalie SOE"] = self.goalieProfile.loc[goalie]
 
+        data.pop("Defense SOE")
+        data.pop("Team SOE")
         return data
 
     def get_training_matrix(self, market):
