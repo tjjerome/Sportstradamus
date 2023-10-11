@@ -116,7 +116,7 @@
         "Targets": "targets"
     },
     "Thrive": {
-        "GOLs + ASTs": "PTS",
+        "GOLs + ASTs": "points",
         "REBS": "REB",
         "PTS": "PTS",
         "ASTS": "AST",
