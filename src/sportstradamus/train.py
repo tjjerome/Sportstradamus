@@ -30,6 +30,7 @@ from lightgbmlss.distributions import (
     NegativeBinomial
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
+import shap
 
 
 @click.command()
@@ -188,7 +189,6 @@ def meditate(force, stats, league, alt):
             filepath = pkg_resources.files(data) / (filename + ".csv")
             if os.path.isfile(filepath) and not force:
                 M = pd.read_csv(filepath, index_col=0)
-                M.to_csv(filepath)
             else:
                 M = stat_data.get_training_matrix(market)
                 M.to_csv(filepath)
@@ -409,6 +409,7 @@ def meditate(force, stats, league, alt):
                 del model
 
             report()
+            see_features()
 
 
 def report():
@@ -433,5 +434,46 @@ def report():
             f.write("\n\n")
 
 
+def see_features():
+    model_list = [f.name for f in pkg_resources.files(
+        data).iterdir() if ".mdl" in f.name]
+    model_list.sort()
+    feature_importances = []
+    for model_str in model_list:
+        with open(pkg_resources.files(data) / model_str, "rb") as infile:
+            model = pickle.load(infile)
+
+        filepath = pkg_resources.files(
+            data) / ("test_" + model_str.replace(".mdl", ".csv"))
+        M = pd.read_csv(filepath, index_col=0)
+
+        y = M[['Result']]
+        X = M.drop(columns=['Result', 'EV'])
+        if model["distribution"] == "Gaussian":
+            X.drop(columns=["STD"], inplace=True)
+        features = X.columns
+
+        categories = ["Home", "Position"]
+        if "Position" not in features:
+            categories.remove("Position")
+        for c in categories:
+            X[c] = X[c].astype('category')
+
+        explainer = shap.TreeExplainer(model['model'].booster)
+        vals = explainer.shap_values(X)
+        if model["distribution"] == "Gaussian":
+            vals = np.abs(vals[0]) + np.abs(vals[1])
+
+        vals = np.mean(np.abs(vals), axis=0)
+        vals = vals/np.sum(vals)*100
+
+        feature_importances.append(
+            {k: v for k, v in list(zip(features, vals))})
+
+    df = pd.DataFrame(feature_importances, index=[
+                      market[:-4] for market in model_list]).fillna(0)
+    df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
+
+
 if __name__ == "__main__":
-    meditate()
+    see_features()
