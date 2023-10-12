@@ -809,11 +809,11 @@ def get_ud():
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"],
-            "Team": player["Team"].replace("WSH", "WAS"),
+            "Team": player["Team"].replace("WSH", "WAS").replace("NOP", "NO"),
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
-            "Opponent": opponent.replace("WSH", "WAS"),
+            "Opponent": opponent.replace("WSH", "WAS").replace("NOP", "NO"),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -886,11 +886,11 @@ def get_ud():
             + " vs. "
             + remove_accents(player2["Name"]),
             "League": player1["League"],
-            "Team": player1["Team"].replace("WSH", "WAS") + "/" + player2["Team"].replace("WSH", "WAS"),
+            "Team": player1["Team"].replace("WSH", "WAS").replace("NOP", "NO") + "/" + player2["Team"].replace("WSH", "WAS").replace("NOP", "NO"),
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
-            "Opponent": opponent1.replace("WSH", "WAS") + "/" + opponent2.replace("WSH", "WAS"),
+            "Opponent": opponent1.replace("WSH", "WAS").replace("NOP", "NO") + "/" + opponent2.replace("WSH", "WAS").replace("NOP", "NO"),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
