@@ -469,7 +469,7 @@ mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
 nhl_teams = scraper.get(
     "https://statsapi.web.nhl.com/api/v1/teams?expand=team.roster")
 nhl_goalies = []
-for team in nhl_teams:
+for team in nhl_teams['teams']:
     nhl_goalies.extend([player["person"]["fullName"]
                        for player in team["roster"]["roster"] if player["position"]["code"] == "G"])
 
