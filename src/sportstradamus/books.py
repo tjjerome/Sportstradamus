@@ -14,6 +14,7 @@ from sportstradamus.helpers import (
     get_ev,
     prob_to_odds,
     mlb_pitchers,
+    nhl_goalies
 )
 
 
@@ -820,6 +821,11 @@ def get_ud():
                 n["Market"] = "Pitcher Fantasy Points"
             else:
                 n["Market"] = "Hitter Fantasy Points"
+        if "Fantasy" in market and n["League"] == "NHL":
+            if n["Player"] in list(nhl_goalies):
+                n["Market"] = "Goalie Fantasy Points"
+            else:
+                n["Market"] = "Skater Fantasy Points"
 
         if n["League"] not in offers:
             offers[n["League"]] = {}
