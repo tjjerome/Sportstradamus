@@ -193,7 +193,7 @@ def prob_to_odds(p):
         return int(np.round((p / (1 - p)) * -100))
 
 
-def no_vig_odds(over, under):
+def no_vig_odds(over, under=None):
     """
     Calculate no-vig odds given over and under odds.
 
@@ -208,12 +208,17 @@ def no_vig_odds(over, under):
         o = odds_to_prob(over)
     else:
         o = 1 / over
-    if np.abs(under) >= 100:
-        u = odds_to_prob(under)
+    if under is None:
+        juice = 1.0652
+        u = juice - o
     else:
-        u = 1 / under
+        if np.abs(under) >= 100:
+            u = odds_to_prob(under)
+        else:
+            u = 1 / under
 
-    juice = o + u
+        juice = o + u
+
     return [o / juice, u / juice]
 
 
