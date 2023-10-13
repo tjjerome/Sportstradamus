@@ -43,6 +43,8 @@
         "Goalie Saves": "saves",
         "SOG + BS": "sogBS",
         "Hits": "hits",
+        "Time On Ice": "timeOnIce",
+        "Faceoffs Won": "faceOffWins",
         "Pass Yards": "passing yards",
         "Rush Yards": "rushing yards",
         "Pass+Rush Yds": "qb yards",
@@ -95,6 +97,9 @@
         "Goals": "goals",
         "Shots": "shots",
         "Saves": "saves",
+        "Blocked Shots": "blocked",
+        "Skater Fantasy Points": "skater fantasy points underdog",
+        "Goalie Fantasy Points": "goalie fantasy points underdog",
         "Passing Yards": "passing yards",
         "Receiving Yards": "receiving yards",
         "Rushing Yards": "rushing yards",
@@ -116,7 +121,7 @@
         "Targets": "targets"
     },
     "Thrive": {
-        "GOLs + ASTs": "PTS",
+        "GOLs + ASTs": "points",
         "REBS": "REB",
         "PTS": "PTS",
         "ASTS": "AST",
