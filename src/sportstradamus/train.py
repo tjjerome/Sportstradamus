@@ -104,6 +104,8 @@ def meditate(force, stats, league, alt):
             "fantasy points parlayplay",
             "passing tds",
             "tds",
+            "rushing tds",
+            "receiving tds",
             "qb tds",
             "completions",
             "carries",
