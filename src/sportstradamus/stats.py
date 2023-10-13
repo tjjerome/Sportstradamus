@@ -2582,9 +2582,17 @@ class StatsNFL(Stats):
         elif any([string in market for string in ["rush", "carries"]]):
             positions = ['QB', 'RB']
             stat_types = self.stat_types['rushing']
-        elif any([string in market for string in ["receiving", "targets", "receptions"]]) or market == "yards":
+        elif any([string in market for string in ["receiving", "targets", "receptions"]]):
             positions = ['WR', 'RB', 'TE']
             stat_types = self.stat_types['receiving']
+        elif market == "tds":
+            positions = ['QB', 'WR', 'RB', 'TE']
+            stat_types = self.stat_types['receiving'] + \
+                self.stat_types['rushing']
+        elif market == "yards":
+            positions = ['WR', 'RB', 'TE']
+            stat_types = self.stat_types['receiving'] + \
+                self.stat_types['rushing']
         else:
             positions = ['QB', 'WR', 'RB', 'TE']
             stat_types = self.stat_types['passing'] + \
