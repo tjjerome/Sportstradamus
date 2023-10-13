@@ -990,14 +990,14 @@ def get_thrive():
                 " ".join([o["player1"]["firstName"], o["player1"]["lastName"]])
             ),
             "League": o["player1"]["leagueType"],
-            "Team": team,
+            "Team": team.replace("WSH", "WAS"),
             "Date": (
                 datetime.strptime(
                     o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
-            "Opponent": opponent,
+            "Opponent": opponent.replace("WSH", "WAS"),
         }
         if n["League"] == "HOCKEY":
             n["League"] = "NHL"
