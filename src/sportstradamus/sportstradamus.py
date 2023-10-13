@@ -35,6 +35,7 @@ import warnings
 @click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
+    global stat_map
     # Initialize tqdm based on the value of 'progress' flag
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -156,6 +157,9 @@ def main(progress, books):
 
     untapped_markets = []
 
+    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
+        stat_map = json.load(infile)
+
     # PrizePicks
 
     pp_dict = get_pp()
@@ -182,6 +186,50 @@ def main(progress, books):
 
     archive.write()
 
+    filepath = pkg_resources.files(data) / "history.dat"
+    if os.path.isfile(filepath):
+        history = pd.read_pickle(filepath)
+    else:
+        history = pd.DataFrame(
+            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
+
+    ud_df = pd.DataFrame(ud_offers)
+    pp_df = pd.DataFrame(pp_offers)
+    th_df = pd.DataFrame(th_offers)
+    ud_df["Market"] = ud_df["Market"].map(stat_map["Underdog"])
+    pp_df["Market"] = pp_df["Market"].map(stat_map["PrizePicks"])
+    th_df["Market"] = th_df["Market"].map(stat_map["Thrive"])
+
+    df = pd.concat([ud_df, pp_df, th_df]).drop_duplicates(["Player", "League", "Date", "Market"],
+                                                          ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
+    history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
+                                                       ignore_index=True)
+    gameDates = pd.to_datetime(history.Date).dt.date
+    history = history.loc[(datetime.datetime.today(
+    ).date() - datetime.timedelta(days=7)) <= gameDates]
+    nameStr = {"MLB": "playerName", "NBA": "PLAYER_NAME",
+               "NFL": "player display name", "NHL": "playerName"}
+    dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
+               "NFL": "gameday", "NHL": "gameDate"}
+    for i, row in history.iterrows():
+        if np.isnan(row["Correct"]):
+            gamelog = stats[row["League"]].gamelog
+            game = gamelog.loc[(gamelog[nameStr[row["League"]]] == row["Player"]) & (
+                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date)]
+            if not game.empty:
+                history.at[i, "Correct"] = int((game.iat[0, row["Market"]] > row["Line"] and row["Bet"] == "Over") or (
+                    game.iat[0, row["Market"]] < row["Line"] and row["Bet"] == "Under"))
+
+    history.to_pickle(filepath)
+    history.dropna(inplace=True, ignore_index=True)
+
+    if len(history) > 0:
+        wks = gc.open("Sportstradamus").worksheet("History")
+        wks.clear()
+        wks.update([history.columns.values.tolist()] +
+                   history.values.tolist())
+        wks.set_basic_filter()
+
     if len(untapped_markets) > 0:
         untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
         wks = gc.open("Sportstradamus").worksheet("Untapped Markets")
@@ -205,6 +253,7 @@ def main(progress, books):
     prob_params['Player'] = playerStats.index
     positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
     prob_params['Position'] = playerStats.Position.map(positions)
+    prob_params = prob_params.join(playerData)
     prob_params['Projection'] = prob_params['loc'].round(1)
     prob_params['Floor'] = norm.ppf(.1395, loc=prob_params['loc'],
                                     scale=prob_params['scale'])
@@ -231,7 +280,7 @@ def main(progress, books):
     prob_params.loc[prob_params['Position'] == "TE", 'VORP6'] = prob_params.loc[prob_params['Position'] == "TE",
                                                                                 'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 7), 'Ceiling'].mean()
 
-    prob_params = prob_params[['Player', 'Position', 'Rank',
+    prob_params = prob_params[['Player', 'Team', 'Game', 'Position', 'Rank',
                                'Projection', 'Floor', 'Ceiling',
                                'VORP12', 'VORP6']].sort_values("VORP6", ascending=False)
 
@@ -390,10 +439,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     Returns:
         list: List of matched offers.
     """
-    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
-        stat_map = json.load(infile)
+    global stat_map
 
     market = stat_map[platform].get(market, market)
+    if league == "NHL":
+        market = {"AST": "assists", "PTS": "points"}.get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
@@ -521,10 +571,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     Returns:
         list: List of matched offers.
     """
-    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
-        stat_map = json.load(infile)
+    global stat_map
 
     market = stat_map[platform].get(market, market)
+    if league == "NHL":
+        market = {"AST": "assists", "PTS": "points"}.get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
