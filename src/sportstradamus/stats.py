@@ -2585,7 +2585,11 @@ class StatsNFL(Stats):
         elif any([string in market for string in ["receiving", "targets", "receptions"]]):
             positions = ['WR', 'RB', 'TE']
             stat_types = self.stat_types['receiving']
-        elif market == "tds" or market == "yards":
+        elif market == "tds":
+            positions = ['QB', 'WR', 'RB', 'TE']
+            stat_types = self.stat_types['receiving'] + \
+                self.stat_types['rushing']
+        elif market == "yards":
             positions = ['WR', 'RB', 'TE']
             stat_types = self.stat_types['receiving'] + \
                 self.stat_types['rushing']
@@ -2936,6 +2940,7 @@ class StatsNFL(Stats):
                     i.append(player)
                     offer.pop("Market")
                     offer.pop("Player")
+                    offer.pop("Home")
                     offers.append(offer)
 
         M = pd.DataFrame(matrix, index=i).fillna(

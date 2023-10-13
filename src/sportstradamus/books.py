@@ -14,6 +14,7 @@ from sportstradamus.helpers import (
     get_ev,
     prob_to_odds,
     mlb_pitchers,
+    nhl_goalies
 )
 
 
@@ -809,17 +810,22 @@ def get_ud():
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"],
-            "Team": player["Team"].replace("WSH", "WAS"),
+            "Team": player["Team"].replace("WSH", "WAS").replace("NOP", "NO"),
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
-            "Opponent": opponent.replace("WSH", "WAS"),
+            "Opponent": opponent.replace("WSH", "WAS").replace("NOP", "NO"),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
                 n["Market"] = "Pitcher Fantasy Points"
             else:
                 n["Market"] = "Hitter Fantasy Points"
+        if "Fantasy" in market and n["League"] == "NHL":
+            if n["Player"] in list(nhl_goalies):
+                n["Market"] = "Goalie Fantasy Points"
+            else:
+                n["Market"] = "Skater Fantasy Points"
 
         if n["League"] not in offers:
             offers[n["League"]] = {}
@@ -886,11 +892,11 @@ def get_ud():
             + " vs. "
             + remove_accents(player2["Name"]),
             "League": player1["League"],
-            "Team": player1["Team"].replace("WSH", "WAS") + "/" + player2["Team"].replace("WSH", "WAS"),
+            "Team": player1["Team"].replace("WSH", "WAS").replace("NOP", "NO") + "/" + player2["Team"].replace("WSH", "WAS").replace("NOP", "NO"),
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
-            "Opponent": opponent1.replace("WSH", "WAS") + "/" + opponent2.replace("WSH", "WAS"),
+            "Opponent": opponent1.replace("WSH", "WAS").replace("NOP", "NO") + "/" + opponent2.replace("WSH", "WAS").replace("NOP", "NO"),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -964,7 +970,7 @@ def get_thrive():
         logger.exception(id)
         return []
 
-    if not api["success"]:
+    if "success" not in api:
         logger.error(api["message"])
         return []
 
@@ -984,14 +990,14 @@ def get_thrive():
                 " ".join([o["player1"]["firstName"], o["player1"]["lastName"]])
             ),
             "League": o["player1"]["leagueType"],
-            "Team": team,
+            "Team": team.replace("WSH", "WAS"),
             "Date": (
                 datetime.strptime(
                     o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
-            "Opponent": opponent,
+            "Opponent": opponent.replace("WSH", "WAS"),
         }
         if n["League"] == "HOCKEY":
             n["League"] = "NHL"
