@@ -44,6 +44,7 @@
         "SOG + BS": "sogBS",
         "Hits": "hits",
         "Time On Ice": "timeOnIce",
+        "Faceoffs Won": "faceOffWins",
         "Pass Yards": "passing yards",
         "Rush Yards": "rushing yards",
         "Pass+Rush Yds": "qb yards",
