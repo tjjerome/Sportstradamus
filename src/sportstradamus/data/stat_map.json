@@ -43,6 +43,7 @@
         "Goalie Saves": "saves",
         "SOG + BS": "sogBS",
         "Hits": "hits",
+        "Time On Ice": "timeOnIce",
         "Pass Yards": "passing yards",
         "Rush Yards": "rushing yards",
         "Pass+Rush Yds": "qb yards",
