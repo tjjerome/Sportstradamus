@@ -970,7 +970,7 @@ def get_thrive():
         logger.exception(id)
         return []
 
-    if not api["success"]:
+    if "success" not in api:
         logger.error(api["message"])
         return []
 
