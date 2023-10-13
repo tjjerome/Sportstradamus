@@ -202,6 +202,10 @@ def main(progress, books):
 
     df = pd.concat([ud_df, pp_df, th_df]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
+    df.loc[(df['Market'] == 'AST') & (
+        df['League'] == 'NHL'), 'Market'] = "points"
+    df.loc[(df['Market'] == 'PTS') & (
+        df['League'] == 'NHL'), 'Market'] = "assists"
     history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                        ignore_index=True)
     gameDates = pd.to_datetime(history.Date).dt.date
