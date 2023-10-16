@@ -82,21 +82,39 @@ def get_dk(events, categories):
                     market = i["name"]
                     for j in i["offerSubcategory"]["offers"]:
                         for k in j:
+                            if market in ["TD Scorer", "Goalscorer"]:
+                                for o in k["outcomes"]:
+                                    if o.get("criterionName") == "Anytime Scorer":
+                                        player = remove_accents(
+                                            o["participant"])
+                                        p = no_vig_odds(o["oddsDecimal"])
+                                        newline = {
+                                            "EV": get_ev(.5, p[1]),
+                                            "Line": '0.5',
+                                            "Over": str(prob_to_odds(p[0])),
+                                            "Under": str(prob_to_odds(p[1]))
+                                        }
+                                        if player not in players:
+                                            players[player] = {}
+
+                                        players[player][market] = newline
+
                             if "line" not in k["outcomes"][0]:
                                 continue
                             if "participant" in k["outcomes"][0]:
-                                player = k["outcomes"][0]["participant"]
+                                player = remove_accents(
+                                    k["outcomes"][0]["participant"])
                             elif market == "1st Inning Total Runs":
                                 for e in dk_api["eventGroup"]["events"]:
                                     if e["eventId"] == k["eventId"]:
                                         player = (
-                                            e["eventMetadata"][
+                                            remove_accents(e["eventMetadata"][
                                                 "participantMetadata"
-                                            ].get("awayTeamStartingPitcherName", "")
+                                            ].get("awayTeamStartingPitcherName", ""))
                                             + " + "
-                                            + e["eventMetadata"][
+                                            + remove_accents(e["eventMetadata"][
                                                 "participantMetadata"
-                                            ].get("homeTeamStartingPitcherName", "")
+                                            ].get("homeTeamStartingPitcherName", ""))
                                         )
                             elif ": " in k["label"]:
                                 player = k["label"][: k["label"].find(": ")]
@@ -231,7 +249,6 @@ def get_fd(sport, tabs):
                         "Moneyline",
                         "Result",
                         "Odd/Even",
-                        "To ",
                         "Alt ",
                     ]
                 )
@@ -239,6 +256,28 @@ def get_fd(sport, tabs):
 
             # Iterate over offers
             for offer in tqdm(offers, desc="Processing Offers", unit="offer"):
+
+                if offer["marketName"] in ["Any Time Touchdown Scorer", "To Record A Hit", "To Hit A Home Run",
+                                           "To Record a Run", "To Record an RBI", "To Hit a Single",
+                                           "To Hit a Double", "Any Time Goal Scorer", "Player to Record 1+ Assists",
+                                           "Player to Record 1+ Points"]:
+                    for o in offer["runners"]:
+                        player = remove_accents(o["runnerName"])
+                        market = offer["marketName"]
+                        if player not in players:
+                            players[player] = {}
+
+                        p = no_vig_odds(
+                            o["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"])
+
+                        newline = {
+                            "EV": get_ev(0.5, p[1]),
+                            "Line": "0.5",
+                            "Over": str(prob_to_odds(p[0])),
+                            "Under": str(prob_to_odds(p[1])),
+                        }
+                        players[player][market] = newline
+
                 if len(offer["runners"]) != 2:
                     continue
 
@@ -391,10 +430,14 @@ def get_pinnacle(league):
         try:
             outcomes = sorted(market["participants"]
                               [:2], key=lambda x: x["name"])
-            line = lines[market["id"]]["s;0;ou"][outcomes[1]
-                                                 ["id"]].get("Line", 0.5)
+            if outcomes[0]["name"] == "No":
+                outcomes.reverse()
+
+            code = "s;0;ou" if "s;0;ou" in lines[market["id"]] else "s;0;m"
+            line = lines[market["id"]][code][outcomes[1]
+                                             ["id"]].get("Line", 0.5)
             prices = [
-                lines[market["id"]]["s;0;ou"][participant["id"]]["Price"]
+                lines[market["id"]][code][participant["id"]]["Price"]
                 for participant in outcomes
             ]
             p = no_vig_odds(prices[0], prices[1])
