@@ -490,11 +490,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
             teams = o["Team"].split("/")
-            if len(teams) == 1:
-                teams = teams*2
+            if len(teams) < len(players):
+                teams = teams*len(players)
             opponents = o["Opponent"].split("/")
-            if len(opponents) == 1:
-                opponents = opponents*2
+            if len(opponents) < len(players):
+                opponents = opponents*len(players)
             for i, player in enumerate(players):
                 if len(player.split(" ")[0].replace(".", "")) <= 2:
                     if league == "NFL":
@@ -528,24 +528,34 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 else:
                     line = 0
 
-                stats = stat_data.get_stats(
-                    o | {
-                        "Player": player,
-                        "Line": line,
-                        "Market": market,
-                        "Team": teams[i],
-                        "Opponent": opponents[i]
-                    }, date=o["Date"])
+                this_o = o | {
+                    "Player": player,
+                    "Line": line,
+                    "Market": market,
+                    "Team": teams[i],
+                    "Opponent": opponents[i]
+                }
+                stats = stat_data.get_stats(this_o, date=o["Date"])
 
                 if type(stats) is int:
                     logger.warning(f"{o['Player']}, {market} stat error")
                     pbar.update()
                     continue
 
+                lines = []
+                for book, dataset in datasets.items():
+                    codex = stat_map[book]
+                    offer = dataset.get(o["Player"], {}).get(
+                        codex.get(market, market)
+                    )
+                    lines.append(offer)
+
+                archive.add(this_o, lines, stat_map[platform])
                 playerStats.append(stats)
                 playerNames.append(player)
+
+            archive.add(o, [None]*4, stat_map[platform])
         else:
-            v = []
             lines = []
             stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
             if type(stats) is int:
@@ -558,26 +568,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 offer = dataset.get(o["Player"], {}).get(
                     codex.get(market, market)
                 )
-                if offer is not None:
-                    v.append(get_ev(offer["Line"], odds_to_prob(
-                        int(offer["Under"])), cv))
 
                 lines.append(offer)
-
-            if v:
-                v = np.mean(v)
-                if cv == 1:
-                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
-                else:
-                    line = o["Line"]
-                    p = [norm.cdf(line, v, v*cv), norm.sf(line, v, v*cv)]
-                push = 1 - p[1] - p[0]
-                p[0] += push / 2
-                p[1] += push / 2
-                stats["Odds"] = p[1]
-            else:
-                p = [0.5] * 2
 
             archive.add(o, lines, stat_map[platform])
             playerStats.append(stats)
