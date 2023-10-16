@@ -396,5 +396,5 @@
 ========================= NHL timeOnIce =========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
-  0.64177   0.659312 0.308999    0.081014     0.102042  0.413341
+ 0.657399   0.672287 0.320124    0.100453     0.122399  0.437905
 
