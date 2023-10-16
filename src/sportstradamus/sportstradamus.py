@@ -570,6 +570,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
                     p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
                 else:
+                    line = o["Line"]
                     p = [norm.cdf(line, v, v*cv), norm.sf(line, v, v*cv)]
                 push = 1 - p[1] - p[0]
                 p[0] += push / 2
