@@ -9,7 +9,7 @@ import datetime
 import importlib.resources as pkg_resources
 from sportstradamus import creds, data
 from time import sleep
-from scipy.stats import poisson, skellam
+from scipy.stats import poisson, skellam, norm
 from scipy.optimize import fsolve
 from scipy.integrate import dblquad
 import numpy as np
@@ -222,7 +222,7 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
-def get_ev(line, under):
+def get_ev(line, under, cv=1):
     """
     Calculate the expected value (EV) given a line and under probability.
 
@@ -233,8 +233,13 @@ def get_ev(line, under):
     Returns:
         float: The expected value (EV).
     """
-    line = np.ceil(float(line) - 1)
-    return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
+    # Poisson dist
+    if cv == 1:
+        line = np.ceil(float(line) - 1)
+        return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
+    else:
+        line = float(line)
+        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
 
 
 def merge_dict(a, b, path=None):
