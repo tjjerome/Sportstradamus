@@ -768,6 +768,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
                     p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
                 else:
+                    line = o["Line"]
                     p = [norm.cdf(line, ev, ev*cv), norm.sf(line, ev, ev*cv)]
                 push = 1 - p[1] - p[0]
                 p[0] += push / 2
