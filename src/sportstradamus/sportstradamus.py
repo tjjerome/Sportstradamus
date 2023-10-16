@@ -10,7 +10,7 @@ from sportstradamus.books import (
     get_thrive,
     get_parp,
 )
-from sportstradamus.helpers import archive, get_ev, prob_diff, prob_sum
+from sportstradamus.helpers import archive, get_ev, prob_diff, prob_sum, odds_to_prob
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -560,7 +560,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     codex.get(market, market)
                 )
                 if offer is not None:
-                    v.append(offer["EV"])
+                    v.append(get_ev(offer["Line"], odds_to_prob(
+                        int(offer["Under"])), cv))
 
                 lines.append(offer)
 
