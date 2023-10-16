@@ -197,6 +197,7 @@
         "runs allowed": "Earned Runs",
         "total bases": "Total Bases",
         "walks allowed": "Walks",
+        "walks": "Walks",
         "batter strikeouts": "Strikeouts",
         "pitcher strikeouts": "Strikeouts",
         "1st inning runs allowed": "1st Inning Total Runs",
@@ -225,17 +226,24 @@
         "passing yards": "Pass Yds",
         "yards": "Rush + Rec Yds",
         "qb yards": "Pass + Rush Yds",
+        "tds": "TD Scorer",
         "completions": "Pass Completions",
         "attempts": "Pass Attempts",
         "interceptions": "Interceptions",
         "shots": "Player Shots on Goal",
         "saves": "Saves",
         "points": "Points",
+        "goals": "Goalscorer",
         "assists": "Assists"
     },
     "FanDuel": {
         "pitcher strikeouts": "Strikeouts",
         "1st inning runs allowed": "1st Inning Over/Under 0.5 Runs",
+        "hits": "To Record A Hit",
+        "home runs": "To Hit A Home Run",
+        "runs": "To Record a Run",
+        "rbi": "To Record an RBI",
+        "singles": "To Hit a Single",
         "PR": "Pts + Reb",
         "PRA": "Pts + Reb + Ast",
         "PTS": "Points",
@@ -249,6 +257,7 @@
         "rushing yards": "Rushing Yds",
         "passing yards": "Passing Yds",
         "passing tds": "Passing TDs",
+        "tds": "Any Time Touchdown Scorer",
         "completions": "Pass Completions",
         "attempts": "Pass Attempts",
         "qb yards": "Passing + Rushing Yds",
@@ -257,7 +266,10 @@
         "receiving yards": "Receiving Yds",
         "receptions": "Total Receptions",
         "saves": "Saves",
-        "shots": "Shots on Goal"
+        "shots": "Shots on Goal",
+        "goals": "Any Time Goal Scorer",
+        "points": "Player to Record 1+ Points",
+        "assists": "Player to Record 1+ Assists"
     },
     "Pinnacle": {
         "pitcher strikeouts": "Total Strikeouts",
@@ -284,7 +296,10 @@
         "receiving yards": "Receiving Yards",
         "receptions": "Receptions",
         "saves": "Saves",
-        "shots": "Shots on Goal"
+        "shots": "Shots on Goal",
+        "goals": "Goals",
+        "assists": "Assists",
+        "points": "Points"
     },
     "Caesars": {
         "total bases": "Total Bases",
