@@ -175,7 +175,7 @@ def meditate(force, stats, league, alt):
             need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
             filepath = pkg_resources.files(data) / filename
-            if os.path.isfile(filepath):
+            if os.path.isfile(filepath) and not force:
                 if stats or alt:
                     with open(filepath, 'rb') as infile:
                         filedict = pickle.load(infile)
@@ -187,8 +187,6 @@ def meditate(force, stats, league, alt):
                 else:
                     continue
 
-            if dist != "Gaussian":
-                continue
             print(f"Training {league} - {market}")
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
@@ -230,6 +228,8 @@ def meditate(force, stats, league, alt):
                     target=y_train, candidate_distributions=candidate_distributions, max_iter=100)
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
+                if dist != "Gaussian":
+                    continue
 
                 params = {
                     "boosting_type": ["categorical", ["gbdt"]],
