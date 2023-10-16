@@ -206,6 +206,7 @@ def main(progress, books):
         df['League'] == 'NHL'), 'Market'] = "points"
     df.loc[(df['Market'] == 'PTS') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
+    df.dropna(subset='Market', inplace=True, ignore_index=True)
     history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                        ignore_index=True)
     gameDates = pd.to_datetime(history.Date).dt.date
@@ -215,14 +216,35 @@ def main(progress, books):
                "NFL": "player display name", "NHL": "playerName"}
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
                "NFL": "gameday", "NHL": "gameDate"}
-    for i, row in history.iterrows():
+    for i, row in tqdm(history.iterrows(), desc="Checking history", total=len(history)):
         if np.isnan(row["Correct"]):
             gamelog = stats[row["League"]].gamelog
-            game = gamelog.loc[(gamelog[nameStr[row["League"]]] == row["Player"]) & (
-                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date)]
-            if not game.empty:
-                history.at[i, "Correct"] = int((game.iat[0, row["Market"]] > row["Line"] and row["Bet"] == "Over") or (
-                    game.iat[0, row["Market"]] < row["Line"] and row["Bet"] == "Under"))
+            if " + " in row["Player"]:
+                players = row["Player"].split(" +")
+                game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
+                    pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
+                    pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                if not game1.empty and not game2.empty:
+                    history.at[i, "Correct"] = int(((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) > row["Line"] and row["Bet"] == "Over") or (
+                        (game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) < row["Line"] and row["Bet"] == "Under"))
+
+            elif " vs. " in row["Player"]:
+                players = row["Player"].split(" vs. ")
+                game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
+                    pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
+                    pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                if not game1.empty and not game2.empty:
+                    history.at[i, "Correct"] = int(((game1.iloc[0][row["Market"]] + row["Line"]) > game2.iloc[0][row["Market"]] and row["Bet"] == "Over") or (
+                        (game1.iloc[0][row["Market"]] + row["Line"]) < game2.iloc[0][row["Market"]] and row["Bet"] == "Under"))
+
+            else:
+                game = gamelog.loc[(gamelog[nameStr[row["League"]]] == row["Player"]) & (
+                    pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                if not game.empty:
+                    history.at[i, "Correct"] = int((game.iloc[0][row["Market"]] > row["Line"] and row["Bet"] == "Over") or (
+                        game.iloc[0][row["Market"]] < row["Line"] and row["Bet"] == "Under"))
 
     history.to_pickle(filepath)
     history.dropna(inplace=True, ignore_index=True)
@@ -591,6 +613,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         filedict = pickle.load(infile)
     model = filedict["model"]
     dist = filedict["distribution"]
+    cv = filedict["cv"]
 
     categories = ["Home", "Position"]
     if "Position" not in playerStats.columns:
@@ -639,14 +662,18 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
             if "+" in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                             ["Odds"]) if stats[0]["Odds"] != 0 else None
+                             ["Odds"], cv) if stats[0]["Odds"] != 0 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                             ["Odds"]) if stats[1]["Odds"] != 0 else None
+                             ["Odds"], cv) if stats[1]["Odds"] != 0 else None
 
                 if ev1 is not None and ev2 is not None:
                     ev = ev1 + ev2
-                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
+                    if cv == 1:
+                        line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                        p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
+                    else:
+                        p = [norm.cdf(line, ev, ev*cv),
+                             norm.sf(line, ev, ev*cv)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -684,13 +711,17 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
             elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                             ["Odds"]) if stats[0]["Odds"] != 0 else None
+                             ["Odds"], cv) if stats[0]["Odds"] != 0 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                             ["Odds"]) if stats[1]["Odds"] != 0 else None
+                             ["Odds"], cv) if stats[1]["Odds"] != 0 else None
                 if ev1 is not None and ev2 is not None:
-                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [skellam.cdf(line[0], ev2, ev1),
-                         skellam.sf(line[1], ev2, ev1)]
+                    if cv == 1:
+                        line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                        p = [skellam.cdf(line[0], ev2, ev1),
+                             skellam.sf(line[1], ev2, ev1)]
+                    else:
+                        p = [norm.cdf(-line, ev1 - ev2, (ev1 + ev2)*cv),
+                             norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -722,12 +753,15 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
 
-            ev = get_ev(stats["Line"], 1-stats["Odds"]
+            ev = get_ev(stats["Line"], 1-stats["Odds"], cv
                         ) if stats["Odds"] != 0 else None
 
             if ev is not None:
-                line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
+                if cv == 1:
+                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                    p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
+                else:
+                    p = [norm.cdf(line, ev, ev*cv), norm.sf(line, ev, ev*cv)]
                 push = 1 - p[1] - p[0]
                 p[0] += push / 2
                 p[1] += push / 2
