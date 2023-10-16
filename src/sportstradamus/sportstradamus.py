@@ -476,6 +476,9 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
         pbar.update(len(offers))
         logger.warning(f"{filename} missing")
         return []
+    with open(filepath, "rb") as infile:
+        filedict = pickle.load(infile)
+    cv = filedict["cv"]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         stat_data.profile_market(market)
@@ -563,8 +566,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
 
             if v:
                 v = np.mean(v)
-                line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                if cv == 1:
+                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                    p = [poisson.cdf(line[0], v), poisson.sf(line[1], v)]
+                else:
+                    p = [norm.cdf(line, v, v*cv), norm.sf(line, v, v*cv)]
                 push = 1 - p[1] - p[0]
                 p[0] += push / 2
                 p[1] += push / 2
