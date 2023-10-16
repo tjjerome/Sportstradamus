@@ -175,17 +175,20 @@ def meditate(force, stats, league, alt):
             need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
             filepath = pkg_resources.files(data) / filename
-            if os.path.isfile(filepath) and not force:
+            if os.path.isfile(filepath):
                 if stats or alt:
                     with open(filepath, 'rb') as infile:
                         filedict = pickle.load(infile)
                         model = filedict['model']
                         params = filedict['params']
                         dist = filedict['distribution']
+                        cv = filedict['cv']
                     need_model = False
                 else:
                     continue
 
+            if dist != "Gaussian":
+                continue
             print(f"Training {league} - {market}")
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
@@ -307,6 +310,7 @@ def meditate(force, stats, league, alt):
             prob_params = model.predict(X_test, pred_type="parameters")
             prob_params.index = y_test.index
             prob_params['result'] = y_test['Result']
+            cv = 1
             if dist == "Poisson":
                 under = poisson.cdf(
                     X_test["Line"], prob_params["rate"])
@@ -324,6 +328,7 @@ def meditate(force, stats, league, alt):
                 ev = prob_params["loc"]
                 entropy = np.mean(
                     np.abs(norm.cdf(y_test["Result"], prob_params["loc"], prob_params["scale"])-.5))
+                cv = y.Result.std()/y.Result.mean()
             elif dist == "Gamma":
                 y_proba = gamma.cdf(
                     X_test["Line"], prob_params["concentration"], scale=1/prob_params["rate"])
@@ -363,8 +368,12 @@ def meditate(force, stats, league, alt):
             ll0 = log_loss(y_class, 0.5*np.ones_like(y_class))
             ll = 1 - ll/ll0
 
-            entropy0 = np.mean(np.abs(poisson.cdf(
-                y_test["Result"], X_test["Line"].apply(get_ev, args=(.5,)))-0.5))
+            if cv == 1:
+                entropy0 = np.mean(np.abs(poisson.cdf(
+                    y_test["Result"], X_test["Line"].apply(get_ev, args=(.5,)))-0.5))
+            else:
+                entropy0 = np.mean(np.abs(norm.cdf(
+                    y_test["Result"], X_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
 
             entropy = 1 - entropy/entropy0
 
@@ -379,7 +388,8 @@ def meditate(force, stats, league, alt):
                     "Deviance": dev,
                 },
                 "params": params,
-                "distribution": dist
+                "distribution": dist,
+                "cv": cv
             }
 
             X_test['Result'] = y_test['Result']
@@ -478,4 +488,4 @@ def see_features():
 
 
 if __name__ == "__main__":
-    see_features()
+    meditate()
