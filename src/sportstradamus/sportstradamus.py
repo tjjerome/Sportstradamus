@@ -82,10 +82,9 @@ def main(progress, books):
         dk_data.update(
             get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
         logger.info("Getting DraftKings NHL lines")
-        dk_data.update(get_dk(42133, [550, 1064, 1189]))  # NHL
+        dk_data.update(get_dk(42133, [550, 1064, 1189, 1190]))  # NHL
         logger.info("Getting DraftKings NFL lines")
-        dk_data.update(get_dk(88808, [1000, 1001]))  # NFL
-        # dk_data.update(get_dk(92893, [488, 633])) # Tennis
+        dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
         logger.info(str(len(dk_data)) + " offers found")
 
         logger.info("Getting FanDuel MLB lines")
@@ -99,7 +98,7 @@ def main(progress, books):
             get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
         logger.info("Getting FanDuel NFL lines")
         fd_data.update(
-            get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props']))
+            get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
         logger.info(str(len(fd_data)) + " offers found")
 
         logger.info("Getting Pinnacle MLB lines")
@@ -680,6 +679,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
                         p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
                     else:
+                        line = o["Line"]
                         p = [norm.cdf(line, ev, ev*cv),
                              norm.sf(line, ev, ev*cv)]
                     push = 1 - p[1] - p[0]
@@ -728,6 +728,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         p = [skellam.cdf(line[0], ev2, ev1),
                              skellam.sf(line[1], ev2, ev1)]
                     else:
+                        line = o["Line"]
                         p = [norm.cdf(-line, ev1 - ev2, (ev1 + ev2)*cv),
                              norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
                     push = 1 - p[1] - p[0]
