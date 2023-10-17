@@ -208,6 +208,7 @@ def main(progress, books):
     df.dropna(subset='Market', inplace=True, ignore_index=True)
     history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                        ignore_index=True)
+    history = history.loc[history["Model"] > .6]
     gameDates = pd.to_datetime(history.Date).dt.date
     history = history.loc[(datetime.datetime.today(
     ).date() - datetime.timedelta(days=7)) <= gameDates]
@@ -550,11 +551,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     )
                     lines.append(offer)
 
-                archive.add(this_o, lines, stat_map[platform])
+                archive.add(this_o, lines, stat_map[platform], cv)
                 playerStats.append(stats)
                 playerNames.append(player)
 
-            archive.add(o, [None]*4, stat_map[platform])
+            archive.add(o, [None]*4, stat_map[platform], cv)
         else:
             lines = []
             stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
@@ -571,7 +572,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
 
                 lines.append(offer)
 
-            archive.add(o, lines, stat_map[platform])
+            archive.add(o, lines, stat_map[platform], cv)
             playerStats.append(stats)
             playerNames.append(o["Player"])
 
