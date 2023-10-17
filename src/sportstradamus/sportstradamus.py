@@ -185,6 +185,7 @@ def main(progress, books):
 
     archive.write()
 
+    logger.info("Checking historical predictions")
     filepath = pkg_resources.files(data) / "history.dat"
     if os.path.isfile(filepath):
         history = pd.read_pickle(filepath)
@@ -263,6 +264,8 @@ def main(progress, books):
         wks.update([untapped_df.columns.values.tolist()] +
                    untapped_df.values.tolist())
         wks.set_basic_filter()
+
+    logger.info("Getting NFL Fantasy Rankings")
 
     filepath = pkg_resources.files(data) / "NFL_fantasy-points-underdog.mdl"
     with open(filepath, "rb") as infile:
