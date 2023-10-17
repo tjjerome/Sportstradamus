@@ -408,7 +408,7 @@ def save_data(offers, book, gc):
             wks.set_basic_filter()
 
             # Apply number formatting to the relevant columns
-            if book == "ParlayPlay":
+            if book == "ParlayPlay" or book == "Underdog":
                 wks.format(
                     "I:J", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
@@ -527,7 +527,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                         lines.remove("Closing Lines")
                     line = lines[-1]
                 else:
-                    line = 0
+                    line = 0.5
 
                 this_o = o | {
                     "Player": player,
@@ -558,12 +558,6 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
             archive.add(o, [None]*4, stat_map[platform], cv)
         else:
             lines = []
-            stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
-            if type(stats) is int:
-                logger.warning(f"{o['Player']}, {market} stat error")
-                pbar.update()
-                continue
-
             for book, dataset in datasets.items():
                 codex = stat_map[book]
                 offer = dataset.get(o["Player"], {}).get(
@@ -573,6 +567,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 lines.append(offer)
 
             archive.add(o, lines, stat_map[platform], cv)
+            stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
+            if type(stats) is int:
+                logger.warning(f"{o['Player']}, {market} stat error")
+                pbar.update()
+                continue
             playerStats.append(stats)
             playerNames.append(o["Player"])
 
@@ -783,7 +782,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         try:
             proba = [under, 1-under]
 
-            if proba[1] > proba[0]:
+            if proba[1] > proba[0] or o.get("Boost", 1) > 1:
                 o["Bet"] = "Over"
                 o["Books"] = p[1]
                 o["Model"] = proba[1]

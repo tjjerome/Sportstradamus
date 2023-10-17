@@ -343,7 +343,8 @@ class Archive:
         odds = []
         for line in lines:
             if line:
-                ev = get_ev(float(line["Line"]), float(line["Under"]), cv)
+                ev = get_ev(float(line["Line"]), odds_to_prob(
+                    float(line["Under"])), cv)
                 if cv == 1:
                     p = poisson.sf(np.floor(o["Line"]), ev)
                     if np.mod(o["Line"], 1) == 0:
