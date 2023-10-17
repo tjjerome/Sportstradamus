@@ -2171,7 +2171,7 @@ class StatsNFL(Stats):
         need_pbp = True
         teamDataList = []
         for i, row in tqdm(self.gamelog.iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
-            if row['opponent'] != row['opponent']:
+            if row['passer rating'] != row['passer rating']:
                 if need_pbp:
                     self.pbp = nfl.import_pbp_data([self.season_start.year])
                     self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
@@ -2212,13 +2212,25 @@ class StatsNFL(Stats):
 
                 playerData = self.parse_pbp(
                     row['week'], row['recent team'], row['player display name'])
-                if type(playerData) is int:
-                    self.gamelog.drop(index=i, inplace=True)
-                    continue
+                if type(playerData) is not int:
+                    for k, v in playerData.items():
+                        self.gamelog.at[i, k.replace(
+                            "_", " ")] = np.nan_to_num(v)
 
-                for k, v in playerData.items():
-                    self.gamelog.at[i, k.replace("_", " ")] = v
+                    if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
+                                                                  (self.teamlog.week == row.week), 'team'] and \
+                            (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
+                        teamData = {
+                            "season": row.season,
+                            "week": row.week,
+                            "team": row['recent team'],
+                            "gameday": self.gamelog.at[i, 'gameday']
+                        }
+                        teamData.update(self.parse_pbp(
+                            row['week'], row['recent team']))
+                        teamDataList.append(teamData)
 
+            if row['opponent'] != row['opponent']:
                 if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
@@ -2235,19 +2247,6 @@ class StatsNFL(Stats):
                                                                                                 == row['recent team']), 'gameday'].values[0]
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent team']), 'game_id'].values[0]
-
-                if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
-                                                              (self.teamlog.week == row.week), 'team'] and \
-                        (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
-                    teamData = {
-                        "season": row.season,
-                        "week": row.week,
-                        "team": row['recent team'],
-                        "gameday": self.gamelog.at[i, 'gameday']
-                    }
-                    teamData.update(self.parse_pbp(
-                        row['week'], row['recent team']))
-                    teamDataList.append(teamData)
 
         self.teamlog = pd.concat(
             [self.teamlog, pd.DataFrame.from_records(teamDataList)], ignore_index=True)
