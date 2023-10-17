@@ -857,6 +857,7 @@ def get_ud():
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
+            "Boost": float(o["options"][0]["payout_multiplier"]),
             "Opponent": opponent.replace("WSH", "WAS").replace("NOP", "NO"),
         }
         if "Fantasy" in market and n["League"] == "MLB":
