@@ -316,7 +316,7 @@ class Archive:
         """
         return self.archive[item]
 
-    def add(self, o, lines, key):
+    def add(self, o, lines, key, cv=1):
         """
         Add data to the archive.
 
@@ -332,7 +332,7 @@ class Archive:
         market = key.get(market, market)
         if o["League"] == "NHL":
             market_swap = {"AST": "assists",
-                           "PTS": "points", "BLK": "blockedShots"}
+                           "PTS": "points", "BLK": "blocked"}
             market = market_swap.get(market, market)
 
         self.archive.setdefault(o["League"], {}).setdefault(market, {})
@@ -343,15 +343,13 @@ class Archive:
         odds = []
         for line in lines:
             if line:
-                l = np.floor(o["Line"])
-                if isinstance(line["EV"], tuple):
-                    p = skellam.sf(l, line["EV"][1], line["EV"][0])
+                ev = get_ev(float(line["Line"]), float(line["Under"]), cv)
+                if cv == 1:
+                    p = poisson.sf(np.floor(o["Line"]), ev)
                     if np.mod(o["Line"], 1) == 0:
-                        p += skellam.pmf(l, line["EV"][1], line["EV"][0]) / 2
+                        p += poisson.pmf(o["Line"], line["EV"]) / 2
                 else:
-                    p = poisson.sf(l, line["EV"])
-                    if np.mod(o["Line"], 1) == 0:
-                        p += poisson.pmf(l, line["EV"]) / 2
+                    p = norm.sf(o["Line"], ev, ev*cv)
             else:
                 p = None
 
