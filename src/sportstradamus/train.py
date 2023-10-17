@@ -68,31 +68,31 @@ def meditate(force, stats, league, alt):
     nfl.update()
 
     all_markets = {
-        # "MLB": [
-        #     "pitcher strikeouts",
-        #     "pitching outs",
-        #     "pitches thrown",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "1st inning runs allowed",
-        #     "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "walks allowed",
-        #     "batter strikeouts",
-        #     "hitter fantasy points parlay",
-        #     "pitcher fantasy points parlay",
-        #     "singles",
-        # ],
+        "MLB": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "walks allowed",
+            "batter strikeouts",
+            "hitter fantasy points parlay",
+            "pitcher fantasy points parlay",
+            "singles",
+        ],
         "NFL": [
             "passing yards",
             "rushing yards",
@@ -190,8 +190,7 @@ def meditate(force, stats, league, alt):
             print(f"Training {league} - {market}")
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
-            # if os.path.isfile(filepath) and not force:
-            if os.path.isfile(filepath):
+            if os.path.isfile(filepath) and not force:
                 M = pd.read_csv(filepath, index_col=0)
             else:
                 M = stat_data.get_training_matrix(market)
@@ -229,8 +228,6 @@ def meditate(force, stats, league, alt):
                     target=y_train, candidate_distributions=candidate_distributions, max_iter=100)
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
-                if dist != "Gaussian":
-                    continue
 
                 params = {
                     "boosting_type": ["categorical", ["gbdt"]],

@@ -721,11 +721,11 @@ def get_pp():
                                ["new_player"]["data"]["id"]]["Name"]
                 ),
                 "League": league,
-                "Team": player_ids[o["relationships"]["new_player"]["data"]["id"]]["Team"],
+                "Team": player_ids[o["relationships"]["new_player"]["data"]["id"]]["Team"].upper(),
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
-                "Opponent": o["attributes"]["description"].replace("JAC", "JAX").replace("WSH", "WAS").replace("LAV", "LV"),
+                "Opponent": o["attributes"]["description"].upper().replace("JAC", "JAX").replace("WSH", "WAS").replace("LAV", "LV"),
             }
 
             if o["attributes"]["is_promo"]:
