@@ -785,7 +785,7 @@ def get_ud():
         team_ids[i["id"]] = i["abbr"]
 
     api = scraper.get(
-        "https://api.underdogfantasy.com/beta/v3/over_under_lines")
+        "https://api.underdogfantasy.com/beta/v5/over_under_lines")
     if not api:
         logger.info("No offers found")
         return {}
@@ -940,6 +940,7 @@ def get_ud():
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
+            "Boost": 1,
             "Opponent": opponent1.replace("WSH", "WAS").replace("NOP", "NO") + "/" + opponent2.replace("WSH", "WAS").replace("NOP", "NO"),
         }
         if "Fantasy" in market and n["League"] == "MLB":
