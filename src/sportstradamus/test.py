@@ -10,6 +10,9 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
+nfl = StatsNFL()
+nfl.load()
+nfl.update()
 nba = StatsNBA()
 nba.load()
 nba.update()
@@ -19,9 +22,6 @@ mlb.update()
 nhl = StatsNHL()
 nhl.load()
 nhl.update()
-nfl = StatsNFL()
-nfl.load()
-nfl.update()
 
 stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
 
