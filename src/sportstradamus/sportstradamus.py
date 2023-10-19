@@ -212,7 +212,7 @@ def main(progress, books):
     history = history.loc[history["Model"] > .6]
     gameDates = pd.to_datetime(history.Date).dt.date
     history = history.loc[(datetime.datetime.today(
-    ).date() - datetime.timedelta(days=7)) <= gameDates]
+    ).date() - datetime.timedelta(days=28)) <= gameDates]
     nameStr = {"MLB": "playerName", "NBA": "PLAYER_NAME",
                "NFL": "player display name", "NHL": "playerName"}
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
