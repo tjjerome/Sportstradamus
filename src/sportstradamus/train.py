@@ -191,7 +191,7 @@ def meditate(force, stats, league, alt):
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
             if os.path.isfile(filepath) and not force:
-                M = pd.read_csv(filepath, index_col=0)
+                M = pd.read_csv(filepath, index_col=0).dropna()
             else:
                 M = stat_data.get_training_matrix(market)
                 M.to_csv(filepath)
