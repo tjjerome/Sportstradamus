@@ -530,8 +530,15 @@ class StatsNBA(Stats):
 
         stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
                       'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
-        playerstats = gamelog.fillna(0).groupby('PLAYER_NAME')[
-            stat_types].mean(numeric_only=True)
+
+        playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
+            self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
+            stat_types]
+        playerstats = playerlogs.mean(numeric_only=True)
+        playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
+            'PLAYER_NAME').tail(4).groupby('PLAYER_NAME').mean().fillna(0).add_suffix(" growth", 1)
+        playerstats = playerstats.join(playertrends)
+
         positions = ['Guard', 'Forward', 'Center',
                      'Guard-Forward', 'Forward-Center']
         for position in positions:
@@ -728,7 +735,11 @@ class StatsNBA(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
+            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
+            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
+            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
+            "DaysIntoSeason": (date.date() - self.season_start).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -1606,8 +1617,13 @@ class StatsMLB(Stats):
             self.playerProfile['days off'] = playerGroups['gameDate'].apply(lambda x: np.diff(
                 [datetime.strptime(g, "%Y-%m-%d") for g in x.iloc[-2:]])[0].days)
 
-            playerstats = gamelog.fillna(0).groupby('playerName')[
-                self.stat_types['pitching']].mean(numeric_only=True)\
+            playerlogs = gamelog.loc[gamelog['playerName'].isin(
+                self.playerProfile.index)].fillna(0).groupby('playerName')[
+                self.stat_types['pitching']]
+            playerstats = playerlogs.mean(numeric_only=True)
+            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
+                'playerName').tail(2).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+            playerstats = playerstats.join(playertrends)
 
             batterstats = gamelog2.groupby('playerName')[
                 self.stat_types['batting']].mean(numeric_only=True)
@@ -1625,8 +1641,14 @@ class StatsMLB(Stats):
                 playerstats, on='playerName')
 
         else:
-            playerstats = gamelog.fillna(0).groupby('playerName')[
-                self.stat_types['batting']].mean(numeric_only=True)
+            playerlogs = gamelog.loc[gamelog['playerName'].isin(
+                self.playerProfile.index)].fillna(0).groupby('playerName')[
+                self.stat_types['batting']]
+            playerstats = playerlogs.mean(numeric_only=True)
+            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
+                'playerName').tail(4).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+            playerstats = playerstats.join(playertrends)
+
             pitcherstats = gamelog2.drop(columns='opponent pitcher').rename(
                 columns={'playerName': 'opponent pitcher'}).groupby('opponent pitcher')[
                 self.stat_types['pitching']].mean(numeric_only=True)
@@ -1801,7 +1823,11 @@ class StatsMLB(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
+            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
+            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
+            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
+            "DaysIntoSeason": (date.date() - self.season_start).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -2014,15 +2040,16 @@ class StatsNFL(Stats):
                 'passer adot differential', 'time to throw', 'aggressiveness', 'pass yards per attempt',
                 'rushing yards over expected', 'rushing success rate', 'yac over expected', 'separation created',
                 'targets per route run', 'first read targets per route run', 'route participation',
-                'yards per route run', 'average depth of target', 'receiver cp over expected',
+                'midfield tprr', 'yards per route run', 'average depth of target', 'receiver cp over expected',
                 'first read target share', 'redzone target share', 'redzone carry share', 'carry share']
         self.gamelog = pd.DataFrame(columns=cols)
-        team_cols = ['season', 'week', 'team', 'pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
+        team_cols = ['season', 'week', 'team', 'pass_rate', 'pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
                      'rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_per_rush', 'epa_per_pass',
                      'epa_allowed_per_rush', 'epa_allowed_per_pass', 'yards_allowed_per_rush', 'yards_allowed_per_pass',
                      'completion_percentage_allowed', 'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush',
                      'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
-                     'blitz_rate', 'epa_per_blitz', "exp_per_rush", "exp_per_pass", "exp_allowed_per_rush", "exp_allowed_per_pass"]
+                     'blitz_rate', 'epa_per_blitz', 'epa_allowed_per_blitz', 'exp_per_rush', 'exp_per_pass',
+                     'exp_allowed_per_rush', 'exp_allowed_per_pass']
         self.teamlog = pd.DataFrame(columns=team_cols)
         self.stat_types = {
             'passing': ['completion percentage over expected', 'completion percentage', 'passer rating',
@@ -2031,17 +2058,18 @@ class StatsNFL(Stats):
             'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
                           'yac over expected', 'separation created', 'targets per route run',
                           'first read targets per route run', 'route participation', 'yards per route run',
-                          'average depth of target', 'receiver cp over expected',
+                          'midfield tprr', 'average depth of target', 'receiver cp over expected',
                           'first read target share', 'redzone target share'],
             'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate',
                         'redzone carry share', 'carry share'],
-            'offense': ['pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
-                        'epa_per_rush', 'epa_per_pass', 'pressure_allowed_per_pass',
-                        'stuffs_allowed_per_rush', 'expected_yards_per_rush', 'epa_per_blitz'],
+            'offense': ['pass_rate', 'pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
+                        'epa_per_rush', 'epa_per_pass', 'exp_per_rush', 'exp_per_pass',
+                        'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
+                        'epa_per_blitz'],
             'defense': ['rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_allowed_per_rush',
-                        'epa_allowed_per_pass', 'yards_allowed_per_rush', 'yards_allowed_per_pass',
-                        'completion_percentage_allowed', 'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush',
-                        'blitz_rate']
+                        'epa_allowed_per_pass', 'exp_allowed_per_rush', 'exp_allowed_per_pass',
+                        'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed',
+                        'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush', 'blitz_rate', 'epa_allowed_per_blitz']
         }
         self.need_pbp = True
 
@@ -2064,6 +2092,7 @@ class StatsNFL(Stats):
         Update data from the web API.
         """
         # Fetch game logs
+        self.need_pbp = True
         cols = ['player_id', 'player_display_name', 'position_group',
                 'recent_team', 'season', 'week', 'season_type',
                 'completions', 'attempts', 'passing_yards', 'passing_tds',
@@ -2283,15 +2312,16 @@ class StatsNFL(Stats):
         pbp_off = pbp.loc[pbp.posteam == team]
         pbp_def = pbp.loc[pbp.posteam != team]
         if playerName == "":
+            pr = pbp_off['pass'].mean()
             proe = pbp_off['pass'].mean() - pbp_off['xpass'].mean()
-            off_rush_sr = pbp_off.loc[pbp_off['rush'], 'success'].mean()
-            off_pass_sr = pbp_off.loc[pbp_off['pass'], 'success'].mean()
-            def_rush_sr = pbp_def.loc[pbp_def['rush'], 'success'].mean()
-            def_pass_sr = pbp_def.loc[pbp_def['pass'], 'success'].mean()
-            off_rush_epa = (pbp_off.loc[pbp_off['rush'], 'epa'] > 0).mean()
-            off_pass_epa = (pbp_off.loc[pbp_off['pass'], 'epa'] > 0).mean()
-            def_rush_epa = (pbp_def.loc[pbp_def['rush'], 'epa'] > 0).mean()
-            def_pass_epa = (pbp_def.loc[pbp_def['pass'], 'epa'] > 0).mean()
+            off_rush_sr = (pbp_off.loc[pbp_off['rush'], 'epa'] > 0).mean()
+            off_pass_sr = (pbp_off.loc[pbp_off['pass'], 'epa'] > 0).mean()
+            def_rush_sr = (pbp_def.loc[pbp_def['rush'], 'epa'] > 0).mean()
+            def_pass_sr = (pbp_def.loc[pbp_def['pass'], 'epa'] > 0).mean()
+            off_rush_epa = pbp_off.loc[pbp_off['rush'], 'epa'].mean()
+            off_pass_epa = pbp_off.loc[pbp_off['pass'], 'epa'].mean()
+            def_rush_epa = pbp_def.loc[pbp_def['rush'], 'epa'].mean()
+            def_pass_epa = pbp_def.loc[pbp_def['pass'], 'epa'].mean()
             def_rush_ypa = pbp_def.loc[pbp_def['rush'], 'yards_gained'].mean()
             def_pass_ypa = pbp_def.loc[pbp_def['pass'], 'yards_gained'].mean()
             off_rush_exp = (
@@ -2319,10 +2349,13 @@ class StatsNFL(Stats):
             off_rush_xya = rush_ngs.iloc[0]/rush_ngs.iloc[1]
             blitz_rate = pbp_def.loc[pbp_def['pass'] & (pbp_def['n_blitzers'] > 0), 'n_blitzers'].count(
             ) / len(pbp_def.loc[pbp_def['qb_dropback']])
-            blitz_epa = pbp_def.loc[pbp_def['pass'] & (
+            off_blitz_epa = pbp_off.loc[pbp_off['pass'] & (
+                pbp_off['n_blitzers'] > 0), 'epa'].mean()
+            def_blitz_epa = pbp_def.loc[pbp_def['pass'] & (
                 pbp_def['n_blitzers'] > 0), 'epa'].mean()
 
             return {
+                "pass_rate": pr,
                 "pass_rate_over_expected": proe,
                 "rush_success_rate": off_rush_sr,
                 "pass_success_rate": off_pass_sr,
@@ -2346,7 +2379,8 @@ class StatsNFL(Stats):
                 "stuffs_allowed_per_rush": off_stuff,
                 "expected_yards_per_rush": off_rush_xya,
                 "blitz_rate": blitz_rate,
-                "epa_per_blitz": blitz_epa
+                "epa_per_blitz": off_blitz_epa,
+                "epa_allowed_per_blitz": def_blitz_epa
             }
 
         else:
@@ -2411,27 +2445,31 @@ class StatsNFL(Stats):
             pass_attempts = len(pbp_off.loc[pbp_off['pass']])
             fr_pass_attempts = len(
                 pbp_off.loc[(pbp_off['pass']) & (pbp_off['read_thrown'] == "1")])
-            tprr = targets / routes_run if routes_run > 0 else np.nan
-            frtprr = fr_targets / routes_run if routes_run > 0 else np.nan
-            frt_pct = fr_targets / fr_pass_attempts if fr_pass_attempts > 0 else np.nan
-            route_participation = routes_run / pass_attempts if pass_attempts > 0 else np.nan
-            yprr = pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(
-                playerName), 'yards_gained'].sum() / routes_run if routes_run > 0 else np.nan
+            mid_targets = (len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
+                playerName)) & (pbp_off['pass_location'] == "middle")]) / routes_run) if routes_run > 0 else np.nan
+            tprr = (targets / routes_run) if routes_run > 0 else np.nan
+            frtprr = (fr_targets / routes_run) if routes_run > 0 else np.nan
+            frt_pct = (
+                fr_targets / fr_pass_attempts) if fr_pass_attempts > 0 else np.nan
+            route_participation = (
+                routes_run / pass_attempts) if pass_attempts > 0 else np.nan
+            yprr = (pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(
+                playerName), 'yards_gained'].sum() / routes_run) if routes_run > 0 else np.nan
             adot = pbp_off.loc[pbp_off['receiver_player_id']
                                == self.ids.get(playerName), 'air_yards'].mean()
             rec_cpoe = pbp_off.loc[pbp_off['receiver_player_id']
                                    == self.ids.get(playerName), 'cpoe'].mean() / 100
             rz_passes = len(
                 pbp_off.loc[pbp_off['pass_attempt'] & pbp_off['drive_inside20']])
-            rz_target_pct = len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
-                playerName)) & pbp_off['drive_inside20']]) / rz_passes if rz_passes > 0 else np.nan
+            rz_target_pct = (len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
+                playerName)) & pbp_off['drive_inside20']]) / rz_passes) if rz_passes > 0 else np.nan
             rz_rushes = len(
                 pbp_off.loc[pbp_off['rush'] & pbp_off['drive_inside20']])
-            rz_attempt_pct = len(pbp_off.loc[(pbp_off['rusher_player_id'] == self.ids.get(
-                playerName)) & pbp_off['drive_inside20']]) / rz_rushes if rz_rushes > 0 else np.nan
+            rz_attempt_pct = (len(pbp_off.loc[(pbp_off['rusher_player_id'] == self.ids.get(
+                playerName)) & pbp_off['drive_inside20']]) / rz_rushes) if rz_rushes > 0 else np.nan
             rushes = len(pbp_off.loc[pbp_off['rush']])
-            attempt_pct = len(pbp_off.loc[pbp_off['rusher_player_id'] == self.ids.get(
-                playerName)]) / rushes if rushes > 0 else np.nan
+            attempt_pct = (len(pbp_off.loc[pbp_off['rusher_player_id'] == self.ids.get(
+                playerName)]) / rushes) if rushes > 0 else np.nan
 
             return {
                 "completion_percentage_over_expected": cpoe,
@@ -2450,6 +2488,7 @@ class StatsNFL(Stats):
                 "first_read_targets_per_route_run": frtprr,
                 "route_participation": route_participation,
                 "yards_per_route_run": yprr,
+                "midfield_tprr": mid_targets,
                 "average_depth_of_target": adot,
                 "receiver_cp_over_expected": rec_cpoe,
                 "first_read_target_share": frt_pct,
@@ -2604,8 +2643,12 @@ class StatsNFL(Stats):
                 self.stat_types['rushing'] + \
                 self.stat_types['receiving']
 
-        playerstats = gamelog.fillna(0).groupby('player display name')[
-            stat_types].mean(numeric_only=True)
+        playerlogs = gamelog.loc[gamelog['player display name'].isin(
+            self.playerProfile.index)].fillna(0).groupby('player display name')[stat_types]
+        playerstats = playerlogs.mean(numeric_only=True)
+        playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
+            'player display name').tail(2).groupby('player display name').mean().fillna(0).add_suffix(" growth", 1)
+        playerstats = playerstats.join(playertrends)
         for position in positions:
             positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
                 ['opponent', 'game id'])
@@ -2648,7 +2691,7 @@ class StatsNFL(Stats):
         self.teamProfile = teamstats[self.stat_types['offense']]
 
         self.playerProfile = self.playerProfile.merge(
-            playerstats[stat_types], on='player display name')
+            playerstats, on='player display name')
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -2778,11 +2821,16 @@ class StatsNFL(Stats):
             "AvgH2H": np.median(h2h_res[-5:]) if h2h_res else 0,
             "IQR10": iqr(game_res[-10:]) if game_res else 0,
             "IQRYr": iqr(game_res[-one_year_ago:]) if game_res else 0,
+            "IQRH2H": iqr(h2h_res[-5:]) if h2h_res else 0,
             "Mean5": np.mean(game_res[-5:]) if game_res else 0,
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
+            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
+            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
+            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
+            "DaysIntoSeason": (date.date() - self.season_start).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -3408,14 +3456,22 @@ class StatsNHL(Stats):
         skater_stats = ["GOE", "Fenwick", "TimeShare",
                         "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
         if any([string in market for string in ["Against", "saves", "goalie"]]):
-            playerstats = gamelog.fillna(0).groupby('playerName')[
-                'SOE'].mean(numeric_only=True)
+            playerlogs = gamelog.loc[gamelog['playerName'].isin(
+                self.playerProfile.index)].fillna(0).groupby('playerName')['SOE']
+            playerstats = playerlogs.mean(numeric_only=True)
+            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
+                'playerName').tail(4).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+            playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
                 playerstats, on='playerName')
         else:
-            playerstats = gamelog.fillna(0).groupby('playerName')[
-                skater_stats].mean(numeric_only=True)
+            playerlogs = gamelog.loc[gamelog['playerName'].isin(
+                self.playerProfile.index)].fillna(0).groupby('playerName')[skater_stats]
+            playerstats = playerlogs.mean(numeric_only=True)
+            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
+                'playerName').tail(4).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+            playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
                 playerstats, on='playerName')
@@ -3597,7 +3653,11 @@ class StatsNHL(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
+            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
+            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
+            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
             "GamesPlayed": one_year_ago,
+            "DaysIntoSeason": (date.date() - self.season_start).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home
