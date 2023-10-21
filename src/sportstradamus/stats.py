@@ -535,8 +535,11 @@ class StatsNBA(Stats):
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
             stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
+        playershortstats = playerlogs.tail(5).groupby(
+            'PLAYER_NAME').mean(numeric_only=True).fillna(0).add_suffix(" short", 1)
+        playerstats = playerstats.join(playershortstats)
         playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-            'PLAYER_NAME').tail(4).groupby('PLAYER_NAME').mean().fillna(0).add_suffix(" growth", 1)
+            'PLAYER_NAME').tail(4).groupby('PLAYER_NAME').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playertrends)
 
         positions = ['Guard', 'Forward', 'Center',
@@ -1621,8 +1624,11 @@ class StatsMLB(Stats):
                 self.playerProfile.index)].fillna(0).groupby('playerName')[
                 self.stat_types['pitching']]
             playerstats = playerlogs.mean(numeric_only=True)
+            playershortstats = playerlogs.tail(3).groupby('playerName').mean(
+                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playerstats = playerstats.join(playershortstats)
             playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(2).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+                'playerName').tail(2).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             batterstats = gamelog2.groupby('playerName')[
@@ -1645,8 +1651,11 @@ class StatsMLB(Stats):
                 self.playerProfile.index)].fillna(0).groupby('playerName')[
                 self.stat_types['batting']]
             playerstats = playerlogs.mean(numeric_only=True)
+            playershortstats = playerlogs.tail(5).groupby('playerName').mean(
+                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playerstats = playerstats.join(playershortstats)
             playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(4).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+                'playerName').tail(4).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             pitcherstats = gamelog2.drop(columns='opponent pitcher').rename(
@@ -2646,8 +2655,11 @@ class StatsNFL(Stats):
         playerlogs = gamelog.loc[gamelog['player display name'].isin(
             self.playerProfile.index)].fillna(0).groupby('player display name')[stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
+        playershortstats = playerlogs.tail(3).groupby('player display name').mean(
+            numeric_only=True).fillna(0).add_suffix(" short", 1)
         playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-            'player display name').tail(2).groupby('player display name').mean().fillna(0).add_suffix(" growth", 1)
+            'player display name').tail(2).groupby('player display name').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
+        playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
             positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
@@ -3459,8 +3471,11 @@ class StatsNHL(Stats):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
                 self.playerProfile.index)].fillna(0).groupby('playerName')['SOE']
             playerstats = playerlogs.mean(numeric_only=True)
+            playershortstats = playerlogs.tail(5).groupby('playerName').mean(
+                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playerstats = playerstats.join(playershortstats)
             playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(4).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+                'playerName').tail(4).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
@@ -3469,8 +3484,11 @@ class StatsNHL(Stats):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
                 self.playerProfile.index)].fillna(0).groupby('playerName')[skater_stats]
             playerstats = playerlogs.mean(numeric_only=True)
+            playershortstats = playerlogs.tail(5).groupby('playerName').mean(
+                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playerstats = playerstats.join(playershortstats)
             playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(4).groupby('playerName').mean().fillna(0).add_suffix(" growth", 1)
+                'playerName').tail(4).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
