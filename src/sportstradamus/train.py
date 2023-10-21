@@ -481,7 +481,7 @@ def see_features():
             {k: v for k, v in list(zip(features, vals))})
 
     df = pd.DataFrame(feature_importances, index=[
-                      market[:-4] for market in model_list]).fillna(0)
+                      market[:-4] for market in model_list]).fillna(0).transpose()
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
 
