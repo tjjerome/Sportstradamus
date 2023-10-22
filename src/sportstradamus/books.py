@@ -1019,6 +1019,12 @@ def get_thrive():
         logger.error(api["message"])
         return []
 
+    abbr_map = {
+        "WSH": "WAS",
+        "GS": "GSW",
+        "PHO": "PHX"
+    }
+    
     lines = api["response"]["data"]
 
     offers = {}
@@ -1035,14 +1041,14 @@ def get_thrive():
                 " ".join([o["player1"]["firstName"], o["player1"]["lastName"]])
             ),
             "League": o["player1"]["leagueType"],
-            "Team": team.replace("WSH", "WAS").replace("PHO", "PHX"),
+            "Team": abbr_map.get(team, team),
             "Date": (
                 datetime.strptime(
                     o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
-            "Opponent": opponent.replace("WSH", "WAS").replace("PHO", "PHX"),
+            "Opponent": abbr_map.get(opponent, opponent),
         }
         if n["League"] == "HOCKEY":
             n["League"] = "NHL"
