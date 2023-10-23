@@ -493,8 +493,8 @@ class StatsNBA(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamstats = teamlog.groupby('TEAM_ABBREVIATION').tail(10).groupby('TEAM_ABBREVIATION')[
-            teamlog.columns[6:]].mean()
+        teamstats = teamlog.groupby('TEAM_ABBREVIATION').apply(
+            lambda x: np.mean(x.tail(10)[x.columns[6:]], 0))
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
@@ -535,11 +535,11 @@ class StatsNBA(Stats):
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
             stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
-        playershortstats = playerlogs.tail(5).groupby(
-            'PLAYER_NAME').mean(numeric_only=True).fillna(0).add_suffix(" short", 1)
+        playershortstats = playerlogs.apply(lambda x: np.mean(
+            x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
+        playertrends = playerlogs.apply(lambda x: np.mean(
+            x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
-        playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-            'PLAYER_NAME').tail(4).groupby('PLAYER_NAME').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playertrends)
 
         positions = ['Guard', 'Forward', 'Center',
@@ -966,6 +966,7 @@ class StatsMLB(Stats):
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0) + v["stats"]["batting"].get("hitByPitch", 0),
                         "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
                         "atBats": v["stats"]["batting"].get("atBats", 0),
+                        "plateAppearances": v["stats"]["batting"].get("plateAppearances", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
                         "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0),
                         "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
@@ -1027,7 +1028,7 @@ class StatsMLB(Stats):
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1])
                     }
-                    if (n["starting batter"] and n["atBats"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
+                    if (n["starting batter"] and n["plateAppearances"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
                         continue
                     if n["starting batter"]:
                         if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
@@ -1068,15 +1069,15 @@ class StatsMLB(Stats):
                         "BB9": (27*adj["BB"] / n["pitching outs"]) if n["starting pitcher"] else 0,
                         "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if n["starting pitcher"] else 0,
                         "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
-                        "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["starting batter"] else 0,
-                        "AVG": (n["hits"]/n["atBats"]) if n["starting batter"] else 0,
-                        "SLG": (n["total bases"]/n["atBats"]) if n["starting batter"] else 0,
-                        "PASO": (v["stats"]["batting"].get("plateAppearances", 0) / adj["SO"]) if (n["starting batter"] and adj["SO"]) else v["stats"]["batting"].get("plateAppearances", 0),
+                        "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["atBats"] > 0 else 0,
+                        "AVG": (n["hits"]/n["atBats"]) if n["atBats"] > 0 else 0,
+                        "SLG": (n["total bases"]/n["atBats"]) if n["atBats"] > 0 else 0,
+                        "PASO": (n["plateAppearances"] / adj["SO"]) if (n["starting batter"] and adj["SO"]) else n["plateAppearances"],
                         "BABIP": ((n["hits"] - n["home runs"]) / BIP) if (n["starting batter"] and BIP) else 0,
                         "batSide": batSide if n["starting batter"] else 0
                     })
 
-                    if (n["starting batter"] and n["atBats"] > 1) or (n["starting pitcher"]):
+                    if (n["starting batter"] and n["plateAppearances"] > 1) or (n["starting pitcher"]):
                         new_games.append(n)
 
             for v in boxscore["teams"]["home"]["players"].values():
@@ -1119,6 +1120,7 @@ class StatsMLB(Stats):
                         "walks": v["stats"]["batting"].get("baseOnBalls", 0) + v["stats"]["batting"].get("hitByPitch", 0),
                         "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
                         "atBats": v["stats"]["batting"].get("atBats", 0),
+                        "plateAppearances": v["stats"]["batting"].get("plateAppearances", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get(
                             "strikeOuts", 0
                         ),
@@ -1192,7 +1194,7 @@ class StatsMLB(Stats):
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1])
                     }
-                    if (n["starting batter"] and n["atBats"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
+                    if (n["starting batter"] and n["plateAppearances"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
                         continue
                     if n["starting batter"]:
                         if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
@@ -1233,15 +1235,15 @@ class StatsMLB(Stats):
                         "BB9": (27*adj["BB"] / n["pitching outs"]) if n["starting pitcher"] else 0,
                         "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if n["starting pitcher"] else 0,
                         "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
-                        "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["starting batter"] else 0,
-                        "AVG": (n["hits"]/n["atBats"]) if n["starting batter"] else 0,
-                        "SLG": (n["total bases"]/n["atBats"]) if n["starting batter"] else 0,
-                        "PASO": (v["stats"]["batting"].get("plateAppearances", 0) / adj["SO"]) if (n["starting batter"] and adj["SO"]) else v["stats"]["batting"].get("plateAppearances", 0),
+                        "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["atBats"] > 0 else 0,
+                        "AVG": (n["hits"]/n["atBats"]) if n["atBats"] > 0 else 0,
+                        "SLG": (n["total bases"]/n["atBats"]) if n["atBats"] > 0 else 0,
+                        "PASO": (n["plateAppearances"] / adj["SO"]) if (n["starting batter"] and adj["SO"]) else n["plateAppearances"],
                         "BABIP": ((n["hits"] - n["home runs"]) / BIP) if (n["starting batter"] and BIP) else 0,
                         "batSide": batSide if n["starting batter"] else 0
                     })
 
-                    if (n["starting batter"] and n["atBats"] > 1) or (n["starting pitcher"]):
+                    if (n["starting batter"] and n["plateAppearances"] > 1) or (n["starting pitcher"]):
                         new_games.append(n)
 
         self.gamelog = pd.concat(
@@ -1536,14 +1538,14 @@ class StatsMLB(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamstats = teamlog.groupby('team').tail(10).groupby('team')[
-            teamlog.columns[4:]].mean()
+        teamstats = teamlog.groupby('team').apply(
+            lambda x: np.mean(x.tail(10)[x.columns[4:]], 0))
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
             lambda x: (x[market].clip(0, 1).mean() > 0.25) & (x[market].count() > 1)).groupby('playerName')
 
-        defenseGroups = gamelog.groupby('opponent')
+        # defenseGroups = gamelog.groupby('opponent')
         defenseGroups = gamelog.groupby(['opponent', 'gameId'])
         defenseGames = pd.DataFrame()
         defenseGames[market] = defenseGroups[market].sum()
@@ -1624,11 +1626,11 @@ class StatsMLB(Stats):
                 self.playerProfile.index)].fillna(0).groupby('playerName')[
                 self.stat_types['pitching']]
             playerstats = playerlogs.mean(numeric_only=True)
-            playershortstats = playerlogs.tail(3).groupby('playerName').mean(
-                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playershortstats = playerlogs.apply(lambda x: np.mean(
+                x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
+            playertrends = playerlogs.apply(lambda x: np.mean(
+                x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
-            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(2).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             batterstats = gamelog2.groupby('playerName')[
@@ -1651,11 +1653,11 @@ class StatsMLB(Stats):
                 self.playerProfile.index)].fillna(0).groupby('playerName')[
                 self.stat_types['batting']]
             playerstats = playerlogs.mean(numeric_only=True)
-            playershortstats = playerlogs.tail(5).groupby('playerName').mean(
-                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playershortstats = playerlogs.apply(lambda x: np.mean(
+                x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
+            playertrends = playerlogs.apply(lambda x: np.mean(
+                x.diff().tail(2), 0)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
-            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(4).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             pitcherstats = gamelog2.drop(columns='opponent pitcher').rename(
@@ -2593,8 +2595,8 @@ class StatsNFL(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamstats = teamlog.groupby('team').tail(5).groupby('team')[
-            teamlog.columns[3:-1]].mean()
+        teamstats = teamlog.groupby('team').apply(
+            lambda x: np.mean(x.tail(5)[x.columns[3:-1]], 0))
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -2655,10 +2657,10 @@ class StatsNFL(Stats):
         playerlogs = gamelog.loc[gamelog['player display name'].isin(
             self.playerProfile.index)].fillna(0).groupby('player display name')[stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
-        playershortstats = playerlogs.tail(3).groupby('player display name').mean(
-            numeric_only=True).fillna(0).add_suffix(" short", 1)
-        playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-            'player display name').tail(2).groupby('player display name').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
+        playershortstats = playerlogs.apply(lambda x: np.mean(
+            x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
+        playertrends = playerlogs.apply(lambda x: np.mean(
+            x.diff().tail(2), 0)).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
@@ -3392,8 +3394,8 @@ class StatsNHL(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamstats = teamlog.groupby('team').tail(10).groupby('team')[
-            teamlog.columns[5:]].mean()
+        teamstats = teamlog.groupby('team').apply(
+            lambda x: np.mean(x.tail(10)[x.columns[5:]], 0))
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -3471,11 +3473,11 @@ class StatsNHL(Stats):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
                 self.playerProfile.index)].fillna(0).groupby('playerName')['SOE']
             playerstats = playerlogs.mean(numeric_only=True)
-            playershortstats = playerlogs.tail(5).groupby('playerName').mean(
-                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playershortstats = playerlogs.apply(lambda x: np.mean(
+                x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
+            playertrends = playerlogs.apply(lambda x: np.mean(
+                x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
-            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(4).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
@@ -3484,11 +3486,11 @@ class StatsNHL(Stats):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
                 self.playerProfile.index)].fillna(0).groupby('playerName')[skater_stats]
             playerstats = playerlogs.mean(numeric_only=True)
-            playershortstats = playerlogs.tail(5).groupby('playerName').mean(
-                numeric_only=True).fillna(0).add_suffix(" short", 1)
+            playershortstats = playerlogs.apply(lambda x: np.mean(
+                x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
+            playertrends = playerlogs.apply(lambda x: np.mean(
+                x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
-            playertrends = playerlogs.apply(lambda x: x.diff()).groupby(
-                'playerName').tail(4).groupby('playerName').mean(numeric_only=True).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
