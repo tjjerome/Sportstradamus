@@ -702,11 +702,20 @@ def get_pp():
         player_ids = {}
         league = None
 
+        abbr_map = {
+            "WSH": "WAS",
+            "GS": "GSW",
+            "PHO": "PHX",
+            "NOP": "NO",
+            "JAC": "JAX",
+            "LAV": "LV"
+        }
+        
         for p in players:
             if p["type"] == "new_player":
                 player_ids[p["id"]] = {
                     "Name": p["attributes"]["name"].replace("\t", "").strip(),
-                    "Team": p["attributes"]["team"].replace("JAC", "JAX").replace("WSH", "WAS").replace("LAV", "LV"),
+                    "Team": abbr_map.get(p["attributes"]["team"], p["attributes"]["team"])
                 }
                 if "position" in p["attributes"]:
                     player_ids[p["id"]].update(
@@ -725,7 +734,7 @@ def get_pp():
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
-                "Opponent": o["attributes"]["description"].upper().replace("JAC", "JAX").replace("WSH", "WAS").replace("LAV", "LV"),
+                "Opponent": abbr_map.get(o["attributes"]["description"], o["attributes"]["description"]).upper(),
             }
 
             if o["attributes"]["is_promo"]:
@@ -836,7 +845,14 @@ def get_ud():
             "Away": match_ids.get(i["match_id"], {"Away": ""})["Away"],
             "Date": match_ids.get(i["match_id"], {"Date": ""})["Date"],
         }
-
+        
+    abbr_map = {
+        "WSH": "WAS",
+        "GS": "GSW",
+        "PHO": "PHX",
+        "NOP": "NO"
+    }
+    
     offers = {}
     for o in tqdm(
         api["over_under_lines"], desc="Getting Underdog Over/Unders", unit="offer"
@@ -853,12 +869,12 @@ def get_ud():
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"],
-            "Team": player["Team"].replace("WSH", "WAS").replace("NOP", "NO"),
+            "Team": abbr_map.get(player["Team"], player["Team"]),
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
             "Boost": float(o["options"][0]["payout_multiplier"]),
-            "Opponent": opponent.replace("WSH", "WAS").replace("NOP", "NO"),
+            "Opponent": abbr_map.get(opponent, opponent),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -936,12 +952,12 @@ def get_ud():
             + " vs. "
             + remove_accents(player2["Name"]),
             "League": player1["League"],
-            "Team": player1["Team"].replace("WSH", "WAS").replace("NOP", "NO") + "/" + player2["Team"].replace("WSH", "WAS").replace("NOP", "NO"),
+            "Team": abbr_map.get(player1["Team"], player1["Team"]) + "/" + abbr_map.get(player2["Team"], player2["Team"]),
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
             "Boost": 1,
-            "Opponent": opponent1.replace("WSH", "WAS").replace("NOP", "NO") + "/" + opponent2.replace("WSH", "WAS").replace("NOP", "NO"),
+            "Opponent": abbr_map.get(opponent1, opponent1) + "/" + abbr_map.get(opponent2, opponent2),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -1022,7 +1038,8 @@ def get_thrive():
     abbr_map = {
         "WSH": "WAS",
         "GS": "GSW",
-        "PHO": "PHX"
+        "PHO": "PHX",
+        "NOP": "NO"
     }
     
     lines = api["response"]["data"]
