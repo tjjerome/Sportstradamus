@@ -54,7 +54,7 @@ class Scrape:
 
         self.header = random.choices(self.headers, weights=self.weights)[0]
 
-    def get(self, url, max_attempts=5, headers={}, params={}):
+    def get(self, url, max_attempts=3, headers={}, params={}):
         """
         Perform a GET request to the specified URL with the provided headers and parameters.
 
@@ -74,7 +74,7 @@ class Scrape:
             for i in range(1, max_attempts + 1):
                 if i > 1:
                     self._new_headers()
-                    sleep(random.uniform(3, 5))
+                    sleep(random.uniform(2, 3))
                 try:
                     response = requests.get(
                         url, headers=self.header | headers, params=params
@@ -92,7 +92,30 @@ class Scrape:
             logger.warning("Max Attempts Reached")
             return None
 
-    def post(self, url, max_attempts=5, headers={}, params={}):
+    def get_proxy(self, url, headers={}):
+        params = {
+            "api_key": apikey,
+            "url": url,
+            "optimize_request": True
+        }
+
+        if headers:
+            params["keep_headers"] = True
+            headers = headers | self.header
+
+        response = requests.get(
+            "https://proxy.scrapeops.io/v1/",
+            headers=headers,
+            params=params
+        )
+
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.warning("Proxy Failed")
+            return None
+
+    def post(self, url, max_attempts=3, headers={}, params={}):
         """
         Perform a GET request to the specified URL with the provided headers and parameters.
 
@@ -112,7 +135,7 @@ class Scrape:
             for i in range(1, max_attempts + 1):
                 if i > 1:
                     self._new_headers()
-                    sleep(random.uniform(3, 5))
+                    sleep(random.uniform(2, 3))
                 try:
                     response = requests.post(
                         url, headers=self.header | headers, params=params
