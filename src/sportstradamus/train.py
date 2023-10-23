@@ -90,6 +90,7 @@ def meditate(force, stats, league, alt):
             "walks allowed",
             "batter strikeouts",
             "singles",
+            "home runs"
         ],
         "NFL": [
             "passing yards",

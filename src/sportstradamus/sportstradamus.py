@@ -32,7 +32,7 @@ import warnings
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     global stat_map
@@ -89,13 +89,13 @@ def main(progress, books):
 
         logger.info("Getting FanDuel MLB lines")
         fd_data.update(
-            get_fd("mlb", ["batter-props", "pitcher-props", "innings"]))
+            get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
         logger.info("Getting FanDuel NBA lines")
-        fd_data.update(get_fd('nba', ['player-points', 'player-rebounds',
-                                      'player-assists', 'player-threes', 'player-combos', 'player-defense']))
+        fd_data.update(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
+                                      'player-assists', 'player-threes', 'player-defense']))
         logger.info("Getting FanDuel NHL lines")
         fd_data.update(
-            get_fd('nhl', ['goal-scorer', 'shots', 'points-assists', 'goalie-props']))
+            get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
         logger.info("Getting FanDuel NFL lines")
         fd_data.update(
             get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
@@ -111,23 +111,23 @@ def main(progress, books):
         pin_data.update(get_pinnacle(889))  # NFL
         logger.info(str(len(pin_data)) + " offers found")
 
-        # logger.info("Getting Caesars MLB Lines")
-        # sport = "baseball"
-        # league = "04f90892-3afa-4e84-acce-5b89f151063d"
-        # csb_data.update(get_caesars(sport, league))
-        # # logger.info("Getting Caesars NBA Lines")
-        # # sport = "basketball"
-        # # league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
-        # # csb_data.update(get_caesars(sport, league))
-        # # logger.info("Getting Caesars NHL Lines")
-        # # sport = "icehockey"
-        # # league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
-        # # csb_data.update(get_caesars(sport, league))
-        # logger.info("Getting Caesars NFL Lines")
-        # sport = "americanfootball"
-        # league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-        # csb_data.update(get_caesars(sport, league))
-        # logger.info(str(len(csb_data)) + " offers found")
+        logger.info("Getting Caesars MLB Lines")
+        sport = "baseball"
+        league = "04f90892-3afa-4e84-acce-5b89f151063d"
+        csb_data.update(get_caesars(sport, league))
+        logger.info("Getting Caesars NBA Lines")
+        sport = "basketball"
+        league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+        csb_data.update(get_caesars(sport, league))
+        logger.info("Getting Caesars NHL Lines")
+        sport = "icehockey"
+        league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+        csb_data.update(get_caesars(sport, league))
+        logger.info("Getting Caesars NFL Lines")
+        sport = "americanfootball"
+        league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+        csb_data.update(get_caesars(sport, league))
+        logger.info(str(len(csb_data)) + " offers found")
 
     datasets = {
         "DraftKings": dk_data,
@@ -378,11 +378,91 @@ def process_offers(offer_dict, book, datasets, stats):
                         # Add the matched offers to the new_offers list
                         new_offers.extend(modeled_offers)
 
+    new_offers = find_correlation(new_offers, stats, book)
+
     logger.info(str(len(new_offers)) + " offers processed")
     return new_offers
 
 
-def save_data(offers, book, gc):
+def find_correlation(offers, stats, platform):
+    global stat_map
+    logger.info("Finding Correlations")
+    df = pd.DataFrame(offers)
+    df["Correlated Bets"] = ""
+    usage_str = {
+        "NBA": "MIN",
+        "NFL": "snap pct",
+        "NHL": "timeOnIce"
+    }
+    positions = {
+        "NBA": ["G", "F", "C", "G-F", "F-C"],
+        "NFL": ["QB", "WR", "RB", "TE"],
+        "NHL": ["C", "R", "L", "D", "G"]
+    }
+    for league in ["NBA", "NFL", "MLB", "NHL"]:
+        league_df = df.loc[df["League"] == league]
+        league_df = league_df.loc[league_df.Position.apply(
+            lambda x: not isinstance(x, tuple))]  # Remove this to correlate combo picks
+        c = pd.read_csv(pkg_resources.files(data) / (league+"_corr.csv"))
+        c.columns = ["market", "correlation", "R"]
+        stat_data = stats.get(league)
+
+        if league != "MLB":
+            league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
+                x, int) else "/".join([positions[league][i] for i in x]))
+            stat_data.profile_market(usage_str[league])
+            usage = pd.DataFrame(stat_data.playerProfile.avg)
+            usage.reset_index(inplace=True)
+            usage.rename(
+                columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
+            league_df = league_df.merge(usage)
+            if league == "NBA":
+                new_df = league_df.loc[league_df.Position.str.contains("-")]
+                new_df.Position = new_df.Position.str.split("-").str[1]
+                league_df = pd.concat([league_df, new_df])
+                league_df.Position = league_df.Position.str.split("-").str[0]
+
+            ranks = league_df.groupby(["Team", "Position"]).rank(
+                ascending=False, method='dense')['avg'].astype(int)
+            league_df.Position = league_df.Position + ranks.astype(str)
+        else:
+            league_df.Position = "B" + league_df.Position.add(1).astype(str)
+            league_df.loc[league_df["Market"].map(stat_map[platform]).str.contains(
+                "allowed") | league_df["Market"].map(stat_map[platform]).str.contains("pitch"), "Position"] = "P"
+
+        for team in list(league_df.Team.unique()):
+            team_df = league_df.loc[league_df["Team"] == team]
+            team_df["cMarket"] = team_df["Position"] + " " + \
+                team_df["Market"].map(stat_map[platform])
+            opp_df = league_df.loc[league_df["Team"]
+                                   == team_df.Opponent.mode().values[0]]
+            opp_df["cMarket"] = "_OPP_" + opp_df["Position"] + \
+                " " + opp_df["Market"].map(stat_map[platform])
+            game_df = pd.concat([team_df, opp_df])
+            for i, offer in team_df.iterrows():
+                if len(team_df.loc[i]) == 2:
+                    mask = c.market.isin(team_df.loc[i].cMarket.to_list())
+                else:
+                    mask = (c.market == offer.cMarket)
+
+                pos = c.loc[mask & (c.R > 0)]
+                neg = c.loc[mask & (c.R < 0)]
+                R_map = c.loc[mask].drop_duplicates("correlation").set_index("correlation")[
+                    "R"].abs().to_dict()
+                corr = pd.concat([game_df.loc[game_df.cMarket.isin(pos.correlation.to_list()) & (game_df.Bet == offer.Bet)],
+                                  game_df.loc[game_df.cMarket.isin(neg.correlation.to_list()) & (game_df.Bet != offer.Bet)]])
+                corr["R"] = corr.cMarket.map(R_map)
+                corr["P"] = corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])*corr["Model"]*(
+                    1-corr["Model"]))+offer["Model"]*corr["Model"]
+                corr.sort_values("P", ascending=False, inplace=True)
+                corr.drop_duplicates("Player", inplace=True)
+                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
+                    (corr["Player"] + " - " + corr["Bet"] + " " + corr["Market"]).to_list())
+
+    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False)
+
+
+def save_data(df, book, gc):
     """
     Save offers data to a Google Sheets worksheet.
 
@@ -394,16 +474,8 @@ def save_data(offers, book, gc):
     Raises:
         Exception: If there is an error writing the offers to the worksheet.
     """
-    if len(offers) > 0:
+    if len(df) > 0:
         try:
-            # Create a DataFrame from the offers data and perform necessary operations
-            df = (
-                pd.DataFrame(offers)
-                .dropna()
-                .drop(columns="Opponent")
-                .sort_values("Model", ascending=False)
-            )
-
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
@@ -810,6 +882,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 o["O/U"] = np.mean([s["Total"] for s in stats]) / \
                     totals_map.get(o["League"], 1)
                 o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
+                if ("Position" in stats[0]) and ("Position" in stats[1]):
+                    o["Position"] = (int(stats[0]["Position"]),
+                                     int(stats[1]["Position"]))
+                else:
+                    o["Position"] = (-1, -1)
             elif "vs." in o["Player"]:
                 avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
                 o["Avg 5"] = avg5 + o["Line"]
@@ -821,6 +898,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     totals_map.get(o["League"], 1)
                 o["DVPOA"] = hmean(
                     [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
+                if ("Position" in stats[0]) and ("Position" in stats[1]):
+                    o["Position"] = (int(stats[0]["Position"]),
+                                     int(stats[1]["Position"]))
+                else:
+                    o["Position"] = (-1, -1)
             else:
                 o["Avg 5"] = stats["Avg5"] - \
                     o["Line"] if stats["Avg5"] != 0 else 0
@@ -829,27 +911,31 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 o["Moneyline"] = stats["Moneyline"]
                 o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
                 o["DVPOA"] = stats["DVPOA"]
+                if "Position" in stats:
+                    o["Position"] = int(stats["Position"])
+                else:
+                    o["Position"] = -1
 
-            lines = archive.archive.get(league, {}).get(market, {}).get(
-                o["Date"], {}).get(o["Player"], {}).get("Closing Lines", [None]*4)
+            # lines = archive.archive.get(league, {}).get(market, {}).get(
+            #     o["Date"], {}).get(o["Player"], {}).get("Closing Lines", [None]*4)
 
-            o["DraftKings"] = (
-                lines[0]["Line"] + "/" +
-                lines[0][o["Bet"]] if lines[0] else "N/A"
-            )
-            o["FanDuel"] = (
-                lines[1]["Line"] + "/" +
-                lines[1][o["Bet"]] if lines[1] else "N/A"
-            )
-            o["Pinnacle"] = (
-                lines[2]["Line"] + "/" +
-                lines[2][o["Bet"]] if lines[2] else "N/A"
-            )
-            o["Caesars"] = (
-                str(lines[3]["Line"]) + "/" + str(lines[3][o["Bet"]])
-                if lines[3]
-                else "N/A"
-            )
+            # o["DraftKings"] = (
+            #     lines[0]["Line"] + "/" +
+            #     lines[0][o["Bet"]] if lines[0] else "N/A"
+            # )
+            # o["FanDuel"] = (
+            #     lines[1]["Line"] + "/" +
+            #     lines[1][o["Bet"]] if lines[1] else "N/A"
+            # )
+            # o["Pinnacle"] = (
+            #     lines[2]["Line"] + "/" +
+            #     lines[2][o["Bet"]] if lines[2] else "N/A"
+            # )
+            # o["Caesars"] = (
+            #     str(lines[3]["Line"]) + "/" + str(lines[3][o["Bet"]])
+            #     if lines[3]
+            #     else "N/A"
+            # )
 
             new_offers.append(o)
 

@@ -1,5 +1,6 @@
 from sportstradamus.spiderLogger import logger
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 import random
 from tqdm import tqdm
 import numpy as np
@@ -158,24 +159,23 @@ def get_fd(sport, tabs):
     Returns:
         dict: The parsed FanDuel data.
     """
-    api_url = "https://sbapi.tn.sportsbook.fanduel.com/api/{}"
-    params = [
-        ("betexRegion", "GBR"),
-        ("capiJurisdiction", "intl"),
-        ("currencyCode", "USD"),
-        ("exchangeLocale", "en_US"),
-        ("includePrices", "true"),
-        ("language", "en"),
-        ("regionCode", "NAMERICA"),
-        ("timezone", "America%2FChicago"),
-        ("_ak", "FhMFpcPWXMeyZxOx"),
-        ("page", "CUSTOM"),
-        ("customPageId", sport),
-    ]
+    api_url = "https://sbapi.tn.sportsbook.fanduel.com/api/{}?"
+    params = {
+        "betexRegion": "GBR",
+        "capiJurisdiction": "intl",
+        "currencyCode": "USD",
+        "exchangeLocale": "en_US",
+        "includePrices": "true",
+        "language": "en",
+        "regionCode": "NAMERICA",
+        "timezone": "America%2FChicago",
+        "_ak": "FhMFpcPWXMeyZxOx",
+        "page": "CUSTOM",
+        "customPageId": sport
+    }
 
-    data = scraper.get(
-        api_url.format("content-managed-page"),
-        params={key: value for key, value in params},
+    data = scraper.get_proxy(
+        api_url.format("content-managed-page") + urlencode(params)
     )
 
     if not data:
@@ -204,19 +204,22 @@ def get_fd(sport, tabs):
 
     # Iterate over event IDs and tabs
     for event_id in tqdm(event_ids, desc="Processing Events", unit="event"):
+        skip = False
         for tab in tabs:
-            new_params = [
-                ("usePlayerPropsVirtualMarket", "true"),
-                ("eventId", event_id),
-                ("tab", tab),
-            ]
+            if skip:
+                continue
+            new_params = params | {
+                "usePlayerPropsVirtualMarket": "true",
+                "eventId": event_id,
+                "tab": tab,
+            }
 
-            data = scraper.get(
-                api_url.format("event-page"),
-                params={key: value for key, value in params + new_params},
+            data = scraper.get_proxy(
+                api_url.format("event-page") + urlencode(new_params)
             )
 
             if not data:
+                skip = True
                 continue
 
             attachments = data.get("attachments")
@@ -253,6 +256,9 @@ def get_fd(sport, tabs):
                     ]
                 )
             ]
+
+            if len(offers) == 0:
+                skip = True
 
             # Iterate over offers
             for offer in tqdm(offers, desc="Processing Offers", unit="offer"):
@@ -352,19 +358,10 @@ def get_pinnacle(league):
         dict: The parsed Pinnacle data.
     """
     header = {"X-API-KEY": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R"}
-    params = {
-        "api_key": apikey,
-        "url": f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight",
-        "optimize_request": True,
-        "keep_headers": True,
-    }
+    url = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight",
 
     try:
-        odds = requests.get(
-            "https://proxy.scrapeops.io/v1/",
-            headers=header | scraper.header,
-            params=params,
-        ).json()
+        odds = scraper.get_proxy(url, header)
     except:
         logger.warning("No lines found for league: " + str(league))
         return {}
@@ -399,17 +396,11 @@ def get_pinnacle(league):
                     price["designation"].capitalize()
                 ] = {"Price": price["price"], "Line": price["points"]}
 
-    params[
-        "url"
-    ] = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/matchups"
+    url = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/matchups"
 
     try:
         sleep(random.uniform(3, 5))
-        api = requests.get(
-            "https://proxy.scrapeops.io/v1/",
-            headers=header | scraper.header,
-            params=params,
-        ).json()
+        api = scraper.get_proxy(url, header)
         markets = [
             line
             for line in api
@@ -528,8 +519,7 @@ def get_caesars(sport, league):
 
     try:
         # Make a GET request to the Caesars API
-        api = requests.get("https://proxy.scrapeops.io/v1/",
-                           params=params).json()
+        api = scraper.get_proxy(caesars)
 
         # Get the game IDs for the specified sport and league
         gameIds = [
@@ -554,8 +544,7 @@ def get_caesars(sport, league):
 
         try:
             # Make a GET request to the Caesars API for each game ID
-            api = requests.get(
-                "https://proxy.scrapeops.io/v1/", params=params).json()
+            api = scraper.get_proxy(caesars)
 
             # Filter and retrieve the desired markets
             markets = [
@@ -651,11 +640,6 @@ def get_pp():
     """
     logger.info("Getting PrizePicks Lines")
     offers = {}
-    params = {
-        "api_key": apikey,
-        "url": f"https://api.prizepicks.com/leagues",
-        "optimize_request": True,
-    }
     live_bets = [
         "1H",
         "2H",
@@ -672,27 +656,26 @@ def get_pp():
         "SERIES",
     ]
 
-    try:
-        # Retrieve the available leagues
-        leagues = requests.get(
-            "https://proxy.scrapeops.io/v1/", params=params).json()
-        leagues = [
-            i["id"]
-            for i in leagues["data"]
-            if i["attributes"]["projections_count"] > 0
-            and not any([string in i["attributes"]["name"] for string in live_bets])
-        ]
-    except:
-        logger.exception("Retrieving leagues failed")
-        leagues = [2, 7, 8, 9]
+    # try:
+    #     # Retrieve the available leagues
+    #     leagues = scraper.get_proxy("https://api.prizepicks.com/leagues")
+    #     leagues = [
+    #         i["id"]
+    #         for i in leagues["data"]
+    #         if i["attributes"]["projections_count"] > 0
+    #         and not any([string in i["attributes"]["name"] for string in live_bets])
+    #     ]
+    # except:
+    #     logger.exception("Retrieving leagues failed")
+    #     leagues = [2, 7, 8, 9]
+
+    leagues = [2, 7, 8, 9]
 
     for l in tqdm(leagues, desc="Processing PrizePicks offers"):
-        params["url"] = f"https://api.prizepicks.com/projections?league_id={l}"
-
         try:
             # Retrieve players and lines for each league
-            api = requests.get(
-                "https://proxy.scrapeops.io/v1/", params=params).json()
+            api = scraper.get_proxy(
+                f"https://api.prizepicks.com/projections?league_id={l}")
             players = api["included"]
             lines = api["data"]
         except:
@@ -710,7 +693,7 @@ def get_pp():
             "JAC": "JAX",
             "LAV": "LV"
         }
-        
+
         for p in players:
             if p["type"] == "new_player":
                 player_ids[p["id"]] = {
@@ -731,10 +714,10 @@ def get_pp():
                 ),
                 "League": league,
                 "Team": player_ids[o["relationships"]["new_player"]["data"]["id"]]["Team"].upper(),
+                "Opponent": abbr_map.get(o["attributes"]["description"], o["attributes"]["description"]).upper(),
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
-                "Opponent": abbr_map.get(o["attributes"]["description"], o["attributes"]["description"]).upper(),
             }
 
             if o["attributes"]["is_promo"]:
@@ -845,14 +828,14 @@ def get_ud():
             "Away": match_ids.get(i["match_id"], {"Away": ""})["Away"],
             "Date": match_ids.get(i["match_id"], {"Date": ""})["Date"],
         }
-        
+
     abbr_map = {
         "WSH": "WAS",
         "GS": "GSW",
         "PHO": "PHX",
         "NOP": "NO"
     }
-    
+
     offers = {}
     for o in tqdm(
         api["over_under_lines"], desc="Getting Underdog Over/Unders", unit="offer"
@@ -870,11 +853,11 @@ def get_ud():
             "Player": remove_accents(player["Name"]),
             "League": player["League"],
             "Team": abbr_map.get(player["Team"], player["Team"]),
+            "Opponent": abbr_map.get(opponent, opponent),
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
             "Boost": float(o["options"][0]["payout_multiplier"]),
-            "Opponent": abbr_map.get(opponent, opponent),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -953,11 +936,11 @@ def get_ud():
             + remove_accents(player2["Name"]),
             "League": player1["League"],
             "Team": abbr_map.get(player1["Team"], player1["Team"]) + "/" + abbr_map.get(player2["Team"], player2["Team"]),
+            "Opponent": abbr_map.get(opponent1, opponent1) + "/" + abbr_map.get(opponent2, opponent2),
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
             "Boost": 1,
-            "Opponent": abbr_map.get(opponent1, opponent1) + "/" + abbr_map.get(opponent2, opponent2),
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -1041,7 +1024,7 @@ def get_thrive():
         "PHO": "PHX",
         "NOP": "NO"
     }
-    
+
     lines = api["response"]["data"]
 
     offers = {}
@@ -1059,13 +1042,13 @@ def get_thrive():
             ),
             "League": o["player1"]["leagueType"],
             "Team": abbr_map.get(team, team),
+            "Opponent": abbr_map.get(opponent, opponent),
             "Date": (
                 datetime.strptime(
                     o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
-            "Opponent": abbr_map.get(opponent, opponent),
         }
         if n["League"] == "HOCKEY":
             n["League"] = "NHL"
@@ -1108,12 +1091,6 @@ def get_parp():
               }
     """
     logger.info("Getting ParlayPlay Lines")
-    params = {
-        "api_key": apikey,
-        "url": "https://parlayplay.io/api/v1/crossgame/search/?format=json&league=&sport=All",
-        "optimize_request": True,
-        "keep_headers": True
-    }
     header = {
         "Accept": "application/json",
         "X-CSRFToken": "FoEEn6o8fwxrKIrSzyphlphpVjBAEVZQANmhb2xeMmmRZwvbaDDZt5zGKoXNzrc2",
@@ -1121,11 +1098,10 @@ def get_parp():
         "X-Parlayplay-Platform": "web",
     }
     try:
-        api = requests.get(
-            "https://proxy.scrapeops.io/v1/",
-            params=params,
+        api = scraper.get_proxy(
+            "https://parlayplay.io/api/v1/crossgame/search/?format=json&league=&sport=All",
             headers=header,
-        ).json()
+        )
     except:
         logger.exception(id)
         return {}
@@ -1166,11 +1142,11 @@ def get_parp():
                 "Player": remove_accents(player["player"]["fullName"]),
                 "League": player["match"]["league"]["leagueNameShort"],
                 "Team": player_team,
+                "Opponent": opponent_team,
                 "Date": player["match"]["matchDate"].split("T")[0],
                 "Market": market,
                 "Line": float(stat["statValue"]),
                 "Slide": "N",
-                "Opponent": opponent_team,
             }
 
             if n["League"] not in offers:
@@ -1217,11 +1193,11 @@ def get_parp():
             "Player": " + ".join(players),
             "League": player["match"]["league"]["leagueNameShort"],
             "Team": "/".join(teams),
+            "Opponent": "/".join(opponents),
             "Date": player["match"]["matchDate"].split("T")[0],
             "Market": market,
             "Line": float(combo["pickValue"]),
             "Slide": "N",
-            "Opponent": "/".join(opponents),
         }
 
         if n["League"] not in offers:
