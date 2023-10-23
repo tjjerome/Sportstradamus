@@ -103,11 +103,16 @@ class Scrape:
             params["keep_headers"] = True
             headers = headers | self.header
 
-        response = requests.get(
-            "https://proxy.scrapeops.io/v1/",
-            headers=headers,
-            params=params
-        )
+        i = 0
+        while (True):
+            i += 1
+            response = requests.get(
+                "https://proxy.scrapeops.io/v1/",
+                headers=headers,
+                params=params
+            )
+            if response.status_code != 500 or i > 2:
+                break
 
         if response.status_code == 200:
             return response.json()
