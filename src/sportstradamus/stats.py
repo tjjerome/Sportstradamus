@@ -3035,7 +3035,7 @@ class StatsNHL(Stats):
 
     def __init__(self):
         super().__init__()
-        self.season_start = datetime(2023, 10, 10)
+        self.season_start = datetime(2023, 10, 10).date()
 
     def load(self):
         """
