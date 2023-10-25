@@ -284,6 +284,13 @@ class StatsNBA(Stats):
 
             player_id = game["PLAYER_ID"]
 
+            # TODO Rework this
+            try:
+                if adv_gamelog[i]["PLAYER_ID"] != player_id:
+                    continue
+            except:
+                continue
+
             if player_id not in self.players:
                 # Fetch player information if not already present
                 self.players[player_id] = nba.commonplayerinfo.CommonPlayerInfo(
@@ -3474,11 +3481,11 @@ class StatsNHL(Stats):
                 self.playerProfile.index)].fillna(0).groupby('playerName')['SOE']
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
-                x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
+                x.tail(5), 0)).fillna(0)
             playertrends = playerlogs.apply(lambda x: np.mean(
-                x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
-            playerstats = playerstats.join(playershortstats)
-            playerstats = playerstats.join(playertrends)
+                x.diff().tail(4), 0)).fillna(0)
+            playerstats = pd.DataFrame(
+                {"SOE": playerstats, "SOE short": playershortstats, "SOE growth": playertrends})
 
             self.playerProfile = self.playerProfile.merge(
                 playerstats, on='playerName')
