@@ -8,7 +8,6 @@ from sportstradamus.books import (
     get_pp,
     get_ud,
     get_thrive,
-    get_parp,
 )
 from sportstradamus.helpers import archive, get_ev, prob_diff, prob_sum, odds_to_prob
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -32,7 +31,7 @@ import warnings
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     global stat_map
@@ -452,12 +451,16 @@ def find_correlation(offers, stats, platform):
                 corr = pd.concat([game_df.loc[game_df.cMarket.isin(pos.correlation.to_list()) & (game_df.Bet == offer.Bet)],
                                   game_df.loc[game_df.cMarket.isin(neg.correlation.to_list()) & (game_df.Bet != offer.Bet)]])
                 corr["R"] = corr.cMarket.map(R_map)
-                corr["P"] = corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])*corr["Model"]*(
-                    1-corr["Model"]))+offer["Model"]*corr["Model"]
+                corr["P"] = (corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])*corr["Model"]*(
+                    1-corr["Model"]))+offer["Model"]*corr["Model"])*3
+                if platform == "Underdog":
+                    corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
                 corr.sort_values("P", ascending=False, inplace=True)
                 corr.drop_duplicates("Player", inplace=True)
+                corr.drop(corr.loc[corr["Player"] ==
+                          offer["Player"]].index, inplace=True)
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
-                    (corr["Player"] + " - " + corr["Bet"] + " " + corr["Market"]).to_list())
+                    (corr["Player"] + " - " + corr["Bet"] + " " + corr["Market"] + " (" + corr["P"] + ")").to_list())
 
     return df.drop(columns='Position').dropna().sort_values("Model", ascending=False)
 
@@ -485,37 +488,29 @@ def save_data(df, book, gc):
             # Apply number formatting to the relevant columns
             if book == "ParlayPlay" or book == "Underdog":
                 wks.format(
-                    "I:J", {"numberFormat": {
+                    "J:K", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
                 wks.format(
-                    "M:M", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
-                wks.format(
-                    "O:O", {"numberFormat": {
+                    "N:P", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
                 wks.update(
-                    "T1",
+                    "R1",
                     "Last Updated: "
                     + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
                 )
             else:
                 wks.format(
-                    "H:I", {"numberFormat": {
+                    "I:J", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
                 wks.format(
-                    "L:L", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
-                wks.format(
-                    "N:N", {"numberFormat": {
+                    "M:O", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
                 wks.update(
-                    "S1",
+                    "Q1",
                     "Last Updated: "
                     + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
                 )

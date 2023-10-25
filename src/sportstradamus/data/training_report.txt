@@ -298,3 +298,8 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.621564   0.593423 0.500046     0.03962     0.052767  0.112773
 
+=========================== NHL points ==========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.598199   0.477169 0.008585   -0.041024    -0.022615 -5.182912
+

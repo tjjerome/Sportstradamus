@@ -193,6 +193,20 @@ def meditate(force, stats, league, alt):
             if M.empty:
                 continue
 
+            i = 0
+            season_diff = {
+                "NFL": [364, 364, 364],
+                "NBA": [371, 364, 301],
+                "MLB": [357, 371, 252],
+                "NHL": [368, 360, 272]
+            }
+            while any(M["DaysIntoSeason"] < 0):
+                M.loc[M["DaysIntoSeason"] < 0] = M.loc[M["DaysIntoSeason"]
+                                                       < 0] + season_diff[league][i]
+                i += 1
+
+            M.to_csv(filepath)
+
             y = M[['Result']]
             X = M.drop(columns=['Result'])
 
