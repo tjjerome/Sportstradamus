@@ -460,7 +460,7 @@ def find_correlation(offers, stats, platform):
                 corr.drop(corr.loc[corr["Player"] ==
                           offer["Player"]].index, inplace=True)
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
-                    (corr["Player"] + " - " + corr["Bet"] + " " + corr["Market"] + " (" + corr["P"] + ")").to_list())
+                    (corr["Player"] + " - " + corr["Bet"] + " " + corr["Market"] + " (" + corr["P"].map('{:.2f}'.format) + ")").to_list())
 
     return df.drop(columns='Position').dropna().sort_values("Model", ascending=False)
 
