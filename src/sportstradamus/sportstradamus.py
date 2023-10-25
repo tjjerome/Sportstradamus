@@ -606,12 +606,6 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     "Team": teams[i],
                     "Opponent": opponents[i]
                 }
-                stats = stat_data.get_stats(this_o, date=o["Date"])
-
-                if type(stats) is int:
-                    logger.warning(f"{o['Player']}, {market} stat error")
-                    pbar.update()
-                    continue
 
                 lines = []
                 for book, dataset in datasets.items():
@@ -622,6 +616,12 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                     lines.append(offer)
 
                 archive.add(this_o, lines, stat_map[platform], cv)
+                stats = stat_data.get_stats(this_o, date=o["Date"])
+
+                if type(stats) is int:
+                    logger.warning(f"{o['Player']}, {market} stat error")
+                    pbar.update()
+                    continue
                 playerStats.append(stats)
                 playerNames.append(player)
 

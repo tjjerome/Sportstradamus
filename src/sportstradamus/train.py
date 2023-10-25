@@ -201,8 +201,8 @@ def meditate(force, stats, league, alt):
                 "NHL": [368, 360, 272]
             }
             while any(M["DaysIntoSeason"] < 0):
-                M.loc[M["DaysIntoSeason"] < 0] = M.loc[M["DaysIntoSeason"]
-                                                       < 0] + season_diff[league][i]
+                M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
+                                                                         < 0, "DaysIntoSeason"] + season_diff[league][i]
                 i += 1
 
             M.to_csv(filepath)
