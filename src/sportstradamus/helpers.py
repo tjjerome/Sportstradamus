@@ -115,7 +115,12 @@ class Scrape:
                 break
 
         if response.status_code == 200:
-            return response.json()
+            try:
+                response = response.json()
+            except:
+                return None
+
+            return response
         else:
             logger.warning("Proxy Failed")
             return None
