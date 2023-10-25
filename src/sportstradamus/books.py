@@ -707,14 +707,16 @@ def get_pp():
                 league = p["attributes"]["name"].replace("CMB", "")
 
         for o in tqdm(lines, desc="Getting offers for " + league, unit="offer"):
+            players = player_ids[o["relationships"]
+                                 ["new_player"]["data"]["id"]]["Name"].split(" + ")
+            teams = player_ids[o["relationships"]["new_player"]
+                               ["data"]["id"]]["Team"].upper().split("/")
+            opponents = o["attributes"]["description"].upper().split("/")
             n = {
-                "Player": remove_accents(
-                    player_ids[o["relationships"]
-                               ["new_player"]["data"]["id"]]["Name"]
-                ),
+                "Player": " + ".join([remove_accents(p) for p in players]),
                 "League": league,
-                "Team": player_ids[o["relationships"]["new_player"]["data"]["id"]]["Team"].upper(),
-                "Opponent": abbr_map.get(o["attributes"]["description"], o["attributes"]["description"]).upper(),
+                "Team": "/".join([abbr_map.get(t, t) for t in teams]),
+                "Opponent": "/".join([abbr_map.get(t, t) for t in opponents]),
                 "Date": o["attributes"]["start_time"].split("T")[0],
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
