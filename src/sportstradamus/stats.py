@@ -157,7 +157,7 @@ class StatsNBA(Stats):
                 'PLUS_MINUS', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlay',
                 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT', 'DREB_PCT', 'REB_PCT',
-                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
+                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR']
         self.gamelog = pd.DataFrame(columns=cols)
         team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE', 'OPP',
                      'OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
@@ -238,7 +238,7 @@ class StatsNBA(Stats):
             **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
         # Fetch playoffs game logs
-        if today.month == 4 or True:
+        if today.month == 4:
             params.update({'season_type_nullable': "PlayIn"})
             nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                 **params).get_normalized_dict()["PlayerGameLogs"])
@@ -246,7 +246,7 @@ class StatsNBA(Stats):
                 **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
             teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                 **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
-        if 4 <= today.month <= 6 or True:
+        if 4 <= today.month <= 6:
             params.update({'season_type_nullable': "Playoffs"})
             nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                 **params).get_normalized_dict()["PlayerGameLogs"])
@@ -320,12 +320,11 @@ class StatsNBA(Stats):
                 1.2 + game["AST"]*1.5 + game["BLST"]*3 - game["TOV"]
             game["fantasy points parlay"] = game["PRA"] + \
                 game["BLST"]*2 - game["TOV"]
+            game["FTR"] = (game["FTM"]/game["FGA"]) if game["FGA"] > 0 else 0
 
-            # game.update(
-            #     {k: v for k, v in adv_gamelog[i].items() if k in adv_stats})
             game.update(adv_gamelog[i])
 
-            nba_df.append(game)
+            nba_df.append({k: v for k, v in game.items() if "RANK" not in k})
 
         nba_df = pd.DataFrame(nba_df)
 
@@ -536,7 +535,7 @@ class StatsNBA(Stats):
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
         stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
-                      'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
+                      'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR']
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
