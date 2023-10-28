@@ -68,29 +68,6 @@ def meditate(force, stats, league, alt):
     nfl.update()
 
     all_markets = {
-        "MLB": [
-            "pitcher strikeouts",
-            "pitching outs",
-            "pitches thrown",
-            "hits allowed",
-            "runs allowed",
-            "1st inning runs allowed",
-            "1st inning hits allowed",
-            "hitter fantasy score",
-            "pitcher fantasy score",
-            "hitter fantasy points underdog",
-            "pitcher fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "walks allowed",
-            "batter strikeouts",
-            "singles"
-        ],
         "NFL": [
             "passing yards",
             "rushing yards",
@@ -149,6 +126,29 @@ def meditate(force, stats, league, alt):
             "assists",
             "faceOffWins",
             "timeOnIce",
+        ],
+        "MLB": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "walks allowed",
+            "batter strikeouts",
+            "singles"
         ],
     }
     if not league == "All":

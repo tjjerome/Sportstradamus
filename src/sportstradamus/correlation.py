@@ -191,28 +191,28 @@ else:
         nfl.profile_market('snap pct', date=gameDate)
 
         homeWR = game_df.loc[game_df['home'] & (game_df['position group'] == 'WR'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(3).index.to_list()
         awayWR = game_df.loc[~game_df['home'] & (game_df['position group'] == 'WR'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(3).index.to_list()
         homeRB = game_df.loc[game_df['home'] & (game_df['position group'] == 'RB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayRB = game_df.loc[~game_df['home'] & (game_df['position group'] == 'RB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeTE = game_df.loc[game_df['home'] & (game_df['position group'] == 'TE'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(1).index.to_list()
         awayTE = game_df.loc[~game_df['home'] & (game_df['position group'] == 'TE'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(1).index.to_list()
         homeQB = game_df.loc[game_df['home'] & (game_df['position group'] == 'QB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(1).index.to_list()
         awayQB = game_df.loc[~game_df['home'] & (game_df['position group'] == 'QB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'avg'] if x in nfl.playerProfile.index else -1).\
+            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
             sort_values(ascending=False).head(1).index.to_list()
 
         if len(homeWR) == 0 or len(homeRB) == 0 or len(homeTE) == 0 or len(homeQB) == 0 or len(awayWR) == 0 or len(awayRB) == 0 or len(awayTE) == 0 or len(awayQB) == 0:
@@ -317,22 +317,22 @@ else:
 
         game_df.index = game_df.PLAYER_NAME
         homeF = game_df.loc[game_df['HOME'] & game_df["POS"].str.contains("Forward"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'avg'] if x in nba.playerProfile.index else -1).\
+            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
             sort_values(ascending=False).head(3).index.to_list()
         homeG = game_df.loc[game_df['HOME'] & game_df["POS"].str.contains("Guard"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'avg'] if x in nba.playerProfile.index else -1).\
+            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
             sort_values(ascending=False).head(3).index.to_list()
         homeC = game_df.loc[game_df['HOME'] & game_df["POS"].str.contains("Center"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'avg'] if x in nba.playerProfile.index else -1).\
+            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayF = game_df.loc[~game_df['HOME'] & game_df["POS"].str.contains("Forward"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'avg'] if x in nba.playerProfile.index else -1).\
+            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
             sort_values(ascending=False).head(3).index.to_list()
         awayG = game_df.loc[~game_df['HOME'] & game_df["POS"].str.contains("Guard"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'avg'] if x in nba.playerProfile.index else -1).\
+            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
             sort_values(ascending=False).head(3).index.to_list()
         awayC = game_df.loc[~game_df['HOME'] & game_df["POS"].str.contains("Center"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'avg'] if x in nba.playerProfile.index else -1).\
+            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
 
         homeStats = {}
@@ -428,34 +428,34 @@ else:
 
         game_df.index = game_df.playerName
         homeC = game_df.loc[game_df['home'] & (game_df["position"] == "C"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeL = game_df.loc[game_df['home'] & (game_df["position"] == "L"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeR = game_df.loc[game_df['home'] & (game_df["position"] == "R"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeD = game_df.loc[game_df['home'] & (game_df["position"] == "D"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(4).index.to_list()
         awayC = game_df.loc[~game_df['home'] & (game_df["position"] == "C"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayL = game_df.loc[~game_df['home'] & (game_df["position"] == "L"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayR = game_df.loc[~game_df['home'] & (game_df["position"] == "R"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayD = game_df.loc[~game_df['home'] & (game_df["position"] == "D"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(4).index.to_list()
         homeGoalie = game_df.loc[game_df['home'] & (game_df["position"] == "G"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(1).index.to_list()
         awayGoalie = game_df.loc[~game_df['home'] & (game_df["position"] == "G"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'avg'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(1).index.to_list()
 
         if len(homeGoalie) == 0 or len(awayGoalie) == 0:
