@@ -387,6 +387,7 @@ c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
 c.loc[c.abs() > .1].to_csv((pkg_resources.files(data) / "NBA_corr.csv"))
 
+
 # NHL
 nhl = StatsNHL()
 nhl.load()
@@ -424,39 +425,37 @@ else:
         gameDate = datetime.strptime(game_df.gameDate.max(), '%Y-%m-%d')
         if gameDate < datetime(2021, 10, 19):
             continue
-        nhl.profile_market('timeOnIce', date=gameDate)
+        nhl.profile_market('TimeShare', date=gameDate)
 
         game_df.index = game_df.playerName
         homeC = game_df.loc[game_df['home'] & (game_df["position"] == "C"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeL = game_df.loc[game_df['home'] & (game_df["position"] == "L"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeR = game_df.loc[game_df['home'] & (game_df["position"] == "R"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         homeD = game_df.loc[game_df['home'] & (game_df["position"] == "D"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(4).index.to_list()
         awayC = game_df.loc[~game_df['home'] & (game_df["position"] == "C"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayL = game_df.loc[~game_df['home'] & (game_df["position"] == "L"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayR = game_df.loc[~game_df['home'] & (game_df["position"] == "R"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(2).index.to_list()
         awayD = game_df.loc[~game_df['home'] & (game_df["position"] == "D"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
+            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
             sort_values(ascending=False).head(4).index.to_list()
-        homeGoalie = game_df.loc[game_df['home'] & (game_df["position"] == "G"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(1).index.to_list()
-        awayGoalie = game_df.loc[~game_df['home'] & (game_df["position"] == "G"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'timeOnIce short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(1).index.to_list()
+        homeGoalie = game_df.loc[game_df['home'] & (game_df["position"] == "G"), "playerName"].\
+            head(1).index.to_list()
+        awayGoalie = game_df.loc[~game_df['home'] & (game_df["position"] == "G"), "playerName"].\
+            head(1).index.to_list()
 
         if len(homeGoalie) == 0 or len(awayGoalie) == 0:
             continue
@@ -464,7 +463,7 @@ else:
         homeGoalie = homeGoalie[0]
         awayGoalie = awayGoalie[0]
 
-        homeStats = {"G " + k: v for k,
+        homeStats = {"G1 " + k: v for k,
                      v in game_df.loc[homeGoalie, goalie_stats].to_dict().items()}
 
         for i, player in enumerate(homeC):
@@ -488,7 +487,7 @@ else:
             homeStats.update({position+" "+k: v for k,
                               v in game_df.loc[player, skater_stats].to_dict().items()})
 
-        awayStats = {"G " + k: v for k,
+        awayStats = {"G1 " + k: v for k,
                      v in game_df.loc[awayGoalie, goalie_stats].to_dict().items()}
 
         for i, player in enumerate(awayC):
