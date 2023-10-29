@@ -31,7 +31,7 @@ import warnings
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     global stat_map
