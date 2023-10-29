@@ -230,30 +230,39 @@ class StatsNBA(Stats):
             "date_from_nullable": latest_date.strftime("%m/%d/%Y"),
             "date_to_nullable": today.strftime("%m/%d/%Y")
         }
-        nba_gamelog = nba.playergamelogs.PlayerGameLogs(
-            **params).get_normalized_dict()["PlayerGameLogs"]
-        adv_gamelog = nba.playergamelogs.PlayerGameLogs(
-            **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"]
-        teamlog = nba.teamgamelogs.TeamGameLogs(
-            **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
-        # Fetch playoffs game logs
-        if today.month == 4:
-            params.update({'season_type_nullable': "PlayIn"})
-            nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
-                **params).get_normalized_dict()["PlayerGameLogs"])
-            adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
-                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
-            teamlog.extend(nba.teamgamelogs.TeamGameLogs(
-                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
-        if 4 <= today.month <= 6:
-            params.update({'season_type_nullable': "Playoffs"})
-            nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
-                **params).get_normalized_dict()["PlayerGameLogs"])
-            adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
-                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
-            teamlog.extend(nba.teamgamelogs.TeamGameLogs(
-                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
+        i = 0
+
+        while (i < 3):
+            try:
+                nba_gamelog = nba.playergamelogs.PlayerGameLogs(
+                    **params).get_normalized_dict()["PlayerGameLogs"]
+                adv_gamelog = nba.playergamelogs.PlayerGameLogs(
+                    **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"]
+                teamlog = nba.teamgamelogs.TeamGameLogs(
+                    **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
+
+                # Fetch playoffs game logs
+                if today.month == 4:
+                    params.update({'season_type_nullable': "PlayIn"})
+                    nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                        **params).get_normalized_dict()["PlayerGameLogs"])
+                    adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
+                    teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
+                if 4 <= today.month <= 6:
+                    params.update({'season_type_nullable': "Playoffs"})
+                    nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                        **params).get_normalized_dict()["PlayerGameLogs"])
+                    adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
+                    teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
+
+                break
+            except:
+                i += 1
 
         nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
         adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
