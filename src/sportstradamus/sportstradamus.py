@@ -410,7 +410,8 @@ def find_correlation(offers, stats, platform):
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
                 x, int) else "/".join([positions[league][i] for i in x]))
             stat_data.profile_market(usage_str[league])
-            usage = pd.DataFrame(stat_data.playerProfile.avg)
+            usage = pd.DataFrame(
+                stat_data.playerProfile[usage_str[league] + " short"])
             usage.reset_index(inplace=True)
             usage.rename(
                 columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
@@ -422,7 +423,7 @@ def find_correlation(offers, stats, platform):
                 league_df.Position = league_df.Position.str.split("-").str[0]
 
             ranks = league_df.groupby(["Team", "Position"]).rank(
-                ascending=False, method='dense')['avg'].astype(int)
+                ascending=False, method='dense')[usage_str[league] + " short"].astype(int)
             league_df.Position = league_df.Position + ranks.astype(str)
         else:
             league_df.Position = "B" + league_df.Position.add(1).astype(str)

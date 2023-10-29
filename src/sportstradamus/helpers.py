@@ -14,6 +14,7 @@ from scipy.optimize import fsolve
 from scipy.integrate import dblquad
 import numpy as np
 import statsapi as mlb
+import pandas as pd
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -26,6 +27,17 @@ scrapeops_logger = ScrapeOpsRequests(
 )
 
 requests = scrapeops_logger.RequestsWrapper()
+
+
+def fit_trendlines(group, n=5):
+    trendlines = {}
+    for column in group.select_dtypes(include='number').columns:
+        if len(group[column].tail(n)) < 2:
+            trendlines[column] = 0
+        else:
+            trendlines[column] = np.polyfit(
+                np.arange(len(group[column].tail(n))), group[column].tail(n), 1)[0]
+    return pd.Series(trendlines)
 
 
 class Scrape:
