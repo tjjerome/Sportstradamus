@@ -12,7 +12,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents, hmean
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents, hmean, fit_trendlines
 import pandas as pd
 import warnings
 import requests
@@ -157,7 +157,7 @@ class StatsNBA(Stats):
                 'PLUS_MINUS', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlay',
                 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT', 'DREB_PCT', 'REB_PCT',
-                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
+                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR']
         self.gamelog = pd.DataFrame(columns=cols)
         team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE', 'OPP',
                      'OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
@@ -238,7 +238,7 @@ class StatsNBA(Stats):
             **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
         # Fetch playoffs game logs
-        if today.month == 4 or True:
+        if today.month == 4:
             params.update({'season_type_nullable': "PlayIn"})
             nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                 **params).get_normalized_dict()["PlayerGameLogs"])
@@ -246,7 +246,7 @@ class StatsNBA(Stats):
                 **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
             teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                 **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
-        if 4 <= today.month <= 6 or True:
+        if 4 <= today.month <= 6:
             params.update({'season_type_nullable': "Playoffs"})
             nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                 **params).get_normalized_dict()["PlayerGameLogs"])
@@ -279,8 +279,6 @@ class StatsNBA(Stats):
         # Process each game
         nba_df = []
         for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
-            if game["MIN"] < 12:
-                continue
 
             player_id = game["PLAYER_ID"]
 
@@ -320,12 +318,11 @@ class StatsNBA(Stats):
                 1.2 + game["AST"]*1.5 + game["BLST"]*3 - game["TOV"]
             game["fantasy points parlay"] = game["PRA"] + \
                 game["BLST"]*2 - game["TOV"]
+            game["FTR"] = (game["FTM"]/game["FGA"]) if game["FGA"] > 0 else 0
 
-            # game.update(
-            #     {k: v for k, v in adv_gamelog[i].items() if k in adv_stats})
             game.update(adv_gamelog[i])
 
-            nba_df.append(game)
+            nba_df.append({k: v for k, v in game.items() if "RANK" not in k})
 
         nba_df = pd.DataFrame(nba_df)
 
@@ -517,26 +514,32 @@ class StatsNBA(Stats):
         defenseGroups = defenseGames.groupby('OPP')
 
         leagueavg = playerGroups[market].mean().mean()
-        if np.isnan(leagueavg):
+        leaguestd = playerGroups[market].mean().std()
+        if np.isnan(leagueavg) or np.isnan(leaguestd):
             return
 
         self.playerProfile['avg'] = playerGroups[market].mean().div(
             leagueavg) - 1
+        self.playerProfile['z'] = (
+            playerGroups[market].mean()-leagueavg).div(leaguestd)
         self.playerProfile['home'] = playerGroups.apply(
             lambda x: x.loc[x['HOME'], market].mean() / x[market].mean()) - 1
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['HOME'].astype(bool), market].mean()/x[market].mean())-1
 
         leagueavg = defenseGroups[market].mean().mean()
+        leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
+        self.defenseProfile['z'] = (
+            defenseGroups[market].mean()-leagueavg).div(leaguestd)
         self.defenseProfile['home'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 1, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
         stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
-                      'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE']
+                      'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'MIN']
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
@@ -544,8 +547,8 @@ class StatsNBA(Stats):
         playerstats = playerlogs.mean(numeric_only=True)
         playershortstats = playerlogs.apply(lambda x: np.mean(
             x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
-        playertrends = playerlogs.apply(lambda x: np.mean(
-            x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
+        playertrends = playerlogs.apply(
+            fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
@@ -597,7 +600,7 @@ class StatsNBA(Stats):
         self.teamProfile = teamstats[team_stat_types]
 
         self.playerProfile = self.playerProfile.merge(
-            playerstats[stat_types], on='PLAYER_NAME')
+            playerstats, on='PLAYER_NAME')
 
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
@@ -745,11 +748,14 @@ class StatsNBA(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
-            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
-            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
-            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
+            "STD10": np.std(game_res[-10:]) if game_res else 0,
+            "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
+            "Trend3": np.polyfit(np.arange(len(game_res[-3:])), game_res[-3:], 1)[0] if len(game_res) > 1 else 0,
+            "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
+            "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
             "DaysIntoSeason": (date.date() - self.season_start).days,
+            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["GAME_DATE"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -803,7 +809,7 @@ class StatsNBA(Stats):
             if game[market] < 0:
                 continue
 
-            if gameDate < datetime(2022, 10, 1):
+            if gameDate < datetime(2022, 1, 1) or game["MIN"] < 12:
                 continue
 
             data = {}
@@ -1035,12 +1041,11 @@ class StatsMLB(Stats):
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1])
                     }
-                    if (n["starting batter"] and n["plateAppearances"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
-                        continue
+
                     if n["starting batter"]:
                         if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
                             batSide = self.players[n["playerId"]]["bats"]
-                        else:
+                        elif str(n["playerId"]) in game["away_batters"]:
                             batSide = game["away_batters"][str(
                                 n["playerId"])][0]["stand"]
                             if n["playerId"] not in self.players:
@@ -1048,6 +1053,8 @@ class StatsMLB(Stats):
                                     "name": n["playerName"], "bats": batSide}
                             else:
                                 self.players[n["playerId"]]["bats"] = batSide
+                        else:
+                            continue
 
                     adj = {
                         "R": n["runs"]/bpf["R"],
@@ -1069,12 +1076,12 @@ class StatsMLB(Stats):
                     BIP = (n["atBats"] - n["batter strikeouts"] - n["home runs"] -
                            v["stats"]["batting"].get("sacFlies", 0))
                     n.update({
-                        "FIP": (3*(13*adj["HRA"] + 3*adj["BB"] - 2*adj["K"])/n["pitching outs"] + 3.2) if n["starting pitcher"] else 0,
-                        "WHIP": (3*(adj["BB"] + adj["HA"])/n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "ERA": (9*adj["RA"]/n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "K9": (27*adj["K"] / n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "BB9": (27*adj["BB"] / n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "FIP": (3*(13*adj["HRA"] + 3*adj["BB"] - 2*adj["K"])/n["pitching outs"] + 3.2) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "WHIP": (3*(adj["BB"] + adj["HA"])/n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "ERA": (9*adj["RA"]/n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "K9": (27*adj["K"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "BB9": (27*adj["BB"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
                         "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["atBats"] > 0 else 0,
                         "AVG": (n["hits"]/n["atBats"]) if n["atBats"] > 0 else 0,
@@ -1084,8 +1091,7 @@ class StatsMLB(Stats):
                         "batSide": batSide if n["starting batter"] else 0
                     })
 
-                    if (n["starting batter"] and n["plateAppearances"] > 1) or (n["starting pitcher"]):
-                        new_games.append(n)
+                    new_games.append(n)
 
             for v in boxscore["teams"]["home"]["players"].values():
                 if (v["person"]["id"] == homePitcherId or
@@ -1201,12 +1207,11 @@ class StatsMLB(Stats):
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1])
                     }
-                    if (n["starting batter"] and n["plateAppearances"] <= 1) or (n["starting pitcher"] and n["pitching outs"] < 6):
-                        continue
+
                     if n["starting batter"]:
                         if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
                             batSide = self.players[n["playerId"]]["bats"]
-                        else:
+                        elif str(n["playerId"]) in game["home_batters"]:
                             batSide = game["home_batters"][str(
                                 n["playerId"])][0]["stand"]
                             if n["playerId"] not in self.players:
@@ -1214,6 +1219,8 @@ class StatsMLB(Stats):
                                     "name": n["playerName"], "bats": batSide}
                             else:
                                 self.players[n["playerId"]]["bats"] = batSide
+                        else:
+                            continue
 
                     adj = {
                         "R": n["runs"]/bpf["R"],
@@ -1235,12 +1242,12 @@ class StatsMLB(Stats):
                     BIP = (n["atBats"] - n["batter strikeouts"] - n["home runs"] -
                            v["stats"]["batting"].get("sacFlies", 0))
                     n.update({
-                        "FIP": (3*(13*adj["HRA"] + 3*adj["BB"] - 2*adj["K"])/n["pitching outs"] + 3.2) if n["starting pitcher"] else 0,
-                        "WHIP": (3*(adj["BB"] + adj["HA"])/n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "ERA": (9*adj["RA"]/n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "K9": (27*adj["K"] / n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "BB9": (27*adj["BB"] / n["pitching outs"]) if n["starting pitcher"] else 0,
-                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if n["starting pitcher"] else 0,
+                        "FIP": (3*(13*adj["HRA"] + 3*adj["BB"] - 2*adj["K"])/n["pitching outs"] + 3.2) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "WHIP": (3*(adj["BB"] + adj["HA"])/n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "ERA": (9*adj["RA"]/n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "K9": (27*adj["K"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "BB9": (27*adj["BB"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
                         "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["atBats"] > 0 else 0,
                         "AVG": (n["hits"]/n["atBats"]) if n["atBats"] > 0 else 0,
@@ -1250,8 +1257,7 @@ class StatsMLB(Stats):
                         "batSide": batSide if n["starting batter"] else 0
                     })
 
-                    if (n["starting batter"] and n["plateAppearances"] > 1) or (n["starting pitcher"]):
-                        new_games.append(n)
+                    new_games.append(n)
 
         self.gamelog = pd.concat(
             [self.gamelog, pd.DataFrame.from_records(new_games)], ignore_index=True)
@@ -1358,7 +1364,7 @@ class StatsMLB(Stats):
             next_day = self.season_start
         if next_day > today:
             next_day = today
-        end_date = next_day + timedelta(days=75)
+        end_date = next_day + timedelta(days=60)
         if end_date > today:
             end_date = today
         mlb_games = mlb.schedule(
@@ -1572,28 +1578,37 @@ class StatsMLB(Stats):
 
         # Compute league average
         leagueavg = playerGroups[market].mean().mean()
-        if np.isnan(leagueavg):
+        leaguestd = playerGroups[market].mean().std()
+        if np.isnan(leagueavg) or np.isnan(leaguestd):
             return
 
         # Compute playerProfile DataFrame
         self.playerProfile['avg'] = playerGroups[market].mean().div(
             leagueavg) - 1
+        self.playerProfile['z'] = (
+            playerGroups[market].mean()-leagueavg).div(leaguestd)
         self.playerProfile['home'] = playerGroups.apply(
             lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
 
         leagueavg = defenseGroups[market].mean().mean()
+        leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
+        self.defenseProfile['z'] = (
+            defenseGroups[market].mean()-leagueavg).div(leaguestd)
         self.defenseProfile['home'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
 
         leagueavg = pitcherGroups[market].mean().mean()
+        leaguestd = pitcherGroups[market].mean().std()
         self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
             leagueavg) - 1
+        self.pitcherProfile['z'] = (
+            pitcherGroups[market].mean()-leagueavg).div(leaguestd)
         self.pitcherProfile['home'] = pitcherGroups.apply(
             lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
         self.pitcherProfile['away'] = pitcherGroups.apply(
@@ -1626,17 +1641,14 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if any([string in market for string in ["allowed", "pitch"]]):
-            self.playerProfile['days off'] = playerGroups['gameDate'].apply(lambda x: np.diff(
-                [datetime.strptime(g, "%Y-%m-%d") for g in x.iloc[-2:]])[0].days)
-
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
                 self.playerProfile.index)].fillna(0).groupby('playerName')[
                 self.stat_types['pitching']]
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
-            playertrends = playerlogs.apply(lambda x: np.mean(
-                x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
+            playertrends = playerlogs.apply(
+                fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -1662,8 +1674,8 @@ class StatsMLB(Stats):
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
-            playertrends = playerlogs.apply(lambda x: np.mean(
-                x.diff().tail(2), 0)).fillna(0).add_suffix(" growth", 1)
+            playertrends = playerlogs.apply(
+                fit_trendlines, 3).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -1810,6 +1822,9 @@ class StatsMLB(Stats):
             pid = self.gamelog.loc[self.gamelog['opponent pitcher']
                                    == pitcher, 'opponent pitcher id']
 
+        if player_games.empty:
+            return 0
+
         if pid.empty:
             pid = 0
         else:
@@ -1841,11 +1856,14 @@ class StatsMLB(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
-            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
-            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
-            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
+            "STD10": np.std(game_res[-10:]) if game_res else 0,
+            "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
+            "Trend3": np.polyfit(np.arange(len(game_res[-3:])), game_res[-3:], 1)[0] if len(game_res) > 1 else 0,
+            "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
+            "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
             "DaysIntoSeason": (date.date() - self.season_start).days,
+            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["gameDate"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -1970,6 +1988,9 @@ class StatsMLB(Stats):
                 continue
 
             if game[market] < 0:
+                continue
+
+            if (game["starting batter"] and game["plateAppearances"] <= 1) or (game["starting pitcher"] and game["pitching outs"] < 6):
                 continue
 
             # Retrieve data from the archive based on game date and player name
@@ -2156,14 +2177,14 @@ class StatsNFL(Stats):
 
         nfl_data = nfl_data.merge(
             snaps, on=['player_display_name', 'season', 'week'])
-        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'QB') | (
-            nfl_data['snap_pct'] > 0.8)]
-        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'WR') | (
-            nfl_data['snap_pct'] > 0.5)]
-        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'RB') | (
-            nfl_data['snap_pct'] > 0.3)]
-        nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
-            nfl_data['snap_pct'] > 0.5)]
+        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'QB') | (
+        #     nfl_data['snap_pct'] > 0.8)]
+        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'WR') | (
+        #     nfl_data['snap_pct'] > 0.5)]
+        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'RB') | (
+        #     nfl_data['snap_pct'] > 0.3)]
+        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
+        #     nfl_data['snap_pct'] > 0.5)]
 
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
@@ -2619,19 +2640,25 @@ class StatsNFL(Stats):
         defenseGroups = defenseGames.groupby('opponent')
 
         leagueavg = playerGroups[market].mean().mean()
-        if np.isnan(leagueavg):
+        leaguestd = playerGroups[market].mean().std()
+        if np.isnan(leagueavg) or np.isnan(leaguestd):
             return
 
         self.playerProfile['avg'] = playerGroups[market].mean().div(
             leagueavg) - 1
+        self.playerProfile['z'] = (
+            playerGroups[market].mean()-leagueavg).div(leaguestd)
         self.playerProfile['home'] = playerGroups.apply(
             lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['home'].astype(bool), market].mean()/x[market].mean())-1
 
         leagueavg = defenseGroups[market].mean().mean()
+        leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
+        self.defenseProfile['z'] = (
+            defenseGroups[market].mean()-leagueavg).div(leaguestd)
         self.defenseProfile['home'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
@@ -2666,8 +2693,10 @@ class StatsNFL(Stats):
         playerstats = playerlogs.mean(numeric_only=True)
         playershortstats = playerlogs.apply(lambda x: np.mean(
             x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
-        playertrends = playerlogs.apply(lambda x: np.mean(
-            x.diff().tail(2), 0)).fillna(0).add_suffix(" growth", 1)
+        playertrends = playerlogs.apply(
+            fit_trendlines, 3).fillna(0).add_suffix(" growth", 1)
+        # playertrends = playerlogs.apply(lambda x: np.mean(
+        #     x.diff().tail(2), 0)).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
@@ -2847,11 +2876,14 @@ class StatsNFL(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
-            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
-            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
-            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
+            "STD10": np.std(game_res[-10:]) if game_res else 0,
+            "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
+            "Trend3": np.polyfit(np.arange(len(game_res[-3:])), game_res[-3:], 1)[0] if len(game_res) > 1 else 0,
+            "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
+            "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
             "DaysIntoSeason": (date.date() - self.season_start).days,
+            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["gameday"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -2913,6 +2945,9 @@ class StatsNFL(Stats):
                 continue
 
             if game[market] < 0:
+                continue
+
+            if ((game['position group'] == 'QB') and (game['snap pct'] < 0.8)) or ((game['position group'] == 'WR') and (game['snap pct'] < 0.4)) or ((game['position group'] == 'RB') and (game['snap pct'] < 0.3)) or ((game['position group'] == 'TE') and (game['snap pct'] < 0.5)):
                 continue
 
             data = archive["NFL"][market].get(gameDate.strftime(
@@ -3177,8 +3212,7 @@ class StatsNHL(Stats):
                         "Ast60": stats["assists"]*60/stats["timeOnIce"],
                         "SOE": ((stats["goalsAgainst"] - float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])) / shotsAgainst) if shotsAgainst else 0
                     })
-                    if stats["timeOnIce"] > 6:
-                        gamelog.append(n | stats)
+                    gamelog.append(n | stats)
 
         return gamelog, teamlog
 
@@ -3418,20 +3452,26 @@ class StatsNHL(Stats):
 
         # Compute league average
         leagueavg = playerGroups[market].mean().mean()
-        if np.isnan(leagueavg):
+        leaguestd = playerGroups[market].mean().std()
+        if np.isnan(leagueavg) or np.isnan(leaguestd):
             return
 
         # Compute playerProfile DataFrame
         self.playerProfile['avg'] = playerGroups[market].mean().div(
             leagueavg) - 1
+        self.playerProfile['z'] = (
+            playerGroups[market].mean()-leagueavg).div(leaguestd)
         self.playerProfile['home'] = playerGroups.apply(
             lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
 
         leagueavg = defenseGroups[market].mean().mean()
+        leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
+        self.defenseProfile['z'] = (
+            defenseGroups[market].mean()-leagueavg).div(leaguestd)
         self.defenseProfile['home'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
@@ -3482,8 +3522,7 @@ class StatsNHL(Stats):
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0)
-            playertrends = playerlogs.apply(lambda x: np.mean(
-                x.diff().tail(4), 0)).fillna(0)
+            playertrends = playerlogs.apply(fit_trendlines, 5).fillna(0)
             playerstats = pd.DataFrame(
                 {"SOE": playerstats, "SOE short": playershortstats, "SOE growth": playertrends})
 
@@ -3495,8 +3534,8 @@ class StatsNHL(Stats):
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
-            playertrends = playerlogs.apply(lambda x: np.mean(
-                x.diff().tail(4), 0)).fillna(0).add_suffix(" growth", 1)
+            playertrends = playerlogs.apply(
+                fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -3680,11 +3719,14 @@ class StatsNHL(Stats):
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
-            "Trend3": np.mean(np.diff(game_res[-3:])) if game_res else 0,
-            "Trend5": np.mean(np.diff(game_res[-5:])) if game_res else 0,
-            "TrendH2H": np.mean(np.diff(h2h_res[-5:])) if h2h_res else 0,
+            "STD10": np.std(game_res[-10:]) if game_res else 0,
+            "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
+            "Trend3": np.polyfit(np.arange(len(game_res[-3:])), game_res[-3:], 1)[0] if len(game_res) > 1 else 0,
+            "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
+            "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
             "DaysIntoSeason": (date.date() - self.season_start).days,
+            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["gameDate"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home
@@ -3754,10 +3796,10 @@ class StatsNHL(Stats):
         # Iterate over each game in the gamelog
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
-            if gameDate < datetime(2022, 10, 1):
+            if gameDate < datetime(2022, 1, 1):
                 continue
 
-            if game[market] < 0:
+            if game[market] < 0 or game["timeOnIce"] < 6:
                 continue
 
             data = {}
