@@ -76,56 +76,104 @@ def main(progress, books):
     csb_data = {}
     if books:
         logger.info("Getting DraftKings MLB lines")
-        dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
+        try:
+            dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
+        except:
+            logger.error("Failed to get DraftKings MLB lines")
         logger.info("Getting DraftKings NBA lines")
-        dk_data.update(
-            get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
+        try:
+            dk_data.update(
+                get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
+        except:
+            logger.error("Failed to get DraftKings NBA lines")
         logger.info("Getting DraftKings NHL lines")
-        dk_data.update(get_dk(42133, [550, 1064, 1189, 1190]))  # NHL
+        try:
+            dk_data.update(get_dk(42133, [550, 1064, 1189, 1190]))  # NHL
+        except:
+            logger.error("Failed to get DraftKings NHL lines")
         logger.info("Getting DraftKings NFL lines")
-        dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
+        try:
+            dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
+        except:
+            logger.error("Failed to get DraftKings NFL lines")
         logger.info(str(len(dk_data)) + " offers found")
 
         logger.info("Getting FanDuel MLB lines")
-        fd_data.update(
-            get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
+        try:
+            fd_data.update(
+                get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
+        except:
+            logger.error("Failed to get FanDuel MLB lines")
         logger.info("Getting FanDuel NBA lines")
-        fd_data.update(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
-                                      'player-assists', 'player-threes', 'player-defense']))
+        try:
+            fd_data.update(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
+                                          'player-assists', 'player-threes', 'player-defense']))
+        except:
+            logger.error("Failed to get FanDuel NBA lines")
         logger.info("Getting FanDuel NHL lines")
-        fd_data.update(
-            get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
+        try:
+            fd_data.update(
+                get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
+        except:
+            logger.error("Failed to get FanDuel NHL lines")
         logger.info("Getting FanDuel NFL lines")
-        fd_data.update(
-            get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
+        try:
+            fd_data.update(
+                get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
+        except:
+            logger.error("Failed to get FanDuel NFL lines")
         logger.info(str(len(fd_data)) + " offers found")
 
         logger.info("Getting Pinnacle MLB lines")
-        pin_data.update(get_pinnacle(246))  # MLB
+        try:
+            pin_data.update(get_pinnacle(246))  # MLB
+        except:
+            logger.error("Failed to get Pinnacle MLB lines")
         logger.info("Getting Pinnacle NBA lines")
-        pin_data.update(get_pinnacle(487))  # NBA
+        try:
+            pin_data.update(get_pinnacle(487))  # NBA
+        except:
+            logger.error("Failed to get Pinnacle NBA lines")
         logger.info("Getting Pinnacle NHL lines")
-        pin_data.update(get_pinnacle(1456))  # NHL
+        try:
+            pin_data.update(get_pinnacle(1456))  # NHL
+        except:
+            logger.error("Failed to get Pinnacle NHL lines")
         logger.info("Getting Pinnacle NFL lines")
-        pin_data.update(get_pinnacle(889))  # NFL
+        try:
+            pin_data.update(get_pinnacle(889))  # NFL
+        except:
+            logger.error("Failed to get Pinnacle NFL lines")
         logger.info(str(len(pin_data)) + " offers found")
 
         logger.info("Getting Caesars MLB Lines")
-        sport = "baseball"
-        league = "04f90892-3afa-4e84-acce-5b89f151063d"
-        csb_data.update(get_caesars(sport, league))
+        try:
+            sport = "baseball"
+            league = "04f90892-3afa-4e84-acce-5b89f151063d"
+            csb_data.update(get_caesars(sport, league))
+        except:
+            logger.error("Failed to get Caesars MLB lines")
         logger.info("Getting Caesars NBA Lines")
-        sport = "basketball"
-        league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
-        csb_data.update(get_caesars(sport, league))
+        try:
+            sport = "basketball"
+            league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+            csb_data.update(get_caesars(sport, league))
+        except:
+            logger.error("Failed to get Caesars NBA lines")
         logger.info("Getting Caesars NHL Lines")
-        sport = "icehockey"
-        league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
-        csb_data.update(get_caesars(sport, league))
+        try:
+            sport = "icehockey"
+            league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+            csb_data.update(get_caesars(sport, league))
+        except:
+            logger.error("Failed to get Caesars NHL lines")
         logger.info("Getting Caesars NFL Lines")
-        sport = "americanfootball"
-        league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-        csb_data.update(get_caesars(sport, league))
+        try:
+            sport = "americanfootball"
+            league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+            csb_data.update(get_caesars(sport, league))
+        except:
+            logger.error("Failed to get Caesars NFL lines")
         logger.info(str(len(csb_data)) + " offers found")
 
     datasets = {
@@ -160,15 +208,21 @@ def main(progress, books):
 
     # PrizePicks
 
-    pp_dict = get_pp()
-    pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
-    save_data(pp_offers, "PrizePicks", gc)
+    try:
+        pp_dict = get_pp()
+        pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
+        save_data(pp_offers, "PrizePicks", gc)
+    except:
+        logger.error("Failed to get PrizePicks")
 
     # Underdog
 
-    ud_dict = get_ud()
-    ud_offers = process_offers(ud_dict, "Underdog", datasets, stats)
-    save_data(ud_offers, "Underdog", gc)
+    try:
+        ud_dict = get_ud()
+        ud_offers = process_offers(ud_dict, "Underdog", datasets, stats)
+        save_data(ud_offers, "Underdog", gc)
+    except:
+        logger.error("Failed to get Underdog")
 
     # ParlayPlay
 
@@ -178,9 +232,12 @@ def main(progress, books):
 
     # Thrive
 
-    th_dict = get_thrive()
-    th_offers = process_offers(th_dict, "Thrive", datasets, stats)
-    save_data(th_offers, "Thrive", gc)
+    try:
+        th_dict = get_thrive()
+        th_offers = process_offers(th_dict, "Thrive", datasets, stats)
+        save_data(th_offers, "Thrive", gc)
+    except:
+        logger.error("Failed to get Thrive")
 
     archive.write()
 
@@ -391,7 +448,7 @@ def find_correlation(offers, stats, platform):
     usage_str = {
         "NBA": "MIN",
         "NFL": "snap pct",
-        "NHL": "timeOnIce"
+        "NHL": "TimeShare"
     }
     positions = {
         "NBA": ["G", "F", "C", "G-F", "F-C"],
