@@ -385,8 +385,11 @@ class Archive:
         self.archive[o["League"]][market][o["Date"]
                                           ].setdefault(o["Player"], {})
 
+        old_lines = self.archive[o["League"]][market][o["Date"]
+                                                      ][o["Player"]].get("Closing Lines", [None]*4)
+
         odds = []
-        for line in lines:
+        for i, line in enumerate(lines):
             if line:
                 ev = get_ev(float(line["Line"]), odds_to_prob(
                     float(line["Under"])), cv)
@@ -397,7 +400,7 @@ class Archive:
                 else:
                     p = norm.sf(o["Line"], ev, ev*cv)
             else:
-                p = None
+                p = old_lines[i]
 
             odds = np.append(odds, p)
 
