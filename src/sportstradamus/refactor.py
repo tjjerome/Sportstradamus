@@ -10,8 +10,8 @@ import json
 import numpy as np
 import pickle
 
-gauss = ["pitches thrown", "pitching outs", "AST", "DREB", "FG3A", "FGA", "FGM", "FTM", "MIN", "PA", "PF", "PR", "PRA", "PTS", "RA", "REB",
-         "attempts", "carries", "completions", "passing yards", "qb yards", "receiving yards", "targets", "yards", "faceOffWins", "saves", "timeOnIce"]
+with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
+    stat_cv = json.load(f)
 
 archive = Archive("All")
 
@@ -19,13 +19,7 @@ leagues = ["MLB", "NBA", "NHL", "NFL"]
 for league in leagues:
     markets = list(archive[league].keys())
     for market in markets:
-        if market not in gauss:
-            continue
-        filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-        filepath = pkg_resources.files(data) / filename
-        with open(filepath, "rb") as infile:
-            filedict = pickle.load(infile)
-        cv = filedict["cv"]
+        cv = stat_cv[league][market]
         for date in list(archive[league][market].keys()):
             for player in list(archive[league][market][date].keys()):
                 lines = list(archive[league][market][date][player].keys())
