@@ -31,6 +31,7 @@ from lightgbmlss.distributions import (
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
+import json
 
 
 @click.command()
@@ -434,15 +435,21 @@ def report():
     model_list = [f.name for f in pkg_resources.files(
         data).iterdir() if ".mdl" in f.name]
     model_list.sort()
+    stat_cv = {}
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
             with open(pkg_resources.files(data) / model_str, "rb") as infile:
                 model = pickle.load(infile)
 
             name = model_str.split("_")
+            cv = model['cv']
             league = name[0]
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
+            if league not in stat_cv:
+                stat_cv[league] = {}
+
+            stat_cv[league][market] = cv
 
             f.write(f" {league} {market} ".center(65, "="))
             f.write("\n")
@@ -450,6 +457,9 @@ def report():
             f.write(pd.DataFrame(model['stats'], index=[
                     ['Stats']]).to_string(index=False))
             f.write("\n\n")
+
+    with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
+        json.dump(stat_cv, f, indent=4)
 
 
 def see_features():
