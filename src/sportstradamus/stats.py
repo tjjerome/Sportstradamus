@@ -701,13 +701,8 @@ class StatsNBA(Stats):
                 self.playerProfile.columns)
 
         try:
-            stats = (
-                archive["NBA"]
-                .get(market, {})
-                .get(date, {})
-                .get(player, {})
-                .get(line, [0] * 4)
-            )
+            stats = archive["NBA"].get(market, {}).get(
+                date, {}).get(player, {}).get(line, [0] * 4)
             moneyline = archive["NBA"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["NBA"]["Totals"].get(date, {}).get(team, 0)
@@ -2241,6 +2236,8 @@ class StatsNFL(Stats):
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
 
+        self.gamelog['player display name'] = self.gamelog['player display name'].apply(
+            remove_accents)
         self.players = nfl.import_ids()
         self.players = self.players.loc[self.players['position'].isin([
             'QB', 'RB', 'WR', 'TE'])]
@@ -2272,9 +2269,12 @@ class StatsNFL(Stats):
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
                                                                                                 == row['recent team']), 'game_id'].values[0]
             if row.isna().any():
+                if self.season_start.year != row['season']:
+                    self.season_start = datetime(row['season'], 9, 1).date()
+                    self.need_pbp = True
 
                 playerData = self.parse_pbp(
-                    row['week'], row['recent team'], row['player display name'])
+                    row['week'], row['recent team'], row['season'], row['player display name'])
                 if type(playerData) is not int:
                     for k, v in playerData.items():
                         self.gamelog.at[i, k.replace(
@@ -2290,7 +2290,7 @@ class StatsNFL(Stats):
                     "gameday": self.gamelog.at[i, 'gameday']
                 }
                 team_pbp = self.parse_pbp(
-                    row['week'], row['recent team'])
+                    row['week'], row['recent team'], row['season'])
 
                 if type(team_pbp) is not int:
                     teamData.update(team_pbp)
@@ -2318,9 +2318,9 @@ class StatsNFL(Stats):
             pickle.dump({'gamelog': self.gamelog,
                         'teamlog': self.teamlog}, outfile, -1)
 
-    def parse_pbp(self, week, team, playerName=""):
+    def parse_pbp(self, week, team, year, playerName=""):
         if self.need_pbp:
-            self.pbp = nfl.import_pbp_data([self.season_start.year])
+            self.pbp = nfl.import_pbp_data([year])
             self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
                 ['run', 'pass'])]
             if self.season_start.year > 2021:
@@ -2450,6 +2450,7 @@ class StatsNFL(Stats):
                     "first_read_targets_per_route_run": 0,
                     "route_participation": 0,
                     "yards_per_route_run": 0,
+                    "midfield_tprr": 0,
                     "average_depth_of_target": 0,
                     "receiver_cp_over_expected": 0,
                     "first_read_target_share": 0,
@@ -3527,13 +3528,14 @@ class StatsNHL(Stats):
                         "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0).groupby('playerName')['SOE']
+                self.playerProfile.index)].fillna(0).groupby('playerName')[['SOE']]
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
-                x.tail(5), 0)).fillna(0)
-            playertrends = playerlogs.apply(fit_trendlines, 5).fillna(0)
-            playerstats = pd.DataFrame(
-                {"SOE": playerstats, "SOE short": playershortstats, "SOE growth": playertrends})
+                x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
+            playertrends = playerlogs.apply(
+                fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
+            playerstats = playerstats.join(playershortstats)
+            playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
                 playerstats, on='playerName')
@@ -3675,13 +3677,8 @@ class StatsNHL(Stats):
                 if goalie not in self.goalieProfile.index:
                     self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent, "SOE"]
 
-            stats = (
-                archive["NHL"]
-                .get(market, {})
-                .get(date, {})
-                .get(player, {})
-                .get(line, [0] * 4)
-            )
+            stats = archive["NHL"].get(market, {}).get(
+                date, {}).get(player, {}).get(line, [0] * 4)
             moneyline = archive["NHL"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["NHL"]["Totals"].get(
@@ -3700,6 +3697,9 @@ class StatsNHL(Stats):
         else:
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
                 pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] != "G")]
+
+        if player_games.empty:
+            return 0
 
         headtohead = player_games.loc[player_games["opponent"] == opponent]
 

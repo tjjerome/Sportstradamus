@@ -1,0 +1,198 @@
+{
+    "NFL": {
+        "team": [
+            [
+                "passing tds",
+                "tds"
+            ],
+            [
+                "passing tds",
+                "receiving tds"
+            ],
+            [
+                "completions",
+                "receptions"
+            ],
+            [
+                "attempts",
+                "carries"
+            ]
+        ],
+        "opponent": []
+    },
+    "NBA": {
+        "team": [],
+        "opponent": []
+    },
+    "NHL": {
+        "team": [
+            [
+                "fantasy points prizepicks",
+                "fantasy points prizepicks"
+            ],
+            [
+                "skater fantasy points underdog",
+                "skater fantasy points underdog"
+            ],
+            [
+                "skater fantasy points underdog",
+                "goalie fantasy points underdog"
+            ],
+            [
+                "points",
+                "points"
+            ],
+            [
+                "points",
+                "goals"
+            ],
+            [
+                "points",
+                "assists"
+            ],
+            [
+                "goals",
+                "assists"
+            ]
+        ],
+        "opponent": [
+            [
+                "skater fantasy points underdog",
+                "goalie fantasy points underdog"
+            ],
+            [
+                "goalsAgainst",
+                "points"
+            ],
+            [
+                "goalsAgainst",
+                "assists"
+            ],
+            [
+                "goalsAgainst",
+                "skater fantasy points underdog"
+            ],
+            [
+                "goalsAgainst",
+                "fantasy points prizepicks"
+            ],
+            [
+                "saves",
+                "points"
+            ],
+            [
+                "saves",
+                "goals"
+            ],
+            [
+                "saves",
+                "assists"
+            ],
+            [
+                "saves",
+                "skater fantasy points underdog"
+            ],
+            [
+                "saves",
+                "fantasy points prizepicks"
+            ],
+            [
+                "saves",
+                "shots"
+            ],
+            [
+                "saves",
+                "sogBS"
+            ]
+        ]
+    },
+    "MLB": {
+        "team": [
+            [
+                "hitter fantasy score",
+                "hitter fantasy score"
+            ],
+            [
+                "pitcher fantasy score",
+                "hitter fantasy score"
+            ],
+            [
+                "hitter fantasy points underdog",
+                "hitter fantasy points underdog"
+            ],
+            [
+                "pitcher fantasy points underdog",
+                "hitter fantasy points underdog"
+            ],
+            [
+                "hitter fantasy score",
+                "hits+runs+rbi"
+            ],
+            [
+                "hitter fantasy points underdog",
+                "hits+runs+rbi"
+            ],
+            [
+                "pitcher fantasy score",
+                "hits+runs+rbi"
+            ],
+            [
+                "pitcher fantasy points underdog",
+                "hits+runs+rbi"
+            ],
+            [
+                "hitter fantasy score",
+                "rbi"
+            ],
+            [
+                "hitter fantasy points underdog",
+                "rbi"
+            ],
+            [
+                "pitcher fantasy score",
+                "rbi"
+            ],
+            [
+                "pitcher fantasy points underdog",
+                "rbi"
+            ],
+            [
+                "hitter fantasy score",
+                "runs"
+            ],
+            [
+                "hitter fantasy points underdog",
+                "runs"
+            ],
+            [
+                "pitcher fantasy score",
+                "runs"
+            ],
+            [
+                "pitcher fantasy points underdog",
+                "runs"
+            ],
+            [
+                "hits+runs+rbi",
+                "hits+runs+rbi"
+            ],
+            [
+                "hits+runs+rbi",
+                "rbi"
+            ],
+            [
+                "hits+runs+rbi",
+                "runs"
+            ],
+            [
+                "rbi",
+                "runs"
+            ],
+            [
+                "runs",
+                "runs"
+            ]
+        ],
+        "opponent": []
+    }
+}
