@@ -118,16 +118,6 @@ for m1, m2 in banned_combos:
     c = c.loc[~(c.index.get_level_values(0).str.contains(m2) & c.index.get_level_values(
         1).str.contains(m1) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
 
-# Other team
-# banned_combos = [
-
-# ]
-
-# for m1, m2 in banned_combos:
-#     c = c.loc[~(c.index.get_level_values(0).str.contains(m1) & c.index.get_level_values(
-#         1).str.contains(m2) & c.index.get_level_values(1).str.startswith("_OPP_"))]
-#     c = c.loc[~(c.index.get_level_values(0).str.contains(m2) & c.index.get_level_values(
-#         1).str.contains(m1) & c.index.get_level_values(1).str.startswith("_OPP_"))]
 
 c.to_csv((pkg_resources.files(data) / "MLB_corr.csv"))
 
