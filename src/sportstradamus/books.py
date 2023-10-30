@@ -691,7 +691,8 @@ def get_pp():
             "PHO": "PHX",
             "NOP": "NO",
             "JAC": "JAX",
-            "LAV": "LV"
+            "LAV": "LV",
+            "NJY": "NYJ"
         }
 
         for p in players:
