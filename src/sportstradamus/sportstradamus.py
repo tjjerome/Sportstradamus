@@ -27,6 +27,7 @@ import os.path
 import datetime
 import importlib.resources as pkg_resources
 import warnings
+from itertools import combinations
 
 
 @click.command()
@@ -206,11 +207,17 @@ def main(progress, books):
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
 
+    pp_df = pd.DataFrame()
+    ud_df = pd.DataFrame()
+    th_df = pd.DataFrame()
+
     # PrizePicks
 
     try:
         pp_dict = get_pp()
         pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
+        pp_df = pd.DataFrame(pp_offers)
+        pp_df["Market"] = pp_df["Market"].map(stat_map["PrizePicks"])
         save_data(pp_offers, "PrizePicks", gc)
     except Exception as exc:
         logger.exception("Failed to get PrizePicks")
@@ -221,6 +228,8 @@ def main(progress, books):
         ud_dict = get_ud()
         ud_offers = process_offers(ud_dict, "Underdog", datasets, stats)
         save_data(ud_offers, "Underdog", gc)
+        ud_df = pd.DataFrame(ud_offers)
+        ud_df["Market"] = ud_df["Market"].map(stat_map["Underdog"])
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
@@ -235,6 +244,8 @@ def main(progress, books):
     try:
         th_dict = get_thrive()
         th_offers = process_offers(th_dict, "Thrive", datasets, stats)
+        th_df = pd.DataFrame(th_offers)
+        th_df["Market"] = th_df["Market"].map(stat_map["Thrive"])
         save_data(th_offers, "Thrive", gc)
     except Exception as exc:
         logger.exception("Failed to get Thrive")
@@ -248,13 +259,6 @@ def main(progress, books):
     else:
         history = pd.DataFrame(
             columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
-
-    ud_df = pd.DataFrame(ud_offers)
-    pp_df = pd.DataFrame(pp_offers)
-    th_df = pd.DataFrame(th_offers)
-    ud_df["Market"] = ud_df["Market"].map(stat_map["Underdog"])
-    pp_df["Market"] = pp_df["Market"].map(stat_map["PrizePicks"])
-    th_df["Market"] = th_df["Market"].map(stat_map["Thrive"])
 
     df = pd.concat([ud_df, pp_df, th_df]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
@@ -461,6 +465,9 @@ def find_correlation(offers, stats, platform):
             lambda x: not isinstance(x, tuple))]  # Remove this to correlate combo picks
         c = pd.read_csv(pkg_resources.files(data) / (league+"_corr.csv"))
         c.columns = ["market", "correlation", "R"]
+        c_map = c
+        c_map.index = c.correlation
+        c_map = c_map.groupby('market').apply(lambda x: x)['R'].to_dict()
         stat_data = stats.get(league)
 
         if league != "MLB":
@@ -487,7 +494,11 @@ def find_correlation(offers, stats, platform):
             league_df.loc[league_df["Market"].map(stat_map[platform]).str.contains(
                 "allowed") | league_df["Market"].map(stat_map[platform]).str.contains("pitch"), "Position"] = "P"
 
+        checked_teams = []
+        best_fives = {}
         for team in list(league_df.Team.unique()):
+            if team in checked_teams:
+                continue
             team_df = league_df.loc[league_df["Team"] == team]
             team_df["cMarket"] = team_df["Position"] + " " + \
                 team_df["Market"].map(stat_map[platform])
@@ -495,7 +506,66 @@ def find_correlation(offers, stats, platform):
                                    == team_df.Opponent.mode().values[0]]
             opp_df["cMarket"] = "_OPP_" + opp_df["Position"] + \
                 " " + opp_df["Market"].map(stat_map[platform])
+            checked_teams.append(team)
+            checked_teams.append(team_df.Opponent.mode().values[0])
             game_df = pd.concat([team_df, opp_df])
+            parlays = []
+            for bet in combinations(game_df.index.unique(), 5):
+                if (len(game_df.loc[list(bet), 'Team'].unique()) != 2) or (len(game_df.loc[list(bet), 'Player'].unique()) != 5):
+                    continue
+
+                p = game_df.loc[list(bet)].drop_duplicates(
+                    'Player')['Model'].product()
+
+                # get correlation matrix
+                for i in np.arange(5):
+                    cm1 = game_df.loc[bet[i], 'cMarket']
+                    b1 = game_df.loc[bet[i], 'Bet']
+                    p1 = game_df.loc[bet[i], 'Model']
+                    if len(cm1) == 2:
+                        cm1 = cm1.to_list()
+                        b1 = b1.iloc[0]
+                        p1 = p1.iloc[0]
+                    else:
+                        cm1 = [cm1]
+                    for j in np.arange(i, 5):
+                        if i != j:
+                            cm2 = game_df.loc[bet[j], 'cMarket']
+                            b2 = game_df.loc[bet[j], 'Bet']
+                            p2 = game_df.loc[bet[j], 'Model']
+                            if len(cm2) == 2:
+                                cm2 = cm2.to_list()
+                                b2 = b2.iloc[0]
+                                p2 = p2.iloc[0]
+                            else:
+                                cm2 = [cm2]
+
+                            max_c = 0
+                            for a in cm1:
+                                for b in cm2:
+                                    if ("_OPP_" in a) and ("_OPP_" in b):
+                                        a = a.replace("_OPP_", "")
+                                        b = b.replace("_OPP_", "")
+                                    cc = c_map.get((a, b), 0)
+                                    max_c = cc if abs(cc) > abs(
+                                        max_c) else max_c
+                                    cc = c_map.get((b, a), 0)
+                                    max_c = cc if abs(cc) > abs(
+                                        max_c) else max_c
+
+                            if b1 != b2:
+                                max_c = -max_c
+
+                            p += np.sqrt(p1*p2*(1-p1)*(1-p2))*max_c
+
+                p = p*20
+                if platform == "Underdog":
+                    p = p * \
+                        game_df.loc[list(bet)].drop_duplicates(
+                            'Player')['Boost'].product()
+                if p > 1:
+                    parlays.append(list(bet), p)
+
             for i, offer in team_df.iterrows():
                 if len(team_df.loc[i]) == 2:
                     mask = c.market.isin(team_df.loc[i].cMarket.to_list())
