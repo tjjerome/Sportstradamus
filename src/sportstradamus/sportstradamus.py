@@ -496,19 +496,19 @@ def find_correlation(offers, stats, platform):
 
         # checked_teams = []
         # best_fives = []
-        # for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
-        #     if team in checked_teams:
-        #         continue
-        #     team_df = league_df.loc[league_df["Team"] == team]
-        #     team_df["cMarket"] = team_df["Position"] + " " + \
-        #         team_df["Market"].map(stat_map[platform])
-        #     opp = team_df.Opponent.mode().values[0]
-        #     opp_df = league_df.loc[league_df["Team"] == opp]
-        #     opp_df["cMarket"] = "_OPP_" + opp_df["Position"] + \
-        #         " " + opp_df["Market"].map(stat_map[platform])
+        for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
+            # if team in checked_teams:
+            #     continue
+            team_df = league_df.loc[league_df["Team"] == team]
+            team_df["cMarket"] = team_df["Position"] + " " + \
+                team_df["Market"].map(stat_map[platform])
+            opp = team_df.Opponent.mode().values[0]
+            opp_df = league_df.loc[league_df["Team"] == opp]
+            opp_df["cMarket"] = "_OPP_" + opp_df["Position"] + \
+                " " + opp_df["Market"].map(stat_map[platform])
+            game_df = pd.concat([team_df, opp_df])
         #     checked_teams.append(team)
         #     checked_teams.append(opp)
-        #     game_df = pd.concat([team_df, opp_df])
         #     for bet in combinations(game_df.index.unique(), 5):
         #         if (len(game_df.loc[list(bet), 'Team'].unique()) != 2) or (len(game_df.loc[list(bet), 'Player'].unique()) != 5):
         #             continue
