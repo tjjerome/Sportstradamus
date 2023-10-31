@@ -32,7 +32,7 @@ from itertools import combinations
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 def main(progress, books):
     global untapped_markets
     global stat_map
@@ -509,7 +509,13 @@ def find_correlation(offers, stats, platform):
             game_df = pd.concat([team_df, opp_df])
             checked_teams.append(team)
             checked_teams.append(opp)
-            for bet in combinations(game_df.index.unique(), 5):
+            if platform == "Underdog":
+                combos = combinations(
+                    game_df.loc[(game_df.Model > .545) | any(game_df.Boost > 1)].index.unique(), 5)
+            else:
+                combos = combinations(
+                    game_df.loc[game_df.Model > .545].index.unique(), 5)
+            for bet in combos:
                 if (len(game_df.loc[list(bet), 'Team'].unique()) != 2) or (len(game_df.loc[list(bet), 'Player'].unique()) != 5):
                     continue
 
@@ -568,7 +574,7 @@ def find_correlation(offers, stats, platform):
                         "League": league,
                         "Platform": platform,
                         "EV": p,
-                        "Bet": list(bet)
+                        "Bet": ", ".join(game_df.loc[list(bet)].drop_duplicates('Player')[['Player', 'Bet', 'Market']].agg(" ".join, axis=1).to_list())
                     }
                     best_fives.append(parlay)
 

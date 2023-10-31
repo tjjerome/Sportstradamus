@@ -1,4 +1,10 @@
 {
+    "MLB": {
+        "hits allowed": 1,
+        "pitcher strikeouts": 1,
+        "pitches thrown": 0.1540088263001153,
+        "pitching outs": 0.23262919410947358
+    },
     "NBA": {
         "AST": 0.9359878079807445,
         "BLK": 1,
@@ -43,6 +49,19 @@
         "yards": 0.7405394254692604
     },
     "NHL": {
-        "points": 1
+        "assists": 1,
+        "blocked": 1,
+        "faceOffWins": 0.867246548132379,
+        "fantasy points prizepicks": 0.8962666148643095,
+        "goalie fantasy points underdog": 0.3821066164744511,
+        "goals": 1,
+        "goalsAgainst": 1,
+        "hits": 1,
+        "points": 1,
+        "saves": 0.32687145263380557,
+        "shots": 1,
+        "skater fantasy points underdog": 0.7595086374425047,
+        "sogBS": 1,
+        "timeOnIce": 0.27076006508623746
     }
 }
