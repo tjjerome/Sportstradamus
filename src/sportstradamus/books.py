@@ -656,20 +656,20 @@ def get_pp():
         "SERIES",
     ]
 
-    # try:
-    #     # Retrieve the available leagues
-    #     leagues = scraper.get_proxy("https://api.prizepicks.com/leagues")
-    #     leagues = [
-    #         i["id"]
-    #         for i in leagues["data"]
-    #         if i["attributes"]["projections_count"] > 0
-    #         and not any([string in i["attributes"]["name"] for string in live_bets])
-    #     ]
-    # except:
-    #     logger.exception("Retrieving leagues failed")
-    #     leagues = [2, 7, 8, 9]
+    try:
+        # Retrieve the available leagues
+        leagues = scraper.get_proxy("https://api.prizepicks.com/leagues")
+        leagues = [
+            i["id"]
+            for i in leagues["data"]
+            if i["attributes"]["projections_count"] > 0
+            and not any([string in i["attributes"]["name"] for string in live_bets])
+        ]
+    except:
+        logger.exception("Retrieving leagues failed")
+        leagues = [2, 7, 8, 9]
 
-    leagues = [2, 7, 8, 9]
+    # leagues = [2, 7, 8, 9]
 
     for l in tqdm(leagues, desc="Processing PrizePicks offers"):
         try:
