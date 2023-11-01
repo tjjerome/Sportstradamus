@@ -2105,14 +2105,15 @@ class StatsNFL(Stats):
                           'first read target share', 'redzone target share'],
             'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate',
                         'redzone carry share', 'carry share'],
-            'offense': ['pass_rate', 'pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
+            'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate', 'pass_success_rate',
                         'epa_per_rush', 'epa_per_pass', 'exp_per_rush', 'exp_per_pass',
                         'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
-                        'epa_per_blitz'],
+                        'epa_per_blitz', 'plays_per_game', 'time_of_possession', 'time_per_play'],
             'defense': ['rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_allowed_per_rush',
                         'epa_allowed_per_pass', 'exp_allowed_per_rush', 'exp_allowed_per_pass',
                         'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed',
-                        'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush', 'blitz_rate', 'epa_allowed_per_blitz']
+                        'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush', 'blitz_rate', 'epa_allowed_per_blitz',
+                        'plays_per_game', 'time_of_possession', 'time_per_play']
         }
         self.need_pbp = True
 
@@ -2181,14 +2182,6 @@ class StatsNFL(Stats):
 
         nfl_data = nfl_data.merge(
             snaps, on=['player_display_name', 'season', 'week'])
-        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'QB') | (
-        #     nfl_data['snap_pct'] > 0.8)]
-        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'WR') | (
-        #     nfl_data['snap_pct'] > 0.5)]
-        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'RB') | (
-        #     nfl_data['snap_pct'] > 0.3)]
-        # nfl_data = nfl_data.loc[(nfl_data['position_group'] != 'TE') | (
-        #     nfl_data['snap_pct'] > 0.5)]
 
         nfl_data['fumbles'] = nfl_data['sack_fumbles'] + \
             nfl_data['rushing_fumbles'] + nfl_data['receiving_fumbles']
@@ -2321,6 +2314,8 @@ class StatsNFL(Stats):
     def parse_pbp(self, week, team, year, playerName=""):
         if self.need_pbp:
             self.pbp = nfl.import_pbp_data([year])
+            self.pbp["play_time"] = self.pbp["game_seconds_remaining"].diff(
+                -1).fillna(0)
             self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
                 ['run', 'pass'])]
             if self.season_start.year > 2021:
@@ -2342,7 +2337,7 @@ class StatsNFL(Stats):
                 bool)
             self.pbp['pass_attempt'] = self.pbp['pass_attempt'].astype(
                 bool)
-            self.pbp['drive_inside20'] = self.pbp['drive_inside20'].astype(
+            self.pbp['redzone'] = (self.pbp['yardline_100'] <= 20).astype(
                 bool)
             self.pbp.loc[self.pbp['home_team']
                          == 'LA', 'home_team'] = "LAR"
@@ -2362,6 +2357,8 @@ class StatsNFL(Stats):
         if playerName == "":
             pr = pbp_off['pass'].mean()
             proe = pbp_off['pass'].mean() - pbp_off['xpass'].mean()
+            proe110 = pbp_off.loc[(pbp_off['down'] == 1) & (pbp_off['ydstogo'] == 10), 'pass'].mean(
+            ) - pbp_off.loc[(pbp_off['down'] == 1) & (pbp_off['ydstogo'] == 10), 'xpass'].mean()
             off_rush_sr = (pbp_off.loc[pbp_off['rush'], 'epa'] > 0).mean()
             off_pass_sr = (pbp_off.loc[pbp_off['pass'], 'epa'] > 0).mean()
             def_rush_sr = (pbp_def.loc[pbp_def['rush'], 'epa'] > 0).mean()
@@ -2401,10 +2398,15 @@ class StatsNFL(Stats):
                 pbp_off['n_blitzers'] > 0), 'epa'].mean()
             def_blitz_epa = pbp_def.loc[pbp_def['pass'] & (
                 pbp_def['n_blitzers'] > 0), 'epa'].mean()
+            plays = len(pbp_off)
+            time_of_possession = pbp_off["play_time"].sum(
+            ) / pbp["play_time"].sum()
+            time_per_play = pbp_off["play_time"].mean()
 
             return {
                 "pass_rate": pr,
                 "pass_rate_over_expected": proe,
+                "pass_rate_over_expected_110": proe110,
                 "rush_success_rate": off_rush_sr,
                 "pass_success_rate": off_pass_sr,
                 "rush_success_rate_allowed": def_rush_sr,
@@ -2428,7 +2430,10 @@ class StatsNFL(Stats):
                 "expected_yards_per_rush": off_rush_xya,
                 "blitz_rate": blitz_rate,
                 "epa_per_blitz": off_blitz_epa,
-                "epa_allowed_per_blitz": def_blitz_epa
+                "epa_allowed_per_blitz": def_blitz_epa,
+                "plays_per_game": plays,
+                "time_of_possession": time_of_possession,
+                "time_per_play": time_per_play
             }
 
         else:
@@ -2509,13 +2514,13 @@ class StatsNFL(Stats):
             rec_cpoe = pbp_off.loc[pbp_off['receiver_player_id']
                                    == self.ids.get(playerName), 'cpoe'].mean() / 100
             rz_passes = len(
-                pbp_off.loc[pbp_off['pass_attempt'] & pbp_off['drive_inside20']])
+                pbp_off.loc[pbp_off['pass_attempt'] & pbp_off['redzone']])
             rz_target_pct = (len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
-                playerName)) & pbp_off['drive_inside20']]) / rz_passes) if rz_passes > 0 else np.nan
+                playerName)) & pbp_off['redzone']]) / rz_passes) if rz_passes > 0 else np.nan
             rz_rushes = len(
-                pbp_off.loc[pbp_off['rush'] & pbp_off['drive_inside20']])
+                pbp_off.loc[pbp_off['rush'] & pbp_off['redzone']])
             rz_attempt_pct = (len(pbp_off.loc[(pbp_off['rusher_player_id'] == self.ids.get(
-                playerName)) & pbp_off['drive_inside20']]) / rz_rushes) if rz_rushes > 0 else np.nan
+                playerName)) & pbp_off['redzone']]) / rz_rushes) if rz_rushes > 0 else np.nan
             rushes = len(pbp_off.loc[pbp_off['rush']])
             attempt_pct = (len(pbp_off.loc[pbp_off['rusher_player_id'] == self.ids.get(
                 playerName)]) / rushes) if rushes > 0 else np.nan
