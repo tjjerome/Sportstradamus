@@ -207,18 +207,17 @@ def main(progress, books):
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
 
-    pp_df = pd.DataFrame()
-    ud_df = pd.DataFrame()
-    th_df = pd.DataFrame()
+    pp_offers = pd.DataFrame()
+    ud_offers = pd.DataFrame()
+    th_offers = pd.DataFrame()
 
     # PrizePicks
 
     try:
         pp_dict = get_pp()
         pp_offers = process_offers(pp_dict, "PrizePicks", datasets, stats)
-        pp_df = pd.DataFrame(pp_offers)
-        pp_df["Market"] = pp_df["Market"].map(stat_map["PrizePicks"])
         save_data(pp_offers, "PrizePicks", gc)
+        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
     except Exception as exc:
         logger.exception("Failed to get PrizePicks")
 
@@ -228,8 +227,7 @@ def main(progress, books):
         ud_dict = get_ud()
         ud_offers = process_offers(ud_dict, "Underdog", datasets, stats)
         save_data(ud_offers, "Underdog", gc)
-        ud_df = pd.DataFrame(ud_offers)
-        ud_df["Market"] = ud_df["Market"].map(stat_map["Underdog"])
+        ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
@@ -244,9 +242,8 @@ def main(progress, books):
     try:
         th_dict = get_thrive()
         th_offers = process_offers(th_dict, "Thrive", datasets, stats)
-        th_df = pd.DataFrame(th_offers)
-        th_df["Market"] = th_df["Market"].map(stat_map["Thrive"])
         save_data(th_offers, "Thrive", gc)
+        th_offers["Market"] = th_offers["Market"].map(stat_map["Thrive"])
     except Exception as exc:
         logger.exception("Failed to get Thrive")
 
@@ -260,8 +257,8 @@ def main(progress, books):
         history = pd.DataFrame(
             columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
 
-    df = pd.concat([ud_df, pp_df, th_df]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                          ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
+    df = pd.concat([ud_offers, pp_offers, th_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
+                                                                      ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
     df.loc[(df['Market'] == 'AST') & (
         df['League'] == 'NHL'), 'Market'] = "points"
     df.loc[(df['Market'] == 'PTS') & (
@@ -744,7 +741,7 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 lines = []
                 for book, dataset in datasets.items():
                     codex = stat_map[book]
-                    offer = dataset.get(o["Player"], {}).get(
+                    offer = dataset.get(player, {}).get(
                         codex.get(market, market)
                     )
                     lines.append(offer)
