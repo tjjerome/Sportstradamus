@@ -190,6 +190,29 @@ class StatsNBA(Stats):
             if latest_date < self.season_start:
                 latest_date = self.season_start
         today = datetime.today().date()
+        player_df = pd.read_csv(pkg_resources.files(
+            data) / f"nba_players_{self.season}.csv")
+
+        player_df.Player = player_df.Player.apply(remove_accents)
+        player_df.index = player_df.Player
+        player_df = player_df.groupby("Team")["Pos"].apply(lambda x: x.str[0])
+        player_df = {level: player_df.xs(level).to_dict()
+                     for level in player_df.index.levels[0]}
+        if self.season in self.players:
+            self.players[self.season] = {team: players.update(
+                player_df[team]) for team, players in self.players.items()}
+        else:
+            self.players[self.season] = player_df
+
+        position_map = {
+            "Forward": "F",
+            "Guard": "C",
+            "Forward-Guard": "W",
+            "Guard-Forward": "W",
+            "Center": "B",
+            "Forward-Center": "B",
+            "Center-Forward": "B"
+        }
 
         self.upcoming_games = {}
 
@@ -290,6 +313,7 @@ class StatsNBA(Stats):
         for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
 
             player_id = game["PLAYER_ID"]
+            game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
 
             # TODO Rework this
             try:
@@ -298,17 +322,18 @@ class StatsNBA(Stats):
             except:
                 continue
 
-            if player_id not in self.players:
+            if game["PLAYER_NAME"] not in self.players[self.season][game["TEAM_ABBREVIATION"]]:
                 # Fetch player information if not already present
-                self.players[player_id] = nba.commonplayerinfo.CommonPlayerInfo(
+                position = nba.commonplayerinfo.CommonPlayerInfo(
                     player_id=player_id
-                ).get_normalized_dict()["CommonPlayerInfo"][0]
+                ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
+                self.players[self.season][game["TEAM_ABBREVIATION"]
+                                          ][game["PLAYER_NAME"]] = position_map.get(position)
                 sleep(0.5)
 
             # Extract additional game information
-            game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
-            game["POS"] = self.players[player_id].get("POSITION").replace(
-                "Center-Forward", "Forward-Center").replace("Forward-Guard", "Guard-Forward")
+            game["POS"] = self.players[self.season][game["TEAM_ABBREVIATION"]].get(
+                game["PLAYER_NAME"])
             game["HOME"] = "vs." in game["MATCHUP"]
             teams = game["MATCHUP"].replace("vs.", "@").split(" @ ")
             for team in teams:
@@ -330,6 +355,8 @@ class StatsNBA(Stats):
             game["FTR"] = (game["FTM"]/game["FGA"]) if game["FGA"] > 0 else 0
 
             game.update(adv_gamelog[i])
+
+            game["AST_RATIO"] = game["AST_PCT"]/game["USG_PCT"]
 
             nba_df.append({k: v for k, v in game.items() if "RANK" not in k})
 
@@ -547,7 +574,7 @@ class StatsNBA(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
-        stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
+        stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'AST_RATIO', 'OREB_PCT',
                       'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'MIN']
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
