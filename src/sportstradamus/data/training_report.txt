@@ -1,3 +1,78 @@
+================== MLB 1st inning hits allowed ==================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.611034   0.590653 -0.021891    0.050377      0.06514  0.222816
+
+================== MLB 1st inning runs allowed ==================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.715573        0.0 -0.755957    0.115123     0.157982  0.027145
+
+======================= MLB hits+runs+rbi =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.637918   0.631082 0.013919    0.034872     0.058408  0.293079
+
+======================== MLB hits allowed =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.624183   0.652019 0.020738    0.038863     0.052167   0.10986
+
+=============== MLB hitter fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.606058   0.582597 0.456008    0.031457     0.042901   0.12156
+
+==================== MLB hitter fantasy score ===================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.610058   0.584214 0.456696    0.033277     0.045539  0.133617
+
+============== MLB pitcher fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.666896   0.684663 0.439428    0.102622     0.131471  0.246696
+
+=================== MLB pitcher fantasy score ===================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.668768   0.684597 0.439519    0.104544     0.132277  0.246409
+
+===================== MLB pitcher strikeouts ====================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.614657   0.627249 0.021218    0.036743      0.04918  0.103243
+
+======================= MLB pitches thrown ======================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.67434   0.675569 0.497056    0.079619     0.106074  0.148917
+
+======================= MLB pitching outs =======================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.639887   0.630866 0.392944    0.048388      0.06789  0.086868
+
+======================== MLB runs allowed =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.669643   0.679954 0.058602    0.104475     0.131303  0.293879
+
+======================== MLB stolen bases =======================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.770833        0.0 -2.988938    0.225411     0.295364  0.099723
+
+======================== MLB total bases ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.600795   0.586597 -0.027408   -0.020631    -0.014085  0.278789
+
+=========================== MLB walks ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.653657        0.0 -0.974015    0.077234      0.10443  0.032961
+
 ============================ NBA AST ============================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -193,8 +268,73 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.649351   0.648464 0.480075    0.073729      0.09409  0.123569
 
+========================== NHL assists ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.651471   0.727273 -0.862305    0.080891      0.11184  0.051599
+
+========================== NHL blocked ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.629886   0.623055 -0.244109     0.04623     0.062482  0.094266
+
+======================== NHL faceOffWins ========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.598891   0.569297 0.313536    0.032808     0.043898  0.116543
+
+================= NHL fantasy points prizepicks =================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.529655   0.514295 0.406021   -0.019724    -0.024619  0.102275
+
+=============== NHL goalie fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.600551   0.609929 0.426886    0.034576     0.046017  0.115348
+
+=========================== NHL goals ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.682809        0.0 -1.376191    0.100517     0.149177  0.035184
+
+======================== NHL goalsAgainst =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.666667   0.710462 0.038512    0.076992     0.100624  0.215486
+
+============================ NHL hits ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.641302   0.631009 -0.093504    0.055859       0.0806  0.159533
+
 =========================== NHL points ==========================
  Distribution Model: Poisson
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
  0.644507   0.604965 -0.480134    0.064593     0.090718  0.089257
+
+=========================== NHL saves ===========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.62356   0.631124  0.45957    0.039461     0.053417   0.08109
+
+=========================== NHL shots ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.628435   0.640127 -0.041125    0.048806     0.065442  0.151581
+
+=============== NHL skater fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.565201    0.55549 0.396361    0.017105     0.021254  0.094758
+
+=========================== NHL sogBS ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.623551   0.651185 0.025823     0.05028     0.066509  0.189868
+
+========================= NHL timeOnIce =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.641582   0.654763 0.320501    0.073536     0.092816  0.341068
 
