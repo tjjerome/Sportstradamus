@@ -400,7 +400,7 @@ class Archive:
                 else:
                     p = norm.sf(o["Line"], ev, ev*cv)
             else:
-                p = old_lines[i]
+                p = None
 
             odds = np.append(odds, p)
 
