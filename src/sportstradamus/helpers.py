@@ -388,6 +388,9 @@ class Archive:
         old_lines = self.archive[o["League"]][market][o["Date"]
                                                       ][o["Player"]].get("Closing Lines", [None]*4)
 
+        for i in range(4):
+            if lines[i] is None:
+                lines[i] = old_lines[i]
         odds = []
         for i, line in enumerate(lines):
             if line:
