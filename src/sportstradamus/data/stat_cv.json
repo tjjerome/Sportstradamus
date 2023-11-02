@@ -1,9 +1,20 @@
 {
     "MLB": {
+        "1st inning hits allowed": 1,
+        "1st inning runs allowed": 1,
+        "hits+runs+rbi": 1,
         "hits allowed": 1,
+        "hitter fantasy points underdog": 0.9688659058888173,
+        "hitter fantasy score": 1.0071278003320556,
+        "pitcher fantasy points underdog": 0.5420468348249582,
+        "pitcher fantasy score": 0.5249131602641597,
         "pitcher strikeouts": 1,
         "pitches thrown": 0.1540088263001153,
-        "pitching outs": 0.23262919410947358
+        "pitching outs": 0.23262919410947358,
+        "runs allowed": 1,
+        "stolen bases": 1,
+        "total bases": 1,
+        "walks": 1
     },
     "NBA": {
         "AST": 0.9359878079807445,
