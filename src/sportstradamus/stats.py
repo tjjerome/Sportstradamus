@@ -10,7 +10,7 @@ from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
-from scipy.stats import iqr
+from scipy.stats import iqr, poisson, norm
 from time import sleep
 from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents, hmean, fit_trendlines
 import pandas as pd
@@ -199,8 +199,8 @@ class StatsNBA(Stats):
         player_df = {level: player_df.xs(level).to_dict()
                      for level in player_df.index.levels[0]}
         if self.season in self.players:
-            self.players[self.season] = {team: players.update(
-                player_df[team]) for team, players in self.players.items()}
+            self.players[self.season] = {team: players | player_df.get(
+                team, {}) for team, players in self.players[self.season].items()}
         else:
             self.players[self.season] = player_df
 
@@ -266,7 +266,7 @@ class StatsNBA(Stats):
                     **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
                 # Fetch playoffs game logs
-                if today.month == 4:
+                if today.month == 4 or True:
                     params.update({'season_type_nullable': "PlayIn"})
                     nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **params).get_normalized_dict()["PlayerGameLogs"])
@@ -274,7 +274,7 @@ class StatsNBA(Stats):
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
                     teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
-                if 4 <= today.month <= 6:
+                if 4 <= today.month <= 6 or True:
                     params.update({'season_type_nullable': "Playoffs"})
                     nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **params).get_normalized_dict()["PlayerGameLogs"])
@@ -322,14 +322,24 @@ class StatsNBA(Stats):
             except:
                 continue
 
+            self.players[self.season].setdefault(game["TEAM_ABBREVIATION"], {})
             if game["PLAYER_NAME"] not in self.players[self.season][game["TEAM_ABBREVIATION"]]:
                 # Fetch player information if not already present
-                position = nba.commonplayerinfo.CommonPlayerInfo(
-                    player_id=player_id
-                ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
+                position = None
+                for season in list(self.players.keys())[::-1]:
+                    if position is None:
+                        position = self.players[season][game["TEAM_ABBREVIATION"]].get(
+                            game["PLAYER_NAME"])
+
+                if position is None:
+                    position = nba.commonplayerinfo.CommonPlayerInfo(
+                        player_id=player_id
+                    ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
+                    position = position_map.get(position)
+                    sleep(0.5)
+
                 self.players[self.season][game["TEAM_ABBREVIATION"]
-                                          ][game["PLAYER_NAME"]] = position_map.get(position)
-                sleep(0.5)
+                                          ][game["PLAYER_NAME"]] = position
 
             # Extract additional game information
             game["POS"] = self.players[self.season][game["TEAM_ABBREVIATION"]].get(
@@ -355,8 +365,6 @@ class StatsNBA(Stats):
             game["FTR"] = (game["FTM"]/game["FGA"]) if game["FGA"] > 0 else 0
 
             game.update(adv_gamelog[i])
-
-            game["AST_RATIO"] = game["AST_PCT"]/game["USG_PCT"]
 
             nba_df.append({k: v for k, v in game.items() if "RANK" not in k})
 
@@ -574,7 +582,7 @@ class StatsNBA(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
-        stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'AST_RATIO', 'OREB_PCT',
+        stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
                       'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'MIN']
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
@@ -588,8 +596,7 @@ class StatsNBA(Stats):
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
-        positions = ['Guard', 'Forward', 'Center',
-                     'Guard-Forward', 'Forward-Center']
+        positions = ['P', 'C', 'F', 'W', 'B']
         for position in positions:
             positionGroups = gamelog.loc[gamelog['POS'] == position].groupby(
                 ['OPP', 'GAME_ID'])
@@ -697,7 +704,7 @@ class StatsNBA(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, date=datetime.today()):
+    def get_stats(self, offer, cv=1, date=datetime.today()):
         """
         Generate a pandas DataFrame with a summary of relevant stats.
 
@@ -728,8 +735,8 @@ class StatsNBA(Stats):
                 self.playerProfile.columns)
 
         try:
-            stats = archive["NBA"].get(market, {}).get(
-                date, {}).get(player, {}).get(line, [0] * 4)
+            ev = archive["NBA"].get(market, {}).get(
+                date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NBA"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["NBA"]["Totals"].get(date, {}).get(team, 0)
@@ -758,13 +765,17 @@ class StatsNBA(Stats):
 
         dvpoa = self.defenseProfile.loc[opponent, position]
 
-        stats = np.array(stats, dtype=np.float64)
-        odds = np.nanmean(stats)
-        if np.isnan(odds):
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev):
             odds = 0
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
 
-        positions = ['Guard', 'Forward', 'Center',
-                     'Guard-Forward', 'Forward-Center']
+        positions = ['P', 'C', 'F', 'W', 'B']
         data = {
             "DVPOA": dvpoa,
             "Odds": odds,
@@ -819,7 +830,7 @@ class StatsNBA(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cv=1):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -850,14 +861,8 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            data = archive["NBA"].get(market, {}).get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
-
-            lines = [k for k, v in data.items()]
-            if "Closing Lines" in lines:
-                lines.remove("Closing Lines")
-                lines.append(
-                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
+            lines = archive["NBA"][market].get(gameDate.strftime(
+                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
 
             line = lines[-1]
 
@@ -872,7 +877,7 @@ class StatsNBA(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, cv, gameDate
                 )
                 if type(new_get_stats) is dict:
                     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
@@ -1776,7 +1781,7 @@ class StatsMLB(Stats):
             self.dvp_index[market][team] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, date=datetime.today()):
+    def get_stats(self, offer, cv=1, date=datetime.today()):
         """
         Calculates the relevant statistics for a given offer and date.
 
@@ -1819,8 +1824,8 @@ class StatsMLB(Stats):
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
 
-            stats = archive["MLB"].get(market, {}).get(
-                date, {}).get(player, {}).get(line, [0] * 4)
+            ev = archive["MLB"].get(market, {}).get(
+                date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["MLB"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["MLB"]["Totals"].get(date, {}).get(team, 0)
@@ -1863,10 +1868,15 @@ class StatsMLB(Stats):
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
-        stats = np.array(stats, dtype=np.float64)
-        odds = np.nanmean(stats)
-        if np.isnan(odds):
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev):
             odds = 0
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
 
         data = {
             "DVPOA": 0,
@@ -1984,7 +1994,7 @@ class StatsMLB(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cv=1):
         """
         Retrieves the training data matrix and target labels for the specified market.
 
@@ -2031,14 +2041,8 @@ class StatsMLB(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            data = archive["MLB"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
-
-            lines = [k for k, v in data.items()]
-            if "Closing Lines" in lines:
-                lines.remove("Closing Lines")
-                lines.append(
-                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
+            lines = archive["MLB"][market].get(gameDate.strftime(
+                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
 
             line = lines[-1]
 
@@ -2056,7 +2060,7 @@ class StatsMLB(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, cv, gameDate
                 )
                 if type(new_get_stats) is dict:
                     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
@@ -2365,6 +2369,8 @@ class StatsNFL(Stats):
                          == 'LA', 'home_team'] = "LAR"
             self.pbp.loc[self.pbp['away_team']
                          == 'LA', 'away_team'] = "LAR"
+            self.pbp.loc[self.pbp['posteam']
+                         == 'LA', 'posteam'] = "LAR"
             self.ngs = pd.concat([nfl.import_ngs_data('passing', [self.season_start.year]),
                                   nfl.import_ngs_data(
                 'receiving', [self.season_start.year]),
@@ -2646,6 +2652,7 @@ class StatsNFL(Stats):
         gameDates = pd.to_datetime(self.teamlog["gameday"]).dt.date
         teamlog = self.teamlog[(
             one_year_ago <= gameDates) & (gameDates < date)].copy()
+        teamlog.drop(columns=['gameday'], inplace=True)
 
         # Retrieve moneyline and totals data from archive
         k = [[(date, team) for team in teams.keys()]
@@ -2661,7 +2668,7 @@ class StatsNFL(Stats):
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(5)[x.columns[3:-1]], 0))
+            lambda x: np.mean(x.tail(5)[x.columns[3:]], 0))
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -2820,7 +2827,7 @@ class StatsNFL(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, date=datetime.today()):
+    def get_stats(self, offer, cv=1, date=datetime.today()):
         """
         Generate a pandas DataFrame with a summary of relevant stats.
 
@@ -2851,8 +2858,8 @@ class StatsNFL(Stats):
                 self.playerProfile.columns)
 
         try:
-            stats = archive["NFL"].get(market, {}).get(
-                date, {}).get(player, {}).get(line, [0] * 4)
+            ev = archive["NFL"].get(market, {}).get(
+                date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NFL"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["NFL"]["Totals"].get(date, {}).get(team, 0)
@@ -2888,10 +2895,15 @@ class StatsNFL(Stats):
 
         dvpoa = self.defenseProfile.loc[opponent, position]
 
-        stats = np.array(stats, dtype=np.float64)
-        odds = np.nanmean(stats)
-        if np.isnan(odds):
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev):
             odds = 0
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
 
         data = {
             "DVPOA": dvpoa,
@@ -2948,7 +2960,7 @@ class StatsNFL(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cv=1):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -2982,14 +2994,8 @@ class StatsNFL(Stats):
             if ((game['position group'] == 'QB') and (game['snap pct'] < 0.8)) or ((game['position group'] == 'WR') and (game['snap pct'] < 0.4)) or ((game['position group'] == 'RB') and (game['snap pct'] < 0.3)) or ((game['position group'] == 'TE') and (game['snap pct'] < 0.5)):
                 continue
 
-            data = archive["NFL"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
-
-            lines = [k for k, v in data.items()]
-            if "Closing Lines" in lines:
-                lines.remove("Closing Lines")
-                lines.append(
-                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
+            lines = archive["NFL"][market].get(gameDate.strftime(
+                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
 
             line = lines[-1]
 
@@ -3004,7 +3010,7 @@ class StatsNFL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, cv, gameDate
                 )
                 if type(new_get_stats) is dict:
 
@@ -3650,7 +3656,7 @@ class StatsNHL(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, date=datetime.today()):
+    def get_stats(self, offer, cv=1, date=datetime.today()):
         """
         Calculate various statistics for a given offer.
 
@@ -3699,8 +3705,8 @@ class StatsNHL(Stats):
                 if goalie not in self.goalieProfile.index:
                     self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent, "SOE"]
 
-            stats = archive["NHL"].get(market, {}).get(
-                date, {}).get(player, {}).get(line, [0] * 4)
+            ev = archive["NHL"].get(market, {}).get(
+                date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NHL"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["NHL"]["Totals"].get(
@@ -3731,10 +3737,15 @@ class StatsNHL(Stats):
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
-        stats = np.array(stats, dtype=np.float64)
-        odds = np.nanmean(stats)
-        if np.isnan(odds):
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev):
             odds = 0
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
 
         data = {
             "DVPOA": 0,
@@ -3808,7 +3819,7 @@ class StatsNHL(Stats):
         data.pop("Team SOE")
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cv=1):
         """
         Retrieve the training matrix for the specified market.
 
@@ -3840,14 +3851,8 @@ class StatsNHL(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            data = archive["NHL"].get(market, {}).get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {0: [0.5]*4})
-
-            lines = [k for k, v in data.items()]
-            if "Closing Lines" in lines:
-                lines.remove("Closing Lines")
-                lines.append(
-                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
+            lines = archive["NHL"][market].get(gameDate.strftime(
+                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
 
             line = lines[-1]
 
@@ -3863,7 +3868,7 @@ class StatsNHL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, cv, gameDate
                 )
                 if type(new_get_stats) is dict:
                     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
