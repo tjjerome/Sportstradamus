@@ -10,6 +10,14 @@
                 "receiving tds"
             ],
             [
+                "qb tds",
+                "tds"
+            ],
+            [
+                "qb tds",
+                "receiving tds"
+            ],
+            [
                 "completions",
                 "receptions"
             ],

@@ -2245,7 +2245,7 @@ class StatsNFL(Stats):
         self.players["Michael Pittman"] = "WR"
 
         teamDataList = []
-        for i, row in tqdm(self.gamelog.iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
+        for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
             if row['opponent'] != row['opponent']:
                 if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
