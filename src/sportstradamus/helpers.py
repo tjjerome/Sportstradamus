@@ -388,6 +388,9 @@ class Archive:
         old_lines = self.archive[o["League"]][market][o["Date"]
                                                       ][o["Player"]].get("Closing Lines", [None]*4)
 
+        for i in range(4):
+            if lines[i] is None:
+                lines[i] = old_lines[i]
         odds = []
         for i, line in enumerate(lines):
             if line:
@@ -400,7 +403,7 @@ class Archive:
                 else:
                     p = norm.sf(o["Line"], ev, ev*cv)
             else:
-                p = old_lines[i]
+                p = None
 
             odds = np.append(odds, p)
 

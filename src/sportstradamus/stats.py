@@ -1792,13 +1792,8 @@ class StatsMLB(Stats):
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
 
-            stats = (
-                archive["MLB"]
-                .get(market, {})
-                .get(date, {})
-                .get(player, {})
-                .get(line, [0] * 4)
-            )
+            stats = archive["MLB"].get(market, {}).get(
+                date, {}).get(player, {}).get(line, [0] * 4)
             moneyline = archive["MLB"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["MLB"]["Totals"].get(date, {}).get(team, 0)
@@ -2824,13 +2819,8 @@ class StatsNFL(Stats):
                 self.playerProfile.columns)
 
         try:
-            stats = (
-                archive["NFL"]
-                .get(market, {})
-                .get(date, {})
-                .get(player, {})
-                .get(line, [0] * 4)
-            )
+            stats = archive["NFL"].get(market, {}).get(
+                date, {}).get(player, {}).get(line, [0] * 4)
             moneyline = archive["NFL"]["Moneyline"].get(
                 date, {}).get(team, 0)
             total = archive["NFL"]["Totals"].get(date, {}).get(team, 0)

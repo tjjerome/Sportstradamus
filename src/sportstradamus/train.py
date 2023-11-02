@@ -134,6 +134,7 @@ def meditate(force, stats, league, alt):
             "pitches thrown",
             "hits allowed",
             "runs allowed",
+            "walks allowed",
             "1st inning runs allowed",
             "1st inning hits allowed",
             "hitter fantasy score",
@@ -147,7 +148,6 @@ def meditate(force, stats, league, alt):
             "hits",
             "runs",
             "rbi",
-            "walks allowed",
             "batter strikeouts",
             "singles"
         ],
