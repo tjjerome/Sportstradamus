@@ -68,6 +68,9 @@ def main(progress, books):
 
     gc = gspread.authorize(cred)
 
+    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
+        stat_map = json.load(infile)
+
     """"
     Start gathering sportsbook data
     """
@@ -97,6 +100,7 @@ def main(progress, books):
             dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
         except Exception as exc:
             logger.exception("Failed to get DraftKings NFL lines")
+
         logger.info(str(len(dk_data)) + " offers found")
 
         logger.info("Getting FanDuel MLB lines")
@@ -203,9 +207,6 @@ def main(progress, books):
     stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
 
     untapped_markets = []
-
-    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
-        stat_map = json.load(infile)
 
     pp_offers = pd.DataFrame()
     ud_offers = pd.DataFrame()
@@ -955,21 +956,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
 
-            ev = get_ev(stats["Line"], 1-stats["Odds"], cv
-                        ) if stats["Odds"] != 0 else None
-
-            if ev is not None:
-                if cv == 1:
-                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
-                else:
-                    line = o["Line"]
-                    p = [norm.cdf(line, ev, ev*cv), norm.sf(line, ev, ev*cv)]
-                push = 1 - p[1] - p[0]
-                p[0] += push / 2
-                p[1] += push / 2
-            else:
+            if stats["Odds"] == 0:
                 p = [0.5] * 2
+            else:
+                p = [1-stats["Odds"], stats["Odds"]]
 
             params = prob_params.loc[o["Player"]]
             if dist == "Poisson":
