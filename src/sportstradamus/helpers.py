@@ -383,34 +383,25 @@ class Archive:
         self.archive.setdefault(o["League"], {}).setdefault(market, {})
         self.archive[o["League"]][market].setdefault(o["Date"], {})
         self.archive[o["League"]][market][o["Date"]
-                                          ].setdefault(o["Player"], {})
+                                          ].setdefault(o["Player"], {"Lines": []})
 
-        old_lines = self.archive[o["League"]][market][o["Date"]
-                                                      ][o["Player"]].get("Closing Lines", [None]*4)
+        old_evs = self.archive[o["League"]][market][o["Date"]
+                                                    ][o["Player"]].get("EV", [None]*4)
 
-        for i in range(4):
-            if lines[i] is None:
-                lines[i] = old_lines[i]
-        odds = []
+        evs = []
         for i, line in enumerate(lines):
             if line:
                 ev = get_ev(float(line["Line"]), odds_to_prob(
                     float(line["Under"])), cv)
-                if cv == 1:
-                    p = poisson.sf(np.floor(o["Line"]), ev)
-                    if np.mod(o["Line"], 1) == 0:
-                        p += poisson.pmf(o["Line"], line["EV"]) / 2
-                else:
-                    p = norm.sf(o["Line"], ev, ev*cv)
             else:
-                p = None
+                ev = old_evs[i]
 
-            odds = np.append(odds, p)
+            evs = np.append(evs, ev)
 
         self.archive[o["League"]][market][o["Date"]
-                                          ][o["Player"]][o["Line"]] = odds
+                                          ][o["Player"]]["Lines"].append(o["Line"])
         self.archive[o["League"]][market][o["Date"]
-                                          ][o["Player"]]["Closing Lines"] = lines
+                                          ][o["Player"]]["EV"] = evs
 
     def write(self):
         """
