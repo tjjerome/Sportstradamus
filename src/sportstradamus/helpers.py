@@ -19,15 +19,16 @@ from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 
-def get_active_sports():
-    # Load API key
-    filepath = pkg_resources.files(creds) / "odds_api.json"
-    with open(filepath, "r") as infile:
-        apikey = json.load(infile)["apikey"]
+# Load API key
+filepath = pkg_resources.files(creds) / "odds_api.json"
+with open(filepath, "r") as infile:
+    odds_api = json.load(infile)["apikey"]
 
+
+def get_active_sports():
     # Get available sports from the API
-    url = f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}"
-    res = scraper.get(url)
+    url = f"https://api.the-odds-api.com/v4/sports/?apiKey={odds_api}"
+    res = requests.get(url)
 
     # Filter sports
     sports = [
