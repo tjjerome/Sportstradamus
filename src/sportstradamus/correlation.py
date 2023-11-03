@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import os.path
-
+pd.set_option('mode.chained_assignment', None)
 # MLB
 mlb = StatsMLB()
 mlb.load()
@@ -46,41 +46,33 @@ else:
     }
 
     games = mlb.gamelog.gameId.unique()
-    matrix = []
+    matrix = pd.DataFrame()
 
     for gameId in tqdm(games):
         game_df = mlb.gamelog.loc[mlb.gamelog['gameId'] == gameId]
+        bat_df = game_df.loc[game_df['starting batter']]
+        bat_df.position = "B" + bat_df.battingOrder.astype(str)
+        bat_df.index = bat_df.position
+        pitch_df = game_df.loc[game_df['starting pitcher']]
+        pitch_df.position = "P"
+        pitch_df.index = pitch_df.position
         gameDate = datetime.strptime(game_df.gameDate.values[0], '%Y-%m-%d')
-        homeBatters = game_df.loc[game_df['home'] & game_df['starting batter']].sort_values(
-            'battingOrder').index.to_list()
-        awayBatters = game_df.loc[~game_df['home'] & game_df['starting batter']].sort_values(
-            'battingOrder').index.to_list()
-        homePitcher = game_df.loc[game_df['home']
-                                  & game_df['starting pitcher'], 'playerName']
-        awayPitcher = game_df.loc[~game_df['home']
-                                  & game_df['starting pitcher'], 'playerName']
-        if homePitcher.empty or awayPitcher.empty:
-            continue
 
-        homePitcher = homePitcher.index[0]
-        awayPitcher = awayPitcher.index[0]
-        homeStats = {"P " + k: v for k,
-                     v in game_df.loc[homePitcher, stats['pitcher']].to_dict().items()}
-        for i, row in game_df.loc[homeBatters, stats['batter']].iterrows():
-            homeStats.update({"B"+str(game_df.loc[homeBatters, 'battingOrder'].at[i])+" "+k: v for k,
-                              v in row.to_dict().items()})
-        awayStats = {"P " + k: v for k,
-                     v in game_df.loc[awayPitcher, stats['pitcher']].to_dict().items()}
-        for i, row in game_df.loc[awayBatters, stats['batter']].iterrows():
-            awayStats.update({"B"+str(game_df.loc[awayBatters, 'battingOrder'].at[i])+" "+k: v for k,
-                              v in row.to_dict().items()})
+        homeStats = pitch_df.loc[pitch_df['home'],
+                                 stats['pitcher']].to_dict("index")
+        homeStats.update(
+            bat_df.loc[bat_df['home'], stats['batter']].to_dict("index"))
 
-        matrix.append(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
-        matrix.append(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
+        awayStats = pitch_df.loc[~pitch_df['home'],
+                                 stats['pitcher']].to_dict("index")
+        awayStats.update(
+            bat_df.loc[~bat_df['home'], stats['batter']].to_dict("index"))
 
-    matrix = pd.DataFrame(matrix)
+        matrix = pd.concat([matrix, pd.json_normalize(
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
+        matrix = pd.concat([matrix, pd.json_normalize(
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
+
     matrix.to_csv((pkg_resources.files(data) / "mlb_corr_data.csv"))
 
 c = matrix.corr().unstack()
@@ -89,35 +81,11 @@ l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
 l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
-c = c.loc[c.abs() > .1]
 
 c = c.loc[~(c.index.get_level_values(0).str.startswith("P") &
             c.index.get_level_values(1).str.startswith("_OPP_B"))]
 c = c.loc[~(c.index.get_level_values(0).str.startswith("B") &
             c.index.get_level_values(1).str.startswith("_OPP_P"))]
-
-# Same team
-banned_combos = [
-    ("fantasy", "fantasy"),
-    ("fantasy", "hits+runs+rbi"),
-    ("fantasy", "rbi"),
-    ("fantasy", "runs"),
-    ("hits+runs+rbi", "hits+runs+rbi"),
-    ("hits+runs+rbi", "rbi"),
-    ("hits+runs+rbi", "runs"),
-    ("rbi", "hits+runs+rbi"),
-    ("rbi", "runs"),
-    ("runs", "hits+runs+rbi"),
-    ("runs", "rbi"),
-    ("runs", "runs"),
-]
-
-for m1, m2 in banned_combos:
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m1) & c.index.get_level_values(
-        1).str.contains(m2) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m2) & c.index.get_level_values(
-        1).str.contains(m1) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
-
 
 c.to_csv((pkg_resources.files(data) / "MLB_corr.csv"))
 
@@ -171,93 +139,54 @@ else:
     }
 
     games = nfl.gamelog['game id'].unique()
-    matrix = []
+    matrix = pd.DataFrame()
 
     for gameId in tqdm(games):
         game_df = nfl.gamelog.loc[nfl.gamelog['game id'] == gameId]
         gameDate = datetime.strptime(game_df.iloc[0]['gameday'], '%Y-%m-%d')
-        if gameDate < datetime(2020, 9, 17):
+        if gameDate < datetime(2020, 9, 24):
             continue
         nfl.profile_market('snap pct', date=gameDate)
+        usage = pd.DataFrame(nfl.playerProfile['snap pct short'])
+        usage.reset_index(inplace=True)
+        game_df = game_df.merge(usage)
+        ranks = game_df.groupby(["recent team", "position group"]).rank(
+            ascending=False, method='dense')["snap pct short"].astype(int)
+        game_df['position group'] = game_df['position group'] + \
+            ranks.astype(str)
+        game_df.index = game_df['position group']
 
-        homeWR = game_df.loc[game_df['home'] & (game_df['position group'] == 'WR'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(3).index.to_list()
-        awayWR = game_df.loc[~game_df['home'] & (game_df['position group'] == 'WR'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(3).index.to_list()
-        homeRB = game_df.loc[game_df['home'] & (game_df['position group'] == 'RB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        awayRB = game_df.loc[~game_df['home'] & (game_df['position group'] == 'RB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        homeTE = game_df.loc[game_df['home'] & (game_df['position group'] == 'TE'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(1).index.to_list()
-        awayTE = game_df.loc[~game_df['home'] & (game_df['position group'] == 'TE'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(1).index.to_list()
-        homeQB = game_df.loc[game_df['home'] & (game_df['position group'] == 'QB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(1).index.to_list()
-        awayQB = game_df.loc[~game_df['home'] & (game_df['position group'] == 'QB'), 'player display name'].apply(
-            lambda x: nfl.playerProfile.loc[x, 'snap pct short'] if x in nfl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(1).index.to_list()
+        homeStats = game_df.loc[game_df['home'] & game_df['position group'].str.contains(
+            "QB"), stats["QB"]].to_dict('index')
+        homeStats.update(game_df.loc[game_df['home'] & game_df['position group'].str.contains(
+            "WR"), stats["WRTE"]].to_dict('index'))
+        homeStats.update(game_df.loc[game_df['home'] & game_df['position group'].str.contains(
+            "TE"), stats["WRTE"]].to_dict('index'))
+        homeStats.update(game_df.loc[game_df['home'] & game_df['position group'].str.contains(
+            "RB"), stats["RB"]].to_dict('index'))
 
-        if len(homeWR) == 0 or len(homeRB) == 0 or len(homeTE) == 0 or len(homeQB) == 0 or len(awayWR) == 0 or len(awayRB) == 0 or len(awayTE) == 0 or len(awayQB) == 0:
-            continue
+        awayStats = game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
+            "QB"), stats["QB"]].to_dict('index')
+        awayStats.update(game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
+            "WR"), stats["WRTE"]].to_dict('index'))
+        awayStats.update(game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
+            "TE"), stats["WRTE"]].to_dict('index'))
+        awayStats.update(game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
+            "RB"), stats["RB"]].to_dict('index'))
 
-        homeStats = {"QB " + k: list(v.values())[0] for k,
-                     v in game_df.loc[homeQB, stats['QB']].to_dict().items()}
-        for i, row in game_df.loc[homeWR, stats['WRTE']].reset_index(drop=True).iterrows():
-            homeStats.update({"WR"+str(i+1)+" "+k: v for k,
-                              v in row.to_dict().items()})
-        for i, row in game_df.loc[homeRB, stats['RB']].reset_index(drop=True).iterrows():
-            homeStats.update({"RB"+str(i+1)+" "+k: v for k,
-                              v in row.to_dict().items()})
-        homeStats.update(
-            {"TE "+k: (list(v.values())[0] if v else 0) for k, v in game_df.loc[homeTE, stats['WRTE']].to_dict().items()})
+        matrix = pd.concat([matrix, pd.json_normalize(
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
+        matrix = pd.concat([matrix, pd.json_normalize(
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
 
-        awayStats = {"QB " + k: list(v.values())[0] for k,
-                     v in game_df.loc[awayQB, stats['QB']].to_dict().items()}
-        for i, row in game_df.loc[awayWR, stats['WRTE']].reset_index(drop=True).iterrows():
-            awayStats.update({"WR"+str(i+1)+" "+k: v for k,
-                              v in row.to_dict().items()})
-        for i, row in game_df.loc[awayRB, stats['RB']].reset_index(drop=True).iterrows():
-            awayStats.update({"RB"+str(i+1)+" "+k: v for k,
-                              v in row.to_dict().items()})
-        awayStats.update(
-            {"TE "+k: (list(v.values())[0] if v else 0) for k, v in game_df.loc[awayTE, stats['WRTE']].to_dict().items()})
-
-        matrix.append(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
-        matrix.append(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
-
-    matrix = pd.DataFrame(matrix)
     matrix.to_csv((pkg_resources.files(data) / "nfl_corr_data.csv"))
 
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
+l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
-c = c.loc[c.abs() > .1]
-
-banned_combos = [
-    ("passing tds", "tds"),
-    ("passing tds", "receiving tds"),
-    ("completions", "receptions"),
-    ("attempts", "carries")
-]
-
-for m1, m2 in banned_combos:
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m1) & c.index.get_level_values(
-        1).str.contains(m2) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m2) & c.index.get_level_values(
-        1).str.contains(m1) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
 
 c.to_csv((pkg_resources.files(data) / "NFL_corr.csv"))
 
@@ -295,7 +224,7 @@ else:
     ]
 
     games = nba.gamelog['GAME_ID'].unique()
-    matrix = []
+    matrix = pd.DataFrame()
 
     for gameId in tqdm(games):
         game_df = nba.gamelog.loc[nba.gamelog['GAME_ID'] == gameId]
@@ -304,69 +233,23 @@ else:
         if gameDate < datetime(2021, 10, 26):
             continue
         nba.profile_market('MIN', date=gameDate)
+        usage = pd.DataFrame(nba.playerProfile['MIN short'])
+        usage.reset_index(inplace=True)
+        game_df = game_df.merge(usage)
+        ranks = game_df.groupby(["TEAM_ABBREVIATION", "POS"]).rank(
+            ascending=False, method='dense')["MIN short"].astype(int)
+        game_df['POS'] = game_df['POS'] + \
+            ranks.astype(str)
+        game_df.index = game_df['POS']
 
-        game_df.index = game_df.PLAYER_NAME
-        homeF = game_df.loc[game_df['HOME'] & game_df["POS"].str.contains("Forward"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
-            sort_values(ascending=False).head(3).index.to_list()
-        homeG = game_df.loc[game_df['HOME'] & game_df["POS"].str.contains("Guard"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
-            sort_values(ascending=False).head(3).index.to_list()
-        homeC = game_df.loc[game_df['HOME'] & game_df["POS"].str.contains("Center"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        awayF = game_df.loc[~game_df['HOME'] & game_df["POS"].str.contains("Forward"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
-            sort_values(ascending=False).head(3).index.to_list()
-        awayG = game_df.loc[~game_df['HOME'] & game_df["POS"].str.contains("Guard"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
-            sort_values(ascending=False).head(3).index.to_list()
-        awayC = game_df.loc[~game_df['HOME'] & game_df["POS"].str.contains("Center"), "PLAYER_NAME"].apply(
-            lambda x: nba.playerProfile.loc[x, 'MIN short'] if x in nba.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
+        homeStats = game_df.loc[game_df['home'], stats].to_dict('index')
+        homeStats = game_df.loc[~game_df['home'], stats].to_dict('index')
 
-        homeStats = {}
+        matrix = pd.concat([matrix, pd.json_normalize(
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
+        matrix = pd.concat([matrix, pd.json_normalize(
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
 
-        for i, player in enumerate(homeF):
-            position = "F"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, stats].to_dict().items()})
-        for i, player in enumerate(homeG):
-            position = "G"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, stats].to_dict().items()})
-        for i, player in enumerate(homeC):
-            position = "C"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, stats].to_dict().items()})
-
-        awayStats = {}
-
-        for i, player in enumerate(awayF):
-            position = "F"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, stats].to_dict().items()})
-        for i, player in enumerate(awayG):
-            position = "G"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, stats].to_dict().items()})
-        for i, player in enumerate(awayC):
-            position = "C"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, stats].to_dict().items()})
-
-        matrix.append(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
-        matrix.append(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
-
-    matrix = pd.DataFrame(matrix).fillna(0.0)
     matrix.to_csv((pkg_resources.files(data) / "nba_corr_data.csv"))
 
 c = matrix.corr().unstack()
@@ -375,7 +258,8 @@ l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
 l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
-c.loc[c.abs() > .1].to_csv((pkg_resources.files(data) / "NBA_corr.csv"))
+
+c.to_csv((pkg_resources.files(data) / "NBA_corr.csv"))
 
 
 # NHL
@@ -408,7 +292,7 @@ else:
     ]
 
     games = nhl.gamelog.gameId.unique()
-    matrix = []
+    matrix = pd.DataFrame()
 
     for gameId in tqdm(games):
         game_df = nhl.gamelog.loc[nhl.gamelog['gameId'] == gameId]
@@ -416,95 +300,29 @@ else:
         if gameDate < datetime(2021, 10, 19):
             continue
         nhl.profile_market('TimeShare', date=gameDate)
+        usage = pd.DataFrame(nfl.playerProfile['TimeShare short'])
+        usage.reset_index(inplace=True)
+        game_df = game_df.merge(usage)
+        ranks = game_df.groupby(["team", "position"]).rank(
+            ascending=False, method='dense')["TimeShare short"].astype(int)
+        game_df['position'] = game_df['position'] + \
+            ranks.astype(str)
+        game_df.index = game_df['position']
 
-        game_df.index = game_df.playerName
-        homeC = game_df.loc[game_df['home'] & (game_df["position"] == "C"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        homeL = game_df.loc[game_df['home'] & (game_df["position"] == "L"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        homeR = game_df.loc[game_df['home'] & (game_df["position"] == "R"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        homeD = game_df.loc[game_df['home'] & (game_df["position"] == "D"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(4).index.to_list()
-        awayC = game_df.loc[~game_df['home'] & (game_df["position"] == "C"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        awayL = game_df.loc[~game_df['home'] & (game_df["position"] == "L"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        awayR = game_df.loc[~game_df['home'] & (game_df["position"] == "R"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(2).index.to_list()
-        awayD = game_df.loc[~game_df['home'] & (game_df["position"] == "D"), "playerName"].apply(
-            lambda x: nhl.playerProfile.loc[x, 'TimeShare short'] if x in nhl.playerProfile.index else -1).\
-            sort_values(ascending=False).head(4).index.to_list()
-        homeGoalie = game_df.loc[game_df['home'] & (game_df["position"] == "G"), "playerName"].\
-            head(1).index.to_list()
-        awayGoalie = game_df.loc[~game_df['home'] & (game_df["position"] == "G"), "playerName"].\
-            head(1).index.to_list()
+        homeStats = game_df.loc[game_df['home'] &
+                                game_df['position'] == "G", goalie_stats].to_dict('index')
+        homeStats.update(
+            game_df.loc[game_df['home'] & game_df['position'] != "G", skater_stats].to_dict('index'))
 
-        if len(homeGoalie) == 0 or len(awayGoalie) == 0:
-            continue
+        awayStats = game_df.loc[~game_df['home'] &
+                                game_df['position'] == "G", goalie_stats].to_dict('index')
+        awayStats.update(
+            game_df.loc[~game_df['home'] & game_df['position'] != "G", skater_stats].to_dict('index'))
 
-        homeGoalie = homeGoalie[0]
-        awayGoalie = awayGoalie[0]
-
-        homeStats = {"G1 " + k: v for k,
-                     v in game_df.loc[homeGoalie, goalie_stats].to_dict().items()}
-
-        for i, player in enumerate(homeC):
-            position = "C"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-        for i, player in enumerate(homeL):
-            position = "L"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-        for i, player in enumerate(homeR):
-            position = "R"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-        for i, player in enumerate(homeD):
-            position = "D"+str(i+1)
-
-            homeStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-
-        awayStats = {"G1 " + k: v for k,
-                     v in game_df.loc[awayGoalie, goalie_stats].to_dict().items()}
-
-        for i, player in enumerate(awayC):
-            position = "C"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-        for i, player in enumerate(awayL):
-            position = "L"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-        for i, player in enumerate(awayR):
-            position = "R"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-        for i, player in enumerate(awayD):
-            position = "D"+str(i+1)
-
-            awayStats.update({position+" "+k: v for k,
-                              v in game_df.loc[player, skater_stats].to_dict().items()})
-
-        matrix.append(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
-        matrix.append(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
+        matrix = pd.concat([matrix, pd.json_normalize(
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
+        matrix = pd.concat([matrix, pd.json_normalize(
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
 
     matrix = pd.DataFrame(matrix)
     matrix.to_csv((pkg_resources.files(data) / "nhl_corr_data.csv"))
@@ -515,41 +333,5 @@ l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
 l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
-c = c.loc[c.abs() > .1]
-
-# Same team
-banned_combos = [
-    ("fantasy", "fantasy"),
-    ("points", "points"),
-    ("points", "goals"),
-    ("points", "assists"),
-    ("goals", "assists"),
-]
-
-for m1, m2 in banned_combos:
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m1) & c.index.get_level_values(
-        1).str.contains(m2) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m2) & c.index.get_level_values(
-        1).str.contains(m1) & ~c.index.get_level_values(1).str.startswith("_OPP_"))]
-
-# Other team
-banned_combos = [
-    ("goalsAgainst", "points"),
-    ("goalsAgainst", "goals"),
-    ("goalsAgainst", "assists"),
-    ("goalsAgainst", "fantasy"),
-    ("saves", "points"),
-    ("saves", "goals"),
-    ("saves", "assists"),
-    ("saves", "fantasy"),
-    ("saves", "shots"),
-    ("fantasy", "fantasy"),
-]
-
-for m1, m2 in banned_combos:
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m1) & c.index.get_level_values(
-        1).str.contains(m2) & c.index.get_level_values(1).str.startswith("_OPP_"))]
-    c = c.loc[~(c.index.get_level_values(0).str.contains(m2) & c.index.get_level_values(
-        1).str.contains(m1) & c.index.get_level_values(1).str.startswith("_OPP_"))]
 
 c.to_csv((pkg_resources.files(data) / "NHL_corr.csv"))
