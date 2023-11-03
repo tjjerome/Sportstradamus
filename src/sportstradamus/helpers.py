@@ -19,6 +19,26 @@ from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 
+def get_active_sports():
+    # Load API key
+    filepath = pkg_resources.files(creds) / "odds_api.json"
+    with open(filepath, "r") as infile:
+        apikey = json.load(infile)["apikey"]
+
+    # Get available sports from the API
+    url = f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}"
+    res = scraper.get(url)
+
+    # Filter sports
+    sports = [
+        (s["key"], s["title"])
+        for s in res
+        if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
+    ]
+
+    return sports
+
+
 with open((pkg_resources.files(creds) / "scrapeops_cred.json"), "r") as infile:
     creds = json.load(infile)
 apikey = creds["apikey"]
