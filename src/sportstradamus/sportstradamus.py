@@ -504,7 +504,7 @@ def find_correlation(offers, stats, platform):
         "NHL": "TimeShare"
     }
     positions = {
-        "NBA": ["G", "F", "C", "G-F", "F-C"],
+        "NBA": ["P", "C", "F", "W", "B"],
         "NFL": ["QB", "WR", "RB", "TE"],
         "NHL": ["C", "R", "L", "D", "G"]
     }
@@ -517,10 +517,10 @@ def find_correlation(offers, stats, platform):
             lambda x: not isinstance(x, tuple))]  # Remove this to correlate combo picks
         c = pd.read_csv(pkg_resources.files(data) / (league+"_corr.csv"))
         c.columns = ["market", "correlation", "R"]
-        team_pairs = c.apply(lambda x: [" ".join(x.market.split(" ")[1:]), " ".join(
-            x.correlation.split(" ")[1:])] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
-        opp_pairs = c.apply(lambda x: [" ".join(x.market.split(" ")[1:]), " ".join(
-            x.correlation.split(" ")[1:])] if "_OPP_" in x.correlation else ["", ""], axis=1).to_list()
+        team_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
+            ".")[1]] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
+        opp_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
+            ".")[1]] if "_OPP_" in x.correlation else ["", ""], axis=1).to_list()
         mask1 = [pair not in banned[league]['team'] and pair[::-1]
                  not in banned[league]['team'] for pair in team_pairs]
         mask2 = [pair not in banned[league]['opponent'] and pair[::-1]
@@ -574,62 +574,63 @@ def find_correlation(offers, stats, platform):
             game_df = pd.concat([team_df, opp_df])
             checked_teams.append(team)
             checked_teams.append(opp)
-            if platform == "Underdog":
-                combos = combinations(
-                    game_df.loc[(game_df['Model'] * game_df['Boost']) > .545, ["Player", "Team", "cMarket", "Bet", "Model", "Boost", "Desc"]].to_dict('records'), 5)
-            else:
-                combos = combinations(
-                    game_df.loc[game_df['Model'] > .545, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 5)
-            for bet in combos:
-                if (len({leg["Team"] for leg in bet}) != 2) or (len({leg["Player"] for leg in bet}) != 5):
-                    continue
-
-                team1_markets = [" ".join(leg["cMarket"].split(
-                    " ")[1:]) for leg in bet if "_OPP_" not in leg["cMarket"]]
-                team2_markets = [" ".join(leg["cMarket"].split(
-                    " ")[1:]) for leg in bet if "_OPP_" in leg["cMarket"]]
-
-                if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[league]['team']]) or
-                    any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[league]['team']]) or
-                    any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[league]['opponent']]) or
-                        any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
-                    continue
-
-                p = np.product([leg["Model"] for leg in bet])
-
-                # get correlation matrix
-                for i in np.arange(5):
-                    cm1 = bet[i]['cMarket']
-                    b1 = bet[i]['Bet']
-                    p1 = bet[i]['Model']
-                    for j in np.arange(i+1, 5):
-                        cm2 = bet[j]['cMarket']
-                        b2 = bet[j]['Bet']
-                        p2 = bet[j]['Model']
-
-                        if ("_OPP_" in cm1) and ("_OPP_" in cm2):
-                            cm1 = cm1.replace("_OPP_", "")
-                            cm2 = cm2.replace("_OPP_", "")
-                        rho = c_map.get((cm1, cm2), 0)
-                        if rho == 0:
-                            rho = c_map.get((cm2, cm1), 0)
-                        if b1 != b2:
-                            rho = -rho
-
-                        p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
-
-                p = p*20
+            if league != "MLB":
                 if platform == "Underdog":
-                    p = p * np.product([leg["Boost"] for leg in bet])
-                if p > 1:
-                    parlay = {
-                        "Game": f"{team}/{opp}",
-                        "League": league,
-                        "Platform": platform,
-                        "EV": p,
-                        "Bet": ", ".join([leg["Desc"] for leg in bet])
-                    }
-                    best_fives.append(parlay)
+                    combos = combinations(
+                        game_df.loc[(game_df['Model'] * game_df['Boost']) > .545, ["Player", "Team", "cMarket", "Bet", "Model", "Boost", "Desc"]].to_dict('records'), 5)
+                else:
+                    combos = combinations(
+                        game_df.loc[game_df['Model'] > .545, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 5)
+                for bet in combos:
+                    if (len({leg["Team"] for leg in bet}) != 2) or (len({leg["Player"] for leg in bet}) != 5):
+                        continue
+
+                    team1_markets = [leg["cMarket"].split(
+                        ".")[1] for leg in bet if "_OPP_" not in leg["cMarket"]]
+                    team2_markets = [leg["cMarket"].split(
+                        ".")[1] for leg in bet if "_OPP_" in leg["cMarket"]]
+
+                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[league]['team']]) or
+                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[league]['team']]) or
+                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[league]['opponent']]) or
+                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
+                        continue
+
+                    p = np.product([leg["Model"] for leg in bet])
+
+                    # get correlation matrix
+                    for i in np.arange(5):
+                        cm1 = bet[i]['cMarket']
+                        b1 = bet[i]['Bet']
+                        p1 = bet[i]['Model']
+                        for j in np.arange(i+1, 5):
+                            cm2 = bet[j]['cMarket']
+                            b2 = bet[j]['Bet']
+                            p2 = bet[j]['Model']
+
+                            if ("_OPP_" in cm1) and ("_OPP_" in cm2):
+                                cm1 = cm1.replace("_OPP_", "")
+                                cm2 = cm2.replace("_OPP_", "")
+                            rho = c_map.get((cm1, cm2), 0)
+                            if rho == 0:
+                                rho = c_map.get((cm2, cm1), 0)
+                            if b1 != b2:
+                                rho = -rho
+
+                            p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+
+                    p = p*20
+                    if platform == "Underdog":
+                        p = p * np.product([leg["Boost"] for leg in bet])
+                    if p > 1:
+                        parlay = {
+                            "Game": f"{team}/{opp}",
+                            "League": league,
+                            "Platform": platform,
+                            "EV": p,
+                            "Bet": ", ".join([leg["Desc"] for leg in bet])
+                        }
+                        best_fives.append(parlay)
 
             # Find best pairs
             for i, offer in team_df.iterrows():
