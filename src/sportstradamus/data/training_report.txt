@@ -73,30 +73,160 @@
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
  0.653657        0.0 -0.974015    0.077234      0.10443  0.032961
 
+============================ NBA AST ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.614346   0.614195 0.245912    0.039287     0.053795  0.108875
+
+============================ NBA FG3A ===========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.613758   0.615182 0.292207    0.041057     0.056283   0.10948
+
+============================ NBA FG3M ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.630831    0.63486 -0.007073    0.048699     0.066438  0.213371
+
+============================ NBA FGA ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.624512   0.631221  0.39614    0.057243     0.075143  0.130835
+
+============================ NBA FGM ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.619438   0.623511 0.323527    0.053544     0.070211  0.113517
+
+============================ NBA FTM ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.541229   0.500867 0.256442   -0.014259     -0.01815  0.078388
+
+============================= NBA PA ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.612654   0.616359 0.445032    0.059396     0.074319  0.128029
+
+============================= NBA PR ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.627729   0.634909 0.451898    0.065403     0.080399  0.130332
+
+============================ NBA PRA ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.627011   0.645466 0.456125    0.074379     0.089581  0.132517
+
+============================ NBA PTS ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.61695   0.625744 0.440466    0.053606     0.068506  0.110608
+
+============================= NBA RA ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.636097   0.642219 0.393725    0.078728     0.097758  0.151147
+
+============================ NBA REB ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.635171   0.643487 0.338293    0.073732     0.093596  0.151966
+
+================= NBA fantasy points prizepicks =================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.630923   0.634045 0.456888    0.059054      0.07528  0.125879
+
+========================== NFL attempts =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.60804   0.646552 0.451293    0.019467     0.033946  0.298522
+
+========================== NFL carries ==========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.648699   0.657568  0.37472    0.063301     0.084166  0.188446
+
+======================== NFL completions ========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.636816      0.696 0.466133    0.105107      0.11858  0.389426
+
+================= NFL fantasy points prizepicks =================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.593159   0.588441 0.443435    0.039519     0.049775   0.09713
+
+================== NFL fantasy points underdog ==================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.59058   0.591426 0.427345    0.027639     0.035874   0.08893
+
+======================= NFL interceptions =======================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.578947        0.0 -0.063152     0.00697     0.007141  0.102038
+
+======================== NFL passing tds ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.585859   0.689655 -0.119359    0.027111     0.038169   0.13564
+
 ======================= NFL passing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.646465   0.649123 0.507739    0.091373     0.108878  0.183418
+ 0.617647   0.686957 0.499116    0.114487     0.129194  0.309326
+
+=========================== NFL qb tds ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.643902        0.7 -0.043887    0.058728     0.079737  0.199326
 
 ========================== NFL qb yards =========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.619792   0.646018  0.47948    0.077724     0.089207  0.335803
+ 0.625641    0.68932 0.484962    0.104673     0.112672  0.296259
+
+======================= NFL receiving tds =======================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+  0.50641        0.0 -0.272162   -0.020265    -0.027608  0.049354
 
 ====================== NFL receiving yards ======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.599829   0.586279 0.475186    0.025481     0.036927  0.093838
+ 0.586207   0.580679 0.476605    0.010623     0.017022  0.057105
+
+========================= NFL receptions ========================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.586207   0.605802 0.002278    0.016276     0.021855  0.121647
+
+======================== NFL rushing tds ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.568182        0.0 -0.255904    0.017718     0.022226  0.082321
 
 ======================= NFL rushing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.648649   0.650575 0.481908    0.049425     0.070985  0.132875
+ 0.631679   0.624113 0.484769    0.056574     0.073261  0.182381
+
+========================== NFL targets ==========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.597893   0.600236 0.316574    0.022648     0.035818  0.087167
+
+============================ NFL tds ============================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.590769   0.672727 -0.279767     0.01985     0.028667   0.06442
 
 =========================== NFL yards ===========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.596718   0.584615  0.48958    0.022874     0.031399  0.090053
+ 0.595763   0.589404 0.475793    0.020278     0.026033  0.093813
 
 ========================== NHL assists ==========================
  Distribution Model: Poisson

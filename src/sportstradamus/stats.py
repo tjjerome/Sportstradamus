@@ -266,7 +266,7 @@ class StatsNBA(Stats):
                     **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
                 # Fetch playoffs game logs
-                if today.month == 4 or True:
+                if today.month == 4:
                     params.update({'season_type_nullable': "PlayIn"})
                     nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **params).get_normalized_dict()["PlayerGameLogs"])
@@ -274,7 +274,7 @@ class StatsNBA(Stats):
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
                     teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
-                if 4 <= today.month <= 6 or True:
+                if 4 <= today.month <= 6:
                     params.update({'season_type_nullable': "Playoffs"})
                     nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **params).get_normalized_dict()["PlayerGameLogs"])
