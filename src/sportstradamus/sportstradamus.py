@@ -9,7 +9,7 @@ from sportstradamus.books import (
     get_ud,
     get_thrive,
 )
-from sportstradamus.helpers import archive, get_ev
+from sportstradamus.helpers import archive, get_ev, get_active_sports
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -68,6 +68,11 @@ def main(progress, books):
 
     gc = gspread.authorize(cred)
 
+    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
+        stat_map = json.load(infile)
+
+    sports = get_active_sports()
+
     """"
     Start gathering sportsbook data
     """
@@ -76,105 +81,137 @@ def main(progress, books):
     pin_data = {}
     csb_data = {}
     if books:
-        logger.info("Getting DraftKings MLB lines")
-        try:
-            dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
-        except Exception as exc:
-            logger.exception("Failed to get DraftKings MLB lines")
-        logger.info("Getting DraftKings NBA lines")
-        try:
-            dk_data.update(
-                get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
-        except Exception as exc:
-            logger.exception("Failed to get DraftKings NBA lines")
-        logger.info("Getting DraftKings NHL lines")
-        try:
-            dk_data.update(get_dk(42133, [550, 1064, 1189, 1190]))  # NHL
-        except Exception as exc:
-            logger.exception("Failed to get DraftKings NHL lines")
-        logger.info("Getting DraftKings NFL lines")
-        try:
-            dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
-        except Exception as exc:
-            logger.exception("Failed to get DraftKings NFL lines")
+        if "MLB" in sports:
+            logger.info("Getting DraftKings MLB lines")
+            try:
+                dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
+            except Exception as exc:
+                logger.exception("Failed to get DraftKings MLB lines")
+
+        if "NBA" in sports:
+            logger.info("Getting DraftKings NBA lines")
+            try:
+                dk_data.update(
+                    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
+            except Exception as exc:
+                logger.exception("Failed to get DraftKings NBA lines")
+
+        if "NHL" in sports:
+            logger.info("Getting DraftKings NHL lines")
+            try:
+                dk_data.update(get_dk(42133, [550, 1064, 1189, 1190]))  # NHL
+            except Exception as exc:
+                logger.exception("Failed to get DraftKings NHL lines")
+
+        if "NFL" in sports:
+            logger.info("Getting DraftKings NFL lines")
+            try:
+                dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
+            except Exception as exc:
+                logger.exception("Failed to get DraftKings NFL lines")
+
         logger.info(str(len(dk_data)) + " offers found")
 
-        logger.info("Getting FanDuel MLB lines")
-        try:
-            fd_data.update(
-                get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
-        except Exception as exc:
-            logger.exception("Failed to get FanDuel MLB lines")
-        logger.info("Getting FanDuel NBA lines")
-        try:
-            fd_data.update(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
-                                          'player-assists', 'player-threes', 'player-defense']))
-        except Exception as exc:
-            logger.exception("Failed to get FanDuel NBA lines")
-        logger.info("Getting FanDuel NHL lines")
-        try:
-            fd_data.update(
-                get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
-        except Exception as exc:
-            logger.exception("Failed to get FanDuel NHL lines")
-        logger.info("Getting FanDuel NFL lines")
-        try:
-            fd_data.update(
-                get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
-        except Exception as exc:
-            logger.exception("Failed to get FanDuel NFL lines")
+        if "MLB" in sports:
+            logger.info("Getting FanDuel MLB lines")
+            try:
+                fd_data.update(
+                    get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
+            except Exception as exc:
+                logger.exception("Failed to get FanDuel MLB lines")
+
+        if "NBA" in sports:
+            logger.info("Getting FanDuel NBA lines")
+            try:
+                fd_data.update(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
+                                              'player-assists', 'player-threes', 'player-defense']))
+            except Exception as exc:
+                logger.exception("Failed to get FanDuel NBA lines")
+
+        if "NHL" in sports:
+            logger.info("Getting FanDuel NHL lines")
+            try:
+                fd_data.update(
+                    get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
+            except Exception as exc:
+                logger.exception("Failed to get FanDuel NHL lines")
+
+        if "NFL" in sports:
+            logger.info("Getting FanDuel NFL lines")
+            try:
+                fd_data.update(
+                    get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
+            except Exception as exc:
+                logger.exception("Failed to get FanDuel NFL lines")
+
         logger.info(str(len(fd_data)) + " offers found")
 
-        logger.info("Getting Pinnacle MLB lines")
-        try:
-            pin_data.update(get_pinnacle(246))  # MLB
-        except Exception as exc:
-            logger.exception("Failed to get Pinnacle MLB lines")
-        logger.info("Getting Pinnacle NBA lines")
-        try:
-            pin_data.update(get_pinnacle(487))  # NBA
-        except Exception as exc:
-            logger.exception("Failed to get Pinnacle NBA lines")
-        logger.info("Getting Pinnacle NHL lines")
-        try:
-            pin_data.update(get_pinnacle(1456))  # NHL
-        except Exception as exc:
-            logger.exception("Failed to get Pinnacle NHL lines")
-        logger.info("Getting Pinnacle NFL lines")
-        try:
-            pin_data.update(get_pinnacle(889))  # NFL
-        except Exception as exc:
-            logger.exception("Failed to get Pinnacle NFL lines")
+        if "MLB" in sports:
+            logger.info("Getting Pinnacle MLB lines")
+            try:
+                pin_data.update(get_pinnacle(246))  # MLB
+            except Exception as exc:
+                logger.exception("Failed to get Pinnacle MLB lines")
+
+        if "NBA" in sports:
+            logger.info("Getting Pinnacle NBA lines")
+            try:
+                pin_data.update(get_pinnacle(487))  # NBA
+            except Exception as exc:
+                logger.exception("Failed to get Pinnacle NBA lines")
+
+        if "NHL" in sports:
+            logger.info("Getting Pinnacle NHL lines")
+            try:
+                pin_data.update(get_pinnacle(1456))  # NHL
+            except Exception as exc:
+                logger.exception("Failed to get Pinnacle NHL lines")
+
+        if "NFL" in sports:
+            logger.info("Getting Pinnacle NFL lines")
+            try:
+                pin_data.update(get_pinnacle(889))  # NFL
+            except Exception as exc:
+                logger.exception("Failed to get Pinnacle NFL lines")
+
         logger.info(str(len(pin_data)) + " offers found")
 
-        logger.info("Getting Caesars MLB Lines")
-        try:
-            sport = "baseball"
-            league = "04f90892-3afa-4e84-acce-5b89f151063d"
-            csb_data.update(get_caesars(sport, league))
-        except Exception as exc:
-            logger.exception("Failed to get Caesars MLB lines")
-        logger.info("Getting Caesars NBA Lines")
-        try:
-            sport = "basketball"
-            league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
-            csb_data.update(get_caesars(sport, league))
-        except Exception as exc:
-            logger.exception("Failed to get Caesars NBA lines")
-        logger.info("Getting Caesars NHL Lines")
-        try:
-            sport = "icehockey"
-            league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
-            csb_data.update(get_caesars(sport, league))
-        except Exception as exc:
-            logger.exception("Failed to get Caesars NHL lines")
-        logger.info("Getting Caesars NFL Lines")
-        try:
-            sport = "americanfootball"
-            league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-            csb_data.update(get_caesars(sport, league))
-        except Exception as exc:
-            logger.exception("Failed to get Caesars NFL lines")
+        if "MLB" in sports:
+            logger.info("Getting Caesars MLB Lines")
+            try:
+                sport = "baseball"
+                league = "04f90892-3afa-4e84-acce-5b89f151063d"
+                csb_data.update(get_caesars(sport, league))
+            except Exception as exc:
+                logger.exception("Failed to get Caesars MLB lines")
+
+        if "NBA" in sports:
+            logger.info("Getting Caesars NBA Lines")
+            try:
+                sport = "basketball"
+                league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
+                csb_data.update(get_caesars(sport, league))
+            except Exception as exc:
+                logger.exception("Failed to get Caesars NBA lines")
+
+        if "NHL" in sports:
+            logger.info("Getting Caesars NHL Lines")
+            try:
+                sport = "icehockey"
+                league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
+                csb_data.update(get_caesars(sport, league))
+            except Exception as exc:
+                logger.exception("Failed to get Caesars NHL lines")
+
+        if "NFL" in sports:
+            logger.info("Getting Caesars NFL Lines")
+            try:
+                sport = "americanfootball"
+                league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
+                csb_data.update(get_caesars(sport, league))
+            except Exception as exc:
+                logger.exception("Failed to get Caesars NFL lines")
+
         logger.info(str(len(csb_data)) + " offers found")
 
     datasets = {
@@ -203,9 +240,6 @@ def main(progress, books):
     stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
 
     untapped_markets = []
-
-    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
-        stat_map = json.load(infile)
 
     pp_offers = pd.DataFrame()
     ud_offers = pd.DataFrame()
@@ -982,21 +1016,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
 
-            ev = get_ev(stats["Line"], 1-stats["Odds"], cv
-                        ) if stats["Odds"] != 0 else None
-
-            if ev:
-                if cv == 1:
-                    line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                    p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
-                else:
-                    line = o["Line"]
-                    p = [norm.cdf(line, ev, ev*cv), norm.sf(line, ev, ev*cv)]
-                push = 1 - p[1] - p[0]
-                p[0] += push / 2
-                p[1] += push / 2
-            else:
+            if stats["Odds"] == 0:
                 p = [0.5] * 2
+            else:
+                p = [1-stats["Odds"], stats["Odds"]]
 
             params = prob_params.loc[o["Player"]]
             if dist == "Poisson":

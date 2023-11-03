@@ -42,6 +42,9 @@ import json
               help="Select league to train on")
 def meditate(force, stats, league, alt):
 
+    with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
+        stat_cv = json.load(f)
+
     dist_params = {
         "stabilization": "None",
         # "response_fn": "exp",
@@ -99,14 +102,14 @@ def meditate(force, stats, league, alt):
             "PA",
             "FG3M",
             "fantasy points prizepicks",
-            "TOV",
-            "BLK",
-            "STL",
-            "BLST",
             "FG3A",
             "FTM",
             "FGM",
             "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
             "OREB",
             "DREB",
             "PF",
@@ -183,12 +186,13 @@ def meditate(force, stats, league, alt):
                     continue
 
             print(f"Training {league} - {market}")
+            cv = stat_cv[league][market]
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
             if os.path.isfile(filepath) and not force:
                 M = pd.read_csv(filepath, index_col=0).dropna()
             else:
-                M = stat_data.get_training_matrix(market)
+                M = stat_data.get_training_matrix(market, cv)
                 M.to_csv(filepath)
 
             if M.empty:
@@ -435,7 +439,8 @@ def report():
     model_list = [f.name for f in pkg_resources.files(
         data).iterdir() if ".mdl" in f.name]
     model_list.sort()
-    stat_cv = {}
+    with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
+        stat_cv = json.load(f)
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
             with open(pkg_resources.files(data) / model_str, "rb") as infile:
