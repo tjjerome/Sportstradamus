@@ -613,7 +613,7 @@ def get_caesars(sport, league):
     return players
 
 
-def get_pp():
+def get_pp(books=True):
     """
     Retrieves player offers data from the PrizePicks API.
 
@@ -665,11 +665,12 @@ def get_pp():
             if i["attributes"]["projections_count"] > 0
             and not any([string in i["attributes"]["name"] for string in live_bets])
         ]
+        if not books:
+            leagues = [league for league in leagues if int(league) in [
+                2, 7, 8, 9]]
     except:
         logger.exception("Retrieving leagues failed")
         leagues = [2, 7, 8, 9]
-
-    # leagues = [2, 7, 8, 9]
 
     for l in tqdm(leagues, desc="Processing PrizePicks offers"):
         try:

@@ -546,7 +546,7 @@ class StatsNBA(Stats):
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
-            filter(lambda x: (x[market].clip(0, 1).mean() > 0.25) & (x[market].count() > 1)).\
+            filter(lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).\
             groupby('PLAYER_NAME')
 
         defenseGroups = gamelog.groupby(['OPP', 'GAME_ID'])
@@ -1592,7 +1592,7 @@ class StatsMLB(Stats):
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
-            lambda x: (x[market].clip(0, 1).mean() > 0.25) & (x[market].count() > 1)).groupby('playerName')
+            lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).groupby('playerName')
 
         # defenseGroups = gamelog.groupby('opponent')
         defenseGroups = gamelog.groupby(['opponent', 'gameId'])
@@ -2672,7 +2672,7 @@ class StatsNFL(Stats):
 
         playerGroups = gamelog.\
             groupby('player display name').\
-            filter(lambda x: (x[market].clip(0, 1).mean() > 0.25) & (x[market].count() > 1)).\
+            filter(lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).\
             groupby('player display name')
 
         defenseGroups = gamelog.groupby(['opponent', 'game id'])
@@ -3478,7 +3478,7 @@ class StatsNHL(Stats):
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
-            lambda x: (x[market].clip(0, 1).mean() > 0.25) & (x[market].count() > 1)).groupby('playerName')
+            lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).groupby('playerName')
 
         defenseGroups = gamelog.groupby(['opponent', 'gameDate'])
         defenseGames = pd.DataFrame()
