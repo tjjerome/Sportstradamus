@@ -513,6 +513,7 @@ def find_correlation(offers, stats, platform):
         "NFL": ["QB", "WR", "RB", "TE"],
         "NHL": ["C", "R", "L", "D", "G"]
     }
+    best_fives = []
     for league in ["NFL", "NBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
@@ -560,14 +561,13 @@ def find_correlation(offers, stats, platform):
                 "Assists": "assists"
             })
 
-        league_df["cMarket"] = league_df["Position"] + " " + \
+        league_df["cMarket"] = league_df["Position"] + "." + \
             league_df["Market"].map(stat_map[platform])
 
         league_df["Desc"] = league_df[[
             "Player", "Bet", "Market"]].agg(" ".join, axis=1)
 
         checked_teams = []
-        best_fives = []
         for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
             if team in checked_teams:
                 continue
@@ -738,7 +738,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
 
     market = stat_map[platform].get(market, market)
     if league == "NHL":
-        market = {"AST": "assists", "PTS": "points"}.get(market, market)
+        market = {"AST": "assists", "PTS": "points",
+                  "BLK": "blocked"}.get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
