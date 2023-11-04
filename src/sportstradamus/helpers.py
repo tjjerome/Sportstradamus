@@ -32,11 +32,8 @@ def get_active_sports():
     res = res.json()
 
     # Filter sports
-    sports = [
-        (s["key"], s["title"])
-        for s in res
-        if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
-    ]
+    sports = [s["title"] for s in res if s["title"] in [
+        "NBA", "MLB", "NHL", "NFL"] and s["active"]]
 
     return sports
 
