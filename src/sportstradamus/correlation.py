@@ -77,8 +77,8 @@ else:
 
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
+l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
 
@@ -147,11 +147,12 @@ else:
         if gameDate < datetime(2020, 9, 24):
             continue
         nfl.profile_market('snap pct', date=gameDate)
-        usage = pd.DataFrame(nfl.playerProfile['snap pct short'])
+        usage = pd.DataFrame(
+            nfl.playerProfile[['snap pct short', 'route participation short']])
         usage.reset_index(inplace=True)
         game_df = game_df.merge(usage)
-        ranks = game_df.groupby(["recent team", "position group"]).rank(
-            ascending=False, method='dense')["snap pct short"].astype(int)
+        ranks = game_df.sort_values('route participation short', ascending=False).groupby(
+            ["recent team", "position group"]).rank(ascending=False, method='first')["snap pct short"].astype(int)
         game_df['position group'] = game_df['position group'] + \
             ranks.astype(str)
         game_df.index = game_df['position group']
@@ -232,12 +233,12 @@ else:
             game_df["GAME_DATE"].max()[:10], '%Y-%m-%d')
         if gameDate < datetime(2021, 10, 26):
             continue
-        nba.profile_market('MIN', date=gameDate)
-        usage = pd.DataFrame(nba.playerProfile['MIN short'])
+        nba.profile_market('USG_PCT', date=gameDate)
+        usage = pd.DataFrame(nba.playerProfile[['USG_PCT short', 'MIN short']])
         usage.reset_index(inplace=True)
         game_df = game_df.merge(usage)
-        ranks = game_df.groupby(["TEAM_ABBREVIATION", "POS"]).rank(
-            ascending=False, method='dense')["MIN short"].astype(int)
+        ranks = game_df.sort_values('MIN short', ascending=False).groupby(
+            ["TEAM_ABBREVIATION", "POS"]).rank(ascending=False, method='dense')["MIN short"].astype(int)
         game_df['POS'] = game_df['POS'] + \
             ranks.astype(str)
         game_df.index = game_df['POS']
@@ -254,8 +255,8 @@ else:
 
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
+l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
 
@@ -300,10 +301,11 @@ else:
         if gameDate < datetime(2021, 10, 19):
             continue
         nhl.profile_market('TimeShare', date=gameDate)
-        usage = pd.DataFrame(nfl.playerProfile['TimeShare short'])
+        usage = pd.DataFrame(
+            nfl.playerProfile[['TimeShare short', 'Corsi_Pct short']])
         usage.reset_index(inplace=True)
         game_df = game_df.merge(usage)
-        ranks = game_df.groupby(["team", "position"]).rank(
+        ranks = game_df.sort_values('Corsi_Pct short', ascending=False).groupby(["team", "position"]).rank(
             ascending=False, method='dense')["TimeShare short"].astype(int)
         game_df['position'] = game_df['position'] + \
             ranks.astype(str)
@@ -329,8 +331,8 @@ else:
 
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(" ")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(" ")[0] for i in c.index.get_level_values(1).to_list()]
+l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
 c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
 

@@ -499,9 +499,14 @@ def find_correlation(offers, stats, platform):
     df = pd.DataFrame(offers)
     df["Correlated Bets"] = ""
     usage_str = {
-        "NBA": "MIN",
+        "NBA": "USG_PCT",
         "NFL": "snap pct",
         "NHL": "TimeShare"
+    }
+    tiebreaker_str = {
+        "NBA": "MIN short",
+        "NFL": "route participation short",
+        "NHL": "Corsi_Pct short"
     }
     positions = {
         "NBA": ["P", "C", "F", "W", "B"],
@@ -536,13 +541,13 @@ def find_correlation(offers, stats, platform):
                 x, int) else "/".join([positions[league][i] for i in x]))
             stat_data.profile_market(usage_str[league])
             usage = pd.DataFrame(
-                stat_data.playerProfile[usage_str[league] + " short"])
+                stat_data.playerProfile[[usage_str[league] + " short", tiebreaker_str[league]]])
             usage.reset_index(inplace=True)
             usage.rename(
                 columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
             league_df = league_df.merge(usage)
-            ranks = league_df.groupby(["Team", "Position"]).rank(
-                ascending=False, method='dense')[usage_str[league] + " short"].astype(int)
+            ranks = league_df.sort_values(tiebreaker_str[league], ascending=False).groupby(
+                ["Team", "Position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
             league_df.Position = league_df.Position + ranks.astype(str)
         else:
             league_df.Position = "B" + league_df.Position.add(1).astype(str)
