@@ -29,6 +29,7 @@ def get_active_sports():
     # Get available sports from the API
     url = f"https://api.the-odds-api.com/v4/sports/?apiKey={odds_api}"
     res = requests.get(url)
+    res = res.json()
 
     # Filter sports
     sports = [

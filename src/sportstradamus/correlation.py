@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import os.path
+
 pd.set_option('mode.chained_assignment', None)
+
 # MLB
 mlb = StatsMLB()
 mlb.load()
@@ -75,6 +77,8 @@ else:
 
     matrix.to_csv((pkg_resources.files(data) / "mlb_corr_data.csv"))
 
+matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
+matrix = matrix.reindex(sorted(matrix.columns), axis=1)
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
 l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
@@ -182,6 +186,8 @@ else:
 
     matrix.to_csv((pkg_resources.files(data) / "nfl_corr_data.csv"))
 
+matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
+matrix = matrix.reindex(sorted(matrix.columns), axis=1)
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
 l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
@@ -233,18 +239,19 @@ else:
             game_df["GAME_DATE"].max()[:10], '%Y-%m-%d')
         if gameDate < datetime(2021, 10, 26):
             continue
-        nba.profile_market('USG_PCT', date=gameDate)
-        usage = pd.DataFrame(nba.playerProfile[['USG_PCT short', 'MIN short']])
+        nba.profile_market('MIN', date=gameDate)
+        usage = pd.DataFrame(nba.playerProfile[['MIN short', 'USG_PCT short']])
         usage.reset_index(inplace=True)
         game_df = game_df.merge(usage)
-        ranks = game_df.sort_values('MIN short', ascending=False).groupby(
-            ["TEAM_ABBREVIATION", "POS"]).rank(ascending=False, method='dense')["MIN short"].astype(int)
+        ranks = game_df.sort_values('USG_PCT short', ascending=False).groupby(
+            ["TEAM_ABBREVIATION", "POS"]).rank(ascending=False, method='first')["MIN short"].astype(int)
         game_df['POS'] = game_df['POS'] + \
             ranks.astype(str)
         game_df.index = game_df['POS']
 
-        homeStats = game_df.loc[game_df['home'], stats].to_dict('index')
-        homeStats = game_df.loc[~game_df['home'], stats].to_dict('index')
+        homeStats = game_df.loc[game_df['HOME'], stats].to_dict('index')
+        awayStats = game_df.loc[~game_df['HOME'].astype(
+            bool), stats].to_dict('index')
 
         matrix = pd.concat([matrix, pd.json_normalize(
             homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
@@ -253,6 +260,8 @@ else:
 
     matrix.to_csv((pkg_resources.files(data) / "nba_corr_data.csv"))
 
+matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
+matrix = matrix.reindex(sorted(matrix.columns), axis=1)
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
 l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
@@ -302,24 +311,24 @@ else:
             continue
         nhl.profile_market('TimeShare', date=gameDate)
         usage = pd.DataFrame(
-            nfl.playerProfile[['TimeShare short', 'Corsi_Pct short']])
+            nhl.playerProfile[['TimeShare short', 'Fenwick short']])
         usage.reset_index(inplace=True)
         game_df = game_df.merge(usage)
-        ranks = game_df.sort_values('Corsi_Pct short', ascending=False).groupby(["team", "position"]).rank(
-            ascending=False, method='dense')["TimeShare short"].astype(int)
+        ranks = game_df.sort_values('Fenwick short', ascending=False).groupby(["team", "position"]).rank(
+            ascending=False, method='first')["TimeShare short"].astype(int)
         game_df['position'] = game_df['position'] + \
             ranks.astype(str)
         game_df.index = game_df['position']
 
         homeStats = game_df.loc[game_df['home'] &
-                                game_df['position'] == "G", goalie_stats].to_dict('index')
+                                (game_df['position'] == "G"), goalie_stats].to_dict('index')
         homeStats.update(
-            game_df.loc[game_df['home'] & game_df['position'] != "G", skater_stats].to_dict('index'))
+            game_df.loc[game_df['home'] & (game_df['position'] != "G"), skater_stats].to_dict('index'))
 
         awayStats = game_df.loc[~game_df['home'] &
-                                game_df['position'] == "G", goalie_stats].to_dict('index')
+                                (game_df['position'] == "G"), goalie_stats].to_dict('index')
         awayStats.update(
-            game_df.loc[~game_df['home'] & game_df['position'] != "G", skater_stats].to_dict('index'))
+            game_df.loc[~game_df['home'] & (game_df['position'] != "G"), skater_stats].to_dict('index'))
 
         matrix = pd.concat([matrix, pd.json_normalize(
             homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
@@ -329,6 +338,8 @@ else:
     matrix = pd.DataFrame(matrix)
     matrix.to_csv((pkg_resources.files(data) / "nhl_corr_data.csv"))
 
+matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
+matrix = matrix.reindex(sorted(matrix.columns), axis=1)
 c = matrix.corr().unstack()
 c = c.iloc[:int(len(c)/2)]
 l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]

@@ -249,7 +249,7 @@ def main(progress, books):
     # PrizePicks
 
     try:
-        pp_dict = get_pp()
+        pp_dict = get_pp(books)
         pp_offers, pp5 = process_offers(pp_dict, "PrizePicks", datasets, stats)
         save_data(pp_offers, "PrizePicks", gc)
         best5 = pd.concat([best5, pp5])
@@ -499,22 +499,21 @@ def find_correlation(offers, stats, platform):
     df = pd.DataFrame(offers)
     df["Correlated Bets"] = ""
     usage_str = {
-        "NBA": "USG_PCT",
+        "NBA": "MIN",
         "NFL": "snap pct",
         "NHL": "TimeShare"
     }
     tiebreaker_str = {
-        "NBA": "MIN short",
+        "NBA": "USG_PCT short",
         "NFL": "route participation short",
-        "NHL": "Corsi_Pct short"
+        "NHL": "Fenwick short"
     }
     positions = {
         "NBA": ["P", "C", "F", "W", "B"],
         "NFL": ["QB", "WR", "RB", "TE"],
         "NHL": ["C", "R", "L", "D", "G"]
     }
-    # for league in ["NFL", "NBA", "MLB", "NHL"]:
-    for league in ["NFL"]:
+    for league in ["NFL", "NBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
             continue
@@ -633,7 +632,8 @@ def find_correlation(offers, stats, platform):
                             "League": league,
                             "Platform": platform,
                             "EV": p,
-                            "Bet": ", ".join([leg["Desc"] for leg in bet])
+                            "Bet": ", ".join([leg["Desc"] for leg in bet]),
+                            "Players": {leg["Player"] for leg in bet}
                         }
                         best_fives.append(parlay)
 
@@ -658,7 +658,8 @@ def find_correlation(offers, stats, platform):
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
-    df5 = pd.DataFrame(best_fives).sort_values("EV", ascending=False)
+    df5 = pd.DataFrame(best_fives).sort_values(
+        "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
 
     return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), df5.groupby(["League", "Game"]).head(5)
 
@@ -759,9 +760,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
             teams = o["Team"].split("/")
+            teams = [i for i in teams if i]
             if len(teams) < len(players):
                 teams = teams*len(players)
             opponents = o["Opponent"].split("/")
+            opponents = [i for i in opponents if i]
             if len(opponents) < len(players):
                 opponents = opponents*len(players)
             for i, player in enumerate(players):
@@ -789,10 +792,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                             continue  # TODO: finish this
 
                 lines = list(archive.archive.get(league, {}).get(
-                    market, {}).get(o["Date"], {}).get(player, {}).keys())
+                    market, {}).get(o["Date"], {}).get(player, {}).get("Lines", []))
                 if len(lines) > 0:
-                    if "Closing Lines" in lines:
-                        lines.remove("Closing Lines")
                     line = lines[-1]
                 else:
                     line = 0.5
