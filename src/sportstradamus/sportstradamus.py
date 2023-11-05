@@ -312,9 +312,11 @@ def main(progress, books, parlays):
     df = pd.concat([ud_offers, pp_offers, th_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                                       ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
     df.loc[(df['Market'] == 'AST') & (
-        df['League'] == 'NHL'), 'Market'] = "points"
-    df.loc[(df['Market'] == 'PTS') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
+    df.loc[(df['Market'] == 'PTS') & (
+        df['League'] == 'NHL'), 'Market'] = "points"
+    df.loc[(df['Market'] == 'BLK') & (
+        df['League'] == 'NHL'), 'Market'] = "blocked"
     df.dropna(subset='Market', inplace=True, ignore_index=True)
     history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                        ignore_index=True)
@@ -501,6 +503,8 @@ def find_correlation(offers, stats, platform, parlays):
     with open(filepath, "r") as infile:
         banned = json.load(infile)
 
+    stats = stat_map[platform]
+
     df = pd.DataFrame(offers)
     df5 = pd.DataFrame()
     df["Correlated Bets"] = ""
@@ -556,18 +560,18 @@ def find_correlation(offers, stats, platform, parlays):
             league_df.Position = league_df.Position + ranks.astype(str)
         else:
             league_df.Position = "B" + league_df.Position.add(1).astype(str)
-            league_df.loc[league_df["Market"].map(stat_map[platform]).str.contains(
-                "allowed") | league_df["Market"].map(stat_map[platform]).str.contains("pitch"), "Position"] = "P"
+            league_df.loc[league_df["Market"].map(stats).str.contains(
+                "allowed") | league_df["Market"].map(stats).str.contains("pitch"), "Position"] = "P"
 
         if league == "NHL":
-            stat_map[platform].update({
+            stats.update({
                 "Points": "points",
                 "Blocked Shots": "blocks",
                 "Assists": "assists"
             })
 
         league_df["cMarket"] = league_df["Position"] + "." + \
-            league_df["Market"].map(stat_map[platform])
+            league_df["Market"].map(stats)
 
         league_df["Desc"] = league_df[[
             "Player", "Bet", "Market"]].agg(" ".join, axis=1)
@@ -590,7 +594,7 @@ def find_correlation(offers, stats, platform, parlays):
             checked_teams.append(opp)
 
             if league != "MLB" and parlays:
-                game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.7)
+                game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
                 if platform == "Underdog":
                     game_df.loc[:, 'Model'] = game_df['Model'] * \
                         game_df['Boost']
