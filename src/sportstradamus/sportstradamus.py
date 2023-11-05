@@ -573,7 +573,7 @@ def find_correlation(offers, stats, platform, parlays):
             "Player", "Bet", "Market"]].agg(" ".join, axis=1)
 
         league_df["Desc"] = league_df["Desc"] + " - " + \
-            league_df["Model"].round(2).astype(str) + "%"
+            league_df["Model"].multiply(100).round(0).astype(str) + "%"
 
         checked_teams = []
         for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
