@@ -503,7 +503,7 @@ def find_correlation(offers, stats, platform, parlays):
     with open(filepath, "r") as infile:
         banned = json.load(infile)
 
-    stats = stat_map[platform]
+    new_map = stat_map[platform]
 
     df = pd.DataFrame(offers)
     df5 = pd.DataFrame()
@@ -560,18 +560,18 @@ def find_correlation(offers, stats, platform, parlays):
             league_df.Position = league_df.Position + ranks.astype(str)
         else:
             league_df.Position = "B" + league_df.Position.add(1).astype(str)
-            league_df.loc[league_df["Market"].map(stats).str.contains(
-                "allowed") | league_df["Market"].map(stats).str.contains("pitch"), "Position"] = "P"
+            league_df.loc[league_df["Market"].map(new_map).str.contains(
+                "allowed") | league_df["Market"].map(new_map).str.contains("pitch"), "Position"] = "P"
 
         if league == "NHL":
-            stats.update({
+            new_map.update({
                 "Points": "points",
                 "Blocked Shots": "blocks",
                 "Assists": "assists"
             })
 
         league_df["cMarket"] = league_df["Position"] + "." + \
-            league_df["Market"].map(stats)
+            league_df["Market"].map(new_map)
 
         league_df["Desc"] = league_df[[
             "Player", "Bet", "Market"]].agg(" ".join, axis=1)
