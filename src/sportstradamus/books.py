@@ -843,7 +843,7 @@ def get_ud():
     offers = {}
     for o in tqdm(api["over_under_lines"], desc="Getting Underdog Over/Unders", unit="offer"):
         player = players[o["over_under"]["appearance_stat"]["appearance_id"]]
-        if "+" in player:
+        if "+" in player["Name"]:
             continue
         game = matches.get(
             o["over_under"]["appearance_stat"]["appearance_id"],

@@ -73,7 +73,6 @@ def main(progress, books, parlays):
         stat_map = json.load(infile)
 
     sports = get_active_sports()
-    sports = ["NBA"]
 
     """"
     Start gathering sportsbook data
@@ -503,6 +502,7 @@ def find_correlation(offers, stats, platform, parlays):
         banned = json.load(infile)
 
     df = pd.DataFrame(offers)
+    df5 = pd.DataFrame()
     df["Correlated Bets"] = ""
     usage_str = {
         "NBA": "MIN",
@@ -519,7 +519,6 @@ def find_correlation(offers, stats, platform, parlays):
         "NFL": ["QB", "WR", "RB", "TE"],
         "NHL": ["C", "R", "L", "D", "G"]
     }
-    best_fives = []
     for league in ["NFL", "NBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
@@ -573,10 +572,14 @@ def find_correlation(offers, stats, platform, parlays):
         league_df["Desc"] = league_df[[
             "Player", "Bet", "Market"]].agg(" ".join, axis=1)
 
+        league_df["Desc"] = league_df["Desc"] + " - " + \
+            league_df["Model"].round(2).astype(str) + "%"
+
         checked_teams = []
         for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
             if team in checked_teams:
                 continue
+            best_fives = []
             team_df = league_df.loc[league_df["Team"] == team]
             opp = team_df.Opponent.mode().values[0]
             opp_df = league_df.loc[league_df["Team"] == opp]
@@ -585,14 +588,17 @@ def find_correlation(offers, stats, platform, parlays):
             logger.info(f"Correlate {league}, {team}/{opp}")
             checked_teams.append(team)
             checked_teams.append(opp)
-            if league != "MLB" and parlays:
 
+            if league != "MLB" and parlays:
+                game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.7)
                 if platform == "Underdog":
                     game_df.loc[:, 'Model'] = game_df['Model'] * \
                         game_df['Boost']
+                    game_df.loc[:, 'Books'] = game_df['Books'] * \
+                        game_df['Boost']
 
-                idx = game_df.sort_values('Model', ascending=False).head(
-                    40).sort_values('Player').index
+                idx = game_df.loc[game_df['Books'] >= .49].sort_values('Model', ascending=False).head(
+                    40).sort_values(['Team', 'Player']).index
                 combos = combinations(
                     game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 5)
 
@@ -635,16 +641,24 @@ def find_correlation(offers, stats, platform, parlays):
                             p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
 
                     p = p*20
-                    if p > 2.5:
+                    if p > 1.5:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
                             "Platform": platform,
                             "EV": p,
-                            "Bet": ", ".join([leg["Desc"] for leg in bet]),
+                            "Leg 1": bet[0]["Desc"],
+                            "Leg 2": bet[1]["Desc"],
+                            "Leg 3": bet[2]["Desc"],
+                            "Leg 4": bet[3]["Desc"],
+                            "Leg 5": bet[4]["Desc"],
                             "Players": {leg["Player"] for leg in bet}
                         }
                         best_fives.append(parlay)
+
+            if len(best_fives) > 0:
+                df5 = pd.concat([df5, pd.DataFrame(best_fives).sort_values(
+                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players").head(5)])
 
             # Find best pairs
             for i, offer in team_df.iterrows():
@@ -663,17 +677,11 @@ def find_correlation(offers, stats, platform, parlays):
                     corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
                 corr.sort_values("P", ascending=False, inplace=True)
                 corr.drop_duplicates("Player", inplace=True)
-                corr = corr.loc[corr["P"] > 0.9]
+                corr = corr.loc[corr["P"] > 0.8]
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
-    if parlays:
-        df5 = pd.DataFrame(best_fives).sort_values(
-            "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
-
-        return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), df5.groupby(["League", "Game"]).head(5)
-    else:
-        return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), pd.DataFrame()
+    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), df5
 
 
 def save_data(df, book, gc):
@@ -769,6 +777,9 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
     playerNames = []
 
     for o in tqdm(offers, leave=False, disable=not pbar):
+        if o["Team"] == "":
+            continue
+
         if "+" in o["Player"] or "vs." in o["Player"]:
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
