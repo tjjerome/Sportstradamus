@@ -37,27 +37,28 @@
         "REB": 0.7075491928495078,
         "STL": 1,
         "TOV": 1,
-        "fantasy points prizepicks": 0.5390787239072937
+        "fantasy points prizepicks": 0.5390787239072937,
+        "fantasy points underdog": 0.5390787239072937
     },
     "NFL": {
         "attempts": 0.248560128121897,
         "carries": 0.7423902362266039,
         "completions": 0.28030682721460354,
-        "fantasy points prizepicks": 0.6995721431443788,
+        "fantasy points prizepicks": 0.7000278648694469,
         "fantasy points underdog": 0.7575460528657008,
         "interceptions": 1,
         "passing tds": 1,
-        "passing yards": 0.29957753015810257,
+        "passing yards": 0.2994936664723889,
         "qb tds": 1,
-        "qb yards": 0.28295014994030776,
+        "qb yards": 0.283140839501653,
         "receiving tds": 1,
-        "receiving yards": 0.8937004149374717,
+        "receiving yards": 0.8978647426191046,
         "receptions": 1,
         "rushing tds": 1,
-        "rushing yards": 0.8592666980780186,
+        "rushing yards": 0.8654699124170909,
         "targets": 0.6471739159681961,
         "tds": 1,
-        "yards": 0.740515839001377
+        "yards": 0.7409909715872895
     },
     "NHL": {
         "assists": 1,

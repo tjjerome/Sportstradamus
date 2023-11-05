@@ -3058,15 +3058,13 @@ class StatsNFL(Stats):
             home = self.upcoming_games.get(team, {}).get(
                 'Home', datetime.today().strftime("%Y-%m-%d"))
             data = archive["NFL"]['fantasy points underdog'].get(
-                gameDate, {}).get(player, {0: [0.5]*4})
+                gameDate, {}).get(player, {'Lines': [0]})
 
-            lines = [k for k, v in data.items()]
-            if "Closing Lines" in lines:
-                lines.remove("Closing Lines")
-                lines.append(
-                    np.floor(np.mean([float(i['Line']) for i in data["Closing Lines"] if i is not None]))+0.5)
-
-            line = lines[-1]
+            lines = data["Lines"]
+            if len(lines) > 0:
+                line = lines[-1]
+            else:
+                line = 0
 
             offer = {
                 "Player": player,
