@@ -186,7 +186,7 @@ def meditate(force, stats, league, alt):
                     continue
 
             print(f"Training {league} - {market}")
-            cv = stat_cv[league][market]
+            cv = stat_cv[league].get(market, 1)
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
             if os.path.isfile(filepath) and not force:
