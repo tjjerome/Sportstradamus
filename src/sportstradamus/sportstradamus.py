@@ -569,6 +569,10 @@ def find_correlation(offers, stats, platform, parlays):
                 "Blocked Shots": "blocked",
                 "Assists": "assists"
             })
+        if league == "NBA":
+            new_map.update({
+                "Fantasy Points": "fantasy points prizepicks"
+            })
 
         league_df["cMarket"] = league_df["Position"] + "." + \
             league_df["Market"].map(new_map)
