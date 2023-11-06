@@ -41,7 +41,7 @@
 ===================== MLB pitcher strikeouts ====================
  Distribution Model: Poisson
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.614657   0.627249 0.021218    0.036743      0.04918  0.103243
+  0.62621   0.630174 0.029181    0.044619     0.059196  0.114723
 
 ======================= MLB pitches thrown ======================
  Distribution Model: Gaussian
