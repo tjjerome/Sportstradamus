@@ -541,6 +541,9 @@ for team in nhl_teams['teams']:
 with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)
 
+with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
+    combo_props = json.load(infile)
+
 
 def prob_diff(X, Y, line):
     def joint_pdf(x, y): return X(x)*Y(y)

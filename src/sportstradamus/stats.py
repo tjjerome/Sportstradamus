@@ -12,7 +12,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, remove_accents, hmean, fit_trendlines
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, remove_accents, fit_trendlines
 import pandas as pd
 import warnings
 import requests
@@ -757,6 +757,21 @@ class StatsNBA(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev) and (market in combo_props):
+            ev = 0
+            for submarket in combo_props.get(market, []):
+                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {}).get("EV", [0] * 4))
+        if ev <= 0:
+            odds = 0.5
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
+
         date = datetime.strptime(date, "%Y-%m-%d")
 
         player_games = self.gamelog.loc[(self.gamelog["PLAYER_NAME"] == player) & (
@@ -776,16 +791,6 @@ class StatsNBA(Stats):
         h2h_res = (headtohead[market]).to_list()
 
         dvpoa = self.defenseProfile.loc[opponent, position]
-
-        ev = np.array(ev, dtype=np.float64)
-        ev = np.nanmean(ev)
-        if np.isnan(ev):
-            odds = 0.5
-        else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
 
         positions = ['P', 'C', 'F', 'W', 'B']
         data = {
@@ -817,7 +822,7 @@ class StatsNBA(Stats):
         }
 
         if data["Line"] == 0:
-            data["Line"] = data["AvgYr"]
+            data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -1849,6 +1854,21 @@ class StatsMLB(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev) and (market in combo_props):
+            ev = 0
+            for submarket in combo_props.get(market, []):
+                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {}).get("EV", [0] * 4))
+        if ev <= 0:
+            odds = 0.5
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
+
         date = datetime.strptime(date, "%Y-%m-%d")
 
         if any([string in market for string in ["allowed", "pitch"]]):
@@ -1883,16 +1903,6 @@ class StatsMLB(Stats):
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
-        ev = np.array(ev, dtype=np.float64)
-        ev = np.nanmean(ev)
-        if np.isnan(ev):
-            odds = 0.5
-        else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
-
         data = {
             "DVPOA": 0,
             "Odds": odds,
@@ -1921,7 +1931,7 @@ class StatsMLB(Stats):
         }
 
         if data["Line"] == 0:
-            data["Line"] = data["AvgYr"]
+            data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         if date.date() < datetime.today().date():
             game = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
@@ -2141,14 +2151,14 @@ class StatsNFL(Stats):
         self.stat_types = {
             'passing': ['completion percentage over expected', 'completion percentage', 'passer rating',
                         'passer adot', 'passer adot differential', 'time to throw', 'aggressiveness',
-                        'pass yards per attempt'],
+                        'pass yards per attempt', 'receiver drops'],
             'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
                           'yac over expected', 'separation created', 'targets per route run',
                           'first read targets per route run', 'route participation', 'yards per route run',
                           'midfield tprr', 'average depth of target', 'receiver cp over expected',
-                          'first read target share', 'redzone target share'],
+                          'first read target share', 'redzone target share', 'drop rate'],
             'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate',
-                        'redzone carry share', 'carry share'],
+                        'redzone carry share', 'carry share', 'breakaway yards', 'broken tackles'],
             'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate', 'pass_success_rate',
                         'epa_per_rush', 'epa_per_pass', 'exp_per_rush', 'exp_per_pass',
                         'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
@@ -2287,7 +2297,7 @@ class StatsNFL(Stats):
         self.players["Michael Pittman"] = "WR"
 
         teamDataList = []
-        for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog)):
+        for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog.loc[self.gamelog.isna().any(axis=1)])):
             if row['opponent'] != row['opponent']:
                 if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
@@ -2389,10 +2399,20 @@ class StatsNFL(Stats):
                          == 'LA', 'away_team'] = "LAR"
             self.pbp.loc[self.pbp['posteam']
                          == 'LA', 'posteam'] = "LAR"
-            self.ngs = pd.concat([nfl.import_ngs_data('passing', [self.season_start.year]),
-                                  nfl.import_ngs_data(
-                'receiving', [self.season_start.year]),
-                nfl.import_ngs_data('rushing', [self.season_start.year])])
+            self.ngs = nfl.import_ngs_data('passing', [self.season_start.year])
+            self.ngs = self.ngs.merge(nfl.import_ngs_data(
+                'receiving', [self.season_start.year]), how='outer')
+            self.ngs = self.ngs.merge(nfl.import_ngs_data(
+                'rushing', [self.season_start.year]), how='outer')
+            self.ngs['player_display_name'] = self.ngs['player_display_name'].apply(
+                remove_accents)
+            self.pfr = nfl.import_weekly_pfr('pass', [self.season_start.year])
+            self.pfr = self.pfr.merge(nfl.import_weekly_pfr(
+                'rush', [self.season_start.year]), how='outer')
+            self.pfr = self.pfr.merge(nfl.import_weekly_pfr(
+                'rec', [self.season_start.year]), how='outer')
+            self.pfr['pfr_player_name'] = self.pfr['pfr_player_name'].apply(
+                remove_accents)
             self.need_pbp = False
         pbp = self.pbp.loc[(self.pbp.week == week) & (
             (self.pbp.home_team == team) | (self.pbp.away_team == team))]
@@ -2425,14 +2445,12 @@ class StatsNFL(Stats):
                 pbp_def.loc[pbp_def['pass'], 'yards_gained'] > 15).mean()
             def_cpoe = pbp_def.loc[pbp_def['pass'], 'cpoe'].mean() / 100
             def_cp = pbp_def.loc[pbp_def['pass'], 'complete_pass'].mean()
-            pressure_mask = pbp_def['is_qb_out_of_pocket'] | pbp_def['sack'] | pbp_def['qb_hit']
-            def_press = pbp_def.loc[pbp_def['pass'] & pressure_mask, 'pass'].count(
-            ) / len(pbp_def.loc[pbp_def['qb_dropback']])
+            def_press = self.pfr.loc[(self.pfr['week'] == pbp.week.max()) & (
+                self.pfr['opponent'] == team), 'times_pressured'].sum() / len(pbp_def.loc[pbp_def['qb_dropback']])
             def_stuff = (pbp_def.loc[pbp_def['rush'],
                          'yards_gained'] <= 0).mean()
-            pressure_mask = pbp_off['is_qb_out_of_pocket'] | pbp_off['sack'] | pbp_off['qb_hit']
-            off_press = pbp_off.loc[pbp_off['pass'] & pressure_mask, 'pass'].count(
-            ) / len(pbp_off.loc[pbp_off['qb_dropback']])
+            off_press = self.pfr.loc[(self.pfr['week'] == pbp.week.max()) & (
+                self.pfr['team'] == team), 'times_pressured'].sum() / len(pbp_off.loc[pbp_off['qb_dropback']])
             off_stuff = (pbp_off.loc[pbp_off['rush'],
                          'yards_gained'] <= 0).mean()
             rush_ngs = self.ngs.loc[(self.ngs['player_position'] == 'RB') & (self.ngs['team_abbr'] == team) & (
@@ -2440,9 +2458,9 @@ class StatsNFL(Stats):
             off_rush_xya = rush_ngs.iloc[0]/rush_ngs.iloc[1]
             blitz_rate = pbp_def.loc[pbp_def['pass'] & (pbp_def['n_blitzers'] > 0), 'n_blitzers'].count(
             ) / len(pbp_def.loc[pbp_def['qb_dropback']])
-            off_blitz_epa = pbp_off.loc[pbp_off['pass'] & (
+            off_blitz_epa = pbp_off.loc[pbp_off['qb_dropback'] & (
                 pbp_off['n_blitzers'] > 0), 'epa'].mean()
-            def_blitz_epa = pbp_def.loc[pbp_def['pass'] & (
+            def_blitz_epa = pbp_def.loc[pbp_def['qb_dropback'] & (
                 pbp_def['n_blitzers'] > 0), 'epa'].mean()
             plays = len(pbp_off)
             time_of_possession = pbp_off["play_time"].sum(
@@ -2493,8 +2511,12 @@ class StatsNFL(Stats):
                     "time_to_throw": 0,
                     "aggressiveness": 0,
                     "pass_yards_per_attempt": 0,
+                    "receiver_drops": 0,
                     "rushing_yards_over_expected": 0,
                     "rushing_success_rate": 0,
+                    "breakaway_yards": 0,
+                    "broken_tackles": 0,
+                    "drop_rate": 0,
                     "yac_over_expected": 0,
                     "separation_created": 0,
                     "targets_per_route_run": 0,
@@ -2534,6 +2556,14 @@ class StatsNFL(Stats):
                 self.ngs['week'] == pbp.week.max()), 'avg_separation'].mean() - \
                 self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
                     self.ngs['week'] == pbp.week.max()), 'avg_cushion'].mean()
+            broken_tackles = self.pfr.loc[(self.pfr['pfr_player_name'] == playerName) & (
+                self.pfr['week'] == pbp.week.max()), ['rushing_broken_tackles', 'receiving_broken_tackles']].sum(axis=1).mean()
+            breakaway_yards = self.pfr.loc[(self.pfr['pfr_player_name'] == playerName) & (
+                self.pfr['week'] == pbp.week.max()), 'rushing_yards_after_contact_avg'].mean()
+            drop_pct = self.pfr.loc[(self.pfr['pfr_player_name'] == playerName) & (
+                self.pfr['week'] == pbp.week.max()), 'receiving_drop_pct'].mean()
+            pass_drop_pct = self.pfr.loc[(self.pfr['pfr_player_name'] == playerName) & (
+                self.pfr['week'] == pbp.week.max()), 'passing_drop_pct'].mean()
             pass_ypa = pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(
                 playerName), 'yards_gained'].sum() / pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(playerName), 'qb_dropback'].sum()
             routes_run = len(pbp_off.loc[pbp_off.offense_players.str.contains(
@@ -2580,8 +2610,12 @@ class StatsNFL(Stats):
                 "time_to_throw": time_to_throw,
                 "aggressiveness": aggressiveness,
                 "pass_yards_per_attempt": pass_ypa,
+                "receiver_drops": pass_drop_pct,
                 "rushing_yards_over_expected": ryoe,
                 "rushing_success_rate": rush_sr,
+                "breakaway_yards": breakaway_yards,
+                "broken_tackles": broken_tackles,
+                "drop_rate": drop_pct,
                 "yac_over_expected": yacoe,
                 "separation_created": sep,
                 "targets_per_route_run": tprr,
@@ -2757,8 +2791,6 @@ class StatsNFL(Stats):
             x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
         playertrends = playerlogs.apply(
             fit_trendlines, 3).fillna(0).add_suffix(" growth", 1)
-        # playertrends = playerlogs.apply(lambda x: np.mean(
-        #     x.diff().tail(2), 0)).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
@@ -2886,6 +2918,21 @@ class StatsNFL(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev) and (market in combo_props):
+            ev = 0
+            for submarket in combo_props.get(market, []):
+                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {}).get("EV", [0] * 4))
+        if ev <= 0:
+            odds = 0.5
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
+
         date = datetime.strptime(date, "%Y-%m-%d")
 
         player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
@@ -2912,16 +2959,6 @@ class StatsNFL(Stats):
         h2h_res = (headtohead[market]).to_list()
 
         dvpoa = self.defenseProfile.loc[opponent, position]
-
-        ev = np.array(ev, dtype=np.float64)
-        ev = np.nanmean(ev)
-        if np.isnan(ev):
-            odds = 0.5
-        else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
 
         data = {
             "DVPOA": dvpoa,
@@ -2953,7 +2990,7 @@ class StatsNFL(Stats):
         }
 
         if data["Line"] == 0:
-            data["Line"] = data["AvgYr"]
+            data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -3735,6 +3772,21 @@ class StatsNHL(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev) and (market in combo_props):
+            ev = 0
+            for submarket in combo_props.get(market, []):
+                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {}).get("EV", [0] * 4))
+        if ev <= 0:
+            odds = 0.5
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
+
         date = datetime.strptime(date, "%Y-%m-%d")
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
@@ -3755,16 +3807,6 @@ class StatsNHL(Stats):
 
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
-
-        ev = np.array(ev, dtype=np.float64)
-        ev = np.nanmean(ev)
-        if np.isnan(ev):
-            odds = 0.5
-        else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
 
         data = {
             "DVPOA": 0,
@@ -3794,7 +3836,7 @@ class StatsNHL(Stats):
         }
 
         if data["Line"] == 0:
-            data["Line"] = data["AvgYr"]
+            data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         positions = ["C", "R", "L", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
