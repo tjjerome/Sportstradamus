@@ -574,7 +574,7 @@ def find_correlation(offers, stats, platform, parlays):
             league_df["Market"].map(new_map)
 
         league_df["Desc"] = league_df[[
-            "Player", "Bet", "Line", "Market"]].agg(" ".join, axis=1)
+            "Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
 
         league_df["Desc"] = league_df["Desc"] + " - " + \
             league_df["Model"].multiply(100).round(1).astype(str) + "%"
