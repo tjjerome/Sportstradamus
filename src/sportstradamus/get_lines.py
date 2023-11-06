@@ -1,4 +1,4 @@
-from sportstradamus.helpers import scraper, archive, no_vig_odds
+from sportstradamus.helpers import scraper, Archive, no_vig_odds
 from sportstradamus.stats import StatsNFL
 from datetime import datetime, timedelta
 from tqdm import tqdm
@@ -37,15 +37,16 @@ nhl_market_ids = {
 }
 
 nfl_market_ids = {
-    "passing_tds": 102,
-    "passing_yards": 103,
-    "completions": 100,
-    "attempts": 333,
-    "interceptions": 101,
-    "carries": 106,
-    "rushing_yards": 107,
-    "receiving_yards": 105,
-    "receptions": 104,
+    # "passing_tds": 102,
+    # "passing_yards": 103,
+    # "completions": 100,
+    # "attempts": 333,
+    # "interceptions": 101,
+    # "carries": 106,
+    # "rushing_yards": 107,
+    # "receiving_yards": 105,
+    # "receptions": 104,
+    "tds": 78
 }
 
 header = {"X-API-Key": "CHi8Hy5CEE4khd46XNYL23dCFX96oUdw6qOt1Dnh"}
@@ -54,12 +55,13 @@ nfl = StatsNFL()
 nfl.load()
 nfl.update()
 
+archive = Archive("NFL")
 with logging_redirect_tqdm():
-    players = list(nfl.gamelog['player_display_name'].unique())
+    players = list(nfl.gamelog['player display name'].unique())
     for player in tqdm(players, unit="player", position=1):
         tryJr = False
         code = player.lower().replace(".", "").replace("'", "").replace(" ", "-")
-        player_games = nfl.gamelog.loc[nfl.gamelog['player_display_name'] == player]
+        player_games = nfl.gamelog.loc[nfl.gamelog['player display name'] == player]
 
         for market, mid in tqdm(
             list(nfl_market_ids.items()), unit="market", position=2, leave=False
@@ -70,7 +72,8 @@ with logging_redirect_tqdm():
                 props = [
                     (i["event"], i["propOffer"])
                     for i in res["analyses"]
-                    if i["propOffer"]["season"] == 2022 and i["propOffer"]["line"]
+                    if i["propOffer"]["season"] <= 2022
+                    and i["propOffer"]["line"]
                 ]
             except:
                 if tryJr:
@@ -93,7 +96,7 @@ with logging_redirect_tqdm():
                         props = [
                             (i["event"], i["propOffer"])
                             for i in res["analyses"]
-                            if i["propOffer"]["season"] == 2022
+                            if i["propOffer"]["season"] <= 2022
                             and i["propOffer"]["line"]
                         ]
                     except:
@@ -108,24 +111,26 @@ with logging_redirect_tqdm():
                 ).strftime("%Y-%m-%d")
                 odds = [prop["cost"], prop["cost_inverse"]]
                 if 0 in odds:
-                    continue
-                if prop["recommendation"] == "under":
-                    odds.reverse()
-                odds = no_vig_odds(odds[0], odds[1])
+                    odds.remove(0)
+                    odds = no_vig_odds(odds[0])
+                else:
+                    if prop["recommendation"] == "under":
+                        odds.reverse()
+                    odds = no_vig_odds(odds[0], odds[1])
                 # game = next(
                 #     (i for i in player_games if i["gameId"][:10] == date), None)
                 # if game is None:
                 #     tqdm.write(f"Error finding {player}, {market}, {date}")
                 #     continue
                 # stats = nfl.get_stats_date(game, market, line)
-                stats = np.zeros(5)
-                stats = np.append(stats, [odds[0]] * 4)
+                stats = [odds[0]] * 4
                 if market not in archive.archive["NFL"]:
                     archive["NFL"][market] = {}
                 if date not in archive.archive["NFL"][market]:
                     archive.archive["NFL"][market][date] = {}
-
-                archive.archive["NFL"][market][date][player] = {line: stats}
+                if player not in archive.archive["NFL"][market][date]:
+                    archive.archive["NFL"][market][date][player] = {
+                        'Line': [line], 'EV': stats}
 
 
 archive.write()
