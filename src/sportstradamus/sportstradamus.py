@@ -681,7 +681,7 @@ def find_correlation(offers, stats, platform, parlays):
                     corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
                 corr.sort_values("P", ascending=False, inplace=True)
                 corr.drop_duplicates("Player", inplace=True)
-                corr = corr.loc[corr["P"] > 0.8]
+                corr = corr.loc[corr["P"] > 0.7]
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
