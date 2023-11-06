@@ -46,12 +46,12 @@
 ======================= MLB pitches thrown ======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
-  0.67434   0.675569 0.497056    0.079619     0.106074  0.148917
+ 0.655123    0.67927  0.49676    0.064421     0.086035    0.0913
 
 ======================= MLB pitching outs =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.639887   0.630866 0.392944    0.048388      0.06789  0.086868
+ 0.619808   0.631111 0.389795    0.034972      0.04929  0.074559
 
 ======================== MLB runs allowed =======================
  Distribution Model: Poisson
