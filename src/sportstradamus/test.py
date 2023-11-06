@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL
-from sportstradamus.helpers import scraper
+from sportstradamus.helpers import scraper, Archive
 from urllib.parse import urlencode
 from datetime import datetime
 import importlib.resources as pkg_resources
@@ -11,14 +11,16 @@ import numpy as np
 from tqdm import tqdm
 
 NFL = StatsNFL()
-NFL.season_start = datetime(2020, 9, 1).date()
+NFL.load()
+# NFL.season_start = datetime(2020, 9, 1).date()
 NFL.update()
-NFL.season_start = datetime(2021, 9, 1).date()
-NFL.update()
-NFL.season_start = datetime(2022, 9, 1).date()
-NFL.update()
-NFL.season_start = datetime(2023, 9, 1).date()
-NFL.update()
+# NFL.season_start = datetime(2021, 9, 1).date()
+# NFL.update()
+# NFL.season_start = datetime(2022, 9, 1).date()
+# NFL.update()
+# NFL.season_start = datetime(2023, 9, 1).date()
+# NFL.update()
+NFL.profile_market("yards")
 
 # NBA = StatsNBA()
 # NBA.season = "2021-22"
