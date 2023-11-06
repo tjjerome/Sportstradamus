@@ -156,8 +156,10 @@ class StatsNBA(Stats):
                 'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
                 'PLUS_MINUS', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlay',
-                'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT', 'DREB_PCT', 'REB_PCT',
-                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR']
+                'OFF_RATING', 'DEF_RATING', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO',
+                'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'PACE',
+                'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV', 'PCT_STL',
+                'PCT_BLKA']
         self.gamelog = pd.DataFrame(columns=cols)
         team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE', 'OPP',
                      'OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
@@ -262,24 +264,30 @@ class StatsNBA(Stats):
                     **params).get_normalized_dict()["PlayerGameLogs"]
                 adv_gamelog = nba.playergamelogs.PlayerGameLogs(
                     **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"]
+                usg_gamelog = nba.playergamelogs.PlayerGameLogs(
+                    **(params | {"measure_type_player_game_logs_nullable": "Usage"})).get_normalized_dict()["PlayerGameLogs"]
                 teamlog = nba.teamgamelogs.TeamGameLogs(
                     **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
                 # Fetch playoffs game logs
-                if today.month == 4:
+                if (today.month == 4) or (today-latest_date).days > 150:
                     params.update({'season_type_nullable': "PlayIn"})
                     nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **params).get_normalized_dict()["PlayerGameLogs"])
                     adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
+                    usg_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Usage"})).get_normalized_dict()["PlayerGameLogs"])
                     teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
-                if 4 <= today.month <= 6:
+                if (4 <= today.month <= 6) or (today-latest_date).days > 150:
                     params.update({'season_type_nullable': "Playoffs"})
                     nba_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **params).get_normalized_dict()["PlayerGameLogs"])
                     adv_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["PlayerGameLogs"])
+                    usg_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Usage"})).get_normalized_dict()["PlayerGameLogs"])
                     teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
 
@@ -289,6 +297,7 @@ class StatsNBA(Stats):
 
         nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
         adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
+        usg_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
         teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
 
         team_df = []
@@ -317,7 +326,7 @@ class StatsNBA(Stats):
 
             # TODO Rework this
             try:
-                if adv_gamelog[i]["PLAYER_ID"] != player_id:
+                if (adv_gamelog[i]["PLAYER_ID"] != player_id) or (usg_gamelog[i]["PLAYER_ID"] != player_id):
                     continue
             except:
                 continue
@@ -365,8 +374,9 @@ class StatsNBA(Stats):
             game["FTR"] = (game["FTM"]/game["FGA"]) if game["FGA"] > 0 else 0
 
             game.update(adv_gamelog[i])
+            game.update(usg_gamelog[i])
 
-            nba_df.append({k: v for k, v in game.items() if "RANK" not in k})
+            nba_df.append(game)
 
         nba_df = pd.DataFrame(nba_df)
 
@@ -582,8 +592,10 @@ class StatsNBA(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
-        stat_types = ['PLUS_MINUS', 'PFD', 'OFF_RATING', 'DEF_RATING', 'AST_PCT', 'OREB_PCT',
-                      'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'MIN']
+        stat_types = ['PLUS_MINUS', 'PFD', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO',
+                      'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'MIN',
+                      'PACE', 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV',
+                      'PCT_STL', 'PCT_BLKA']
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
@@ -768,7 +780,7 @@ class StatsNBA(Stats):
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
-            odds = 0
+            odds = 0.5
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -803,6 +815,9 @@ class StatsNBA(Stats):
             "Home": home,
             "Position": positions.index(position)
         }
+
+        if data["Line"] == 0:
+            data["Line"] = data["AvgYr"]
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -1871,7 +1886,7 @@ class StatsMLB(Stats):
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
-            odds = 0
+            odds = 0.5
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -1904,6 +1919,9 @@ class StatsMLB(Stats):
             "Total": total,
             "Home": home,
         }
+
+        if data["Line"] == 0:
+            data["Line"] = data["AvgYr"]
 
         if date.date() < datetime.today().date():
             game = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
@@ -2898,7 +2916,7 @@ class StatsNFL(Stats):
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
-            odds = 0
+            odds = 0.5
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -2933,6 +2951,9 @@ class StatsNFL(Stats):
             "Home": home,
             "Position": ["QB", "WR", "RB", "TE"].index(position)
         }
+
+        if data["Line"] == 0:
+            data["Line"] = data["AvgYr"]
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -3738,7 +3759,7 @@ class StatsNHL(Stats):
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
-            odds = 0
+            odds = 0.5
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -3771,6 +3792,10 @@ class StatsNHL(Stats):
             "Total": total,
             "Home": home
         }
+
+        if data["Line"] == 0:
+            data["Line"] = data["AvgYr"]
+
         positions = ["C", "R", "L", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             if len(player_games) > 0:
