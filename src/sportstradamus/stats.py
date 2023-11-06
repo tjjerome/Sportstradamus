@@ -610,7 +610,17 @@ class StatsNBA(Stats):
 
         positions = ['P', 'C', 'F', 'W', 'B']
         for position in positions:
-            positionGroups = gamelog.loc[gamelog['POS'] == position].groupby(
+            positionLogs = gamelog.loc[gamelog['POS'] == position]
+            positionGroups = positionLogs.groupby('PLAYER_NAME')
+            positionAvg = positionGroups[market].mean().mean()
+            positionStd = positionGroups[market].mean().std()
+            idx = list(set(positionGroups.groups.keys()).intersection(
+                set(self.playerProfile.index)))
+            self.playerProfile.loc[idx, 'position avg'] = positionGroups[market].mean().div(
+                positionAvg) - 1
+            self.playerProfile.loc[idx, 'position z'] = (
+                positionGroups[market].mean() - positionAvg).div(positionStd)
+            positionGroups = positionLogs.groupby(
                 ['OPP', 'GAME_ID'])
             defenseGames = pd.DataFrame()
             defenseGames[market] = positionGroups[market].sum()
@@ -2794,7 +2804,17 @@ class StatsNFL(Stats):
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
-            positionGroups = gamelog.loc[gamelog['position group'] == position].groupby(
+            positionLogs = gamelog.loc[gamelog['position group'] == position]
+            positionGroups = positionLogs.groupby('player display name')
+            positionAvg = positionGroups[market].mean().mean()
+            positionStd = positionGroups[market].mean().std()
+            idx = list(set(positionGroups.groups.keys()).intersection(
+                set(self.playerProfile.index)))
+            self.playerProfile.loc[idx, 'position avg'] = positionGroups[market].mean().div(
+                positionAvg) - 1
+            self.playerProfile.loc[idx, 'position z'] = (
+                positionGroups[market].mean() - positionAvg).div(positionStd)
+            positionGroups = positionLogs.groupby(
                 ['opponent', 'game id'])
             defenseGames = pd.DataFrame()
             defenseGames[market] = positionGroups[market].sum()
@@ -3574,7 +3594,17 @@ class StatsNHL(Stats):
         positions = ["C", "R", "L", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             for position in positions:
-                positionGroups = gamelog.loc[gamelog['position'] == position].groupby(
+                positionLogs = gamelog.loc[gamelog['position'] == position]
+                positionGroups = positionLogs.groupby('playerName')
+                positionAvg = positionGroups[market].mean().mean()
+                positionStd = positionGroups[market].mean().std()
+                idx = list(set(positionGroups.groups.keys()).intersection(
+                    set(self.playerProfile.index)))
+                self.playerProfile.loc[idx, 'position avg'] = positionGroups[market].mean().div(
+                    positionAvg) - 1
+                self.playerProfile.loc[idx, 'position z'] = (
+                    positionGroups[market].mean() - positionAvg).div(positionStd)
+                positionGroups = positionLogs.groupby(
                     'opponent')
                 defenseGames = pd.DataFrame()
                 defenseGames[market] = positionGroups[market].sum()
