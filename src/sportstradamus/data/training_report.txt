@@ -15,8 +15,8 @@
 
 ======================== MLB hits allowed =======================
  Distribution Model: Poisson
- Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.624183   0.652019 0.020738    0.038863     0.052167   0.10986
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.628788   0.707692 -0.024432    0.050176     0.067237  0.100357
 
 =============== MLB hitter fantasy points underdog ==============
  Distribution Model: Gaussian
