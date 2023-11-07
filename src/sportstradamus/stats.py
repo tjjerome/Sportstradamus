@@ -12,7 +12,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, remove_accents, fit_trendlines
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, remove_accents, fit_trendlines, get_ev
 import pandas as pd
 import warnings
 import requests
@@ -2943,8 +2943,14 @@ class StatsNFL(Stats):
         if np.isnan(ev) and (market in combo_props):
             ev = 0
             for submarket in combo_props.get(market, []):
-                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {}).get("EV", [0] * 4))
+                data = archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                v = np.nanmean(np.array(data["EV"], dtype=float))
+                if np.isnan(v):
+                    if len(data["Lines"]) > 0:
+                        ev += get_ev(data["Lines"][-1], .5, cv)
+                else:
+                    ev += v
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
