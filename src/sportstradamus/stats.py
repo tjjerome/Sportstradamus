@@ -774,7 +774,7 @@ class StatsNBA(Stats):
             for submarket in combo_props.get(market, []):
                 ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
                     date, {}).get(player, {}).get("EV", [0] * 4))
-        if ev <= 0:
+        if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
             if cv == 1:
@@ -1871,7 +1871,7 @@ class StatsMLB(Stats):
             for submarket in combo_props.get(market, []):
                 ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
                     date, {}).get(player, {}).get("EV", [0] * 4))
-        if ev <= 0:
+        if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
             if cv == 1:
@@ -2945,7 +2945,7 @@ class StatsNFL(Stats):
             for submarket in combo_props.get(market, []):
                 ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
                     date, {}).get(player, {}).get("EV", [0] * 4))
-        if ev <= 0:
+        if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
             if cv == 1:
@@ -3809,7 +3809,7 @@ class StatsNHL(Stats):
             for submarket in combo_props.get(market, []):
                 ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
                     date, {}).get(player, {}).get("EV", [0] * 4))
-        if ev <= 0:
+        if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
             if cv == 1:
