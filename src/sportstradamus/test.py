@@ -20,7 +20,8 @@ NFL.update()
 # NFL.update()
 # NFL.season_start = datetime(2023, 9, 1).date()
 # NFL.update()
-NFL.profile_market("yards")
+NFL.profile_market("passing yards")
+NFL.get_training_matrix("passing yards")
 
 # NBA = StatsNBA()
 # NBA.season = "2021-22"
