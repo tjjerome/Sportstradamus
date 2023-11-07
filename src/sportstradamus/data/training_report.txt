@@ -1,10 +1,15 @@
 ======================= NFL passing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.558824   0.541667 0.519268      0.0552     0.055894  0.307573
+ 0.597701   0.602151 0.523199    0.055273     0.057275  0.303668
+
+====================== NFL receiving yards ======================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.56162   0.558733 0.481986   -0.000266     0.002506  0.067861
 
 ======================= NFL rushing yards =======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.570076    0.55914 0.471721   -0.010821    -0.009656  0.142575
+ 0.569316   0.568376 0.469397   -0.016531    -0.015799  0.125502
 
