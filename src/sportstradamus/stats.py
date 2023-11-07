@@ -772,8 +772,15 @@ class StatsNBA(Stats):
         if np.isnan(ev) and (market in combo_props):
             ev = 0
             for submarket in combo_props.get(market, []):
-                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {}).get("EV", [0] * 4))
+                data = archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                v = np.nanmean(np.array(data["EV"], dtype=float))
+                if np.isnan(v):
+                    if len(data["Lines"]) > 0:
+                        ev += get_ev(data["Lines"][-1], .5, cv)
+                else:
+                    ev += v
+
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
@@ -1869,8 +1876,15 @@ class StatsMLB(Stats):
         if np.isnan(ev) and (market in combo_props):
             ev = 0
             for submarket in combo_props.get(market, []):
-                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {}).get("EV", [0] * 4))
+                data = archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                v = np.nanmean(np.array(data["EV"], dtype=float))
+                if np.isnan(v):
+                    if len(data["Lines"]) > 0:
+                        ev += get_ev(data["Lines"][-1], .5, cv)
+                else:
+                    ev += v
+
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
@@ -2951,6 +2965,7 @@ class StatsNFL(Stats):
                         ev += get_ev(data["Lines"][-1], .5, cv)
                 else:
                     ev += v
+
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
@@ -3813,8 +3828,15 @@ class StatsNHL(Stats):
         if np.isnan(ev) and (market in combo_props):
             ev = 0
             for submarket in combo_props.get(market, []):
-                ev += np.nanmean(archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {}).get("EV", [0] * 4))
+                data = archive["NFL"].get(submarket, {}).get(
+                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                v = np.nanmean(np.array(data["EV"], dtype=float))
+                if np.isnan(v):
+                    if len(data["Lines"]) > 0:
+                        ev += get_ev(data["Lines"][-1], .5, cv)
+                else:
+                    ev += v
+
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
         else:
