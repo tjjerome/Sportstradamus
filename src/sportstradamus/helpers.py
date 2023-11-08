@@ -121,7 +121,7 @@ class Scrape:
                     logger.exception("Attempt " + str(i) + ",")
 
             logger.warning("Max Attempts Reached")
-            return None
+            return {}
 
     def get_proxy(self, url, headers={}):
         params = {
@@ -149,12 +149,12 @@ class Scrape:
             try:
                 response = response.json()
             except:
-                return None
+                return {}
 
             return response
         else:
             logger.warning("Proxy Failed")
-            return None
+            return {}
 
     def post(self, url, max_attempts=3, headers={}, params={}):
         """
@@ -534,9 +534,10 @@ mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
 nhl_teams = scraper.get(
     "https://statsapi.web.nhl.com/api/v1/teams?expand=team.roster")
 nhl_goalies = []
-for team in nhl_teams['teams']:
-    nhl_goalies.extend([player["person"]["fullName"]
-                       for player in team["roster"]["roster"] if player["position"]["code"] == "G"])
+if nhl_teams:
+    for team in nhl_teams.get('teams', []):
+        nhl_goalies.extend([player["person"]["fullName"]
+                            for player in team["roster"]["roster"] if player["position"]["code"] == "G"])
 
 with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)

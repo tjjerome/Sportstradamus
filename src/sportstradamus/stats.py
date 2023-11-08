@@ -3373,10 +3373,13 @@ class StatsNHL(Stats):
         res = scraper.get(
             f"https://statsapi.web.nhl.com/api/v1/schedule?startDate={start_date}&endDate={end_date}")
 
-        ids = [[(game['gamePk'], date['date']) for game in date['games'] if game['gameType']
-                not in ["PR", "A"]] for date in res['dates'] if datetime.strptime(date["date"], "%Y-%m-%d").date() < today]
+        if len(res) > 0:
+            ids = [[(game['gamePk'], date['date']) for game in date['games'] if game['gameType']
+                    not in ["PR", "A"]] for date in res['dates'] if datetime.strptime(date["date"], "%Y-%m-%d").date() < today]
 
-        ids = [item for sublist in ids for item in sublist]
+            ids = [item for sublist in ids for item in sublist]
+        else:
+            ids = []
 
         # Parse the game stats
         nhl_gamelog = []
@@ -3395,9 +3398,12 @@ class StatsNHL(Stats):
             "gameDate").reset_index(drop=True)
 
         self.upcoming_games = {}
-        ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name'], game["gamePk"]) for game in date['games'] if game['gameType']
-               not in ["PR", "A"]] for date in res['dates'] if today <= datetime.strptime(date["date"], "%Y-%m-%d").date()]
-        ug = [item for sublist in ug for item in sublist][:20]
+        if len(res) > 0:
+            ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name'], game["gamePk"]) for game in date['games'] if game['gameType']
+                   not in ["PR", "A"]] for date in res['dates'] if today <= datetime.strptime(date["date"], "%Y-%m-%d").date()]
+            ug = [item for sublist in ug for item in sublist][:20]
+        else:
+            ug = []
         for away, home, gameId in ug:
             game = scraper.get(
                 f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/boxscore")
