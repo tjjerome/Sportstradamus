@@ -693,7 +693,8 @@ def get_pp(books=True):
             "NOP": "NO",
             "JAC": "JAX",
             "LAV": "LV",
-            "NJY": "NYJ"
+            "NJY": "NYJ",
+            "NJD": "NJ"
         }
 
         for p in players:
