@@ -60,16 +60,16 @@ def meditate(force, stats, league, alt):
 
     mlb = StatsMLB()
     mlb.load()
-    mlb.update()
+    # mlb.update()
     nba = StatsNBA()
     nba.load()
-    nba.update()
+    # nba.update()
     nhl = StatsNHL()
     nhl.load()
-    nhl.update()
+    # nhl.update()
     nfl = StatsNFL()
     nfl.load()
-    nfl.update()
+    # nfl.update()
 
     all_markets = {
         "NFL": [
@@ -229,6 +229,24 @@ def meditate(force, stats, league, alt):
 
             categories = "name:"+",".join(categories)
 
+            params = {
+                "feature_pre_filter": ["categorical", [False]],
+                "boosting_type": ["categorical", ["gbdt"]],
+                "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
+                # "max_bin": ["int", {"low": 63, "high": 4095, "log": False}],
+                "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
+                "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
+                "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
+                "min_child_samples": ["int", {"low": 2, "high": 500, "log": True}],
+                "min_child_weight": ["float", {"low": 1e-2, "high": len(X_train)*.8/1000, "log": True}],
+                "path_smooth": ["float", {"low": 0, "high": len(X_train)/2, "log": False}],
+                "learning_rate": ["float", {"low": 5e-2, "high": 0.5, "log": True}],
+                "min_gain_to_split": ["float", {"low": 1e-8, "high": 40, "log": False}],
+                "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                "bagging_freq": ["int", {"low": 1, "high": 15, "log": False}]
+            }
+
             if need_model:
                 y_train = np.ravel(y_train.to_numpy())
 
@@ -242,16 +260,6 @@ def meditate(force, stats, league, alt):
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
 
-                params = {
-                    "boosting_type": ["categorical", ["gbdt"]],
-                    "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
-                    "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
-                    "min_child_weight": ["float", {"low": 1e-2, "high": len(X)*.8/1000, "log": True}],
-                    "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                    "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                    "bagging_freq": ["int", {"low": 1, "high": 1, "log": False}]
-                }
-
                 model = LightGBMLSS(distributions[dist])
                 opt_param = model.hyper_opt(params,
                                             dtrain,
@@ -259,7 +267,7 @@ def meditate(force, stats, league, alt):
                                             nfold=5,
                                             early_stopping_rounds=20,
                                             max_minutes=30,
-                                            n_trials=500,
+                                            n_trials=200,
                                             silence=True,
                                             )
                 opt_params = opt_param.copy()
@@ -285,24 +293,6 @@ def meditate(force, stats, league, alt):
                     dist = "NegativeBinomial"
                 else:
                     continue
-
-                params = {
-                    "boosting_type": ["categorical", ["gbdt"]],
-                    "device_type": ["categorical", ["gpu"]],
-                    "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
-                    "max_bin": ["int", {"low": 63, "high": 4095, "log": False}],
-                    "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
-                    "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                    "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 2, "high": 500, "log": True}],
-                    "min_child_weight": ["float", {"low": 1e-2, "high": len(X_train)*.8/1000, "log": True}],
-                    "path_smooth": ["float", {"low": 0, "high": len(X_train)/2, "log": False}],
-                    "learning_rate": ["float", {"low": 1e-5, "high": 0.5, "log": True}],
-                    "min_gain_to_split": ["float", {"low": 1e-8, "high": 40, "log": False}],
-                    "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                    "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                    "bagging_freq": ["int", {"low": 1, "high": 10, "log": False}]
-                }
 
                 model = LightGBMLSS(distributions[dist])
                 opt_param = model.hyper_opt(params,
