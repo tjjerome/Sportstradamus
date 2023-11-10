@@ -24,6 +24,15 @@ filepath = pkg_resources.files(creds) / "odds_api.json"
 with open(filepath, "r") as infile:
     odds_api = json.load(infile)["apikey"]
 
+with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
+    abbreviations = json.load(infile)
+
+with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
+    combo_props = json.load(infile)
+
+with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
+    stat_cv = json.load(infile)
+
 
 def get_active_sports():
     # Get available sports from the API
@@ -380,7 +389,7 @@ class Archive:
         """
         return self.archive[item]
 
-    def add(self, o, lines, key, cv=1):
+    def add(self, o, lines, key):
         """
         Add data to the archive.
 
@@ -394,6 +403,7 @@ class Archive:
         """
         market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
+        cv = stat_cv.get(market, 1)
         if o["League"] == "NHL":
             market_swap = {"AST": "assists",
                            "PTS": "points", "BLK": "blocked"}
@@ -410,17 +420,26 @@ class Archive:
         evs = []
         for i, line in enumerate(lines):
             if line:
-                ev = get_ev(float(line["Line"]), odds_to_prob(
-                    float(line["Under"])), cv)
+                ev = get_ev(float(line["Line"]),
+                            float(line["Under"]), cv)
             else:
                 ev = old_evs[i]
 
             evs = np.append(evs, ev)
 
-        self.archive[o["League"]][market][o["Date"]
-                                          ][o["Player"]]["Lines"].append(o["Line"])
+        if o["Line"] not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
+            self.archive[o["League"]][market][o["Date"]
+                                              ][o["Player"]]["Lines"].append(o["Line"])
+
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]]["EV"] = evs
+
+    def add_books(self, offers, position, key):
+        key = {v: k for k, v in key.items()}
+        for offer in offers:
+            lines = [None]*4
+            lines[position] = offer
+            self.add(offer, lines, key)
 
     def write(self):
         """
@@ -538,12 +557,6 @@ if nhl_teams:
     for team in nhl_teams.get('teams', []):
         nhl_goalies.extend([player["person"]["fullName"]
                             for player in team["roster"]["roster"] if player["position"]["code"] == "G"])
-
-with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
-    abbreviations = json.load(infile)
-
-with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
-    combo_props = json.load(infile)
 
 
 def prob_diff(X, Y, line):
