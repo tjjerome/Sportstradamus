@@ -1,0 +1,44 @@
+{
+    "qb tds": [
+        "passing tds",
+        "tds"
+    ],
+    "qb yards": [
+        "passing yards",
+        "rushing yards"
+    ],
+    "yards": [
+        "receiving yards",
+        "rushing yards"
+    ],
+    "hits+runs+rbi": [
+        "hits",
+        "runs",
+        "rbi"
+    ],
+    "PRA": [
+        "PTS",
+        "REB",
+        "AST"
+    ],
+    "RA": [
+        "REB",
+        "AST"
+    ],
+    "PR": [
+        "PTS",
+        "REB"
+    ],
+    "PA": [
+        "PTS",
+        "AST"
+    ],
+    "BLST": [
+        "BLK",
+        "STL"
+    ],
+    "sogBS": [
+        "shots",
+        "blocked"
+    ]
+}
