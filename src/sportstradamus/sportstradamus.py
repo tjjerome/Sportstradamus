@@ -506,7 +506,7 @@ def find_correlation(offers, stats, platform, parlays):
     new_map = stat_map[platform]
 
     df = pd.DataFrame(offers)
-    df5 = pd.DataFrame()
+    parlay_df = pd.DataFrame()
     df["Correlated Bets"] = ""
     usage_str = {
         "NBA": "MIN",
@@ -569,6 +569,10 @@ def find_correlation(offers, stats, platform, parlays):
                 "Blocked Shots": "blocked",
                 "Assists": "assists"
             })
+        if league == "NBA":
+            new_map.update({
+                "Fantasy Points": "fantasy points prizepicks"
+            })
 
         league_df["cMarket"] = league_df["Position"] + "." + \
             league_df["Market"].map(new_map)
@@ -583,7 +587,6 @@ def find_correlation(offers, stats, platform, parlays):
         for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
             if team in checked_teams:
                 continue
-            best_fives = []
             team_df = league_df.loc[league_df["Team"] == team]
             opp = team_df.Opponent.mode().values[0]
             opp_df = league_df.loc[league_df["Team"] == opp]
@@ -592,17 +595,18 @@ def find_correlation(offers, stats, platform, parlays):
             logger.info(f"Correlate {league}, {team}/{opp}")
             checked_teams.append(team)
             checked_teams.append(opp)
+            game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
+            if platform == "Underdog":
+                game_df.loc[:, 'Model'] = game_df['Model'] * \
+                    game_df['Boost']
+                game_df.loc[:, 'Books'] = game_df['Books'] * \
+                    game_df['Boost']
 
-            if league != "MLB" and parlays:
-                game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
-                if platform == "Underdog":
-                    game_df.loc[:, 'Model'] = game_df['Model'] * \
-                        game_df['Boost']
-                    game_df.loc[:, 'Books'] = game_df['Books'] * \
-                        game_df['Boost']
+            idx = game_df.loc[game_df['Books'] >= .49].sort_values('Model', ascending=False).head(
+                40).sort_values(['Team', 'Player']).index
 
-                idx = game_df.loc[game_df['Books'] >= .49].sort_values('Model', ascending=False).head(
-                    40).sort_values(['Team', 'Player']).index
+            best_fives = []
+            if league != "MLB" and platform != "Thrive":
                 combos = combinations(
                     game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 5)
 
@@ -661,7 +665,70 @@ def find_correlation(offers, stats, platform, parlays):
                         best_fives.append(parlay)
 
             if len(best_fives) > 0:
-                df5 = pd.concat([df5, pd.DataFrame(best_fives).sort_values(
+                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_fives).sort_values(
+                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players").head(5)])
+
+            best_threes = []
+            if platform != "PrizePicks":
+                combos = combinations(
+                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 3)
+
+                for bet in combos:
+                    if (len({leg["Team"] for leg in bet}) != 2) or (len({leg["Player"] for leg in bet}) != 3):
+                        continue
+
+                    team1_markets = [leg["cMarket"].split(
+                        ".")[1] for leg in bet if "_OPP_" not in leg["cMarket"]]
+                    team2_markets = [leg["cMarket"].split(
+                        ".")[1] for leg in bet if "_OPP_" in leg["cMarket"]]
+
+                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[league]['team']]) or
+                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[league]['team']]) or
+                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[league]['opponent']]) or
+                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
+                        continue
+
+                    p = np.product([leg["Model"] for leg in bet])
+
+                    # get correlation matrix
+                    for i in np.arange(3):
+                        cm1 = bet[i]['cMarket']
+                        b1 = bet[i]['Bet']
+                        p1 = bet[i]['Model']
+                        for j in np.arange(i+1, 3):
+                            cm2 = bet[j]['cMarket']
+                            b2 = bet[j]['Bet']
+                            p2 = bet[j]['Model']
+
+                            if ("_OPP_" in cm1) and ("_OPP_" in cm2):
+                                cm1 = cm1.replace("_OPP_", "")
+                                cm2 = cm2.replace("_OPP_", "")
+                            rho = c_map.get((cm1, cm2), 0)
+                            if rho == 0:
+                                rho = c_map.get((cm2, cm1), 0)
+                            if b1 != b2:
+                                rho = -rho
+
+                            p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+
+                    p = p*6
+                    if p > 1.5:
+                        parlay = {
+                            "Game": f"{team}/{opp}",
+                            "League": league,
+                            "Platform": platform,
+                            "EV": p,
+                            "Leg 1": bet[0]["Desc"],
+                            "Leg 2": bet[1]["Desc"],
+                            "Leg 3": bet[2]["Desc"],
+                            "Leg 4": "",
+                            "Leg 5": "",
+                            "Players": {leg["Player"] for leg in bet}
+                        }
+                        best_threes.append(parlay)
+
+            if len(best_threes) > 0:
+                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_fives).sort_values(
                     "EV", ascending=False).drop_duplicates("Players").drop(columns="Players").head(5)])
 
             # Find best pairs
@@ -685,7 +752,7 @@ def find_correlation(offers, stats, platform, parlays):
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
-    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), df5
+    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
 
 
 def save_data(df, book, gc):
