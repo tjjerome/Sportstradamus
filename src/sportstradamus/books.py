@@ -1,5 +1,5 @@
 from sportstradamus.spiderLogger import logger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 import random
 from tqdm import tqdm
@@ -19,7 +19,7 @@ from sportstradamus.helpers import (
 )
 
 
-def get_dk(events, categories):
+def get_dk(events, categories, league):
     """
     Retrieve DraftKings data for given events and categories.
 
@@ -30,7 +30,7 @@ def get_dk(events, categories):
     Returns:
         dict: The parsed DraftKings data.
     """
-    players = {}
+    players = []
     markets = []
     games = {}
 
@@ -50,7 +50,8 @@ def get_dk(events, categories):
 
         # Store game IDs and names
         for i in dk_api["eventGroup"]["events"]:
-            games[i["eventId"]] = i["name"]
+            games[i["eventId"]] = {"Title": i["name"], "Date": datetime.fromisoformat(
+                i["startDate"]).astimezone().strftime("%Y-%m-%d")}
 
         # Get offer subcategory descriptors
         for i in dk_api["eventGroup"]["offerCategories"]:
@@ -78,7 +79,7 @@ def get_dk(events, categories):
                     markets = i["offerSubcategoryDescriptors"]
 
             # Iterate over markets
-            for i in tqdm(markets):
+            for i in markets:
                 if "offerSubcategory" in i:
                     market = i["name"]
                     for j in i["offerSubcategory"]["offers"]:
@@ -90,15 +91,15 @@ def get_dk(events, categories):
                                             o["participant"])
                                         p = no_vig_odds(o["oddsDecimal"])
                                         newline = {
-                                            "EV": get_ev(.5, p[1]),
+                                            "Player": player,
+                                            "League": league,
+                                            "Market": market,
+                                            "Date": games[k["eventId"]]["Date"],
                                             "Line": '0.5',
-                                            "Over": str(prob_to_odds(p[0])),
-                                            "Under": str(prob_to_odds(p[1]))
+                                            "Over": p[0],
+                                            "Under": p[1]
                                         }
-                                        if player not in players:
-                                            players[player] = {}
-
-                                        players[player][market] = newline
+                                        players.append(newline)
 
                             if "line" not in k["outcomes"][0]:
                                 continue
@@ -120,12 +121,9 @@ def get_dk(events, categories):
                             elif ": " in k["label"]:
                                 player = k["label"][: k["label"].find(": ")]
                             elif k["eventId"] in games:
-                                player = games[k["eventId"]]
+                                player = games[k["eventId"]]["Title"]
                             else:
                                 continue
-
-                            if player not in players:
-                                players[player] = {}
 
                             try:
                                 outcomes = sorted(
@@ -137,12 +135,15 @@ def get_dk(events, categories):
                                     outcomes[1]["oddsDecimal"],
                                 )
                                 newline = {
-                                    "EV": get_ev(line, p[1]),
-                                    "Line": str(outcomes[1]["line"]),
-                                    "Over": str(prob_to_odds(p[0])),
-                                    "Under": str(prob_to_odds(p[1])),
+                                    "Player": player,
+                                    "League": league,
+                                    "Market": market,
+                                    "Date": games[k["eventId"]]["Date"],
+                                    "Line": line,
+                                    "Over": p[0],
+                                    "Under": p[1]
                                 }
-                                players[player][market] = newline
+                                players.append(newline)
                             except:
                                 continue
     return players
@@ -190,20 +191,13 @@ def get_fd(sport, tabs):
     events = attachments["events"]
 
     # Filter event IDs based on open date
-    event_ids = [
-        event['eventId']
-        for event in events.values()
-        if datetime.strptime(event["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
-        > datetime.now()
-        and datetime.strptime(event["openDate"], "%Y-%m-%dT%H:%M:%S.%fZ")
-        - timedelta(days=10)
-        < datetime.today()
-    ]
+    event_ids = [(event['eventId'], datetime.fromisoformat(event["openDate"]).astimezone().strftime("%Y-%m-%d")) for event in events.values() if (datetime.fromisoformat(
+        event["openDate"]) > datetime.now(timezone.utc)) and (datetime.fromisoformat(event["openDate"]) - timedelta(days=10) < datetime.now(timezone.utc))]
 
-    players = {}
+    players = []
 
     # Iterate over event IDs and tabs
-    for event_id in tqdm(event_ids, desc="Processing Events", unit="event"):
+    for event_id, date in tqdm(event_ids, desc="Processing Events", unit="event"):
         skip = False
         for tab in tabs:
             if skip:
@@ -226,6 +220,7 @@ def get_fd(sport, tabs):
             events = attachments.get("events")
             offers = attachments.get("markets")
             if not events or not offers:
+                skip = True
                 logger.warning(f"No offers found for {event_id}, {tab}.")
                 continue
 
@@ -244,6 +239,8 @@ def get_fd(sport, tabs):
                     for substring in [
                         "Total Points",
                         "Spread Betting",
+                        "Total Match Points",
+                        "Spread",
                         "Run Line",
                         "Total Runs",
                         "Puck Line",
@@ -261,7 +258,7 @@ def get_fd(sport, tabs):
                 skip = True
 
             # Iterate over offers
-            for offer in tqdm(offers, desc="Processing Offers", unit="offer"):
+            for offer in offers:
 
                 if offer["marketName"] in ["Any Time Touchdown Scorer", "To Record A Hit", "To Hit A Home Run",
                                            "To Record a Run", "To Record an RBI", "To Hit a Single",
@@ -270,19 +267,20 @@ def get_fd(sport, tabs):
                     for o in offer["runners"]:
                         player = remove_accents(o["runnerName"])
                         market = offer["marketName"]
-                        if player not in players:
-                            players[player] = {}
 
                         p = no_vig_odds(
                             o["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"])
 
                         newline = {
-                            "EV": get_ev(0.5, p[1]),
+                            "Player": player,
+                            "Market": market,
+                            "League": sport.upper(),
+                            "Date": date,
                             "Line": "0.5",
-                            "Over": str(prob_to_odds(p[0])),
-                            "Under": str(prob_to_odds(p[1])),
+                            "Over": p[0],
+                            "Under": p[1],
                         }
-                        players[player][market] = newline
+                        players.append(newline)
 
                 if len(offer["runners"]) != 2:
                     continue
@@ -312,9 +310,6 @@ def get_fd(sport, tabs):
                     else:
                         continue
 
-                    if player not in players:
-                        players[player] = {}
-
                     outcomes = sorted(
                         offer["runners"][:2], key=lambda x: x["runnerName"])
                     if outcomes[1]["handicap"] == 0:
@@ -334,13 +329,17 @@ def get_fd(sport, tabs):
                         outcomes[0]["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"],
                         outcomes[1]["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"],
                     )
+
                     newline = {
-                        "EV": get_ev(line, p[1]),
-                        "Line": str(line),
-                        "Over": str(prob_to_odds(p[0])),
-                        "Under": str(prob_to_odds(p[1])),
+                        "Player": player,
+                        "Market": market,
+                        "League": sport.upper(),
+                        "Date": date,
+                        "Line": line,
+                        "Over": p[0],
+                        "Under": p[1],
                     }
-                    players[player][market] = newline
+                    players.append(newline)
                 except:
                     continue
 
@@ -359,6 +358,8 @@ def get_pinnacle(league):
     """
     header = {"X-API-KEY": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R"}
     url = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight",
+
+    leagues = {246: "MLB", 487: "NBA", 889: "NFL", 1456: "NHL"}
 
     try:
         odds = scraper.get_proxy(url, header)
@@ -410,14 +411,12 @@ def get_pinnacle(league):
         logger.warning("No lines found for league: " + str(league))
         return {}
 
-    players = {}
+    players = []
     for market in tqdm(markets):
         player = market["special"]["description"]
         player = player.replace(" (", ")").split(")")
         bet = player[1]
         player = remove_accents(player[0])
-        if player not in players:
-            players[player] = {}
         try:
             outcomes = sorted(market["participants"]
                               [:2], key=lambda x: x["name"])
@@ -433,12 +432,16 @@ def get_pinnacle(league):
             ]
             p = no_vig_odds(prices[0], prices[1])
             newline = {
+                "Player": player,
+                "Market": bet,
+                "League": leagues.get(league),
+                "Date": datetime.fromisoformat(market["startTime"]).astimezone().strftime("%Y-%m-%d"),
                 "EV": get_ev(line, p[1]),
                 "Line": str(line),
-                "Over": str(prob_to_odds(p[0])),
-                "Under": str(prob_to_odds(p[1])),
+                "Over": p[0],
+                "Under": p[1],
             }
-            players[player][bet] = newline
+            players.append(newline)
         except:
             continue
 
@@ -469,8 +472,6 @@ def get_pinnacle(league):
 
                     player = " + ".join(pitchers)
                     bet = "1st Inning Runs Allowed"
-                    if player not in players:
-                        players[player] = {}
 
                     line = lines[game["id"]]["s;3;ou;0.5"]["Under"]["Line"]
                     prices = [
@@ -479,12 +480,16 @@ def get_pinnacle(league):
                     ]
                     p = no_vig_odds(prices[0], prices[1])
                     newline = {
+                        "Player": player,
+                        "Market": bet,
+                        "League": leagues.get(league),
+                        "Date": datetime.fromisoformat(market["startTime"]).astimezone().strftime("%Y-%m-%d"),
                         "EV": get_ev(line, p[1]),
                         "Line": str(line),
-                        "Over": str(prob_to_odds(p[0])),
-                        "Under": str(prob_to_odds(p[1])),
+                        "Over": p[0],
+                        "Under": p[1],
                     }
-                    players[player][bet] = newline
+                    players.append(newline)
 
                 except:
                     continue
@@ -534,7 +539,7 @@ def get_caesars(sport, league):
         logger.exception("Caesars API request failed")
         return {}
 
-    players = {}
+    players = []
     for id in tqdm(gameIds):
         caesars = f"https://api.americanwagering.com/regions/us/locations/mi/brands/czr/sb/v3/events/{id}?content-type=json"
         params["url"] = caesars
@@ -558,11 +563,14 @@ def get_caesars(sport, league):
                 )
             ]
 
+            date = datetime.fromisoformat(
+                api["startTime"]).astimezone().strftime("%Y-%m-%d")
+
         except:
             logger.exception(f"Unable to parse game {id}")
             continue
 
-        for market in tqdm(markets):
+        for market in markets:
             if market.get("displayName") == "Run In 1st Inning?":
                 # Handle special case for "Run In 1st Inning?" market
                 marketName = "1st Inning Runs Allowed"
@@ -594,21 +602,21 @@ def get_caesars(sport, league):
 
                 line = market["line"]
 
-            if player not in players:
-                players[player] = {}
-
             # Calculate odds and expected value
             p = no_vig_odds(
                 market["selections"][0]["price"]["d"],
                 market["selections"][1]["price"]["d"],
             )
             newline = {
-                "EV": get_ev(line, p[1]),
+                "Player": player,
+                "Market": marketName,
+                "League": api["competitionName"],
+                "Date": date,
                 "Line": line,
-                "Over": str(prob_to_odds(p[0])),
-                "Under": str(prob_to_odds(p[1])),
+                "Over": p[0],
+                "Under": p[1],
             }
-            players[player][marketName] = newline
+            players.append(newline)
 
     return players
 

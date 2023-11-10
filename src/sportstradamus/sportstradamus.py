@@ -77,46 +77,50 @@ def main(progress, books, parlays):
     """"
     Start gathering sportsbook data
     """
-    dk_data = {}
-    fd_data = {}
-    pin_data = {}
-    csb_data = {}
+    dk_data = []
+    fd_data = []
+    pin_data = []
+    csb_data = []
     if books:
         if "MLB" in sports:
             logger.info("Getting DraftKings MLB lines")
             try:
-                dk_data.update(get_dk(84240, [743, 1024, 1031]))  # MLB
+                dk_data.extend(get_dk(84240, [743, 1024, 1031], "MLB"))  # MLB
             except Exception as exc:
                 logger.exception("Failed to get DraftKings MLB lines")
 
         if "NBA" in sports:
             logger.info("Getting DraftKings NBA lines")
             try:
-                dk_data.update(
-                    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220]))  # NBA
+                dk_data.extend(
+                    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220], "NBA"))  # NBA
             except Exception as exc:
                 logger.exception("Failed to get DraftKings NBA lines")
 
         if "NHL" in sports:
             logger.info("Getting DraftKings NHL lines")
             try:
-                dk_data.update(get_dk(42133, [550, 1064, 1189, 1190]))  # NHL
+                dk_data.extend(
+                    get_dk(42133, [550, 1064, 1189, 1190], "NHL"))  # NHL
             except Exception as exc:
                 logger.exception("Failed to get DraftKings NHL lines")
 
         if "NFL" in sports:
             logger.info("Getting DraftKings NFL lines")
             try:
-                dk_data.update(get_dk(88808, [1000, 1001, 1003]))  # NFL
+                dk_data.extend(get_dk(88808, [1000, 1001, 1003], "NFL"))  # NFL
             except Exception as exc:
                 logger.exception("Failed to get DraftKings NFL lines")
 
         logger.info(str(len(dk_data)) + " offers found")
 
+        archive.add_books(dk_data, 0, stat_map["DraftKings"])
+        archive.write()
+
         if "MLB" in sports:
             logger.info("Getting FanDuel MLB lines")
             try:
-                fd_data.update(
+                fd_data.extend(
                     get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
             except Exception as exc:
                 logger.exception("Failed to get FanDuel MLB lines")
@@ -124,7 +128,7 @@ def main(progress, books, parlays):
         if "NBA" in sports:
             logger.info("Getting FanDuel NBA lines")
             try:
-                fd_data.update(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
+                fd_data.extend(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
                                               'player-assists', 'player-threes', 'player-defense']))
             except Exception as exc:
                 logger.exception("Failed to get FanDuel NBA lines")
@@ -132,7 +136,7 @@ def main(progress, books, parlays):
         if "NHL" in sports:
             logger.info("Getting FanDuel NHL lines")
             try:
-                fd_data.update(
+                fd_data.extend(
                     get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
             except Exception as exc:
                 logger.exception("Failed to get FanDuel NHL lines")
@@ -140,49 +144,55 @@ def main(progress, books, parlays):
         if "NFL" in sports:
             logger.info("Getting FanDuel NFL lines")
             try:
-                fd_data.update(
+                fd_data.extend(
                     get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
             except Exception as exc:
                 logger.exception("Failed to get FanDuel NFL lines")
 
         logger.info(str(len(fd_data)) + " offers found")
 
+        archive.add_books(fd_data, 1, stat_map["FanDuel"])
+        archive.write()
+
         if "MLB" in sports:
             logger.info("Getting Pinnacle MLB lines")
             try:
-                pin_data.update(get_pinnacle(246))  # MLB
+                pin_data.extend(get_pinnacle(246))  # MLB
             except Exception as exc:
                 logger.exception("Failed to get Pinnacle MLB lines")
 
         if "NBA" in sports:
             logger.info("Getting Pinnacle NBA lines")
             try:
-                pin_data.update(get_pinnacle(487))  # NBA
+                pin_data.extend(get_pinnacle(487))  # NBA
             except Exception as exc:
                 logger.exception("Failed to get Pinnacle NBA lines")
 
         if "NHL" in sports:
             logger.info("Getting Pinnacle NHL lines")
             try:
-                pin_data.update(get_pinnacle(1456))  # NHL
+                pin_data.extend(get_pinnacle(1456))  # NHL
             except Exception as exc:
                 logger.exception("Failed to get Pinnacle NHL lines")
 
         if "NFL" in sports:
             logger.info("Getting Pinnacle NFL lines")
             try:
-                pin_data.update(get_pinnacle(889))  # NFL
+                pin_data.extend(get_pinnacle(889))  # NFL
             except Exception as exc:
                 logger.exception("Failed to get Pinnacle NFL lines")
 
         logger.info(str(len(pin_data)) + " offers found")
+
+        archive.add_books(pin_data, 2, stat_map["Pinnacle"])
+        archive.write()
 
         if "MLB" in sports:
             logger.info("Getting Caesars MLB Lines")
             try:
                 sport = "baseball"
                 league = "04f90892-3afa-4e84-acce-5b89f151063d"
-                csb_data.update(get_caesars(sport, league))
+                csb_data.extend(get_caesars(sport, league))
             except Exception as exc:
                 logger.exception("Failed to get Caesars MLB lines")
 
@@ -191,7 +201,7 @@ def main(progress, books, parlays):
             try:
                 sport = "basketball"
                 league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
-                csb_data.update(get_caesars(sport, league))
+                csb_data.extend(get_caesars(sport, league))
             except Exception as exc:
                 logger.exception("Failed to get Caesars NBA lines")
 
@@ -200,7 +210,7 @@ def main(progress, books, parlays):
             try:
                 sport = "icehockey"
                 league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
-                csb_data.update(get_caesars(sport, league))
+                csb_data.extend(get_caesars(sport, league))
             except Exception as exc:
                 logger.exception("Failed to get Caesars NHL lines")
 
@@ -209,18 +219,14 @@ def main(progress, books, parlays):
             try:
                 sport = "americanfootball"
                 league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-                csb_data.update(get_caesars(sport, league))
+                csb_data.extend(get_caesars(sport, league))
             except Exception as exc:
                 logger.exception("Failed to get Caesars NFL lines")
 
         logger.info(str(len(csb_data)) + " offers found")
 
-    datasets = {
-        "DraftKings": dk_data,
-        "FanDuel": fd_data,
-        "Pinnacle": pin_data,
-        "Caesars": csb_data,
-    }
+        archive.add_books(csb_data, 3, stat_map["Caesars"])
+        archive.write()
 
     """
     Start gathering player stats
@@ -252,7 +258,7 @@ def main(progress, books, parlays):
     try:
         pp_dict = get_pp(books)
         pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", datasets, stats, parlays)
+            pp_dict, "PrizePicks", stats, parlays)
         save_data(pp_offers, "PrizePicks", gc)
         best5 = pd.concat([best5, pp5])
         pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
@@ -264,25 +270,19 @@ def main(progress, books, parlays):
     try:
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
-            ud_dict, "Underdog", datasets, stats, parlays)
+            ud_dict, "Underdog", stats, parlays)
         save_data(ud_offers, "Underdog", gc)
         best5 = pd.concat([best5, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
-    # ParlayPlay
-
-    # parp_dict = get_parp()
-    # parp_offers = process_offers(parp_dict, "ParlayPlay", datasets, stats)
-    # save_data(parp_offers, "ParlayPlay", gc)
-
     # Thrive
 
     try:
         th_dict = get_thrive()
         th_offers, th5 = process_offers(
-            th_dict, "Thrive", datasets, stats, False)
+            th_dict, "Thrive", stats, False)
         save_data(th_offers, "Thrive", gc)
         best5 = pd.concat([best5, th5])
         th_offers["Market"] = th_offers["Market"].map(stat_map["Thrive"])
@@ -291,7 +291,7 @@ def main(progress, books, parlays):
 
     archive.write()
 
-    if parlays:
+    if parlays and not best5.empty:
         best5.sort_values("EV", ascending=False, inplace=True)
 
         if len(best5) > 0:
@@ -434,14 +434,13 @@ def main(progress, books, parlays):
     logger.info("Success!")
 
 
-def process_offers(offer_dict, book, datasets, stats, parlays):
+def process_offers(offer_dict, book, stats, parlays):
     """
     Process the offers from the given offer dictionary and match them with player statistics.
 
     Args:
         offer_dict (dict): Dictionary containing the offers to be processed.
         book (str): Name of the book or platform.
-        datasets (dict): Dictionary containing the datasets of player prop odds.
         stats (dict): Dictionary containing player stats.
 
     Returns:
@@ -473,7 +472,7 @@ def process_offers(offer_dict, book, datasets, stats, parlays):
                 for market, offers in markets.items():
                     # Match the offers with player statistics
                     playerStats = match_offers(
-                        offers, league, market, book, datasets, stat_data, pbar
+                        offers, league, market, book, stat_data, pbar
                     )
 
                     if len(playerStats) == 0:
@@ -728,7 +727,7 @@ def find_correlation(offers, stats, platform, parlays):
                         best_threes.append(parlay)
 
             if len(best_threes) > 0:
-                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_fives).sort_values(
+                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_threes).sort_values(
                     "EV", ascending=False).drop_duplicates("Players").drop(columns="Players").head(5)])
 
             # Find best pairs
@@ -748,7 +747,7 @@ def find_correlation(offers, stats, platform, parlays):
                     corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
                 corr.sort_values("P", ascending=False, inplace=True)
                 corr.drop_duplicates("Player", inplace=True)
-                corr = corr.loc[corr["P"] > 0.7]
+                # corr = corr.loc[corr["P"] > 0.7]
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
@@ -809,7 +808,7 @@ def save_data(df, book, gc):
             logger.exception(f"Error writing {book} offers")
 
 
-def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
+def match_offers(offers, league, market, platform, stat_data, pbar):
     """
     Matches offers with statistical data and applies various calculations and transformations.
 
@@ -818,7 +817,6 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
         league (str): League name.
         market (str): Market name.
         platform (str): Platform name.
-        datasets (dict): Dictionary of datasets.
         stat_data (obj): Statistical data object.
         pbar (obj): Progress bar object.
 
@@ -837,9 +835,6 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
         pbar.update(len(offers))
         logger.warning(f"{filename} missing")
         return []
-    with open(filepath, "rb") as infile:
-        filedict = pickle.load(infile)
-    cv = filedict["cv"]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         stat_data.profile_market(market)
@@ -902,14 +897,8 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 }
 
                 lines = []
-                for book, dataset in datasets.items():
-                    codex = stat_map[book]
-                    offer = dataset.get(player, {}).get(
-                        codex.get(market, market)
-                    )
-                    lines.append(offer)
 
-                archive.add(this_o, lines, stat_map[platform], cv)
+                archive.add(this_o, lines, stat_map[platform])
                 stats = stat_data.get_stats(this_o, date=o["Date"])
 
                 if type(stats) is int:
@@ -919,18 +908,11 @@ def match_offers(offers, league, market, platform, datasets, stat_data, pbar):
                 playerStats.append(stats)
                 playerNames.append(player)
 
-            archive.add(o, [None]*4, stat_map[platform], cv)
+            archive.add(o, [None]*4, stat_map[platform])
         else:
             lines = []
-            for book, dataset in datasets.items():
-                codex = stat_map[book]
-                offer = dataset.get(o["Player"], {}).get(
-                    codex.get(market, market)
-                )
 
-                lines.append(offer)
-
-            archive.add(o, lines, stat_map[platform], cv)
+            archive.add(o, lines, stat_map[platform])
             stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
             if type(stats) is int:
                 logger.warning(f"{o['Player']}, {market} stat error")
@@ -1193,27 +1175,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     o["Position"] = int(stats["Position"])
                 else:
                     o["Position"] = -1
-
-            # lines = archive.archive.get(league, {}).get(market, {}).get(
-            #     o["Date"], {}).get(o["Player"], {}).get("Closing Lines", [None]*4)
-
-            # o["DraftKings"] = (
-            #     lines[0]["Line"] + "/" +
-            #     lines[0][o["Bet"]] if lines[0] else "N/A"
-            # )
-            # o["FanDuel"] = (
-            #     lines[1]["Line"] + "/" +
-            #     lines[1][o["Bet"]] if lines[1] else "N/A"
-            # )
-            # o["Pinnacle"] = (
-            #     lines[2]["Line"] + "/" +
-            #     lines[2][o["Bet"]] if lines[2] else "N/A"
-            # )
-            # o["Caesars"] = (
-            #     str(lines[3]["Line"]) + "/" + str(lines[3][o["Bet"]])
-            #     if lines[3]
-            #     else "N/A"
-            # )
 
             new_offers.append(o)
 
