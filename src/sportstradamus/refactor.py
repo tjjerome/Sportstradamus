@@ -25,12 +25,8 @@ for league in tqdm(leagues, unit="leagues", position=0):
         cv = stat_cv.get(league, {}).get(market, 1)
         for date in tqdm(list(archive[league][market].keys()), desc=market, unit="Gamedays", position=2):
             for player in list(archive[league][market][date].keys()):
-                if len(archive[league][market][date][player]['EV']) > 4:
-                    archive[league][market][date][player]['EV'] = archive[league][market][date][player]['EV'][:4]
-                    archive[league][market][date][player]['Lines'] = archive[league][market][date][player]['Lines'][::-1]
-
-                if np.nanmean(np.array(archive[league][market][date][player]['EV'], dtype=float)) == archive[league][market][date][player]['Lines'][-1]:
-                    archive[league][market][date][player]['EV'] = [None]*4
+                if len(archive[league][market][date][player]["EV"]) == 0:
+                    archive[league][market][date][player]["EV"] = [None]*4
                 # lines = list(archive[league][market][date][player].keys())
                 # EV = []
                 # if "Closing Lines" in archive[league][market][date][player]:
@@ -65,9 +61,5 @@ for league in tqdm(leagues, unit="leagues", position=0):
 
             # if len(archive[league][market][date]) == 0:
             #     archive[league][market].pop(date)
-        if len(archive[league][market]) == 0:
-            archive[league].pop(market)
-    if len(archive[league]) == 0:
-        archive.archive.pop(league)
 
 archive.write()
