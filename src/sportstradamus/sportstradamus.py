@@ -32,7 +32,7 @@ from itertools import combinations
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 @click.option("--parlays/--no-parlays", default=True, help="Find best 5 leg parlays")
 def main(progress, books, parlays):
     global untapped_markets
@@ -93,7 +93,7 @@ def main(progress, books, parlays):
             logger.info("Getting DraftKings NBA lines")
             try:
                 dk_data.extend(
-                    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1219, 1220], "NBA"))  # NBA
+                    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1293], "NBA"))  # NBA
             except Exception as exc:
                 logger.exception("Failed to get DraftKings NBA lines")
 
