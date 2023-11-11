@@ -409,6 +409,9 @@ class Archive:
                            "PTS": "points", "BLK": "blocked"}
             market = market_swap.get(market, market)
 
+        if len(lines) < 4:
+            lines = [None]*4
+
         self.archive.setdefault(o["League"], {}).setdefault(market, {})
         self.archive[o["League"]][market].setdefault(o["Date"], {})
         self.archive[o["League"]][market][o["Date"]
@@ -416,6 +419,8 @@ class Archive:
 
         old_evs = self.archive[o["League"]][market][o["Date"]
                                                     ][o["Player"]].get("EV", [None]*4)
+        if len(old_evs) == 0:
+            old_evs = [None]*4
 
         evs = []
         for i, line in enumerate(lines):
@@ -427,9 +432,9 @@ class Archive:
 
             evs = np.append(evs, ev)
 
-        if o["Line"] not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
+        if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
             self.archive[o["League"]][market][o["Date"]
-                                              ][o["Player"]]["Lines"].append(o["Line"])
+                                              ][o["Player"]]["Lines"].append(float(o["Line"]))
 
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]]["EV"] = evs
