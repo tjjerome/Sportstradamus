@@ -156,7 +156,8 @@
         "Pass YDS + Rush YDS": "qb yards",
         "REC": "receptions",
         "CMP": "completions",
-        "Pass TD's": "passing tds"
+        "Pass TD's": "passing tds",
+        "INT": "interceptions"
     },
     "ParlayPlay": {
         "3PT Made": "FG3M",
@@ -230,6 +231,7 @@
         "STL": "Steals",
         "BLK": "Blocks",
         "FG3M": "Threes",
+        "TOV": "Turnovers",
         "passing tds": "Pass TDs",
         "rushing yards": "Rush Yds",
         "receiving yards": "Rec Yds",
