@@ -20,13 +20,13 @@
         "AST": 0.9423617249434715,
         "BLK": 1,
         "BLST": 1,
-        "DREB": 0.7331962645183882,
-        "FG3A": 0.6886583595677626,
+        "DREB": 0.7372253482489104,
+        "FG3A": 0.696957202896261,
         "FG3M": 1,
-        "FGA": 0.583465273016252,
-        "FGM": 0.6826854711201595,
-        "FTM": 1.153526249367737,
-        "MIN": 0.3014690625280339,
+        "FGA": 0.5885296593900454,
+        "FGM": 0.6879554384487272,
+        "FTM": 1.1748767234644788,
+        "MIN": 0.3067567898089074,
         "OREB": 1,
         "PA": 0.6491555306586791,
         "PF": 1,
@@ -37,7 +37,7 @@
         "REB": 0.7107042668080757,
         "STL": 1,
         "TOV": 1,
-        "fantasy points prizepicks": 0.5390787239072937,
+        "fantasy points prizepicks": 0.5441264231482794,
         "fantasy points underdog": 0.5390787239072937
     },
     "NFL": {
@@ -63,17 +63,17 @@
     "NHL": {
         "assists": 1,
         "blocked": 1,
-        "faceOffWins": 0.867246548132379,
-        "fantasy points prizepicks": 0.8962666148643095,
-        "goalie fantasy points underdog": 0.3821066164744511,
+        "faceOffWins": 0.929408003025007,
+        "fantasy points prizepicks": 0.8962358582409111,
+        "goalie fantasy points underdog": 0.3826932997289327,
         "goals": 1,
         "goalsAgainst": 1,
         "hits": 1,
         "points": 1,
-        "saves": 0.32687145263380557,
+        "saves": 0.327170775430481,
         "shots": 1,
-        "skater fantasy points underdog": 0.7595086374425047,
+        "skater fantasy points underdog": 0.7602672345211458,
         "sogBS": 1,
-        "timeOnIce": 0.27076006508623746
+        "timeOnIce": 0.27071011927961963
     }
 }

@@ -267,7 +267,7 @@ def meditate(force, stats, league, alt):
                                             nfold=5,
                                             early_stopping_rounds=20,
                                             max_minutes=30,
-                                            n_trials=200,
+                                            n_trials=180,
                                             silence=True,
                                             )
                 opt_params = opt_param.copy()
