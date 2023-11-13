@@ -1407,16 +1407,13 @@ class StatsMLB(Stats):
                 self.teamlog = mlb_data["teamlog"]
                 self.players = mlb_data["players"]
 
-    def update(self):
-        """
-        Updates the MLB player statistics.
-        """
         filepath = pkg_resources.files(data) / "park_factor.json"
         if os.path.isfile(filepath):
             with open(filepath, 'r') as infile:
                 self.park_factors = json.load(infile)
         filepath = pkg_resources.files(
             data) / "affinity_pitchersBySHV_matchScores.csv"
+
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
             df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) &
@@ -1425,6 +1422,11 @@ class StatsMLB(Stats):
             df.key2 = df.key2.str[:-2].astype(int)
             self.affinity = df.groupby('key1').apply(
                 lambda x: x.key2.to_list()).to_dict()
+
+    def update(self):
+        """
+        Updates the MLB player statistics.
+        """
 
         # Get the current MLB schedule
         today = datetime.today().date()
