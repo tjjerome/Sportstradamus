@@ -33,6 +33,10 @@ with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
 with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
     stat_cv = json.load(infile)
 
+with open((pkg_resources.files(data) / "goalies.csv"), "r") as infile:
+    nhl_goalies = pd.read_csv(infile)
+    nhl_goalies = list(nhl_goalies.name.unique())
+
 
 def get_active_sports():
     # Get available sports from the API
@@ -554,14 +558,6 @@ mlb_pitchers["LA"] = mlb_pitchers.get("LAD", "")
 mlb_pitchers["ANA"] = mlb_pitchers.get("LAA", "")
 mlb_pitchers["ARI"] = mlb_pitchers.get("AZ", "")
 mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
-
-nhl_teams = scraper.get(
-    "https://statsapi.web.nhl.com/api/v1/teams?expand=team.roster")
-nhl_goalies = []
-if nhl_teams:
-    for team in nhl_teams.get('teams', []):
-        nhl_goalies.extend([player["person"]["fullName"]
-                            for player in team["roster"]["roster"] if player["position"]["code"] == "G"])
 
 
 def prob_diff(X, Y, line):
