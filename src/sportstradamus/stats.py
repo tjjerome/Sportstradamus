@@ -3215,6 +3215,10 @@ class StatsNHL(Stats):
     def __init__(self):
         super().__init__()
         self.season_start = datetime(2023, 10, 10).date()
+        self.skater_stats = ["GOE", "Fenwick", "TimeShare",
+                             "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
+        self.goalie_stats = ["SV", "SOE",
+                             "goalsAgainst", "Freeze", "Rebound", "RG"]
 
     def load(self):
         """
@@ -3235,25 +3239,19 @@ class StatsNHL(Stats):
 
     def parse_game(self, gameId, gameDate):
         game = scraper.get(
-            f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/linescore")
-        season = str(gameId)[:4]
-        season = season + str(int(season)+1)
+            f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
+        season = game['season']
         res = requests.get(
             f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv").text
         res = [row.split(',') for row in res.split('\n')]
         if res[1][0] != str(gameId):
-            return 0
+            return 0, 0
         game_df = pd.DataFrame(res[1:-1], columns=res[0])
         pp_df = game_df.loc[game_df.situation == '5on4']
         game_df = game_df.loc[game_df.situation == 'all']
         gamelog = []
         teamlog = []
         if game and not game_df.empty:
-            awayTeam = abbreviations['NHL'][remove_accents(game['teams']
-                                            ['away']['team']['name'])]
-            homeTeam = abbreviations['NHL'][remove_accents(game['teams']
-                                            ['home']['team']['name'])]
-
             team_map = {
                 "SJS": "SJ",
                 "LAK": "LA",
@@ -3261,14 +3259,20 @@ class StatsNHL(Stats):
                 "TBL": "TB",
                 "WSH": "WAS"
             }
+            awayTeam = game['awayTeam']['abbrev']
+            homeTeam = game['homeTeam']['abbrev']
+
+            awayTeam = team_map.get(awayTeam, awayTeam)
+            homeTeam = team_map.get(homeTeam, homeTeam)
+            game_df.team = game_df.team.apply(lambda x: team_map.get(x, x))
 
             for i, player in game_df.iterrows():
                 team = player['team']
                 team = team_map.get(team, team)
                 home = team == homeTeam
                 opponent = awayTeam if home else homeTeam
-                win = (game['teams']['home']['goals'] >
-                       game['teams']['away']['goals']) == home
+                win = (game['homeTeam']['score'] >
+                       game['awayTeam']['score']) == home
 
                 if player['position'] == 'Team Level':
                     n = {
@@ -3289,13 +3293,20 @@ class StatsNHL(Stats):
                         "Hits_Pct": float(player["OffIce_hits_For_Percentage"]),
                         "Takeaways_Pct": float(player["OffIce_takeaways_For_Percentage"]),
                         "PIM_Pct": float(player["OffIce_penalityMinutes_For_Percentage"]),
+                        "Block_Pct": float(player["OffIce_A_blockedShotAttempts"]) / float(player["OffIce_A_shotAttempts"]),
                         "xGoals": float(player["OffIce_F_flurryScoreVenueAdjustedxGoals"]),
-                        "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"])
+                        "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"]),
+                        "goalsAgainst": float(player["OffIce_A_goals"])
                     }
-                    stats["GOE"] = (float(player["OffIce_F_goals"]) - stats["xGoals"]
-                                    ) / float(player["OffIce_F_unblockedShotAttempts"])
-                    stats["SOE"] = (float(player["OffIce_A_goals"]) - stats["xGoalsAgainst"]
-                                    ) / float(player["OffIce_A_unblockedShotAttempts"])
+                    shotsAgainst = float(player['OffIce_A_shotsOnGoal'])
+                    stats.update({
+                        "GOE": (float(player["OffIce_F_goals"]) - stats["xGoals"]) / float(player["OffIce_F_shotAttempts"]),
+                        "SV": (float(player['OffIce_A_savedShotsOnGoal']) / shotsAgainst) if shotsAgainst else 0,
+                        "SOE": ((float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"]) - float(player["OffIce_A_goals"])) / shotsAgainst) if shotsAgainst else 0,
+                        "Freeze": ((float(player['OffIce_A_freeze']) - float(player['OffIce_A_xFreeze'])) / shotsAgainst) if shotsAgainst else 0,
+                        "Rebound": ((float(player['OffIce_A_rebounds']) - float(player['OffIce_A_xRebounds'])) / shotsAgainst) if shotsAgainst else 0,
+                        "RG": ((float(player['OffIce_A_reboundGoals']) - float(player['OffIce_A_reboundxGoals'])) / float(player['OffIce_A_rebounds'])) if float(player['OffIce_A_rebounds']) else 0
+                    })
                     teamlog.append(n | stats)
                 else:
                     n = {
@@ -3335,9 +3346,9 @@ class StatsNHL(Stats):
                         "skater fantasy points parlay": stats.get("goals", 0)*3 + stats.get("assists", 0)*2 + stats.get("shots", 0)*.5 + stats.get("hits", 0) + stats.get("blocked", 0),
                     })
                     team = {v: k for k, v in team_map.items()}.get(team, team)
-                    shots = float(player["I_F_unblockedShotAttempts"])
+                    shots = float(player["I_F_shotAttempts"])
                     shotsAgainst = float(
-                        player["OnIce_A_unblockedShotAttempts"])
+                        player['OnIce_A_shotsOnGoal'])
                     stats.update({
                         "GOE": ((stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"])) / shots) if shots else 0,
                         "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
@@ -3347,7 +3358,11 @@ class StatsNHL(Stats):
                         "Blk60": stats["blocked"]*60/stats["timeOnIce"],
                         "Hit60": stats["hits"]*60/stats["timeOnIce"],
                         "Ast60": stats["assists"]*60/stats["timeOnIce"],
-                        "SOE": ((stats["goalsAgainst"] - float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])) / shotsAgainst) if shotsAgainst else 0
+                        "SV": (float(player['OnIce_A_savedShotsOnGoal']) / shotsAgainst) if shotsAgainst else 0,
+                        "SOE": ((float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"]) - stats["goalsAgainst"]) / shotsAgainst) if shotsAgainst else 0,
+                        "Freeze": ((float(player['OnIce_A_freeze']) - float(player['OnIce_A_xFreeze'])) / shotsAgainst) if shotsAgainst else 0,
+                        "Rebound": ((float(player['OnIce_A_rebounds']) - float(player['OnIce_A_xRebounds'])) / shotsAgainst) if shotsAgainst else 0,
+                        "RG": ((float(player['OnIce_A_reboundGoals']) - float(player['OnIce_A_reboundxGoals'])) / float(player['OnIce_A_rebounds'])) if float(player['OnIce_A_rebounds']) else 0
                     })
                     gamelog.append(n | stats)
 
@@ -3367,31 +3382,35 @@ class StatsNHL(Stats):
         # Get game ids
         latest_date = self.season_start
         if not self.gamelog.empty:
-            latest_date = datetime.strptime(
-                self.gamelog["gameDate"].max().split("T")[0], "%Y-%m-%d") + timedelta(days=1)
+            latest_date = (datetime.strptime(
+                self.gamelog["gameDate"].max().split("T")[0], "%Y-%m-%d") + timedelta(days=1)).date()
         today = datetime.today().date()
-        start_date = latest_date.strftime("%Y-%m-%d")
-        end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
-        res = scraper.get(
-            f"https://statsapi.web.nhl.com/api/v1/schedule?startDate={start_date}&endDate={end_date}")
+        ids = []
+        while latest_date <= today:
+            start_date = latest_date.strftime("%Y-%m-%d")
+            res = scraper.get(
+                f"https://api-web.nhle.com/v1/schedule/{start_date}")
+            latest_date = datetime.strptime(
+                res['nextStartDate'], '%Y-%m-%d').date()
 
-        if len(res) > 0:
-            ids = [[(game['gamePk'], date['date']) for game in date['games'] if game['gameType']
-                    not in ["PR", "A"]] for date in res['dates'] if datetime.strptime(date["date"], "%Y-%m-%d").date() < today]
+            if len(res.get('gameWeek', [])) > 0:
+                for day in res.get('gameWeek'):
+                    ids.extend([(game['id'], day['date'])
+                               for game in day['games']])
 
-            ids = [item for sublist in ids for item in sublist]
-        else:
-            ids = []
+            else:
+                break
 
         # Parse the game stats
         nhl_gamelog = []
         nhl_teamlog = []
         for gameId, date in tqdm(ids, desc="Getting NHL Stats"):
-            gamelog, teamlog = self.parse_game(gameId, date)
-            if type(gamelog) is list:
-                nhl_gamelog.extend(gamelog)
-            if type(teamlog) is list:
-                nhl_teamlog.extend(teamlog)
+            if datetime.strptime(date, '%Y-%m-%d').date() < today:
+                gamelog, teamlog = self.parse_game(gameId, date)
+                if type(gamelog) is list:
+                    nhl_gamelog.extend(gamelog)
+                if type(teamlog) is list:
+                    nhl_teamlog.extend(teamlog)
 
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0)
         self.gamelog = pd.concat([nhl_df, self.gamelog]).sort_values(
@@ -3399,33 +3418,36 @@ class StatsNHL(Stats):
         self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0), self.teamlog]).sort_values(
             "gameDate").reset_index(drop=True)
 
+        res = scraper.get(
+            "https://core.api.dobbersports.com/v1/weekly-schedule/weekly-games?week=0")
         self.upcoming_games = {}
-        if len(res) > 0:
-            ug = [[(game['teams']['away']['team']['name'], game['teams']['home']['team']['name'], game["gamePk"]) for game in date['games'] if game['gameType']
-                   not in ["PR", "A"]] for date in res['dates'] if today <= datetime.strptime(date["date"], "%Y-%m-%d").date()]
-            ug = [item for sublist in ug for item in sublist][:20]
-        else:
-            ug = []
-        for away, home, gameId in ug:
-            game = scraper.get(
-                f"https://statsapi.web.nhl.com/api/v1/game/{gameId}/boxscore")
-            awayTeam = abbreviations['NHL'][remove_accents(away)]
-            homeTeam = abbreviations['NHL'][remove_accents(home)]
-            awayGoalie = game["teams"]["away"]["goalies"]
-            awayGoalie = awayGoalie[0] if len(awayGoalie) > 0 else ""
-            homeGoalie = game["teams"]["home"]["goalies"]
-            homeGoalie = homeGoalie[0] if len(homeGoalie) > 0 else ""
-            if awayTeam not in self.upcoming_games:
-                self.upcoming_games[awayTeam] = {
-                    "Opponent": homeTeam,
-                    "Home": 0,
-                    "Goalie": awayGoalie
-                }
-            if homeTeam not in self.upcoming_games:
-                self.upcoming_games[homeTeam] = {
-                    "Opponent": awayTeam,
-                    "Home": 1,
-                    "Goalie": homeGoalie
+        for team in res.get('data', {}).get('content', {}).get('weeklyGames', []):
+            for game in team.get('games', []):
+                abbr = abbreviations["NHL"][remove_accents(team['teamName'])]
+                if abbr in self.upcoming_games:
+                    continue
+                idx = game['gameId']
+                details = scraper.get(
+                    f"https://core.api.dobbersports.com/v1/game/{idx}")
+                if datetime.fromisoformat(details.get('data', {}).get('gameDate')).date() < today:
+                    continue
+                opp = abbreviations["NHL"][remove_accents(
+                    game['opponentTeam']['name'])]
+                home = int(game['teamType'] == "HOME")
+                if home:
+                    goalie = details.get('data', {}).get(
+                        'predictedGoalies', {}).get('HOME', [])
+                else:
+                    goalie = details.get('data', {}).get(
+                        'predictedGoalies', {}).get('AWAY', [])
+                if goalie:
+                    goalie = remove_accents(goalie[0]['goalie']['fullName'])
+                else:
+                    goalie = ""
+                self.upcoming_games[abbr] = {
+                    "Opponent": opp,
+                    "Home": home,
+                    "Goalie": goalie
                 }
 
         # Remove old games to prevent file bloat
@@ -3667,11 +3689,9 @@ class StatsNHL(Stats):
                 lambda x: np.polyfit(x.totals.fillna(2.5).values.astype(float) / 8.3 - x.totals.fillna(2.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
-        skater_stats = ["GOE", "Fenwick", "TimeShare",
-                        "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0).groupby('playerName')[['SOE']]
+                self.playerProfile.index)].fillna(0).groupby('playerName')[self.goalie_stats]
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
@@ -3684,7 +3704,7 @@ class StatsNHL(Stats):
                 playerstats, on='playerName')
         else:
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0).groupby('playerName')[skater_stats]
+                self.playerProfile.index)].fillna(0).groupby('playerName')[self.skater_stats]
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
@@ -3697,7 +3717,7 @@ class StatsNHL(Stats):
                 playerstats, on='playerName')
 
             self.goalieProfile = gamelog2.fillna(0).groupby('playerName')[
-                'SOE'].mean(numeric_only=True)
+                self.goalie_stats].mean(numeric_only=True)
 
         i = self.defenseProfile.index
         self.defenseProfile = self.defenseProfile.merge(
@@ -3818,7 +3838,8 @@ class StatsNHL(Stats):
                         opponent, {}).get("Goalie", "")
 
                 if goalie not in self.goalieProfile.index:
-                    self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent, "SOE"]
+                    self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent,
+                                                                          self.goalie_stats]
 
             ev = archive["NHL"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
@@ -3933,21 +3954,21 @@ class StatsNHL(Stats):
         defense_data = self.defenseProfile.loc[opponent]
 
         data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in positions})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in (positions + self.goalie_stats)})
 
         team_data = self.teamProfile.loc[team]
 
         data.update(
-            {"Team " + col: team_data[col] for col in team_data.index})
+            {"Team " + col: team_data[col] for col in team_data.index if col not in self.goalie_stats})
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             data["DVPOA"] = data.pop("Defense avg")
         else:
             data["DVPOA"] = self.defenseProfile.loc[opponent, position]
-            data["Goalie SOE"] = self.goalieProfile.loc[goalie]
+            goalie_data = self.goalieProfile.loc[goalie]
+            data.update(
+                {"Goalie " + col: goalie_data[col] for col in goalie_data.index})
 
-        data.pop("Defense SOE")
-        data.pop("Team SOE")
         return data
 
     def get_training_matrix(self, market, cv=1):
