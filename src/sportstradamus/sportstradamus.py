@@ -958,6 +958,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         filedict = pickle.load(infile)
     model = filedict["model"]
     dist = filedict["distribution"]
+    clf = filedict["filter"]
     cv = filedict["cv"]
 
     categories = ["Home", "Position"]
@@ -1115,7 +1116,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     o["Line"], params["loc"], params["scale"])
 
         try:
-            proba = [under, 1-under]
+            proba = clf.predict_proba([[1-under]])[0]
 
             if proba[1] > proba[0] or o.get("Boost", 1) > 1:
                 o["Bet"] = "Over"
