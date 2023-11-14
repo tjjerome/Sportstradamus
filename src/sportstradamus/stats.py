@@ -761,7 +761,7 @@ class StatsNBA(Stats):
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NBA"]["Moneyline"].get(
                 date, {}).get(team, 0)
-            total = archive["NBA"]["Totals"].get(date, {}).get(team, 0)
+            total = archive["NBA"]["Totals"].get(date, {}).get(team, 112)
 
         except:
             logger.exception(f"{player}, {market}")
@@ -1867,7 +1867,7 @@ class StatsMLB(Stats):
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["MLB"]["Moneyline"].get(
                 date, {}).get(team, 0)
-            total = archive["MLB"]["Totals"].get(date, {}).get(team, 0)
+            total = archive["MLB"]["Totals"].get(date, {}).get(team, 4.5)
 
         except:
             logger.exception(f"{player}, {market}")
@@ -2948,7 +2948,7 @@ class StatsNFL(Stats):
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NFL"]["Moneyline"].get(
                 date, {}).get(team, 0)
-            total = archive["NFL"]["Totals"].get(date, {}).get(team, 0)
+            total = archive["NFL"]["Totals"].get(date, {}).get(team, 22.5)
 
         except:
             logger.exception(f"{player}, {market}")
@@ -3823,7 +3823,7 @@ class StatsNHL(Stats):
         opponent = offer["Opponent"]
         home = offer.get("Home")
         if home is None:
-            home = self.upcoming_games.get(team, {}).get("Home", 0)
+            home = self.upcoming_games.get(team, {}).get("Home", 3)
 
         if player not in self.playerProfile.index:
             self.playerProfile.loc[player] = np.zeros_like(
