@@ -73,26 +73,6 @@ def meditate(force, stats, league, alt):
     # nfl.update()
 
     all_markets = {
-        "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
-            "yards",
-            "qb yards",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "passing tds",
-            "tds",
-            "rushing tds",
-            "receiving tds",
-            "qb tds",
-            "completions",
-            "carries",
-            "receptions",
-            "interceptions",
-            "attempts",
-            "targets",
-        ],
         "NBA": [
             "PTS",
             "REB",
@@ -115,6 +95,26 @@ def meditate(force, stats, league, alt):
             "DREB",
             "PF",
             "MIN",
+        ],
+        "NFL": [
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "qb yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "passing tds",
+            "tds",
+            "rushing tds",
+            "receiving tds",
+            "qb tds",
+            "completions",
+            "carries",
+            "receptions",
+            "interceptions",
+            "attempts",
+            "targets",
         ],
         "NHL": [
             "points",
@@ -199,19 +199,15 @@ def meditate(force, stats, league, alt):
             if M.empty:
                 continue
 
-            i = 0
-            season_diff = {
-                "NFL": [364, 364, 364],
-                "NBA": [371, 364, 301],
-                "MLB": [357, 371, 252],
-                "NHL": [368, 360, 272]
-            }
-            while any(M["DaysIntoSeason"] < 0):
+            while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
                 M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                         < 0, "DaysIntoSeason"] + season_diff[league][i]
-                i += 1
+                                                                         < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
+                M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
+                                                                           > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
+                                                                                                            > 300, "DaysIntoSeason"].min()
 
-            M.to_csv(filepath)
+            M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
+                M["Line"] <= M["Line"].quantile(.95))) | (M["Odds"] != 0.5)]
 
             y = M[['Result']]
             X = M.drop(columns=['Result'])

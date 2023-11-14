@@ -1,3 +1,23 @@
+======================== MLB hits allowed =======================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.611002    0.57971 -0.025493    0.040342     0.057236  0.092038
+
+===================== MLB pitcher strikeouts ====================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.609637    0.58867  0.02999    0.035508     0.048155  0.093802
+
+======================= MLB pitches thrown ======================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.646783   0.654582 0.496643    0.074469     0.098646  0.084859
+
+======================= MLB pitching outs =======================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.605281   0.582734 0.370613     0.03971     0.052922  0.095548
+
 ============================ NBA AST ============================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -128,6 +148,11 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.576367   0.607547 0.414853    0.019786     0.025636  0.082939
 
+======================= NFL interceptions =======================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.578947   0.586207 -0.030645    0.008736     0.016643  0.161588
+
 ======================== NFL passing tds ========================
  Distribution Model: Poisson
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
@@ -148,6 +173,11 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.645933   0.621849 0.469455    0.084273     0.100474  0.367209
 
+======================= NFL receiving tds =======================
+ Distribution Model: Poisson
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.739583        0.8 -1.85679    0.165995     0.216843  0.109008
+
 ====================== NFL receiving yards ======================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
@@ -157,6 +187,11 @@
  Distribution Model: Poisson
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
  0.573443    0.56927 -0.016352     0.00975     0.013394  0.076777
+
+======================== NFL rushing tds ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.633136   0.416667 -1.072292    0.041524     0.064757  0.015675
 
 ======================= NFL rushing yards =======================
  Distribution Model: Gaussian
@@ -168,20 +203,55 @@
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
   0.55104   0.575856 0.301665    0.003806     0.005912  0.049401
 
+============================ NFL tds ============================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+  0.67218   0.575472 -0.935721    0.073983     0.102439  0.062005
+
 =========================== NFL yards ===========================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.645902   0.638009  0.46733    0.048351     0.065361  0.151435
+
+========================== NHL assists ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.698119   0.602564 -1.262425    0.134163     0.174633  0.091573
+
+========================== NHL blocked ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.642379   0.661905 -0.280914    0.060713     0.081953  0.128017
+
+======================== NHL faceOffWins ========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.656878   0.676692 0.302851    0.074391     0.098219  0.120554
 
 ================= NHL fantasy points prizepicks =================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.598827   0.562077 0.419571    0.021069      0.02913  0.045759
 
+=============== NHL goalie fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+  0.60026   0.576336 0.441063    0.035086     0.046054   0.09045
+
+=========================== NHL goals ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.746184        0.0 -2.160643    0.206946     0.265566   0.13741
+
 ======================== NHL goalsAgainst =======================
  Distribution Model: Poisson
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.611247   0.591696 0.063262    0.033592     0.045076  0.115013
+
+============================ NHL hits ===========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
+ 0.641886   0.640762 -0.104962    0.062502      0.08386   0.16992
 
 =========================== NHL points ==========================
  Distribution Model: Poisson
@@ -198,8 +268,18 @@
  Accuracy  Precision   Entropy  Likelihood  Brier Score  Deviance
  0.645312   0.656766 -0.026655    0.061795     0.083329   0.16237
 
+=============== NHL skater fantasy points underdog ==============
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.589752   0.579487 0.395516    0.018059     0.024969  0.051957
+
 =========================== NHL sogBS ===========================
  Distribution Model: Poisson
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
  0.619371   0.657451 0.024328    0.042342      0.05698  0.129506
+
+========================= NHL timeOnIce =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.655872   0.660814 0.318522    0.080695     0.105117  0.327783
 
