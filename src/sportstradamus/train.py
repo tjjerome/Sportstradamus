@@ -206,8 +206,60 @@ def meditate(force, stats, league, alt):
                                                                            > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
                                                                                                             > 300, "DaysIntoSeason"].min()
 
+            mask = (M["Odds"] != 0.5) | (M["Line"] != M["AvgYr"])
             M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
-                M["Line"] <= M["Line"].quantile(.95))) | (M["Odds"] != 0.5)]
+                M["Line"] <= M["Line"].quantile(.95))) | mask]
+
+            if "Position" in M.columns:
+                for i in M.Position.unique():
+                    if mask.mean() > .25:
+                        target = M.loc[mask & (
+                            M["Position"] == i), "Line"].median()
+                    else:
+                        target = M.loc[M["Position"] == i, "Line"].mean()
+
+                    less = M.loc[~mask & (
+                        M["Position"] == i) & (M["Line"] < target), "Line"]
+                    more = M.loc[~mask & (
+                        M["Position"] == i) & (M["Line"] > target), "Line"]
+
+                    n = np.abs(less.count() - more.count())
+                    if n > 0:
+                        if less.count() > more.count():
+                            chopping_block = less.index
+                            p = np.square(less.to_numpy() - target)
+                            p = p/np.sum(p)
+                        else:
+                            chopping_block = more.index
+                            p = np.square(more.to_numpy() - target)
+                            p = p/np.sum(p)
+
+                        cut = np.random.choice(
+                            chopping_block, n, replace=False, p=p)
+                        M.drop(cut, inplace=True)
+            else:
+                if mask.mean() > .25:
+                    target = M.loc[mask, "Line"].median()
+                else:
+                    target = M["Line"].mean()
+
+                less = M.loc[~mask & (M["Line"] < target), "Line"]
+                more = M.loc[~mask & (M["Line"] > target), "Line"]
+
+                n = np.abs(less.count() - more.count())
+                if n > 0:
+                    if less.count() > more.count():
+                        chopping_block = less.index
+                        p = np.square(less.to_numpy() - target)
+                        p = p/np.sum(p)
+                    else:
+                        chopping_block = more.index
+                        p = np.square(more.to_numpy() - target)
+                        p = p/np.sum(p)
+
+                    cut = np.random.choice(
+                        chopping_block, n, replace=False, p=p)
+                    M.drop(cut, inplace=True)
 
             y = M[['Result']]
             X = M.drop(columns=['Result'])

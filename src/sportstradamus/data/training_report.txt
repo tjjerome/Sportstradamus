@@ -1,5 +1,10 @@
 ============================ NBA PTS ============================
  Distribution Model: Gaussian
  Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
- 0.587017   0.622739 0.434121    0.024586     0.032837  0.073886
+  0.55487   0.585421 0.443972    0.006172      0.00821   0.01618
+
+============================ NBA REB ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Entropy  Likelihood  Brier Score  Deviance
+ 0.666972   0.774453 0.324873    0.029621     0.040451  0.090181
 

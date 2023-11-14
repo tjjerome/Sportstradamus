@@ -1117,11 +1117,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     o["Line"], params["loc"], params["scale"])
 
         try:
-            # if "H2H" in o["Market"]:
-            #     proba = [under, 1-under]
-            # else:
-            #     proba = clf.predict_proba([[1-under]])[0]
-            proba = [under, 1-under]
+            if "H2H" in o["Market"]:
+                proba = [under, 1-under]
+            else:
+                proba = clf.predict_proba([[1-under]])[0]
+            # proba = [under, 1-under]
 
             if proba[1] > proba[0] or o.get("Boost", 1) > 1:
                 o["Bet"] = "Over"
