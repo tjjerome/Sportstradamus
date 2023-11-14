@@ -502,7 +502,7 @@ def find_correlation(offers, stats, platform, parlays):
     with open(filepath, "r") as infile:
         banned = json.load(infile)
 
-    new_map = stat_map[platform]
+    new_map = stat_map[platform].copy()
 
     df = pd.DataFrame(offers)
     parlay_df = pd.DataFrame()
@@ -946,7 +946,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
     market = stat_map[platform].get(market, market)
     if league == "NHL":
-        market = {"AST": "assists", "PTS": "points"}.get(market, market)
+        market = {"AST": "assists", "PTS": "points",
+                  "BLK": "blocked"}.get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
     if not os.path.isfile(filepath):
