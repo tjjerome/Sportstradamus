@@ -5,6 +5,7 @@ import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -36,7 +37,7 @@ import json
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
 @click.option("--alt/--no-alt", default=False, help="Generate alternate model sets")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
@@ -248,15 +249,15 @@ def meditate(force, stats, league, alt):
             }
 
             if need_model:
-                y_train = np.ravel(y_train.to_numpy())
+                y_train_labels = np.ravel(y_train.to_numpy())
 
-                dtrain = lgb.Dataset(X_train, label=y_train)
+                dtrain = lgb.Dataset(X_train, label=y_train_labels)
 
                 lgblss_dist_class = DistributionClass()
                 candidate_distributions = [Gaussian, Poisson]
 
                 dist = lgblss_dist_class.dist_select(
-                    target=y_train, candidate_distributions=candidate_distributions, max_iter=100)
+                    target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
 
@@ -280,15 +281,15 @@ def meditate(force, stats, league, alt):
                             )
 
             elif alt:
-                y_train = np.ravel(y_train.to_numpy())
+                y_train_labels = np.ravel(y_train.to_numpy())
 
-                dtrain = lgb.Dataset(X_train, label=y_train)
+                dtrain = lgb.Dataset(X_train, label=y_train_labels)
 
                 if dist == "Gaussian":
                     dist = "Gamma"
                     # X_train = X_train[y_train > 1]
                     # y_train = y_train[y_train > 1]
-                    y_train[y_train < 2] = 2
+                    y_train_labels[y_train_labels < 2] = 2
                 elif dist == "Poisson":
                     dist = "NegativeBinomial"
                 else:
@@ -313,14 +314,19 @@ def meditate(force, stats, league, alt):
                             num_boost_round=n_rounds
                             )
 
-            X_test.loc[X_test["Line"] == 0, "Line"] = X_test.loc[X_test["Line"]
-                                                                 == 0, "Avg10"].apply(np.ceil)-0.5
-            X_test.loc[X_test["Line"] <= 0, "Line"] = 0.5
+            prob_params_train = model.predict(X_train, pred_type="parameters")
+            prob_params_train.index = y_train.index
+            prob_params_train['result'] = y_train['Result']
             prob_params = model.predict(X_test, pred_type="parameters")
             prob_params.index = y_test.index
             prob_params['result'] = y_test['Result']
             cv = 1
             if dist == "Poisson":
+                under = poisson.cdf(
+                    X_train["Line"], prob_params_train["rate"])
+                push = poisson.pmf(
+                    X_train["Line"], prob_params_train["rate"])
+                y_proba_train = under - push/2
                 under = poisson.cdf(
                     X_test["Line"], prob_params["rate"])
                 push = poisson.pmf(
@@ -331,6 +337,8 @@ def meditate(force, stats, league, alt):
                 entropy = np.mean(
                     np.abs(poisson.cdf(y_test["Result"], prob_params["rate"])-.5))
             elif dist == "Gaussian":
+                y_proba_train = norm.cdf(
+                    X_train["Line"], prob_params_train["loc"], prob_params_train["scale"])
                 y_proba = norm.cdf(
                     X_test["Line"], prob_params["loc"], prob_params["scale"])
                 p = 0
@@ -339,6 +347,8 @@ def meditate(force, stats, league, alt):
                     np.abs(norm.cdf(y_test["Result"], prob_params["loc"], prob_params["scale"])-.5))
                 cv = y.Result.std()/y.Result.mean()
             elif dist == "Gamma":
+                y_proba_train = gamma.cdf(
+                    X_train["Line"], prob_params_train["concentration"], scale=1/prob_params_train["rate"])
                 y_proba = gamma.cdf(
                     X_test["Line"], prob_params["concentration"], scale=1/prob_params["rate"])
                 p = 2
@@ -347,6 +357,8 @@ def meditate(force, stats, league, alt):
                     y_test["Result"], prob_params["concentration"], scale=1/prob_params["rate"])-.5))
                 y_test.loc[y_test["Result"] == 0, 'Result'] = 1
             elif dist == "NegativeBinomial":
+                y_proba_train = nbinom.cdf(
+                    X_train["Line"], prob_params_train["total_count"], prob_params_train["probs"])
                 y_proba = nbinom.cdf(
                     X_test["Line"], prob_params["total_count"], prob_params["probs"])
                 p = 1
@@ -355,10 +367,18 @@ def meditate(force, stats, league, alt):
                 entropy = np.mean(np.abs(norm.cdf(
                     y_test["Result"], prob_params["total_count"], prob_params["probs"])-.5))
 
-            y_proba = np.array([y_proba, 1-y_proba]).transpose()
+            y_class = (y_train["Result"] >
+                       X_train["Line"]).astype(int)
+            y_proba_train = (1-y_proba_train).reshape(-1, 1)
+            clf = LogisticRegressionCV().fit(y_proba_train, y_class)
+            y_proba = (1-y_proba).reshape(-1, 1)
+            y_proba = clf.predict_proba(y_proba)
+
+            # y_proba = np.array([y_proba, 1-y_proba]).transpose()
             y_class = (y_test["Result"] >
                        X_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
+
             y_pred = (y_proba > .5).astype(int)[:, 1]
             mask = np.max(y_proba, axis=1) > 0.54
             prec = precision_score(y_class[mask], y_pred[mask])
@@ -388,6 +408,7 @@ def meditate(force, stats, league, alt):
 
             filedict = {
                 "model": model,
+                "filter": clf,
                 "stats": {
                     "Accuracy": acc,
                     "Precision": prec,
@@ -412,7 +433,9 @@ def meditate(force, stats, league, alt):
                 X_test['beta'] = prob_params['rate']
             elif dist == "NegativeBinomial":
                 X_test['N'] = prob_params['total_count']
-                X_test['P'] = prob_params['probs']
+                X_test['L'] = prob_params['probs']
+
+            X_test['P'] = y_proba[:, 1]
 
             filename = "_".join(["test", league, market]
                                 ).replace(" ", "-") + ".csv"
@@ -430,7 +453,7 @@ def meditate(force, stats, league, alt):
                 del model
 
             report()
-            see_features()
+            # see_features()
 
 
 def report():
@@ -479,7 +502,7 @@ def see_features():
         M = pd.read_csv(filepath, index_col=0)
 
         y = M[['Result']]
-        X = M.drop(columns=['Result', 'EV'])
+        X = M.drop(columns=['Result', 'EV', 'P'])
         if model["distribution"] == "Gaussian":
             X.drop(columns=["STD"], inplace=True)
         features = X.columns
