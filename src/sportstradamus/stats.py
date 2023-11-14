@@ -767,6 +767,11 @@ class StatsNBA(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 112
+
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev) and (market in combo_props):
@@ -1873,6 +1878,11 @@ class StatsMLB(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 4.5
+
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev) and (market in combo_props):
@@ -2954,6 +2964,11 @@ class StatsNFL(Stats):
             logger.exception(f"{player}, {market}")
             return 0
 
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 22.5
+
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev) and (market in combo_props):
@@ -3851,6 +3866,11 @@ class StatsNHL(Stats):
         except:
             logger.exception(f"{player}, {market}")
             return 0
+
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 3
 
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
