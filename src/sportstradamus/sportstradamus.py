@@ -1128,10 +1128,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 o["Model"] = proba[0]
 
             totals_map = {
-                "NBA": 110,
+                "NBA": 112,
                 "NFL": 22.5,
                 "MLB": 4.5,
-                "NHL": 2.5
+                "NHL": 3
             }
 
             if "+" in o["Player"]:
