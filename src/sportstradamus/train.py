@@ -37,7 +37,7 @@ import json
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
 @click.option("--alt/--no-alt", default=False, help="Generate alternate model sets")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
