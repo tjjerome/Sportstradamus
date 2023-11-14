@@ -545,7 +545,7 @@ class StatsNBA(Stats):
         flat_money = {t: archive["NBA"]["Moneyline"].get(
             t[0], {}).get(t[1], 0.5) for t in k}
         flat_total = {t: archive["NBA"]["Totals"].get(
-            t[0], {}).get(t[1], 110) for t in k}
+            t[0], {}).get(t[1], 112) for t in k}
         tup_s = pd.Series(
             zip(gamelog['GAME_DATE'].str[:10], gamelog['TEAM_ABBREVIATION']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
@@ -642,7 +642,7 @@ class StatsNBA(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(110).values.astype(float) / 110 - x.totals.fillna(110).mean(),
+                apply(lambda x: np.polyfit(x.totals.fillna(112).values.astype(float) / 112 - x.totals.fillna(112).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.\
@@ -650,7 +650,7 @@ class StatsNBA(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(110).values.astype(float) / 110 - x.totals.fillna(110).mean(),
+                apply(lambda x: np.polyfit(x.totals.fillna(112).values.astype(float) / 112 - x.totals.fillna(112).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
         team_stat_types = ['OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
@@ -760,7 +760,7 @@ class StatsNBA(Stats):
             ev = archive["NBA"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NBA"]["Moneyline"].get(
-                date, {}).get(team, 0)
+                date, {}).get(team, 0.5)
             total = archive["NBA"]["Totals"].get(date, {}).get(team, 112)
 
         except:
@@ -1696,7 +1696,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.apply(
@@ -1704,7 +1704,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['moneyline gain'] = pitcherGroups.apply(
@@ -1712,7 +1712,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['totals gain'] = pitcherGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(8.3).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if any([string in market for string in ["allowed", "pitch"]]):
@@ -1866,7 +1866,7 @@ class StatsMLB(Stats):
             ev = archive["MLB"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["MLB"]["Moneyline"].get(
-                date, {}).get(team, 0)
+                date, {}).get(team, 0.5)
             total = archive["MLB"]["Totals"].get(date, {}).get(team, 4.5)
 
         except:
@@ -2947,7 +2947,7 @@ class StatsNFL(Stats):
             ev = archive["NFL"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NFL"]["Moneyline"].get(
-                date, {}).get(team, 0)
+                date, {}).get(team, 0.5)
             total = archive["NFL"]["Totals"].get(date, {}).get(team, 22.5)
 
         except:
@@ -3594,7 +3594,7 @@ class StatsNHL(Stats):
         flat_money = {t: archive["NHL"]["Moneyline"].get(
             t[0], {}).get(t[1], 0.5) for t in k}
         flat_total = {t: archive["NHL"]["Totals"].get(
-            t[0], {}).get(t[1], 2.5) for t in k}
+            t[0], {}).get(t[1], 3) for t in k}
         tup_s = pd.Series(
             zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
@@ -3678,7 +3678,7 @@ class StatsNHL(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(2.5).values.astype(float) / 8.3 - x.totals.fillna(2.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(3).values.astype(float) / 8.3 - x.totals.fillna(3).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.apply(
@@ -3686,7 +3686,7 @@ class StatsNHL(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(2.5).values.astype(float) / 8.3 - x.totals.fillna(2.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(3).values.astype(float) / 8.3 - x.totals.fillna(3).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
@@ -3844,9 +3844,9 @@ class StatsNHL(Stats):
             ev = archive["NHL"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
             moneyline = archive["NHL"]["Moneyline"].get(
-                date, {}).get(team, 0)
+                date, {}).get(team, 0.5)
             total = archive["NHL"]["Totals"].get(
-                date, {}).get(team, 0)
+                date, {}).get(team, 3)
 
         except:
             logger.exception(f"{player}, {market}")
