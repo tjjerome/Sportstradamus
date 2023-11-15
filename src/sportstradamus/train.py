@@ -5,7 +5,7 @@ import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, SGDClassifier
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -206,6 +206,8 @@ def meditate(force, stats, league, alt):
                                                                            > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
                                                                                                             > 300, "DaysIntoSeason"].min()
 
+            # Trim the fat
+            np.random.seed(69)
             mask = (M["Odds"] != 0.5) | (
                 (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
             M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
@@ -293,6 +295,9 @@ def meditate(force, stats, league, alt):
                     cut = np.random.choice(
                         chopping_block, n, replace=False, p=p)
                     M.drop(cut, inplace=True)
+
+            mask = (M["Odds"] != 0.5) | (
+                (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
 
             y = M[['Result']]
             X = M.drop(columns=['Result'])
@@ -403,6 +408,7 @@ def meditate(force, stats, league, alt):
             prob_params.index = y_test.index
             prob_params['result'] = y_test['Result']
             cv = 1
+            step = M["Result"].sort_values().diff().drop_duplicates().iloc[2]
             if dist == "Poisson":
                 under = poisson.cdf(
                     X_train["Line"], prob_params_train["rate"])
@@ -419,10 +425,20 @@ def meditate(force, stats, league, alt):
                 entropy = np.mean(
                     np.abs(poisson.cdf(y_test["Result"], prob_params["rate"])-.5))
             elif dist == "Gaussian":
-                y_proba_train = norm.cdf(
-                    X_train["Line"], prob_params_train["loc"], prob_params_train["scale"])
-                y_proba = norm.cdf(
-                    X_test["Line"], prob_params["loc"], prob_params["scale"])
+                high = np.floor((X_train["Line"]+step)/step)*step
+                low = np.ceil((X_train["Line"]-step)/step)*step
+                under = norm.cdf(
+                    high, prob_params_train["loc"], prob_params_train["scale"])
+                push = under - norm.cdf(
+                    low, prob_params_train["loc"], prob_params_train["scale"])
+                y_proba_train = under - push/2
+                high = np.floor((X_test["Line"]+step)/step)*step
+                low = np.ceil((X_test["Line"]-step)/step)*step
+                under = norm.cdf(
+                    high, prob_params["loc"], prob_params["scale"])
+                push = under - norm.cdf(
+                    low, prob_params["loc"], prob_params["scale"])
+                y_proba = under - push/2
                 p = 0
                 ev = prob_params["loc"]
                 entropy = np.mean(
@@ -449,35 +465,32 @@ def meditate(force, stats, league, alt):
                 entropy = np.mean(np.abs(norm.cdf(
                     y_test["Result"], prob_params["total_count"], prob_params["probs"])-.5))
 
-            y_class = (y_train["Result"] >
-                       X_train["Line"]).astype(int)
-            y_proba_train = (1-y_proba_train).reshape(-1, 1)
-            clf = LogisticRegressionCV().fit(y_proba_train, y_class)
-            y_proba = (1-y_proba).reshape(-1, 1)
-            y_proba = clf.predict_proba(y_proba)
-            # y_proba = np.array([y_proba, 1-y_proba]).transpose()
+            dev = mean_tweedie_deviance(y_test, ev, power=p)
 
-            y_class = (y_test["Result"] >
+            y_class = (y_train["Result"] >=
+                       X_train["Line"]).astype(int)
+
+            y_proba_train = (1-y_proba_train).reshape(-1, 1)
+
+            clf = LogisticRegressionCV(
+                fit_intercept=True, solver='newton-cholesky').fit(y_proba_train, y_class)
+            sgd = SGDClassifier(loss='log_loss', fit_intercept=True).fit(
+                y_proba_train, y_class)
+
+            y_proba_no_filt = np.array(
+                [y_proba, 1-y_proba]).transpose()
+            y_proba = (1-y_proba).reshape(-1, 1)
+            y_proba_clf = clf.predict_proba(y_proba)
+            y_proba_sgd = sgd.predict_proba(y_proba)
+
+            y_class = (y_test["Result"] >=
                        X_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
-
-            y_pred = (y_proba > .5).astype(int)[:, 1]
-            mask = np.max(y_proba, axis=1) > 0.54
-            prec = precision_score(y_class[mask], y_pred[mask])
-            acc = accuracy_score(y_class[mask], y_pred[mask])
-
-            bs = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
             bs0 = brier_score_loss(
                 y_class, 0.5*np.ones_like(y_class), pos_label=1)
-            bs = 1 - bs/bs0
-
-            dev = mean_tweedie_deviance(y_test, ev, power=p)
             dev0 = mean_tweedie_deviance(y_test, X_test["Line"], power=p)
-            dev = 1 - dev/dev0
-
-            ll = log_loss(y_class, y_proba[:, 1])
             ll0 = log_loss(y_class, 0.5*np.ones_like(y_class))
-            ll = 1 - ll/ll0
+            bal0 = (y_test["Result"] > X_test["Line"]).mean()
 
             if cv == 1:
                 entropy0 = np.mean(np.abs(poisson.cdf(
@@ -486,18 +499,43 @@ def meditate(force, stats, league, alt):
                 entropy0 = np.mean(np.abs(norm.cdf(
                     y_test["Result"], X_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
 
-            entropy = 1 - entropy/entropy0
+            prec = np.zeros(3)
+            acc = np.zeros(3)
+            bs = np.zeros(3)
+            d = np.zeros(3)
+            ll = np.zeros(3)
+            bal = np.zeros(3)
+            e = np.zeros(3)
+
+            for i, y_proba in enumerate([y_proba_no_filt, y_proba_clf, y_proba_sgd]):
+                y_pred = (y_proba > .5).astype(int)[:, 1]
+                mask = np.max(y_proba, axis=1) > 0.54
+                prec[i] = precision_score(y_class[mask], y_pred[mask])
+                acc[i] = accuracy_score(y_class[mask], y_pred[mask])
+                bal[i] = np.mean(y_pred[mask]) - bal0
+
+                bs[i] = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
+                bs[i] = 1 - bs[i]/bs0
+
+                ll[i] = log_loss(y_class, y_proba[:, 1])
+                ll[i] = 1 - ll[i]/ll0
+
+                d[i] = 1 - dev/dev0
+                e[i] = 1 - entropy/entropy0
 
             filedict = {
                 "model": model,
                 "filter": clf,
+                "sgd_filter": sgd,
+                "step": step,
                 "stats": {
                     "Accuracy": acc,
                     "Precision": prec,
-                    "Entropy": entropy,
+                    "Balance": bal,
                     "Likelihood": ll,
                     "Brier Score": bs,
-                    "Deviance": dev,
+                    "Deviance": d,
+                    "Entropy": e,
                 },
                 "params": params,
                 "distribution": dist,
@@ -563,7 +601,7 @@ def report():
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
             f.write(pd.DataFrame(model['stats'], index=[
-                    ['Stats']]).to_string(index=False))
+                    ['No Filter', 'Log', 'SGD']]).to_string(index=False))
             f.write("\n\n")
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:

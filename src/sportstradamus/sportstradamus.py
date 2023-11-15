@@ -960,6 +960,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     model = filedict["model"]
     dist = filedict["distribution"]
     clf = filedict["filter"]
+    step = filedict["step"]
     cv = filedict["cv"]
 
     categories = ["Home", "Position"]
@@ -1039,11 +1040,19 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         o["Line"], params[1]["rate"] + params[0]["rate"])
                     under -= push/2
                 elif dist == "Gaussian":
-                    under = norm.cdf(o["Line"],
+                    high = np.floor((o["Line"]+step)/step)*step
+                    low = np.ceil((o["Line"]-step)/step)*step
+                    under = norm.cdf(high,
                                      params[1]["loc"] +
                                      params[0]["loc"],
                                      params[1]["scale"] +
                                      params[0]["scale"])
+                    push = under - norm.cdf(low,
+                                            params[1]["loc"] +
+                                            params[0]["loc"],
+                                            params[1]["scale"] +
+                                            params[0]["scale"])
+                    under = under - push/2
                 elif dist == "Gamma":
                     under = gamma.cdf(o["Line"],
                                       params[1]["concentration"] +
@@ -1088,11 +1097,19 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         o["Line"], params[1]["rate"], params[0]["rate"])
                     under -= push/2
                 elif dist == "Gaussian":
-                    under = norm.cdf(-o["Line"],
+                    high = np.floor((-o["Line"]+step)/step)*step
+                    low = np.ceil((-o["Line"]-step)/step)*step
+                    under = norm.cdf(high,
                                      params[0]["loc"] -
                                      params[1]["loc"],
                                      params[0]["scale"] +
                                      params[1]["scale"])
+                    push = under - norm.cdf(low,
+                                            params[0]["loc"] -
+                                            params[1]["loc"],
+                                            params[0]["scale"] +
+                                            params[1]["scale"])
+                    under = under - push/2
 
         else:
             if o["Player"] not in playerStats.index:
@@ -1113,8 +1130,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 push = poisson.pmf(o["Line"], params["rate"])
                 under -= push/2
             elif dist == "Gaussian":
+                high = np.floor((o["Line"]+step)/step)*step
+                low = np.ceil((o["Line"]-step)/step)*step
                 under = norm.cdf(
-                    o["Line"], params["loc"], params["scale"])
+                    high, params["loc"], params["scale"])
+                push = under - norm.cdf(
+                    low, params["loc"], params["scale"])
+                under = under - push/2
 
         try:
             # if "H2H" in o["Market"]:
