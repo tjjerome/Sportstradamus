@@ -37,7 +37,7 @@ import json
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
 @click.option("--alt/--no-alt", default=False, help="Generate alternate model sets")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
@@ -206,13 +206,16 @@ def meditate(force, stats, league, alt):
                                                                            > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
                                                                                                             > 300, "DaysIntoSeason"].min()
 
-            mask = (M["Odds"] != 0.5) | (M["Line"] != M["AvgYr"])
+            mask = (M["Odds"] != 0.5) | (
+                (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
             M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
                 M["Line"] <= M["Line"].quantile(.95))) | mask]
 
             if "Position" in M.columns:
                 for i in M.Position.unique():
-                    if mask.mean() > .25:
+                    mask = (M["Odds"] != 0.5) | (
+                        (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
+                    if len(M[mask]) > 4:
                         target = M.loc[mask & (
                             M["Position"] == i), "Line"].median()
                     else:
@@ -227,18 +230,34 @@ def meditate(force, stats, league, alt):
                     if n > 0:
                         if less.count() > more.count():
                             chopping_block = less.index
-                            p = np.square(less.to_numpy() - target)
+                            counts, bins = np.histogram(less)
+                            actuals = M.loc[mask & (
+                                M["Position"] == i) & (M["Line"] < target), "Line"]
+                            actual_counts, bins = np.histogram(actuals, bins)
+                            diff = np.clip(counts-actual_counts, 1, None)
+                            p = np.zeros(len(less))
+                            for j, a in enumerate(bins[:-1]):
+                                p[less >= a] = diff[j]
                             p = p/np.sum(p)
                         else:
                             chopping_block = more.index
-                            p = np.square(more.to_numpy() - target)
+                            counts, bins = np.histogram(more)
+                            actuals = M.loc[mask & (
+                                M["Position"] == i) & (M["Line"] > target), "Line"]
+                            actual_counts, bins = np.histogram(actuals, bins)
+                            diff = np.clip(counts-actual_counts, 1, None)
+                            p = np.zeros(len(more))
+                            for j, a in enumerate(bins[:-1]):
+                                p[more >= a] = diff[j]
                             p = p/np.sum(p)
 
                         cut = np.random.choice(
                             chopping_block, n, replace=False, p=p)
                         M.drop(cut, inplace=True)
             else:
-                if mask.mean() > .25:
+                mask = (M["Odds"] != 0.5) | (
+                    (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
+                if len(M[mask]) > 4:
                     target = M.loc[mask, "Line"].median()
                 else:
                     target = M["Line"].mean()
@@ -250,11 +269,25 @@ def meditate(force, stats, league, alt):
                 if n > 0:
                     if less.count() > more.count():
                         chopping_block = less.index
-                        p = np.square(less.to_numpy() - target)
+                        counts, bins = np.histogram(less)
+                        actuals = M.loc[mask & (
+                            M["Position"] == i) & (M["Line"] < target), "Line"]
+                        actual_counts, bins = np.histogram(actuals, bins)
+                        diff = np.clip(counts-actual_counts, 0, None)
+                        p = np.zeros(len(less))
+                        for i, a in enumerate(bins[:-1]):
+                            p[less >= a] = diff[i]
                         p = p/np.sum(p)
                     else:
                         chopping_block = more.index
-                        p = np.square(more.to_numpy() - target)
+                        counts, bins = np.histogram(more)
+                        actuals = M.loc[mask & (
+                            M["Position"] == i) & (M["Line"] > target), "Line"]
+                        actual_counts, bins = np.histogram(actuals, bins)
+                        diff = np.clip(counts-actual_counts, 0, None)
+                        p = np.zeros(len(more))
+                        for i, a in enumerate(bins[:-1]):
+                            p[more >= a] = diff[i]
                         p = p/np.sum(p)
 
                     cut = np.random.choice(
@@ -279,21 +312,22 @@ def meditate(force, stats, league, alt):
             categories = "name:"+",".join(categories)
 
             params = {
-                "feature_pre_filter": ["categorical", [False]],
+                "feature_pre_filter": ["none", [False]],
                 "boosting_type": ["categorical", ["gbdt"]],
+                "extra_trees": ["categorical", [True, False]],
                 "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
-                # "max_bin": ["int", {"low": 63, "high": 4095, "log": False}],
+                # "max_bin": ["int", {"low": 1, "high": 512, "log": False}],
                 "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
                 "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
                 "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
                 "min_child_samples": ["int", {"low": 2, "high": 500, "log": True}],
-                "min_child_weight": ["float", {"low": 1e-2, "high": len(X_train)*.8/1000, "log": True}],
+                "min_child_weight": ["float", {"low": 1e-4, "high": len(X_train)*.8/1000, "log": True}],
                 "path_smooth": ["float", {"low": 0, "high": len(X_train)/2, "log": False}],
-                "learning_rate": ["float", {"low": 5e-2, "high": 0.5, "log": True}],
+                "learning_rate": ["float", {"low": len(X_train)*1e-6, "high": 0.5, "log": True}],
                 "min_gain_to_split": ["float", {"low": 1e-8, "high": 40, "log": False}],
                 "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                 "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                "bagging_freq": ["int", {"low": 1, "high": 15, "log": False}]
+                "bagging_freq": ["int", {"low": 1, "high": 20, "log": False}]
             }
 
             if need_model:
@@ -315,8 +349,8 @@ def meditate(force, stats, league, alt):
                                             num_boost_round=999,
                                             nfold=5,
                                             early_stopping_rounds=20,
-                                            max_minutes=30,
-                                            n_trials=180,
+                                            max_minutes=60,
+                                            n_trials=500,
                                             silence=True,
                                             )
                 opt_params = opt_param.copy()
@@ -421,8 +455,8 @@ def meditate(force, stats, league, alt):
             clf = LogisticRegressionCV().fit(y_proba_train, y_class)
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba = clf.predict_proba(y_proba)
-
             # y_proba = np.array([y_proba, 1-y_proba]).transpose()
+
             y_class = (y_test["Result"] >
                        X_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
