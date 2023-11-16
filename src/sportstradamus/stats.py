@@ -3095,7 +3095,7 @@ class StatsNFL(Stats):
             gameDate = datetime.strptime(
                 game["gameday"], "%Y-%m-%d")
 
-            if gameDate < datetime(2021, 9, 1):
+            if gameDate < datetime(2020, 11, 1):
                 continue
 
             self.profile_market(market, date=gameDate)
