@@ -71,6 +71,7 @@ def meditate(force, stats, league, alt):
     nfl = StatsNFL()
     nfl.load()
     # nfl.update()
+    np.random.seed(69)
 
     all_markets = {
         "NBA": [
@@ -182,6 +183,7 @@ def meditate(force, stats, league, alt):
                         params = filedict['params']
                         dist = filedict['distribution']
                         cv = filedict['cv']
+                        step = filedict['step']
                     need_model = False
                 else:
                     continue
@@ -194,7 +196,6 @@ def meditate(force, stats, league, alt):
                 M = pd.read_csv(filepath, index_col=0).dropna()
             else:
                 M = stat_data.get_training_matrix(market, cv)
-                M.to_csv(filepath)
 
             if M.empty:
                 continue
@@ -207,36 +208,115 @@ def meditate(force, stats, league, alt):
                                                                                                             > 300, "DaysIntoSeason"].min()
 
             # Trim the fat
-            np.random.seed(69)
             mask = (M["Odds"] != 0.5) | (
                 (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
             M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
                 M["Line"] <= M["Line"].quantile(.95))) | mask]
 
-            if "Position" in M.columns:
-                for i in M.Position.unique():
+            if M["Line"].max() < 2:
+                M = M.loc[M["Odds"] > .2]
+                mask = (M["Odds"] != 0.5)
+                balance = (M["Result"] > M["Line"]).mean()
+                n = 2*int(np.abs(.5 - balance) * len(M))
+                if balance < .5:
+                    chopping_block = M.loc[~mask & (
+                        M["Result"] < M["Line"])].index
+                    p = (1/M.loc[chopping_block,
+                                 "MeanYr"].clip(0.1)).to_numpy()
+                    p = p/np.sum(p)
+                else:
+                    chopping_block = M.loc[~mask & (
+                        M["Result"] > M["Line"])].index
+                    p = (M.loc[chopping_block, "MeanYr"].clip(
+                        0.1)).to_numpy()
+                    p = p/np.sum(p)
+
+                if n > 0:
+                    cut = np.random.choice(
+                        chopping_block, n, replace=False, p=p)
+                    M.drop(cut, inplace=True)
+            else:
+                if "Position" in M.columns:
+                    for i in M.Position.unique():
+                        mask = (M["Odds"] != 0.5) | (
+                            (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
+                        if len(M[mask]) > 4:
+                            target = M.loc[mask & (
+                                M["Position"] == i), "Line"].median()
+                        else:
+                            target = M.loc[M["Position"]
+                                           == i, "Line"].mean()
+
+                        less = M.loc[~mask & (
+                            M["Position"] == i) & (M["Line"] < target), "Line"]
+                        more = M.loc[~mask & (
+                            M["Position"] == i) & (M["Line"] > target), "Line"]
+
+                        n = np.abs(less.count() - more.count())
+                        if n > 0:
+                            if less.count() > more.count():
+                                chopping_block = less.index
+                                counts, bins = np.histogram(less)
+                                counts = counts/len(less)
+                                actuals = M.loc[mask & (
+                                    M["Position"] == i) & (M["Line"] < target), "Line"]
+                                actual_counts, bins = np.histogram(
+                                    actuals, bins)
+                                if len(actuals):
+                                    actual_counts = actual_counts / \
+                                        len(actuals)
+                                diff = np.clip(
+                                    counts-actual_counts, 1e-8, None)
+                                p = np.zeros(len(less))
+                                for j, a in enumerate(bins[:-1]):
+                                    p[less >= a] = diff[j]
+                                p = p/np.sum(p)
+                            else:
+                                chopping_block = more.index
+                                counts, bins = np.histogram(more)
+                                counts = counts/len(more)
+                                actuals = M.loc[mask & (
+                                    M["Position"] == i) & (M["Line"] < target), "Line"]
+                                actual_counts, bins = np.histogram(
+                                    actuals, bins)
+                                if len(actuals):
+                                    actual_counts = actual_counts / \
+                                        len(actuals)
+                                diff = np.clip(
+                                    counts-actual_counts, 1e-8, None)
+                                p = np.zeros(len(more))
+                                for j, a in enumerate(bins[:-1]):
+                                    p[more >= a] = diff[j]
+                                p = p/np.sum(p)
+
+                            cut = np.random.choice(
+                                chopping_block, n, replace=False, p=p)
+                            M.drop(cut, inplace=True)
+                else:
                     mask = (M["Odds"] != 0.5) | (
                         (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
                     if len(M[mask]) > 4:
-                        target = M.loc[mask & (
-                            M["Position"] == i), "Line"].median()
+                        target = M.loc[mask, "Line"].median()
                     else:
-                        target = M.loc[M["Position"] == i, "Line"].mean()
+                        target = M["Line"].mean()
 
-                    less = M.loc[~mask & (
-                        M["Position"] == i) & (M["Line"] < target), "Line"]
-                    more = M.loc[~mask & (
-                        M["Position"] == i) & (M["Line"] > target), "Line"]
+                    less = M.loc[~mask & (M["Line"] < target), "Line"]
+                    more = M.loc[~mask & (M["Line"] > target), "Line"]
 
                     n = np.abs(less.count() - more.count())
                     if n > 0:
                         if less.count() > more.count():
                             chopping_block = less.index
                             counts, bins = np.histogram(less)
+                            counts = counts/len(less)
                             actuals = M.loc[mask & (
                                 M["Position"] == i) & (M["Line"] < target), "Line"]
-                            actual_counts, bins = np.histogram(actuals, bins)
-                            diff = np.clip(counts-actual_counts, 1, None)
+                            actual_counts, bins = np.histogram(
+                                actuals, bins)
+                            if len(actuals):
+                                actual_counts = actual_counts/len(actuals)
+                            diff = np.clip(
+                                counts-actual_counts, 1e-8, None)
                             p = np.zeros(len(less))
                             for j, a in enumerate(bins[:-1]):
                                 p[less >= a] = diff[j]
@@ -244,10 +324,15 @@ def meditate(force, stats, league, alt):
                         else:
                             chopping_block = more.index
                             counts, bins = np.histogram(more)
+                            counts = counts/len(more)
                             actuals = M.loc[mask & (
-                                M["Position"] == i) & (M["Line"] > target), "Line"]
-                            actual_counts, bins = np.histogram(actuals, bins)
-                            diff = np.clip(counts-actual_counts, 1, None)
+                                M["Position"] == i) & (M["Line"] < target), "Line"]
+                            actual_counts, bins = np.histogram(
+                                actuals, bins)
+                            if len(actuals):
+                                actual_counts = actual_counts/len(actuals)
+                            diff = np.clip(
+                                counts-actual_counts, 1e-8, None)
                             p = np.zeros(len(more))
                             for j, a in enumerate(bins[:-1]):
                                 p[more >= a] = diff[j]
@@ -256,45 +341,8 @@ def meditate(force, stats, league, alt):
                         cut = np.random.choice(
                             chopping_block, n, replace=False, p=p)
                         M.drop(cut, inplace=True)
-            else:
-                mask = (M["Odds"] != 0.5) | (
-                    (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
-                if len(M[mask]) > 4:
-                    target = M.loc[mask, "Line"].median()
-                else:
-                    target = M["Line"].mean()
 
-                less = M.loc[~mask & (M["Line"] < target), "Line"]
-                more = M.loc[~mask & (M["Line"] > target), "Line"]
-
-                n = np.abs(less.count() - more.count())
-                if n > 0:
-                    if less.count() > more.count():
-                        chopping_block = less.index
-                        counts, bins = np.histogram(less)
-                        actuals = M.loc[mask & (
-                            M["Position"] == i) & (M["Line"] < target), "Line"]
-                        actual_counts, bins = np.histogram(actuals, bins)
-                        diff = np.clip(counts-actual_counts, 0, None)
-                        p = np.zeros(len(less))
-                        for i, a in enumerate(bins[:-1]):
-                            p[less >= a] = diff[i]
-                        p = p/np.sum(p)
-                    else:
-                        chopping_block = more.index
-                        counts, bins = np.histogram(more)
-                        actuals = M.loc[mask & (
-                            M["Position"] == i) & (M["Line"] > target), "Line"]
-                        actual_counts, bins = np.histogram(actuals, bins)
-                        diff = np.clip(counts-actual_counts, 0, None)
-                        p = np.zeros(len(more))
-                        for i, a in enumerate(bins[:-1]):
-                            p[more >= a] = diff[i]
-                        p = p/np.sum(p)
-
-                    cut = np.random.choice(
-                        chopping_block, n, replace=False, p=p)
-                    M.drop(cut, inplace=True)
+            M.to_csv(filepath)
 
             mask = (M["Odds"] != 0.5) | (
                 (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
@@ -408,7 +456,7 @@ def meditate(force, stats, league, alt):
             prob_params.index = y_test.index
             prob_params['result'] = y_test['Result']
             cv = 1
-            step = M["Result"].sort_values().diff().drop_duplicates().iloc[2]
+            step = M["Result"].drop_duplicates().sort_values().diff().min()
             if dist == "Poisson":
                 under = poisson.cdf(
                     X_train["Line"], prob_params_train["rate"])
