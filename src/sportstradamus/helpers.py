@@ -372,7 +372,9 @@ class Archive:
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
 
+        self.leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
         if league != "None" and league != "All":
+            self.leagues = [league]
             filepath = pkg_resources.files(data) / f"archive_{league}.dat"
             if os.path.isfile(filepath):
                 with open(filepath, 'rb') as infile:
@@ -381,8 +383,7 @@ class Archive:
                 if type(new_archive) is dict:
                     self.archive = merge_dict(new_archive, self.archive)
         elif league == "All":
-            leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
-            for league in leagues:
+            for league in self.leagues:
                 filepath = pkg_resources.files(data) / f"archive_{league}.dat"
                 if os.path.isfile(filepath):
                     with open(filepath, 'rb') as infile:
@@ -467,8 +468,7 @@ class Archive:
         Returns:
             None
         """
-        leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
-        for league in leagues:
+        for league in self.leagues:
 
             filepath = pkg_resources.files(data) / f"archive_{league}.dat"
             full_archive = {}
@@ -479,7 +479,7 @@ class Archive:
             with open(filepath, "wb") as outfile:
                 if league == "MISC":
                     misc_leagues = list(self.archive.keys())
-                    for l in leagues:
+                    for l in self.leagues:
                         if l in misc_leagues:
                             misc_leagues.remove(l)
                     for l in misc_leagues:
