@@ -319,16 +319,16 @@ def meditate(force, stats, league, alt):
             params = {
                 "feature_pre_filter": ["none", [False]],
                 "boosting_type": ["categorical", ["gbdt"]],
-                "extra_trees": ["categorical", [True, False]],
+                # "extra_trees": ["categorical", [True, False]],
                 "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
                 # "max_bin": ["int", {"low": 1, "high": 512, "log": False}],
                 "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
                 "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
                 "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
                 "min_child_samples": ["int", {"low": 2, "high": 500, "log": True}],
-                "min_child_weight": ["float", {"low": 1e-4, "high": len(X_train)*.8/1000, "log": True}],
+                "min_child_weight": ["float", {"low": 1e-4, "high": len(X_train)/1000, "log": True}],
                 "path_smooth": ["float", {"low": 0, "high": len(X_train)/2, "log": False}],
-                "learning_rate": ["float", {"low": len(X_train)*1e-6, "high": 0.5, "log": True}],
+                "learning_rate": ["float", {"low": len(X_train)*1e-7, "high": 0.2, "log": True}],
                 "min_gain_to_split": ["float", {"low": 1e-8, "high": 40, "log": False}],
                 "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                 "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
@@ -555,7 +555,7 @@ def meditate(force, stats, league, alt):
                 X_test['N'] = prob_params['total_count']
                 X_test['L'] = prob_params['probs']
 
-            X_test['P'] = y_proba[:, 1]
+            X_test['P'] = y_proba_no_filt[:, 1]
 
             filename = "_".join(["test", league, market]
                                 ).replace(" ", "-") + ".csv"
