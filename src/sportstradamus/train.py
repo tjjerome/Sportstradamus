@@ -118,15 +118,15 @@ def meditate(force, stats, league, alt):
             "targets",
         ],
         "NHL": [
-            "points",
             "saves",
-            "goalsAgainst",
             "shots",
-            "sogBS",
-            "fantasy points prizepicks",
+            "points",
+            "goalsAgainst",
             "goalie fantasy points underdog",
             "skater fantasy points underdog",
             "blocked",
+            "sogBS",
+            "fantasy points prizepicks",
             "hits",
             "goals",
             "assists",
@@ -213,7 +213,7 @@ def meditate(force, stats, league, alt):
             M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
                 M["Line"] <= M["Line"].quantile(.95))) | mask]
 
-            if M["Line"].max() < 2:
+            if M["Line"].max() < 3:
                 M = M.loc[M["Odds"] > .2]
                 mask = (M["Odds"] != 0.5)
                 balance = (M["Result"] > M["Line"]).mean()
@@ -276,7 +276,7 @@ def meditate(force, stats, league, alt):
                                 counts, bins = np.histogram(more)
                                 counts = counts/len(more)
                                 actuals = M.loc[mask & (
-                                    M["Position"] == i) & (M["Line"] < target), "Line"]
+                                    M["Position"] == i) & (M["Line"] > target), "Line"]
                                 actual_counts, bins = np.histogram(
                                     actuals, bins)
                                 if len(actuals):
@@ -310,7 +310,7 @@ def meditate(force, stats, league, alt):
                             counts, bins = np.histogram(less)
                             counts = counts/len(less)
                             actuals = M.loc[mask & (
-                                M["Position"] == i) & (M["Line"] < target), "Line"]
+                                M["Line"] < target), "Line"]
                             actual_counts, bins = np.histogram(
                                 actuals, bins)
                             if len(actuals):
@@ -326,7 +326,7 @@ def meditate(force, stats, league, alt):
                             counts, bins = np.histogram(more)
                             counts = counts/len(more)
                             actuals = M.loc[mask & (
-                                M["Position"] == i) & (M["Line"] < target), "Line"]
+                                M["Line"] > target), "Line"]
                             actual_counts, bins = np.histogram(
                                 actuals, bins)
                             if len(actuals):
