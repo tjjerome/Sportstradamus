@@ -242,6 +242,7 @@
         "receiving tds": "TD Scorer",
         "tds": "TD Scorer",
         "completions": "Pass Completions",
+        "receptions": "Receptions",
         "attempts": "Pass Attempts",
         "carries": "Rush Attempts",
         "interceptions": "Interceptions",
@@ -249,7 +250,9 @@
         "saves": "Saves",
         "points": "Points",
         "goals": "Goalscorer",
-        "assists": "Assists"
+        "assists": "Assists",
+        "blocked": "Blocked Shots",
+        "goalsAgainst": "Goals Against"
     },
     "FanDuel": {
         "pitcher strikeouts": "Strikeouts",
@@ -316,7 +319,7 @@
         "receiving yards": "Receiving Yards",
         "receptions": "Receptions",
         "saves": "Saves",
-        "shots": "Shots on Goal",
+        "shots": "Shots On Goal",
         "goals": "Goals",
         "assists": "Assists",
         "points": "Points"
@@ -329,7 +332,7 @@
         "PR": "Points + Rebounds",
         "PTS": "Points",
         "REB": "Rebounds",
-        "FG3M": "3-Pt Made",
+        "FG3M": "3-PT Made",
         "RA": "Rebounds + Assists",
         "PRA": "Pts + Rebs + Asts",
         "AST": "Assists",
@@ -341,9 +344,13 @@
         "passing tds": "Passing TDs",
         "interceptions": "Interceptions",
         "passing yards": "Passing Yards",
-        "receiving yards": "Peceiving Yards",
+        "completions": "Passing Completions",
+        "attempts": "Passing Attempts",
+        "receiving yards": "Receiving Yards",
+        "receptions": "Receptions",
         "rushing yards": "Rushing Yards",
-        "shots": "Shots",
-        "saves": "Saves"
+        "carries": "Rushing Attempts",
+        "shots": "Total Shots",
+        "saves": "Total Saves"
     }
 }
