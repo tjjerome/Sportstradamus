@@ -331,7 +331,17 @@ def merge_dict(a, b, path=None):
                 pass  # same leaf value
             else:
                 # raise Exception('Conflict at %s' % '.'.join(path + [str(key)]))
-                a[key] = b[key]
+                if key == "Line":
+                    a[key].extend(b[key])
+                elif key == "EV":
+                    evs = b[key]
+                    for i, ev in enumerate(evs):
+                        if not ev:
+                            evs[i] = a[key][i]
+
+                    a[key] = evs
+                else:
+                    a[key] = b[key]
         else:
             a[key] = b[key]
     return a
@@ -450,7 +460,7 @@ class Archive:
             lines[position] = offer
             self.add(offer, lines, key)
 
-    def write(self):
+    def write(self, overwrite=False):
         """
         Write the archive data to a file.
 
@@ -462,7 +472,7 @@ class Archive:
 
             filepath = pkg_resources.files(data) / f"archive_{league}.dat"
             full_archive = {}
-            if os.path.isfile(filepath):
+            if os.path.isfile(filepath) and not overwrite:
                 with open(filepath, "rb") as infile:
                     full_archive = pickle.load(infile)
 
