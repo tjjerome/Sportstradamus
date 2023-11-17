@@ -343,6 +343,7 @@
         "BLK": "Blocks",
         "yards": "Rushing + Receiving Yards",
         "passing tds": "Passing TDs",
+        "tds": "Anytime Touchdown Scorer",
         "interceptions": "Interceptions",
         "passing yards": "Passing Yards",
         "completions": "Passing Completions",
@@ -352,6 +353,10 @@
         "rushing yards": "Rushing Yards",
         "carries": "Rushing Attempts",
         "shots": "Total Shots",
-        "saves": "Total Saves"
+        "saves": "Total Saves",
+        "points": "Total Points",
+        "goals": "Anytime Goalscorer",
+        "assists": "Total Assists",
+        "powerPlayPoints": "Total Power Play Points"
     }
 }
