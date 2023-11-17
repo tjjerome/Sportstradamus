@@ -253,7 +253,8 @@
         "goals": "Goalscorer",
         "assists": "Assists",
         "blocked": "Blocked Shots",
-        "goalsAgainst": "Goals Against"
+        "goalsAgainst": "Goals Against",
+        "powerPlayPoints": "Power Play Points"
     },
     "FanDuel": {
         "pitcher strikeouts": "Strikeouts",
