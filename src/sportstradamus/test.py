@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-NFL = StatsNFL()
+# NFL = StatsNFL()
 # NFL.season_start = datetime(2020, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2021, 9, 1).date()

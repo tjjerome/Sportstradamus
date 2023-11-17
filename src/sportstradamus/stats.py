@@ -3355,8 +3355,8 @@ class StatsNHL(Stats):
                         stats["powerPlayPoints"] = 0
                     stats.update({
                         "fantasy points prizepicks": stats.get("goals", 0)*8 + stats.get("assists", 0)*5 + stats.get("sogBS", 0)*1.5,
-                        "goalie fantasy points underdog": int(win)*6 + stats.get("saves", 0)*.6 - stats.get("goalsAgainst", 0)*.6,
-                        "skater fantasy points underdog": stats.get("goals", 0)*6 + stats.get("assists", 0)*4 + stats.get("sogBS", 0) + stats.get("hits", 0) + stats.get("powerPlayPoints", 0)*.5,
+                        "goalie fantasy points underdog": int(win)*6 + stats.get("saves", 0)*.6 - stats.get("goalsAgainst", 0)*3,
+                        "skater fantasy points underdog": stats.get("goals", 0)*6 + stats.get("assists", 0)*4 + stats.get("sogBS", 0) + stats.get("hits", 0)*.5 + stats.get("powerPlayPoints", 0)*.5,
                         "goalie fantasy points parlay": stats.get("saves", 0)*.25 - stats.get("goalsAgainst", 0),
                         "skater fantasy points parlay": stats.get("goals", 0)*3 + stats.get("assists", 0)*2 + stats.get("shots", 0)*.5 + stats.get("hits", 0) + stats.get("blocked", 0),
                     })

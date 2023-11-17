@@ -664,8 +664,20 @@ def find_correlation(offers, stats, platform, parlays):
                         best_fives.append(parlay)
 
             if len(best_fives) > 0:
-                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_fives).sort_values(
-                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players").head(5)])
+                df5 = pd.DataFrame(best_fives).sort_values(
+                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
+                to_add = df5.head(2)
+                while len(to_add) < 8 and len(df5) > 0:
+                    dupes = [item for row in to_add[[
+                        "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5"]].values.tolist() for item in row]
+                    dupes = list(set([x for x in dupes if dupes.count(x) > 1]))
+
+                    for leg in dupes:
+                        df5 = df5[~df5.eq(leg).any(axis=1)]
+
+                    to_add = pd.concat([to_add, df5.head(1)])
+
+                parlay_df = pd.concat([parlay_df, to_add])
 
             best_threes = []
             if platform != "PrizePicks":
@@ -727,8 +739,20 @@ def find_correlation(offers, stats, platform, parlays):
                         best_threes.append(parlay)
 
             if len(best_threes) > 0:
-                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_threes).sort_values(
-                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players").head(5)])
+                df3 = pd.DataFrame(best_threes).sort_values(
+                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
+                to_add = df3.head(2)
+                while len(to_add) < 8 and len(df3) > 0:
+                    dupes = [item for row in to_add[["Leg 1", "Leg 2",
+                                                     "Leg 3"]].values.tolist() for item in row]
+                    dupes = list(set([x for x in dupes if dupes.count(x) > 1]))
+
+                    for leg in dupes:
+                        df3 = df3[~df3.eq(leg).any(axis=1)]
+
+                    to_add = pd.concat([to_add, df3.head(1)])
+
+                parlay_df = pd.concat([parlay_df, to_add])
 
             # Find best pairs
             for i, offer in team_df.iterrows():
@@ -899,7 +923,9 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
                 lines = []
 
                 archive.add(this_o, lines, stat_map[platform])
-                stats = stat_data.get_stats(this_o, date=o["Date"])
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=RuntimeWarning)
+                    stats = stat_data.get_stats(this_o, date=o["Date"])
 
                 if type(stats) is int:
                     logger.warning(f"{o['Player']}, {market} stat error")
@@ -913,7 +939,10 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
             lines = []
 
             archive.add(o, lines, stat_map[platform])
-            stats = stat_data.get_stats(o | {"Market": market}, date=o["Date"])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                stats = stat_data.get_stats(
+                    o | {"Market": market}, date=o["Date"])
             if type(stats) is int:
                 logger.warning(f"{o['Player']}, {market} stat error")
                 pbar.update()
