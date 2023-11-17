@@ -263,7 +263,7 @@ def get_fd(sport, tabs):
                 if offer["marketName"] in ["Any Time Touchdown Scorer", "To Record A Hit", "To Hit A Home Run",
                                            "To Record a Run", "To Record an RBI", "To Hit a Single",
                                            "To Hit a Double", "Any Time Goal Scorer", "Player to Record 1+ Assists",
-                                           "Player to Record 1+ Points"]:
+                                           "Player to Record 1+ Points", "Player to Record 1+ Powerplay Points"]:
                     for o in offer["runners"]:
                         player = remove_accents(o["runnerName"])
                         market = offer["marketName"]
