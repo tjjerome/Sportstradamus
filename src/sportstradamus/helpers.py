@@ -333,7 +333,7 @@ def merge_dict(a, b, path=None):
                 # raise Exception('Conflict at %s' % '.'.join(path + [str(key)]))
                 if key == "Line":
                     a[key].extend(b[key])
-                elif key == "EV":
+                elif key == "EV" and len(a[key]) == 4:
                     evs = b[key]
                     for i, ev in enumerate(evs):
                         if not ev:

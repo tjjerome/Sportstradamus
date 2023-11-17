@@ -125,6 +125,7 @@ def meditate(force, stats, league, alt):
             "goalie fantasy points underdog",
             "skater fantasy points underdog",
             "blocked",
+            "powerPlayPoints",
             "sogBS",
             "fantasy points prizepicks",
             "hits",
