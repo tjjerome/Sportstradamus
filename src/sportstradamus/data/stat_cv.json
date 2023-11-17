@@ -63,7 +63,7 @@
     "NHL": {
         "assists": 1,
         "blocked": 1,
-        "faceOffWins": 0.9292642674558456,
+        "faceOffWins": 0.7307325838116866,
         "fantasy points prizepicks": 0.8661022317416615,
         "goalie fantasy points underdog": 0.5860951912740477,
         "goals": 1,
@@ -74,6 +74,7 @@
         "shots": 1,
         "skater fantasy points underdog": 0.8092747015415639,
         "sogBS": 1,
-        "timeOnIce": 0.2707009790066582
+        "timeOnIce": 0.26113092642139435,
+        "powerPlayPoints": 1
     }
 }
