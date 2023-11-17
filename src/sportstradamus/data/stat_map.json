@@ -292,6 +292,7 @@
         "shots": "Shots on Goal",
         "goals": "Any Time Goal Scorer",
         "points": "Player to Record 1+ Points",
+        "powerPlayPoints": "Player to Record 1+ Powerplay Points",
         "assists": "Player to Record 1+ Assists"
     },
     "Pinnacle": {
