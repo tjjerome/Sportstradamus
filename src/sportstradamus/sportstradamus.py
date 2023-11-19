@@ -256,15 +256,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp(books)
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp(books)
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats, parlays)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -692,8 +692,8 @@ def find_correlation(offers, stats, platform, parlays):
                     to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
                     ).sort_values("EV", ascending=False)
 
-                    idx = [i for i in df5.index if i not in to_add.index]
-                    df5 = df5.loc[idx]
+                    add_id = [i for i in df5.index if i not in to_add.index]
+                    df5 = df5.loc[add_id]
 
                 parlay_df = pd.concat(
                     [parlay_df, to_add])
@@ -782,8 +782,8 @@ def find_correlation(offers, stats, platform, parlays):
                     to_add = pd.concat([to_add, df3.head(1)]).drop_duplicates(
                     ).sort_values("EV", ascending=False)
 
-                    idx = [i for i in df3.index if i not in to_add.index]
-                    df3 = df3.loc[idx]
+                    add_id = [i for i in df3.index if i not in to_add.index]
+                    df3 = df3.loc[add_id]
 
                 parlay_df = pd.concat(
                     [parlay_df, to_add])
