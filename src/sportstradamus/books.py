@@ -413,7 +413,7 @@ def get_pinnacle(league):
 
     players = []
     for market in tqdm(markets):
-        player = market["special"]["description"]
+        player = market["special"]["description"].replace(" (BAL)", "").replace(" (BUF)", "").replace(" (CAR)", "")
         player = player.replace(" (", ")").split(")")
         bet = player[1]
         player = remove_accents(player[0])
