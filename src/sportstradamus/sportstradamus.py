@@ -635,10 +635,12 @@ def find_correlation(offers, stats, platform, parlays):
                         cm1 = bet[i]['cMarket']
                         b1 = bet[i]['Bet']
                         p1 = bet[i]['Model']
+                        pb1 = bet[i]['Books']
                         for j in np.arange(i+1, 5):
                             cm2 = bet[j]['cMarket']
                             b2 = bet[j]['Bet']
                             p2 = bet[j]['Model']
+                            pb2 = bet[j]['Books']
 
                             if ("_OPP_" in cm1) and ("_OPP_" in cm2):
                                 cm1 = cm1.replace("_OPP_", "")
@@ -649,9 +651,8 @@ def find_correlation(offers, stats, platform, parlays):
                             if b1 != b2:
                                 rho = -rho
 
-                            coeff = np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
-                            p *= coeff
-                            pb *= coeff
+                            p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+                            pb *= np.exp(np.sqrt(pb1*pb2*(1-pb1)*(1-pb2))*rho)
 
                     p *= 20
                     pb *= 20
@@ -690,6 +691,9 @@ def find_correlation(offers, stats, platform, parlays):
                     to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
                     ).sort_values("EV", ascending=False)
 
+                    idx = [i for i in df5.index if i not in to_add.index]
+                    df5 = df5.loc[idx]
+
                 parlay_df = pd.concat(
                     [parlay_df, to_add])
 
@@ -721,10 +725,12 @@ def find_correlation(offers, stats, platform, parlays):
                         cm1 = bet[i]['cMarket']
                         b1 = bet[i]['Bet']
                         p1 = bet[i]['Model']
+                        pb1 = bet[i]['Books']
                         for j in np.arange(i+1, 3):
                             cm2 = bet[j]['cMarket']
                             b2 = bet[j]['Bet']
                             p2 = bet[j]['Model']
+                            pb2 = bet[j]['Books']
 
                             if ("_OPP_" in cm1) and ("_OPP_" in cm2):
                                 cm1 = cm1.replace("_OPP_", "")
@@ -735,9 +741,8 @@ def find_correlation(offers, stats, platform, parlays):
                             if b1 != b2:
                                 rho = -rho
 
-                            coeff = np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
-                            p *= coeff
-                            pb *= coeff
+                            p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+                            pb *= np.exp(np.sqrt(pb1*pb2*(1-pb1)*(1-pb2))*rho)
 
                     p *= 6
                     pb *= 6
@@ -775,6 +780,9 @@ def find_correlation(offers, stats, platform, parlays):
 
                     to_add = pd.concat([to_add, df3.head(1)]).drop_duplicates(
                     ).sort_values("EV", ascending=False)
+
+                    idx = [i for i in df3.index if i not in to_add.index]
+                    df3 = df3.loc[idx]
 
                 parlay_df = pd.concat(
                     [parlay_df, to_add])
