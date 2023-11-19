@@ -607,7 +607,7 @@ def find_correlation(offers, stats, platform, parlays):
             best_fives = []
             if league != "MLB" and platform != "Thrive":
                 combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 5)
+                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Desc"]].to_dict('records'), 5)
 
                 for bet in combos:
                     if (len({leg["Team"] for leg in bet}) != 2) or (len({leg["Player"] for leg in bet}) != 5):
@@ -625,6 +625,10 @@ def find_correlation(offers, stats, platform, parlays):
                         continue
 
                     p = np.product([leg["Model"] for leg in bet])
+                    pb = np.product([leg["Books"] for leg in bet])
+
+                    if p < 1/20 or pb < .65/20:
+                        continue
 
                     # get correlation matrix
                     for i in np.arange(5):
@@ -645,10 +649,13 @@ def find_correlation(offers, stats, platform, parlays):
                             if b1 != b2:
                                 rho = -rho
 
-                            p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+                            coeff = np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+                            p *= coeff
+                            pb *= coeff
 
-                    p = p*20
-                    if p > 1.5:
+                    p *= 20
+                    pb *= 20
+                    if p > 1.5 and pb > .95:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
@@ -667,22 +674,29 @@ def find_correlation(offers, stats, platform, parlays):
                 df5 = pd.DataFrame(best_fives).sort_values(
                     "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
                 to_add = df5.head(2)
-                while len(to_add) < 8 and len(df5) > 0:
+                while len(to_add) < 10 and len(df5) > 0:
                     dupes = [item for row in to_add[[
                         "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5"]].values.tolist() for item in row]
-                    dupes = list(set([x for x in dupes if dupes.count(x) > 1]))
+                    dupes = list(
+                        set([x for x in dupes if dupes.count(x) > 1]))
+
+                    for leg in dupes:
+                        to_add = pd.concat(
+                            [to_add, df5[~df5.eq(leg).any(axis=1)].head(1)])
 
                     for leg in dupes:
                         df5 = df5[~df5.eq(leg).any(axis=1)]
 
-                    to_add = pd.concat([to_add, df5.head(1)])
+                    to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
+                    ).sort_values("EV", ascending=False)
 
-                parlay_df = pd.concat([parlay_df, to_add])
+                parlay_df = pd.concat(
+                    [parlay_df, to_add])
 
             best_threes = []
             if platform != "PrizePicks":
                 combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Desc"]].to_dict('records'), 3)
+                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Desc"]].to_dict('records'), 3)
 
                 for bet in combos:
                     if (len({leg["Team"] for leg in bet}) != 2) or (len({leg["Player"] for leg in bet}) != 3):
@@ -700,6 +714,7 @@ def find_correlation(offers, stats, platform, parlays):
                         continue
 
                     p = np.product([leg["Model"] for leg in bet])
+                    pb = np.product([leg["Books"] for leg in bet])
 
                     # get correlation matrix
                     for i in np.arange(3):
@@ -720,10 +735,13 @@ def find_correlation(offers, stats, platform, parlays):
                             if b1 != b2:
                                 rho = -rho
 
-                            p *= np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+                            coeff = np.exp(np.sqrt(p1*p2*(1-p1)*(1-p2))*rho)
+                            p *= coeff
+                            pb *= coeff
 
-                    p = p*6
-                    if p > 1.5:
+                    p *= 6
+                    pb *= 6
+                    if p > 1.25 and pb > .8:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
@@ -742,17 +760,24 @@ def find_correlation(offers, stats, platform, parlays):
                 df3 = pd.DataFrame(best_threes).sort_values(
                     "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
                 to_add = df3.head(2)
-                while len(to_add) < 8 and len(df3) > 0:
-                    dupes = [item for row in to_add[["Leg 1", "Leg 2",
-                                                     "Leg 3"]].values.tolist() for item in row]
-                    dupes = list(set([x for x in dupes if dupes.count(x) > 1]))
+                while len(to_add) < 10 and len(df3) > 0:
+                    dupes = [item for row in to_add[[
+                        "Leg 1", "Leg 2", "Leg 3"]].values.tolist() for item in row]
+                    dupes = list(
+                        set([x for x in dupes if dupes.count(x) > 1]))
+
+                    for leg in dupes:
+                        to_add = pd.concat(
+                            [to_add, df3[~df3.eq(leg).any(axis=1)].head(1)])
 
                     for leg in dupes:
                         df3 = df3[~df3.eq(leg).any(axis=1)]
 
-                    to_add = pd.concat([to_add, df3.head(1)])
+                    to_add = pd.concat([to_add, df3.head(1)]).drop_duplicates(
+                    ).sort_values("EV", ascending=False)
 
-                parlay_df = pd.concat([parlay_df, to_add])
+                parlay_df = pd.concat(
+                    [parlay_df, to_add])
 
             # Find best pairs
             for i, offer in team_df.iterrows():
