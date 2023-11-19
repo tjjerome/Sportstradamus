@@ -108,7 +108,8 @@ def main(progress, books, parlays):
         if "NFL" in sports:
             logger.info("Getting DraftKings NFL lines")
             try:
-                dk_data.extend(get_dk(88808, [1000, 1001, 1003], "NFL"))  # NFL
+                dk_data.extend(
+                    get_dk(88808, [1000, 1001, 1003, 1002], "NFL"))  # NFL
             except Exception as exc:
                 logger.exception("Failed to get DraftKings NFL lines")
 
