@@ -1037,12 +1037,16 @@ def get_thrive():
     }
     logger.info("Getting Thrive Lines")
     try:
-        api = requests.post(
-            "https://proxy.scrapeops.io/v1/",
-            params=params,
-            headers=header | scraper.header,
-            json=payload,
-        ).json()
+        i = 0
+        api = {}
+        while "success" not in api and i < 3:
+            i += 1
+            api = requests.post(
+                "https://proxy.scrapeops.io/v1/",
+                params=params,
+                headers=header | scraper.header,
+                json=payload,
+            ).json()
     except:
         logger.exception(id)
         return []

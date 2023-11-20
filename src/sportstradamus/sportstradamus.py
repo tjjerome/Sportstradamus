@@ -774,9 +774,9 @@ def find_correlation(offers, stats, platform, parlays):
             best_threes = []
             if platform != "PrizePicks":
                 combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Desc"]].to_dict('records'), 3)
+                    game_df[["Player", "Team", "cMarket", "Bet", "Model", "Books", "Desc"]].to_dict('records'), 3)
 
-                for bet in tqdm(combos, desc="Checking 3-Leg Parlay Combinations", leave=False, total=comb(len(idx), 3)):
+                for bet in tqdm(combos, desc="Checking 3-Leg Parlay Combinations", leave=False, total=comb(len(game_df), 3)):
                     teams = []
                     players = []
                     markets = []
