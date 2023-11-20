@@ -572,7 +572,7 @@ def find_correlation(offers, stats, platform, parlays):
             usage.reset_index(inplace=True)
             usage.rename(
                 columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
-            player_df = player_df.merge(usage)
+            player_df = player_df.merge(usage, how='left').fillna(0)
             ranks = player_df.sort_values(tiebreaker_str[league], ascending=False).groupby(
                 ["Team", "Position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
             player_df.Position = player_df.Position + ranks.astype(str)
@@ -611,7 +611,8 @@ def find_correlation(offers, stats, platform, parlays):
             league_df["Model"].multiply(100).round(1).astype(str) + "%"
 
         checked_teams = []
-        for team in tqdm(list(league_df.Team.unique()), desc=f"Checking {league} games", unit="game"):
+        teams = [team for team in league_df.Team.unique() if "/" not in team]
+        for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
             if team in checked_teams:
                 continue
             team_df = league_df.loc[league_df["Team"] == team]
