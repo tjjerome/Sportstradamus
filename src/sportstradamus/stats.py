@@ -2331,6 +2331,7 @@ class StatsNFL(Stats):
         self.players = self.players.groupby(
             'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
         self.players["Michael Pittman"] = "WR"
+        self.players["Justin Watson"] = "WR"
 
         teamDataList = []
         for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog.loc[self.gamelog.isna().any(axis=1)])):

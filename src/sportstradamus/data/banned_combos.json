@@ -35,6 +35,10 @@
             ],
             [
                 "attempts",
+                "targets"
+            ],
+            [
+                "attempts",
                 "carries"
             ]
         ],
