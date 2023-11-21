@@ -2191,8 +2191,7 @@ class StatsNFL(Stats):
         self.stat_types = {
             'passing': ['completion percentage over expected', 'completion percentage', 'passer rating',
                         'passer adot', 'passer adot differential', 'time to throw', 'aggressiveness',
-                        'pass yards per attempt', 'receiver drops', 'longest completion', 'sacks taken',
-                        'passing first downs', 'fumbles lost'],
+                        'pass yards per attempt', 'receiver drops', 'longest completion'],
             'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
                           'yac over expected', 'separation created', 'targets per route run',
                           'first read targets per route run', 'route participation', 'yards per route run',
