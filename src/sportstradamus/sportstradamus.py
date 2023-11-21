@@ -636,6 +636,8 @@ def find_correlation(offers, stats, platform, parlays):
                     game_df['Boost']
                 game_df.loc[:, 'Books'] = game_df['Books'] * \
                     game_df['Boost']
+            else:
+                game_df.loc[:, 'Boost'] = 1
 
             idx = game_df.loc[game_df['Books'] >= .49].sort_values('Model', ascending=False).head(
                 35).sort_values(['Team', 'Player']).index
@@ -643,7 +645,7 @@ def find_correlation(offers, stats, platform, parlays):
             best_fives = []
             if league != "MLB" and platform != "Thrive":
                 combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Desc"]].to_dict('records'), 5)
+                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), 5)
 
                 for bet in tqdm(combos, desc="Checking 5-Leg Parlay Combinations", leave=False, total=comb(len(idx), 5)):
                     teams = []
@@ -736,6 +738,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "League": league,
                             "Platform": platform,
                             "EV": p,
+                            "Boost": np.product([leg["Boost"] for leg in bet]),
                             "Leg 1": bet[0]["Desc"],
                             "Leg 2": bet[1]["Desc"],
                             "Leg 3": bet[2]["Desc"],
@@ -858,12 +861,13 @@ def find_correlation(offers, stats, platform, parlays):
 
                     p *= 6
                     pb *= 6
-                    if p > 1.5 and pb > 1:
+                    if p > 1.25 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
                             "Platform": platform,
                             "EV": p,
+                            "Boost": np.product([leg["Boost"] for leg in bet]),
                             "Leg 1": bet[0]["Desc"],
                             "Leg 2": bet[1]["Desc"],
                             "Leg 3": bet[2]["Desc"],
