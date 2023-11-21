@@ -2174,33 +2174,42 @@ class StatsNFL(Stats):
                 'rushing yards over expected', 'rushing success rate', 'yac over expected', 'separation created',
                 'targets per route run', 'first read targets per route run', 'route participation',
                 'midfield tprr', 'yards per route run', 'average depth of target', 'receiver cp over expected',
-                'first read target share', 'redzone target share', 'redzone carry share', 'carry share']
+                'first read target share', 'redzone target share', 'redzone carry share', 'carry share',
+                'longest completion', 'longest rush', 'longest reception', 'sacks taken', 'passing first downs',
+                'first downs']
         self.gamelog = pd.DataFrame(columns=cols)
-        team_cols = ['season', 'week', 'team', 'pass_rate', 'pass_rate_over_expected', 'rush_success_rate', 'pass_success_rate',
-                     'rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_per_rush', 'epa_per_pass',
-                     'epa_allowed_per_rush', 'epa_allowed_per_pass', 'yards_allowed_per_rush', 'yards_allowed_per_pass',
-                     'completion_percentage_allowed', 'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush',
-                     'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
-                     'blitz_rate', 'epa_per_blitz', 'epa_allowed_per_blitz', 'exp_per_rush', 'exp_per_pass',
-                     'exp_allowed_per_rush', 'exp_allowed_per_pass']
+        team_cols = ['season', 'week', 'team', 'pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110',
+                     'pass_rate_against', 'pass_rate_over_expected_against', 'rush_success_rate', 'pass_success_rate',
+                     'redzone_success_rate', 'rush_success_rate_allowed', 'pass_success_rate_allowed',
+                     'redzone_success_rate_allowed', 'epa_per_rush', 'epa_per_pass', 'redzone_epa', 'yards_per_rush',
+                     'yards_per_pass', 'epa_allowed_per_rush', 'epa_allowed_per_pass', 'redzone_epa_allowed',
+                     'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed', 'cpoe_allowed',
+                     'pressure_per_pass', 'stuffs_per_rush', 'pressure_allowed_per_pass', 'stuffs_allowed_per_rush',
+                     'expected_yards_per_rush', 'blitz_rate', 'epa_per_blitz', 'epa_allowed_per_blitz', 'exp_per_rush',
+                     'exp_per_pass', 'exp_allowed_per_rush', 'exp_allowed_per_pass']
         self.teamlog = pd.DataFrame(columns=team_cols)
         self.stat_types = {
             'passing': ['completion percentage over expected', 'completion percentage', 'passer rating',
                         'passer adot', 'passer adot differential', 'time to throw', 'aggressiveness',
-                        'pass yards per attempt', 'receiver drops'],
+                        'pass yards per attempt', 'receiver drops', 'longest completion', 'sacks taken',
+                        'passing first downs', 'fumbles lost', 'completion percentage'],
             'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
                           'yac over expected', 'separation created', 'targets per route run',
                           'first read targets per route run', 'route participation', 'yards per route run',
                           'midfield tprr', 'average depth of target', 'receiver cp over expected',
-                          'first read target share', 'redzone target share', 'drop rate'],
+                          'first read target share', 'redzone target share', 'drop rate', 'longest reception'
+                          'first downs', 'fumbles lost'],
             'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate',
-                        'redzone carry share', 'carry share', 'breakaway yards', 'broken tackles'],
-            'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate', 'pass_success_rate',
-                        'epa_per_rush', 'epa_per_pass', 'exp_per_rush', 'exp_per_pass',
+                        'redzone carry share', 'carry share', 'breakaway yards', 'broken tackles'
+                        'longest rush', 'first downs', 'fumbles lost'],
+            'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate',
+                        'pass_success_rate', 'redzone_success_rate', 'epa_per_rush', 'epa_per_pass', 'redzone_epa',
+                        'exp_per_rush', 'exp_per_pass', 'yards_per_rush', 'yards_per_pass',
                         'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
                         'epa_per_blitz', 'plays_per_game', 'time_of_possession', 'time_per_play'],
-            'defense': ['rush_success_rate_allowed', 'pass_success_rate_allowed', 'epa_allowed_per_rush',
-                        'epa_allowed_per_pass', 'exp_allowed_per_rush', 'exp_allowed_per_pass',
+            'defense': ['pass_rate_against', 'pass_rate_over_expected_against', 'rush_success_rate_allowed',
+                        'pass_success_rate_allowed', 'redzone_success_rate_allowed', 'epa_allowed_per_rush',
+                        'epa_allowed_per_pass', 'redzone_epa_allowed', 'exp_allowed_per_rush', 'exp_allowed_per_pass',
                         'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed',
                         'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush', 'blitz_rate', 'epa_allowed_per_blitz',
                         'plays_per_game', 'time_of_possession', 'time_per_play']
@@ -2462,14 +2471,22 @@ class StatsNFL(Stats):
             proe = pbp_off['pass'].mean() - pbp_off['xpass'].mean()
             proe110 = pbp_off.loc[(pbp_off['down'] == 1) & (pbp_off['ydstogo'] == 10), 'pass'].mean(
             ) - pbp_off.loc[(pbp_off['down'] == 1) & (pbp_off['ydstogo'] == 10), 'xpass'].mean()
+            pr_against = pbp_def['pass'].mean()
+            proe_against = pbp_def['pass'].mean() - pbp_def['xpass'].mean()
             off_rush_sr = (pbp_off.loc[pbp_off['rush'], 'epa'] > 0).mean()
             off_pass_sr = (pbp_off.loc[pbp_off['pass'], 'epa'] > 0).mean()
+            off_rz_sr = (pbp_off.loc[pbp_off['redzone'], 'epa'] > 0).mean()
             def_rush_sr = (pbp_def.loc[pbp_def['rush'], 'epa'] > 0).mean()
             def_pass_sr = (pbp_def.loc[pbp_def['pass'], 'epa'] > 0).mean()
+            def_rz_sr = (pbp_def.loc[pbp_def['redzone'], 'epa'] > 0).mean()
             off_rush_epa = pbp_off.loc[pbp_off['rush'], 'epa'].mean()
             off_pass_epa = pbp_off.loc[pbp_off['pass'], 'epa'].mean()
+            off_rz_epa = pbp_off.loc[pbp_off['redzone'], 'epa'].mean()
             def_rush_epa = pbp_def.loc[pbp_def['rush'], 'epa'].mean()
             def_pass_epa = pbp_def.loc[pbp_def['pass'], 'epa'].mean()
+            def_rz_epa = pbp_def.loc[pbp_def['redzone'], 'epa'].mean()
+            off_rush_ypa = pbp_off.loc[pbp_off['rush'], 'yards_gained'].mean()
+            off_pass_ypa = pbp_off.loc[pbp_off['pass'], 'yards_gained'].mean()
             def_rush_ypa = pbp_def.loc[pbp_def['rush'], 'yards_gained'].mean()
             def_pass_ypa = pbp_def.loc[pbp_def['pass'], 'yards_gained'].mean()
             off_rush_exp = (
@@ -2508,18 +2525,26 @@ class StatsNFL(Stats):
                 "pass_rate": pr,
                 "pass_rate_over_expected": proe,
                 "pass_rate_over_expected_110": proe110,
+                "pass_rate_against": pr_against,
+                "pass_rate_over_expected_against": proe_against,
                 "rush_success_rate": off_rush_sr,
                 "pass_success_rate": off_pass_sr,
+                "redzone_success_rate": off_rz_sr,
                 "rush_success_rate_allowed": def_rush_sr,
                 "pass_success_rate_allowed": def_pass_sr,
+                "redzone_success_rate_allowed": def_rz_sr,
                 "epa_per_rush": off_rush_epa,
                 "epa_per_pass": off_pass_epa,
+                "redzone_epa": off_rz_epa,
                 "epa_allowed_per_rush": def_rush_epa,
                 "epa_allowed_per_pass": def_pass_epa,
+                "redzone_epa_allowed": def_rz_epa,
                 "exp_per_rush": off_rush_exp,
                 "exp_per_pass": off_pass_exp,
                 "exp_allowed_per_rush": def_rush_exp,
                 "exp_allowed_per_pass": def_pass_exp,
+                "yards_per_rush": off_rush_ypa,
+                "yards_per_pass": off_pass_ypa,
                 "yards_allowed_per_rush": def_rush_ypa,
                 "yards_allowed_per_pass": def_pass_ypa,
                 "completion_percentage_allowed": def_cp,
@@ -2566,7 +2591,14 @@ class StatsNFL(Stats):
                     "first_read_target_share": 0,
                     "redzone_target_share": 0,
                     "redzone_carry_share": 0,
-                    "carry_share": 0
+                    "carry_share": 0,
+                    "carry_share": 0,
+                    "longest_completion": 0,
+                    "longest_rush": 0,
+                    "longest_reception": 0,
+                    "sacks_taken": 0,
+                    "passing_first_downs": 0,
+                    "first_downs": 0,
                 }
 
             cpoe = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
@@ -2638,6 +2670,19 @@ class StatsNFL(Stats):
             attempt_pct = (len(pbp_off.loc[pbp_off['rusher_player_id'] == self.ids.get(
                 playerName)]) / rushes) if rushes > 0 else np.nan
 
+            sacks_taken = pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(
+                playerName), 'sack'].sum()
+            longest_completion = pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(
+                playerName), 'passing_yards'].max()
+            longest_rush = pbp_off.loc[pbp_off['rusher_player_id'] == self.ids.get(
+                playerName), 'rushing_yards'].max()
+            longest_reception = pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(
+                playerName), 'receiving_yards'].max()
+            passing_first_downs = len(pbp_off.loc[(pbp_off['passer_player_id'] == self.ids.get(
+                playerName)) & (pbp_off['yards_gained'] > pbp_off['ydstogo'])])
+            first_downs = len(pbp_off.loc[((pbp_off['rusher_player_id'] == self.ids.get(playerName)) | (
+                pbp_off['receiver_player_id'] == self.ids.get(playerName))) & (pbp_off['yards_gained'] > pbp_off['ydstogo'])])
+
             return {
                 "completion_percentage_over_expected": cpoe,
                 "completion_percentage": cp,
@@ -2665,7 +2710,13 @@ class StatsNFL(Stats):
                 "first_read_target_share": frt_pct,
                 "redzone_target_share": rz_target_pct,
                 "redzone_carry_share": rz_attempt_pct,
-                "carry_share": attempt_pct
+                "carry_share": attempt_pct,
+                "longest_completion": longest_completion,
+                "longest_rush": longest_rush,
+                "longest_reception": longest_reception,
+                "sacks_taken": sacks_taken,
+                "passing_first_downs": passing_first_downs,
+                "first_downs": first_downs,
             }
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):

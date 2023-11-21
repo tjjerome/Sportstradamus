@@ -116,6 +116,14 @@ def meditate(force, stats, league, alt):
             "interceptions",
             "attempts",
             "targets",
+            "longest completion",
+            "longest rush",
+            "longest reception",
+            "sacks taken",
+            "passing first downs",
+            "first downs",
+            "fumbles lost",
+            "completion percentage"
         ],
         "NHL": [
             "saves",
