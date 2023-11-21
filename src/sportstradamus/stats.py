@@ -2168,7 +2168,7 @@ class StatsNFL(Stats):
                 'targets', 'receiving yards', 'receiving tds', 'receiving fumbles', 'receiving fumbles lost',
                 'receiving 2pt conversions', 'fumbles', 'fumbles lost', 'yards', 'tds', 'qb yards', 'qb tds',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlayplay', 'home', 'opponent',
-                'gameday', 'game id', 'target share', 'air yards share', 'wopr', 'yards per target',
+                'gameday', 'game id', 'target share', 'air yards share', 'wopr', 'yards per target', 'yards per carry',
                 'completion percentage over expected', 'completion percentage', 'passer rating', 'passer adot',
                 'passer adot differential', 'time to throw', 'aggressiveness', 'pass yards per attempt',
                 'rushing yards over expected', 'rushing success rate', 'yac over expected', 'separation created',
@@ -2198,7 +2198,7 @@ class StatsNFL(Stats):
                           'midfield tprr', 'average depth of target', 'receiver cp over expected',
                           'first read target share', 'redzone target share', 'drop rate', 'longest reception'],
             'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate', 'redzone carry share',
-                        'carry share', 'breakaway yards', 'broken tackles', 'longest rush'],
+                        'carry share', 'yards per carry', 'breakaway yards', 'broken tackles', 'longest rush'],
             'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate',
                         'pass_success_rate', 'redzone_success_rate', 'epa_per_rush', 'epa_per_pass', 'redzone_epa',
                         'exp_per_rush', 'exp_per_pass', 'yards_per_rush', 'yards_per_pass',
@@ -2582,13 +2582,13 @@ class StatsNFL(Stats):
                     "first_read_targets_per_route_run": 0,
                     "route_participation": 0,
                     "yards_per_route_run": 0,
+                    "yards_per_carry": 0,
                     "midfield_tprr": 0,
                     "average_depth_of_target": 0,
                     "receiver_cp_over_expected": 0,
                     "first_read_target_share": 0,
                     "redzone_target_share": 0,
                     "redzone_carry_share": 0,
-                    "carry_share": 0,
                     "carry_share": 0,
                     "longest_completion": 0,
                     "longest_rush": 0,
@@ -2631,7 +2631,9 @@ class StatsNFL(Stats):
             pass_drop_pct = self.pfr.loc[(self.pfr['pfr_player_name'] == playerName) & (
                 self.pfr['week'] == pbp.week.max()), 'passing_drop_pct'].mean()
             pass_ypa = pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(
-                playerName), 'yards_gained'].sum() / pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(playerName), 'qb_dropback'].sum()
+                playerName), 'yards_gained'].fillna(0).mean()
+            ypc = pbp_off.loc[pbp_off['rusher_player_id'] ==
+                              self.ids.get(playerName), 'yards_gained'].fillna(0).mean()
             routes_run = len(pbp_off.loc[pbp_off.offense_players.str.contains(
                 self.ids.get(playerName)) & pbp_off['pass']])
             targets = len(
@@ -2708,6 +2710,7 @@ class StatsNFL(Stats):
                 "redzone_target_share": rz_target_pct,
                 "redzone_carry_share": rz_attempt_pct,
                 "carry_share": attempt_pct,
+                "yards_per_carry": ypc,
                 "longest_completion": longest_completion,
                 "longest_rush": longest_rush,
                 "longest_reception": longest_reception,
