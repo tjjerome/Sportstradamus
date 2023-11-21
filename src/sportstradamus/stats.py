@@ -2192,16 +2192,14 @@ class StatsNFL(Stats):
             'passing': ['completion percentage over expected', 'completion percentage', 'passer rating',
                         'passer adot', 'passer adot differential', 'time to throw', 'aggressiveness',
                         'pass yards per attempt', 'receiver drops', 'longest completion', 'sacks taken',
-                        'passing first downs', 'fumbles lost', 'completion percentage'],
+                        'passing first downs', 'fumbles lost'],
             'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
                           'yac over expected', 'separation created', 'targets per route run',
                           'first read targets per route run', 'route participation', 'yards per route run',
                           'midfield tprr', 'average depth of target', 'receiver cp over expected',
-                          'first read target share', 'redzone target share', 'drop rate', 'longest reception'
-                          'first downs', 'fumbles lost'],
-            'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate',
-                        'redzone carry share', 'carry share', 'breakaway yards', 'broken tackles'
-                        'longest rush', 'first downs', 'fumbles lost'],
+                          'first read target share', 'redzone target share', 'drop rate', 'longest reception'],
+            'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate', 'redzone carry share',
+                        'carry share', 'breakaway yards', 'broken tackles', 'longest rush'],
             'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate',
                         'pass_success_rate', 'redzone_success_rate', 'epa_per_rush', 'epa_per_pass', 'redzone_epa',
                         'exp_per_rush', 'exp_per_pass', 'yards_per_rush', 'yards_per_pass',
@@ -2848,14 +2846,14 @@ class StatsNFL(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 0, market].mean()/x[market].mean())-1
 
-        if any([string in market for string in ["pass", "completions", "attempts", "interceptions", "qb"]]):
+        if any([string in market for string in ["pass", "completion", "attempts", "interceptions", "qb", "sacks"]]):
             positions = ['QB']
             stat_types = self.stat_types['passing'] + \
                 self.stat_types['rushing']
         elif any([string in market for string in ["rush", "carries"]]):
             positions = ['QB', 'RB']
             stat_types = self.stat_types['rushing']
-        elif any([string in market for string in ["receiving", "targets", "receptions"]]):
+        elif any([string in market for string in ["receiving", "targets", "reception"]]):
             positions = ['WR', 'RB', 'TE']
             stat_types = self.stat_types['receiving']
         elif market == "tds":
