@@ -12,7 +12,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, remove_accents, fit_trendlines, get_ev
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, fit_trendlines, get_ev
 import pandas as pd
 import warnings
 import requests
@@ -726,7 +726,7 @@ class StatsNBA(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, cv=1, date=datetime.today()):
+    def get_stats(self, offer, date=datetime.today()):
         """
         Generate a pandas DataFrame with a summary of relevant stats.
 
@@ -745,6 +745,7 @@ class StatsNBA(Stats):
         market = offer["Market"]
         line = offer["Line"]
         opponent = offer["Opponent"]
+        cv = stat_cv.get("NBA", {}).get(market, 1)
         if self.defenseProfile.empty:
             logger.exception(f"{market} not profiled")
             return 0
@@ -872,7 +873,7 @@ class StatsNBA(Stats):
 
         return data
 
-    def get_training_matrix(self, market, cv=1):
+    def get_training_matrix(self, market):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -919,7 +920,7 @@ class StatsNBA(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, cv, gameDate
+                    offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
                     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
@@ -1825,7 +1826,7 @@ class StatsMLB(Stats):
             self.dvp_index[market][team] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, cv=1, date=datetime.today()):
+    def get_stats(self, offer, date=datetime.today()):
         """
         Calculates the relevant statistics for a given offer and date.
 
@@ -1842,6 +1843,7 @@ class StatsMLB(Stats):
         player = offer["Player"]
         team = offer["Team"].replace("AZ", "ARI")
         market = offer["Market"]
+        cv = stat_cv.get("MLB", {}).get(market, 1)
         if self.defenseProfile.empty:
             logger.exception(f"{market} not profiled")
             return 0
@@ -2058,7 +2060,7 @@ class StatsMLB(Stats):
 
         return data
 
-    def get_training_matrix(self, market, cv=1):
+    def get_training_matrix(self, market):
         """
         Retrieves the training data matrix and target labels for the specified market.
 
@@ -2124,7 +2126,7 @@ class StatsMLB(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, cv, gameDate
+                    offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
                     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
@@ -2978,7 +2980,7 @@ class StatsNFL(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, cv=1, date=datetime.today()):
+    def get_stats(self, offer, date=datetime.today()):
         """
         Generate a pandas DataFrame with a summary of relevant stats.
 
@@ -2997,6 +2999,7 @@ class StatsNFL(Stats):
         market = offer["Market"]
         line = offer["Line"]
         opponent = offer["Opponent"]
+        cv = stat_cv.get("NFL", {}).get(market, 1)
         if self.defenseProfile.empty:
             logger.exception(f"{market} not profiled")
             return 0
@@ -3131,7 +3134,7 @@ class StatsNFL(Stats):
 
         return data
 
-    def get_training_matrix(self, market, cv=1):
+    def get_training_matrix(self, market):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -3181,7 +3184,7 @@ class StatsNFL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, cv, gameDate
+                    offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
 
@@ -3861,7 +3864,7 @@ class StatsNHL(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, cv=1, date=datetime.today()):
+    def get_stats(self, offer, date=datetime.today()):
         """
         Calculate various statistics for a given offer.
 
@@ -3886,6 +3889,7 @@ class StatsNHL(Stats):
         team = offer["Team"]
         market = offer["Market"]
         market = stat_map.get(market, market)
+        cv = stat_cv.get("NHL", {}).get(market, 1)
         if self.defenseProfile.empty:
             logger.exception(f"{market} not profiled")
             return 0
@@ -4046,7 +4050,7 @@ class StatsNHL(Stats):
 
         return data
 
-    def get_training_matrix(self, market, cv=1):
+    def get_training_matrix(self, market):
         """
         Retrieve the training matrix for the specified market.
 
@@ -4095,7 +4099,7 @@ class StatsNHL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, cv, gameDate
+                    offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
                     if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
