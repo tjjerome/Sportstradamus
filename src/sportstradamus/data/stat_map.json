@@ -63,7 +63,8 @@
         "Pass Completions": "completions",
         "Pass Attempts": "attempts",
         "Rush Attempts": "carries",
-        "Rec Targets": "targets"
+        "Rec Targets": "targets",
+        "Completion Percentage": "completion percentage"
     },
     "Underdog": {
         "3-Pointers Made": "FG3M",
