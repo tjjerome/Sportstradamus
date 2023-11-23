@@ -116,6 +116,14 @@ def meditate(force, stats, league, alt):
             "interceptions",
             "attempts",
             "targets",
+            "longest completion",
+            "longest rush",
+            "longest reception",
+            # "sacks taken",
+            # "passing first downs",
+            # "first downs",
+            # "fumbles lost",
+            # "completion percentage"
         ],
         "NHL": [
             "saves",
@@ -369,6 +377,7 @@ def meditate(force, stats, league, alt):
 
             params = {
                 "feature_pre_filter": ["none", [False]],
+                "force_col_wise": ["none", [True]],
                 "boosting_type": ["categorical", ["gbdt"]],
                 # "extra_trees": ["categorical", [True, False]],
                 "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
@@ -404,7 +413,7 @@ def meditate(force, stats, league, alt):
                                             dtrain,
                                             num_boost_round=999,
                                             nfold=5,
-                                            early_stopping_rounds=20,
+                                            early_stopping_rounds=100,
                                             max_minutes=60,
                                             n_trials=500,
                                             silence=True,
@@ -523,16 +532,29 @@ def meditate(force, stats, league, alt):
 
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
-            clf = LogisticRegressionCV(
-                fit_intercept=True, solver='newton-cholesky').fit(y_proba_train, y_class)
-            sgd = SGDClassifier(loss='log_loss', fit_intercept=True).fit(
-                y_proba_train, y_class)
+            filt = {}
+
+            n_bins = np.clip(
+                int(X_train["Line"].max()-X_train["Line"].min()), 3, 10)
+            counts, bins = np.histogram(X_train["Line"], bins=n_bins)
+            bins[-1] = bins[-1] + .5
+            edges = []
+            for b1, b2 in zip(bins[1:], bins[:-1]):
+                mask = X_train["Line"].between(b2, b1, "left")
+                if (y_class[mask].sum() > 4) and ((len(y_class[mask]) - y_class[mask].sum()) > 4):
+                    edges.append((b2, b1))
+                    clf = LogisticRegressionCV(
+                        fit_intercept=True, solver='newton-cholesky').fit(y_proba_train[mask], y_class[mask])
+                    filt[(b2, b1)] = clf
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
-            y_proba_clf = clf.predict_proba(y_proba)
-            y_proba_sgd = sgd.predict_proba(y_proba)
+            y_proba_filt = np.ones_like(y_proba_no_filt)*.5
+            for mini, maxi in edges:
+                mask = X_test["Line"].between(mini, maxi, "left")
+                y_proba_filt[mask, :] = filt[(mini, maxi)].predict_proba(
+                    y_proba[mask])
 
             y_class = (y_test["Result"] >=
                        X_test["Line"]).astype(int)
@@ -550,15 +572,15 @@ def meditate(force, stats, league, alt):
                 entropy0 = np.mean(np.abs(norm.cdf(
                     y_test["Result"], X_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
 
-            prec = np.zeros(3)
-            acc = np.zeros(3)
-            bs = np.zeros(3)
-            d = np.zeros(3)
-            ll = np.zeros(3)
-            bal = np.zeros(3)
-            e = np.zeros(3)
+            prec = np.zeros(2)
+            acc = np.zeros(2)
+            bs = np.zeros(2)
+            d = np.zeros(2)
+            ll = np.zeros(2)
+            bal = np.zeros(2)
+            e = np.zeros(2)
 
-            for i, y_proba in enumerate([y_proba_no_filt, y_proba_clf, y_proba_sgd]):
+            for i, y_proba in enumerate([y_proba_no_filt, y_proba_filt]):
                 y_pred = (y_proba > .5).astype(int)[:, 1]
                 mask = np.max(y_proba, axis=1) > 0.54
                 prec[i] = precision_score(y_class[mask], y_pred[mask])
@@ -576,8 +598,7 @@ def meditate(force, stats, league, alt):
 
             filedict = {
                 "model": model,
-                "filter": clf,
-                "sgd_filter": sgd,
+                "filter": filt,
                 "step": step,
                 "stats": {
                     "Accuracy": acc,
@@ -606,7 +627,7 @@ def meditate(force, stats, league, alt):
                 X_test['N'] = prob_params['total_count']
                 X_test['L'] = prob_params['probs']
 
-            X_test['P'] = y_proba_no_filt[:, 1]
+            X_test['P'] = y_proba_filt[:, 1]
 
             filename = "_".join(["test", league, market]
                                 ).replace(" ", "-") + ".csv"
@@ -652,7 +673,7 @@ def report():
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
             f.write(pd.DataFrame(model['stats'], index=[
-                    ['No Filter', 'Log', 'SGD']]).to_string(index=False))
+                    ['No Filter', 'Filter']]).to_string(index=False))
             f.write("\n\n")
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:

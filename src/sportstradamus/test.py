@@ -10,15 +10,15 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-# NFL = StatsNFL()
-# NFL.season_start = datetime(2020, 9, 1).date()
-# NFL.update()
-# NFL.season_start = datetime(2021, 9, 1).date()
-# NFL.update()
-# NFL.season_start = datetime(2022, 9, 1).date()
-# NFL.update()
-# NFL.season_start = datetime(2023, 9, 1).date()
-# NFL.update()
+NFL = StatsNFL()
+NFL.season_start = datetime(2020, 9, 1).date()
+NFL.update()
+NFL.season_start = datetime(2021, 9, 1).date()
+NFL.update()
+NFL.season_start = datetime(2022, 9, 1).date()
+NFL.update()
+NFL.season_start = datetime(2023, 9, 1).date()
+NFL.update()
 
 # NBA = StatsNBA()
 # NBA.season = "2021-22"
@@ -31,13 +31,13 @@ from tqdm import tqdm
 # NBA.season_start = datetime(2023, 10, 1).date()
 # NBA.update()
 
-NHL = StatsNHL()
-NHL.season_start = datetime(2021, 10, 12).date()
-NHL.update()
-NHL.season_start = datetime(2022, 10, 7).date()
-NHL.update()
-NHL.season_start = datetime(2023, 10, 10).date()
-NHL.update()
+# NHL = StatsNHL()
+# NHL.season_start = datetime(2021, 10, 12).date()
+# NHL.update()
+# NHL.season_start = datetime(2022, 10, 7).date()
+# NHL.update()
+# NHL.season_start = datetime(2023, 10, 10).date()
+# NHL.update()
 
 # MLB = StatsMLB()
 # MLB.load()
