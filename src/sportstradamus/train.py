@@ -644,8 +644,8 @@ def meditate(force, stats, league, alt):
                 del filedict
                 del model
 
-            # report()
-            # see_features()
+            report()
+            see_features()
 
 
 def report():
