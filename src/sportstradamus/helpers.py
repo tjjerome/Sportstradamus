@@ -461,6 +461,10 @@ class Archive:
             lines[position] = offer
             self.add(offer, lines, key)
 
+    def add_dfs(self, offers, key):
+        for offer in offers:
+            self.add(offer, [None]*4, key)
+
     def write(self, overwrite=False):
         """
         Write the archive data to a file.

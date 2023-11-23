@@ -115,7 +115,14 @@ else:
             "completions",
             "carries",
             "interceptions",
-            "attempts"
+            "attempts",
+            "sacks taken",
+            "longest completion",
+            "longest rush",
+            "passing first downs",
+            "first downs",
+            "fumbles lost",
+            "completion percentage"
         ],
         "RB": [
             "rushing yards",
@@ -128,7 +135,11 @@ else:
             "receiving tds",
             "carries",
             "receptions",
-            "targets"
+            "targets",
+            "longest rush",
+            "longest reception",
+            "first downs",
+            "fumbles lost"
         ],
         "WRTE": [
             "receiving yards",
@@ -138,7 +149,10 @@ else:
             "tds",
             "receiving tds",
             "receptions",
-            "targets"
+            "targets",
+            "longest reception",
+            "first downs",
+            "fumbles lost"
         ],
     }
 

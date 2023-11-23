@@ -133,6 +133,11 @@
         "Passing First Downs": "passing first downs",
         "First Downs": "first downs",
         "Fumbles Lost": "fumbles lost",
+        "Completion Percentage": "completion percentage""Targets": "targets",
+        "Sacks Taken": "sacks taken",
+        "Passing First Downs": "passing first downs",
+        "First Downs": "first downs",
+        "Fumbles Lost": "fumbles lost",
         "Completion Percentage": "completion percentage"
     },
     "Thrive": {
@@ -305,6 +310,7 @@
         "powerPlayPoints": "Player to Record 1+ Powerplay Points",
         "assists": "Player to Record 1+ Assists",
         "longest rush": "Longest Rush",
+        "longest reception": "Longest Reception",
         "longest completion": "Longest Pass"
     },
     "Pinnacle": {

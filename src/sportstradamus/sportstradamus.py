@@ -450,6 +450,7 @@ def process_offers(offer_dict, book, stats, parlays):
 
     """
     global untapped_markets
+    global stat_map
     new_offers = []
     logger.info(f"Processing {book} offers")
     if len(offer_dict) > 0:
@@ -465,6 +466,7 @@ def process_offers(offer_dict, book, stats, parlays):
                 else:
                     # Handle untapped markets where the league is not supported
                     for market, offers in markets.items():
+                        archive.add_dfs(offers, stat_map[book])
                         untapped_markets.append(
                             {"Platform": book, "League": league, "Market": market}
                         )
@@ -472,6 +474,7 @@ def process_offers(offer_dict, book, stats, parlays):
                     continue
 
                 for market, offers in markets.items():
+                    archive.add_dfs(offers, stat_map[book])
                     # Match the offers with player statistics
                     playerStats = match_offers(
                         offers, league, market, book, stat_data, pbar
@@ -1094,11 +1097,7 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
                 playerStats.append(stats)
                 playerNames.append(player)
 
-            archive.add(o, [None]*4, stat_map[platform])
         else:
-            lines = []
-
-            archive.add(o, lines, stat_map[platform])
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 stats = stat_data.get_stats(
@@ -1148,7 +1147,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         filedict = pickle.load(infile)
     model = filedict["model"]
     dist = filedict["distribution"]
-    clf = filedict["filter"]
+    filt = filedict["filter"]
     step = filedict["step"]
     cv = filedict["cv"]
 
@@ -1328,11 +1327,17 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 under = under - push/2
 
         try:
-            # if "H2H" in o["Market"]:
-            #     proba = [under, 1-under]
-            # else:
-            #     proba = clf.predict_proba([[1-under]])[0]
-            proba = [under, 1-under]
+            if "H2H" in o["Market"]:
+                proba = [under, 1-under]
+            else:
+                proba = [0.5, 0.5]
+                for edges, clf in filt.items():
+                    line = o["Line"]
+                    if "+" in o["Player"]:
+                        line = np.ceil(line)/2
+                    if edges[0] <= line < edges[1]:
+                        proba = clf.predict_proba([[1-under]])[0]
+            # proba = [under, 1-under]
 
             if proba[1] > proba[0] or o.get("Boost", 1) > 1:
                 o["Bet"] = "Over"
