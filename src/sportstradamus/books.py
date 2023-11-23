@@ -574,6 +574,27 @@ def get_caesars(sport, league):
             continue
 
         for market in markets:
+            if market.get("metadata", {}).get("marketType", {}) == "PLAYEROUTCOME":
+                marketName = market.get("displayName")
+                line = 0.5
+                for o in market.get("selections", []):
+                    player = remove_accents(
+                        o.get('name', '').replace('|', '').strip())
+                    if not o.get("price"):
+                        continue
+                    p = no_vig_odds(o["price"]["d"])
+                    newline = {
+                        "Player": player,
+                        "Market": marketName,
+                        "League": api["competitionName"],
+                        "Date": date,
+                        "Line": line,
+                        "Over": p[0],
+                        "Under": p[1],
+                    }
+                    players.append(newline)
+
+                continue
             if market.get("displayName") == "Run In 1st Inning?":
                 # Handle special case for "Run In 1st Inning?" market
                 marketName = "1st Inning Runs Allowed"
@@ -586,23 +607,6 @@ def get_caesars(sport, league):
                         for team in api["markets"][0]["selections"]
                     ]
                 )
-            elif market.get("metadata", {}).get("marketType", {}) == "PLAYEROUTCOME":
-                marketName = market.get("displayName")
-                line = 0.5
-                for o in market.get("selections", []):
-                    player = remove_accents(
-                        o.get('name', '').replace('|', '').strip())
-                    p = no_vig_odds(o["price"]["d"])
-                    newline = {
-                        "Player": player,
-                        "Market": marketName,
-                        "League": api["competitionName"],
-                        "Date": date,
-                        "Line": line,
-                        "Over": p[0],
-                        "Under": p[1],
-                    }
-                    players.append(newline)
             else:
                 # Get player and market names
                 player = remove_accents(market["metadata"]["player"])
