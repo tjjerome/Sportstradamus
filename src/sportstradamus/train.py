@@ -204,7 +204,7 @@ def meditate(force, stats, league, alt):
             if os.path.isfile(filepath) and not force:
                 M = pd.read_csv(filepath, index_col=0).dropna()
             else:
-                M = stat_data.get_training_matrix(market, cv)
+                M = stat_data.get_training_matrix(market)
 
                 if M.empty:
                     continue
