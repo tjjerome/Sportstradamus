@@ -9,12 +9,13 @@
         "pitcher fantasy points underdog": 0.5420468348249582,
         "pitcher fantasy score": 0.5249131602641597,
         "pitcher strikeouts": 1,
-        "pitches thrown": 0.1539916987216958,
-        "pitching outs": 0.23259645783861846,
+        "pitches thrown": 0.14677969191442852,
+        "pitching outs": 0.22839172203377886,
         "runs allowed": 1,
         "stolen bases": 1,
         "total bases": 1,
-        "walks": 1
+        "walks": 1,
+        "walks allowed": 1
     },
     "NBA": {
         "AST": 0.8491361101283916,
@@ -55,7 +56,7 @@
         "receiving yards": 0.8825778835097811,
         "receptions": 1,
         "rushing tds": 1,
-        "rushing yards": 0.8384814678285227,
+        "rushing yards": 0.8382174615268049,
         "targets": 0.6364498889272242,
         "tds": 1,
         "yards": 0.7373102970818342,
