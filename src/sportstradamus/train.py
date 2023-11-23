@@ -534,12 +534,15 @@ def meditate(force, stats, league, alt):
 
             filt = {}
 
-            counts, bins = np.histogram(X_train["Line"])
+            n_bins = np.clip(
+                int(X_train["Line"].max()-X_train["Line"].min()), 3, 10)
+            counts, bins = np.histogram(X_train["Line"], bins=n_bins)
+            bins[-1] = bins[-1] + .5
             edges = []
-            for c, b1, b2 in zip(counts, bins[1:], bins[:-1]):
-                if c > 0:
+            for b1, b2 in zip(bins[1:], bins[:-1]):
+                mask = X_train["Line"].between(b2, b1, "left")
+                if (y_class[mask].sum() > 4) and ((len(y_class[mask]) - y_class[mask].sum()) > 4):
                     edges.append((b2, b1))
-                    mask = X_train["Line"].between(b2, b1, "right")
                     clf = LogisticRegressionCV(
                         fit_intercept=True, solver='newton-cholesky').fit(y_proba_train[mask], y_class[mask])
                     filt[(b2, b1)] = clf
@@ -549,7 +552,7 @@ def meditate(force, stats, league, alt):
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             for mini, maxi in edges:
-                mask = X_test["Line"].between(mini, maxi, "right")
+                mask = X_test["Line"].between(mini, maxi, "left")
                 y_proba_filt[mask, :] = filt[(mini, maxi)].predict_proba(
                     y_proba[mask])
 
@@ -595,7 +598,7 @@ def meditate(force, stats, league, alt):
 
             filedict = {
                 "model": model,
-                "filter": clf,
+                "filter": filt,
                 "step": step,
                 "stats": {
                     "Accuracy": acc,

@@ -2848,7 +2848,10 @@ class StatsNFL(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 0, market].mean()/x[market].mean())-1
 
-        if any([string in market for string in ["pass", "completion", "attempts", "interceptions", "qb", "sacks"]]):
+        if any([string in market for string in ["pass", "completion", "attempts", "interceptions"]]):
+            positions = ['QB']
+            stat_types = self.stat_types['passing']
+        elif any([string in market for string in ["qb", "sacks"]]):
             positions = ['QB']
             stat_types = self.stat_types['passing'] + \
                 self.stat_types['rushing']
