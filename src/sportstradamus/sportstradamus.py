@@ -642,8 +642,8 @@ def find_correlation(offers, stats, platform, parlays):
             else:
                 game_df.loc[:, 'Boost'] = 1
 
-            idx = game_df.loc[game_df['Books'] > .49].sort_values('Model', ascending=False).head(
-                35).sort_values(['Team', 'Player']).index
+            idx = game_df.loc[game_df['Books'] > .49].sort_values(['Model', 'Books'], ascending=False).groupby('Player').head(5).head(
+                30).sort_values(['Team', 'Player']).index
 
             best_fives = []
             if league != "MLB" and platform != "Thrive":
@@ -692,8 +692,8 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Model"] for leg in bet])
                     pb = np.product([leg["Books"] for leg in bet])
 
-                    if p < 1/20 or pb < .65/20:
-                        continue
+                    # if p < 1/20 or pb < .65/20:
+                    #     continue
 
                     # get correlation matrix
                     for i in np.arange(5):
@@ -735,7 +735,7 @@ def find_correlation(offers, stats, platform, parlays):
 
                     p *= 20
                     pb *= 20
-                    if p > 1.5 and pb > 1:
+                    if p > 1 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
@@ -773,11 +773,11 @@ def find_correlation(offers, stats, platform, parlays):
                     to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
                     ).sort_values("EV", ascending=False)
 
-                    add_id = [i for i in df5.index if i not in to_add.index]
-                    df5 = df5.loc[add_id]
-
                     if len(to_add.loc[to_add["Boost"] > 1]) > 3:
                         df5 = df5.loc[df5["Boost"] == 1]
+
+                    add_id = [i for i in df5.index if i not in to_add.index]
+                    df5 = df5.loc[add_id]
 
                 parlay_df = pd.concat(
                     [parlay_df, to_add])
@@ -869,7 +869,7 @@ def find_correlation(offers, stats, platform, parlays):
 
                     p *= 6
                     pb *= 6
-                    if p > 1.25 and pb > 1:
+                    if p > 1 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
@@ -907,11 +907,11 @@ def find_correlation(offers, stats, platform, parlays):
                     to_add = pd.concat([to_add, df3.head(1)]).drop_duplicates(
                     ).sort_values("EV", ascending=False)
 
-                    add_id = [i for i in df3.index if i not in to_add.index]
-                    df3 = df3.loc[add_id]
-
                     if len(to_add.loc[to_add["Boost"] > 1]) > 3:
                         df3 = df3.loc[df3["Boost"] == 1]
+
+                    add_id = [i for i in df3.index if i not in to_add.index]
+                    df3 = df3.loc[add_id]
 
                 parlay_df = pd.concat(
                     [parlay_df, to_add])
