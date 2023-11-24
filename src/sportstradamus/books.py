@@ -129,11 +129,14 @@ def get_dk(events, categories, league):
                                 outcomes = sorted(
                                     k["outcomes"][:2], key=lambda x: x["label"]
                                 )
-                                line = outcomes[1]["line"]
-                                p = no_vig_odds(
-                                    outcomes[0]["oddsDecimal"],
-                                    outcomes[1]["oddsDecimal"],
-                                )
+                                line = outcomes[0]["line"]
+                                if len(outcomes) == 1:
+                                    p = no_vig_odds(outcomes[0]["oddsDecimal"])
+                                else:
+                                    p = no_vig_odds(
+                                        outcomes[0]["oddsDecimal"],
+                                        outcomes[1]["oddsDecimal"],
+                                    )
                                 newline = {
                                     "Player": player,
                                     "League": league,
@@ -191,7 +194,7 @@ def get_fd(sport, tabs):
     events = attachments["events"]
 
     # Filter event IDs based on open date
-    event_ids = [(event['eventId'], datetime.fromisoformat(event["openDate"]).astimezone().strftime("%Y-%m-%d")) for event in events.values() if (datetime.fromisoformat(
+    event_ids = [(str(event['eventId']), datetime.fromisoformat(event["openDate"]).astimezone().strftime("%Y-%m-%d")) for event in events.values() if (datetime.fromisoformat(
         event["openDate"]) > datetime.now(timezone.utc)) and (datetime.fromisoformat(event["openDate"]) - timedelta(days=10) < datetime.now(timezone.utc))]
 
     players = []
@@ -290,7 +293,7 @@ def get_fd(sport, tabs):
                         player = remove_accents(
                             offer["marketName"].split(" - ")[0])
                         market = offer["marketName"].split(" - ")[1]
-                    elif "@" in events[event_id]["name"]:
+                    elif sport == 'mlb' and "@" in events[event_id]["name"]:
                         teams = (
                             events[event_id]["name"]
                             .replace(" @ ", ")")
