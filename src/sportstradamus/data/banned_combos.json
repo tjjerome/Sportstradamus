@@ -79,6 +79,22 @@
                 "assists"
             ],
             [
+                "powerPlayPoints",
+                "points"
+            ],
+            [
+                "powerPlayPoints",
+                "powerPlayPoints"
+            ],
+            [
+                "powerPlayPoints",
+                "goals"
+            ],
+            [
+                "powerPlayPoints",
+                "assists"
+            ],
+            [
                 "goals",
                 "assists"
             ]
@@ -94,7 +110,15 @@
             ],
             [
                 "goalsAgainst",
+                "powerPlayPoints"
+            ],
+            [
+                "goalsAgainst",
                 "assists"
+            ],
+            [
+                "goalsAgainst",
+                "goals"
             ],
             [
                 "goalsAgainst",
@@ -107,6 +131,10 @@
             [
                 "saves",
                 "points"
+            ],
+            [
+                "saves",
+                "powerPlayPoints"
             ],
             [
                 "saves",
