@@ -279,18 +279,6 @@ def main(progress, books, parlays):
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
-    # Thrive
-
-    try:
-        th_dict = get_thrive()
-        th_offers, th5 = process_offers(
-            th_dict, "Thrive", stats, False)
-        save_data(th_offers, "Thrive", gc)
-        best5 = pd.concat([best5, th5])
-        th_offers["Market"] = th_offers["Market"].map(stat_map["Thrive"])
-    except Exception as exc:
-        logger.exception("Failed to get Thrive")
-
     archive.write()
 
     if parlays and not best5.empty:
@@ -311,8 +299,8 @@ def main(progress, books, parlays):
         history = pd.DataFrame(
             columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
 
-    df = pd.concat([ud_offers, pp_offers, th_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                                      ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
+    df = pd.concat([ud_offers, pp_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
+                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
     df.loc[(df['Market'] == 'AST') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
     df.loc[(df['Market'] == 'PTS') & (

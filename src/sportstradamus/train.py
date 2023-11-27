@@ -38,10 +38,9 @@ import json
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
 @click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
-@click.option("--alt/--no-alt", default=False, help="Generate alternate model sets")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
-def meditate(force, stats, league, alt):
+def meditate(force, stats, league):
 
     with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
         stat_cv = json.load(f)
@@ -74,29 +73,6 @@ def meditate(force, stats, league, alt):
     np.random.seed(69)
 
     all_markets = {
-        "NBA": [
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-            "MIN",
-        ],
         "NFL": [
             "passing yards",
             "rushing yards",
@@ -125,6 +101,29 @@ def meditate(force, stats, league, alt):
             # "fumbles lost",
             # "completion percentage"
         ],
+        "NBA": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN",
+        ],
         "NHL": [
             "saves",
             "shots",
@@ -142,29 +141,29 @@ def meditate(force, stats, league, alt):
             "faceOffWins",
             "timeOnIce",
         ],
-        "MLB": [
-            "pitcher strikeouts",
-            "pitching outs",
-            "pitches thrown",
-            "hits allowed",
-            "runs allowed",
-            "walks allowed",
-            "1st inning runs allowed",
-            "1st inning hits allowed",
-            "hitter fantasy score",
-            "pitcher fantasy score",
-            "hitter fantasy points underdog",
-            "pitcher fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles"
-        ],
+        # "MLB": [
+        #     "pitcher strikeouts",
+        #     "pitching outs",
+        #     "pitches thrown",
+        #     "hits allowed",
+        #     "runs allowed",
+        #     "walks allowed",
+        #     "1st inning runs allowed",
+        #     "1st inning hits allowed",
+        #     "hitter fantasy score",
+        #     "pitcher fantasy score",
+        #     "hitter fantasy points underdog",
+        #     "pitcher fantasy points underdog",
+        #     "hits+runs+rbi",
+        #     "total bases",
+        #     "walks",
+        #     "stolen bases",
+        #     "hits",
+        #     "runs",
+        #     "rbi",
+        #     "batter strikeouts",
+        #     "singles"
+        # ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -185,7 +184,7 @@ def meditate(force, stats, league, alt):
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
             filepath = pkg_resources.files(data) / filename
             if os.path.isfile(filepath) and not force:
-                if stats or alt:
+                if stats:
                     with open(filepath, 'rb') as infile:
                         filedict = pickle.load(infile)
                         model = filedict['model']
@@ -227,9 +226,11 @@ def meditate(force, stats, league, alt):
                 if M.loc[mask, "Line"].max() < 3:
                     M = M.loc[(M["Odds"] > .2) & (M["Line"] < 3)]
                     mask = (M["Odds"] != 0.5)
+                    target = (M.loc[mask, "Result"] >
+                              M.loc[mask, "Line"]).mean()
                     balance = (M["Result"] > M["Line"]).mean()
-                    n = 2*int(np.abs(.5 - balance) * len(M))
-                    if balance < .5:
+                    n = 2*int(np.abs(target - balance) * len(M))
+                    if balance < target:
                         chopping_block = M.loc[~mask & (
                             M["Result"] < M["Line"])].index
                         p = (1/M.loc[chopping_block,
@@ -398,8 +399,6 @@ def meditate(force, stats, league, alt):
             if need_model:
                 y_train_labels = np.ravel(y_train.to_numpy())
 
-                dtrain = lgb.Dataset(X_train, label=y_train_labels)
-
                 lgblss_dist_class = DistributionClass()
                 candidate_distributions = [Gaussian, Poisson]
 
@@ -408,63 +407,50 @@ def meditate(force, stats, league, alt):
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
 
-                model = LightGBMLSS(distributions[dist])
-                opt_param = model.hyper_opt(params,
-                                            dtrain,
-                                            num_boost_round=999,
-                                            nfold=5,
-                                            early_stopping_rounds=100,
-                                            max_minutes=60,
-                                            n_trials=500,
-                                            silence=True,
-                                            )
-                opt_params = opt_param.copy()
-                n_rounds = opt_params["opt_rounds"]
-                del opt_params["opt_rounds"]
+                models = {}
 
-                model.train(opt_params,
-                            dtrain,
-                            num_boost_round=n_rounds
-                            )
+                # n_bins = np.clip(
+                #     int(X_train["Line"].max()-X_train["Line"].min()), 3, 10)
+                # _, bins = np.histogram(X_train["Line"], bins=n_bins)
+                _, bins = pd.qcut(X_train["Player z"],
+                                  4, retbins=True, duplicates='drop')
+                bins[-1] = bins[-1] + 3
+                bins[0] = bins[0] - 3
+                for b1, b2 in zip(bins[1:], bins[:-1]):
+                    mask = X_train["Player z"].between(b2, b1, "left")
+                    dtrain = lgb.Dataset(
+                        X_train[mask], label=y_train_labels[mask])
+                    model = LightGBMLSS(distributions[dist])
+                    opt_param = model.hyper_opt(params,
+                                                dtrain,
+                                                num_boost_round=999,
+                                                nfold=5,
+                                                early_stopping_rounds=20,
+                                                max_minutes=20,
+                                                n_trials=250,
+                                                silence=True,
+                                                )
+                    opt_params = opt_param.copy()
+                    n_rounds = opt_params["opt_rounds"]
+                    del opt_params["opt_rounds"]
 
-            elif alt:
-                y_train_labels = np.ravel(y_train.to_numpy())
+                    model.train(opt_params,
+                                dtrain,
+                                num_boost_round=n_rounds
+                                )
+                    models[(b2, b1)] = model
 
-                dtrain = lgb.Dataset(X_train, label=y_train_labels)
+            prob_params_train = pd.DataFrame()
+            prob_params = pd.DataFrame()
+            for bounds, model in models.items():
+                mask = X_test["Player z"].between(bounds[0], bounds[1], "left")
+                prob_params_train.loc[mask] = model.predict(
+                    X_train, pred_type="parameters")
+                prob_params.loc[mask] = model.predict(
+                    X_test, pred_type="parameters")
 
-                if dist == "Gaussian":
-                    dist = "Gamma"
-                    # X_train = X_train[y_train > 1]
-                    # y_train = y_train[y_train > 1]
-                    y_train_labels[y_train_labels < 2] = 2
-                elif dist == "Poisson":
-                    dist = "NegativeBinomial"
-                else:
-                    continue
-
-                model = LightGBMLSS(distributions[dist])
-                opt_param = model.hyper_opt(params,
-                                            dtrain,
-                                            num_boost_round=999,
-                                            nfold=5,
-                                            early_stopping_rounds=20,
-                                            max_minutes=60,
-                                            n_trials=500,
-                                            silence=True,
-                                            )
-                opt_params = opt_param.copy()
-                n_rounds = opt_params["opt_rounds"]
-                del opt_params["opt_rounds"]
-
-                model.train(opt_params,
-                            dtrain,
-                            num_boost_round=n_rounds
-                            )
-
-            prob_params_train = model.predict(X_train, pred_type="parameters")
             prob_params_train.index = y_train.index
             prob_params_train['result'] = y_train['Result']
-            prob_params = model.predict(X_test, pred_type="parameters")
             prob_params.index = y_test.index
             prob_params['result'] = y_test['Result']
             cv = 1
@@ -527,33 +513,22 @@ def meditate(force, stats, league, alt):
 
             dev = mean_tweedie_deviance(y_test, ev, power=p)
 
-            y_class = (y_train["Result"] >=
-                       X_train["Line"]).astype(int)
-
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
             filt = {}
-
-            n_bins = np.clip(
-                int(X_train["Line"].max()-X_train["Line"].min()), 3, 10)
-            counts, bins = np.histogram(X_train["Line"], bins=n_bins)
-            bins[-1] = bins[-1] + .5
-            edges = []
-            for b1, b2 in zip(bins[1:], bins[:-1]):
-                mask = X_train["Line"].between(b2, b1, "left")
-                if (y_class[mask].sum() > 4) and ((len(y_class[mask]) - y_class[mask].sum()) > 4):
-                    edges.append((b2, b1))
-                    clf = LogisticRegressionCV(
-                        fit_intercept=True, solver='newton-cholesky').fit(y_proba_train[mask], y_class[mask])
-                    filt[(b2, b1)] = clf
+            y_class = (y_train["Result"] >=
+                       X_train["Line"]).astype(int)
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
-            for mini, maxi in edges:
-                mask = X_test["Line"].between(mini, maxi, "left")
-                y_proba_filt[mask, :] = filt[(mini, maxi)].predict_proba(
+            for mini, maxi in models.keys():
+                mask = X_test["Player z"].between(mini, maxi, "left")
+                clf = LogisticRegressionCV(
+                    fit_intercept=True, solver='newton-cholesky', tol=1e-8, max_iter=500).fit(y_proba_train[mask], y_class[mask])
+                filt[(mini, maxi)] = clf
+                y_proba_filt[mask, :] = clf.predict_proba(
                     y_proba[mask])
 
             y_class = (y_test["Result"] >=
