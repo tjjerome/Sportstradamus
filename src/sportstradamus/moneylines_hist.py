@@ -10,14 +10,14 @@ filepath = pkg_resources.files(data) / "archive.dat"
 with open(filepath, "rb") as infile:
     archive = pickle.load(infile)
 
-apikey = "02a4dcf96364c282ed62cdfba33cc460"
+apikey = "2d1d69177847c97238489e7332968625"
 
 sport = "americanfootball_nfl"
 league = "NFL"
 
-Date = datetime.strptime("2023-09-06T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime.strptime("2020-09-05T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
 
-while Date < datetime.strptime("2023-10-17T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
+while Date < datetime.strptime("2021-02-03T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
     # for date in ['2020-10-13', '2020-12-19', '2021-12-26', '2022-01-02', '2022-11-20',
     #              '2022-12-25', '2023-01-01', '2023-01-08', '2023-09-07', '2023-09-10',
     #              '2023-09-11', '2023-09-14']:

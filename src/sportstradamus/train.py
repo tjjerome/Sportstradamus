@@ -33,6 +33,7 @@ from lightgbmlss.distributions import (
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
+import gc
 
 
 @click.command()
@@ -63,13 +64,13 @@ def meditate(force, stats, league):
     # mlb.update()
     nba = StatsNBA()
     nba.load()
-    # nba.update()
+    nba.update()
     nhl = StatsNHL()
     nhl.load()
-    # nhl.update()
+    nhl.update()
     nfl = StatsNFL()
     nfl.load()
-    # nfl.update()
+    nfl.update()
     np.random.seed(69)
 
     all_markets = {
@@ -95,11 +96,11 @@ def meditate(force, stats, league):
             "longest completion",
             "longest rush",
             "longest reception",
-            # "sacks taken",
-            # "passing first downs",
-            # "first downs",
-            # "fumbles lost",
-            # "completion percentage"
+            "sacks taken",
+            "passing first downs",
+            "first downs",
+            "fumbles lost",
+            "completion percentage"
         ],
         "NBA": [
             "PTS",
@@ -141,29 +142,29 @@ def meditate(force, stats, league):
             "faceOffWins",
             "timeOnIce",
         ],
-        # "MLB": [
-        #     "pitcher strikeouts",
-        #     "pitching outs",
-        #     "pitches thrown",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "walks allowed",
-        #     "1st inning runs allowed",
-        #     "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "batter strikeouts",
-        #     "singles"
-        # ],
+        "MLB": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "walks allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -216,104 +217,18 @@ def meditate(force, stats, league):
                                                                                                                 > 300, "DaysIntoSeason"].min()
 
                 # Trim the fat
-                mask = (M["Odds"] != 0.5) | (
-                    (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
-                M = M.loc[((M["Line"] >= M["Line"].quantile(.05)) & (
-                    M["Line"] <= M["Line"].quantile(.95))) | mask]
-                mask = (M["Odds"] != 0.5) | (
-                    (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
+                M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
+                    M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
 
-                if M.loc[mask, "Line"].max() < 3:
-                    M = M.loc[(M["Odds"] > .2) & (M["Line"] < 3)]
-                    mask = (M["Odds"] != 0.5)
-                    target = (M.loc[mask, "Result"] >
-                              M.loc[mask, "Line"]).mean()
-                    balance = (M["Result"] > M["Line"]).mean()
-                    n = 2*int(np.abs(target - balance) * len(M))
-                    if balance < target:
-                        chopping_block = M.loc[~mask & (
-                            M["Result"] < M["Line"])].index
-                        p = (1/M.loc[chopping_block,
-                                     "MeanYr"].clip(0.1)).to_numpy()
-                        p = p/np.sum(p)
-                    else:
-                        chopping_block = M.loc[~mask & (
-                            M["Result"] > M["Line"])].index
-                        p = (M.loc[chopping_block, "MeanYr"].clip(
-                            0.1)).to_numpy()
-                        p = p/np.sum(p)
+                if "Position" in M.columns:
+                    for i in M.Position.unique():
+                        target = M.loc[(M["Archived"] == 1) & (
+                            M["Position"] == i), "Line"].median()
 
-                    if n > 0:
-                        cut = np.random.choice(
-                            chopping_block, n, replace=False, p=p)
-                        M.drop(cut, inplace=True)
-                else:
-                    if "Position" in M.columns:
-                        for i in M.Position.unique():
-                            mask = (M["Odds"] != 0.5) | (
-                                (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
-                            if len(M[mask]) > 4:
-                                target = M.loc[mask & (
-                                    M["Position"] == i), "Line"].median()
-                            else:
-                                target = M.loc[M["Position"]
-                                               == i, "Line"].mean()
-
-                            less = M.loc[~mask & (
-                                M["Position"] == i) & (M["Line"] < target), "Line"]
-                            more = M.loc[~mask & (
-                                M["Position"] == i) & (M["Line"] > target), "Line"]
-
-                            n = np.abs(less.count() - more.count())
-                            if n > 0:
-                                if less.count() > more.count():
-                                    chopping_block = less.index
-                                    counts, bins = np.histogram(less)
-                                    counts = counts/len(less)
-                                    actuals = M.loc[mask & (
-                                        M["Position"] == i) & (M["Line"] < target), "Line"]
-                                    actual_counts, bins = np.histogram(
-                                        actuals, bins)
-                                    if len(actuals):
-                                        actual_counts = actual_counts / \
-                                            len(actuals)
-                                    diff = np.clip(
-                                        counts-actual_counts, 1e-8, None)
-                                    p = np.zeros(len(less))
-                                    for j, a in enumerate(bins[:-1]):
-                                        p[less >= a] = diff[j]
-                                    p = p/np.sum(p)
-                                else:
-                                    chopping_block = more.index
-                                    counts, bins = np.histogram(more)
-                                    counts = counts/len(more)
-                                    actuals = M.loc[mask & (
-                                        M["Position"] == i) & (M["Line"] > target), "Line"]
-                                    actual_counts, bins = np.histogram(
-                                        actuals, bins)
-                                    if len(actuals):
-                                        actual_counts = actual_counts / \
-                                            len(actuals)
-                                    diff = np.clip(
-                                        counts-actual_counts, 1e-8, None)
-                                    p = np.zeros(len(more))
-                                    for j, a in enumerate(bins[:-1]):
-                                        p[more >= a] = diff[j]
-                                    p = p/np.sum(p)
-
-                                cut = np.random.choice(
-                                    chopping_block, n, replace=False, p=p)
-                                M.drop(cut, inplace=True)
-                    else:
-                        mask = (M["Odds"] != 0.5) | (
-                            (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
-                        if len(M[mask]) > 4:
-                            target = M.loc[mask, "Line"].median()
-                        else:
-                            target = M["Line"].mean()
-
-                        less = M.loc[~mask & (M["Line"] < target), "Line"]
-                        more = M.loc[~mask & (M["Line"] > target), "Line"]
+                        less = M.loc[(M["Archived"] != 1) & (
+                            M["Position"] == i) & (M["Line"] < target), "Line"]
+                        more = M.loc[(M["Archived"] != 1) & (
+                            M["Position"] == i) & (M["Line"] > target), "Line"]
 
                         n = np.abs(less.count() - more.count())
                         if n > 0:
@@ -321,12 +236,13 @@ def meditate(force, stats, league):
                                 chopping_block = less.index
                                 counts, bins = np.histogram(less)
                                 counts = counts/len(less)
-                                actuals = M.loc[mask & (
-                                    M["Line"] < target), "Line"]
+                                actuals = M.loc[(M["Archived"] == 1) & (
+                                    M["Position"] == i) & (M["Line"] < target), "Line"]
                                 actual_counts, bins = np.histogram(
                                     actuals, bins)
                                 if len(actuals):
-                                    actual_counts = actual_counts/len(actuals)
+                                    actual_counts = actual_counts / \
+                                        len(actuals)
                                 diff = np.clip(
                                     counts-actual_counts, 1e-8, None)
                                 p = np.zeros(len(less))
@@ -337,12 +253,13 @@ def meditate(force, stats, league):
                                 chopping_block = more.index
                                 counts, bins = np.histogram(more)
                                 counts = counts/len(more)
-                                actuals = M.loc[mask & (
-                                    M["Line"] > target), "Line"]
+                                actuals = M.loc[(M["Archived"] == 1) & (
+                                    M["Position"] == i) & (M["Line"] > target), "Line"]
                                 actual_counts, bins = np.histogram(
                                     actuals, bins)
                                 if len(actuals):
-                                    actual_counts = actual_counts/len(actuals)
+                                    actual_counts = actual_counts / \
+                                        len(actuals)
                                 diff = np.clip(
                                     counts-actual_counts, 1e-8, None)
                                 p = np.zeros(len(more))
@@ -353,11 +270,79 @@ def meditate(force, stats, league):
                             cut = np.random.choice(
                                 chopping_block, n, replace=False, p=p)
                             M.drop(cut, inplace=True)
+                else:
+                    if len(M[(M["Archived"] == 1)]) > 4:
+                        target = M.loc[(M["Archived"] == 1), "Line"].median()
+                    else:
+                        target = M["Line"].mean()
 
+                    less = M.loc[(M["Archived"] != 1) & (M["Line"] < target), "Line"]
+                    more = M.loc[(M["Archived"] != 1) & (M["Line"] > target), "Line"]
+
+                    n = np.abs(less.count() - more.count())
+                    if n > 0:
+                        if less.count() > more.count():
+                            chopping_block = less.index
+                            counts, bins = np.histogram(less)
+                            counts = counts/len(less)
+                            actuals = M.loc[(M["Archived"] == 1) & (
+                                M["Line"] < target), "Line"]
+                            actual_counts, bins = np.histogram(
+                                actuals, bins)
+                            if len(actuals):
+                                actual_counts = actual_counts/len(actuals)
+                            diff = np.clip(
+                                counts-actual_counts, 1e-8, None)
+                            p = np.zeros(len(less))
+                            for j, a in enumerate(bins[:-1]):
+                                p[less >= a] = diff[j]
+                            p = p/np.sum(p)
+                        else:
+                            chopping_block = more.index
+                            counts, bins = np.histogram(more)
+                            counts = counts/len(more)
+                            actuals = M.loc[(M["Archived"] == 1) & (
+                                M["Line"] > target), "Line"]
+                            actual_counts, bins = np.histogram(
+                                actuals, bins)
+                            if len(actuals):
+                                actual_counts = actual_counts/len(actuals)
+                            diff = np.clip(
+                                counts-actual_counts, 1e-8, None)
+                            p = np.zeros(len(more))
+                            for j, a in enumerate(bins[:-1]):
+                                p[more >= a] = diff[j]
+                            p = p/np.sum(p)
+
+                        cut = np.random.choice(
+                            chopping_block, n, replace=False, p=p)
+                        M.drop(cut, inplace=True)
+
+                M = M.loc[(M["Odds"] > .2) & (M["Odds"] < .8)]
+                target = (M.loc[(M["Archived"] == 1), "Result"] >
+                            M.loc[(M["Archived"] == 1), "Line"]).mean()
+                balance = (M["Result"] > M["Line"]).mean()
+                n = 2*int(np.abs(target - balance) * len(M))
+                if balance < target:
+                    chopping_block = M.loc[(M["Archived"] != 1) & (
+                        M["Result"] < M["Line"])].index
+                    p = (1/M.loc[chopping_block,
+                                    "MeanYr"].clip(0.1)).to_numpy()
+                    p = p/np.sum(p)
+                else:
+                    chopping_block = M.loc[(M["Archived"] != 1) & (
+                        M["Result"] > M["Line"])].index
+                    p = (M.loc[chopping_block, "MeanYr"].clip(
+                        0.1)).to_numpy()
+                    p = p/np.sum(p)
+
+                if n > 0:
+                    cut = np.random.choice(
+                        chopping_block, n, replace=False, p=p)
+                    M.drop(cut, inplace=True)
+
+                M.drop(columns=["Archived"], inplace=True)
                 M.to_csv(filepath)
-
-            mask = (M["Odds"] != 0.5) | (
-                (M["Line"] != M["AvgYr"]) & (M["Line"] != 0.5))
 
             y = M[['Result']]
             X = M.drop(columns=['Result'])
@@ -376,26 +361,6 @@ def meditate(force, stats, league):
 
             categories = "name:"+",".join(categories)
 
-            params = {
-                "feature_pre_filter": ["none", [False]],
-                "force_col_wise": ["none", [True]],
-                "boosting_type": ["categorical", ["gbdt"]],
-                # "extra_trees": ["categorical", [True, False]],
-                "max_depth": ["int", {"low": 2, "high": 63, "log": False}],
-                # "max_bin": ["int", {"low": 1, "high": 512, "log": False}],
-                "num_leaves": ["int", {"low": 7, "high": 4095, "log": False}],
-                "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                "min_child_samples": ["int", {"low": 2, "high": 500, "log": True}],
-                "min_child_weight": ["float", {"low": 1e-4, "high": len(X_train)/1000, "log": True}],
-                "path_smooth": ["float", {"low": 0, "high": len(X_train)/2, "log": False}],
-                "learning_rate": ["float", {"low": len(X_train)*1e-7, "high": 0.2, "log": True}],
-                "min_gain_to_split": ["float", {"low": 1e-8, "high": 40, "log": False}],
-                "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                "bagging_freq": ["int", {"low": 1, "high": 20, "log": False}]
-            }
-
             if need_model:
                 y_train_labels = np.ravel(y_train.to_numpy())
 
@@ -409,11 +374,26 @@ def meditate(force, stats, league):
 
                 models = {}
 
-                # n_bins = np.clip(
-                #     int(X_train["Line"].max()-X_train["Line"].min()), 3, 10)
-                # _, bins = np.histogram(X_train["Line"], bins=n_bins)
+                n_bins = np.clip(int(len(X_train)/2000), 3, 7)
                 _, bins = pd.qcut(X_train["Player z"],
-                                  4, retbins=True, duplicates='drop')
+                                  n_bins, retbins=True, duplicates='drop')
+                
+                params = {
+                    "feature_pre_filter": ["none", [False]],
+                    "force_col_wise": ["none", [True]],
+                    "max_depth": ["int", {"low": 5, "high": 63, "log": False}],
+                    "max_bin": ["none", [int(.8*len(X_train)/n_bins/3)]],
+                    "num_leaves": ["int", {"low": 23, "high": 4095, "log": False}],
+                    "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
+                    "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
+                    "min_child_samples": ["int", {"low": 2, "high": 500, "log": False}],
+                    "min_child_weight": ["float", {"low": 1e-4, "high": .8*len(X_train)/n_bins/1000, "log": True}],
+                    "learning_rate": ["float", {"low": .001, "high": 0.3, "log": True}],
+                    "feature_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
+                    "bagging_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
+                    "bagging_freq": ["none", [1]]
+                }
+
                 bins[-1] = bins[-1] + 3
                 bins[0] = bins[0] - 3
                 for b1, b2 in zip(bins[1:], bins[:-1]):
@@ -425,7 +405,7 @@ def meditate(force, stats, league):
                                                 dtrain,
                                                 num_boost_round=999,
                                                 nfold=5,
-                                                early_stopping_rounds=20,
+                                                early_stopping_rounds=50,
                                                 max_minutes=20,
                                                 n_trials=250,
                                                 silence=True,
@@ -439,6 +419,7 @@ def meditate(force, stats, league):
                                 num_boost_round=n_rounds
                                 )
                     models[(b2, b1)] = model
+                    gc.collect()
 
             prob_params_train = pd.DataFrame()
             prob_params = pd.DataFrame()
@@ -572,7 +553,7 @@ def meditate(force, stats, league):
                 e[i] = 1 - entropy/entropy0
 
             filedict = {
-                "model": model,
+                "model": models,
                 "filter": filt,
                 "step": step,
                 "stats": {
@@ -620,7 +601,7 @@ def meditate(force, stats, league):
                 del model
 
             report()
-            see_features()
+            # see_features()
 
 
 def report():
