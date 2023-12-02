@@ -1143,7 +1143,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     new_offers = []
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
-    model = filedict["model"]
+    models = filedict["model"]
     dist = filedict["distribution"]
     filt = filedict["filter"]
     step = filedict["step"]
@@ -1155,7 +1155,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     for c in categories:
         playerStats[c] = playerStats[c].astype('category')
 
-    prob_params = model.predict(playerStats, pred_type="parameters")
+    prob_params = pd.DataFrame()
+    for bounds, model in models.items():
+        mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
+        prob_params.loc[mask] = model.predict(
+            playerStats, pred_type="parameters")
     prob_params.index = playerStats.index
 
     for o in tqdm(offers, leave=False):

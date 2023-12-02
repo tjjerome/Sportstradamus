@@ -154,12 +154,12 @@ class StatsNBA(Stats):
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
                 'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
                 'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
-                'PLUS_MINUS', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
+                'FG3_RATIO', 'PLUS_MINUS', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
                 'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlay',
                 'OFF_RATING', 'DEF_RATING', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO',
-                'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'PACE',
-                'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV', 'PCT_STL',
-                'PCT_BLKA']
+                'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'BLK_PCT', 'PIE', 'FTR', 'PACE',
+                'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV', 'PCT_STL', 'PCT_BLKA',
+                'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48', 'TOV_48', 'BLKA_48', 'STL_48']
         self.gamelog = pd.DataFrame(columns=cols)
         team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE', 'OPP',
                      'OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
@@ -320,6 +320,8 @@ class StatsNBA(Stats):
         # Process each game
         nba_df = []
         for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
+            if game["MIN"] < 1:
+                continue
 
             player_id = game["PLAYER_ID"]
             game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
@@ -372,6 +374,17 @@ class StatsNBA(Stats):
             game["fantasy points parlay"] = game["PRA"] + \
                 game["BLST"]*2 - game["TOV"]
             game["FTR"] = (game["FTM"]/game["FGA"]) if game["FGA"] > 0 else 0
+            game["FG3_RATIO"] = (game["FG3A"]/game["FGA"]) if game["FGA"] > 0 else 0
+            game["BLK_PCT"] = (game["BLK"]/game["BLKA"]) if game["BLKA"] > 0 else 0
+            game["FGA_48"] = game["FGA"] / game["MIN"] * 48
+            game["FG3A_48"] = game["FG3A"] / game["MIN"] * 48
+            game["REB_48"] = game["REB"] / game["MIN"] * 48
+            game["OREB_48"] = game["OREB"] / game["MIN"] * 48
+            game["DREB_48"] = game["DREB"] / game["MIN"] * 48
+            game["AST_48"] = game["AST"] / game["MIN"] * 48
+            game["TOV_48"] = game["TOV"] / game["MIN"] * 48
+            game["BLKA_48"] = game["BLKA"] / game["MIN"] * 48
+            game["STL_48"] = game["STL"] / game["MIN"] * 48
 
             game.update(adv_gamelog[i])
             game.update(usg_gamelog[i])
@@ -592,10 +605,11 @@ class StatsNBA(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
-        stat_types = ['PLUS_MINUS', 'PFD', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO',
-                      'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PIE', 'FTR', 'MIN',
-                      'PACE', 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV',
-                      'PCT_STL', 'PCT_BLKA']
+        stat_types = ['PLUS_MINUS', 'PFD', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO', 'FG3_RATIO',
+                      'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
+                      'PIE', 'FTR', 'MIN', 'PACE', 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST',
+                      'PCT_TOV', 'PCT_STL', 'PCT_BLKA', 'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48',
+                      'TOV_48', 'BLKA_48', 'STL_48']
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
@@ -894,10 +908,9 @@ class StatsNBA(Stats):
             if game[market] < 0:
                 continue
 
-            if gameDate < datetime(2022, 1, 1) or game["MIN"] < 12:
+            if gameDate < (pd.to_datetime(self.gamelog["GAME_DATE"]).min() + timedelta(days=14)):
                 continue
 
-            data = {}
             self.profile_market(market, date=gameDate)
             name = game['PLAYER_NAME']
 
@@ -906,6 +919,11 @@ class StatsNBA(Stats):
 
             lines = archive["NBA"][market].get(gameDate.strftime(
                 "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
+
+            if len(lines) > 2:
+                mu = np.median(lines)
+                sig = iqr(lines)
+                lines = [line for line in lines if mu - sig <= line <= mu + sig]
 
             line = lines[-1]
 
@@ -923,10 +941,11 @@ class StatsNBA(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
-                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
-                        continue
                     new_get_stats.update(
-                        {"Result": game[market]}
+                        {
+                            "Result": game[market],
+                            "Archived": int(line != 0)
+                        }
                     )
 
                     matrix.append(new_get_stats)
@@ -2096,9 +2115,9 @@ class StatsMLB(Stats):
                 continue
 
             # Retrieve data from the archive based on game date and player name
-            data = {}
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
-            if gameDate < datetime(2022, 3, 1):
+            
+            if gameDate < (pd.to_datetime(self.gamelog["gameDate"]).min() + timedelta(days=14)):
                 continue
 
             self.profile_market(market, date=gameDate.date())
@@ -2109,6 +2128,11 @@ class StatsMLB(Stats):
 
             lines = archive["MLB"][market].get(gameDate.strftime(
                 "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
+
+            if len(lines) > 2:
+                mu = np.median(lines)
+                sig = iqr(lines)
+                lines = [line for line in lines if mu - sig <= line <= mu + sig]
 
             line = lines[-1]
 
@@ -2129,11 +2153,12 @@ class StatsMLB(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
-                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
-                        continue
                     # Determine the result
                     new_get_stats.update(
-                        {"Result": game[market]}
+                        {
+                            "Result": game[market],
+                            "Archived": int(line != 0)
+                        }
                     )
 
                     # Concatenate retrieved stats into the training data matrix
@@ -2174,7 +2199,7 @@ class StatsNFL(Stats):
                 'completion percentage over expected', 'completion percentage', 'passer rating', 'passer adot',
                 'passer adot differential', 'time to throw', 'aggressiveness', 'pass yards per attempt',
                 'rushing yards over expected', 'rushing success rate', 'yac over expected', 'separation created',
-                'targets per route run', 'first read targets per route run', 'route participation',
+                'targets per route run', 'first read targets per route run', 'route participation', 'midfield target rate',
                 'midfield tprr', 'yards per route run', 'average depth of target', 'receiver cp over expected',
                 'first read target share', 'redzone target share', 'redzone carry share', 'carry share',
                 'longest completion', 'longest rush', 'longest reception', 'sacks taken', 'passing first downs',
@@ -2182,18 +2207,21 @@ class StatsNFL(Stats):
         self.gamelog = pd.DataFrame(columns=cols)
         team_cols = ['season', 'week', 'team', 'pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110',
                      'pass_rate_against', 'pass_rate_over_expected_against', 'rush_success_rate', 'pass_success_rate',
-                     'redzone_success_rate', 'rush_success_rate_allowed', 'pass_success_rate_allowed',
-                     'redzone_success_rate_allowed', 'epa_per_rush', 'epa_per_pass', 'redzone_epa', 'yards_per_rush',
-                     'yards_per_pass', 'epa_allowed_per_rush', 'epa_allowed_per_pass', 'redzone_epa_allowed',
-                     'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed', 'cpoe_allowed',
-                     'pressure_per_pass', 'stuffs_per_rush', 'pressure_allowed_per_pass', 'stuffs_allowed_per_rush',
-                     'expected_yards_per_rush', 'blitz_rate', 'epa_per_blitz', 'epa_allowed_per_blitz', 'exp_per_rush',
-                     'exp_per_pass', 'exp_allowed_per_rush', 'exp_allowed_per_pass']
+                     'redzone_success_rate', 'first_read_success_rate', 'midfield_success_rate', 'rush_success_rate_allowed',
+                     'pass_success_rate_allowed', 'redzone_success_rate_allowed', 'first_read_success_rate_allowed',
+                     'midfield_success_rate_allowed', 'epa_per_rush', 'epa_per_pass', 'redzone_epa', 'first_read_epa',
+                     'midfield_epa', 'yards_per_rush', 'yards_per_pass', 'epa_allowed_per_rush', 'epa_allowed_per_pass',
+                     'redzone_epa_allowed', 'first_read_epa_allowed', 'midfield_epa_allowed', 'yards_allowed_per_rush',
+                     'yards_allowed_per_pass', 'completion_percentage_allowed', 'cpoe_allowed', 'pressure_per_pass',
+                     'stuffs_per_rush', 'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
+                     'blitz_rate', 'epa_per_blitz', 'epa_allowed_per_blitz', 'exp_per_rush', 'exp_per_pass',
+                     'exp_allowed_per_rush', 'exp_allowed_per_pass', 'plays_per_game', 'time_of_possession', 'time_per_play']
+        
         self.teamlog = pd.DataFrame(columns=team_cols)
         self.stat_types = {
             'passing': ['completion percentage over expected', 'completion percentage', 'passer rating',
                         'passer adot', 'passer adot differential', 'time to throw', 'aggressiveness',
-                        'pass yards per attempt', 'receiver drops', 'longest completion'],
+                        'pass yards per attempt', 'receiver drops', 'midfield target rate', 'longest completion'],
             'receiving': ['target share', 'air yards share', 'wopr', 'yards per target',
                           'yac over expected', 'separation created', 'targets per route run',
                           'first read targets per route run', 'route participation', 'yards per route run',
@@ -2202,14 +2230,16 @@ class StatsNFL(Stats):
             'rushing': ['snap pct', 'rushing yards over expected', 'rushing success rate', 'redzone carry share',
                         'carry share', 'yards per carry', 'breakaway yards', 'broken tackles', 'longest rush'],
             'offense': ['pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110', 'rush_success_rate',
-                        'pass_success_rate', 'redzone_success_rate', 'epa_per_rush', 'epa_per_pass', 'redzone_epa',
-                        'exp_per_rush', 'exp_per_pass', 'yards_per_rush', 'yards_per_pass',
-                        'pressure_allowed_per_pass', 'stuffs_allowed_per_rush', 'expected_yards_per_rush',
-                        'epa_per_blitz', 'plays_per_game', 'time_of_possession', 'time_per_play'],
+                        'pass_success_rate', 'redzone_success_rate','first_read_success_rate', 'midfield_success_rate',
+                        'epa_per_rush', 'epa_per_pass', 'redzone_epa','first_read_epa', 'midfield_epa', 'exp_per_rush',
+                        'exp_per_pass', 'yards_per_rush', 'yards_per_pass', 'pressure_allowed_per_pass',
+                        'stuffs_allowed_per_rush', 'expected_yards_per_rush', 'epa_per_blitz', 'plays_per_game',
+                        'time_of_possession', 'time_per_play'],
             'defense': ['pass_rate_against', 'pass_rate_over_expected_against', 'rush_success_rate_allowed',
-                        'pass_success_rate_allowed', 'redzone_success_rate_allowed', 'epa_allowed_per_rush',
-                        'epa_allowed_per_pass', 'redzone_epa_allowed', 'exp_allowed_per_rush', 'exp_allowed_per_pass',
-                        'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed',
+                        'pass_success_rate_allowed', 'redzone_success_rate_allowed', 'first_read_success_rate_allowed',
+                        'midfield_success_rate_allowed', 'epa_allowed_per_rush', 'epa_allowed_per_pass',
+                        'redzone_epa_allowed', 'first_read_epa_allowed', 'midfield_epa_allowed', 'exp_allowed_per_rush',
+                        'exp_allowed_per_pass',  'yards_allowed_per_rush', 'yards_allowed_per_pass', 'completion_percentage_allowed',
                         'cpoe_allowed', 'pressure_per_pass', 'stuffs_per_rush', 'blitz_rate', 'epa_allowed_per_blitz',
                         'plays_per_game', 'time_of_possession', 'time_per_play']
         }
@@ -2253,6 +2283,10 @@ class StatsNFL(Stats):
         sched = nfl.import_schedules([self.season_start.year])
         sched.loc[sched['away_team'] == 'LA', 'away_team'] = "LAR"
         sched.loc[sched['home_team'] == 'LA', 'home_team'] = "LAR"
+        sched.loc[sched['away_team'] == 'OAK', 'away_team'] = "LV"
+        sched.loc[sched['home_team'] == 'OAK', 'home_team'] = "LV"
+        sched.loc[sched['away_team'] == 'WSH', 'away_team'] = "WAS"
+        sched.loc[sched['home_team'] == 'WSH', 'home_team'] = "WAS"
         upcoming_games = sched.loc[pd.to_datetime(sched['gameday']) >= datetime.today(), [
             'gameday', 'away_team', 'home_team', 'weekday', 'gametime']]
         if not upcoming_games.empty:
@@ -2323,6 +2357,8 @@ class StatsNFL(Stats):
                      == 'LA', 'recent team'] = "LAR"
         nfl_data.loc[nfl_data['recent team']
                      == 'WSH', 'recent team'] = "WAS"
+        nfl_data.loc[nfl_data['recent team']
+                     == 'OAK', 'recent team'] = "LV"
 
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
@@ -2444,6 +2480,18 @@ class StatsNFL(Stats):
                          == 'LA', 'away_team'] = "LAR"
             self.pbp.loc[self.pbp['posteam']
                          == 'LA', 'posteam'] = "LAR"
+            self.pbp.loc[self.pbp['home_team']
+                         == 'WSH', 'home_team'] = "WAS"
+            self.pbp.loc[self.pbp['away_team']
+                         == 'WSH', 'away_team'] = "WAS"
+            self.pbp.loc[self.pbp['posteam']
+                         == 'WSH', 'posteam'] = "WAS"
+            self.pbp.loc[self.pbp['home_team']
+                         == 'OAK', 'home_team'] = "LV"
+            self.pbp.loc[self.pbp['away_team']
+                         == 'OAK', 'away_team'] = "LV"
+            self.pbp.loc[self.pbp['posteam']
+                         == 'OAK', 'posteam'] = "LV"
             self.ngs = nfl.import_ngs_data('passing', [self.season_start.year])
             self.ngs = self.ngs.merge(nfl.import_ngs_data(
                 'receiving', [self.season_start.year]), how='outer')
@@ -2475,15 +2523,23 @@ class StatsNFL(Stats):
             off_rush_sr = (pbp_off.loc[pbp_off['rush'], 'epa'] > 0).mean()
             off_pass_sr = (pbp_off.loc[pbp_off['pass'], 'epa'] > 0).mean()
             off_rz_sr = (pbp_off.loc[pbp_off['redzone'], 'epa'] > 0).mean()
+            off_fr_sr = (pbp_off.loc[(pbp_off['pass']) & (pbp_off['read_thrown'] == "1"), 'epa'] > 0).mean()
+            off_mid_sr = (pbp_off.loc[(pbp_off['pass']) & (pbp_off['pass_location'] == "middle"), 'epa'] > 0).mean()
             def_rush_sr = (pbp_def.loc[pbp_def['rush'], 'epa'] > 0).mean()
             def_pass_sr = (pbp_def.loc[pbp_def['pass'], 'epa'] > 0).mean()
             def_rz_sr = (pbp_def.loc[pbp_def['redzone'], 'epa'] > 0).mean()
+            def_fr_sr = (pbp_def.loc[(pbp_def['pass']) & (pbp_def['read_thrown'] == "1"), 'epa'] > 0).mean()
+            def_mid_sr = (pbp_def.loc[(pbp_def['pass']) & (pbp_def['pass_location'] == "middle"), 'epa'] > 0).mean()
             off_rush_epa = pbp_off.loc[pbp_off['rush'], 'epa'].mean()
             off_pass_epa = pbp_off.loc[pbp_off['pass'], 'epa'].mean()
             off_rz_epa = pbp_off.loc[pbp_off['redzone'], 'epa'].mean()
+            off_fr_epa = pbp_off.loc[(pbp_off['pass']) & (pbp_off['read_thrown'] == "1"), 'epa'].mean()
+            off_mid_epa = pbp_off.loc[(pbp_off['pass']) & (pbp_off['pass_location'] == "middle"), 'epa'].mean()
             def_rush_epa = pbp_def.loc[pbp_def['rush'], 'epa'].mean()
             def_pass_epa = pbp_def.loc[pbp_def['pass'], 'epa'].mean()
             def_rz_epa = pbp_def.loc[pbp_def['redzone'], 'epa'].mean()
+            def_fr_epa = pbp_def.loc[(pbp_def['pass']) & (pbp_def['read_thrown'] == "1"), 'epa'].mean()
+            def_mid_epa = pbp_def.loc[(pbp_def['pass']) & (pbp_def['pass_location'] == "middle"), 'epa'].mean()
             off_rush_ypa = pbp_off.loc[pbp_off['rush'], 'yards_gained'].mean()
             off_pass_ypa = pbp_off.loc[pbp_off['pass'], 'yards_gained'].mean()
             def_rush_ypa = pbp_def.loc[pbp_def['rush'], 'yards_gained'].mean()
@@ -2529,15 +2585,23 @@ class StatsNFL(Stats):
                 "rush_success_rate": off_rush_sr,
                 "pass_success_rate": off_pass_sr,
                 "redzone_success_rate": off_rz_sr,
+                "first_read_success_rate": off_fr_sr,
+                "midfield_success_rate": off_mid_sr,
                 "rush_success_rate_allowed": def_rush_sr,
                 "pass_success_rate_allowed": def_pass_sr,
                 "redzone_success_rate_allowed": def_rz_sr,
+                "first_read_success_rate_allowed": def_fr_sr,
+                "midfield_success_rate_allowed": def_mid_sr,
                 "epa_per_rush": off_rush_epa,
                 "epa_per_pass": off_pass_epa,
                 "redzone_epa": off_rz_epa,
+                "first_read_epa": off_fr_epa,
+                "midfield_epa": off_mid_epa,
                 "epa_allowed_per_rush": def_rush_epa,
                 "epa_allowed_per_pass": def_pass_epa,
                 "redzone_epa_allowed": def_rz_epa,
+                "first_read_epa_allowed": def_fr_epa,
+                "midfield_epa_allowed": def_mid_epa,
                 "exp_per_rush": off_rush_exp,
                 "exp_per_pass": off_pass_exp,
                 "exp_allowed_per_rush": def_rush_exp,
@@ -2573,6 +2637,7 @@ class StatsNFL(Stats):
                     "aggressiveness": 0,
                     "pass_yards_per_attempt": 0,
                     "receiver_drops": 0,
+                    "midfield_target_rate": 0,
                     "rushing_yards_over_expected": 0,
                     "rushing_success_rate": 0,
                     "breakaway_yards": 0,
@@ -2601,9 +2666,9 @@ class StatsNFL(Stats):
                 }
 
             cpoe = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
-                self.ngs['week'] == pbp.week.max()), 'completion_percentage_above_expectation'].mean() / 100
+                self.ngs['week'] == pbp.week.max()), 'completion_percentage_above_expectation'].mean()
             cp = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
-                self.ngs['week'] == pbp.week.max()), 'completion_percentage'].mean() / 100
+                self.ngs['week'] == pbp.week.max()), 'completion_percentage'].mean()
             qbr = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
                 self.ngs['week'] == pbp.week.max()), 'passer_rating'].mean()
             pass_adot = self.ngs.loc[(self.ngs['player_display_name'] == playerName) & (
@@ -2645,6 +2710,8 @@ class StatsNFL(Stats):
             pass_attempts = len(pbp_off.loc[pbp_off['pass']])
             fr_pass_attempts = len(
                 pbp_off.loc[(pbp_off['pass']) & (pbp_off['read_thrown'] == "1")])
+            mid_target_rate = (len(pbp_off.loc[(pbp_off['passer_player_id'] == self.ids.get(
+                playerName)) & (pbp_off['pass_location'] == "middle")]) / pass_attempts) if pass_attempts > 0 else np.nan
             mid_targets = (len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
                 playerName)) & (pbp_off['pass_location'] == "middle")]) / routes_run) if routes_run > 0 else np.nan
             tprr = (targets / routes_run) if routes_run > 0 else np.nan
@@ -2658,7 +2725,7 @@ class StatsNFL(Stats):
             adot = pbp_off.loc[pbp_off['receiver_player_id']
                                == self.ids.get(playerName), 'air_yards'].mean()
             rec_cpoe = pbp_off.loc[pbp_off['receiver_player_id']
-                                   == self.ids.get(playerName), 'cpoe'].mean() / 100
+                                   == self.ids.get(playerName), 'cpoe'].mean()
             rz_passes = len(
                 pbp_off.loc[pbp_off['pass_attempt'] & pbp_off['redzone']])
             rz_target_pct = (len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
@@ -2694,6 +2761,7 @@ class StatsNFL(Stats):
                 "aggressiveness": aggressiveness,
                 "pass_yards_per_attempt": pass_ypa,
                 "receiver_drops": pass_drop_pct,
+                "midfield_target_rate": mid_target_rate,
                 "rushing_yards_over_expected": ryoe,
                 "rushing_success_rate": rush_sr,
                 "breakaway_yards": breakaway_yards,
@@ -3153,7 +3221,7 @@ class StatsNFL(Stats):
             gameDate = datetime.strptime(
                 game["gameday"], "%Y-%m-%d")
 
-            if gameDate < datetime(2020, 11, 1):
+            if gameDate < (pd.to_datetime(self.gamelog["gameday"]).min() + timedelta(days=14)):
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -3165,11 +3233,16 @@ class StatsNFL(Stats):
             if game[market] < 0:
                 continue
 
-            if ((game['position group'] == 'QB') and (game['snap pct'] < 0.8)) or ((game['position group'] == 'WR') and (game['snap pct'] < 0.4)) or ((game['position group'] == 'RB') and (game['snap pct'] < 0.3)) or ((game['position group'] == 'TE') and (game['snap pct'] < 0.5)):
+            if ((game['position group'] == 'QB') and (game['snap pct'] < 0.8)) or (game['snap pct'] < 0.3):
                 continue
 
             lines = archive["NFL"][market].get(gameDate.strftime(
                 "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
+
+            if len(lines) > 2:
+                mu = np.median(lines)
+                sig = iqr(lines)
+                lines = [line for line in lines if mu - sig <= line <= mu + sig]
 
             line = lines[-1]
 
@@ -3189,7 +3262,10 @@ class StatsNFL(Stats):
                 if type(new_get_stats) is dict:
 
                     new_get_stats.update(
-                        {"Result": game[market]}
+                        {
+                            "Result": game[market],
+                            "Archived": int(line != 0)
+                        }
                     )
 
                     matrix.append(new_get_stats)
@@ -3502,7 +3578,7 @@ class StatsNHL(Stats):
                 idx = game['gameId']
                 details = scraper.get(
                     f"https://core.api.dobbersports.com/v1/game/{idx}")
-                if datetime.fromisoformat(details.get('data', {}).get('gameDate')).date() < today:
+                if datetime.strptime(details.get('data', {}).get('gameDate'), "%Y-%m-%dT%H:%M:%S%z").astimezone().date() < today:
                     continue
                 opp = abbreviations["NHL"][remove_accents(
                     game['opponentTeam']['name'])]
@@ -4069,10 +4145,11 @@ class StatsNHL(Stats):
         # Iterate over each game in the gamelog
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
-            if gameDate < datetime(2022, 1, 1):
+            
+            if gameDate < (pd.to_datetime(self.gamelog["gameDate"]).min() + timedelta(days=14)):
                 continue
 
-            if game[market] < 0 or game["timeOnIce"] < 6:
+            if game[market] < 0:
                 continue
 
             data = {}
@@ -4084,6 +4161,11 @@ class StatsNHL(Stats):
 
             lines = archive["NHL"][market].get(gameDate.strftime(
                 "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
+
+            if len(lines) > 2:
+                mu = np.median(lines)
+                sig = iqr(lines)
+                lines = [line for line in lines if mu - sig <= line <= mu + sig]
 
             line = lines[-1]
 
@@ -4102,10 +4184,11 @@ class StatsNHL(Stats):
                     offer | {"Line": line}, gameDate
                 )
                 if type(new_get_stats) is dict:
-                    if new_get_stats["Avg10"] == 0 and new_get_stats["IQR10"] == 0:
-                        continue
                     new_get_stats.update(
-                        {"Result": game[market]}
+                        {
+                            "Result": game[market],
+                            "Archived": int(line != 0)
+                        }
                     )
 
                     matrix.append(new_get_stats)
