@@ -257,15 +257,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp(books)
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp(books)
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats, parlays)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -1014,12 +1014,12 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
     if league == "NHL":
         market = {"AST": "assists", "PTS": "points",
                   "BLK": "blocked"}.get(market, market)
-    filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-    filepath = pkg_resources.files(data) / filename
-    if not os.path.isfile(filepath):
-        pbar.update(len(offers))
-        logger.warning(f"{filename} missing")
-        return []
+    # filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
+    # filepath = pkg_resources.files(data) / filename
+    # if not os.path.isfile(filepath):
+    #     pbar.update(len(offers))
+    #     logger.warning(f"{filename} missing")
+    #     return []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         stat_data.profile_market(market)
@@ -1136,33 +1136,36 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                   "BLK": "blocked"}.get(market, market)
     filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
     filepath = pkg_resources.files(data) / filename
-    if not os.path.isfile(filepath):
-        logger.warning(f"{filename} missing")
-        return []
-
     new_offers = []
-    with open(filepath, "rb") as infile:
-        filedict = pickle.load(infile)
-    models = filedict["model"]
-    dist = filedict["distribution"]
-    filt = filedict["filter"]
-    step = filedict["step"]
-    cv = filedict["cv"]
+    if os.path.isfile(filepath):
+        with open(filepath, "rb") as infile:
+            filedict = pickle.load(infile)
+        models = filedict["model"]
+        dist = filedict["distribution"]
+        filt = filedict["filter"]
+        step = filedict["step"]
+        cv = filedict["cv"]
 
-    categories = ["Home", "Position"]
-    if "Position" not in playerStats.columns:
-        categories.remove("Position")
-    for c in categories:
-        playerStats[c] = playerStats[c].astype('category')
+        categories = ["Home", "Position"]
+        if "Position" not in playerStats.columns:
+            categories.remove("Position")
+        for c in categories:
+            playerStats[c] = playerStats[c].astype('category')
 
-    prob_params = pd.DataFrame()
-    for bounds, model in models.items():
-        mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
-        prob_params.loc[mask] = model.predict(
-            playerStats, pred_type="parameters")
-    prob_params.index = playerStats.index
+        prob_params = pd.DataFrame()
+        for bounds, model in models.items():
+            mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
+            preds = model.predict(
+                playerStats[mask], pred_type="parameters")
+            preds.index = playerStats.loc[mask].index
+            prob_params = pd.concat([prob_params, preds])
+
+        prob_params.sort_index(inplace=True)
+    else:
+        logger.warning(f"{filename} missing")
 
     for o in tqdm(offers, leave=False):
+        players = [o["Player"]]
         if "+" in o["Player"] or "vs." in o["Player"]:
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
@@ -1197,12 +1200,21 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if any([type(s) is int for s in stats]):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
+        else:
+            if o["Player"] in playerStats.index:
+                stats = playerStats.loc[o["Player"]]
+            else:
+                stats = 0
+            if type(stats) is int:
+                logger.warning(f"{o['Player']}, {market} stat error")
+                continue
 
+        if os.path.isfile(filepath) and all([player in playerStats.index for player in players]):
             if "+" in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                             ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                             ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
 
                 if ev1 and ev2:
                     ev = ev1 + ev2
@@ -1212,7 +1224,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     else:
                         line = o["Line"]
                         p = [norm.cdf(line, ev, ev*cv),
-                             norm.sf(line, ev, ev*cv)]
+                            norm.sf(line, ev, ev*cv)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -1233,10 +1245,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     high = np.floor((o["Line"]+step)/step)*step
                     low = np.ceil((o["Line"]-step)/step)*step
                     under = norm.cdf(high,
-                                     params[1]["loc"] +
-                                     params[0]["loc"],
-                                     params[1]["scale"] +
-                                     params[0]["scale"])
+                                    params[1]["loc"] +
+                                    params[0]["loc"],
+                                    params[1]["scale"] +
+                                    params[0]["scale"])
                     push = under - norm.cdf(low,
                                             params[1]["loc"] +
                                             params[0]["loc"],
@@ -1245,31 +1257,31 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     under = under - push/2
                 elif dist == "Gamma":
                     under = gamma.cdf(o["Line"],
-                                      params[1]["concentration"] +
-                                      params[0]["concentration"],
-                                      scale=1/(params[1]["rate"] +
-                                               params[0]["rate"]))
+                                    params[1]["concentration"] +
+                                    params[0]["concentration"],
+                                    scale=1/(params[1]["rate"] +
+                                            params[0]["rate"]))
                 elif dist == "NegativeBinomial":
                     under = nbinom.cdf(o["Line"],
-                                       params[1]["concentration"] +
-                                       params[0]["concentration"],
-                                       scale=1/(params[1]["rate"] +
+                                    params[1]["concentration"] +
+                                    params[0]["concentration"],
+                                    scale=1/(params[1]["rate"] +
                                                 params[0]["rate"]))
 
             elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                             ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                             ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
                 if ev1 and ev2:
                     if cv == 1:
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
                         p = [skellam.cdf(line[0], ev2, ev1),
-                             skellam.sf(line[1], ev2, ev1)]
+                            skellam.sf(line[1], ev2, ev1)]
                     else:
                         line = o["Line"]
                         p = [norm.cdf(-line, ev1 - ev2, (ev1 + ev2)*cv),
-                             norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
+                            norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -1290,10 +1302,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     high = np.floor((-o["Line"]+step)/step)*step
                     low = np.ceil((-o["Line"]-step)/step)*step
                     under = norm.cdf(high,
-                                     params[0]["loc"] -
-                                     params[1]["loc"],
-                                     params[0]["scale"] +
-                                     params[1]["scale"])
+                                    params[0]["loc"] -
+                                    params[1]["loc"],
+                                    params[0]["scale"] +
+                                    params[1]["scale"])
                     push = under - norm.cdf(low,
                                             params[0]["loc"] -
                                             params[1]["loc"],
@@ -1301,109 +1313,147 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                                             params[1]["scale"])
                     under = under - push/2
 
-        else:
-            if o["Player"] not in playerStats.index:
-                continue
-            stats = playerStats.loc[o["Player"]]
-            if type(stats) is int:
-                logger.warning(f"{o['Player']}, {market} stat error")
-                continue
-
-            if stats["Odds"] == 0:
-                p = [0.5/o.get("Boost", 1)] * 2
             else:
-                p = [1-stats["Odds"], stats["Odds"]]
+                if stats["Odds"] == 0:
+                    p = [0.5/o.get("Boost", 1)] * 2
+                else:
+                    p = [1-stats["Odds"], stats["Odds"]]
 
-            params = prob_params.loc[o["Player"]]
-            if dist == "Poisson":
-                under = poisson.cdf(o["Line"], params["rate"])
-                push = poisson.pmf(o["Line"], params["rate"])
-                under -= push/2
-            elif dist == "Gaussian":
-                high = np.floor((o["Line"]+step)/step)*step
-                low = np.ceil((o["Line"]-step)/step)*step
-                under = norm.cdf(
-                    high, params["loc"], params["scale"])
-                push = under - norm.cdf(
-                    low, params["loc"], params["scale"])
-                under = under - push/2
+                params = prob_params.loc[o["Player"]]
+                if dist == "Poisson":
+                    under = poisson.cdf(o["Line"], params["rate"])
+                    push = poisson.pmf(o["Line"], params["rate"])
+                    under -= push/2
+                elif dist == "Gaussian":
+                    high = np.floor((o["Line"]+step)/step)*step
+                    low = np.ceil((o["Line"]-step)/step)*step
+                    under = norm.cdf(
+                        high, params["loc"], params["scale"])
+                    push = under - norm.cdf(
+                        low, params["loc"], params["scale"])
+                    under = under - push/2
 
-        try:
             if "H2H" in o["Market"]:
                 proba = [under, 1-under]
             else:
                 proba = [0.5/o.get("Boost", 1)] * 2
                 for edges, clf in filt.items():
-                    line = o["Line"]
                     if "+" in o["Player"]:
-                        line = np.ceil(line)/2
-                    if edges[0] <= line < edges[1]:
+                        z = np.sum([stat["Player z"] for stat in stats])
+                    else:
+                        z = playerStats.loc[o["Player"], "Player z"]
+                    if edges[0] <= z < edges[1]:
                         proba = clf.predict_proba([[1-under]])[0]
-            # proba = [under, 1-under]
 
-            if proba[1] > proba[0] or o.get("Boost", 1) > 1:
-                o["Bet"] = "Over"
-                o["Books"] = p[1]
-                o["Model"] = proba[1]
-            else:
-                o["Bet"] = "Under"
-                o["Books"] = p[0]
-                o["Model"] = proba[0]
-
-            totals_map = {
-                "NBA": 112,
-                "NFL": 22.5,
-                "MLB": 4.5,
-                "NHL": 3
-            }
-
+        else:
             if "+" in o["Player"]:
-                avg5 = np.sum([s["Avg5"] for s in stats])
-                o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
-                avgh2h = np.sum([s["AvgH2H"] for s in stats])
-                o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
-                o["Moneyline"] = np.mean([s["Moneyline"] for s in stats])
-                o["O/U"] = np.mean([s["Total"] for s in stats]) / \
-                    totals_map.get(o["League"], 1)
-                o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
-                if ("Position" in stats[0]) and ("Position" in stats[1]):
-                    o["Position"] = (int(stats[0]["Position"]),
-                                     int(stats[1]["Position"]))
+                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
+                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
+                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+
+                if ev1 and ev2:
+                    ev = ev1 + ev2
+                    if cv == 1:
+                        line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                        p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
+                    else:
+                        line = o["Line"]
+                        p = [norm.cdf(line, ev, ev*cv),
+                            norm.sf(line, ev, ev*cv)]
+                    push = 1 - p[1] - p[0]
+                    p[0] += push / 2
+                    p[1] += push / 2
                 else:
-                    o["Position"] = (-1, -1)
+                    p = [0.5] * 2
             elif "vs." in o["Player"]:
-                avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
-                o["Avg 5"] = avg5 + o["Line"]
-                avgh2h = stats[0]["AvgH2H"] - stats[1]["AvgH2H"]
-                o["Avg H2H"] = avgh2h + o["Line"]
-                o["Moneyline"] = np.mean(
-                    [stats[0]["Moneyline"], 1-stats[1]["Moneyline"]])
-                o["O/U"] = np.mean([s["Total"] for s in stats]) / \
-                    totals_map.get(o["League"], 1)
-                o["DVPOA"] = hmean(
-                    [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
-                if ("Position" in stats[0]) and ("Position" in stats[1]):
-                    o["Position"] = (int(stats[0]["Position"]),
-                                     int(stats[1]["Position"]))
+                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
+                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
+                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                if ev1 and ev2:
+                    if cv == 1:
+                        line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
+                        p = [skellam.cdf(line[0], ev2, ev1),
+                            skellam.sf(line[1], ev2, ev1)]
+                    else:
+                        line = o["Line"]
+                        p = [norm.cdf(-line, ev1 - ev2, (ev1 + ev2)*cv),
+                            norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
+                    push = 1 - p[1] - p[0]
+                    p[0] += push / 2
+                    p[1] += push / 2
                 else:
-                    o["Position"] = (-1, -1)
+                    p = [0.5] * 2
             else:
-                o["Avg 5"] = stats["Avg5"] - \
-                    o["Line"] if stats["Avg5"] != 0 else 0
-                o["Avg H2H"] = stats["AvgH2H"] - \
-                    o["Line"] if stats["AvgH2H"] != 0 else 0
-                o["Moneyline"] = stats["Moneyline"]
-                o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
-                o["DVPOA"] = stats["DVPOA"]
-                if "Position" in stats:
-                    o["Position"] = int(stats["Position"])
+                if stats["Odds"] == 0:
+                    p = [0.5/o.get("Boost", 1)] * 2
                 else:
-                    o["Position"] = -1
+                    p = [1-stats["Odds"], stats["Odds"]]
+            
+            proba = p
 
-            new_offers.append(o)
 
-        except Exception:
-            logger.exception(o["Player"] + ", " + o["Market"])
+        if proba[1] > proba[0] or o.get("Boost", 1) > 1:
+            o["Bet"] = "Over"
+            o["Books"] = p[1]
+            o["Model"] = proba[1]
+        else:
+            o["Bet"] = "Under"
+            o["Books"] = p[0]
+            o["Model"] = proba[0]
+
+        totals_map = {
+            "NBA": 112,
+            "NFL": 22.5,
+            "MLB": 4.5,
+            "NHL": 3
+        }
+
+        if "+" in o["Player"]:
+            avg5 = np.sum([s["Avg5"] for s in stats])
+            o["Avg 5"] = avg5 - o["Line"] if avg5 != 0 else 0
+            avgh2h = np.sum([s["AvgH2H"] for s in stats])
+            o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
+            o["Moneyline"] = np.mean([s["Moneyline"] for s in stats])
+            o["O/U"] = np.mean([s["Total"] for s in stats]) / \
+                totals_map.get(o["League"], 1)
+            o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
+            if ("Position" in stats[0]) and ("Position" in stats[1]):
+                o["Position"] = (int(stats[0]["Position"]),
+                                    int(stats[1]["Position"]))
+            else:
+                o["Position"] = (-1, -1)
+        elif "vs." in o["Player"]:
+            avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
+            o["Avg 5"] = avg5 + o["Line"]
+            avgh2h = stats[0]["AvgH2H"] - stats[1]["AvgH2H"]
+            o["Avg H2H"] = avgh2h + o["Line"]
+            o["Moneyline"] = np.mean(
+                [stats[0]["Moneyline"], 1-stats[1]["Moneyline"]])
+            o["O/U"] = np.mean([s["Total"] for s in stats]) / \
+                totals_map.get(o["League"], 1)
+            o["DVPOA"] = hmean(
+                [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
+            if ("Position" in stats[0]) and ("Position" in stats[1]):
+                o["Position"] = (int(stats[0]["Position"]),
+                                    int(stats[1]["Position"]))
+            else:
+                o["Position"] = (-1, -1)
+        else:
+            o["Avg 5"] = stats["Avg5"] - \
+                o["Line"] if stats["Avg5"] != 0 else 0
+            o["Avg H2H"] = stats["AvgH2H"] - \
+                o["Line"] if stats["AvgH2H"] != 0 else 0
+            o["Moneyline"] = stats["Moneyline"]
+            o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
+            o["DVPOA"] = stats["DVPOA"]
+            if "Position" in stats:
+                o["Position"] = int(stats["Position"])
+            else:
+                o["Position"] = -1
+
+        new_offers.append(o)
 
     return new_offers
 
