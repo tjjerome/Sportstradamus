@@ -64,13 +64,13 @@ def meditate(force, stats, league):
     # mlb.update()
     nba = StatsNBA()
     nba.load()
-    nba.update()
+    # nba.update()
     nhl = StatsNHL()
     nhl.load()
-    nhl.update()
+    # nhl.update()
     nfl = StatsNFL()
     nfl.load()
-    nfl.update()
+    # nfl.update()
     np.random.seed(69)
 
     all_markets = {
@@ -219,6 +219,7 @@ def meditate(force, stats, league):
                 # Trim the fat
                 M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
                     M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
+                M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
 
                 if "Position" in M.columns:
                     for i in M.Position.unique():
@@ -230,7 +231,7 @@ def meditate(force, stats, league):
                         more = M.loc[(M["Archived"] != 1) & (
                             M["Position"] == i) & (M["Line"] > target), "Line"]
 
-                        n = np.abs(less.count() - more.count())
+                        n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
                         if n > 0:
                             if less.count() > more.count():
                                 chopping_block = less.index
@@ -279,7 +280,7 @@ def meditate(force, stats, league):
                     less = M.loc[(M["Archived"] != 1) & (M["Line"] < target), "Line"]
                     more = M.loc[(M["Archived"] != 1) & (M["Line"] > target), "Line"]
 
-                    n = np.abs(less.count() - more.count())
+                    n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
                     if n > 0:
                         if less.count() > more.count():
                             chopping_block = less.index
@@ -322,7 +323,7 @@ def meditate(force, stats, league):
                 target = (M.loc[(M["Archived"] == 1), "Result"] >
                             M.loc[(M["Archived"] == 1), "Line"]).mean()
                 balance = (M["Result"] > M["Line"]).mean()
-                n = 2*int(np.abs(target - balance) * len(M))
+                n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 2000, 0, None))
                 if balance < target:
                     chopping_block = M.loc[(M["Archived"] != 1) & (
                         M["Result"] < M["Line"])].index
@@ -386,7 +387,7 @@ def meditate(force, stats, league):
                     "num_leaves": ["int", {"low": 23, "high": 4095, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 2, "high": 500, "log": False}],
+                    "min_child_samples": ["int", {"low": 10, "high": 500, "log": False}],
                     "min_child_weight": ["float", {"low": 1e-4, "high": .8*len(X_train)/n_bins/1000, "log": True}],
                     "learning_rate": ["float", {"low": .001, "high": 0.3, "log": True}],
                     "feature_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
@@ -424,15 +425,22 @@ def meditate(force, stats, league):
             prob_params_train = pd.DataFrame()
             prob_params = pd.DataFrame()
             for bounds, model in models.items():
+                mask = X_train["Player z"].between(bounds[0], bounds[1], "left")
+                idx = X_train.loc[mask].index
+                preds = model.predict(
+                    X_train.loc[mask], pred_type="parameters")
+                preds.index = idx
+                prob_params_train = pd.concat([prob_params_train, preds])
                 mask = X_test["Player z"].between(bounds[0], bounds[1], "left")
-                prob_params_train.loc[mask] = model.predict(
-                    X_train, pred_type="parameters")
-                prob_params.loc[mask] = model.predict(
-                    X_test, pred_type="parameters")
+                idx = X_test.loc[mask].index
+                preds = model.predict(
+                    X_test.loc[mask], pred_type="parameters")
+                preds.index = idx
+                prob_params = pd.concat([prob_params, preds])
 
-            prob_params_train.index = y_train.index
+            prob_params_train.sort_index(inplace=True)
             prob_params_train['result'] = y_train['Result']
-            prob_params.index = y_test.index
+            prob_params.sort_index(inplace=True)
             prob_params['result'] = y_test['Result']
             cv = 1
             step = M["Result"].drop_duplicates().sort_values().diff().min()
@@ -505,10 +513,11 @@ def meditate(force, stats, league):
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             for mini, maxi in models.keys():
-                mask = X_test["Player z"].between(mini, maxi, "left")
+                mask = X_train["Player z"].between(mini, maxi, "left")
                 clf = LogisticRegressionCV(
                     fit_intercept=True, solver='newton-cholesky', tol=1e-8, max_iter=500).fit(y_proba_train[mask], y_class[mask])
                 filt[(mini, maxi)] = clf
+                mask = X_test["Player z"].between(mini, maxi, "left")
                 y_proba_filt[mask, :] = clf.predict_proba(
                     y_proba[mask])
 
