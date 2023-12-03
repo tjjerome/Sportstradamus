@@ -1162,7 +1162,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         prob_params.sort_index(inplace=True)
     else:
-        cv = stat_cv[league].get(market,1)
+        cv = stat_cv.get(league,{}).get(market,1)
         logger.warning(f"{filename} missing")
 
     for o in tqdm(offers, leave=False):
