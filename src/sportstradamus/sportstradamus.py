@@ -9,7 +9,7 @@ from sportstradamus.books import (
     get_ud,
     get_thrive,
 )
-from sportstradamus.helpers import archive, get_ev, get_active_sports
+from sportstradamus.helpers import archive, get_ev, get_active_sports, stat_cv
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -1162,6 +1162,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         prob_params.sort_index(inplace=True)
     else:
+        cv = stat_cv[league][market]
         logger.warning(f"{filename} missing")
 
     for o in tqdm(offers, leave=False):
