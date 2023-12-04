@@ -575,6 +575,19 @@ class StatsNBA(Stats):
         if market == self.profiled_market and date == self.profile_latest_date:
             return
 
+        team_stat_types = ['FGA', 'FG_PCT', 'FG3A', 'FG3_PCT', 'FT_PCT', 'BLKA', 'PF', 'PFD', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT',
+                           'PCT_FGA_3PT', 'PCT_PTS_2PT', 'PCT_PTS_2PT_MR', 'PCT_PTS_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV',
+                           'PCT_PTS_PAINT', 'PCT_AST_2PM', 'PCT_UAST_2PM', 'PCT_AST_3PM', 'PCT_UAST_3PM', 'PCT_AST_FGM',
+                           'PCT_UAST_FGM', 'E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING', 'AST_PCT', 'AST_TO',
+                           'AST_RATIO', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT', 'E_PACE', 'PACE',
+                           'PIE', 'OPP_FGA', 'OPP_FG_PCT', 'OPP_FG3A', 'OPP_FG3_PCT', 'OPP_FT_PCT', 'OPP_OREB', 'OPP_DREB', 'OPP_REB',
+                           'OPP_AST', 'OPP_TOV', 'OPP_STL', 'OPP_BLK', 'OPP_BLKA', 'OPP_PTS', 'OPP_FTR', 'OPP_BLK_RATIO', 'OPP_PCT_FGA_2PT',
+                           'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_2PT', 'OPP_PCT_PTS_2PT_MR', 'OPP_PCT_PTS_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT',
+                           'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
+                           'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_E_OFF_RATING', 'OPP_OFF_RATING', 'OPP_E_DEF_RATING',
+                           'OPP_DEF_RATING', 'OPP_AST_PCT', 'OPP_AST_TO', 'OPP_AST_RATIO', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
+                           'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_EFG_PCT', 'OPP_TS_PCT', 'OPP_E_PACE', 'OPP_PACE', 'OPP_PIE']
+
         self.profiled_market = market
         self.profile_latest_date = date
 
@@ -603,7 +616,7 @@ class StatsNBA(Stats):
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
         teamstats = teamlog.groupby('TEAM_ABBREVIATION').apply(
-            lambda x: np.mean(x.tail(10)[x.columns[6:]], 0))
+            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
@@ -704,19 +717,7 @@ class StatsNBA(Stats):
             self.defenseProfile['totals gain'] = defenseGroups.\
                 apply(lambda x: np.polyfit(x.totals.fillna(112).values.astype(float) / 112 - x.totals.fillna(112).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
-
-        team_stat_types = ['FGA', 'FG_PCT', 'FG3A', 'FG3_PCT', 'FT_PCT', 'BLKA', 'PF', 'PFD', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT',
-                           'PCT_FGA_3PT', 'PCT_PTS_2PT', 'PCT_PTS_2PT_MR', 'PCT_PTS_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV',
-                           'PCT_PTS_PAINT', 'PCT_AST_2PM', 'PCT_UAST_2PM', 'PCT_AST_3PM', 'PCT_UAST_3PM', 'PCT_AST_FGM',
-                           'PCT_UAST_FGM', 'E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING', 'AST_PCT', 'AST_TO',
-                           'AST_RATIO', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT', 'E_PACE', 'PACE',
-                           'PIE', 'OPP_FGA', 'OPP_FG_PCT', 'OPP_FG3A', 'OPP_FG3_PCT', 'OPP_FT_PCT', 'OPP_OREB', 'OPP_DREB', 'OPP_REB',
-                           'OPP_AST', 'OPP_TOV', 'OPP_STL', 'OPP_BLK', 'OPP_BLKA', 'OPP_PTS', 'OPP_FTR', 'OPP_BLK_RATIO', 'OPP_PCT_FGA_2PT',
-                           'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_2PT', 'OPP_PCT_PTS_2PT_MR', 'OPP_PCT_PTS_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT',
-                           'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
-                           'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_E_OFF_RATING', 'OPP_OFF_RATING', 'OPP_E_DEF_RATING',
-                           'OPP_DEF_RATING', 'OPP_AST_PCT', 'OPP_AST_TO', 'OPP_AST_RATIO', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
-                           'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_EFG_PCT', 'OPP_TS_PCT', 'OPP_E_PACE', 'OPP_PACE', 'OPP_PIE']
+            
         i = self.defenseProfile.index
         self.defenseProfile = self.defenseProfile.merge(
             teamstats[team_stat_types], left_on='OPP', right_on='TEAM_ABBREVIATION')
