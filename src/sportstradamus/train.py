@@ -375,7 +375,7 @@ def meditate(force, stats, league):
 
                 models = {}
 
-                n_bins = np.clip(int(len(X_train)/2000), 3, 7)
+                n_bins = np.clip(int(len(X_train)/2000), 2, 5)
                 _, bins = pd.qcut(X_train["Player z"],
                                   n_bins, retbins=True, duplicates='drop')
                 
@@ -387,9 +387,9 @@ def meditate(force, stats, league):
                     "num_leaves": ["int", {"low": 23, "high": 4095, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 10, "high": 500, "log": False}],
+                    "min_child_samples": ["int", {"low": 4, "high": 500, "log": False}],
                     "min_child_weight": ["float", {"low": 1e-4, "high": .8*len(X_train)/n_bins/1000, "log": True}],
-                    "learning_rate": ["float", {"low": .001, "high": 0.3, "log": True}],
+                    "learning_rate": ["float", {"low": .0001, "high": 0.2, "log": True}],
                     "feature_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
                     "bagging_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
@@ -407,8 +407,8 @@ def meditate(force, stats, league):
                                                 num_boost_round=999,
                                                 nfold=5,
                                                 early_stopping_rounds=50,
-                                                max_minutes=20,
-                                                n_trials=250,
+                                                max_minutes=30,
+                                                n_trials=500,
                                                 silence=True,
                                                 )
                     opt_params = opt_param.copy()
