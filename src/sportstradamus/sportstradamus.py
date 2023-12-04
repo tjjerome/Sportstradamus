@@ -310,7 +310,7 @@ def main(progress, books, parlays):
     df.dropna(subset='Market', inplace=True, ignore_index=True)
     history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                        ignore_index=True)
-    history = history.loc[history["Model"] > .6]
+    history = history.loc[history["Model"] > .54]
     gameDates = pd.to_datetime(history.Date).dt.date
     history = history.loc[(datetime.datetime.today(
     ).date() - datetime.timedelta(days=28)) <= gameDates]
@@ -1349,15 +1349,20 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         low, params["loc"], params["scale"])
                     under = under - push/2
 
-            if "H2H" in o["Market"]:
-                proba = [under, 1-under]
+            proba = [0.5/o.get("Boost", 1)] * 2
+            if ("+" in o["Player"]) or ("vs." in o["Player"]):
+                probb = []
+                for stat in stats:
+                    z = stat["Player z"]
+                    for edges, clf in filt.items():
+                        if edges[0] <= z < edges[1]:
+                            probb.append(clf.predict_proba([[1-under]])[0][1])
+
+                proba = np.mean(probb)
+                proba = [1- proba, proba]
             else:
-                proba = [0.5/o.get("Boost", 1)] * 2
+                z = playerStats.loc[o["Player"], "Player z"]
                 for edges, clf in filt.items():
-                    if "+" in o["Player"]:
-                        z = np.sum([stat["Player z"] for stat in stats])
-                    else:
-                        z = playerStats.loc[o["Player"], "Player z"]
                     if edges[0] <= z < edges[1]:
                         proba = clf.predict_proba([[1-under]])[0]
 

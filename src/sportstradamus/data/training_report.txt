@@ -1,3 +1,9 @@
+============================ NBA PTS ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.510254   0.513681  0.034787   -0.808646    -0.413043 -1.618879 0.255999
+ 0.532738   0.531915 -0.294415    0.000276     0.000389 -1.618879 0.255999
+
 ========================== NFL attempts =========================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
@@ -9,6 +15,12 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
  0.568627   0.644040 0.025911   -2.219528    -0.392547 -2.386041  0.08169
  0.605435   0.637584 0.271734    0.034622     0.047415 -2.386041  0.08169
+
+=================== NFL completion percentage ===================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.618799   0.648649 -0.088231    0.015040     0.031597  0.122236 0.432847
+ 0.620499   0.672269 -0.145014    0.040982     0.055917  0.122236 0.432847
 
 ======================== NFL completions ========================
  Distribution Model: Gaussian
@@ -33,6 +45,12 @@
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
  0.607558   0.491803 -0.137374   -0.200340    -0.071201 -0.166578 -0.156217
  0.673440   0.769231 -0.236723    0.045385     0.061391 -0.166578 -0.156217
+
+======================== NFL fumbles lost =======================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
+ 0.841046        0.0 -0.158954    0.235989      0.31758  0.445269 -0.207205
+ 0.841046        0.0 -0.158954    0.375209      0.47083  0.445269 -0.207205
 
 ======================= NFL interceptions =======================
  Distribution Model: Poisson
