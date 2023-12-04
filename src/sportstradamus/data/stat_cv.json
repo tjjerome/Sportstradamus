@@ -62,7 +62,10 @@
         "yards": 0.7119080374632525,
         "longest completion": 0.2966374078805009,
         "longest rush": 0.5125028127382688,
-        "longest reception": 0.6029662970179933
+        "longest reception": 0.6029662970179933,
+        "sacks taken": 1,
+        "passing first downs": 0.2861326780486845,
+        "first downs": 1
     },
     "NHL": {
         "assists": 1,
