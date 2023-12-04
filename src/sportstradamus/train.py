@@ -64,7 +64,7 @@ def meditate(force, stats, league):
     # mlb.update()
     nba = StatsNBA()
     nba.load()
-    # nba.update()
+    nba.update()
     nhl = StatsNHL()
     nhl.load()
     # nhl.update()

@@ -161,11 +161,21 @@ class StatsNBA(Stats):
                 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV', 'PCT_STL', 'PCT_BLKA',
                 'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48', 'TOV_48', 'BLKA_48', 'STL_48']
         self.gamelog = pd.DataFrame(columns=cols)
-        team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE', 'OPP',
-                     'OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
-                     'TM_TOV_PCT', 'PACE', 'OPP_OFF_RATING', 'OPP_DEF_RATING',
-                     'OPP_EFG_PCT', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
-                     'OPP_TM_TOV_PCT', 'OPP_PACE']
+        team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME', 'GAME_ID', 'GAME_DATE', 'OPP',
+                     'WL', 'MIN', 'FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB',
+                     'DREB', 'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT', 'PCT_FGA_3PT',
+                     'PCT_PTS_2PT', 'PCT_PTS_2PT_MR', 'PCT_PTS_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV',
+                     'PCT_PTS_PAINT', 'PCT_AST_2PM', 'PCT_UAST_2PM', 'PCT_AST_3PM', 'PCT_UAST_3PM', 'PCT_AST_FGM',
+                     'PCT_UAST_FGM', 'E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING', 'AST_PCT', 'AST_TO',
+                     'AST_RATIO', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT', 'E_PACE', 'PACE',
+                     'PIE', 'OPP_FGM', 'OPP_FGA', 'OPP_FG_PCT', 'OPP_FG3M', 'OPP_FG3A', 'OPP_FG3_PCT', 'OPP_FTM',
+                     'OPP_FTA', 'OPP_FT_PCT', 'OPP_OREB', 'OPP_DREB', 'OPP_REB', 'OPP_AST', 'OPP_TOV', 'OPP_STL',
+                     'OPP_BLK', 'OPP_BLKA', 'OPP_PTS', 'OPP_FTR', 'OPP_BLK_RATIO', 'OPP_PCT_FGA_2PT', 'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_2PT',
+                     'OPP_PCT_PTS_2PT_MR', 'OPP_PCT_PTS_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT', 'OPP_PCT_PTS_OFF_TOV',
+                     'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM', 'OPP_PCT_UAST_3PM',
+                     'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_E_OFF_RATING', 'OPP_OFF_RATING', 'OPP_E_DEF_RATING',
+                     'OPP_DEF_RATING', 'OPP_AST_PCT', 'OPP_AST_TO', 'OPP_AST_RATIO', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
+                     'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_EFG_PCT', 'OPP_TS_PCT', 'OPP_E_PACE', 'OPP_PACE', 'OPP_PIE']
         self.teamlog = pd.DataFrame(columns=team_cols)
 
     def load(self):
@@ -267,6 +277,10 @@ class StatsNBA(Stats):
                 usg_gamelog = nba.playergamelogs.PlayerGameLogs(
                     **(params | {"measure_type_player_game_logs_nullable": "Usage"})).get_normalized_dict()["PlayerGameLogs"]
                 teamlog = nba.teamgamelogs.TeamGameLogs(
+                    **(params)).get_normalized_dict()["TeamGameLogs"]
+                sco_teamlog = nba.teamgamelogs.TeamGameLogs(
+                    **(params | {"measure_type_player_game_logs_nullable": "Scoring"})).get_normalized_dict()["TeamGameLogs"]
+                adv_teamlog = nba.teamgamelogs.TeamGameLogs(
                     **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"]
 
                 # Fetch playoffs game logs
@@ -279,6 +293,10 @@ class StatsNBA(Stats):
                     usg_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Usage"})).get_normalized_dict()["PlayerGameLogs"])
                     teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                        **(params)).get_normalized_dict()["TeamGameLogs"])
+                    sco_teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Scoring"})).get_normalized_dict()["TeamGameLogs"])
+                    adv_teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
                 if (4 <= today.month <= 6) or (today-latest_date).days > 150:
                     params.update({'season_type_nullable': "Playoffs"})
@@ -289,6 +307,10 @@ class StatsNBA(Stats):
                     usg_gamelog.extend(nba.playergamelogs.PlayerGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Usage"})).get_normalized_dict()["PlayerGameLogs"])
                     teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                        **(params)).get_normalized_dict()["TeamGameLogs"])
+                    sco_teamlog.extend(nba.teamgamelogs.TeamGameLogs(
+                        **(params | {"measure_type_player_game_logs_nullable": "Scoring"})).get_normalized_dict()["TeamGameLogs"])
+                    adv_teamlog.extend(nba.teamgamelogs.TeamGameLogs(
                         **(params | {"measure_type_player_game_logs_nullable": "Advanced"})).get_normalized_dict()["TeamGameLogs"])
 
                 break
@@ -299,15 +321,31 @@ class StatsNBA(Stats):
         adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
         usg_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
         teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+        sco_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+        adv_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+
+        for i in np.arange(len(teamlog)):
+            if (teamlog[i]["GAME_ID"] == sco_teamlog[i]["GAME_ID"]) and (teamlog[i]["TEAM_ID"] == sco_teamlog[i]["TEAM_ID"]):
+                teamlog[i] = teamlog[i] | sco_teamlog[i]
+            if (teamlog[i]["GAME_ID"] == adv_teamlog[i]["GAME_ID"]) and (teamlog[i]["TEAM_ID"] == adv_teamlog[i]["TEAM_ID"]):
+                teamlog[i] = teamlog[i] | adv_teamlog[i]
 
         team_df = []
-        for team1, team2 in tqdm(zip(*[iter(teamlog)]*2), desc="Getting NBA stats", unit='team'):
+        for team1, team2 in zip(*[iter(teamlog)]*2):
+            team1.update({
+                "FTR": (team1["FTM"] / team1["FGA"]) if team1["FGA"] > 0 else 0,
+                "BLK_RATIO": (team1["BLK"] / team1["BLKA"]) if team1["BLKA"] > 0 else 0,
+                "OPP": team2['TEAM_ABBREVIATION']
+            })
+            team2.update({
+                "FTR": (team2["FTM"] / team2["FGA"]) if team2["FGA"] > 0 else 0,
+                "BLK_RATIO": (team2["BLK"] / team2["BLKA"]) if team2["BLKA"] > 0 else 0,
+                "OPP": team1['TEAM_ABBREVIATION']
+            })
             team1.update({"OPP_"+k: v for k, v in team2.items()
                          if "OPP_"+k in self.teamlog.columns})
-            team1["OPP"] = team2['TEAM_ABBREVIATION']
             team2.update({"OPP_"+k: v for k, v in team1.items()
                          if "OPP_"+k in self.teamlog.columns})
-            team2["OPP"] = team1['TEAM_ABBREVIATION']
             team_df.append(team1)
             team_df.append(team2)
 
@@ -667,10 +705,18 @@ class StatsNBA(Stats):
                 apply(lambda x: np.polyfit(x.totals.fillna(112).values.astype(float) / 112 - x.totals.fillna(112).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
-        team_stat_types = ['OFF_RATING', 'DEF_RATING', 'EFG_PCT', 'OREB_PCT', 'DREB_PCT',
-                           'TM_TOV_PCT', 'PACE', 'OPP_OFF_RATING', 'OPP_DEF_RATING',
-                           'OPP_EFG_PCT', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
-                           'OPP_TM_TOV_PCT']
+        team_stat_types = ['FGA', 'FG_PCT', 'FG3A', 'FG3_PCT', 'FT_PCT', 'BLKA', 'PF', 'PFD', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT',
+                           'PCT_FGA_3PT', 'PCT_PTS_2PT', 'PCT_PTS_2PT_MR', 'PCT_PTS_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV',
+                           'PCT_PTS_PAINT', 'PCT_AST_2PM', 'PCT_UAST_2PM', 'PCT_AST_3PM', 'PCT_UAST_3PM', 'PCT_AST_FGM',
+                           'PCT_UAST_FGM', 'E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING', 'AST_PCT', 'AST_TO',
+                           'AST_RATIO', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT', 'E_PACE', 'PACE',
+                           'PIE', 'OPP_FGA', 'OPP_FG_PCT', 'OPP_FG3A', 'OPP_FG3_PCT', 'OPP_FT_PCT', 'OPP_OREB', 'OPP_DREB', 'OPP_REB',
+                           'OPP_AST', 'OPP_TOV', 'OPP_STL', 'OPP_BLK', 'OPP_BLKA', 'OPP_PTS', 'OPP_FTR', 'OPP_BLK_RATIO', 'OPP_PCT_FGA_2PT',
+                           'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_2PT', 'OPP_PCT_PTS_2PT_MR', 'OPP_PCT_PTS_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT',
+                           'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
+                           'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_E_OFF_RATING', 'OPP_OFF_RATING', 'OPP_E_DEF_RATING',
+                           'OPP_DEF_RATING', 'OPP_AST_PCT', 'OPP_AST_TO', 'OPP_AST_RATIO', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
+                           'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_EFG_PCT', 'OPP_TS_PCT', 'OPP_E_PACE', 'OPP_PACE', 'OPP_PIE']
         i = self.defenseProfile.index
         self.defenseProfile = self.defenseProfile.merge(
             teamstats[team_stat_types], left_on='OPP', right_on='TEAM_ABBREVIATION')

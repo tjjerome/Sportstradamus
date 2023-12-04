@@ -33,7 +33,7 @@
         "PF": 1,
         "PR": 0.49905374594103524,
         "PRA": 0.4829227936961216,
-        "PTS": 0.5863658733691783,
+        "PTS": 0.5849229835101669,
         "RA": 0.5309310579365863,
         "REB": 0.6797058604010964,
         "STL": 1,
@@ -65,7 +65,9 @@
         "longest reception": 0.6029662970179933,
         "sacks taken": 1,
         "passing first downs": 0.2861326780486845,
-        "first downs": 1
+        "first downs": 1,
+        "fumbles lost": 2.2072173504663577,
+        "completion percentage": 0.11840134154729509
     },
     "NHL": {
         "assists": 1,
