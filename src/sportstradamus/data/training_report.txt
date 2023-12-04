@@ -28,6 +28,12 @@
  0.553564   0.542729 0.061657   -0.317571    -0.212226 -0.485756 0.318804
  0.593521   0.579737 0.062541    0.010334     0.014242 -0.485756 0.318804
 
+======================== NFL first downs ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
+ 0.607558   0.491803 -0.137374   -0.200340    -0.071201 -0.166578 -0.156217
+ 0.673440   0.769231 -0.236723    0.045385     0.061391 -0.166578 -0.156217
+
 ======================= NFL interceptions =======================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
@@ -51,6 +57,12 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
  0.673701    0.71831 0.197334    0.111047     0.146452  0.076477 0.429632
  0.698630    0.69863 0.390516    0.127133     0.165017  0.076477 0.429632
+
+==================== NFL passing first downs ====================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.595174   0.648352 0.042936   -0.045815    -0.023507  0.015998 0.318837
+ 0.620408   0.637681 0.118265    0.035003     0.047435  0.015998 0.318837
 
 ======================== NFL passing tds ========================
  Distribution Model: Poisson
@@ -105,6 +117,12 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
  0.594678   0.633628 0.026512   -0.687714    -0.210147 -0.701792 0.327542
  0.614650   0.613636 0.242266    0.031677     0.043634 -0.701792 0.327542
+
+======================== NFL sacks taken ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
+ 0.550489   0.621622 -0.045936   -0.034265    -0.037702  0.060985 -0.041046
+ 0.623145   0.615686  0.349177    0.036055     0.048770  0.060985 -0.041046
 
 ========================== NFL targets ==========================
  Distribution Model: Gaussian
