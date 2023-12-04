@@ -371,15 +371,23 @@ def main(progress, books, parlays):
     filepath = pkg_resources.files(data) / "NFL_fantasy-points-underdog.mdl"
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
-    model = filedict["model"]
+    models = filedict["model"]
 
     playerStats, playerData = nfl.get_fantasy()
     categories = ["Home", "Position"]
     for c in categories:
         playerStats[c] = playerStats[c].astype('category')
 
-    prob_params = model.predict(playerStats, pred_type="parameters")
-    prob_params.index = playerStats.index
+    prob_params = pd.DataFrame()
+    for bounds, model in models.items():
+        mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
+        if len(playerStats[mask]) == 0:
+            continue
+        preds = model.predict(
+            playerStats[mask], pred_type="parameters")
+        preds.index = playerStats.loc[mask].index
+        prob_params = pd.concat([prob_params, preds])
+
     prob_params['Player'] = playerStats.index
     positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
     prob_params['Position'] = playerStats.Position.map(positions)
@@ -1020,9 +1028,12 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
     #     pbar.update(len(offers))
     #     logger.warning(f"{filename} missing")
     #     return []
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        stat_data.profile_market(market)
+    if market in stat_data.gamelog.columns:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            stat_data.profile_market(market)
+    else:
+        return []
 
     playerStats = []
     playerNames = []
@@ -1155,12 +1166,16 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         prob_params = pd.DataFrame()
         for bounds, model in models.items():
             mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
+            if len(playerStats[mask]) == 0:
+                continue
             preds = model.predict(
                 playerStats[mask], pred_type="parameters")
             preds.index = playerStats.loc[mask].index
             prob_params = pd.concat([prob_params, preds])
 
         prob_params.sort_index(inplace=True)
+    elif market not in stat_data.gamelog.columns:
+        return []
     else:
         cv = stat_cv.get(league,{}).get(market,1)
         logger.warning(f"{filename} missing")
