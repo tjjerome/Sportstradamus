@@ -5,7 +5,7 @@ import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegressionCV, SGDClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -38,7 +38,7 @@ import gc
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
 def meditate(force, stats, league):
@@ -64,7 +64,7 @@ def meditate(force, stats, league):
     # mlb.update()
     nba = StatsNBA()
     nba.load()
-    nba.update()
+    # nba.update()
     nhl = StatsNHL()
     nhl.load()
     # nhl.update()
@@ -75,9 +75,9 @@ def meditate(force, stats, league):
 
     all_markets = {
         "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
+            # "passing yards",
+            # "rushing yards",
+            # "receiving yards",
             "yards",
             "qb yards",
             "fantasy points prizepicks",
@@ -188,7 +188,7 @@ def meditate(force, stats, league):
                 if stats:
                     with open(filepath, 'rb') as infile:
                         filedict = pickle.load(infile)
-                        model = filedict['model']
+                        models = filedict['model']
                         params = filedict['params']
                         dist = filedict['distribution']
                         cv = filedict['cv']
@@ -442,6 +442,10 @@ def meditate(force, stats, league):
             prob_params_train['result'] = y_train['Result']
             prob_params.sort_index(inplace=True)
             prob_params['result'] = y_test['Result']
+            X_train.sort_index(inplace=True)
+            y_train.sort_index(inplace=True)
+            X_test.sort_index(inplace=True)
+            y_test.sort_index(inplace=True)
             cv = 1
             step = M["Result"].drop_duplicates().sort_values().diff().min()
             if dist == "Poisson":
@@ -506,7 +510,7 @@ def meditate(force, stats, league):
 
             filt = {}
             y_class = (y_train["Result"] >=
-                       X_train["Line"]).astype(int)
+                       X_train["Line"]).astype(int).to_numpy()
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
@@ -514,12 +518,12 @@ def meditate(force, stats, league):
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             for mini, maxi in models.keys():
                 mask = X_train["Player z"].between(mini, maxi, "left")
-                clf = LogisticRegressionCV(
-                    fit_intercept=True, solver='newton-cholesky', tol=1e-8, max_iter=500).fit(y_proba_train[mask], y_class[mask])
+                clf = LogisticRegression(
+                    fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train[mask]*2-1, y_class[mask])
                 filt[(mini, maxi)] = clf
                 mask = X_test["Player z"].between(mini, maxi, "left")
                 y_proba_filt[mask, :] = clf.predict_proba(
-                    y_proba[mask])
+                    y_proba[mask]*2-1)
 
             y_class = (y_test["Result"] >=
                        X_test["Line"]).astype(int)
