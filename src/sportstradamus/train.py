@@ -38,7 +38,7 @@ import gc
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
 def meditate(force, stats, league):
@@ -75,9 +75,9 @@ def meditate(force, stats, league):
 
     all_markets = {
         "NFL": [
-            # "passing yards",
-            # "rushing yards",
-            # "receiving yards",
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
             "yards",
             "qb yards",
             "fantasy points prizepicks",
@@ -347,20 +347,19 @@ def meditate(force, stats, league):
 
             y = M[['Result']]
             X = M.drop(columns=['Result'])
-
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
+            step = M["Result"].drop_duplicates().sort_values().diff().min()
 
             categories = ["Home", "Position"]
             if "Position" not in X.columns:
                 categories.remove("Position")
             for c in categories:
                 X[c] = X[c].astype('category')
-                X_train[c] = X_train[c].astype('category')
-                X_test[c] = X_test[c].astype('category')
 
             categories = "name:"+",".join(categories)
+
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
 
             if need_model:
                 y_train_labels = np.ravel(y_train.to_numpy())
@@ -378,20 +377,24 @@ def meditate(force, stats, league):
                 n_bins = np.clip(int(len(X_train)/2000), 2, 5)
                 _, bins = pd.qcut(X_train["Player z"],
                                   n_bins, retbins=True, duplicates='drop')
+                                  
+                max_hist_bin = int(np.min([.75*len(X_train)/n_bins/3,
+                                           9*1024*1024*1024/(20*4095*len(X_train.columns))]))
                 
                 params = {
                     "feature_pre_filter": ["none", [False]],
-                    "force_col_wise": ["none", [True]],
+                    # "force_col_wise": ["none", [True]],
                     "max_depth": ["int", {"low": 5, "high": 63, "log": False}],
-                    "max_bin": ["none", [int(.8*len(X_train)/n_bins/3)]],
+                    "max_bin": ["none", [max_hist_bin]],
+                    "hist_pool_size": ["none", [9*1024]],
                     "num_leaves": ["int", {"low": 23, "high": 4095, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
                     "min_child_samples": ["int", {"low": 4, "high": 500, "log": False}],
-                    "min_child_weight": ["float", {"low": 1e-4, "high": .8*len(X_train)/n_bins/1000, "log": True}],
-                    "learning_rate": ["float", {"low": .0001, "high": 0.2, "log": True}],
-                    "feature_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
-                    "bagging_fraction": ["float", {"low": 0.7, "high": 1.0, "log": False}],
+                    "min_child_weight": ["float", {"low": 1e-4, "high": .75*len(X_train)/n_bins/1000, "log": True}],
+                    "learning_rate": ["float", {"low": .001, "high": 0.2, "log": True}],
+                    "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                    "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
                 }
 
@@ -405,10 +408,10 @@ def meditate(force, stats, league):
                     opt_param = model.hyper_opt(params,
                                                 dtrain,
                                                 num_boost_round=999,
-                                                nfold=5,
-                                                early_stopping_rounds=50,
-                                                max_minutes=30,
-                                                n_trials=500,
+                                                nfold=4,
+                                                early_stopping_rounds=20,
+                                                max_minutes=20,
+                                                n_trials=200,
                                                 silence=True,
                                                 )
                     opt_params = opt_param.copy()
@@ -447,7 +450,6 @@ def meditate(force, stats, league):
             X_test.sort_index(inplace=True)
             y_test.sort_index(inplace=True)
             cv = 1
-            step = M["Result"].drop_duplicates().sort_values().diff().min()
             if dist == "Poisson":
                 under = poisson.cdf(
                     X_train["Line"], prob_params_train["rate"])
@@ -614,7 +616,7 @@ def meditate(force, stats, league):
                 del model
 
             report()
-            # see_features()
+    see_features()
 
 
 def report():
@@ -654,9 +656,11 @@ def see_features():
         data).iterdir() if ".mdl" in f.name]
     model_list.sort()
     feature_importances = []
+    features_to_filter = {}
+    most_important = {}
     for model_str in model_list:
         with open(pkg_resources.files(data) / model_str, "rb") as infile:
-            model = pickle.load(infile)
+            filedict = pickle.load(infile)
 
         filepath = pkg_resources.files(
             data) / ("test_" + model_str.replace(".mdl", ".csv"))
@@ -664,7 +668,7 @@ def see_features():
 
         y = M[['Result']]
         X = M.drop(columns=['Result', 'EV', 'P'])
-        if model["distribution"] == "Gaussian":
+        if filedict["distribution"] == "Gaussian":
             X.drop(columns=["STD"], inplace=True)
         features = X.columns
 
@@ -674,19 +678,39 @@ def see_features():
         for c in categories:
             X[c] = X[c].astype('category')
 
-        explainer = shap.TreeExplainer(model['model'].booster)
-        vals = explainer.shap_values(X)
-        if model["distribution"] == "Gaussian":
-            vals = np.abs(vals[0]) + np.abs(vals[1])
+        models = filedict['model']
 
-        vals = np.mean(np.abs(vals), axis=0)
+        vals = np.zeros(len(X.columns))
+        for bounds, model in models.items():
+            mask = X["Player z"].between(bounds[0], bounds[1], 'left')
+            explainer = shap.TreeExplainer(model.booster)
+            subvals = explainer.shap_values(X[mask])
+            if filedict["distribution"] == "Gaussian":
+                subvals = np.abs(subvals[0]) + np.abs(subvals[1])
+
+            vals = vals + np.mean(np.abs(subvals), axis=0)
+
         vals = vals/np.sum(vals)*100
-
         feature_importances.append(
             {k: v for k, v in list(zip(features, vals))})
+        
+        features_to_filter[model_str[:-4]] = list(features[vals == 0])
+        most_important[model_str[:-4]] = list(features[np.argpartition(vals, -10)[-10:]])
 
     df = pd.DataFrame(feature_importances, index=[
                       market[:-4] for market in model_list]).fillna(0).transpose()
+    
+    for league in ["NBA", "NFL", "NHL", "MLB"]:
+        df[league + "_ALL"] = df[[col for col in df.columns if league in col]].mean(axis=1)
+        most_important[league + "_ALL"] = list(df[league + "_ALL"].sort_values(ascending=False).head(10).index)
+
+    df["ALL"] = df[[col for col in df.columns if "ALL" in col]].mean(axis=1)
+    most_important["ALL"] = list(df["ALL"].sort_values(ascending=False).head(10).index)
+
+    with open(pkg_resources.files(data) / "features_to_filter.json", "w") as outfile:
+        json.dump(features_to_filter, outfile, indent=4)
+    with open(pkg_resources.files(data) / "most_important_features.json", "w") as outfile:
+        json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
 
