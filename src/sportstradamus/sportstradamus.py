@@ -1174,6 +1174,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             prob_params = pd.concat([prob_params, preds])
 
         prob_params.sort_index(inplace=True)
+        playerStats.sort_index(inplace=True)
     elif market not in stat_data.gamelog.columns:
         return []
     else:
@@ -1349,23 +1350,23 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         low, params["loc"], params["scale"])
                     under = under - push/2
 
-            proba = [under, 1-under]
-            # proba = [0.5/o.get("Boost", 1)] * 2
-            # if ("+" in o["Player"]) or ("vs." in o["Player"]):
-            #     probb = []
-            #     for stat in stats:
-            #         z = stat["Player z"]
-            #         for edges, clf in filt.items():
-            #             if edges[0] <= z < edges[1]:
-            #                 probb.append(clf.predict_proba([[1-under]])[0][1])
+            # proba = [under, 1-under]
+            proba = [0.5/o.get("Boost", 1)] * 2
+            if ("+" in o["Player"]) or ("vs." in o["Player"]):
+                probb = []
+                for stat in stats:
+                    z = stat["Player z"]
+                    for edges, clf in filt.items():
+                        if edges[0] <= z < edges[1]:
+                            probb.append(clf.predict_proba([[2*(1-under)-1]])[0][1])
 
-            #     proba = np.mean(probb)
-            #     proba = [1- proba, proba]
-            # else:
-            #     z = playerStats.loc[o["Player"], "Player z"]
-            #     for edges, clf in filt.items():
-            #         if edges[0] <= z < edges[1]:
-            #             proba = clf.predict_proba([[1-under]])[0]
+                proba = np.mean(probb)
+                proba = [1- proba, proba]
+            else:
+                z = playerStats.loc[o["Player"], "Player z"]
+                for edges, clf in filt.items():
+                    if edges[0] <= z < edges[1]:
+                        proba = clf.predict_proba([[2*(1-under)-1]])[0]
 
         else:
             if "+" in o["Player"]:
