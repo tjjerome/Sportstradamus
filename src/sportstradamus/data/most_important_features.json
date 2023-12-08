@@ -1,4 +1,184 @@
 {
+    "NBA_AST": [
+        "MeanH2H",
+        "Player E_OFF_RATING",
+        "Player AST_PCT",
+        "Player z",
+        "MeanYr",
+        "Mean5",
+        "Mean10",
+        "Player avg",
+        "Line",
+        "Odds"
+    ],
+    "NBA_BLK": [
+        "DVPOA",
+        "Mean5",
+        "MeanYr",
+        "Mean10",
+        "Player avg",
+        "Odds",
+        "STDYr",
+        "Player MIN growth",
+        "Line",
+        "Player MIN short"
+    ],
+    "NBA_BLST": [
+        "Player PACE growth",
+        "Player z",
+        "Player MIN short",
+        "STDYr",
+        "MeanYr",
+        "Mean10",
+        "Mean5",
+        "Defense z",
+        "Line",
+        "DVPOA"
+    ],
+    "NBA_DREB": [
+        "Player z",
+        "Mean5",
+        "DaysOff",
+        "Player MIN growth",
+        "Game 5",
+        "Line",
+        "Player MIN short",
+        "MeanYr",
+        "Player avg",
+        "Mean10"
+    ],
+    "NBA_FG3A": [
+        "DVPOA",
+        "Mean10",
+        "Moneyline",
+        "Game 5",
+        "Defense z",
+        "Player z",
+        "Player MIN short",
+        "Line",
+        "MeanYr",
+        "Mean5"
+    ],
+    "NBA_FG3M": [
+        "Player E_OFF_RATING",
+        "Player avg",
+        "Player PCT_FG3A short",
+        "Mean5",
+        "Player FG3A_48 short",
+        "Mean10",
+        "Player z",
+        "Odds",
+        "Line",
+        "Player MIN short"
+    ],
+    "NBA_FGA": [
+        "Defense avg",
+        "MeanYr",
+        "Mean5",
+        "Mean10",
+        "Moneyline",
+        "Player MIN short",
+        "Game 5",
+        "Line",
+        "Player MIN growth",
+        "DaysOff"
+    ],
+    "NBA_FGM": [
+        "Player USG_PCT short",
+        "Moneyline",
+        "Mean5",
+        "Player MIN growth",
+        "Player MIN short",
+        "Line",
+        "Player avg",
+        "Game 5",
+        "MeanYr",
+        "Mean10"
+    ],
+    "NBA_FTM": [
+        "DaysOff",
+        "Player USG_PCT",
+        "Player PCT_FGA short",
+        "Player USG_PCT short",
+        "MeanYr",
+        "Player MIN short",
+        "Player PFD",
+        "Mean10",
+        "Line",
+        "Player PFD short"
+    ],
+    "NBA_MIN": [
+        "Trend5",
+        "Game 4",
+        "Avg5",
+        "Moneyline",
+        "DaysOff",
+        "Mean10",
+        "Mean5",
+        "Player MIN short",
+        "Line",
+        "Game 5"
+    ],
+    "NBA_OREB": [
+        "Mean10",
+        "Player DREB_48 short",
+        "STD10",
+        "DaysOff",
+        "Player PCT_FG3A",
+        "Player avg",
+        "Player MIN short",
+        "Player z",
+        "Line",
+        "Player MIN growth"
+    ],
+    "NBA_PA": [
+        "Player position z",
+        "Player MIN growth",
+        "MeanYr",
+        "Odds",
+        "Mean5",
+        "Avg10",
+        "Game 5",
+        "Player MIN short",
+        "Line",
+        "Mean10"
+    ],
+    "NBA_PF": [
+        "Player PIE short",
+        "Moneyline",
+        "Player PFD short",
+        "DaysOff",
+        "Mean10",
+        "Line",
+        "MeanYr",
+        "Player MIN short",
+        "Player MIN growth",
+        "DVPOA"
+    ],
+    "NBA_PR": [
+        "Total",
+        "Player z",
+        "STDYr",
+        "Player MIN short",
+        "Game 5",
+        "MeanYr",
+        "Mean10",
+        "Line",
+        "Mean5",
+        "Odds"
+    ],
+    "NBA_PRA": [
+        "Player z",
+        "Avg5",
+        "Meeting 4",
+        "Player avg",
+        "Game 5",
+        "Player MIN short",
+        "Odds",
+        "Mean5",
+        "Line",
+        "Mean10"
+    ],
     "NBA_PTS": [
         "DaysIntoSeason",
         "Mean5",
@@ -11,6 +191,18 @@
         "Line",
         "Player MIN short"
     ],
+    "NBA_RA": [
+        "Meeting 2",
+        "MeanYr",
+        "Player avg",
+        "Player z",
+        "Game 5",
+        "Player MIN short",
+        "Odds",
+        "Line",
+        "Mean5",
+        "Mean10"
+    ],
     "NBA_REB": [
         "Player MIN growth",
         "STD10",
@@ -22,6 +214,42 @@
         "Line",
         "Odds",
         "Mean10"
+    ],
+    "NBA_STL": [
+        "Mean10",
+        "Moneyline",
+        "Player MIN growth",
+        "Defense z",
+        "Player z",
+        "Defense avg",
+        "MeanYr",
+        "Player MIN short",
+        "Line",
+        "Player avg"
+    ],
+    "NBA_TOV": [
+        "Player MIN growth",
+        "Defense OPP_TM_TOV_PCT",
+        "Mean10",
+        "Defense z",
+        "Player z",
+        "Line",
+        "Moneyline",
+        "Player MIN short",
+        "Player PFD short",
+        "Player AST_TO short"
+    ],
+    "NBA_fantasy-points-prizepicks": [
+        "MeanYr",
+        "Avg5",
+        "DaysOff",
+        "Player MIN growth",
+        "Player MIN short",
+        "Mean5",
+        "Mean10",
+        "Game 5",
+        "Line",
+        "Odds"
     ],
     "NFL_attempts": [
         "Defense avg",
@@ -335,17 +563,77 @@
         "Player yards per target",
         "DVPOA"
     ],
-    "NBA_ALL": [
+    "NHL_goalie-fantasy-points-underdog": [
+        "Player Freeze",
+        "AvgYr",
+        "Defense Block_Pct",
+        "Defense Fenwick",
+        "DVPOA",
+        "Player Freeze short",
+        "Trend5",
+        "Team Block_Pct",
+        "Moneyline",
+        "Line"
+    ],
+    "NHL_goalsAgainst": [
+        "Team Fenwick_Pct",
+        "Team xGoals",
+        "Defense z",
+        "Team Takeaways",
+        "Defense totals gain",
         "Line",
-        "Mean10",
-        "Odds",
-        "Mean5",
-        "Player MIN short",
-        "MeanYr",
+        "Moneyline",
+        "Player Freeze short",
+        "Team xGoalsAgainst",
+        "Defense Fenwick_Pct"
+    ],
+    "NHL_points": [
+        "Team GOE",
+        "Player z",
+        "Player Blk60",
+        "Player Fenwick",
+        "Total",
+        "Moneyline",
+        "Player ShotShare",
+        "Player ShotShare short",
+        "Player TimeShare",
+        "Player TimeShare short"
+    ],
+    "NHL_saves": [
+        "Team Fenwick_Pct",
+        "Defense Corsi_Pct",
+        "Player SOE",
+        "Defense Fenwick",
+        "Team Takeaways_Pct",
+        "DaysIntoSeason",
+        "Moneyline",
+        "Line",
+        "Defense z",
+        "DVPOA"
+    ],
+    "NHL_shots": [
+        "Player TimeShare growth",
+        "Player ShotShare short",
+        "GamesPlayed",
+        "Defense avg",
+        "Player Ast60",
         "Player avg",
         "Player z",
+        "Defense z",
+        "Line",
+        "Player TimeShare short"
+    ],
+    "NBA_ALL": [
+        "Line",
+        "Player MIN short",
+        "Mean10",
+        "Mean5",
         "Game 5",
-        "Player MIN growth"
+        "Odds",
+        "MeanYr",
+        "Player MIN growth",
+        "Player z",
+        "Player avg"
     ],
     "NFL_ALL": [
         "Total",
@@ -360,16 +648,16 @@
         "Player avg"
     ],
     "NHL_ALL": [
-        "DVPOA",
-        "Odds",
         "Line",
-        "Avg5",
-        "Avg10",
-        "AvgYr",
-        "AvgH2H",
-        "IQR10",
-        "IQRYr",
-        "Mean5"
+        "Moneyline",
+        "Defense z",
+        "DVPOA",
+        "Player TimeShare short",
+        "Defense Fenwick_Pct",
+        "Total",
+        "Team Block_Pct",
+        "Defense Fenwick",
+        "Team xGoalsAgainst"
     ],
     "MLB_ALL": [
         "DVPOA",
@@ -385,14 +673,14 @@
     ],
     "ALL": [
         "Line",
-        "Mean10",
+        "Moneyline",
         "Total",
+        "Mean10",
+        "DVPOA",
+        "Defense z",
         "Mean5",
-        "Odds",
-        "Player avg",
-        "MeanYr",
         "Player z",
-        "Player carry share short",
-        "Player MIN short"
+        "Player MIN short",
+        "Player avg"
     ]
 }

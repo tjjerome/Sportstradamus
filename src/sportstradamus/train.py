@@ -125,46 +125,46 @@ def meditate(force, stats, league):
             "PF",
             "MIN",
         ],
-        # "NHL": [
-        #     "saves",
-        #     "shots",
-        #     "points",
-        #     "goalsAgainst",
-        #     "goalie fantasy points underdog",
-        #     "skater fantasy points underdog",
-        #     "blocked",
-        #     "powerPlayPoints",
-        #     "sogBS",
-        #     "fantasy points prizepicks",
-        #     "hits",
-        #     "goals",
-        #     "assists",
-        #     "faceOffWins",
-        #     "timeOnIce",
-        # ],
-        # "MLB": [
-        #     "pitcher strikeouts",
-        #     "pitching outs",
-        #     "pitches thrown",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "walks allowed",
-        #     "1st inning runs allowed",
-        #     "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "batter strikeouts",
-        #     "singles"
-        # ],
+        "NHL": [
+            "saves",
+            "shots",
+            "points",
+            "goalsAgainst",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "blocked",
+            "powerPlayPoints",
+            "sogBS",
+            "fantasy points prizepicks",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
+        "MLB": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "walks allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -521,7 +521,7 @@ def meditate(force, stats, league):
             for mini, maxi in models.keys():
                 mask = X_train["Player z"].between(mini, maxi, "left")
                 clf = LogisticRegression(
-                    fit_intercept=True, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train[mask]*2-1, y_class[mask])
+                    fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train[mask]*2-1, y_class[mask])
                 filt[(mini, maxi)] = clf
                 mask = X_test["Player z"].between(mini, maxi, "left")
                 y_proba_filt[mask, :] = clf.predict_proba(

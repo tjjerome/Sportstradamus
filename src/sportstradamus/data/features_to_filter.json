@@ -1,4 +1,116 @@
 {
+    "NBA_AST": [
+        "DaysOff",
+        "Meeting 1"
+    ],
+    "NBA_BLK": [
+        "AvgH2H",
+        "MeanH2H",
+        "TrendH2H",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 4",
+        "Meeting 5",
+        "Game 1",
+        "Player AST_TO short",
+        "Team BLKA",
+        "Team OREB_PCT",
+        "Defense OREB_PCT",
+        "Defense OPP_PCT_FGA_3PT",
+        "Defense OPP_DREB_PCT"
+    ],
+    "NBA_BLST": [
+        "Avg10",
+        "IQR10",
+        "IQRYr",
+        "Meeting 1",
+        "Meeting 3",
+        "Game 1",
+        "Game 3"
+    ],
+    "NBA_DREB": [
+        "Odds",
+        "Game 1"
+    ],
+    "NBA_FG3A": [
+        "Odds"
+    ],
+    "NBA_FG3M": [
+        "AvgYr",
+        "Meeting 2",
+        "Meeting 3",
+        "Game 1",
+        "Game 4",
+        "Player REB_PCT short",
+        "Player OREB_48 short",
+        "Player E_OFF_RATING growth",
+        "Team PCT_UAST_3PM",
+        "Team PCT_UAST_FGM",
+        "Defense PCT_UAST_2PM",
+        "Defense PIE",
+        "Defense OPP_OFF_RATING",
+        "Defense OPP_DEF_RATING"
+    ],
+    "NBA_FGA": [
+        "Odds"
+    ],
+    "NBA_FGM": [
+        "Odds"
+    ],
+    "NBA_FTM": [
+        "Odds",
+        "Avg5",
+        "AvgYr",
+        "IQRYr",
+        "Home",
+        "Position",
+        "Meeting 1",
+        "Meeting 4",
+        "Game 2",
+        "Player OREB_PCT",
+        "Player PCT_DREB",
+        "Player PCT_REB",
+        "Player AST_48",
+        "Player OREB_PCT short",
+        "Player FG3_PCT short",
+        "Player REB_PCT growth",
+        "Player DREB_48 growth",
+        "Defense PCT_FGA_3PT"
+    ],
+    "NBA_MIN": [
+        "Odds"
+    ],
+    "NBA_OREB": [
+        "Odds",
+        "AvgYr",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Game 4"
+    ],
+    "NBA_PA": [],
+    "NBA_PF": [
+        "Odds",
+        "Meeting 3",
+        "Meeting 4",
+        "Defense OPP_OFF_RATING"
+    ],
+    "NBA_PR": [
+        "Meeting 1",
+        "Meeting 5",
+        "Player REB_48",
+        "Player EFG_PCT growth",
+        "Team OPP_OFF_RATING",
+        "Team OPP_DEF_RATING",
+        "Defense DREB_PCT"
+    ],
+    "NBA_PRA": [
+        "DaysOff",
+        "Player TOV_48 growth",
+        "Defense OPP_DEF_RATING",
+        "Defense OPP_DREB_PCT"
+    ],
     "NBA_PTS": [
         "Player PCT_AST short",
         "Team PCT_UAST_3PM",
@@ -8,9 +120,52 @@
         "Defense OPP_DEF_RATING",
         "Defense OPP_DREB_PCT"
     ],
+    "NBA_RA": [
+        "Position",
+        "Player OREB_PCT short",
+        "Defense OPP_PCT_UAST_2PM",
+        "Defense OPP_OFF_RATING",
+        "Defense OPP_DEF_RATING"
+    ],
     "NBA_REB": [
         "Player AST_48 short"
     ],
+    "NBA_STL": [
+        "Avg5",
+        "IQRYr",
+        "TrendH2H",
+        "Home",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 4",
+        "Meeting 5",
+        "Game 2",
+        "Game 5",
+        "Team FG3_PCT",
+        "Team PCT_PTS_OFF_TOV",
+        "Team OPP_OFF_RATING",
+        "Team OPP_REB_PCT",
+        "Defense PCT_UAST_3PM",
+        "Defense PCT_UAST_FGM",
+        "Defense OPP_DREB_PCT"
+    ],
+    "NBA_TOV": [
+        "Odds",
+        "Avg10",
+        "AvgYr",
+        "IQR10",
+        "IQRYr",
+        "TrendH2H",
+        "Home",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 5",
+        "Game 2",
+        "Game 3"
+    ],
+    "NBA_fantasy-points-prizepicks": [],
     "NFL_attempts": [
         "Odds",
         "Avg5",
@@ -1508,5 +1663,72 @@
         "Team first_read_epa",
         "Team exp_per_pass",
         "Defense plays_per_game"
-    ]
+    ],
+    "NHL_goalie-fantasy-points-underdog": [
+        "Odds",
+        "Avg5",
+        "TrendH2H",
+        "DaysOff",
+        "Total",
+        "Home",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 5",
+        "Game 2",
+        "Game 4",
+        "Player RG",
+        "Player SV growth",
+        "Player SOE growth",
+        "Player Freeze growth",
+        "Defense Hits",
+        "Defense GOE",
+        "Team PIM"
+    ],
+    "NHL_goalsAgainst": [
+        "Odds",
+        "Avg5",
+        "IQRYr",
+        "Mean5",
+        "Mean10",
+        "MeanYr",
+        "TrendH2H",
+        "DaysOff",
+        "Home",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 4",
+        "Game 2",
+        "Game 3",
+        "Game 4",
+        "Game 5",
+        "Player totals gain",
+        "Player SV",
+        "Player SOE",
+        "Player SV short",
+        "Player goalsAgainst short",
+        "Team PIM"
+    ],
+    "NHL_points": [
+        "Odds",
+        "Meeting 1",
+        "Meeting 5"
+    ],
+    "NHL_saves": [
+        "Odds",
+        "Avg10",
+        "Trend5",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 4",
+        "Meeting 5",
+        "Game 1",
+        "Player SV short",
+        "Player Rebound short",
+        "Defense Takeaways_Pct",
+        "Team Corsi"
+    ],
+    "NHL_shots": []
 }
