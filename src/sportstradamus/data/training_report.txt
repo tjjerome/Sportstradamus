@@ -280,6 +280,12 @@
  0.623625   0.607580 0.185875    0.057395     0.074374  0.147149 0.473378
  0.626694   0.610329 0.187096    0.058738     0.076798  0.147149 0.473378
 
+========================== NHL assists ==========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
+ 0.741583        0.0 -0.260867    0.202687     0.262347  0.169179 -2.541178
+ 0.741626        0.0 -0.260867    0.205064     0.264402  0.169179 -2.541178
+
 ========================== NHL blocked ==========================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
