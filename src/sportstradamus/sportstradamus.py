@@ -256,27 +256,27 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    # try:
-    #     pp_dict = get_pp(books)
-    #     pp_offers, pp5 = process_offers(
-    #         pp_dict, "PrizePicks", stats, parlays)
-    #     save_data(pp_offers, "PrizePicks", gc)
-    #     best5 = pd.concat([best5, pp5])
-    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    # except Exception as exc:
-    #     logger.exception("Failed to get PrizePicks")
+    try:
+        pp_dict = get_pp(books)
+        pp_offers, pp5 = process_offers(
+            pp_dict, "PrizePicks", stats, parlays)
+        save_data(pp_offers, "PrizePicks", gc)
+        best5 = pd.concat([best5, pp5])
+        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    except Exception as exc:
+        logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
-    # try:
-    #     ud_dict = get_ud()
-    #     ud_offers, ud5 = process_offers(
-    #         ud_dict, "Underdog", stats, parlays)
-    #     save_data(ud_offers, "Underdog", gc)
-    #     best5 = pd.concat([best5, ud5])
-    #     ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-    # except Exception as exc:
-    #     logger.exception("Failed to get Underdog")
+    try:
+        ud_dict = get_ud()
+        ud_offers, ud5 = process_offers(
+            ud_dict, "Underdog", stats, parlays)
+        save_data(ud_offers, "Underdog", gc)
+        best5 = pd.concat([best5, ud5])
+        ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
+    except Exception as exc:
+        logger.exception("Failed to get Underdog")
 
     archive.write()
 
