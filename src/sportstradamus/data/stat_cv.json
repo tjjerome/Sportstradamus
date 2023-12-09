@@ -73,7 +73,7 @@
         "assists": 1,
         "blocked": 1,
         "faceOffWins": 0.7307325838116866,
-        "fantasy points prizepicks": 0.8661022317416615,
+        "fantasy points prizepicks": 0.8365811994716039,
         "goalie fantasy points underdog": 0.34980044154569945,
         "goals": 1,
         "goalsAgainst": 0.5200588189813382,
@@ -84,6 +84,6 @@
         "skater fantasy points underdog": 0.7054868484491648,
         "sogBS": 1,
         "timeOnIce": 0.26113092642139435,
-        "powerPlayPoints": 1
+        "powerPlayPoints": 2.044269192865882
     }
 }
