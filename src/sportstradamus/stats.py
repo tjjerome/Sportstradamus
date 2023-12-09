@@ -3836,6 +3836,8 @@ class StatsNHL(Stats):
             lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
 
         positions = ["C", "R", "L", "D"]
+        if market == "faceOffWins":
+            positions.remove("D")
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             for position in positions:
                 positionLogs = gamelog.loc[gamelog['position'] == position]
