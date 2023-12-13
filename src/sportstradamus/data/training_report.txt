@@ -292,6 +292,12 @@
  0.640323   0.633065 -0.309100    0.057167     0.077526  0.059488 -0.542061
  0.638087   0.623833 -0.302209    0.054758     0.074803  0.059488 -0.542061
 
+======================== NHL faceOffWins ========================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.676355   0.588747 -0.046757    0.077829     0.104864  0.117586 0.197928
+ 0.668827   0.579698 -0.046843    0.103399     0.135372  0.117586 0.197928
+
 ================= NHL fantasy points prizepicks =================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
@@ -357,4 +363,10 @@
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy
  0.622918   0.723679 -0.054339    0.049916     0.064588  0.174667 0.048734
  0.612995   0.708920 -0.049370    0.045240     0.059203  0.174667 0.048734
+
+========================= NHL timeOnIce =========================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.661613   0.696572 0.058894    0.095496     0.120076  0.354399 0.321553
+ 0.655641   0.690385 0.054791    0.090971     0.115731  0.354399 0.321553
 
