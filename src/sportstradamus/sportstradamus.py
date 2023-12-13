@@ -29,6 +29,12 @@ import datetime
 import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations
+from sklearn.metrics import (
+    precision_score,
+    accuracy_score,
+    brier_score_loss,
+    log_loss
+)
 
 
 @click.command()
@@ -296,7 +302,7 @@ def main(progress, books, parlays):
         history = pd.read_pickle(filepath)
     else:
         history = pd.DataFrame(
-            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
+            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Result"])
 
     df = pd.concat([ud_offers, pp_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                            ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
@@ -317,8 +323,8 @@ def main(progress, books, parlays):
                "NFL": "player display name", "NHL": "playerName"}
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
                "NFL": "gameday", "NHL": "gameDate"}
-    for i, row in tqdm(history.iterrows(), desc="Checking history", total=len(history)):
-        if np.isnan(row["Correct"]):
+    for i, row in tqdm(history.loc[history.isna().any(axis=1)].iterrows(), desc="Checking history", total=len(history)):
+        if np.isnan(row["Result"]):
             gamelog = stats[row["League"]].gamelog
             if " + " in row["Player"]:
                 players = row["Player"].split(" +")
@@ -327,8 +333,7 @@ def main(progress, books, parlays):
                 game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
                     pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
                 if not game1.empty and not game2.empty:
-                    history.at[i, "Correct"] = int(((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) > row["Line"] and row["Bet"] == "Over") or (
-                        (game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) < row["Line"] and row["Bet"] == "Under"))
+                    history.at[i, "Result"] = "Over" if ((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) > row["Line"]) else ("Under" if ((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) < row["Line"]) else "Push")
 
             elif " vs. " in row["Player"]:
                 players = row["Player"].split(" vs. ")
@@ -337,15 +342,13 @@ def main(progress, books, parlays):
                 game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
                     pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
                 if not game1.empty and not game2.empty:
-                    history.at[i, "Correct"] = int(((game1.iloc[0][row["Market"]] + row["Line"]) > game2.iloc[0][row["Market"]] and row["Bet"] == "Over") or (
-                        (game1.iloc[0][row["Market"]] + row["Line"]) < game2.iloc[0][row["Market"]] and row["Bet"] == "Under"))
+                    history.at[i, "Result"] = "Over" if ((game1.iloc[0][row["Market"]] + row["Line"]) > game2.iloc[0][row["Market"]]) else ("Under" if ((game1.iloc[0][row["Market"]] + row["Line"]) < game2.iloc[0][row["Market"]]) else "Push")
 
             else:
                 game = gamelog.loc[(gamelog[nameStr[row["League"]]] == row["Player"]) & (
                     pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
                 if not game.empty:
-                    history.at[i, "Correct"] = int((game.iloc[0][row["Market"]] > row["Line"] and row["Bet"] == "Over") or (
-                        game.iloc[0][row["Market"]] < row["Line"] and row["Bet"] == "Under"))
+                    history.at[i, "Result"] = "Over" if (game.iloc[0][row["Market"]] > row["Line"]) else ("Under" if (game.iloc[0][row["Market"]] < row["Line"]) else "Push")
 
     history.to_pickle(filepath)
     history.dropna(inplace=True, ignore_index=True)
@@ -355,6 +358,45 @@ def main(progress, books, parlays):
         wks.clear()
         wks.update([history.columns.values.tolist()] +
                    history.values.tolist())
+        wks.set_basic_filter()
+
+        hist_stats = pd.DataFrame(columns=["Accuracy", "Precision", "Balance", "LogLoss", "Brier", "Samples"])
+        hist_stats.loc["All"] = {
+            "Accuracy": accuracy_score(history["Bet"], history["Result"]),
+            "Precision": precision_score(history["Bet"], history["Result"], average='weighted'),
+            "Balance": (history["Bet"] == "Over").mean() - (history["Result"] == "Over").mean(),
+            "LogLoss": log_loss((history["Bet"] == history["Result"]).astype(int), history["Model"], labels=[0,1]),
+            "Brier": brier_score_loss((history["Bet"] == history["Result"]).astype(int), history["Model"], pos_label=1),
+            "Samples": len(history)
+        }
+        for league in history["League"].unique():
+            league_hist = history.loc[history["League"] == league]
+            hist_stats.loc[league] = {
+                "Accuracy": accuracy_score(league_hist["Bet"], league_hist["Result"]),
+                "Precision": precision_score(league_hist["Bet"], league_hist["Result"], average='weighted'),
+                "Balance": (league_hist["Bet"] == "Over").mean() - (league_hist["Result"] == "Over").mean(),
+                "LogLoss": log_loss((league_hist["Bet"] == league_hist["Result"]).astype(int), league_hist["Model"], labels=[0,1]),
+                "Brier": brier_score_loss((league_hist["Bet"] == league_hist["Result"]).astype(int), league_hist["Model"], pos_label=1),
+                "Samples": len(league_hist)
+            }
+            for market in league_hist["Market"].unique():
+                market_hist = league_hist.loc[league_hist["Market"] == market]
+                hist_stats.loc[f"{league} - {market}"] = {
+                    "Accuracy": accuracy_score(market_hist["Bet"], market_hist["Result"]),
+                    "Precision": precision_score(market_hist["Bet"], market_hist["Result"], average='weighted'),
+                    "Balance": (market_hist["Bet"] == "Over").mean() - (market_hist["Result"] == "Over").mean(),
+                    "LogLoss": log_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], labels=[0,1]),
+                    "Brier": brier_score_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], pos_label=1),
+                    "Samples": len(market_hist)
+                }
+                
+        hist_stats["Split"] = hist_stats.index
+        hist_stats = hist_stats[["Split", "Accuracy", "Precision", "Balance", "LogLoss", "Brier", "Samples"]].sort_values('Samples', ascending=False)
+        
+        wks = gc.open("Sportstradamus").worksheet("Model Stats")
+        wks.clear()
+        wks.update([hist_stats.columns.values.tolist()] +
+                   hist_stats.values.tolist())
         wks.set_basic_filter()
 
     if len(untapped_markets) > 0:
@@ -504,6 +546,7 @@ def find_correlation(offers, stats, platform, parlays):
         banned = json.load(infile)
 
     new_map = stat_map[platform].copy()
+    warnings.simplefilter('ignore')
 
     df = pd.DataFrame(offers)
     parlay_df = pd.DataFrame()
@@ -626,7 +669,6 @@ def find_correlation(offers, stats, platform, parlays):
                 split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
                     x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
             game_df = pd.concat([team_df, opp_df, split_df])
-            logger.info(f"Correlate {league}, {team}/{opp}")
             checked_teams.append(team)
             checked_teams.append(opp)
             game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
@@ -646,7 +688,7 @@ def find_correlation(offers, stats, platform, parlays):
                 combos = combinations(
                     game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), 5)
 
-                for bet in tqdm(combos, desc="Checking 5-Leg Parlay Combinations", leave=False, total=comb(len(idx), 5)):
+                for bet in tqdm(combos, desc=f"{league}, {team}/{opp} 5-Leg Parlays", leave=False, total=comb(len(idx), 5)):
                     teams = []
                     players = []
                     markets = []
@@ -783,7 +825,7 @@ def find_correlation(offers, stats, platform, parlays):
                 combos = combinations(
                     game_df[["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), 3)
 
-                for bet in tqdm(combos, desc="Checking 3-Leg Parlay Combinations", leave=False, total=comb(len(game_df), 3)):
+                for bet in tqdm(combos, desc=f"{league}, {team}/{opp} 3-Leg Parlays", leave=False, total=comb(len(game_df), 3)):
                     teams = []
                     players = []
                     markets = []
