@@ -1664,6 +1664,22 @@
         "Team exp_per_pass",
         "Defense plays_per_game"
     ],
+    "NHL_assists": [
+        "Odds",
+        "Line",
+        "Avg5",
+        "Avg10",
+        "Meeting 1",
+        "Meeting 2"
+    ],
+    "NHL_blocked": [
+        "Meeting 1"
+    ],
+    "NHL_faceOffWins": [
+        "Odds",
+        "Position"
+    ],
+    "NHL_fantasy-points-prizepicks": [],
     "NHL_goalie-fantasy-points-underdog": [
         "Odds",
         "Avg5",
@@ -1684,6 +1700,25 @@
         "Defense Hits",
         "Defense GOE",
         "Team PIM"
+    ],
+    "NHL_goals": [
+        "Odds",
+        "Line",
+        "Avg5",
+        "Avg10",
+        "AvgYr",
+        "IQR10",
+        "IQRYr",
+        "TrendH2H",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 3",
+        "Meeting 4",
+        "Meeting 5",
+        "Game 1",
+        "Game 3",
+        "Game 4",
+        "Game 5"
     ],
     "NHL_goalsAgainst": [
         "Odds",
@@ -1710,10 +1745,18 @@
         "Player goalsAgainst short",
         "Team PIM"
     ],
+    "NHL_hits": [
+        "Game 3"
+    ],
     "NHL_points": [
         "Odds",
         "Meeting 1",
         "Meeting 5"
+    ],
+    "NHL_powerPlayPoints": [
+        "Line",
+        "IQRYr",
+        "Meeting 2"
     ],
     "NHL_saves": [
         "Odds",
@@ -1730,5 +1773,12 @@
         "Defense Takeaways_Pct",
         "Team Corsi"
     ],
-    "NHL_shots": []
+    "NHL_shots": [],
+    "NHL_skater-fantasy-points-underdog": [
+        "Odds"
+    ],
+    "NHL_sogBS": [],
+    "NHL_timeOnIce": [
+        "Odds"
+    ]
 }

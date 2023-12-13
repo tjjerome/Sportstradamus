@@ -563,6 +563,54 @@
         "Player yards per target",
         "DVPOA"
     ],
+    "NHL_assists": [
+        "Goalie goalsAgainst",
+        "Player ShotShare short",
+        "Player z",
+        "Moneyline",
+        "GamesPlayed",
+        "Player Fenwick",
+        "Total",
+        "Player ShotShare",
+        "Player TimeShare",
+        "Player TimeShare short"
+    ],
+    "NHL_blocked": [
+        "Player Fenwick short",
+        "Position",
+        "Defense avg",
+        "Player position avg",
+        "GamesPlayed",
+        "DVPOA",
+        "Odds",
+        "MeanYr",
+        "Line",
+        "Player TimeShare short"
+    ],
+    "NHL_faceOffWins": [
+        "Game 4",
+        "DaysIntoSeason",
+        "Player TimeShare short",
+        "STD10",
+        "Mean10",
+        "Mean5",
+        "Line",
+        "STDYr",
+        "Game 5",
+        "MeanYr"
+    ],
+    "NHL_fantasy-points-prizepicks": [
+        "Player TimeShare growth",
+        "Defense avg",
+        "Player z",
+        "Total",
+        "Player ShotShare",
+        "Player ShotShare short",
+        "Moneyline",
+        "Odds",
+        "Line",
+        "Player TimeShare short"
+    ],
     "NHL_goalie-fantasy-points-underdog": [
         "Player Freeze",
         "AvgYr",
@@ -574,6 +622,18 @@
         "Team Block_Pct",
         "Moneyline",
         "Line"
+    ],
+    "NHL_goals": [
+        "Player Shot60 short",
+        "Player Fenwick short",
+        "Player Ast60",
+        "GamesPlayed",
+        "Player Blk60",
+        "Total",
+        "Player ShotShare",
+        "Player TimeShare",
+        "Player GOE",
+        "Player TimeShare short"
     ],
     "NHL_goalsAgainst": [
         "Team Fenwick_Pct",
@@ -587,6 +647,18 @@
         "Team xGoalsAgainst",
         "Defense Fenwick_Pct"
     ],
+    "NHL_hits": [
+        "Player z",
+        "Mean5",
+        "MeanYr",
+        "Player Hit60 short",
+        "Defense avg",
+        "Mean10",
+        "Line",
+        "Defense z",
+        "Home",
+        "DaysIntoSeason"
+    ],
     "NHL_points": [
         "Team GOE",
         "Player z",
@@ -597,6 +669,18 @@
         "Player ShotShare",
         "Player ShotShare short",
         "Player TimeShare",
+        "Player TimeShare short"
+    ],
+    "NHL_powerPlayPoints": [
+        "Player Fenwick short",
+        "Player Fenwick",
+        "Player ShotShare short",
+        "Player TimeShare",
+        "Player ShotShare",
+        "Moneyline",
+        "Goalie goalsAgainst",
+        "Total",
+        "DaysIntoSeason",
         "Player TimeShare short"
     ],
     "NHL_saves": [
@@ -621,6 +705,42 @@
         "Player z",
         "Defense z",
         "Line",
+        "Player TimeShare short"
+    ],
+    "NHL_skater-fantasy-points-underdog": [
+        "Team GOE",
+        "Moneyline",
+        "Defense avg",
+        "GamesPlayed",
+        "Mean10",
+        "Total",
+        "Player ShotShare",
+        "Player ShotShare short",
+        "Line",
+        "Player TimeShare short"
+    ],
+    "NHL_sogBS": [
+        "Player ShotShare short",
+        "Player Fenwick",
+        "Mean10",
+        "MeanYr",
+        "GamesPlayed",
+        "Defense z",
+        "Defense avg",
+        "Player TimeShare growth",
+        "Line",
+        "Player TimeShare short"
+    ],
+    "NHL_timeOnIce": [
+        "Game 4",
+        "Player TimeShare growth",
+        "DaysIntoSeason",
+        "Avg5",
+        "Avg10",
+        "Line",
+        "Mean5",
+        "Mean10",
+        "Game 5",
         "Player TimeShare short"
     ],
     "NBA_ALL": [
@@ -649,15 +769,15 @@
     ],
     "NHL_ALL": [
         "Line",
-        "Moneyline",
-        "Defense z",
-        "DVPOA",
         "Player TimeShare short",
-        "Defense Fenwick_Pct",
+        "Moneyline",
         "Total",
-        "Team Block_Pct",
-        "Defense Fenwick",
-        "Team xGoalsAgainst"
+        "Defense z",
+        "Mean5",
+        "GamesPlayed",
+        "DVPOA",
+        "Game 5",
+        "Player ShotShare"
     ],
     "MLB_ALL": [
         "DVPOA",
@@ -673,14 +793,14 @@
     ],
     "ALL": [
         "Line",
-        "Moneyline",
         "Total",
         "Mean10",
-        "DVPOA",
-        "Defense z",
         "Mean5",
+        "Moneyline",
+        "Player TimeShare short",
+        "Game 5",
         "Player z",
-        "Player MIN short",
-        "Player avg"
+        "DVPOA",
+        "Player MIN short"
     ]
 }
