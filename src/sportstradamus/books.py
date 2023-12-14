@@ -745,6 +745,9 @@ def get_pp(books=True):
                 league = p["attributes"]["name"].replace("CMB", "")
 
         for o in tqdm(lines, desc="Getting offers for " + league, unit="offer"):
+            if o["attributes"]["adjusted_odds"]:
+                continue
+            
             players = player_ids[o["relationships"]
                                  ["new_player"]["data"]["id"]]["Name"].split(" + ")
             teams = player_ids[o["relationships"]["new_player"]
