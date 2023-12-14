@@ -10,89 +10,6 @@ import os.path
 
 pd.set_option('mode.chained_assignment', None)
 
-# MLB
-mlb = StatsMLB()
-mlb.load()
-mlb.update()
-
-if os.path.isfile((pkg_resources.files(data) / "mlb_corr_data.csv")):
-    matrix = pd.read_csv((pkg_resources.files(
-        data) / "mlb_corr_data.csv"), index_col=0)
-else:
-    stats = {
-        "pitcher": [
-            "pitcher strikeouts",
-            "pitching outs",
-            "pitches thrown",
-            "hits allowed",
-            "runs allowed",
-            "1st inning runs allowed",
-            "1st inning hits allowed",
-            "pitcher fantasy score",
-            "pitcher fantasy points underdog",
-            "walks allowed"
-        ],
-        "batter": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles"
-        ]
-    }
-
-    games = mlb.gamelog.gameId.unique()
-    matrix = pd.DataFrame()
-
-    for gameId in tqdm(games):
-        game_df = mlb.gamelog.loc[mlb.gamelog['gameId'] == gameId]
-        bat_df = game_df.loc[game_df['starting batter']]
-        bat_df.position = "B" + bat_df.battingOrder.astype(str)
-        bat_df.index = bat_df.position
-        pitch_df = game_df.loc[game_df['starting pitcher']]
-        pitch_df.position = "P"
-        pitch_df.index = pitch_df.position
-        gameDate = datetime.strptime(game_df.gameDate.values[0], '%Y-%m-%d')
-
-        homeStats = pitch_df.loc[pitch_df['home'],
-                                 stats['pitcher']].to_dict("index")
-        homeStats.update(
-            bat_df.loc[bat_df['home'], stats['batter']].to_dict("index"))
-
-        awayStats = pitch_df.loc[~pitch_df['home'],
-                                 stats['pitcher']].to_dict("index")
-        awayStats.update(
-            bat_df.loc[~bat_df['home'], stats['batter']].to_dict("index"))
-
-        matrix = pd.concat([matrix, pd.json_normalize(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
-        matrix = pd.concat([matrix, pd.json_normalize(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
-
-    matrix.to_csv((pkg_resources.files(data) / "mlb_corr_data.csv"))
-
-matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
-matrix = matrix.reindex(sorted(matrix.columns), axis=1)
-c = matrix.corr().unstack()
-c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
-c = c.reindex(c.abs().sort_values(ascending=False).index)
-
-c = c.loc[~(c.index.get_level_values(0).str.startswith("P") &
-            c.index.get_level_values(1).str.startswith("_OPP_B"))]
-c = c.loc[~(c.index.get_level_values(0).str.startswith("B") &
-            c.index.get_level_values(1).str.startswith("_OPP_P"))]
-
-c.to_csv((pkg_resources.files(data) / "MLB_corr.csv"))
-
 # NFL
 nfl = StatsNFL()
 nfl.load()
@@ -162,7 +79,7 @@ else:
     for gameId in tqdm(games):
         game_df = nfl.gamelog.loc[nfl.gamelog['game id'] == gameId]
         gameDate = datetime.strptime(game_df.iloc[0]['gameday'], '%Y-%m-%d')
-        if gameDate < datetime(2020, 9, 24):
+        if gameDate < datetime(2021, 9, 1):
             continue
         nfl.profile_market('snap pct', date=gameDate)
         usage = pd.DataFrame(
@@ -362,3 +279,87 @@ c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
 c = c.reindex(c.abs().sort_values(ascending=False).index)
 
 c.to_csv((pkg_resources.files(data) / "NHL_corr.csv"))
+
+
+# MLB
+mlb = StatsMLB()
+mlb.load()
+mlb.update()
+
+if os.path.isfile((pkg_resources.files(data) / "mlb_corr_data.csv")):
+    matrix = pd.read_csv((pkg_resources.files(
+        data) / "mlb_corr_data.csv"), index_col=0)
+else:
+    stats = {
+        "pitcher": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "pitcher fantasy score",
+            "pitcher fantasy points underdog",
+            "walks allowed"
+        ],
+        "batter": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ]
+    }
+
+    games = mlb.gamelog.gameId.unique()
+    matrix = pd.DataFrame()
+
+    for gameId in tqdm(games):
+        game_df = mlb.gamelog.loc[mlb.gamelog['gameId'] == gameId]
+        bat_df = game_df.loc[game_df['starting batter']]
+        bat_df.position = "B" + bat_df.battingOrder.astype(str)
+        bat_df.index = bat_df.position
+        pitch_df = game_df.loc[game_df['starting pitcher']]
+        pitch_df.position = "P"
+        pitch_df.index = pitch_df.position
+        gameDate = datetime.strptime(game_df.gameDate.values[0], '%Y-%m-%d')
+
+        homeStats = pitch_df.loc[pitch_df['home'],
+                                 stats['pitcher']].to_dict("index")
+        homeStats.update(
+            bat_df.loc[bat_df['home'], stats['batter']].to_dict("index"))
+
+        awayStats = pitch_df.loc[~pitch_df['home'],
+                                 stats['pitcher']].to_dict("index")
+        awayStats.update(
+            bat_df.loc[~bat_df['home'], stats['batter']].to_dict("index"))
+
+        matrix = pd.concat([matrix, pd.json_normalize(
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
+        matrix = pd.concat([matrix, pd.json_normalize(
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
+
+    matrix.to_csv((pkg_resources.files(data) / "mlb_corr_data.csv"))
+
+matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
+matrix = matrix.reindex(sorted(matrix.columns), axis=1)
+c = matrix.corr().unstack()
+c = c.iloc[:int(len(c)/2)]
+l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
+c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
+c = c.reindex(c.abs().sort_values(ascending=False).index)
+
+c = c.loc[~(c.index.get_level_values(0).str.startswith("P") &
+            c.index.get_level_values(1).str.startswith("_OPP_B"))]
+c = c.loc[~(c.index.get_level_values(0).str.startswith("B") &
+            c.index.get_level_values(1).str.startswith("_OPP_P"))]
+
+c.to_csv((pkg_resources.files(data) / "MLB_corr.csv"))

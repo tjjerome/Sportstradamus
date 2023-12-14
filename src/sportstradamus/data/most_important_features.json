@@ -276,16 +276,16 @@
         "Player carry share short"
     ],
     "NFL_completion-percentage": [
-        "Team time_per_play",
-        "STDYr",
-        "Player pass yards per attempt growth",
-        "Player pass yards per attempt short",
-        "Total",
-        "Player completion percentage over expected",
-        "DaysIntoSeason",
-        "Defense z",
+        "Player completion percentage",
+        "Player passer adot",
+        "Team rush_success_rate",
+        "Player position z",
+        "MeanH2H",
+        "Defense midfield_epa_allowed",
+        "Player passer rating short",
         "Player time to throw short",
-        "Player completion percentage over expected short"
+        "Avg10",
+        "Total"
     ],
     "NFL_completions": [
         "Line",
@@ -324,13 +324,13 @@
         "Player yards per target"
     ],
     "NFL_first-downs": [
-        "Player passer rating",
+        "Player route participation growth",
+        "Player route participation",
         "Moneyline",
-        "Player longest completion",
         "DVPOA",
         "Player carry share short",
         "Player carry share",
-        "Player receiver drops short",
+        "Player passer rating",
         "Mean10",
         "Player completion percentage",
         "Player breakaway yards"
@@ -396,16 +396,16 @@
         "Player rushing success rate"
     ],
     "NFL_passing-first-downs": [
-        "Player pass yards per attempt",
-        "Defense epa_allowed_per_pass",
-        "Team epa_per_rush",
-        "Defense first_read_success_rate_allowed",
         "Team pass_rate_over_expected",
+        "Player completion percentage over expected",
         "Mean10",
+        "Team epa_per_rush",
         "Player completion percentage",
+        "Team expected_yards_per_rush",
+        "MeanH2H",
+        "MeanYr",
         "Defense yards_allowed_per_pass",
-        "Total",
-        "MeanYr"
+        "Total"
     ],
     "NFL_passing-tds": [
         "Player completion percentage",
@@ -480,16 +480,16 @@
         "Player wopr short"
     ],
     "NFL_receptions": [
-        "Team pass_rate_over_expected",
+        "Defense moneyline gain",
         "Player avg",
         "Player route participation growth",
-        "MeanYr",
-        "Defense midfield_success_rate_allowed",
-        "DVPOA",
+        "Total",
+        "Player route participation short",
         "Mean10",
         "Line",
         "Player target share short",
-        "Player route participation short"
+        "Defense yards_allowed_per_rush",
+        "DVPOA"
     ],
     "NFL_rushing-tds": [
         "Team pass_success_rate",
@@ -516,28 +516,28 @@
         "DVPOA"
     ],
     "NFL_sacks-taken": [
-        "Player receiver drops growth",
-        "Player completion percentage growth",
         "Player yards per carry growth",
-        "Player yards per carry short",
-        "Defense stuffs_per_rush",
-        "Moneyline",
-        "Defense pass_success_rate_allowed",
+        "Defense home",
+        "Player completion percentage over expected",
+        "Player midfield target rate",
         "Total",
-        "Team redzone_epa",
-        "Player longest rush short"
+        "Defense midfield_success_rate_allowed",
+        "Player longest rush short",
+        "Player longest rush growth",
+        "Player carry share",
+        "Team redzone_epa"
     ],
     "NFL_targets": [
-        "Player target share short",
         "Player yards per route run",
-        "Player yards per target",
-        "Player wopr",
-        "Position",
         "Player z",
-        "Mean10",
         "Player route participation short",
+        "Player longest reception",
+        "Defense totals gain",
+        "Player route participation growth",
+        "Player wopr",
+        "Mean10",
         "Line",
-        "Player route participation growth"
+        "Position"
     ],
     "NFL_tds": [
         "Player wopr",
@@ -761,11 +761,11 @@
         "Mean10",
         "Player carry share short",
         "Team pass_success_rate",
-        "Player time to throw short",
+        "Player z",
         "Team pass_rate_over_expected",
         "Player position z",
-        "DVPOA",
-        "Player avg"
+        "Player avg",
+        "Player carry share"
     ],
     "NHL_ALL": [
         "Line",
