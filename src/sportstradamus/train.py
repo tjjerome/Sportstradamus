@@ -61,16 +61,16 @@ def meditate(force, stats, league):
 
     mlb = StatsMLB()
     mlb.load()
-    # mlb.update()
+    mlb.update()
     nba = StatsNBA()
     nba.load()
-    # nba.update()
+    nba.update()
     nhl = StatsNHL()
     nhl.load()
-    # nhl.update()
+    nhl.update()
     nfl = StatsNFL()
     nfl.load()
-    # nfl.update()
+    nfl.update()
     np.random.seed(69)
 
     all_markets = {
@@ -142,29 +142,29 @@ def meditate(force, stats, league):
             "faceOffWins",
             "timeOnIce",
         ],
-        # "MLB": [
-        #     "pitcher strikeouts",
-        #     "pitching outs",
-        #     "pitches thrown",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "walks allowed",
-        #     "1st inning runs allowed",
-        #     "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "batter strikeouts",
-        #     "singles"
-        # ],
+        "MLB": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "walks allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -374,12 +374,12 @@ def meditate(force, stats, league):
 
                 models = {}
 
-                n_bins = np.clip(int(len(X_train)/2000), 2, 5)
+                n_bins = np.clip(int(len(X_train)/3000), 2, 9)
                 _, bins = pd.qcut(X_train["Player z"],
                                   n_bins, retbins=True, duplicates='drop')
                                   
                 max_hist_bin = int(np.min([.75*len(X_train)/n_bins/3,
-                                           9*1024*1024*1024/(20*4095*len(X_train.columns))]))
+                                           9*1024*1024*1024/(20*2047*len(X_train.columns))]))
                 
                 params = {
                     "feature_pre_filter": ["none", [False]],
@@ -410,7 +410,7 @@ def meditate(force, stats, league):
                                                 num_boost_round=999,
                                                 nfold=4,
                                                 early_stopping_rounds=20,
-                                                max_minutes=20,
+                                                max_minutes=30,
                                                 n_trials=500,
                                                 silence=True,
                                                 )
