@@ -44,6 +44,26 @@
             [
                 "attempts",
                 "carries"
+            ],
+            [
+                "first downs",
+                "passing first downs"
+            ],
+            [
+                "passing yards",
+                "yards"
+            ],
+            [
+                "passing yards",
+                "receiving yards"
+            ],
+            [
+                "qb yards",
+                "yards"
+            ],
+            [
+                "qb yards",
+                "receiving yards"
             ]
         ],
         "opponent": []
