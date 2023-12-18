@@ -68,6 +68,14 @@
             [
                 "fantasy points underdog",
                 "fantasy points underdog"
+            ],
+            [
+                "passing yards",
+                "fantasy points underdog"
+            ],
+            [
+                "qb yards",
+                "fantasy points underdog"
             ]
         ],
         "opponent": []
