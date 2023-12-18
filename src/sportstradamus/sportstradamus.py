@@ -564,9 +564,9 @@ def find_correlation(offers, stats, platform, parlays):
         "NFL": ["QB", "WR", "RB", "TE"],
         "NHL": ["C", "R", "L", "D", "G"]
     }
-    payout_table = {
-        "Underdog": [3, 6, 10, 20],
-        "PrizePicks": [3, 5, 10, 20, 25]
+    payout_table = { # using equivalent payouts when insured picks are better
+        "Underdog": [3, 6, 10.9, 20.2],
+        "PrizePicks": [3, 5.3, 10, 20.8, 38.8]
     }
     for league in ["NFL", "NBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
@@ -682,15 +682,15 @@ def find_correlation(offers, stats, platform, parlays):
             else:
                 game_df.loc[:, 'Boost'] = 1
 
-            idx = game_df.loc[game_df['Books'] > .49].sort_values(['Model', 'Books'], ascending=False).groupby('Player').head(5).head(
-                30).sort_values(['Team', 'Player']).index
+            idx = game_df.loc[game_df['Books'] > .49].sort_values(['Model', 'Books'], ascending=False).groupby('Player').head(4).head(
+                25).sort_values(['Team', 'Player']).index
 
-            best_fives = []
-            if league != "MLB" and platform != "Thrive":
+            for bet_size in np.arange(2, len(payout_table[platform]) + 2):
+                best_bets = []
                 combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), 5)
+                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), bet_size)
 
-                for bet in tqdm(combos, desc=f"{league}, {team}/{opp} 5-Leg Parlays", leave=False, total=comb(len(idx), 5)):
+                for bet in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False, total=comb(len(idx), bet_size)):
                     teams = []
                     players = []
                     markets = []
@@ -732,11 +732,11 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Model"] for leg in bet])
                     pb = np.product([leg["Books"] for leg in bet])
 
-                    # if p < 1/20 or pb < .65/20:
-                    #     continue
+                    if p < .5**bet_size or pb < .5**bet_size:
+                        continue
 
                     # get correlation matrix
-                    for i in np.arange(5):
+                    for i in np.arange(bet_size):
                         cm1 = bet[i]['cMarket']
                         b1 = [bet[i]['Bet']]*len(cm1)
                         if "vs." in bet[i]["Player"]:
@@ -746,7 +746,7 @@ def find_correlation(offers, stats, platform, parlays):
                                 b1[1] = "Over"
                         p1 = bet[i]['Model']
                         pb1 = bet[i]['Books']
-                        for j in np.arange(i+1, 5):
+                        for j in np.arange(i+1, bet_size):
                             cm2 = bet[j]['cMarket']
                             b2 = [bet[j]['Bet']]*len(cm2)
                             if "vs." in bet[j]["Player"]:
@@ -773,8 +773,8 @@ def find_correlation(offers, stats, platform, parlays):
                                     pb *= np.exp(np.sqrt(pb1*pb2 *
                                                  (1-pb1)*(1-pb2))*rho)
 
-                    p *= 20
-                    pb *= 20
+                    p *= payout_table[platform][bet_size-2]
+                    pb *= payout_table[platform][bet_size-2]
                     if p > 1 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
@@ -782,179 +782,48 @@ def find_correlation(offers, stats, platform, parlays):
                             "Platform": platform,
                             "EV": p,
                             "Boost": np.product([leg["Boost"] for leg in bet]),
-                            "Leg 1": bet[0]["Desc"],
-                            "Leg 2": bet[1]["Desc"],
-                            "Leg 3": bet[2]["Desc"],
-                            "Leg 4": bet[3]["Desc"],
-                            "Leg 5": bet[4]["Desc"],
-                            "Players": {leg["Player"] for leg in bet}
-                        }
-                        best_fives.append(parlay)
-
-            if len(best_fives) > 0:
-                df5 = pd.DataFrame(best_fives).sort_values(
-                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
-                to_add = df5.head(2)
-                to_add = pd.concat(
-                    [to_add, df5.loc[df5["Boost"] == 1].head(1)]).drop_duplicates()
-                while len(to_add) < 10 and len(df5) > 0:
-                    dupes = [item for row in to_add[[
-                        "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5"]].values.tolist() for item in row]
-                    dupes = list(
-                        set([x for x in dupes if dupes.count(x) > 1]))
-
-                    for leg in dupes:
-                        to_add = pd.concat(
-                            [to_add, df5[~df5.eq(leg).any(axis=1)].head(1)])
-
-                    for leg in dupes:
-                        df5 = df5[~df5.eq(leg).any(axis=1)]
-
-                    to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
-                    ).sort_values("EV", ascending=False)
-
-                    if len(to_add.loc[to_add["Boost"] > 1]) > 3:
-                        df5 = df5.loc[df5["Boost"] == 1]
-
-                    add_id = [i for i in df5.index if i not in to_add.index]
-                    df5 = df5.loc[add_id]
-
-                parlay_df = pd.concat(
-                    [parlay_df, to_add])
-
-            best_threes = []
-            if platform != "PrizePicks":
-                combos = combinations(
-                    game_df[["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), 3)
-
-                for bet in tqdm(combos, desc=f"{league}, {team}/{opp} 3-Leg Parlays", leave=False, total=comb(len(game_df), 3)):
-                    teams = []
-                    players = []
-                    markets = []
-                    for leg in bet:
-                        if "/" not in leg["Team"]:
-                            teams.append(leg["Team"])
-                        elif "vs." not in leg["Player"]:
-                            teams.extend(leg["Team"].split("/"))
-                        else:
-                            teams.append(leg["Team"].split(
-                                "/")[0] if (leg["Bet"] == "Over") else leg["Team"].split("/")[1])
-
-                        if "+" in leg["Player"]:
-                            players.extend(leg["Player"].split(" + "))
-                        elif "vs." in leg["Player"]:
-                            players.extend(leg["Player"].split(" vs. "))
-                        else:
-                            players.append(leg["Player"])
-
-                        if isinstance(leg["cMarket"], list):
-                            markets.extend(leg["cMarket"])
-                        else:
-                            markets.append(leg["cMarket"])
-
-                    if (len(set(teams)) != 2) or (len(set(players)) != len(players)):
-                        continue
-
-                    team1_markets = [leg.split(".")[1]
-                                     for leg in markets if "_OPP_" not in leg]
-                    team2_markets = [leg.split(".")[1]
-                                     for leg in markets if "_OPP_" in leg]
-
-                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[league]['team']]) or
-                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[league]['team']]) or
-                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[league]['opponent']]) or
-                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
-                        continue
-
-                    p = np.product([leg["Model"] for leg in bet])
-                    pb = np.product([leg["Books"] for leg in bet])
-
-                    # get correlation matrix
-                    for i in np.arange(3):
-                        cm1 = bet[i]['cMarket']
-                        b1 = [bet[i]['Bet']]*len(cm1)
-                        if "vs." in bet[i]["Player"]:
-                            if b1[0] == "Over":
-                                b1[1] = "Under"
-                            else:
-                                b1[1] = "Over"
-                        p1 = bet[i]['Model']
-                        pb1 = bet[i]['Books']
-                        for j in np.arange(i+1, 3):
-                            cm2 = bet[j]['cMarket']
-                            b2 = [bet[j]['Bet']]*len(cm2)
-                            if "vs." in bet[j]["Player"]:
-                                if b2[0] == "Over":
-                                    b2[1] = "Under"
-                                else:
-                                    b2[1] = "Over"
-                            p2 = bet[j]['Model']
-                            pb2 = bet[j]['Books']
-
-                            for xi, x in enumerate(cm1):
-                                for yi, y in enumerate(cm2):
-                                    if ("_OPP_" in x) and ("_OPP_" in y):
-                                        x = x.replace("_OPP_", "")
-                                        y = y.replace("_OPP_", "")
-                                    rho = c_map.get((x, y), 0)
-                                    if rho == 0:
-                                        rho = c_map.get((y, x), 0)
-                                    if b1[xi] != b2[yi]:
-                                        rho = -rho
-
-                                    p *= np.exp(np.sqrt(p1*p2 *
-                                                (1-p1)*(1-p2))*rho)
-                                    pb *= np.exp(np.sqrt(pb1*pb2 *
-                                                 (1-pb1)*(1-pb2))*rho)
-
-                    p *= 6
-                    pb *= 6
-                    if p > 1 and pb > 1:
-                        parlay = {
-                            "Game": f"{team}/{opp}",
-                            "League": league,
-                            "Platform": platform,
-                            "EV": p,
-                            "Boost": np.product([leg["Boost"] for leg in bet]),
-                            "Leg 1": bet[0]["Desc"],
-                            "Leg 2": bet[1]["Desc"],
-                            "Leg 3": bet[2]["Desc"],
+                            "Leg 1": "",
+                            "Leg 2": "",
+                            "Leg 3": "",
                             "Leg 4": "",
                             "Leg 5": "",
+                            "Leg 6": "",
                             "Players": {leg["Player"] for leg in bet}
                         }
-                        best_threes.append(parlay)
+                        for i in np.arange(bet_size):
+                            parlay["Leg " + str(i+1)] = bet[i]["Desc"]
+                        best_bets.append(parlay)
 
-            if len(best_threes) > 0:
-                df3 = pd.DataFrame(best_threes).sort_values(
-                    "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
-                to_add = df3.head(2)
-                to_add = pd.concat(
-                    [to_add, df3.loc[df3["Boost"] == 1].head(1)]).drop_duplicates()
-                while len(to_add) < 10 and len(df3) > 0:
-                    dupes = [item for row in to_add[[
-                        "Leg 1", "Leg 2", "Leg 3"]].values.tolist() for item in row]
-                    dupes = list(
-                        set([x for x in dupes if dupes.count(x) > 1]))
+                if len(best_bets) > 0:
+                    df5 = pd.DataFrame(best_bets).sort_values(
+                        "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
+                    to_add = df5.head(2)
+                    to_add = pd.concat(
+                        [to_add, df5.loc[df5["Boost"] == 1].head(1)]).drop_duplicates()
+                    while len(to_add) < 10 and len(df5) > 0:
+                        dupes = [item for row in to_add[[
+                            "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6"]].values.tolist() for item in row if item != ""]
+                        dupes = list(
+                            set([x for x in dupes if dupes.count(x) > 1]))
 
-                    for leg in dupes:
-                        to_add = pd.concat(
-                            [to_add, df3[~df3.eq(leg).any(axis=1)].head(1)])
+                        for leg in dupes:
+                            to_add = pd.concat(
+                                [to_add, df5[~df5.eq(leg).any(axis=1)].head(1)])
 
-                    for leg in dupes:
-                        df3 = df3[~df3.eq(leg).any(axis=1)]
+                        for leg in dupes:
+                            df5 = df5[~df5.eq(leg).any(axis=1)]
 
-                    to_add = pd.concat([to_add, df3.head(1)]).drop_duplicates(
-                    ).sort_values("EV", ascending=False)
+                        to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
+                        ).sort_values("EV", ascending=False)
 
-                    if len(to_add.loc[to_add["Boost"] > 1]) > 3:
-                        df3 = df3.loc[df3["Boost"] == 1]
+                        if len(to_add.loc[to_add["Boost"] > 1]) > 3:
+                            df5 = df5.loc[df5["Boost"] == 1]
 
-                    add_id = [i for i in df3.index if i not in to_add.index]
-                    df3 = df3.loc[add_id]
+                        add_id = [i for i in df5.index if i not in to_add.index]
+                        df5 = df5.loc[add_id]
 
-                parlay_df = pd.concat(
-                    [parlay_df, to_add])
+                    parlay_df = pd.concat(
+                        [parlay_df, to_add])
 
             # Find best pairs
             for i, offer in game_df.iterrows():
