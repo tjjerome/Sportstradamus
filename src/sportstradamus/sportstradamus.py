@@ -683,7 +683,7 @@ def find_correlation(offers, stats, platform, parlays):
                 game_df.loc[:, 'Boost'] = 1
 
             idx = game_df.loc[game_df['Books'] > .49].sort_values(['Model', 'Books'], ascending=False).groupby('Player').head(4).head(
-                25).sort_values(['Team', 'Player']).index
+                28).sort_values(['Team', 'Player']).index
 
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                 best_bets = []
