@@ -423,6 +423,8 @@ class Archive:
             market_swap = {"AST": "assists",
                            "PTS": "points", "BLK": "blocked"}
             market = market_swap.get(market, market)
+        if o["League"] == "NBA":
+            market = market.replace("underdog", "prizepicks")
 
         if len(lines) < 4:
             lines = [None]*4
