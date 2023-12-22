@@ -7,7 +7,6 @@ from sportstradamus.books import (
     get_dk,
     get_pp,
     get_ud,
-    get_thrive,
 )
 from sportstradamus.helpers import archive, get_ev, get_active_sports, stat_cv
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -15,6 +14,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import gspread
 import click
+import re
 from scipy.stats import poisson, skellam, norm, hmean, gamma, nbinom
 from math import comb
 import numpy as np
@@ -30,7 +30,6 @@ import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations
 from sklearn.metrics import (
-    precision_score,
     accuracy_score,
     brier_score_loss,
     log_loss
@@ -772,6 +771,23 @@ def find_correlation(offers, stats, platform, parlays):
                                                 (1-p1)*(1-p2))*rho)
                                     pb *= np.exp(np.sqrt(pb1*pb2 *
                                                  (1-pb1)*(1-pb2))*rho)
+                                    
+                                    if re.sub(r'[0-9]', '', x) in banned[league]['modified'].keys():
+                                        modifier = banned[league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
+                                        if b1[xi] == b2[yi]:
+                                            p *= modifier
+                                            pb *= modifier
+                                        else:
+                                            p /= modifier
+                                            pb /= modifier
+                                    elif re.sub(r'[0-9]', '', y) in banned[league]['modified'].keys():
+                                        modifier = banned[league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
+                                        if b1[xi] == b2[yi]:
+                                            p *= modifier
+                                            pb *= modifier
+                                        else:
+                                            p /= modifier
+                                            pb /= modifier
 
                     p *= payout_table[platform][bet_size-2]
                     pb *= payout_table[platform][bet_size-2]

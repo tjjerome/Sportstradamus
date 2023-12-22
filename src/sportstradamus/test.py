@@ -10,7 +10,9 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-# NFL = StatsNFL()
+NFL = StatsNFL()
+NFL.load()
+NFL.update()
 # NFL.season_start = datetime(2018, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2019, 9, 1).date()
@@ -24,16 +26,16 @@ from tqdm import tqdm
 # NFL.season_start = datetime(2023, 9, 1).date()
 # NFL.update()
 
-NBA = StatsNBA()
-NBA.season = "2021-22"
-NBA.season_start = datetime(2021, 10, 1).date()
-NBA.update()
-NBA.season = "2022-23"
-NBA.season_start = datetime(2022, 10, 1).date()
-NBA.update()
-NBA.season = "2023-24"
-NBA.season_start = datetime(2023, 10, 1).date()
-NBA.update()
+# NBA = StatsNBA()
+# NBA.season = "2021-22"
+# NBA.season_start = datetime(2021, 10, 1).date()
+# NBA.update()
+# NBA.season = "2022-23"
+# NBA.season_start = datetime(2022, 10, 1).date()
+# NBA.update()
+# NBA.season = "2023-24"
+# NBA.season_start = datetime(2023, 10, 1).date()
+# NBA.update()
 
 # NHL = StatsNHL()
 # NHL.season_start = datetime(2021, 10, 12).date()
