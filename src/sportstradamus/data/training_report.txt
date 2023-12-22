@@ -64,6 +64,18 @@
  0.565978   0.568894 0.062335    0.004822     0.008507  0.009862 0.437256
  0.565274   0.568030 0.064849    0.001470     0.004036  0.009862 0.437256
 
+============================ NBA PTS ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.564899   0.565829 0.099749    0.007332     0.010931  0.013588 0.420484
+ 0.560162   0.562789 0.099726    0.006125     0.009107  0.013588 0.420484
+
+============================ NBA REB ============================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.608414   0.633559 0.180618    0.035714     0.046506  0.046237 0.304862
+ 0.603126   0.626453 0.175049    0.031378     0.041360  0.046237 0.304862
+
 ============================ NBA STL ============================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy
@@ -88,6 +100,12 @@
  0.649142   0.684292 0.151866    0.088361     0.110304  0.191976 0.386723
  0.647490   0.680851 0.150236    0.082255     0.104181  0.191976 0.386723
 
+=================== NFL completion percentage ===================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy
+ 0.647761   0.591837 -0.127463    0.074741     0.099175  0.163468 0.420881
+ 0.647059   0.594059 -0.122941    0.072929     0.097128  0.163468 0.420881
+
 ======================== NFL completions ========================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
@@ -105,6 +123,12 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy
  0.591727   0.568382 0.167392    0.024322     0.032646  0.102035 0.399894
  0.593539   0.569444 0.165187    0.025212     0.033866  0.102035 0.399894
+
+======================== NFL first downs ========================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy
+ 0.674526   0.555556 -0.180619    0.110347     0.154070  0.356326 -0.026809
+ 0.682759   0.555556 -0.189683    0.153937     0.190286  0.356326 -0.026809
 
 ======================== NFL fumbles lost =======================
  Distribution Model: Gaussian
