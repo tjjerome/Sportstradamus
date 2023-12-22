@@ -734,6 +734,8 @@ def find_correlation(offers, stats, platform, parlays):
                     if p < (.5**bet_size)*.9 or pb < (.5**bet_size)*.9:
                         continue
 
+                    boost = 1
+
                     # get correlation matrix
                     for i in np.arange(bet_size):
                         cm1 = bet[i]['cMarket']
@@ -772,32 +774,41 @@ def find_correlation(offers, stats, platform, parlays):
                                     pb *= np.exp(np.sqrt(pb1*pb2 *
                                                  (1-pb1)*(1-pb2))*rho)
                                     
-                                    if re.sub(r'[0-9]', '', x) in banned[league]['modified'].keys():
-                                        modifier = banned[league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
-                                        if b1[xi] == b2[yi]:
-                                            p *= modifier
-                                            pb *= modifier
-                                        else:
-                                            p /= modifier
-                                            pb /= modifier
-                                    elif re.sub(r'[0-9]', '', y) in banned[league]['modified'].keys():
-                                        modifier = banned[league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
-                                        if b1[xi] == b2[yi]:
-                                            p *= modifier
-                                            pb *= modifier
-                                        else:
-                                            p /= modifier
-                                            pb /= modifier
+                                    if platform == "Underdog":
+                                        if re.sub(r'[0-9]', '', x) in banned[league]['modified'].keys():
+                                            modifier = banned[league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
+                                            if b1[xi] == b2[yi]:
+                                                p *= modifier
+                                                pb *= modifier
+                                                boost *= modifier
+                                            else:
+                                                p /= modifier
+                                                pb /= modifier
+                                                boost /= modifier
+
+                                        elif re.sub(r'[0-9]', '', y) in banned[league]['modified'].keys():
+                                            modifier = banned[league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
+                                            if b1[xi] == b2[yi]:
+                                                p *= modifier
+                                                pb *= modifier
+                                                boost *= modifier
+                                            else:
+                                                p /= modifier
+                                                pb /= modifier
+                                                boost /= modifier
 
                     p *= payout_table[platform][bet_size-2]
                     pb *= payout_table[platform][bet_size-2]
+
+                    boost = np.clip(boost, .667, 1.6125) * np.product([leg["Boost"] for leg in bet])
+
                     if p > 1 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
                             "Platform": platform,
                             "EV": p,
-                            "Boost": np.product([leg["Boost"] for leg in bet]),
+                            "Boost": boost,
                             "Leg 1": "",
                             "Leg 2": "",
                             "Leg 3": "",
