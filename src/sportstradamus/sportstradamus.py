@@ -15,7 +15,7 @@ from google.auth.transport.requests import Request
 import gspread
 import click
 import re
-from scipy.stats import poisson, skellam, norm, hmean, gamma, nbinom
+from scipy.stats import poisson, skellam, norm, hmean, multivariate_normal
 from math import comb
 import numpy as np
 import pickle
@@ -674,14 +674,14 @@ def find_correlation(offers, stats, platform, parlays):
             checked_teams.append(opp)
             game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
             if platform == "Underdog":
-                game_df.loc[:, 'Model'] = game_df['Model'] * \
+                game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
                     game_df['Boost']
-                game_df.loc[:, 'Books'] = game_df['Books'] * \
+                game_df.loc[:, 'Boosted Books'] = game_df['Books'] * \
                     game_df['Boost']
             else:
                 game_df.loc[:, 'Boost'] = 1
 
-            idx = game_df.loc[game_df['Books'] > .49].sort_values(['Model', 'Books'], ascending=False).groupby('Player').head(4).head(
+            idx = game_df.loc[game_df['Boosted Books'] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(4).head(
                 28).sort_values(['Team', 'Player']).index
 
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
@@ -731,12 +731,13 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Model"] for leg in bet])
                     pb = np.product([leg["Books"] for leg in bet])
 
-                    if p < (.5**bet_size)*.9 or pb < (.5**bet_size)*.9:
+                    if p < (.5**bet_size)*.98 or pb < (.5**bet_size)*.98:
                         continue
 
                     boost = 1
 
                     # get correlation matrix
+                    SIG = np.zeros([bet_size, bet_size])
                     for i in np.arange(bet_size):
                         cm1 = bet[i]['cMarket']
                         b1 = [bet[i]['Bet']]*len(cm1)
@@ -745,8 +746,6 @@ def find_correlation(offers, stats, platform, parlays):
                                 b1[1] = "Under"
                             else:
                                 b1[1] = "Over"
-                        p1 = bet[i]['Model']
-                        pb1 = bet[i]['Books']
                         for j in np.arange(i+1, bet_size):
                             cm2 = bet[j]['cMarket']
                             b2 = [bet[j]['Bet']]*len(cm2)
@@ -755,8 +754,6 @@ def find_correlation(offers, stats, platform, parlays):
                                     b2[1] = "Under"
                                 else:
                                     b2[1] = "Over"
-                            p2 = bet[j]['Model']
-                            pb2 = bet[j]['Books']
 
                             for xi, x in enumerate(cm1):
                                 for yi, y in enumerate(cm2):
@@ -769,45 +766,37 @@ def find_correlation(offers, stats, platform, parlays):
                                     if b1[xi] != b2[yi]:
                                         rho = -rho
 
-                                    p *= np.exp(np.sqrt(p1*p2 *
-                                                (1-p1)*(1-p2))*rho)
-                                    pb *= np.exp(np.sqrt(pb1*pb2 *
-                                                 (1-pb1)*(1-pb2))*rho)
+                                    SIG[i, j] += rho
                                     
                                     if platform == "Underdog":
                                         if re.sub(r'[0-9]', '', x) in banned[league]['modified'].keys():
                                             modifier = banned[league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
                                             if b1[xi] == b2[yi]:
-                                                p *= modifier
-                                                pb *= modifier
                                                 boost *= modifier
                                             else:
-                                                p /= modifier
-                                                pb /= modifier
                                                 boost /= modifier
 
                                         elif re.sub(r'[0-9]', '', y) in banned[league]['modified'].keys():
                                             modifier = banned[league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
                                             if b1[xi] == b2[yi]:
-                                                p *= modifier
-                                                pb *= modifier
                                                 boost *= modifier
                                             else:
-                                                p /= modifier
-                                                pb /= modifier
                                                 boost /= modifier
 
-                    p *= payout_table[platform][bet_size-2]
-                    pb *= payout_table[platform][bet_size-2]
+                    SIG = SIG + SIG.T + np.eye(bet_size)
 
                     boost = np.clip(boost, .667, 1.6125) * np.product([leg["Boost"] for leg in bet])
+
+                    p = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
+                    pb = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
 
                     if p > 1 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
                             "League": league,
                             "Platform": platform,
-                            "EV": p,
+                            "Model EV": p,
+                            "Books EV": pb,
                             "Boost": boost,
                             "Leg 1": "",
                             "Leg 2": "",
@@ -1216,18 +1205,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                                             params[1]["scale"] +
                                             params[0]["scale"])
                     under = under - push/2
-                elif dist == "Gamma":
-                    under = gamma.cdf(o["Line"],
-                                    params[1]["concentration"] +
-                                    params[0]["concentration"],
-                                    scale=1/(params[1]["rate"] +
-                                            params[0]["rate"]))
-                elif dist == "NegativeBinomial":
-                    under = nbinom.cdf(o["Line"],
-                                    params[1]["concentration"] +
-                                    params[0]["concentration"],
-                                    scale=1/(params[1]["rate"] +
-                                                params[0]["rate"]))
 
             elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
