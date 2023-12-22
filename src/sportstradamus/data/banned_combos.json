@@ -52,6 +52,7 @@
                 "WR.fantasy points underdog": 0.83,
                 "TE.receptions": 0.73,
                 "TE.receiving yards": 0.78,
+                "TE.targets": 0.74,
                 "RB.receptions": 0.73,
                 "RB.receiving yards": 0.85
             },
@@ -75,6 +76,7 @@
                 "WR.fantasy points underdog": 0.88,
                 "TE.receptions": 0.79,
                 "TE.receiving yards": 0.81,
+                "TE.targets": 0.67,
                 "RB.receptions": 0.79,
                 "RB.receiving yards": 0.90,
                 "RB.carries": 1.15
@@ -101,6 +103,7 @@
                 "WR.fantasy points underdog": 0.86,
                 "TE.receptions": 0.85,
                 "TE.receiving yards": 0.83,
+                "TE.targets": 0.81,
                 "TE.fantasy points underdog": 0.86,
                 "RB.receptions": 0.85,
                 "RB.receiving yards": 0.83
