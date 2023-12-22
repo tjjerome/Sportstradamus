@@ -286,7 +286,7 @@ def main(progress, books, parlays):
     archive.write()
 
     if parlays and not best5.empty:
-        best5.sort_values("EV", ascending=False, inplace=True)
+        best5.sort_values("Model EV", ascending=False, inplace=True)
 
         if len(best5) > 0:
             wks = gc.open("Sportstradamus").worksheet("Best Parlays")
@@ -673,13 +673,13 @@ def find_correlation(offers, stats, platform, parlays):
             checked_teams.append(team)
             checked_teams.append(opp)
             game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
-            if platform == "Underdog":
-                game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
-                    game_df['Boost']
-                game_df.loc[:, 'Boosted Books'] = game_df['Books'] * \
-                    game_df['Boost']
-            else:
+            if platform != "Underdog":
                 game_df.loc[:, 'Boost'] = 1
+
+            game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
+                game_df['Boost']
+            game_df.loc[:, 'Boosted Books'] = game_df['Books'] * \
+                game_df['Boost']
 
             idx = game_df.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(4).head(
                 28).sort_values(['Team', 'Player']).index
@@ -813,7 +813,7 @@ def find_correlation(offers, stats, platform, parlays):
 
                 if len(best_bets) > 0:
                     df5 = pd.DataFrame(best_bets).sort_values(
-                        "EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
+                        "Model EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
                     to_add = df5.head(2)
                     to_add = pd.concat(
                         [to_add, df5.loc[df5["Boost"] == 1].head(1)]).drop_duplicates()
@@ -831,7 +831,7 @@ def find_correlation(offers, stats, platform, parlays):
                             df5 = df5[~df5.eq(leg).any(axis=1)]
 
                         to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
-                        ).sort_values("EV", ascending=False)
+                        ).sort_values("Model EV", ascending=False)
 
                         if len(to_add.loc[to_add["Boost"] > 1]) > 3:
                             df5 = df5.loc[df5["Boost"] == 1]
