@@ -26,63 +26,101 @@
                 "fantasy points underdog"
             ],
             [
-                "completions",
+                "passing first downs",
                 "receptions"
             ],
             [
+                "passing first downs",
+                "receiving yards"
+            ],
+            [
+                "passing first downs",
+                "first downs"
+            ],
+            [
                 "completions",
-                "targets"
-            ],
-            [
-                "attempts",
-                "receptions"
-            ],
-            [
-                "attempts",
-                "targets"
-            ],
-            [
-                "attempts",
-                "carries"
-            ],
-            [
-                "first downs",
-                "passing first downs"
-            ],
-            [
-                "passing yards",
-                "yards"
-            ],
-            [
-                "passing yards",
-                "receiving yards"
-            ],
-            [
-                "qb yards",
-                "yards"
-            ],
-            [
-                "qb yards",
-                "receiving yards"
-            ],
-            [
-                "fantasy points underdog",
-                "fantasy points underdog"
-            ],
-            [
-                "passing yards",
-                "fantasy points underdog"
-            ],
-            [
-                "qb yards",
-                "fantasy points underdog"
+                "first downs"
             ]
         ],
-        "opponent": []
+        "opponent": [],
+        "modified": {
+            "QB.completions": {
+                "WR.receptions": 0.73,
+                "WR.receiving yards": 0.83,
+                "WR.yards": 0.86,
+                "WR.targets": 0.74,
+                "WR.fantasy points underdog": 0.83,
+                "TE.receptions": 0.73,
+                "TE.receiving yards": 0.78,
+                "RB.receptions": 0.73,
+                "RB.receiving yards": 0.85
+            },
+            "QB.passing yards": {
+                "WR.receptions": 0.82,
+                "WR.receiving yards": 0.79,
+                "WR.yards": 0.79,
+                "WR.targets": 0.80,
+                "WR.fantasy points underdog": 0.86,
+                "TE.receptions": 0.82,
+                "TE.receiving yards": 0.77,
+                "TE.fantasy points underdog": 0.93,
+                "RB.receptions": 0.82,
+                "RB.receiving yards": 0.83
+            },
+            "QB.attempts": {
+                "WR.receptions": 0.79,
+                "WR.receiving yards": 0.84,
+                "WR.yards": 0.87,
+                "WR.targets": 0.67,
+                "WR.fantasy points underdog": 0.88,
+                "TE.receptions": 0.79,
+                "TE.receiving yards": 0.81,
+                "RB.receptions": 0.79,
+                "RB.receiving yards": 0.90,
+                "RB.carries": 1.15
+            },
+            "QB.interceptions": {
+                "WR.targets": 0.76
+            },
+            "QB.passing first downs": {
+                "WR.yards": 0.82,
+                "WR.targets": 0.72,
+                "WR.fantasy points underdog": 0.89,
+                "TE.fantasy points underdog": 0.89
+            },
+            "QB.completion percentage": {
+                "WR.receptions": 0.79,
+                "TE.receptions": 0.79,
+                "RB.receptions": 0.79
+            },
+            "QB.qb yards": {
+                "WR.receptions": 0.85,
+                "WR.receiving yards": 0.83,
+                "WR.yards": 0.79,
+                "WR.targets": 0.81,
+                "WR.fantasy points underdog": 0.86,
+                "TE.receptions": 0.85,
+                "TE.receiving yards": 0.83,
+                "TE.fantasy points underdog": 0.86,
+                "RB.receptions": 0.85,
+                "RB.receiving yards": 0.83
+            },
+            "QB.fantasy points underdog": {
+                "WR.receptions": 0.88,
+                "WR.receiving yards": 0.86,
+                "WR.yards": 0.86,
+                "WR.targets": 0.91,
+                "WR.fantasy points underdog": 0.81,
+                "TE.receptions": 0.88,
+                "TE.receiving yards": 0.86,
+                "TE.fantasy points underdog": 0.81
+            }
+        }
     },
     "NBA": {
         "team": [],
-        "opponent": []
+        "opponent": [],
+        "modified": {}
     },
     "NHL": {
         "team": [
@@ -196,7 +234,8 @@
                 "saves",
                 "sogBS"
             ]
-        ]
+        ],
+        "modified": {}
     },
     "MLB": {
         "team": [
@@ -285,6 +324,7 @@
                 "runs"
             ]
         ],
-        "opponent": []
+        "opponent": [],
+        "modified": {}
     }
 }
