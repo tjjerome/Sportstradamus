@@ -731,7 +731,7 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Model"] for leg in bet])
                     pb = np.product([leg["Books"] for leg in bet])
 
-                    if p < .5**bet_size or pb < .5**bet_size:
+                    if p < (.5**bet_size)*.9 or pb < (.5**bet_size)*.9:
                         continue
 
                     # get correlation matrix
