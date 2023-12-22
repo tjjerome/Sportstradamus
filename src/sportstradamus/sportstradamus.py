@@ -681,7 +681,7 @@ def find_correlation(offers, stats, platform, parlays):
             else:
                 game_df.loc[:, 'Boost'] = 1
 
-            idx = game_df.loc[game_df['Boosted Books'] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(4).head(
+            idx = game_df.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(4).head(
                 28).sort_values(['Team', 'Player']).index
 
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
@@ -728,10 +728,11 @@ def find_correlation(offers, stats, platform, parlays):
                             any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
                         continue
 
-                    p = np.product([leg["Model"] for leg in bet])
-                    pb = np.product([leg["Books"] for leg in bet])
+                    p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
+                    pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
 
-                    if p < (.5**bet_size)*.98 or pb < (.5**bet_size)*.98:
+                    threshold = 1/payout_table[platform][bet_size-2]/(.365*bet_size**2 - 1.513*bet_size + 2.89)
+                    if p < threshold or pb < threshold:
                         continue
 
                     boost = 1
