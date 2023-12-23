@@ -690,7 +690,7 @@ def find_correlation(offers, stats, platform, parlays):
                 combos = combinations(
                     game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), bet_size)
 
-                threshold = 1/payout_table[platform][bet_size-2]/1.5
+                threshold = 1/payout_table[platform][bet_size-2]
 
                 for bet in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False, total=comb(len(idx), bet_size)):
                     teams = []
@@ -700,7 +700,7 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
                     pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
 
-                    if p < threshold or pb < threshold:
+                    if p < threshold or pb < threshold/1.5:
                         continue
 
                     for leg in bet:
