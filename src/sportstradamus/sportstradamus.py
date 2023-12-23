@@ -683,12 +683,12 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
 
             idx = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3).\
-                groupby('Team').head(15).head(25).sort_values(['Team', 'Player']).index
+                groupby('Team').head(15)
 
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                 best_bets = []
                 combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), bet_size)
+                    game_df.loc[idx.head(32-2*bet_size).sort_values(['Team', 'Player']).index, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), bet_size)
 
                 threshold = 1/payout_table[platform][bet_size-2]
 
