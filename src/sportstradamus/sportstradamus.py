@@ -567,7 +567,7 @@ def find_correlation(offers, stats, platform, parlays):
         "Underdog": [3, 6, 10.9, 20.2],
         "PrizePicks": [3, 5.3, 10, 20.8, 38.8]
     }
-    max_mod = 1 # REMOVE
+
     for league in ["NFL", "NBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
@@ -690,10 +690,19 @@ def find_correlation(offers, stats, platform, parlays):
                 combos = combinations(
                     game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), bet_size)
 
+                threshold = 1/payout_table[platform][bet_size-2]/1.5
+
                 for bet in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False, total=comb(len(idx), bet_size)):
                     teams = []
                     players = []
                     markets = []
+
+                    p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
+                    pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
+
+                    if p < threshold or pb < threshold:
+                        continue
+
                     for leg in bet:
                         if "/" not in leg["Team"]:
                             teams.append(leg["Team"])
@@ -727,13 +736,6 @@ def find_correlation(offers, stats, platform, parlays):
                         any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[league]['team']]) or
                         any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[league]['opponent']]) or
                             any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
-                        continue
-
-                    p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
-                    pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
-
-                    threshold = 1/payout_table[platform][bet_size-2]/1.5
-                    if p < threshold or pb < threshold:
                         continue
 
                     boost = 1
@@ -791,8 +793,6 @@ def find_correlation(offers, stats, platform, parlays):
 
                     p = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
                     pb = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
-                    modifier = pb/np.product([leg["Books"] for leg in bet])/payout_table[platform][bet_size-2]/boost # REMOVE
-                    max_mod = np.max([max_mod, modifier]) # REMOVE
 
                     if p > 1 and pb > 1:
                         parlay = {
