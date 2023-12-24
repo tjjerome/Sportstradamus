@@ -792,8 +792,11 @@ def find_correlation(offers, stats, platform, parlays):
 
                     boost = np.clip(boost, .667, 1.6125) * np.product([leg["Boost"] for leg in bet])
 
-                    p = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
-                    pb = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
+                    try:
+                        p = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
+                        pb = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
+                    except:
+                        continue
 
                     if p > 1 and pb > 1:
                         parlay = {
@@ -958,12 +961,6 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
                   "BLK": "blocked"}.get(market, market)
     if league == "NBA":
         market = market.replace("underdog", "prizepicks")
-    # filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-    # filepath = pkg_resources.files(data) / filename
-    # if not os.path.isfile(filepath):
-    #     pbar.update(len(offers))
-    #     logger.warning(f"{filename} missing")
-    #     return []
     if market in stat_data.gamelog.columns:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -1077,6 +1074,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     """
     global stat_map
 
+    totals_map = {
+        "NBA": 112,
+        "NFL": 22.5,
+        "MLB": 4.5,
+        "NHL": 3
+    }
+
     market = stat_map[platform].get(market, market)
     if league == "NHL":
         market = {"AST": "assists", "PTS": "points",
@@ -1125,27 +1129,27 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
             stats = []
-            for i, player in enumerate(players):
-                if len(player.split(" ")[0].replace(".", "")) <= 2:
-                    if league == "NFL":
-                        nameStr = 'player display name'
-                        namePos = 1
-                    elif league == "NBA":
-                        nameStr = 'PLAYER_NAME'
-                        namePos = 2
-                    elif league == "MLB":
-                        nameStr = "playerName"
-                        namePos = 3
-                    elif league == "NHL":
-                        nameStr = "playerName"
-                        namePos = 7
-                    name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
-                        " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
-                    if name_df.empty:
-                        pass
-                    else:
-                        players[i] = name_df.iloc[0, namePos]
-                        player = name_df.iloc[0, namePos]
+            for player in players:
+                # if len(player.split(" ")[0].replace(".", "")) <= 2:
+                #     if league == "NFL":
+                #         nameStr = 'player display name'
+                #         namePos = 1
+                #     elif league == "NBA":
+                #         nameStr = 'PLAYER_NAME'
+                #         namePos = 2
+                #     elif league == "MLB":
+                #         nameStr = "playerName"
+                #         namePos = 3
+                #     elif league == "NHL":
+                #         nameStr = "playerName"
+                #         namePos = 7
+                #     name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
+                #         " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
+                #     if name_df.empty:
+                #         pass
+                #     else:
+                #         players[i] = name_df.iloc[0, namePos]
+                #         player = name_df.iloc[0, namePos]
 
                 if player not in playerStats.index:
                     stats.append(0)
@@ -1276,7 +1280,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         low, params["loc"], params["scale"])
                     under = under - push/2
 
-            # proba = [under, 1-under]
             proba = [0.5/o.get("Boost", 1)] * 2
             if ("+" in o["Player"]) or ("vs." in o["Player"]):
                 probb = []
@@ -1351,13 +1354,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             o["Bet"] = "Under"
             o["Books"] = p[0]
             o["Model"] = proba[0]
-
-        totals_map = {
-            "NBA": 112,
-            "NFL": 22.5,
-            "MLB": 4.5,
-            "NHL": 3
-        }
 
         if "+" in o["Player"]:
             avg5 = np.sum([s["Avg5"] for s in stats])
