@@ -513,6 +513,7 @@ def meditate(force, stats, league):
             filt = {}
             y_class = (y_train["Result"] >=
                        X_train["Line"]).astype(int).to_numpy()
+            train_ll = log_loss(y_class, y_proba_train)
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
@@ -550,6 +551,7 @@ def meditate(force, stats, league):
             ll = np.zeros(2)
             bal = np.zeros(2)
             e = np.zeros(2)
+            g = np.zeros(2)
 
             for i, y_proba in enumerate([y_proba_no_filt, y_proba_filt]):
                 y_pred = (y_proba > .5).astype(int)[:, 1]
@@ -562,6 +564,7 @@ def meditate(force, stats, league):
                 bs[i] = 1 - bs[i]/bs0
 
                 ll[i] = log_loss(y_class, y_proba[:, 1])
+                g[i] = ll[i] - train_ll
                 ll[i] = 1 - ll[i]/ll0
 
                 d[i] = 1 - dev/dev0
@@ -579,6 +582,7 @@ def meditate(force, stats, league):
                     "Brier Score": bs,
                     "Deviance": d,
                     "Entropy": e,
+                    "Training Gap": g
                 },
                 "params": params,
                 "distribution": dist,
@@ -640,7 +644,7 @@ def report():
 
             stat_cv[league][market] = cv
 
-            f.write(f" {league} {market} ".center(65, "="))
+            f.write(f" {league} {market} ".center(90, "="))
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
             f.write(pd.DataFrame(model['stats'], index=[

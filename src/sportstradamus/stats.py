@@ -2501,7 +2501,8 @@ class StatsNFL(Stats):
                 ftn = nfl.import_ftn_data([self.season_start.year])
                 ftn['game_id'] = ftn['nflverse_game_id']
                 ftn['play_id'] = ftn['nflverse_play_id']
-                self.pbp = self.pbp.merge(ftn)
+                ftn.drop(columns=['week', 'season', 'nflverse_game_id'], inplace=True)
+                self.pbp = self.pbp.merge(ftn, on=['game_id', 'play_id'], how='left')
             else:
                 self.pbp['is_qb_out_of_pocket'] = False
                 self.pbp['is_throw_away'] = False

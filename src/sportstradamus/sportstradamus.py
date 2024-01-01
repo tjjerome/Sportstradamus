@@ -326,7 +326,7 @@ def main(progress, books, parlays):
         if np.isnan(row["Result"]):
             gamelog = stats[row["League"]].gamelog
             if " + " in row["Player"]:
-                players = row["Player"].split(" +")
+                players = row["Player"].split(" + ")
                 game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
                     pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
                 game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
