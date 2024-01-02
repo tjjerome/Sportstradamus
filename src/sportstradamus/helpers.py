@@ -299,7 +299,7 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
-def get_ev(line, under, cv=1):
+def get_ev(line, under, cv=1, force_gauss=False):
     """
     Calculate the expected value (EV) given a line and under probability.
 
@@ -311,7 +311,7 @@ def get_ev(line, under, cv=1):
         float: The expected value (EV).
     """
     # Poisson dist
-    if cv == 1:
+    if (cv == 1) and (not force_gauss):
         line = np.ceil(float(line) - 1)
         return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
     else:
