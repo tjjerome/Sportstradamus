@@ -833,17 +833,33 @@ class StatsNBA(Stats):
 
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
-        if np.isnan(ev) and (market in combo_props):
-            ev = 0
-            for submarket in combo_props.get(market, []):
-                data = archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                v = np.nanmean(np.array(data["EV"], dtype=float))
-                if np.isnan(v):
-                    if len(data["Lines"]) > 0:
-                        ev += get_ev(data["Lines"][-1], .5, cv)
-                else:
-                    ev += v
+        if np.isnan(ev):
+            if market in combo_props:
+                ev = 0
+                for submarket in combo_props.get(market, []):
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["NBA"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                    else:
+                        ev += v
+
+            elif "fantasy" in market:
+                ev = 0
+                fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
+                for submarket, weight in fantasy_props:
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["NBA"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                    else:
+                        ev += v*weight
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
@@ -1161,11 +1177,11 @@ class StatsMLB(Stats):
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
                         3*v["stats"]["batting"].get("hitByPitch", 0) +
                         4*v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points underdog": 5*v["stats"]["pitching"].get("wins", 0) +
-                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
-                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
-                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
-                        (5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                        "pitcher fantasy points underdog": 2*v["stats"]["pitching"].get("wins", 0) +
+                        v["stats"]["pitching"].get("strikeOuts", 0) -
+                        v["stats"]["pitching"].get("earnedRuns", 0) +
+                        int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        (3 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
                             0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0),
                         "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
@@ -1950,17 +1966,47 @@ class StatsMLB(Stats):
 
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
-        if np.isnan(ev) and (market in combo_props):
-            ev = 0
-            for submarket in combo_props.get(market, []):
-                data = archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                v = np.nanmean(np.array(data["EV"], dtype=float))
-                if np.isnan(v):
-                    if len(data["Lines"]) > 0:
-                        ev += get_ev(data["Lines"][-1], .5, cv)
+        if np.isnan(ev):
+            if market in combo_props:
+                ev = 0
+                for submarket in combo_props.get(market, []):
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["MLB"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                    else:
+                        ev += v
+                        
+            elif ("fantasy" in market) and ("pitcher" in market):
+                ev = 0
+                if "underdog" in market:
+                    fantasy_props = [("Moneyline", 2), ("pitcher strikeouts", 1), ("runs allowed", -1), ("pitching outs", 1/3), ("quality start", 3)]
                 else:
-                    ev += v
+                    fantasy_props = [("Moneyline", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
+                for submarket, weight in fantasy_props:
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["MLB"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        elif submarket == "Moneyline":
+                            ev += archive["MLB"].get("Moneyline", {}).get(date, {}).get(team, 0.5)*weight
+                        elif submarket == "quality start":
+                            p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
+                            p *= poisson.cdf(3, v_runs)
+                            ev += p*weight
+                    else:
+                        ev += v*weight
+
+                    if submarket == "runs allowed":
+                        v_runs = v
+                    if submarket == "pitching outs":
+                        v_outs = v
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
@@ -3142,17 +3188,36 @@ class StatsNFL(Stats):
 
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
-        if np.isnan(ev) and (market in combo_props):
-            ev = 0
-            for submarket in combo_props.get(market, []):
-                data = archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                v = np.nanmean(np.array(data["EV"], dtype=float))
-                if np.isnan(v):
-                    if len(data["Lines"]) > 0:
-                        ev += get_ev(data["Lines"][-1], .5, cv)
+        if np.isnan(ev):
+            if market in combo_props:
+                ev = 0
+                for submarket in combo_props.get(market, []):
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["NFL"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                    else:
+                        ev += v
+                        
+            elif "fantasy" in market:
+                ev = 0
+                if "prizepicks" in market:
+                    fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", 1)]
                 else:
-                    ev += v
+                    fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
+                for submarket, weight in fantasy_props:
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["NFL"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                    else:
+                        ev += v*weight
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
@@ -4056,17 +4121,40 @@ class StatsNHL(Stats):
 
         ev = np.array(ev, dtype=np.float64)
         ev = np.nanmean(ev)
-        if np.isnan(ev) and (market in combo_props):
-            ev = 0
-            for submarket in combo_props.get(market, []):
-                data = archive["NFL"].get(submarket, {}).get(
-                    date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                v = np.nanmean(np.array(data["EV"], dtype=float))
-                if np.isnan(v):
-                    if len(data["Lines"]) > 0:
-                        ev += get_ev(data["Lines"][-1], .5, cv)
+        if np.isnan(ev):
+            if market in combo_props:
+                ev = 0
+                for submarket in combo_props.get(market, []):
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["NHL"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                    else:
+                        ev += v
+                        
+            elif "fantasy" in market:
+                ev = 0
+                if "prizepicks" in market:
+                    fantasy_props = [("goals", 8), ("assists", 5), ("interceptions", -1), ("shots", 1.5), ("blocked", 1.5)]
+                elif ("underdog" in market) and ("skater" in market):
+                    fantasy_props = [("goals", 6), ("assists", 4), ("interceptions", -1), ("shots", 1), ("blocked", 1), ("hits", .5), ("powerPlayPoints", .5)]
                 else:
-                    ev += v
+                    fantasy_props = [("saves", .25), ("goalsAgainst", -1), ("Moneyline", 6)]
+                for submarket, weight in fantasy_props:
+                    sub_cv = stat_cv["MLB"][submarket]
+                    data = archive["NHL"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        elif submarket == "Moneyline":
+                            ev += archive["NHL"].get("Moneyline", {}).get(date, {}).get(team, 0.5)*weight
+                    else:
+                        ev += v*weight
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
