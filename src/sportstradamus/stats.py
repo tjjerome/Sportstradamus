@@ -815,6 +815,30 @@ class StatsNBA(Stats):
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
 
+        date = datetime.strptime(date, "%Y-%m-%d")
+
+        player_games = self.gamelog.loc[(self.gamelog["PLAYER_NAME"] == player) & (
+            pd.to_datetime(self.gamelog["GAME_DATE"]) < date)]
+
+        if len(player_games) > 0:
+            position = player_games.iloc[0]['POS']
+        else:
+            logger.warning(f"{player} not found")
+            return 0
+
+        one_year_ago = len(player_games.loc[pd.to_datetime(
+            self.gamelog["GAME_DATE"]) > date-timedelta(days=300)])
+        headtohead = player_games.loc[player_games["OPP"] == opponent]
+
+        game_res = (player_games[market]).to_list()
+        h2h_res = (headtohead[market]).to_list()
+
+        dvpoa = self.defenseProfile.loc[opponent, position]
+
+        if line == 0:
+            line = np.median(game_res[-one_year_ago:]) if game_res else 0
+            line = 0.5 if line < 1 else line
+
         try:
             ev = archive["NBA"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
@@ -837,7 +861,7 @@ class StatsNBA(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["MLB"][submarket]
+                    sub_cv = stat_cv["NBA"][submarket]
                     data = archive["NBA"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -851,7 +875,7 @@ class StatsNBA(Stats):
                 ev = 0
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["MLB"][submarket]
+                    sub_cv = stat_cv["NBA"][submarket]
                     data = archive["NBA"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -868,26 +892,6 @@ class StatsNBA(Stats):
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
             else:
                 odds = norm.sf(line, ev, ev*cv)
-
-        date = datetime.strptime(date, "%Y-%m-%d")
-
-        player_games = self.gamelog.loc[(self.gamelog["PLAYER_NAME"] == player) & (
-            pd.to_datetime(self.gamelog["GAME_DATE"]) < date)]
-
-        if len(player_games) > 0:
-            position = player_games.iloc[0]['POS']
-        else:
-            logger.warning(f"{player} not found")
-            return 0
-
-        one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["GAME_DATE"]) > date-timedelta(days=300)])
-        headtohead = player_games.loc[player_games["OPP"] == opponent]
-
-        game_res = (player_games[market]).to_list()
-        h2h_res = (headtohead[market]).to_list()
-
-        dvpoa = self.defenseProfile.loc[opponent, position]
 
         positions = ['P', 'C', 'F', 'W', 'B']
         data = {
@@ -1939,6 +1943,44 @@ class StatsMLB(Stats):
             self.defenseProfile.loc[opponent] = np.zeros_like(
                 self.defenseProfile.columns)
 
+        date = datetime.strptime(date, "%Y-%m-%d")
+
+        if any([string in market for string in ["allowed", "pitch"]]):
+            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
+                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"]]
+
+            headtohead = player_games.loc[player_games["opponent"] == opponent]
+
+            pid = self.gamelog.loc[self.gamelog['playerName']
+                                   == player, 'playerId']
+        else:
+            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
+                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting batter"]]
+
+            headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
+
+            pid = self.gamelog.loc[self.gamelog['opponent pitcher']
+                                   == pitcher, 'opponent pitcher id']
+
+        if player_games.empty:
+            return 0
+
+        if pid.empty:
+            pid = 0
+        else:
+            pid = pid.iat[0]
+
+        affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
+
+        one_year_ago = len(player_games.loc[
+            pd.to_datetime(self.gamelog.gameDate) > date-timedelta(days=300)])
+        game_res = (player_games[market]).to_list()
+        h2h_res = (headtohead[market]).to_list()
+
+        if line == 0:
+            line = np.median(game_res[-one_year_ago:]) if game_res else 0
+            line = 0.5 if line < 1 else line
+
         try:
             if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
                 pitcher = offer.get("Pitcher", "")
@@ -1995,11 +2037,12 @@ class StatsMLB(Stats):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
                         elif submarket == "Moneyline":
-                            ev += archive["MLB"].get("Moneyline", {}).get(date, {}).get(team, 0.5)*weight
+                            p = 1-archive["MLB"].get("Moneyline", {}).get(date, {}).get(team, 0.5)
+                            ev += get_ev(1, p, force_gauss=True)*weight
                         elif submarket == "quality start":
                             p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
                             p *= poisson.cdf(3, v_runs)
-                            ev += p*weight
+                            ev += get_ev(1, p, force_gauss=True)*weight
                     else:
                         ev += v*weight
 
@@ -2015,40 +2058,6 @@ class StatsMLB(Stats):
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
             else:
                 odds = norm.sf(line, ev, ev*cv)
-
-        date = datetime.strptime(date, "%Y-%m-%d")
-
-        if any([string in market for string in ["allowed", "pitch"]]):
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"]]
-
-            headtohead = player_games.loc[player_games["opponent"] == opponent]
-
-            pid = self.gamelog.loc[self.gamelog['playerName']
-                                   == player, 'playerId']
-        else:
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting batter"]]
-
-            headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
-
-            pid = self.gamelog.loc[self.gamelog['opponent pitcher']
-                                   == pitcher, 'opponent pitcher id']
-
-        if player_games.empty:
-            return 0
-
-        if pid.empty:
-            pid = 0
-        else:
-            pid = pid.iat[0]
-
-        affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
-
-        one_year_ago = len(player_games.loc[
-            pd.to_datetime(self.gamelog.gameDate) > date-timedelta(days=300)])
-        game_res = (player_games[market]).to_list()
-        h2h_res = (headtohead[market]).to_list()
 
         data = {
             "DVPOA": 0,
@@ -3170,63 +3179,6 @@ class StatsNFL(Stats):
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
 
-        try:
-            ev = archive["NFL"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", [None] * 4)
-            moneyline = archive["NFL"]["Moneyline"].get(
-                date, {}).get(team, 0.5)
-            total = archive["NFL"]["Totals"].get(date, {}).get(team, 22.5)
-
-        except:
-            logger.exception(f"{player}, {market}")
-            return 0
-
-        if np.isnan(moneyline):
-            moneyline = 0.5
-        if np.isnan(total):
-            total = 22.5
-
-        ev = np.array(ev, dtype=np.float64)
-        ev = np.nanmean(ev)
-        if np.isnan(ev):
-            if market in combo_props:
-                ev = 0
-                for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["MLB"][submarket]
-                    data = archive["NFL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
-                    if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
-                    else:
-                        ev += v
-                        
-            elif "fantasy" in market:
-                ev = 0
-                if "prizepicks" in market:
-                    fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", 1)]
-                else:
-                    fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
-                for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["MLB"][submarket]
-                    data = archive["NFL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
-                    if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
-                    else:
-                        ev += v*weight
-
-        if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
-        else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
-
         date = datetime.strptime(date, "%Y-%m-%d")
 
         player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
@@ -3253,6 +3205,67 @@ class StatsNFL(Stats):
         h2h_res = (headtohead[market]).to_list()
 
         dvpoa = self.defenseProfile.loc[opponent, position]
+
+        if line == 0:
+            line = np.median(game_res[-one_year_ago:]) if game_res else 0
+            line = 0.5 if line < 1 else line
+
+        try:
+            ev = archive["NFL"].get(market, {}).get(
+                date, {}).get(player, {}).get("EV", [None] * 4)
+            moneyline = archive["NFL"]["Moneyline"].get(
+                date, {}).get(team, 0.5)
+            total = archive["NFL"]["Totals"].get(date, {}).get(team, 22.5)
+
+        except:
+            logger.exception(f"{player}, {market}")
+            return 0
+
+        if np.isnan(moneyline):
+            moneyline = 0.5
+        if np.isnan(total):
+            total = 22.5
+
+        ev = np.array(ev, dtype=np.float64)
+        ev = np.nanmean(ev)
+        if np.isnan(ev):
+            if market in combo_props:
+                ev = 0
+                for submarket in combo_props.get(market, []):
+                    sub_cv = stat_cv["NFL"][submarket]
+                    data = archive["NFL"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                    else:
+                        ev += v
+                        
+            elif "fantasy" in market:
+                ev = 0
+                if "prizepicks" in market:
+                    fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", 1)]
+                else:
+                    fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
+                for submarket, weight in fantasy_props:
+                    sub_cv = stat_cv["NFL"][submarket]
+                    data = archive["NFL"].get(submarket, {}).get(
+                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
+                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                    if np.isnan(v):
+                        if len(data["Lines"]) > 0:
+                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                    else:
+                        ev += v*weight
+
+        if np.isnan(ev) or (ev <= 0):
+            odds = 0.5
+        else:
+            if cv == 1:
+                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
+            else:
+                odds = norm.sf(line, ev, ev*cv)
 
         data = {
             "DVPOA": dvpoa,
@@ -3282,9 +3295,6 @@ class StatsNFL(Stats):
             "Home": home,
             "Position": ["QB", "WR", "RB", "TE"].index(position)
         }
-
-        if data["Line"] == 0:
-            data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -4091,6 +4101,31 @@ class StatsNHL(Stats):
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
 
+        date = datetime.strptime(date, "%Y-%m-%d")
+
+        if any([string in market for string in ["Against", "saves", "goalie"]]):
+            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
+                pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] == "G")]
+
+        else:
+            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
+                pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] != "G")]
+
+        if player_games.empty:
+            return 0
+
+        headtohead = player_games.loc[player_games["opponent"] == opponent]
+
+        one_year_ago = len(player_games.loc[pd.to_datetime(
+            self.gamelog["gameDate"]) > date-timedelta(days=300)])
+
+        game_res = (player_games[market]).to_list()
+        h2h_res = (headtohead[market]).to_list()
+
+        if line == 0:
+            line = np.median(game_res[-one_year_ago:]) if game_res else 0
+            line = 0.5 if line < 1 else line
+
         try:
             if not any([string in market for string in ["Against", "saves", "goalie"]]):
                 if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
@@ -4125,7 +4160,7 @@ class StatsNHL(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["MLB"][submarket]
+                    sub_cv = stat_cv["NHL"][submarket]
                     data = archive["NHL"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -4144,7 +4179,7 @@ class StatsNHL(Stats):
                 else:
                     fantasy_props = [("saves", .25), ("goalsAgainst", -1), ("Moneyline", 6)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["MLB"][submarket]
+                    sub_cv = stat_cv["NHL"][submarket]
                     data = archive["NHL"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -4152,7 +4187,8 @@ class StatsNHL(Stats):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
                         elif submarket == "Moneyline":
-                            ev += archive["NHL"].get("Moneyline", {}).get(date, {}).get(team, 0.5)*weight
+                            p = archive["NHL"].get("Moneyline", {}).get(date, {}).get(team, 0.5)
+                            ev += get_ev(1, p, force_gauss=True)*weight
                     else:
                         ev += v*weight
 
@@ -4163,27 +4199,6 @@ class StatsNHL(Stats):
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
             else:
                 odds = norm.sf(line, ev, ev*cv)
-
-        date = datetime.strptime(date, "%Y-%m-%d")
-
-        if any([string in market for string in ["Against", "saves", "goalie"]]):
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] == "G")]
-
-        else:
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] != "G")]
-
-        if player_games.empty:
-            return 0
-
-        headtohead = player_games.loc[player_games["opponent"] == opponent]
-
-        one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameDate"]) > date-timedelta(days=300)])
-
-        game_res = (player_games[market]).to_list()
-        h2h_res = (headtohead[market]).to_list()
 
         data = {
             "DVPOA": 0,

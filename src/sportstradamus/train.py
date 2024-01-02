@@ -112,6 +112,7 @@ def meditate(force, stats, league):
             "PA",
             "FG3M",
             "fantasy points prizepicks",
+            "fantasy points underdog",
             "FG3A",
             "FTM",
             "FGM",
@@ -323,7 +324,7 @@ def meditate(force, stats, league):
                 target = (M.loc[(M["Archived"] == 1), "Result"] >
                             M.loc[(M["Archived"] == 1), "Line"]).mean()
                 balance = (M["Result"] > M["Line"]).mean()
-                n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 2000, 0, None))
+                n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
                 if balance < target:
                     chopping_block = M.loc[(M["Archived"] != 1) & (
                         M["Result"] < M["Line"])].index
