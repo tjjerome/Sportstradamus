@@ -311,9 +311,12 @@ def get_ev(line, under, cv=1, force_gauss=False):
         float: The expected value (EV).
     """
     # Poisson dist
-    if (cv == 1) and (not force_gauss):
+    if cv == 1:
         line = np.ceil(float(line) - 1)
-        return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
+        if force_gauss:
+            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), line)[0]
+        else:
+            return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
     else:
         line = float(line)
         return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
