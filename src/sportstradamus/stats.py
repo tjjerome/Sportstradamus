@@ -815,10 +815,10 @@ class StatsNBA(Stats):
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
 
-        date = datetime.strptime(date, "%Y-%m-%d")
+        Date = datetime.strptime(date, "%Y-%m-%d")
 
         player_games = self.gamelog.loc[(self.gamelog["PLAYER_NAME"] == player) & (
-            pd.to_datetime(self.gamelog["GAME_DATE"]) < date)]
+            pd.to_datetime(self.gamelog["GAME_DATE"]) < Date)]
 
         if len(player_games) > 0:
             position = player_games.iloc[0]['POS']
@@ -827,7 +827,7 @@ class StatsNBA(Stats):
             return 0
 
         one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["GAME_DATE"]) > date-timedelta(days=300)])
+            self.gamelog["GAME_DATE"]) > Date-timedelta(days=300)])
         headtohead = player_games.loc[player_games["OPP"] == opponent]
 
         game_res = (player_games[market]).to_list()
@@ -839,7 +839,6 @@ class StatsNBA(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
-        date = date.strftime("%Y-%m-%d")
         try:
             ev = archive["NBA"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
@@ -915,8 +914,8 @@ class StatsNBA(Stats):
             "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
             "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
-            "DaysIntoSeason": (date.date() - self.season_start).days,
-            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["GAME_DATE"]).date()).days,
+            "DaysIntoSeason": (Date.date() - self.season_start).days,
+            "DaysOff": (Date.date() - pd.to_datetime(player_games.iloc[-1]["GAME_DATE"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -1944,11 +1943,11 @@ class StatsMLB(Stats):
             self.defenseProfile.loc[opponent] = np.zeros_like(
                 self.defenseProfile.columns)
 
-        date = datetime.strptime(date, "%Y-%m-%d")
+        Date = datetime.strptime(date, "%Y-%m-%d")
 
         if any([string in market for string in ["allowed", "pitch"]]):
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"]]
+                pd.to_datetime(self.gamelog.gameDate) < Date) & self.gamelog["starting pitcher"]]
 
             headtohead = player_games.loc[player_games["opponent"] == opponent]
 
@@ -1956,7 +1955,7 @@ class StatsMLB(Stats):
                                    == player, 'playerId']
         else:
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting batter"]]
+                pd.to_datetime(self.gamelog.gameDate) < Date) & self.gamelog["starting batter"]]
 
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
@@ -1974,7 +1973,7 @@ class StatsMLB(Stats):
         affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
 
         one_year_ago = len(player_games.loc[
-            pd.to_datetime(self.gamelog.gameDate) > date-timedelta(days=300)])
+            pd.to_datetime(self.gamelog.gameDate) > Date-timedelta(days=300)])
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
@@ -1982,7 +1981,6 @@ class StatsMLB(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
-        date = date.strftime("%Y-%m-%d")
         try:
             if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
                 pitcher = offer.get("Pitcher", "")
@@ -2081,8 +2079,8 @@ class StatsMLB(Stats):
             "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
             "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
-            "DaysIntoSeason": (date.date() - self.season_start).days,
-            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["gameDate"]).date()).days,
+            "DaysIntoSeason": (Date.date() - self.season_start).days,
+            "DaysOff": (Date.date() - pd.to_datetime(player_games.iloc[-1]["gameDate"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -3181,13 +3179,13 @@ class StatsNFL(Stats):
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
 
-        date = datetime.strptime(date, "%Y-%m-%d")
+        Date = datetime.strptime(date, "%Y-%m-%d")
 
         player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
-            pd.to_datetime(self.gamelog["gameday"]) < date)]
+            pd.to_datetime(self.gamelog["gameday"]) < Date)]
         position = self.players.get(player, "")
         one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameday"]) > date-timedelta(days=300)])
+            self.gamelog["gameday"]) > Date-timedelta(days=300)])
         if one_year_ago < 2:
             return 0
 
@@ -3212,7 +3210,6 @@ class StatsNFL(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
-        date = date.strftime("%Y-%m-%d")
         try:
             ev = archive["NFL"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
@@ -3291,8 +3288,8 @@ class StatsNFL(Stats):
             "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
             "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
-            "DaysIntoSeason": (date.date() - self.season_start).days,
-            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["gameday"]).date()).days,
+            "DaysIntoSeason": (Date.date() - self.season_start).days,
+            "DaysOff": (Date.date() - pd.to_datetime(player_games.iloc[-1]["gameday"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
@@ -4104,15 +4101,15 @@ class StatsNHL(Stats):
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
 
-        date = datetime.strptime(date, "%Y-%m-%d")
+        Date = datetime.strptime(date, "%Y-%m-%d")
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] == "G")]
+                pd.to_datetime(self.gamelog.gameDate) < Date) & (self.gamelog["position"] == "G")]
 
         else:
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < date) & (self.gamelog["position"] != "G")]
+                pd.to_datetime(self.gamelog.gameDate) < Date) & (self.gamelog["position"] != "G")]
 
         if player_games.empty:
             return 0
@@ -4120,7 +4117,7 @@ class StatsNHL(Stats):
         headtohead = player_games.loc[player_games["opponent"] == opponent]
 
         one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameDate"]) > date-timedelta(days=300)])
+            self.gamelog["gameDate"]) > Date-timedelta(days=300)])
 
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
@@ -4129,7 +4126,6 @@ class StatsNHL(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
-        date = date.strftime("%Y-%m-%d")
         try:
             if not any([string in market for string in ["Against", "saves", "goalie"]]):
                 if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
@@ -4224,8 +4220,8 @@ class StatsNHL(Stats):
             "Trend5": np.polyfit(np.arange(len(game_res[-5:])), game_res[-5:], 1)[0] if len(game_res) > 1 else 0,
             "TrendH2H": np.polyfit(np.arange(len(h2h_res[-3:])), h2h_res[-3:], 1)[0] if len(h2h_res) > 1 else 0,
             "GamesPlayed": one_year_ago,
-            "DaysIntoSeason": (date.date() - self.season_start).days,
-            "DaysOff": (date.date() - pd.to_datetime(player_games.iloc[-1]["gameDate"]).date()).days,
+            "DaysIntoSeason": (Date.date() - self.season_start).days,
+            "DaysOff": (Date.date() - pd.to_datetime(player_games.iloc[-1]["gameDate"]).date()).days,
             "Moneyline": moneyline,
             "Total": total,
             "Home": home
