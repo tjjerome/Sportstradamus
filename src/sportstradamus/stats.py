@@ -4173,11 +4173,11 @@ class StatsNHL(Stats):
             elif "fantasy" in market:
                 ev = 0
                 if "prizepicks" in market:
-                    fantasy_props = [("goals", 8), ("assists", 5), ("interceptions", -1), ("shots", 1.5), ("blocked", 1.5)]
+                    fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
                 elif ("underdog" in market) and ("skater" in market):
-                    fantasy_props = [("goals", 6), ("assists", 4), ("interceptions", -1), ("shots", 1), ("blocked", 1), ("hits", .5), ("powerPlayPoints", .5)]
+                    fantasy_props = [("goals", 6), ("assists", 4), ("shots", 1), ("blocked", 1), ("hits", .5), ("powerPlayPoints", .5)]
                 else:
-                    fantasy_props = [("saves", .25), ("goalsAgainst", -1), ("Moneyline", 6)]
+                    fantasy_props = [("saves", .6), ("goalsAgainst", -3), ("Moneyline", 6)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NHL"][submarket]
                     data = archive["NHL"].get(submarket, {}).get(
