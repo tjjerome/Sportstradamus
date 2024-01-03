@@ -839,6 +839,7 @@ class StatsNBA(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
+        date = date.strftime("%Y-%m-%d")
         try:
             ev = archive["NBA"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
@@ -1981,6 +1982,7 @@ class StatsMLB(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
+        date = date.strftime("%Y-%m-%d")
         try:
             if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
                 pitcher = offer.get("Pitcher", "")
@@ -3210,6 +3212,7 @@ class StatsNFL(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
+        date = date.strftime("%Y-%m-%d")
         try:
             ev = archive["NFL"].get(market, {}).get(
                 date, {}).get(player, {}).get("EV", [None] * 4)
@@ -4126,6 +4129,7 @@ class StatsNHL(Stats):
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
             line = 0.5 if line < 1 else line
 
+        date = date.strftime("%Y-%m-%d")
         try:
             if not any([string in market for string in ["Against", "saves", "goalie"]]):
                 if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
