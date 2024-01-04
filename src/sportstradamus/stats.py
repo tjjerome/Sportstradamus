@@ -861,7 +861,7 @@ class StatsNBA(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["NBA"][submarket]
+                    sub_cv = stat_cv["NBA"].get(submarket, 1)
                     data = archive["NBA"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -875,7 +875,7 @@ class StatsNBA(Stats):
                 ev = 0
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["NBA"][submarket]
+                    sub_cv = stat_cv["NBA"].get(submarket, 1)
                     data = archive["NBA"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -2012,7 +2012,7 @@ class StatsMLB(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["MLB"][submarket]
+                    sub_cv = stat_cv["MLB"].get(submarket, 1)
                     data = archive["MLB"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -2029,7 +2029,7 @@ class StatsMLB(Stats):
                 else:
                     fantasy_props = [("Moneyline", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["MLB"][submarket]
+                    sub_cv = stat_cv["MLB"].get(submarket, 1)
                     data = archive["MLB"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -3232,7 +3232,7 @@ class StatsNFL(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["NFL"][submarket]
+                    sub_cv = stat_cv["NFL"].get(submarket, 1)
                     data = archive["NFL"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -3249,7 +3249,7 @@ class StatsNFL(Stats):
                 else:
                     fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["NFL"][submarket]
+                    sub_cv = stat_cv["NFL"].get(submarket, 1)
                     data = archive["NFL"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -4160,7 +4160,7 @@ class StatsNHL(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["NHL"][submarket]
+                    sub_cv = stat_cv["NHL"].get(submarket, 1)
                     data = archive["NHL"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
@@ -4179,7 +4179,7 @@ class StatsNHL(Stats):
                 else:
                     fantasy_props = [("saves", .6), ("goalsAgainst", -3), ("Moneyline", 6)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["NHL"][submarket]
+                    sub_cv = stat_cv["NHL"].get(submarket, 1)
                     data = archive["NHL"].get(submarket, {}).get(
                         date, {}).get(player, {"Lines": [], "EV": [None]*4})
                     v = np.nanmean(np.array(data["EV"], dtype=float))
