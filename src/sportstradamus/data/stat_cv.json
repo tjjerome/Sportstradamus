@@ -22,24 +22,24 @@
         "BLK": 1,
         "BLST": 1,
         "DREB": 0.796672909974914,
-        "FG3A": 0.8028193557121942,
+        "FG3A": 0.773898619427044,
         "FG3M": 1,
         "FGA": 0.6619056982406252,
         "FGM": 0.7541806906796633,
         "FTM": 1,
         "MIN": 0.4267521905636941,
         "OREB": 1,
-        "PA": 0.5452371656094646,
+        "PA": 0.5487482421600391,
         "PF": 1,
-        "PR": 0.5084548772645261,
-        "PRA": 0.489098704333097,
+        "PR": 0.5016595179675792,
+        "PRA": 0.4838970068131778,
         "PTS": 0.5850166455237558,
-        "RA": 0.5200131772104426,
+        "RA": 0.5217765424964486,
         "REB": 0.6462720001393929,
         "STL": 1,
         "TOV": 1,
-        "fantasy points prizepicks": 0.6199562440621218,
-        "fantasy points underdog": 0.5390787239072937
+        "fantasy points prizepicks": 0.6165835733148199,
+        "fantasy points underdog": 0.3326627152937281
     },
     "NFL": {
         "attempts": 0.22511174827460376,
@@ -67,23 +67,23 @@
         "passing first downs": 1,
         "first downs": 1,
         "fumbles lost": 2.2072173504663577,
-        "completion percentage": 0.11565642261445275
+        "completion percentage": 0.11538522624527824
     },
     "NHL": {
         "assists": 1,
         "blocked": 1,
         "faceOffWins": 1.146150173549589,
-        "fantasy points prizepicks": 0.8365811994716039,
-        "goalie fantasy points underdog": 0.3498004415456994,
+        "fantasy points prizepicks": 0.8318628764424478,
+        "goalie fantasy points underdog": 0.24587731875858757,
         "goals": 1,
-        "goalsAgainst": 0.5200588189813382,
+        "goalsAgainst": 0.5291181845191102,
         "hits": 1,
         "points": 1,
-        "saves": 0.2929806220753617,
+        "saves": 0.28614157000310264,
         "shots": 1,
-        "skater fantasy points underdog": 0.7054868484491648,
+        "skater fantasy points underdog": 0.6858884007369661,
         "sogBS": 1,
         "timeOnIce": 0.2506291877523893,
-        "powerPlayPoints": 2.044269192865882
+        "powerPlayPoints": 2.090473210105153
     }
 }
