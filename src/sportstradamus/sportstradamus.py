@@ -298,7 +298,7 @@ def main(progress, books, parlays):
         filepath = pkg_resources.files(data) / "parlay_hist.dat"
         if os.path.isfile(filepath):
             old5 = pd.read_pickle(filepath)
-            best5 = pd.concat([best5, old5]).drop_duplicates(ignore_index=True, inplace=True)
+            best5 = pd.concat([best5, old5]).drop_duplicates(ignore_index=True)
 
         best5.to_pickle(filepath)
 
