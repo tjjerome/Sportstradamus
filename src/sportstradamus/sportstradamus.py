@@ -692,6 +692,7 @@ def find_correlation(offers, stats, platform, parlays):
                 continue
             team_df = league_df.loc[league_df["Team"] == team]
             opp = team_df.Opponent.mode().values[0]
+            date = team_df.Date.mode().values[0]
             opp_df = league_df.loc[league_df["Team"] == opp]
             if not opp_df.empty:
                 opp_df["cMarket"] = opp_df.apply(
@@ -832,6 +833,7 @@ def find_correlation(offers, stats, platform, parlays):
                     if p > 1 and pb > 1:
                         parlay = {
                             "Game": f"{team}/{opp}",
+                            "Date": date,
                             "League": league,
                             "Platform": platform,
                             "Model EV": p,
