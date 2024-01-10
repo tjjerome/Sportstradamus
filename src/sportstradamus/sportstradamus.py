@@ -295,13 +295,20 @@ def main(progress, books, parlays):
                        best5.values.tolist())
             wks.set_basic_filter()
 
+        filepath = pkg_resources.files(data) / "parlay_hist.dat"
+        if os.path.isfile(filepath):
+            old5 = pd.read_pickle(filepath)
+            best5 = pd.concat([best5, old5]).drop_duplicates(ignore_axis=True, inplace=True)
+
+        best5.to_pickle(filepath)
+
     logger.info("Checking historical predictions")
     filepath = pkg_resources.files(data) / "history.dat"
     if os.path.isfile(filepath):
         history = pd.read_pickle(filepath)
     else:
         history = pd.DataFrame(
-            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Result"])
+            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Result"])
 
     df = pd.concat([ud_offers, pp_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                            ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
@@ -368,6 +375,14 @@ def main(progress, books, parlays):
             "Brier": brier_score_loss((history["Bet"] == history["Result"]).astype(int), history["Model"], pos_label=1),
             "Samples": len(history)
         }
+        hist_filt = history.loc[history["Books"] > .52]
+        hist_stats.loc["All, Book Filtered"] = {
+            "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
+            "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
+            "LogLoss": log_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], labels=[0,1]),
+            "Brier": brier_score_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], pos_label=1),
+            "Samples": len(hist_filt)
+        }
         for league in history["League"].unique():
             league_hist = history.loc[history["League"] == league]
             hist_stats.loc[league] = {
@@ -377,6 +392,14 @@ def main(progress, books, parlays):
                 "Brier": brier_score_loss((league_hist["Bet"] == league_hist["Result"]).astype(int), league_hist["Model"], pos_label=1),
                 "Samples": len(league_hist)
             }
+            hist_filt = league_hist.loc[league_hist["Books"] > .52]
+            hist_stats.loc[f"{league}, Book Filtered"] = {
+                "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
+                "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
+                "LogLoss": log_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], labels=[0,1]),
+                "Brier": brier_score_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], pos_label=1),
+                "Samples": len(hist_filt)
+            }
             for market in league_hist["Market"].unique():
                 market_hist = league_hist.loc[league_hist["Market"] == market]
                 hist_stats.loc[f"{league} - {market}"] = {
@@ -385,6 +408,14 @@ def main(progress, books, parlays):
                     "LogLoss": log_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], labels=[0,1]),
                     "Brier": brier_score_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], pos_label=1),
                     "Samples": len(market_hist)
+                }
+                hist_filt = market_hist.loc[market_hist["Books"] > .52]
+                hist_stats.loc[f"{league} - {market}, Book Filtered"] = {
+                    "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
+                    "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
+                    "LogLoss": log_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], labels=[0,1]),
+                    "Brier": brier_score_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], pos_label=1),
+                    "Samples": len(hist_filt)
                 }
                 
         hist_stats["Split"] = hist_stats.index
