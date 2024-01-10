@@ -298,7 +298,7 @@ def main(progress, books, parlays):
         filepath = pkg_resources.files(data) / "parlay_hist.dat"
         if os.path.isfile(filepath):
             old5 = pd.read_pickle(filepath)
-            best5 = pd.concat([best5, old5]).drop_duplicates(ignore_axis=True, inplace=True)
+            best5 = pd.concat([best5, old5]).drop_duplicates(ignore_index=True, inplace=True)
 
         best5.to_pickle(filepath)
 
@@ -311,7 +311,7 @@ def main(progress, books, parlays):
             columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Result"])
 
     df = pd.concat([ud_offers, pp_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model"]]
+                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model"]]
     df.loc[(df['Market'] == 'AST') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
     df.loc[(df['Market'] == 'PTS') & (
