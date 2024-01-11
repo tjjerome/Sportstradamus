@@ -10,10 +10,10 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-archive = Archive("All")
-filepath = pkg_resources.files(data) / "history.dat"
-history = pd.read_pickle(filepath)
-history["Books"] = np.nan
+# archive = Archive("All")
+# filepath = pkg_resources.files(data) / "history.dat"
+# history = pd.read_pickle(filepath)
+# history["Books"] = np.nan
 # history = history[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model"]]
 # for i, row in history.iterrows():
 #     ev = archive[row["League"]][row["Market"]].get(row["Date"], {}).get(row["Player"], {}).get("EV", np.array([None]))
