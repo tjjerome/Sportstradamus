@@ -325,14 +325,20 @@
 =========================== NHL goalie fantasy points underdog ===========================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
- 0.831522   0.848571 0.140831    0.310537     0.391562  0.325367 0.444287      0.007323
- 0.821053   0.850282 0.121323    0.336055     0.422773  0.325367 0.444287     -0.010364
+ 0.627660   0.646341 0.239687    0.047217     0.067682  0.160471  0.38326      0.014851
+ 0.641304   0.662500 0.236912    0.063538     0.088954  0.160471  0.38326      0.003539
 
 ==================================== NHL goalsAgainst ====================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.675830   0.706422 0.166262    0.081908     0.108513  0.109902 0.173166     -0.004661
  0.663866   0.694118 0.166978    0.093282     0.121754  0.109902 0.173166     -0.012545
+
+======================================== NHL hits ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.614646   0.601144 -0.268152    0.041876     0.056597  0.081114 -0.186498      0.031821
+ 0.612945   0.595016 -0.256188    0.040415     0.055053  0.081114 -0.186498      0.032833
 
 ======================================= NHL points =======================================
  Distribution Model: Poisson
