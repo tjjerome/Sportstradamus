@@ -331,7 +331,7 @@ def main(progress, books, parlays):
                "NFL": "player display name", "NHL": "playerName"}
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
                "NFL": "gameday", "NHL": "gameDate"}
-    for i, row in tqdm(history.loc[history.isna().any(axis=1) & (pd.to_datetime(history.Date).dt.date < datetime.today().date())].iterrows(), desc="Checking history", total=len(history)):
+    for i, row in tqdm(history.loc[history.isna().any(axis=1) & (pd.to_datetime(history.Date).dt.date < datetime.datetime.today().date())].iterrows(), desc="Checking history", total=len(history)):
         if np.isnan(row["Result"]):
             gamelog = stats[row["League"]].gamelog
             if " + " in row["Player"]:
