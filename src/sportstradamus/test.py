@@ -10,29 +10,54 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-# archive = Archive("All")
-# filepath = pkg_resources.files(data) / "history.dat"
-# history = pd.read_pickle(filepath)
-# history["Books"] = np.nan
-# history = history[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model"]]
-# for i, row in history.iterrows():
-#     ev = archive[row["League"]][row["Market"]].get(row["Date"], {}).get(row["Player"], {}).get("EV", np.array([None]))
-#     ev = np.nanmean(ev.astype(float))
-#     cv = stat_cv.get(row["League"], {}).get(row["Market"], 1)
-#     if not np.isnan(ev):
-#         if cv == 1:
-#             odds = poisson.sf(row["Line"], ev) + poisson.pmf(row["Line"], ev)/2
-#         else:
-#             odds = norm.sf(row["Line"], ev, ev*cv)
-#     else:
-#         odds = 0.5
+nba = StatsNBA()
+nba.load()
+nba.update()
+mlb = StatsMLB()
+mlb.load()
+mlb.update()
+nhl = StatsNHL()
+nhl.load()
+nhl.update()
+nfl = StatsNFL()
+nfl.load()
+nfl.update()
 
-#     if row["Bet"] == "Under":
-#         odds = 1-odds
+stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
+filepath = pkg_resources.files(data) / "history.dat"
+history = pd.read_pickle(filepath)
+nameStr = {"MLB": "playerName", "NBA": "PLAYER_NAME",
+            "NFL": "player display name", "NHL": "playerName"}
+dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
+            "NFL": "gameday", "NHL": "gameDate"}
+for i, row in tqdm(history.loc[history.isna().any(axis=1) & (pd.to_datetime(history.Date).dt.date < datetime.today().date())].iterrows(), desc="Checking history", total=len(history)):
+    if np.isnan(row["Result"]):
+        gamelog = stats[row["League"]].gamelog
+        if " + " in row["Player"]:
+            players = row["Player"].split(" + ")
+            game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
+                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+            game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
+                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+            if not game1.empty and not game2.empty and not game1[row["Market"]].isna().any() and not game2[row["Market"]].isna().any():
+                history.at[i, "Result"] = "Over" if ((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) > row["Line"]) else ("Under" if ((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) < row["Line"]) else "Push")
 
-#     history.loc[i, "Books"] = odds
+        elif " vs. " in row["Player"]:
+            players = row["Player"].split(" vs. ")
+            game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
+                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+            game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
+                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+            if not game1.empty and not game2.empty and not game1[row["Market"]].isna().any() and not game2[row["Market"]].isna().any():
+                history.at[i, "Result"] = "Over" if ((game1.iloc[0][row["Market"]] + row["Line"]) > game2.iloc[0][row["Market"]]) else ("Under" if ((game1.iloc[0][row["Market"]] + row["Line"]) < game2.iloc[0][row["Market"]]) else "Push")
 
-# history.to_pickle(filepath)
+        else:
+            game = gamelog.loc[(gamelog[nameStr[row["League"]]] == row["Player"]) & (
+                pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+            if not game.empty and not game[row["Market"]].isna().any():
+                history.at[i, "Result"] = "Over" if (game.iloc[0][row["Market"]] > row["Line"]) else ("Under" if (game.iloc[0][row["Market"]] < row["Line"]) else "Push")
+
+history.to_pickle(filepath)
 
 # NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
@@ -67,22 +92,22 @@ from tqdm import tqdm
 # NHL.season_start = datetime(2023, 10, 10).date()
 # NHL.update()
 
-MLB = StatsMLB()
-MLB.load()
-MLB.gamelog = pd.DataFrame()
-MLB.teamlog = pd.DataFrame()
-MLB.season_start = datetime(2021, 3, 1).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2022, 3, 1).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2023, 3, 30).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
+# MLB = StatsMLB()
+# MLB.load()
+# MLB.gamelog = pd.DataFrame()
+# MLB.teamlog = pd.DataFrame()
+# MLB.season_start = datetime(2021, 3, 1).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2022, 3, 1).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2023, 3, 30).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
