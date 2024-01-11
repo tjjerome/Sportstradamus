@@ -411,14 +411,6 @@ def main(progress, books, parlays):
                     "Brier": brier_score_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], pos_label=1),
                     "Samples": len(market_hist)
                 }
-                hist_filt = market_hist.loc[market_hist["Books"] > .52]
-                hist_stats.loc[f"{league} - {market}, Book Filtered"] = {
-                    "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
-                    "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
-                    "LogLoss": log_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], labels=[0,1]),
-                    "Brier": brier_score_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], pos_label=1),
-                    "Samples": len(hist_filt)
-                }
                 
         hist_stats["Split"] = hist_stats.index
         hist_stats = hist_stats[["Split", "Accuracy", "Balance", "LogLoss", "Brier", "Samples"]].sort_values('Samples', ascending=False)

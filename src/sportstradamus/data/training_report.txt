@@ -310,6 +310,12 @@
  0.626013   0.609785 0.183006    0.059607     0.077065  0.152399 0.472956      0.016909
  0.628086   0.613769 0.180947    0.060686     0.079121  0.152399 0.472956      0.016161
 
+====================================== NHL assists =======================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.745412   0.607143 -0.25624    0.204336     0.264808  0.170315 -2.524617      0.016529
+ 0.745412   0.607143 -0.25624    0.206393     0.266576  0.170315 -2.524617      0.015103
+
 ====================================== NHL blocked =======================================
  Distribution Model: Poisson
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
@@ -327,6 +333,12 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.627660   0.646341 0.239687    0.047217     0.067682  0.160471  0.38326      0.014851
  0.641304   0.662500 0.236912    0.063538     0.088954  0.160471  0.38326      0.003539
+
+======================================= NHL goals ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.793796        0.0 -0.206204    0.288589     0.367008  0.245788 -3.847194      0.017830
+ 0.793796        0.0 -0.206204    0.290360     0.368307  0.245788 -3.847194      0.016603
 
 ==================================== NHL goalsAgainst ====================================
  Distribution Model: Gaussian
