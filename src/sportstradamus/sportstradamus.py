@@ -604,10 +604,10 @@ def find_correlation(offers, stats, platform, parlays):
             ".")[1]] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
         opp_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
             ".")[1]] if "_OPP_" in x.correlation else ["", ""], axis=1).to_list()
-        mask1 = [pair not in banned[league]['team'] and pair[::-1]
-                 not in banned[league]['team'] for pair in team_pairs]
-        mask2 = [pair not in banned[league]['opponent'] and pair[::-1]
-                 not in banned[league]['opponent'] for pair in opp_pairs]
+        mask1 = [pair not in banned[platform][league]['team'] and pair[::-1]
+                 not in banned[platform][league]['team'] for pair in team_pairs]
+        mask2 = [pair not in banned[platform][league]['opponent'] and pair[::-1]
+                 not in banned[platform][league]['opponent'] for pair in opp_pairs]
         c = c.loc[[a and b for a, b in zip(mask1, mask2)]]
         c_map = c
         c_map.index = c.correlation
@@ -760,10 +760,10 @@ def find_correlation(offers, stats, platform, parlays):
                     team2_markets = [leg.split(".")[1]
                                      for leg in markets if "_OPP_" in leg]
 
-                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[league]['team']]) or
-                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[league]['team']]) or
-                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[league]['opponent']]) or
-                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[league]['opponent']])):
+                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[platform][league]['team']]) or
+                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[platform][league]['team']]) or
+                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[platform][league]['opponent']]) or
+                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[platform][league]['opponent']])):
                         continue
 
                     boost = 1
@@ -800,20 +800,19 @@ def find_correlation(offers, stats, platform, parlays):
 
                                     SIG[i, j] += rho
                                     
-                                    if platform == "Underdog":
-                                        if re.sub(r'[0-9]', '', x) in banned[league]['modified'].keys():
-                                            modifier = banned[league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
-                                            if b1[xi] == b2[yi]:
-                                                boost *= modifier
-                                            else:
-                                                boost /= modifier
+                                    if re.sub(r'[0-9]', '', x) in banned[platform][league]['modified'].keys():
+                                        modifier = banned[platform][league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
+                                        if b1[xi] == b2[yi]:
+                                            boost *= modifier
+                                        else:
+                                            boost /= modifier
 
-                                        elif re.sub(r'[0-9]', '', y) in banned[league]['modified'].keys():
-                                            modifier = banned[league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
-                                            if b1[xi] == b2[yi]:
-                                                boost *= modifier
-                                            else:
-                                                boost /= modifier
+                                    elif re.sub(r'[0-9]', '', y) in banned[platform][league]['modified'].keys():
+                                        modifier = banned[platform][league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
+                                        if b1[xi] == b2[yi]:
+                                            boost *= modifier
+                                        else:
+                                            boost /= modifier
 
                     SIG = SIG + SIG.T + np.eye(bet_size)
 

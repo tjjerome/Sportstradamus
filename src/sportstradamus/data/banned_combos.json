@@ -1,333 +1,540 @@
 {
-    "NFL": {
-        "team": [
-            [
-                "passing tds",
-                "tds"
-            ],
-            [
-                "passing tds",
-                "receiving tds"
-            ],
-            [
-                "qb tds",
-                "tds"
-            ],
-            [
-                "qb tds",
-                "receiving tds"
-            ],
-            [
-                "tds",
-                "tds"
-            ],
-            [
-                "tds",
-                "fantasy points underdog"
-            ],
-            [
-                "passing first downs",
-                "receptions"
-            ],
-            [
-                "passing first downs",
-                "receiving yards"
-            ],
-            [
-                "passing first downs",
-                "first downs"
-            ],
-            [
-                "completions",
-                "first downs"
-            ]
-        ],
-        "opponent": [],
-        "modified": {
-            "QB.completions": {
-                "WR.receptions": 0.73,
-                "WR.receiving yards": 0.83,
-                "WR.yards": 0.86,
-                "WR.targets": 0.74,
-                "WR.fantasy points underdog": 0.83,
-                "TE.receptions": 0.73,
-                "TE.receiving yards": 0.78,
-                "TE.targets": 0.74,
-                "RB.receptions": 0.73,
-                "RB.receiving yards": 0.85
+    "Underdog":{
+            "NFL": {
+                "team": [
+                    [
+                        "passing tds",
+                        "tds"
+                    ],
+                    [
+                        "passing tds",
+                        "receiving tds"
+                    ],
+                    [
+                        "qb tds",
+                        "tds"
+                    ],
+                    [
+                        "qb tds",
+                        "receiving tds"
+                    ],
+                    [
+                        "tds",
+                        "tds"
+                    ],
+                    [
+                        "tds",
+                        "fantasy points underdog"
+                    ],
+                    [
+                        "passing first downs",
+                        "receptions"
+                    ],
+                    [
+                        "passing first downs",
+                        "receiving yards"
+                    ],
+                    [
+                        "passing first downs",
+                        "first downs"
+                    ],
+                    [
+                        "completions",
+                        "first downs"
+                    ]
+                ],
+                "opponent": [],
+                "modified": {
+                    "QB.completions": {
+                        "WR.receptions": 0.73,
+                        "WR.receiving yards": 0.83,
+                        "WR.yards": 0.86,
+                        "WR.targets": 0.74,
+                        "WR.fantasy points underdog": 0.83,
+                        "TE.receptions": 0.73,
+                        "TE.receiving yards": 0.78,
+                        "TE.targets": 0.74,
+                        "RB.receptions": 0.73,
+                        "RB.receiving yards": 0.85
+                    },
+                    "QB.passing yards": {
+                        "WR.receptions": 0.82,
+                        "WR.receiving yards": 0.79,
+                        "WR.yards": 0.79,
+                        "WR.targets": 0.80,
+                        "WR.fantasy points underdog": 0.86,
+                        "TE.receptions": 0.82,
+                        "TE.receiving yards": 0.77,
+                        "TE.fantasy points underdog": 0.93,
+                        "RB.receptions": 0.82,
+                        "RB.receiving yards": 0.83
+                    },
+                    "QB.attempts": {
+                        "WR.receptions": 0.79,
+                        "WR.receiving yards": 0.84,
+                        "WR.yards": 0.87,
+                        "WR.targets": 0.67,
+                        "WR.fantasy points underdog": 0.88,
+                        "TE.receptions": 0.79,
+                        "TE.receiving yards": 0.81,
+                        "TE.targets": 0.67,
+                        "RB.receptions": 0.79,
+                        "RB.receiving yards": 0.90,
+                        "RB.carries": 1.15
+                    },
+                    "QB.interceptions": {
+                        "WR.targets": 0.76
+                    },
+                    "QB.passing first downs": {
+                        "WR.yards": 0.82,
+                        "WR.targets": 0.72,
+                        "WR.fantasy points underdog": 0.89,
+                        "TE.fantasy points underdog": 0.89
+                    },
+                    "QB.completion percentage": {
+                        "WR.receptions": 0.79,
+                        "TE.receptions": 0.79,
+                        "RB.receptions": 0.79
+                    },
+                    "QB.qb yards": {
+                        "WR.receptions": 0.85,
+                        "WR.receiving yards": 0.83,
+                        "WR.yards": 0.79,
+                        "WR.targets": 0.81,
+                        "WR.fantasy points underdog": 0.86,
+                        "TE.receptions": 0.85,
+                        "TE.receiving yards": 0.83,
+                        "TE.targets": 0.81,
+                        "TE.fantasy points underdog": 0.86,
+                        "RB.receptions": 0.85,
+                        "RB.receiving yards": 0.83
+                    },
+                    "QB.fantasy points underdog": {
+                        "WR.receptions": 0.88,
+                        "WR.receiving yards": 0.86,
+                        "WR.yards": 0.86,
+                        "WR.targets": 0.91,
+                        "WR.fantasy points underdog": 0.81,
+                        "TE.receptions": 0.88,
+                        "TE.receiving yards": 0.86,
+                        "TE.fantasy points underdog": 0.81
+                    }
+                }
             },
-            "QB.passing yards": {
-                "WR.receptions": 0.82,
-                "WR.receiving yards": 0.79,
-                "WR.yards": 0.79,
-                "WR.targets": 0.80,
-                "WR.fantasy points underdog": 0.86,
-                "TE.receptions": 0.82,
-                "TE.receiving yards": 0.77,
-                "TE.fantasy points underdog": 0.93,
-                "RB.receptions": 0.82,
-                "RB.receiving yards": 0.83
+            "NBA": {
+                "team": [],
+                "opponent": [],
+                "modified": {}
             },
-            "QB.attempts": {
-                "WR.receptions": 0.79,
-                "WR.receiving yards": 0.84,
-                "WR.yards": 0.87,
-                "WR.targets": 0.67,
-                "WR.fantasy points underdog": 0.88,
-                "TE.receptions": 0.79,
-                "TE.receiving yards": 0.81,
-                "TE.targets": 0.67,
-                "RB.receptions": 0.79,
-                "RB.receiving yards": 0.90,
-                "RB.carries": 1.15
+            "NHL": {
+                "team": [
+                    [
+                        "skater fantasy points underdog",
+                        "skater fantasy points underdog"
+                    ],
+                    [
+                        "skater fantasy points underdog",
+                        "goalie fantasy points underdog"
+                    ],
+                    [
+                        "points",
+                        "points"
+                    ],
+                    [
+                        "points",
+                        "goals"
+                    ],
+                    [
+                        "points",
+                        "assists"
+                    ],
+                    [
+                        "powerPlayPoints",
+                        "points"
+                    ],
+                    [
+                        "powerPlayPoints",
+                        "powerPlayPoints"
+                    ],
+                    [
+                        "powerPlayPoints",
+                        "goals"
+                    ],
+                    [
+                        "powerPlayPoints",
+                        "assists"
+                    ],
+                    [
+                        "goals",
+                        "assists"
+                    ]
+                ],
+                "opponent": [
+                    [
+                        "skater fantasy points underdog",
+                        "goalie fantasy points underdog"
+                    ],
+                    [
+                        "goalie fantasy points underdog",
+                        "goalie fantasy points underdog"
+                    ],
+                    [
+                        "goalsAgainst",
+                        "points"
+                    ],
+                    [
+                        "goalsAgainst",
+                        "powerPlayPoints"
+                    ],
+                    [
+                        "goalsAgainst",
+                        "assists"
+                    ],
+                    [
+                        "goalsAgainst",
+                        "goals"
+                    ],
+                    [
+                        "goalsAgainst",
+                        "skater fantasy points underdog"
+                    ],
+                    [
+                        "saves",
+                        "points"
+                    ],
+                    [
+                        "saves",
+                        "powerPlayPoints"
+                    ],
+                    [
+                        "saves",
+                        "goals"
+                    ],
+                    [
+                        "saves",
+                        "assists"
+                    ],
+                    [
+                        "saves",
+                        "skater fantasy points underdog"
+                    ],
+                    [
+                        "saves",
+                        "shots"
+                    ],
+                    [
+                        "saves",
+                        "sogBS"
+                    ]
+                ],
+                "modified": {}
             },
-            "QB.interceptions": {
-                "WR.targets": 0.76
-            },
-            "QB.passing first downs": {
-                "WR.yards": 0.82,
-                "WR.targets": 0.72,
-                "WR.fantasy points underdog": 0.89,
-                "TE.fantasy points underdog": 0.89
-            },
-            "QB.completion percentage": {
-                "WR.receptions": 0.79,
-                "TE.receptions": 0.79,
-                "RB.receptions": 0.79
-            },
-            "QB.qb yards": {
-                "WR.receptions": 0.85,
-                "WR.receiving yards": 0.83,
-                "WR.yards": 0.79,
-                "WR.targets": 0.81,
-                "WR.fantasy points underdog": 0.86,
-                "TE.receptions": 0.85,
-                "TE.receiving yards": 0.83,
-                "TE.targets": 0.81,
-                "TE.fantasy points underdog": 0.86,
-                "RB.receptions": 0.85,
-                "RB.receiving yards": 0.83
-            },
-            "QB.fantasy points underdog": {
-                "WR.receptions": 0.88,
-                "WR.receiving yards": 0.86,
-                "WR.yards": 0.86,
-                "WR.targets": 0.91,
-                "WR.fantasy points underdog": 0.81,
-                "TE.receptions": 0.88,
-                "TE.receiving yards": 0.86,
-                "TE.fantasy points underdog": 0.81
+            "MLB": {
+                "team": [
+                    [
+                        "hitter fantasy points underdog",
+                        "hitter fantasy points underdog"
+                    ],
+                    [
+                        "pitcher fantasy points underdog",
+                        "hitter fantasy points underdog"
+                    ],
+                    [
+                        "hitter fantasy points underdog",
+                        "hits+runs+rbi"
+                    ],
+                    [
+                        "pitcher fantasy points underdog",
+                        "hits+runs+rbi"
+                    ],
+                    [
+                        "hitter fantasy points underdog",
+                        "rbi"
+                    ],
+                    [
+                        "pitcher fantasy points underdog",
+                        "rbi"
+                    ],
+                    [
+                        "hitter fantasy points underdog",
+                        "runs"
+                    ],
+                    [
+                        "pitcher fantasy points underdog",
+                        "runs"
+                    ],
+                    [
+                        "hits+runs+rbi",
+                        "hits+runs+rbi"
+                    ],
+                    [
+                        "hits+runs+rbi",
+                        "rbi"
+                    ],
+                    [
+                        "hits+runs+rbi",
+                        "runs"
+                    ],
+                    [
+                        "rbi",
+                        "runs"
+                    ],
+                    [
+                        "runs",
+                        "runs"
+                    ]
+                ],
+                "opponent": [],
+                "modified": {}
             }
+        },
+
+    "PrizePicks": {
+        "NFL": {
+            "team": [
+                [
+                    "passing tds",
+                    "tds"
+                ],
+                [
+                    "passing tds",
+                    "receiving tds"
+                ],
+                [
+                    "qb tds",
+                    "tds"
+                ],
+                [
+                    "qb tds",
+                    "receiving tds"
+                ],
+                [
+                    "tds",
+                    "tds"
+                ],
+                [
+                    "tds",
+                    "fantasy score"
+                ]
+            ],
+            "opponent": [],
+            "modified": {
+                "QB.completions": {
+                    "WR.receptions": 0.99,
+                    "WR.receiving yards": 0.99,
+                    "WR.targets": 0.99,
+                    "TE.receptions": 0.99,
+                    "TE.receiving yards": 0.99,
+                    "TE.targets": 0.99,
+                    "RB.receptions": 0.99,
+                    "RB.receiving yards": 0.99
+                },
+                "QB.passing yards": {
+                    "WR.receptions": 0.99,
+                    "WR.receiving yards": 0.99,
+                    "WR.targets": 0.99,
+                    "WR.fantasy score": 0.99,
+                    "TE.receptions": 0.99,
+                    "TE.receiving yards": 0.99,
+                    "TE.targets": 0.99,
+                    "TE.fantasy score": 0.99,
+                    "RB.receptions": 0.99,
+                    "RB.receiving yards": 0.99,
+                    "_OPP_QB.passing yards": 0.99
+                },
+                "QB.attempts": {
+                    "WR.receptions": 0.99,
+                    "WR.receiving yards": 0.99,
+                    "WR.targets": 0.99,
+                    "WR.fantasy score": 0.99,
+                    "TE.receptions": 0.99,
+                    "TE.receiving yards": 0.99,
+                    "TE.targets": 0.99,
+                    "TE.fantasy score": 0.99,
+                    "RB.receptions": 0.99,
+                    "RB.receiving yards": 0.99
+                },
+                "QB.qb yards": {
+                    "WR.receptions": 0.99,
+                    "WR.receiving yards": 0.99,
+                    "WR.targets": 0.99,
+                    "WR.fantasy score": 0.99,
+                    "TE.receptions": 0.99,
+                    "TE.receiving yards": 0.99,
+                    "TE.targets": 0.99,
+                    "TE.fantasy score": 0.99,
+                    "RB.receptions": 0.99,
+                    "RB.receiving yards": 0.99,
+                    "_OPP_QB.passing yards": 0.99
+                },
+                "QB.fantasy score": {
+                    "WR.receptions": 0.99,
+                    "WR.receiving yards": 0.99,
+                    "WR.targets": 0.99,
+                    "WR.fantasy score": 0.99,
+                    "TE.receptions": 0.99,
+                    "TE.receiving yards": 0.99,
+                    "TE.targets": 0.99,
+                    "TE.fantasy score": 0.99,
+                    "RB.receptions": 0.99,
+                    "RB.receiving yards": 0.99,
+                    "_OPP_QB.passing yards": 0.99
+                }
+            }
+        },
+        "NBA": {
+            "team": [],
+            "opponent": [],
+            "modified": {}
+        },
+        "NHL": {
+            "team": [
+                [
+                    "fantasy points prizepicks",
+                    "fantasy points prizepicks"
+                ],
+                [
+                    "points",
+                    "points"
+                ],
+                [
+                    "points",
+                    "goals"
+                ],
+                [
+                    "points",
+                    "assists"
+                ],
+                [
+                    "powerPlayPoints",
+                    "points"
+                ],
+                [
+                    "powerPlayPoints",
+                    "powerPlayPoints"
+                ],
+                [
+                    "powerPlayPoints",
+                    "goals"
+                ],
+                [
+                    "powerPlayPoints",
+                    "assists"
+                ],
+                [
+                    "goals",
+                    "assists"
+                ]
+            ],
+            "opponent": [
+                [
+                    "goalsAgainst",
+                    "points"
+                ],
+                [
+                    "goalsAgainst",
+                    "powerPlayPoints"
+                ],
+                [
+                    "goalsAgainst",
+                    "assists"
+                ],
+                [
+                    "goalsAgainst",
+                    "goals"
+                ],
+                [
+                    "goalsAgainst",
+                    "fantasy points prizepicks"
+                ],
+                [
+                    "saves",
+                    "points"
+                ],
+                [
+                    "saves",
+                    "powerPlayPoints"
+                ],
+                [
+                    "saves",
+                    "goals"
+                ],
+                [
+                    "saves",
+                    "assists"
+                ],
+                [
+                    "saves",
+                    "fantasy points prizepicks"
+                ],
+                [
+                    "saves",
+                    "shots"
+                ],
+                [
+                    "saves",
+                    "sogBS"
+                ]
+            ],
+            "modified": {}
+        },
+        "MLB": {
+            "team": [
+                [
+                    "hitter fantasy score",
+                    "hitter fantasy score"
+                ],
+                [
+                    "pitcher fantasy score",
+                    "hitter fantasy score"
+                ],
+                [
+                    "hitter fantasy score",
+                    "hits+runs+rbi"
+                ],
+                [
+                    "pitcher fantasy score",
+                    "hits+runs+rbi"
+                ],
+                [
+                    "hitter fantasy score",
+                    "rbi"
+                ],
+                [
+                    "pitcher fantasy score",
+                    "rbi"
+                ],
+                [
+                    "hitter fantasy score",
+                    "runs"
+                ],
+                [
+                    "pitcher fantasy score",
+                    "runs"
+                ],
+                [
+                    "hits+runs+rbi",
+                    "hits+runs+rbi"
+                ],
+                [
+                    "hits+runs+rbi",
+                    "rbi"
+                ],
+                [
+                    "hits+runs+rbi",
+                    "runs"
+                ],
+                [
+                    "rbi",
+                    "runs"
+                ],
+                [
+                    "runs",
+                    "runs"
+                ]
+            ],
+            "opponent": [],
+            "modified": {}
         }
-    },
-    "NBA": {
-        "team": [],
-        "opponent": [],
-        "modified": {}
-    },
-    "NHL": {
-        "team": [
-            [
-                "fantasy points prizepicks",
-                "fantasy points prizepicks"
-            ],
-            [
-                "skater fantasy points underdog",
-                "skater fantasy points underdog"
-            ],
-            [
-                "skater fantasy points underdog",
-                "goalie fantasy points underdog"
-            ],
-            [
-                "points",
-                "points"
-            ],
-            [
-                "points",
-                "goals"
-            ],
-            [
-                "points",
-                "assists"
-            ],
-            [
-                "powerPlayPoints",
-                "points"
-            ],
-            [
-                "powerPlayPoints",
-                "powerPlayPoints"
-            ],
-            [
-                "powerPlayPoints",
-                "goals"
-            ],
-            [
-                "powerPlayPoints",
-                "assists"
-            ],
-            [
-                "goals",
-                "assists"
-            ]
-        ],
-        "opponent": [
-            [
-                "skater fantasy points underdog",
-                "goalie fantasy points underdog"
-            ],
-            [
-                "goalie fantasy points underdog",
-                "goalie fantasy points underdog"
-            ],
-            [
-                "goalsAgainst",
-                "points"
-            ],
-            [
-                "goalsAgainst",
-                "powerPlayPoints"
-            ],
-            [
-                "goalsAgainst",
-                "assists"
-            ],
-            [
-                "goalsAgainst",
-                "goals"
-            ],
-            [
-                "goalsAgainst",
-                "skater fantasy points underdog"
-            ],
-            [
-                "goalsAgainst",
-                "fantasy points prizepicks"
-            ],
-            [
-                "saves",
-                "points"
-            ],
-            [
-                "saves",
-                "powerPlayPoints"
-            ],
-            [
-                "saves",
-                "goals"
-            ],
-            [
-                "saves",
-                "assists"
-            ],
-            [
-                "saves",
-                "skater fantasy points underdog"
-            ],
-            [
-                "saves",
-                "fantasy points prizepicks"
-            ],
-            [
-                "saves",
-                "shots"
-            ],
-            [
-                "saves",
-                "sogBS"
-            ]
-        ],
-        "modified": {}
-    },
-    "MLB": {
-        "team": [
-            [
-                "hitter fantasy score",
-                "hitter fantasy score"
-            ],
-            [
-                "pitcher fantasy score",
-                "hitter fantasy score"
-            ],
-            [
-                "hitter fantasy points underdog",
-                "hitter fantasy points underdog"
-            ],
-            [
-                "pitcher fantasy points underdog",
-                "hitter fantasy points underdog"
-            ],
-            [
-                "hitter fantasy score",
-                "hits+runs+rbi"
-            ],
-            [
-                "hitter fantasy points underdog",
-                "hits+runs+rbi"
-            ],
-            [
-                "pitcher fantasy score",
-                "hits+runs+rbi"
-            ],
-            [
-                "pitcher fantasy points underdog",
-                "hits+runs+rbi"
-            ],
-            [
-                "hitter fantasy score",
-                "rbi"
-            ],
-            [
-                "hitter fantasy points underdog",
-                "rbi"
-            ],
-            [
-                "pitcher fantasy score",
-                "rbi"
-            ],
-            [
-                "pitcher fantasy points underdog",
-                "rbi"
-            ],
-            [
-                "hitter fantasy score",
-                "runs"
-            ],
-            [
-                "hitter fantasy points underdog",
-                "runs"
-            ],
-            [
-                "pitcher fantasy score",
-                "runs"
-            ],
-            [
-                "pitcher fantasy points underdog",
-                "runs"
-            ],
-            [
-                "hits+runs+rbi",
-                "hits+runs+rbi"
-            ],
-            [
-                "hits+runs+rbi",
-                "rbi"
-            ],
-            [
-                "hits+runs+rbi",
-                "runs"
-            ],
-            [
-                "rbi",
-                "runs"
-            ],
-            [
-                "runs",
-                "runs"
-            ]
-        ],
-        "opponent": [],
-        "modified": {}
     }
 }
