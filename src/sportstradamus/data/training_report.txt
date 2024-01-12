@@ -22,6 +22,12 @@
  0.618478   0.698477 0.017560    0.054375     0.068409  0.111697  0.35256
  0.620457   0.693720 0.019617    0.054390     0.071804  0.111697  0.35256
 
+==================================== MLB runs allowed ====================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.646144   0.728244 -0.033057    0.084340     0.107162  0.256229 0.058225      0.038349
+ 0.645718   0.720695 -0.031800    0.071308     0.095271  0.256229 0.058225      0.047382
+
 ======================================== NBA AST =========================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
@@ -393,4 +399,10 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.650830   0.748390 0.059234    0.058207     0.077526  0.130897 0.093252      0.018460
  0.638129   0.734677 0.055282    0.062715     0.083893  0.130897 0.093252      0.015336
+
+===================================== NHL timeOnIce ======================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.665370   0.688796 0.057782    0.098501     0.123111  0.345811 0.327079      0.015967
+ 0.658573   0.684195 0.054146    0.093986     0.119223  0.345811 0.327079      0.019096
 
