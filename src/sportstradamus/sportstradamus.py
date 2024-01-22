@@ -824,10 +824,10 @@ def find_correlation(offers, stats, platform, parlays):
                         pb = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
                     except:
                         continue
-
+                    
                     if p > 1 and pb > 1:
                         parlay = {
-                            "Game": f"{team}/{opp}",
+                            "Game": "/".join(sorted([team, opp])),
                             "Date": date,
                             "League": league,
                             "Platform": platform,

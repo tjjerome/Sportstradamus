@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Sportstradamus"
-version = "3.3.0"
+version = "3.4.0"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
@@ -37,6 +37,7 @@ torch = "^2.0.1"
 prophecize = "sportstradamus.sportstradamus:main"
 get-money = "sportstradamus.moneylines:get_moneylines"
 meditate = "sportstradamus.train:meditate"
+reflect = "sportstradamus.analyze_parlay_hist:reflect"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"
