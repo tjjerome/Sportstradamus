@@ -208,7 +208,8 @@ def reflect():
                     # fig.show()
 
                     # df = df.loc[(df["Books EV"] > 2.36) & (df["Model EV"] > 1.01)]
-                    profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).drop_duplicates(["Game", "Date"]).Profit.sum()
+                    profits[f"{platform}, {league}, Best Parlay Total"][tf] = df.sort_values("Model EV", ascending=False).drop_duplicates(["Game", "Date"]).Profit.sum()
+                    profits[f"{platform}, {league}, All Parlay Mean"][tf] = df.Profit.mean()
 
     profits = pd.DataFrame(profits).T
     wks = gc.open("Sportstradamus").worksheet("Parlay Profit")
