@@ -179,7 +179,8 @@ def reflect():
                 league_df = platform_df.loc[platform_df["League"] == league]
 
             if not league_df.empty:
-                profits.setdefault(f"{platform}, {league}", {})
+                profits.setdefault(f"{platform}, {league}, Best Parlay Total", {})
+                profits.setdefault(f"{platform}, {league}, All Parlay Mean", {})
 
             for tf, days in [("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
                 df = league_df.loc[pd.to_datetime(league_df.Date).dt.date > datetime.today().date() - timedelta(days=days)]
@@ -211,7 +212,7 @@ def reflect():
                     profits[f"{platform}, {league}, Best Parlay Total"][tf] = df.sort_values("Model EV", ascending=False).drop_duplicates(["Game", "Date"]).Profit.sum()
                     profits[f"{platform}, {league}, All Parlay Mean"][tf] = df.Profit.mean()
 
-    profits = pd.DataFrame(profits).T
+    profits = pd.DataFrame(profits).T.reset_index(names='Split')
     wks = gc.open("Sportstradamus").worksheet("Parlay Profit")
     wks.clear()
     wks.update([profits.columns.values.tolist()] +
