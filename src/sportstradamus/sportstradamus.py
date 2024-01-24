@@ -896,8 +896,8 @@ def find_correlation(offers, stats, platform, parlays):
                 pos = R_map.loc[R_map > 0.1]
                 neg = R_map.loc[R_map < -0.1]
                 R_map = R_map.abs().to_dict()
-                corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos.index.to_list() if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet)],
-                                  game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg.index.to_list() if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet)]])
+                corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos.index.to_list() if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet) & (game_df.Books*game_df.Boost > .5)],
+                                  game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg.index.to_list() if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet) & (game_df.Books*game_df.Boost > .5)]])
                 corr["R"] = corr.cMarket.apply(lambda x: R_map[x[0]])
                 corr["P"] = (np.exp(corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])
                                                       * corr["Model"]*(1-corr["Model"])))*offer["Model"]*corr["Model"])*3
