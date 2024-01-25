@@ -452,7 +452,7 @@ class Archive:
 
             evs = np.append(evs, ev)
 
-        if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
+        if o["Line"] and float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
             self.archive[o["League"]][market][o["Date"]
                                               ][o["Player"]]["Lines"].append(float(o["Line"]))
 

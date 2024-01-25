@@ -287,6 +287,11 @@ def main(progress, books, parlays):
 
     if parlays and not best5.empty:
         best5.sort_values("Model EV", ascending=False, inplace=True)
+        # filepath = pkg_resources.files(data) / "parlay_masks.json"
+        # with open(filepath, 'r') as infile:
+        #     masks = json.load(infile)
+
+        # best5_write = best5.loc[best5.apply(lambda x: (masks[x.League][0]*np.log(6-x["Model EV"]) + masks[x.League][1]) < x["Books EV"], axis=1)]
 
         if len(best5) > 0:
             wks = gc.open("Sportstradamus").worksheet("Best Parlays")
@@ -825,7 +830,7 @@ def find_correlation(offers, stats, platform, parlays):
                     except:
                         continue
                     
-                    if p > 1 and pb > 1:
+                    if p > 1 and pb > 1 and p > boost/2:
                         parlay = {
                             "Game": "/".join(sorted([team, opp])),
                             "Date": date,
