@@ -7,41 +7,10 @@ import importlib.resources as pkg_resources
 from sportstradamus import data, creds
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL
 from tqdm import tqdm
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-import gspread
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 def reflect():
-    # Authorize the gspread API
-    SCOPES = [
-        "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/drive.file",
-    ]
-    cred = None
-
-    # Check if token.json file exists and load credentials
-    if os.path.exists((pkg_resources.files(creds) / "token.json")):
-        cred = Credentials.from_authorized_user_file(
-            (pkg_resources.files(creds) / "token.json"), SCOPES
-        )
-
-    # If no valid credentials found, let the user log in
-    if not cred or not cred.valid:
-        if cred and cred.expired and cred.refresh_token:
-            cred.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                (pkg_resources.files(creds) / "credentials.json"), SCOPES
-            )
-            cred = flow.run_local_server(port=0)
-
-        # Save the credentials for the next run
-        with open((pkg_resources.files(creds) / "token.json"), "w") as token:
-            token.write(cred.to_json())
-
-    gc = gspread.authorize(cred)
-
     tqdm.pandas()
     payout_table = {
         "Underdog": [(1, 1),
@@ -61,16 +30,12 @@ def reflect():
 
     nba = StatsNBA()
     nba.load()
-    nba.update()
     mlb = StatsMLB()
     mlb.load()
-    mlb.update()
     nhl = StatsNHL()
     nhl.load()
-    nhl.update()
     nfl = StatsNFL()
     nfl.load()
-    nfl.update()
 
     stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
 
@@ -169,51 +134,43 @@ def reflect():
     parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99
 
     profits = {}
-    masks = {}
 
     for platform in payout_table.keys():
         platform_df = parlays.loc[parlays["Platform"] == platform]
-        for league in ["All", "NBA", "NFL", "NHL", "MLB"]:
+        for league in ["NBA", "NFL", "NHL", "MLB", "All"]:
             if league == "All":
-                league_df = platform_df
+                df = platform_df
             else:
-                league_df = platform_df.loc[platform_df["League"] == league]
+                df = platform_df.loc[platform_df["League"] == league]
 
-            if not league_df.empty:
-                profits.setdefault(f"{platform}, {league}", {})
+            if not df.empty:
+                profits.setdefault(platform, {})
+                n = .01
+                mean_profit = np.zeros([int(1/n), int(5/n)])
+                for i, bt in enumerate(tqdm(np.arange(1, 2, n))):
+                    for j, mt in enumerate(np.arange(1, 6, n)):
+                        test_df = df.loc[(df["Books EV"] > bt) & (df["Model EV"] > mt)]
+                        bets = test_df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(5).mean())
+                        if len(bets):
+                            mean_profit[i, j] = bets.sum()
 
-                if platform == "Underdog":
-                    n = .01
-                    # mean_profit = np.zeros([int(1/n), int(5/n)])
-                    # for i, bt in enumerate(tqdm(np.arange(1, 2, n))):
-                    #     for j, mt in enumerate(np.arange(1, 6, n)):
-                    #         test_df = league_df.loc[(league_df["Books EV"] > bt) & (league_df["Model EV"] > mt)]
-                    #         bets = test_df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(5).mean())
-                    #         if len(bets):
-                    #             mean_profit[i, j] = bets.sum()
-                            
-                    # model_threshold = np.argmax((mean_profit-np.nanmean(mean_profit))/np.nanstd(mean_profit) >= 1, axis=1)*n+1
-                    # book_threshold = np.arange(1,2,n)
-                    # book_threshold = book_threshold[model_threshold > 1]
-                    # model_threshold = model_threshold[model_threshold > 1]
-                    # p = np.polyfit(np.log(6-model_threshold), book_threshold, 1)
-                    # masks[league] = list(p)
+                model_threshold = np.argmax((mean_profit-np.nanmean(mean_profit))/np.nanstd(mean_profit) >= 1, axis=1)*n+1
+                book_threshold = np.arange(1,2,n)
+                book_threshold = book_threshold[model_threshold > 1]
+                model_threshold = model_threshold[model_threshold > 1]
+                p = np.polyfit(np.log(6-model_threshold), book_threshold, 1)
+                mask = (p[0]*np.log(6-df["Model EV"]) + p[1]) < df["Books EV"]
 
-            for tf, days in [("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
-                df = league_df.loc[pd.to_datetime(league_df.Date).dt.date > datetime.today().date() - timedelta(days=days)]
+                fig = plt.figure()
+                ax = sns.heatmap(pd.DataFrame(mean_profit, columns=np.round(np.arange(1, 6, n),1), index=np.round(np.arange(1, 2, n),1)).sort_index(ascending=False))
+                ax.set_title('Mean, All Parlays')
+                fig.tight_layout()
+                fig.show()
 
-                if not df.empty:
-                    profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(5).mean()).sum()
-
-    # filepath = pkg_resources.files(data) / "parlay_masks.json"
-    # with open(filepath, 'w') as of:
-    #     json.dump(masks, of, indent=4)
+                profits[platform][league] = df.loc[mask].sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(5).mean()).sum()
 
     profits = pd.DataFrame(profits).T.reset_index(names='Split')
-    wks = gc.open("Sportstradamus").worksheet("Parlay Profit")
-    wks.clear()
-    wks.update([profits.columns.values.tolist()] +
-            profits.values.tolist())
+
     
 if __name__ == "__main__":
     reflect()
