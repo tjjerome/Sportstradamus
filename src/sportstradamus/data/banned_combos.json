@@ -93,8 +93,11 @@
                     },
                     "QB.completion percentage": {
                         "WR.receptions": 0.79,
+                        "WR.receiving yards": 0.83,
                         "TE.receptions": 0.79,
-                        "RB.receptions": 0.79
+                        "TE.receiving yards": 0.78,
+                        "RB.receptions": 0.79,
+                        "RB.receiving yards": 0.85
                     },
                     "QB.qb yards": {
                         "WR.receptions": 0.85,
