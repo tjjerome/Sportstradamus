@@ -830,7 +830,8 @@ def find_correlation(offers, stats, platform, parlays):
                     except:
                         continue
                     
-                    if p > 1 and pb > 1 and p > boost/2:
+                    units = np.round((p - 1)/(payout_table[platform][bet_size-2]*boost - 1)/0.02*2)/2
+                    if units > 0 and pb > 1:
                         parlay = {
                             "Game": "/".join(sorted([team, opp])),
                             "Date": date,
@@ -839,6 +840,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Model EV": p,
                             "Books EV": pb,
                             "Boost": boost,
+                            "Rec Bet": units,
                             "Leg 1": "",
                             "Leg 2": "",
                             "Leg 3": "",
