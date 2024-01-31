@@ -88,6 +88,8 @@ def reflect():
     if os.path.isfile(filepath):
         parlays_clean = pd.read_pickle(filepath)
 
+    parlays_clean["Rec Bet"] = np.round(parlays_clean["Rec Bet"]/3*2)/2
+
     parlays = parlays_clean.copy()
 
     def check_bet(bet):

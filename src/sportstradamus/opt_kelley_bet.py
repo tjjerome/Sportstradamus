@@ -147,15 +147,17 @@ def reflect():
     control = parlays.sort_values("Model EV", ascending=False).groupby(["Game", "Date", "Platform"]).apply(lambda x: x["Profit"].head(5).mean()).sum()
     for unit in tqdm(unit_size):
         parlays["Bet"] = (parlays["Model EV"] - 1)/(parlays.apply(lambda x: pt_simp[x["Platform"]][x["Actual Legs"]]*x["Boost"] - 1, axis=1))
-        # unit = parlays.loc[parlays["Profit"] > 0, "Bet"].mean()
         parlays["Bet"] = np.round(parlays["Bet"]/unit*2)/2
+        # parlays["Bet"] = parlays["Bet"]/parlays["Bet"].median()
         parlays["Actual Profit"] = parlays["Profit"]*parlays["Bet"]
         profits.append(parlays.sort_values("Model EV", ascending=False).groupby(["Game", "Date", "Platform"]).apply(lambda x: x["Actual Profit"].head(5).mean()).sum())
 
     plt.plot(unit_size, profits)
-    plt.plot(unit_size, np.ones(len(profits))*control, '-')
+    plt.plot(unit_size, np.ones(len(profits))*control, '--')
     plt.xlabel("Unit Size")
     plt.ylabel("Profit")
+    plt.show()
+    pass
 
     
 if __name__ == "__main__":
