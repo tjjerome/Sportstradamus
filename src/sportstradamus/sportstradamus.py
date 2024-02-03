@@ -1128,7 +1128,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     if os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
-        models = filedict["model"]
+        model = filedict["model"]
         dist = filedict["distribution"]
         filt = filedict["filter"]
         step = filedict["step"]
@@ -1140,18 +1140,20 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         for c in categories:
             playerStats[c] = playerStats[c].astype('category')
 
+        sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
+        if dist == "Poisson":
+            sv = sv[:,0]
+
+        model.start_values = sv
         prob_params = pd.DataFrame()
-        for bounds, model in models.items():
-            mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
-            if len(playerStats[mask]) == 0:
-                continue
-            preds = model.predict(
-                playerStats[mask], pred_type="parameters")
-            preds.index = playerStats.loc[mask].index
-            prob_params = pd.concat([prob_params, preds])
+        preds = model.predict(
+            playerStats, pred_type="parameters")
+        preds.index = playerStats.index
+        prob_params = pd.concat([prob_params, preds])
 
         prob_params.sort_index(inplace=True)
         playerStats.sort_index(inplace=True)
+
     elif market not in stat_data.gamelog.columns:
         return []
     else:
