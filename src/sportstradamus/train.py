@@ -373,8 +373,6 @@ def meditate(force, stats, league):
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
 
-                models = {}
-
                 n_bins = np.clip(int(len(X_train)/2000), 2, 3)
                 _, bins = pd.qcut(X_train["Player z"],
                                   n_bins, retbins=True, duplicates='drop')
@@ -399,56 +397,47 @@ def meditate(force, stats, league):
                     "bagging_freq": ["none", [1]]
                 }
 
-                bins[-1] = bins[-1] + 3
-                bins[0] = bins[0] - 3
-                for b1, b2 in zip(bins[1:], bins[:-1]):
-                    mask = X_train["Player z"].between(b2, b1, "left")
-                    dtrain = lgb.Dataset(
-                        X_train[mask], label=y_train_labels[mask])
-                    model = LightGBMLSS(distributions[dist])
-                    sv = X_train[mask][["MeanYr", "STDYr"]].to_numpy()
-                    if dist == "Poisson":
-                        sv = sv[:,0]
-                    model.start_values = sv
-                    opt_param = model.hyper_opt(params,
-                                                dtrain,
-                                                num_boost_round=999,
-                                                nfold=4,
-                                                early_stopping_rounds=50,
-                                                max_minutes=30,
-                                                n_trials=200,
-                                                silence=True,
-                                                )
-                    opt_params = opt_param.copy()
-                    n_rounds = opt_params["opt_rounds"]
-                    del opt_params["opt_rounds"]
-
-                    model.train(opt_params,
-                                dtrain,
-                                num_boost_round=n_rounds
-                                )
-                    models[(b2, b1)] = model
-                    gc.collect()
-
-            prob_params_train = pd.DataFrame()
-            prob_params = pd.DataFrame()
-            for bounds, model in models.items():
-                mask = X_train["Player z"].between(bounds[0], bounds[1], "left")
-                idx = X_train.loc[mask].index
-                preds = model.predict(
-                    X_train.loc[mask], pred_type="parameters")
-                preds.index = idx
-                prob_params_train = pd.concat([prob_params_train, preds])
-                mask = X_test["Player z"].between(bounds[0], bounds[1], "left")
-                idx = X_test.loc[mask].index
-                sv = X_test[mask][["MeanYr", "STDYr"]].to_numpy()
+                dtrain = lgb.Dataset(
+                    X_train, label=y_train_labels)
+                model = LightGBMLSS(distributions[dist])
+                sv = X_train[["MeanYr", "STDYr"]].to_numpy()
                 if dist == "Poisson":
                     sv = sv[:,0]
                 model.start_values = sv
-                preds = model.predict(
-                    X_test.loc[mask], pred_type="parameters")
-                preds.index = idx
-                prob_params = pd.concat([prob_params, preds])
+                opt_param = model.hyper_opt(params,
+                                            dtrain,
+                                            num_boost_round=999,
+                                            nfold=4,
+                                            early_stopping_rounds=50,
+                                            max_minutes=30,
+                                            n_trials=200,
+                                            silence=True,
+                                            )
+                opt_params = opt_param.copy()
+                n_rounds = opt_params["opt_rounds"]
+                del opt_params["opt_rounds"]
+
+                model.train(opt_params,
+                            dtrain,
+                            num_boost_round=n_rounds
+                            )
+
+            prob_params_train = pd.DataFrame()
+            prob_params = pd.DataFrame()
+            idx = X_train.loc.index
+            preds = model.predict(
+                X_train.loc, pred_type="parameters")
+            preds.index = idx
+            prob_params_train = pd.concat([prob_params_train, preds])
+            idx = X_test.loc.index
+            sv = X_test[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+            model.start_values = sv
+            preds = model.predict(
+                X_test.loc, pred_type="parameters")
+            preds.index = idx
+            prob_params = pd.concat([prob_params, preds])
 
             prob_params_train.sort_index(inplace=True)
             prob_params_train['result'] = y_train['Result']
@@ -519,7 +508,6 @@ def meditate(force, stats, league):
 
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
-            filt = {}
             y_class = (y_train["Result"] >=
                        X_train["Line"]).astype(int).to_numpy()
             train_ll = log_loss(y_class, y_proba_train)
@@ -528,14 +516,10 @@ def meditate(force, stats, league):
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
-            for mini, maxi in models.keys():
-                mask = X_train["Player z"].between(mini, maxi, "left")
-                clf = LogisticRegression(
-                    fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train[mask]*2-1, y_class[mask])
-                filt[(mini, maxi)] = clf
-                mask = X_test["Player z"].between(mini, maxi, "left")
-                y_proba_filt[mask, :] = clf.predict_proba(
-                    y_proba[mask]*2-1)
+            filt = LogisticRegression(
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train*2-1, y_class)
+            y_proba_filt = filt.predict_proba(
+                y_proba*2-1)
 
             y_class = (y_test["Result"] >=
                        X_test["Line"]).astype(int)
@@ -580,7 +564,7 @@ def meditate(force, stats, league):
                 e[i] = 1 - entropy/entropy0
 
             filedict = {
-                "model": models,
+                "model": model,
                 "filter": filt,
                 "step": step,
                 "stats": {
