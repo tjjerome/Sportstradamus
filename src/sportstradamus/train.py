@@ -48,15 +48,15 @@ def meditate(force, stats, league):
 
     dist_params = {
         "stabilization": "None",
-        # "response_fn": "exp",
+        "response_fn": "softplus",
         "loss_fn": "nll"
     }
 
     distributions = {
         "Gaussian": Gaussian.Gaussian(**dist_params),
         "Poisson": Poisson.Poisson(**dist_params),
-        "Gamma": Gamma.Gamma(**dist_params),
-        "NegativeBinomial": NegativeBinomial.NegativeBinomial(**dist_params)
+        # "Gamma": Gamma.Gamma(**dist_params),
+        # "NegativeBinomial": NegativeBinomial.NegativeBinomial(**dist_params)
     }
 
     mlb = StatsMLB()
@@ -375,7 +375,7 @@ def meditate(force, stats, league):
 
                 models = {}
 
-                n_bins = np.clip(int(len(X_train)/2000), 2, 5)
+                n_bins = np.clip(int(len(X_train)/2000), 2, 3)
                 _, bins = pd.qcut(X_train["Player z"],
                                   n_bins, retbins=True, duplicates='drop')
                                   
@@ -406,13 +406,17 @@ def meditate(force, stats, league):
                     dtrain = lgb.Dataset(
                         X_train[mask], label=y_train_labels[mask])
                     model = LightGBMLSS(distributions[dist])
+                    sv = X_train[mask][["MeanYr", "STDYr"]].to_numpy()
+                    if dist == "Poisson":
+                        sv = sv[:,0]
+                    model.start_values = sv
                     opt_param = model.hyper_opt(params,
                                                 dtrain,
                                                 num_boost_round=999,
                                                 nfold=4,
                                                 early_stopping_rounds=50,
-                                                max_minutes=60,
-                                                n_trials=500,
+                                                max_minutes=30,
+                                                n_trials=200,
                                                 silence=True,
                                                 )
                     opt_params = opt_param.copy()
@@ -437,6 +441,10 @@ def meditate(force, stats, league):
                 prob_params_train = pd.concat([prob_params_train, preds])
                 mask = X_test["Player z"].between(bounds[0], bounds[1], "left")
                 idx = X_test.loc[mask].index
+                sv = X_test[mask][["MeanYr", "STDYr"]].to_numpy()
+                if dist == "Poisson":
+                    sv = sv[:,0]
+                model.start_values = sv
                 preds = model.predict(
                     X_test.loc[mask], pred_type="parameters")
                 preds.index = idx
@@ -523,7 +531,7 @@ def meditate(force, stats, league):
             for mini, maxi in models.keys():
                 mask = X_train["Player z"].between(mini, maxi, "left")
                 clf = LogisticRegression(
-                    fit_intercept=True, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train[mask]*2-1, y_class[mask])
+                    fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train[mask]*2-1, y_class[mask])
                 filt[(mini, maxi)] = clf
                 mask = X_test["Player z"].between(mini, maxi, "left")
                 y_proba_filt[mask, :] = clf.predict_proba(
