@@ -745,7 +745,7 @@ def get_pp(books=True):
                 league = p["attributes"]["name"].replace("CMB", "")
 
         for o in tqdm(lines, desc="Getting offers for " + league, unit="offer"):
-            if o["attributes"]["adjusted_odds"]:
+            if o["attributes"]["adjusted_odds"] or o["attributes"]["is_promo"]:
                 continue
             
             players = player_ids[o["relationships"]
@@ -762,9 +762,6 @@ def get_pp(books=True):
                 "Market": o["attributes"]["stat_type"].replace(" (Combo)", ""),
                 "Line": o["attributes"]["line_score"],
             }
-
-            if o["attributes"]["is_promo"]:
-                n["Line"] = o["attributes"]["flash_sale_line_score"]
 
             if league == "NFL" and n["Market"] == "Pass+Rush+Rec TDs":
                 if player_ids[o["relationships"]["new_player"]["data"]["id"]].get("Position") == "QB":
