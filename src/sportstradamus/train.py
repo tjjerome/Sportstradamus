@@ -372,26 +372,22 @@ def meditate(force, stats, league):
                     target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
-
-                n_bins = np.clip(int(len(X_train)/2000), 2, 3)
-                _, bins = pd.qcut(X_train["Player z"],
-                                  n_bins, retbins=True, duplicates='drop')
                                   
-                max_hist_bin = int(np.min([.75*len(X_train)/n_bins/3,
+                max_hist_bin = int(np.min([.75*len(X_train)/3,
                                            9*1024*1024*1024/(20*2047*len(X_train.columns))]))
                 
                 params = {
                     "feature_pre_filter": ["none", [False]],
                     # "force_col_wise": ["none", [True]],
                     "max_depth": ["int", {"low": 4, "high": 63, "log": False}],
-                    "max_bin": ["none", [max_hist_bin]],
+                    # "max_bin": ["none", [max_hist_bin]],
                     "hist_pool_size": ["none", [9*1024]],
                     "num_leaves": ["int", {"low": 23, "high": 4095, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-8, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-8, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 10, "high": 500, "log": False}],
-                    "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/n_bins/1000, "log": True}],
-                    "learning_rate": ["float", {"low": 1e-6, "high": 0.1, "log": True}],
+                    "min_child_samples": ["int", {"low": 20, "high": 500, "log": False}],
+                    "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
+                    "learning_rate": ["float", {"low": 1e-3, "high": 0.4, "log": True}],
                     "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
@@ -403,14 +399,15 @@ def meditate(force, stats, league):
                 sv = X_train[["MeanYr", "STDYr"]].to_numpy()
                 if dist == "Poisson":
                     sv = sv[:,0]
+                    sv.shape = (len(sv),1)
                 model.start_values = sv
                 opt_param = model.hyper_opt(params,
                                             dtrain,
-                                            num_boost_round=999,
+                                            num_boost_round=500,
                                             nfold=4,
                                             early_stopping_rounds=50,
-                                            max_minutes=30,
-                                            n_trials=200,
+                                            max_minutes=60,
+                                            n_trials=250,
                                             silence=True,
                                             )
                 opt_params = opt_param.copy()
@@ -424,18 +421,19 @@ def meditate(force, stats, league):
 
             prob_params_train = pd.DataFrame()
             prob_params = pd.DataFrame()
-            idx = X_train.loc.index
+            idx = X_train.index
             preds = model.predict(
-                X_train.loc, pred_type="parameters")
+                X_train, pred_type="parameters")
             preds.index = idx
             prob_params_train = pd.concat([prob_params_train, preds])
-            idx = X_test.loc.index
+            idx = X_test.index
             sv = X_test[["MeanYr", "STDYr"]].to_numpy()
             if dist == "Poisson":
                 sv = sv[:,0]
+                sv.shape = (len(sv),1)
             model.start_values = sv
             preds = model.predict(
-                X_test.loc, pred_type="parameters")
+                X_test, pred_type="parameters")
             preds.index = idx
             prob_params = pd.concat([prob_params, preds])
 
