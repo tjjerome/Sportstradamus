@@ -325,10 +325,12 @@ class StatsNBA(Stats):
         adv_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
 
         for i in np.arange(len(teamlog)):
-            if (teamlog[i]["GAME_ID"] == sco_teamlog[i]["GAME_ID"]) and (teamlog[i]["TEAM_ID"] == sco_teamlog[i]["TEAM_ID"]):
-                teamlog[i] = teamlog[i] | sco_teamlog[i]
-            if (teamlog[i]["GAME_ID"] == adv_teamlog[i]["GAME_ID"]) and (teamlog[i]["TEAM_ID"] == adv_teamlog[i]["TEAM_ID"]):
-                teamlog[i] = teamlog[i] | adv_teamlog[i]
+            adv_game = [g for g in adv_teamlog if g["TEAM_ID"] == teamlog[i]["TEAM_ID"] and g["GAME_ID"] == teamlog[i]["GAME_ID"]]
+            sco_game = [g for g in sco_teamlog if g["TEAM_ID"] == teamlog[i]["TEAM_ID"] and g["GAME_ID"] == teamlog[i]["GAME_ID"]]
+            if len(adv_game):
+                teamlog[i] = teamlog[i] | adv_game[0]
+            if len(sco_game):
+                teamlog[i] = teamlog[i] | sco_game[0]
 
         team_df = []
         for team1, team2 in zip(*[iter(teamlog)]*2):
@@ -364,12 +366,8 @@ class StatsNBA(Stats):
             player_id = game["PLAYER_ID"]
             game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
 
-            # TODO Rework this
-            try:
-                if (adv_gamelog[i]["PLAYER_ID"] != player_id) or (usg_gamelog[i]["PLAYER_ID"] != player_id):
-                    continue
-            except:
-                continue
+            adv_game = [g for g in adv_gamelog if g["PLAYER_ID"] == player_id and g["GAME_ID"] == game["GAME_ID"]]
+            usg_game = [g for g in usg_gamelog if g["PLAYER_ID"] == player_id and g["GAME_ID"] == game["GAME_ID"]]
 
             self.players[self.season].setdefault(game["TEAM_ABBREVIATION"], {})
             if game["PLAYER_NAME"] not in self.players[self.season][game["TEAM_ABBREVIATION"]]:
@@ -424,8 +422,11 @@ class StatsNBA(Stats):
             game["BLKA_48"] = game["BLKA"] / game["MIN"] * 48
             game["STL_48"] = game["STL"] / game["MIN"] * 48
 
-            game.update(adv_gamelog[i])
-            game.update(usg_gamelog[i])
+            if len(adv_game):
+                game.update(adv_game[0])
+
+            if len(usg_game):
+                game.update(usg_game[0])
 
             nba_df.append(game)
 

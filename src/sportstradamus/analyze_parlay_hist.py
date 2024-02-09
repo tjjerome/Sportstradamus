@@ -88,8 +88,6 @@ def reflect():
     if os.path.isfile(filepath):
         parlays_clean = pd.read_pickle(filepath)
 
-    parlays_clean["Rec Bet"] = np.round(parlays_clean["Rec Bet"]/3*2)/2
-
     parlays = parlays_clean.copy()
 
     def check_bet(bet):
@@ -185,8 +183,8 @@ def reflect():
             if not league_df.empty:
                 profits.setdefault(f"{platform}, {league}", {})
 
-                if platform == "Underdog":
-                    n = .01
+                # if platform == "Underdog":
+                    # n = .01
                     # mean_profit = np.zeros([int(1/n), int(5/n)])
                     # for i, bt in enumerate(tqdm(np.arange(1, 2, n))):
                     #     for j, mt in enumerate(np.arange(1, 6, n)):
@@ -212,7 +210,7 @@ def reflect():
     # with open(filepath, 'w') as of:
     #     json.dump(masks, of, indent=4)
 
-    profits = pd.DataFrame(profits).T.reset_index(names='Split')
+    profits = pd.DataFrame(profits).T.reset_index(names='Split').fillna(0.0)
     wks = gc.open("Sportstradamus").worksheet("Parlay Profit")
     wks.clear()
     wks.update([profits.columns.values.tolist()] +
