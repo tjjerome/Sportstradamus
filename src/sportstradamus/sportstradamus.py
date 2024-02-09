@@ -619,6 +619,8 @@ def find_correlation(offers, stats, platform, parlays):
         c_map.index = c.correlation
         c_map = c_map.groupby('market').apply(lambda x: x)['R'].to_dict()
         stat_data = stats.get(league)
+        banned_team_markets = banned[platform][league]['team']
+        banned_opponent_markets = banned[platform][league]['opponent']
 
         if league != "MLB":
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
@@ -717,8 +719,8 @@ def find_correlation(offers, stats, platform, parlays):
 
             idx_base = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
 
+            best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                best_bets = []
                 n_candidates = 32-2*bet_size
                 idx = idx_base.groupby('Team').head(int(n_candidates/2)+2).head(n_candidates).sort_values(['Team', 'Player']).index
                 combos = combinations(
@@ -727,38 +729,47 @@ def find_correlation(offers, stats, platform, parlays):
                 threshold = 1/payout_table[platform][bet_size-2]
 
                 for bet in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False, total=comb(len(idx), bet_size)):
-                    teams = []
                     players = []
                     markets = []
+                    unique_teams = set()
+                    unique_players = set()
 
                     p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
                     pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
 
-                    if p < threshold or pb < threshold*.8:
+                    if p/threshold < np.exp(0.075*(bet_size-2)) or pb/threshold < .75:
                         continue
 
                     for leg in bet:
-                        if "/" not in leg["Team"]:
-                            teams.append(leg["Team"])
-                        elif "vs." not in leg["Player"]:
-                            teams.extend(leg["Team"].split("/"))
-                        else:
-                            teams.append(leg["Team"].split(
-                                "/")[0] if (leg["Bet"] == "Over") else leg["Team"].split("/")[1])
+                        this_team = leg["Team"]
+                        player = leg["Player"]
+                        cMarket = leg["cMarket"]
 
-                        if "+" in leg["Player"]:
-                            players.extend(leg["Player"].split(" + "))
-                        elif "vs." in leg["Player"]:
-                            players.extend(leg["Player"].split(" vs. "))
+                        if "/" not in this_team:
+                            unique_teams.add(this_team)
+                        elif "vs." not in player:
+                            unique_teams.update(this_team.split("/"))
                         else:
-                            players.append(leg["Player"])
+                            unique_teams.add(this_team.split("/")[0] if leg["Bet"] == "Over" else this_team.split("/")[1])
 
-                        if isinstance(leg["cMarket"], list):
-                            markets.extend(leg["cMarket"])
+                        if "+" in player:
+                            these_players = player.split(" + ")
+                            unique_players.update(these_players)
+                            players.extend(these_players)
+                        elif "vs." in player:
+                            these_players = player.split(" vs. ")
+                            unique_players.update(these_players)
+                            players.extend(these_players)
                         else:
-                            markets.append(leg["cMarket"])
+                            unique_players.add(player)
+                            players.append(player)
 
-                    if (len(set(teams)) != 2) or (len(set(players)) != len(players)):
+                        if isinstance(cMarket, list):
+                            markets.extend(cMarket)
+                        else:
+                            markets.append(cMarket)
+
+                    if (len(unique_teams) != 2) or (len(unique_players) != len(players)):
                         continue
 
                     team1_markets = [leg.split(".")[1]
@@ -766,71 +777,67 @@ def find_correlation(offers, stats, platform, parlays):
                     team2_markets = [leg.split(".")[1]
                                      for leg in markets if "_OPP_" in leg]
 
-                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned[platform][league]['team']]) or
-                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned[platform][league]['team']]) or
-                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned[platform][league]['opponent']]) or
-                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned[platform][league]['opponent']])):
+                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned_team_markets]) or
+                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned_team_markets]) or
+                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned_opponent_markets]) or
+                        any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned_opponent_markets])):
                         continue
 
                     boost = 1
 
                     # get correlation matrix
+                    bet_indices = np.arange(bet_size)
                     SIG = np.zeros([bet_size, bet_size])
-                    for i in np.arange(bet_size):
+
+                    # Iterate over combinations of bets
+                    for i, j in combinations(bet_indices, 2):
                         cm1 = bet[i]['cMarket']
-                        b1 = [bet[i]['Bet']]*len(cm1)
+                        b1 = [bet[i]['Bet']] * len(cm1)
                         if "vs." in bet[i]["Player"]:
-                            if b1[0] == "Over":
-                                b1[1] = "Under"
-                            else:
-                                b1[1] = "Over"
-                        for j in np.arange(i+1, bet_size):
-                            cm2 = bet[j]['cMarket']
-                            b2 = [bet[j]['Bet']]*len(cm2)
-                            if "vs." in bet[j]["Player"]:
-                                if b2[0] == "Over":
-                                    b2[1] = "Under"
-                                else:
-                                    b2[1] = "Over"
+                            b1[1] = "Under" if b1[0] == "Over" else "Over"
 
-                            for xi, x in enumerate(cm1):
-                                for yi, y in enumerate(cm2):
-                                    if ("_OPP_" in x) and ("_OPP_" in y):
-                                        x = x.replace("_OPP_", "")
-                                        y = y.replace("_OPP_", "")
-                                    rho = c_map.get((x, y), 0)
-                                    if rho == 0:
-                                        rho = c_map.get((y, x), 0)
-                                    if b1[xi] != b2[yi]:
-                                        rho = -rho
+                        cm2 = bet[j]['cMarket']
+                        b2 = [bet[j]['Bet']] * len(cm2)
+                        if "vs." in bet[j]["Player"]:
+                            b2[1] = "Under" if b2[0] == "Over" else "Over"
 
-                                    SIG[i, j] += rho
-                                    
-                                    if re.sub(r'[0-9]', '', x) in banned[platform][league]['modified'].keys():
-                                        modifier = banned[platform][league]['modified'][re.sub(r'[0-9]', '', x)].get(re.sub(r'[0-9]', '', y), 1)
-                                        if b1[xi] == b2[yi]:
-                                            boost *= modifier
-                                        else:
-                                            boost /= modifier
+                        # Vectorized operation to compute rho for all combinations of x and y
+                        rho_matrix = np.zeros((len(cm1), len(cm2)))
+                        for xi, x in enumerate(cm1):
+                            for yi, y in enumerate(cm2):
+                                if ("_OPP_" in x) and ("_OPP_" in y):
+                                    x = x.replace("_OPP_", "")
+                                    y = y.replace("_OPP_", "")
+                                rho = c_map.get((x, y), c_map.get((y, x), 0))
+                                if b1[xi] != b2[yi]:
+                                    rho = -rho
+                                rho_matrix[xi, yi] = rho
 
-                                    elif re.sub(r'[0-9]', '', y) in banned[platform][league]['modified'].keys():
-                                        modifier = banned[platform][league]['modified'][re.sub(r'[0-9]', '', y)].get(re.sub(r'[0-9]', '', x), 1)
-                                        if b1[xi] == b2[yi]:
-                                            boost *= modifier
-                                        else:
-                                            boost /= modifier
+                                # Modify boost based on conditions
+                                x_key = re.sub(r'[0-9]', '', x)
+                                y_key = re.sub(r'[0-9]', '', y)
+                                if x_key in banned[platform][league]['modified']:
+                                    modifier = banned[platform][league]['modified'][x_key].get(y_key, 1)
+                                    boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
+                                elif y_key in banned[platform][league]['modified']:
+                                    modifier = banned[platform][league]['modified'][y_key].get(x_key, 1)
+                                    boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
+
+                        # Sum rho_matrix to update SIG
+                        SIG[i, j] = np.sum(rho_matrix)
 
                     SIG = SIG + SIG.T + np.eye(bet_size)
 
                     boost = np.clip(boost, .667, 1.6125) * np.product([leg["Boost"] for leg in bet])
+                    payout = np.clip(payout_table[platform][bet_size-2]*boost, 1, 100)
 
                     try:
-                        p = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
-                        pb = payout_table[platform][bet_size-2]*boost*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
+                        p = payout*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
+                        pb = payout*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
                     except:
                         continue
                     
-                    units = np.round((p - 1)/(payout_table[platform][bet_size-2]*boost - 1)/0.05*2)/2
+                    units = np.round((p - 1)/(payout - 1)/0.05*2)/2
                     if units > 0 and pb > 1:
                         parlay = {
                             "Game": "/".join(sorted([team, opp])),
@@ -847,44 +854,40 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 4": "",
                             "Leg 5": "",
                             "Leg 6": "",
-                            "Players": {leg["Player"] for leg in bet}
+                            "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
+                            "Bet Size": bet_size
                         }
                         for i in np.arange(bet_size):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-                if len(best_bets) > 0:
-                    df5 = pd.DataFrame(best_bets).sort_values(
-                        "Model EV", ascending=False).drop_duplicates("Players").drop(columns="Players")
-                    to_add = df5.head(2)
-                    to_add = pd.concat(
-                        [to_add, df5.loc[df5["Boost"] == 1].head(1)]).drop_duplicates()
-                    while len(to_add) < 10 and len(df5) > 0:
-                        dupes = [item for row in to_add[[
-                            "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6"]].values.tolist() for item in row if item != ""]
-                        dupes = list(
-                            set([x for x in dupes if dupes.count(x) > 1]))
+            if len(best_bets) > 0:                
+                df5 = pd.DataFrame(best_bets)
+                
+                df5.sort_values('Model EV', ascending=False, inplace=True)
+                player_set = set.union(*df5.Players.to_list())
+                for fam_size in tqdm(np.arange(1,5), desc="Filtering...", leave=False):
+                    best_parlays = []
+                    families = []
+                    filtered_df = df5.loc[df5["Bet Size"] <= fam_size + 2]
+                    for family in combinations(player_set, fam_size):
+                        family_val = filtered_df.loc[filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size, "Model EV"].sum()
+                        if family_val > 0:
+                            families.append((family, family_val))
 
-                        for leg in dupes:
-                            to_add = pd.concat(
-                                [to_add, df5[~df5.eq(leg).any(axis=1)].head(1)])
+                    families.sort(reverse=True, key=(lambda x: x[1]))
+                    best_fam = []
+                    for family, _ in families:
+                        if not any([len(set(family).intersection(f)) > 1 for f in best_fam]):
+                            best_fam.append(family)
 
-                        for leg in dupes:
-                            df5 = df5[~df5.eq(leg).any(axis=1)]
+                    for family in best_fam[:fam_size+1]:
+                        best_parlays.append(filtered_df.loc[filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size].iloc[0].drop(["Players", "Bet Size"]))
 
-                        to_add = pd.concat([to_add, df5.head(1)]).drop_duplicates(
-                        ).sort_values("Model EV", ascending=False)
+                    if len(best_parlays):
+                        parlay_df = pd.concat([parlay_df, pd.DataFrame(best_parlays).sort_values("Model EV", ascending=False).drop_duplicates()])
 
-                        if len(to_add.loc[to_add["Boost"] > 1]) > 3:
-                            df5 = df5.loc[df5["Boost"] == 1]
-
-                        add_id = [i for i in df5.index if i not in to_add.index]
-                        df5 = df5.loc[add_id]
-
-                    parlay_df = pd.concat(
-                        [parlay_df, to_add])
-
-            # Find best pairs
+            # Find best pairs, TODO add corr modifier
             for i, offer in game_df.iterrows():
                 R_map = pd.Series(0, index=c.index.drop_duplicates())
                 for market in offer.cMarket:
