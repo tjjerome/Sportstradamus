@@ -197,8 +197,12 @@ class StatsNBA(Stats):
         # Fetch regular season game logs
         latest_date = self.season_start
         if not self.gamelog.empty:
-            latest_date = datetime.strptime(
-                self.gamelog["GAME_DATE"].max().split("T")[0], "%Y-%m-%d").date()
+            nanlog = self.gamelog.loc[self.gamelog.isnull().values.any(axis=1)]
+            if not nanlog.empty:
+                latest_date = pd.to_datetime(nanlog["GAME_DATE"]).min().date()
+
+            else:
+                latest_date = pd.to_datetime(self.gamelog["GAME_DATE"]).max().date()
             if latest_date < self.season_start:
                 latest_date = self.season_start
         today = datetime.today().date()
