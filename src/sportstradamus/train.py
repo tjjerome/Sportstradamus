@@ -189,7 +189,7 @@ def meditate(force, stats, league):
                 if stats:
                     with open(filepath, 'rb') as infile:
                         filedict = pickle.load(infile)
-                        models = filedict['model']
+                        model = filedict['model']
                         params = filedict['params']
                         dist = filedict['distribution']
                         cv = filedict['cv']
@@ -378,16 +378,17 @@ def meditate(force, stats, league):
                 
                 params = {
                     "feature_pre_filter": ["none", [False]],
+                    "num_threads": ["none", [8]],
                     # "force_col_wise": ["none", [True]],
-                    "max_depth": ["int", {"low": 4, "high": 63, "log": False}],
+                    "max_depth": ["int", {"low": 4, "high": 32, "log": False}],
                     # "max_bin": ["none", [max_hist_bin]],
                     "hist_pool_size": ["none", [9*1024]],
-                    "num_leaves": ["int", {"low": 23, "high": 4095, "log": False}],
+                    "num_leaves": ["int", {"low": 23, "high": 2047, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
                     "min_child_samples": ["int", {"low": 20, "high": 500, "log": False}],
                     "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
-                    "learning_rate": ["float", {"low": 5e-3, "high": 0.4, "log": True}],
+                    "learning_rate": ["float", {"low": 1e-3, "high": 0.4, "log": True}],
                     "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
@@ -422,6 +423,11 @@ def meditate(force, stats, league):
             prob_params_train = pd.DataFrame()
             prob_params = pd.DataFrame()
             idx = X_train.index
+            sv = X_train[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+            model.start_values = sv
             preds = model.predict(
                 X_train, pred_type="parameters")
             preds.index = idx
@@ -515,9 +521,9 @@ def meditate(force, stats, league):
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(y_proba_train*2-1, y_class)
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(np.concatenate([y_proba_train, X_train.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1, y_class)
             y_proba_filt = filt.predict_proba(
-                y_proba*2-1)
+                np.concatenate([y_proba, X_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
 
             y_class = (y_test["Result"] >=
                        X_test["Line"]).astype(int)

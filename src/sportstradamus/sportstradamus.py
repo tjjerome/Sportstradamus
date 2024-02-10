@@ -1325,14 +1325,12 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if ("+" in o["Player"]) or ("vs." in o["Player"]):
                 probb = []
                 for stat in stats:
-                    z = stat["Player z"]
-                    probb.append(filt.predict_proba([[2*(1-under)-1]])[0][1])
+                    probb.append(filt.predict_proba([[2*(1-under)-1, stat["Odds"]]])[0][1])
 
                 proba = np.mean(probb)
                 proba = [1- proba, proba]
             else:
-                z = playerStats.loc[o["Player"], "Player z"]
-                proba = filt.predict_proba([[2*(1-under)-1]])[0]
+                proba = filt.predict_proba([[2*(1-under)-1, stats["Odds"]]])[0]
 
         else:
             if "+" in o["Player"]:
