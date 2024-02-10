@@ -919,7 +919,7 @@ def find_correlation(offers, stats, platform, parlays):
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
-    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
+    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df.sort_values("Model EV", ascending=False).drop_duplicates()
 
 
 def save_data(df, book, gc):
