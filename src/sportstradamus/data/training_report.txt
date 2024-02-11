@@ -16,6 +16,18 @@
  0.579863   0.643559 -0.089010    0.013971     0.020377  0.087469 -0.036706      0.048276
  0.569555   0.632080 -0.085231   -0.010580    -0.008193  0.087469 -0.036706      0.065294
 
+======================================== NBA FGM =========================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.626603   0.642160 0.154765    0.044262     0.059939  0.081123 0.286446      0.012864
+ 0.619600   0.636097 0.148168    0.042416     0.057743  0.081123 0.286446      0.014143
+
+======================================== NBA FTM =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.608348   0.503333 -0.126427    0.028036     0.040148  0.057821 -0.118011      0.051784
+ 0.603657   0.503704 -0.115003    0.011823     0.022834  0.057821 -0.118011      0.063022
+
 ========================================= NBA PA =========================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
