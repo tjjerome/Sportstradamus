@@ -20,9 +20,11 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 
 # Load API key
-filepath = pkg_resources.files(creds) / "odds_api.json"
-with open(filepath, "r") as infile:
-    odds_api = json.load(infile)["apikey"]
+with open((pkg_resources.files(creds) / "keys.json"), "r") as infile:
+    keys = json.load(infile)
+    odds_api = keys["odds_api"]
+    scrapeops = keys["scrapeops"]
+    apikey = keys["scrapingfish"]
 
 with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)
@@ -50,28 +52,6 @@ def get_active_sports():
 
     return sports
 
-
-with open((pkg_resources.files(creds) / "scrapeops_cred.json"), "r") as infile:
-    creds = json.load(infile)
-apikey = creds["apikey"]
-scrapeops_logger = ScrapeOpsRequests(
-    scrapeops_api_key=apikey, spider_name="Sportstradamus", job_name=os.uname()[1]
-)
-
-requests = scrapeops_logger.RequestsWrapper()
-
-
-def fit_trendlines(group, n=5):
-    trendlines = {}
-    for column in group.select_dtypes(include='number').columns:
-        if len(group[column].tail(n)) < 2:
-            trendlines[column] = 0
-        else:
-            trendlines[column] = np.polyfit(
-                np.arange(len(group[column].tail(n))), group[column].tail(n), 1)[0]
-    return pd.Series(trendlines)
-
-
 class Scrape:
     def __init__(self, apikey):
         """
@@ -81,7 +61,7 @@ class Scrape:
             apikey (str): API key for fetching browser headers.
         """
         self.headers = requests.get(
-            f"http://headers.scrapeops.io/v1/browser-headers?api_key={apikey}"
+            f"http://headers.scrapeops.io/v1/browser-headers?api_key={scrapeops}"
         ).json()["result"]
         self.header = random.choice(self.headers)
         self.weights = np.ones([len(self.headers)])
@@ -151,7 +131,7 @@ class Scrape:
         while (True):
             i += 1
             response = requests.get(
-                "https://proxy.scrapeops.io/v1/",
+                "https://scraping.narf.ai/api/v1/",
                 headers=headers,
                 params=params
             )

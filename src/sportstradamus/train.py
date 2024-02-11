@@ -26,9 +26,7 @@ import os
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions import (
     Gaussian,
-    Poisson,
-    Gamma,
-    NegativeBinomial
+    Poisson
 )
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
@@ -54,9 +52,7 @@ def meditate(force, stats, league):
 
     distributions = {
         "Gaussian": Gaussian.Gaussian(**dist_params),
-        "Poisson": Poisson.Poisson(**dist_params),
-        # "Gamma": Gamma.Gamma(**dist_params),
-        # "NegativeBinomial": NegativeBinomial.NegativeBinomial(**dist_params)
+        "Poisson": Poisson.Poisson(**dist_params)
     }
 
     mlb = StatsMLB()
@@ -114,17 +110,17 @@ def meditate(force, stats, league):
             "fantasy points prizepicks",
             "fantasy points underdog",
             "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-            "MIN",
+            # "FTM",
+            # "FGM",
+            # "FGA",
+            # "STL",
+            # "BLK",
+            # "BLST",
+            # "TOV",
+            # "OREB",
+            # "DREB",
+            # "PF",
+            # "MIN",
         ],
         "NHL": [
             "saves",

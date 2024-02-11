@@ -38,7 +38,7 @@ from sklearn.metrics import (
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
 @click.option("--parlays/--no-parlays", default=True, help="Find best 5 leg parlays")
 def main(progress, books, parlays):
     global untapped_markets
@@ -441,7 +441,7 @@ def main(progress, books, parlays):
         filepath = pkg_resources.files(data) / "NFL_fantasy-points-underdog.mdl"
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
-        models = filedict["model"]
+        model = filedict["model"]
 
         playerStats, playerData = nfl.get_fantasy()
         categories = ["Home", "Position"]
@@ -449,14 +449,10 @@ def main(progress, books, parlays):
             playerStats[c] = playerStats[c].astype('category')
 
         prob_params = pd.DataFrame()
-        for bounds, model in models.items():
-            mask = playerStats["Player z"].between(bounds[0], bounds[1], "left")
-            if len(playerStats[mask]) == 0:
-                continue
-            preds = model.predict(
-                playerStats[mask], pred_type="parameters")
-            preds.index = playerStats.loc[mask].index
-            prob_params = pd.concat([prob_params, preds])
+        preds = model.predict(
+            playerStats, pred_type="parameters")
+        preds.index = playerStats.index
+        prob_params = pd.concat([prob_params, preds])
 
         prob_params = prob_params.loc[playerStats.index]
         prob_params['Player'] = playerStats.index

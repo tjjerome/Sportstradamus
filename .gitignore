@@ -170,6 +170,7 @@ docs/build
 *refactor.py
 *test.py
 *.txt
+*.prof
 src/sportstradamus/data/training_report.txt
 src/sportstradamus/data/~$feature_importances.xlsx
 src/sportstradamus/data/feature_importances.xlsx
