@@ -3162,12 +3162,12 @@ files = [
 
 [[package]]
 name = "torch"
-version = "2.1.2+cpu.cxx11.abi"
+version = "2.1.2+cpu"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 optional = false
 python-versions = ">=3.8.0"
 files = [
-    {file = "torch-2.1.2+cpu.cxx11.abi-cp311-cp311-linux_x86_64.whl", hash = "sha256:c74ff2502a89432d3ef9655daca5641862cbb3c52f68e1e391c55971a16a9b9f"},
+    {file = "torch-2.1.2+cpu-cp311-cp311-linux_x86_64.whl", hash = "sha256:6acac7871cca2b72f00b60496dd7d59d7d8247721f374705b8f9c6b9aeea482a"},
 ]
 
 [package.dependencies]
@@ -3184,7 +3184,7 @@ opt-einsum = ["opt-einsum (>=3.3)"]
 
 [package.source]
 type = "url"
-url = "https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.1.2%2Bcpu.cxx11.abi-cp311-cp311-linux_x86_64.whl"
+url = "https://download.pytorch.org/whl/cpu/torch-2.1.2%2Bcpu-cp311-cp311-linux_x86_64.whl"
 
 [[package]]
 name = "tornado"
@@ -3311,4 +3311,4 @@ watchdog = ["watchdog (>=2.3)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "e14acb0e001675be2bcb396029e5a0ff4c2447db35de12fa9b59b03b4badceea"
+content-hash = "b5210d954f5521ea694ee7ca82b1c38832d81db17f5a54e1d3be79c7842bb228"
