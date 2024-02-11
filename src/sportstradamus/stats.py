@@ -2392,7 +2392,7 @@ class StatsNFL(Stats):
         sched.loc[sched['home_team'] == 'OAK', 'home_team'] = "LV"
         sched.loc[sched['away_team'] == 'WSH', 'away_team'] = "WAS"
         sched.loc[sched['home_team'] == 'WSH', 'home_team'] = "WAS"
-        upcoming_games = sched.loc[pd.to_datetime(sched['gameday']) >= datetime.today(), [
+        upcoming_games = sched.loc[pd.to_datetime(sched['gameday']).dt.date >= datetime.today().date(), [
             'gameday', 'away_team', 'home_team', 'weekday', 'gametime']]
         if not upcoming_games.empty:
             upcoming_games['gametime'] = upcoming_games['weekday'].str[:-
@@ -3430,9 +3430,9 @@ class StatsNFL(Stats):
             gameTime = self.upcoming_games.get(team, {}).get(
                 'gametime', datetime.today().strftime("%Y-%m-%d"))
             opponent = self.upcoming_games.get(team, {}).get(
-                'Opponent', datetime.today().strftime("%Y-%m-%d"))
+                'Opponent')
             home = self.upcoming_games.get(team, {}).get(
-                'Home', datetime.today().strftime("%Y-%m-%d"))
+                'Home')
             data = archive["NFL"]['fantasy points underdog'].get(
                 gameDate, {}).get(player, {'Lines': [0]})
 

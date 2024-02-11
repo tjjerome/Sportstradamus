@@ -12,36 +12,37 @@ from tqdm import tqdm
 from time import time
 import requests
 
-url = "https://api.prizepicks.com/projections?league_id=7"
-params = {
-    "api_key": "82ccbf28-ddd6-4e37-b3a1-0097b10fd412",
-    "url": url,
-    "optimize_request": True
-}
+# url = "https://api.prizepicks.com/projections?league_id=7"
+# params = {
+#     "api_key": "82ccbf28-ddd6-4e37-b3a1-0097b10fd412",
+#     "url": url,
+#     "optimize_request": True
+# }
 
-then = time()
-response1 = requests.get(
-    "https://proxy.scrapeops.io/v1/",
-    params=params
-)
-scrapeops = time() - then
+# then = time()
+# response1 = requests.get(
+#     "https://proxy.scrapeops.io/v1/",
+#     params=params
+# )
+# scrapeops = time() - then
 
-params = {
-    "api_key": "ElO5mYYVEiyFzpb7VasAdBQvJiaxKTQ1khUQtV7bwkdykhwwpSJhBD1NoKCDrDd1YtGKCOnKjoNkG17Y0b",
-    "url": url
-}
-then = time()
-response2 = requests.get(
-    "https://scraping.narf.ai/api/v1/",
-    params=params
-)
-scrapefish = time() - then
+# params = {
+#     "api_key": "ElO5mYYVEiyFzpb7VasAdBQvJiaxKTQ1khUQtV7bwkdykhwwpSJhBD1NoKCDrDd1YtGKCOnKjoNkG17Y0b",
+#     "url": url
+# }
+# then = time()
+# response2 = requests.get(
+#     "https://scraping.narf.ai/api/v1/",
+#     params=params
+# )
+# scrapefish = time() - then
 
-(scrapeops, scrapefish)
+# (scrapeops, scrapefish)
 
-# NFL = StatsNFL()
+NFL = StatsNFL()
+NFL.load()
 # NFL.season_start = datetime(2018, 9, 1).date()
-# NFL.update()
+NFL.update()
 # NFL.season_start = datetime(2019, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2020, 9, 1).date()
