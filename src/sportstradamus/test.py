@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL
-from sportstradamus.helpers import scraper, Archive, stat_cv
+from sportstradamus.helpers import scraper, archive, stat_cv
 from urllib.parse import urlencode
 from datetime import datetime
 import importlib.resources as pkg_resources
@@ -9,6 +9,35 @@ from scipy.stats import norm, poisson
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from time import time
+import requests
+
+url = "https://api.prizepicks.com/projections?league_id=7"
+params = {
+    "api_key": "82ccbf28-ddd6-4e37-b3a1-0097b10fd412",
+    "url": url,
+    "optimize_request": True
+}
+
+then = time()
+response1 = requests.get(
+    "https://proxy.scrapeops.io/v1/",
+    params=params
+)
+scrapeops = time() - then
+
+params = {
+    "api_key": "ElO5mYYVEiyFzpb7VasAdBQvJiaxKTQ1khUQtV7bwkdykhwwpSJhBD1NoKCDrDd1YtGKCOnKjoNkG17Y0b",
+    "url": url
+}
+then = time()
+response2 = requests.get(
+    "https://scraping.narf.ai/api/v1/",
+    params=params
+)
+scrapefish = time() - then
+
+(scrapeops, scrapefish)
 
 # NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
@@ -24,16 +53,16 @@ from tqdm import tqdm
 # NFL.season_start = datetime(2023, 9, 1).date()
 # NFL.update()
 
-NBA = StatsNBA()
-NBA.season = "2021-22"
-NBA.season_start = datetime(2021, 10, 1).date()
-NBA.update()
-NBA.season = "2022-23"
-NBA.season_start = datetime(2022, 10, 1).date()
-NBA.update()
-NBA.season = "2023-24"
-NBA.season_start = datetime(2023, 10, 1).date()
-NBA.update()
+# NBA = StatsNBA()
+# NBA.season = "2021-22"
+# NBA.season_start = datetime(2021, 10, 1).date()
+# NBA.update()
+# NBA.season = "2022-23"
+# NBA.season_start = datetime(2022, 10, 1).date()
+# NBA.update()
+# NBA.season = "2023-24"
+# NBA.season_start = datetime(2023, 10, 1).date()
+# NBA.update()
 
 # NHL = StatsNHL()
 # NHL.season_start = datetime(2021, 10, 12).date()

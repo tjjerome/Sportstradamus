@@ -12,10 +12,11 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, fit_trendlines, get_ev
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev
 import pandas as pd
 import warnings
 import requests
+from time import time
 
 
 class Stats:
@@ -573,9 +574,9 @@ class StatsNBA(Stats):
                     self.playerStats[player]["line"] = lines[i]
 
     def profile_market(self, market, date=datetime.today().date()):
-        if type(date) is str:
+        if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
-        if type(date) is datetime:
+        elif isinstance(date, datetime):
             date = date.date()
         if market == self.profiled_market and date == self.profile_latest_date:
             return
@@ -617,21 +618,10 @@ class StatsNBA(Stats):
         gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
         gamelog.loc[:, "totals"] = tup_s.map(flat_total)
 
-        teamstats = teamlog.groupby('TEAM_ABBREVIATION').apply(
-            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
-
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
             filter(lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).\
             groupby('PLAYER_NAME')
-
-        defenseGroups = gamelog.groupby(['OPP', 'GAME_ID'])
-        defenseGames = pd.DataFrame()
-        defenseGames[market] = defenseGroups[market].sum()
-        defenseGames['HOME'] = defenseGroups['HOME'].mean().astype(int)
-        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
-        defenseGames['totals'] = defenseGroups['totals'].mean()
-        defenseGroups = defenseGames.groupby('OPP')
 
         leagueavg = playerGroups[market].mean().mean()
         leaguestd = playerGroups[market].mean().std()
@@ -646,6 +636,14 @@ class StatsNBA(Stats):
             lambda x: x.loc[x['HOME'], market].mean() / x[market].mean()) - 1
         self.playerProfile['away'] = playerGroups.apply(
             lambda x: x.loc[~x['HOME'].astype(bool), market].mean()/x[market].mean())-1
+
+        defenseGroups = gamelog.groupby(['OPP', 'GAME_ID'])
+        defenseGames = pd.DataFrame()
+        defenseGames[market] = defenseGroups[market].sum()
+        defenseGames['HOME'] = defenseGroups['HOME'].mean().astype(int)
+        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
+        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGroups = defenseGames.groupby('OPP')
 
         leagueavg = defenseGroups[market].mean().mean()
         leaguestd = defenseGroups[market].mean().std()
@@ -671,7 +669,7 @@ class StatsNBA(Stats):
         playershortstats = playerlogs.apply(lambda x: np.mean(
             x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
         playertrends = playerlogs.apply(
-            fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
+            lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
@@ -720,6 +718,9 @@ class StatsNBA(Stats):
                 apply(lambda x: np.polyfit(x.totals.fillna(112).values.astype(float) / 112 - x.totals.fillna(112).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
             
+        teamstats = teamlog.groupby('TEAM_ABBREVIATION').apply(
+            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
+        
         i = self.defenseProfile.index
         self.defenseProfile = self.defenseProfile.merge(
             teamstats[team_stat_types], left_on='OPP', right_on='TEAM_ABBREVIATION')
@@ -729,7 +730,7 @@ class StatsNBA(Stats):
 
         self.playerProfile = self.playerProfile.merge(
             playerstats, on='PLAYER_NAME')
-
+        
     def dvpoa(self, team, position, market, date=datetime.today().date()):
         """
         Calculate the Defense Versus Position Above Average (DVPOA) for a specific team, position, and market.
@@ -1674,9 +1675,9 @@ class StatsMLB(Stats):
         self.playerStats = self.playerStats.to_dict(orient='index')
 
     def profile_market(self, market, date=datetime.today().date()):
-        if type(date) is str:
+        if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
-        if type(date) is datetime:
+        elif isinstance(date, datetime):
             date = date.date()
 
         if market == self.profiled_market and date == self.profile_latest_date:
@@ -1817,7 +1818,7 @@ class StatsMLB(Stats):
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
             playertrends = playerlogs.apply(
-                fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
+                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -1844,7 +1845,7 @@ class StatsMLB(Stats):
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
             playertrends = playerlogs.apply(
-                fit_trendlines, 3).fillna(0).add_suffix(" growth", 1)
+                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(3))), x.tail(3), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -1889,7 +1890,7 @@ class StatsMLB(Stats):
         if self.dvp_index[market].get(team):
             return self.dvp_index[market][team]
 
-        if type(date) is datetime:
+        if isinstance(date, datetime):
             date = date.date()
 
         one_year_ago = (date - timedelta(days=300))
@@ -1925,7 +1926,7 @@ class StatsMLB(Stats):
         Returns:
             pandas.DataFrame: The calculated statistics as a DataFrame.
         """
-        if type(date) is datetime:
+        if isinstance(date, datetime):
             date = date.strftime("%Y-%m-%d")
 
         player = offer["Player"]
@@ -2946,9 +2947,9 @@ class StatsNFL(Stats):
         self.playerStats = self.playerStats.to_dict(orient='index')
 
     def profile_market(self, market, date=datetime.today().date()):
-        if type(date) is str:
+        if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
-        if type(date) is datetime:
+        if isinstance(date, datetime):
             date = date.date()
 
         if market == self.profiled_market and date == self.profile_latest_date:
@@ -3056,7 +3057,7 @@ class StatsNFL(Stats):
         playershortstats = playerlogs.apply(lambda x: np.mean(
             x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
         playertrends = playerlogs.apply(
-            fit_trendlines, 3).fillna(0).add_suffix(" growth", 1)
+            lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(3))), x.tail(3), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
@@ -3829,9 +3830,9 @@ class StatsNHL(Stats):
                     self.playerStats[player]["line"] = line
 
     def profile_market(self, market, date=datetime.today().date()):
-        if type(date) is str:
+        if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
-        if type(date) is datetime:
+        if isinstance(date, datetime):
             date = date.date()
 
         if market == self.profiled_market and date == self.profile_latest_date:
@@ -3972,7 +3973,7 @@ class StatsNHL(Stats):
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
             playertrends = playerlogs.apply(
-                fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
+                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -3985,7 +3986,7 @@ class StatsNHL(Stats):
             playershortstats = playerlogs.apply(lambda x: np.mean(
                 x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
             playertrends = playerlogs.apply(
-                fit_trendlines, 5).fillna(0).add_suffix(" growth", 1)
+                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -4079,7 +4080,7 @@ class StatsNHL(Stats):
             pandas.DataFrame: A DataFrame containing the calculated statistics.
         """
 
-        if type(date) is datetime:
+        if isinstance(date, datetime):
             date = date.strftime("%Y-%m-%d")
 
         stat_map = {
