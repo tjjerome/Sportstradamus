@@ -4,6 +4,24 @@
  0.594595   0.617070 0.165507    0.026180     0.035949  0.036263 0.250947      0.016087
  0.598271   0.622469 0.155284    0.027436     0.037507  0.036263 0.250947      0.015217
 
+======================================== NBA BLK =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.654632   0.539906 -0.305683    0.081344     0.108939  0.051706 -0.92426      0.057326
+ 0.649637   0.528421 -0.300939    0.056122     0.082760  0.051706 -0.92426      0.074809
+
+======================================== NBA BLST ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.580610   0.603788 -0.141090    0.014109     0.020453  0.079175 -0.08104      0.055313
+ 0.571286   0.592214 -0.114896   -0.033576    -0.031608  0.079175 -0.08104      0.088366
+
+======================================== NBA DREB ========================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.636631   0.657831 0.167192    0.048954     0.065994  0.079478 0.248594      0.011407
+ 0.629789   0.651224 0.163452    0.047799     0.064939  0.079478 0.248594      0.012208
+
 ======================================== NBA FG3A ========================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
@@ -34,11 +52,29 @@
  0.608348   0.503333 -0.126427    0.028036     0.040148  0.057821 -0.118011      0.051784
  0.603657   0.503704 -0.115003    0.011823     0.022834  0.057821 -0.118011      0.063022
 
+======================================== NBA MIN =========================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.649833   0.682931 0.020036    0.078185     0.103485  0.216711 0.435022      0.008852
+ 0.646408   0.680241 0.020046    0.078490     0.102609  0.216711 0.435022      0.008641
+
+======================================== NBA OREB ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.627005   0.569892 -0.219493    0.049827     0.067173  0.066653 -0.311245      0.039952
+ 0.619208   0.564223 -0.198515    0.033706     0.049718  0.066653 -0.311245      0.051126
+
 ========================================= NBA PA =========================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.570071   0.580458 0.065821    0.000775     0.003564 -0.000022 0.424226      0.016920
  0.572874   0.585750 0.051882    0.007416     0.010993 -0.000022 0.424226      0.012317
+
+========================================= NBA PF =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.633935   0.737346 0.002265    0.047440     0.064174  0.123482 0.060363      0.028057
+ 0.618101   0.720226 0.003669    0.036381     0.052635  0.123482 0.060363      0.035723
 
 ========================================= NBA PR =========================================
  Distribution Model: Gaussian
@@ -69,6 +105,18 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.599527   0.627414 0.163891    0.026254     0.036138  0.024475 0.309056      0.013964
  0.596956   0.625298 0.161971    0.025106     0.034622  0.024475 0.309056      0.014760
+
+======================================== NBA STL =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.599483   0.582876 -0.135957    0.024844     0.034073   0.07988 -0.189124      0.035611
+ 0.571702   0.559493 -0.136017   -0.027559    -0.022571   0.07988 -0.189124      0.071933
+
+======================================== NBA TOV =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.602570   0.591676 -0.151464    0.024429     0.034026  0.071254 -0.138387      0.045494
+ 0.593618   0.583776 -0.137672    0.002983     0.010824  0.071254 -0.138387      0.060359
 
 ============================= NBA fantasy points prizepicks ==============================
  Distribution Model: Gaussian
@@ -262,6 +310,12 @@
  0.704731   0.572590 -0.226806    0.102395     0.137499  0.062087 -0.683263      0.004812
  0.689635   0.546834 -0.201348    0.117134     0.154486  0.062087 -0.683263     -0.005404
 
+================================== NHL powerPlayPoints ===================================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.815846   0.500000 -0.184027    0.219742     0.295449  0.399042 -0.208844      0.000741
+ 0.815109   0.363636 -0.183087    0.328332     0.413067  0.399042 -0.208844     -0.074527
+
 ======================================= NHL saves ========================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
@@ -279,4 +333,10 @@
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.589038   0.573139  0.218655    0.022896     0.030782  0.051069 0.368801      0.014683
  0.593717   0.588830 -0.012264    0.025737     0.035200  0.051069 0.368801      0.012713
+
+======================================= NHL sogBS ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.666314   0.757437 0.074361    0.068526     0.091267  0.131516 0.103056      0.021249
+ 0.645962   0.730202 0.089827    0.070137     0.094662  0.131516 0.103056      0.020132
 

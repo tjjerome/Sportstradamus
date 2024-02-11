@@ -38,7 +38,7 @@ from sklearn.metrics import (
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=True, help="Get data from sportsbooks")
+@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
 @click.option("--parlays/--no-parlays", default=True, help="Find best 5 leg parlays")
 def main(progress, books, parlays):
     global untapped_markets
@@ -931,6 +931,9 @@ def save_data(df, book, gc):
         Exception: If there is an error writing the offers to the worksheet.
     """
     if len(df) > 0:
+
+        with open((pkg_resources.files(data) / f"results/{book}.csv"), "w") as outfile:
+            df.to_csv(outfile)
         try:
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
@@ -948,8 +951,8 @@ def save_data(df, book, gc):
                     "N:P", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
-                wks.update(
-                    "R1",
+                wks.update_cell(
+                    1, 18,
                     "Last Updated: "
                     + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
                 )
@@ -962,8 +965,8 @@ def save_data(df, book, gc):
                     "M:O", {"numberFormat": {
                         "type": "PERCENT", "pattern": "0.00%"}}
                 )
-                wks.update(
-                    "Q1",
+                wks.update_cell(
+                    1, 17,
                     "Last Updated: "
                     + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
                 )
