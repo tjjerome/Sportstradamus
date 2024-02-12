@@ -2238,7 +2238,7 @@ class StatsMLB(Stats):
                 mu = np.median(lines)
                 sig = iqr(lines)
                 lines = [line for line in lines if mu - sig <= line <= mu + sig]
-            elif lines == [0] and any([name in k for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys()]):
+            elif lines == [0] and any([name in k for k in archive["MLB"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()]):
                 lines = [archive["MLB"][market][gameDate.strftime("%Y-%m-%d")][k]["Lines"][-1] for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys() if name in k]
 
             line = lines[-1]
@@ -4324,7 +4324,7 @@ class StatsNHL(Stats):
                 mu = np.median(lines)
                 sig = iqr(lines)
                 lines = [line for line in lines if mu - sig <= line <= mu + sig]
-            elif lines == [0] and any([name in k for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys()]):
+            elif lines == [0] and any([name in k for k in archive["MLB"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()]):
                 lines = [archive["MLB"][market][gameDate.strftime("%Y-%m-%d")][k]["Lines"][-1] for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys() if name in k]
 
             line = lines[-1]
