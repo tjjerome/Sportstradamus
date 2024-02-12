@@ -1753,39 +1753,39 @@ class StatsMLB(Stats):
             return
 
         # Compute playerProfile DataFrame
-        self.playerProfile['avg'] = playerGroups[market].mean().div(
-            leagueavg) - 1
-        self.playerProfile['z'] = (
-            playerGroups[market].mean()-leagueavg).div(leaguestd)
-        self.playerProfile['home'] = playerGroups.apply(
-            lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
-        self.playerProfile['away'] = playerGroups.apply(
-            lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
-
-        leagueavg = defenseGroups[market].mean().mean()
-        leaguestd = defenseGroups[market].mean().std()
-        self.defenseProfile['avg'] = defenseGroups[market].mean().div(
-            leagueavg) - 1
-        self.defenseProfile['z'] = (
-            defenseGroups[market].mean()-leagueavg).div(leaguestd)
-        self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
-        self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
-
-        leagueavg = pitcherGroups[market].mean().mean()
-        leaguestd = pitcherGroups[market].mean().std()
-        self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
-            leagueavg) - 1
-        self.pitcherProfile['z'] = (
-            pitcherGroups[market].mean()-leagueavg).div(leaguestd)
-        self.pitcherProfile['home'] = pitcherGroups.apply(
-            lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
-        self.pitcherProfile['away'] = pitcherGroups.apply(
-            lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            self.playerProfile['avg'] = playerGroups[market].mean().div(
+                leagueavg) - 1
+            self.playerProfile['z'] = (
+                playerGroups[market].mean()-leagueavg).div(leaguestd)
+            self.playerProfile['home'] = playerGroups.apply(
+                lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
+            self.playerProfile['away'] = playerGroups.apply(
+                lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
+
+            leagueavg = defenseGroups[market].mean().mean()
+            leaguestd = defenseGroups[market].mean().std()
+            self.defenseProfile['avg'] = defenseGroups[market].mean().div(
+                leagueavg) - 1
+            self.defenseProfile['z'] = (
+                defenseGroups[market].mean()-leagueavg).div(leaguestd)
+            self.defenseProfile['home'] = defenseGroups.apply(
+                lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
+            self.defenseProfile['away'] = defenseGroups.apply(
+                lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
+
+            leagueavg = pitcherGroups[market].mean().mean()
+            leaguestd = pitcherGroups[market].mean().std()
+            self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
+                leagueavg) - 1
+            self.pitcherProfile['z'] = (
+                pitcherGroups[market].mean()-leagueavg).div(leaguestd)
+            self.pitcherProfile['home'] = pitcherGroups.apply(
+                lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
+            self.pitcherProfile['away'] = pitcherGroups.apply(
+                lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
+
             self.playerProfile['moneyline gain'] = playerGroups.apply(
                 lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float) / 0.5 - x.moneyline.fillna(0.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
@@ -2095,7 +2095,7 @@ class StatsMLB(Stats):
         if data["Line"] == 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
-        if date.date() < datetime.today().date():
+        if Date.date() < datetime.today().date():
             game = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
                 pd.to_datetime(self.gamelog.gameDate) == date)]
             position = game.iloc[0]['battingOrder']
@@ -2238,6 +2238,8 @@ class StatsMLB(Stats):
                 mu = np.median(lines)
                 sig = iqr(lines)
                 lines = [line for line in lines if mu - sig <= line <= mu + sig]
+            elif lines == [0] and any([name in k for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys()]):
+                lines = [archive["MLB"][market][gameDate.strftime("%Y-%m-%d")][k]["Lines"][-1] for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys() if name in k]
 
             line = lines[-1]
 
@@ -4322,6 +4324,8 @@ class StatsNHL(Stats):
                 mu = np.median(lines)
                 sig = iqr(lines)
                 lines = [line for line in lines if mu - sig <= line <= mu + sig]
+            elif lines == [0] and any([name in k for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys()]):
+                lines = [archive["MLB"][market][gameDate.strftime("%Y-%m-%d")][k]["Lines"][-1] for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys() if name in k]
 
             line = lines[-1]
 

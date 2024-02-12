@@ -1,3 +1,45 @@
+============================== MLB 1st inning runs allowed ===============================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.740077   0.522388 -0.211002    0.184524     0.237633  0.091073 -1.420739      0.026281
+ 0.735557   0.525641 -0.202588    0.185011     0.238665  0.091073 -1.420739      0.025943
+
+==================================== MLB hits allowed ====================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.627439   0.605809 -0.239249    0.057767     0.076517  0.109232 -0.039702      0.034233
+ 0.625514   0.608365 -0.231585    0.047789     0.065024  0.109232 -0.039702      0.041149
+
+================================= MLB pitcher strikeouts =================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.620712   0.697143 0.067272    0.049134     0.064910  0.116803 0.064884      0.028614
+ 0.601690   0.681542 0.066857    0.039427     0.052916  0.116803 0.064884      0.035343
+
+=================================== MLB pitches thrown ===================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.635452   0.687259 0.009055    0.057445     0.076426   0.09904  0.46698      0.020433
+ 0.632479   0.682701 0.009032    0.055814     0.073985   0.09904  0.46698      0.021563
+
+=================================== MLB pitching outs ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.629085   0.707366 0.021994    0.061482     0.078621  0.124083 0.354499      0.009840
+ 0.626178   0.703775 0.023071    0.058840     0.076566  0.124083 0.354499      0.011672
+
+==================================== MLB runs allowed ====================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.650524   0.720963 0.004487    0.094294     0.118286  0.269587 0.069727      0.034876
+ 0.640297   0.702523 0.007835    0.083269     0.105752  0.269587 0.069727      0.042518
+
+=================================== MLB walks allowed ====================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.630611   0.617978 -0.267400    0.035783     0.051114  0.064553 -0.115215      0.035252
+ 0.626939   0.631313 -0.258745    0.030947     0.046286  0.064553 -0.115215      0.038604
+
 ======================================== NBA AST =========================================
  Distribution Model: Gaussian
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
@@ -286,11 +328,23 @@
  0.633279   0.623171 0.149660    0.057920     0.076765  0.131849 0.478604      0.008153
  0.636661   0.624606 0.135828    0.058149     0.077791  0.131849 0.478604      0.007994
 
+====================================== NHL assists =======================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.748382   0.591837 -0.253331    0.213066     0.273837  0.183319 -2.476934      0.052654
+ 0.747523   0.579365 -0.251862    0.206475     0.267164  0.183319 -2.476934      0.057223
+
 ====================================== NHL blocked =======================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
  0.624334   0.613704 -0.320707    0.044632     0.060753  0.042539 -0.465172      0.041875
  0.618795   0.601199 -0.305275    0.029085     0.043602  0.042539 -0.465172      0.052651
+
+==================================== NHL faceOffWins =====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.681958   0.590056 -0.044757    0.072186     0.097960  0.104315 0.230315      0.003594
+ 0.667793   0.577699 -0.028532    0.080982     0.110183  0.104315 0.230315     -0.002503
 
 ============================= NHL fantasy points prizepicks ==============================
  Distribution Model: Gaussian
@@ -303,6 +357,12 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.601307   0.682692 0.104609    0.057572     0.073824  0.076309 0.406956      0.008414
  0.598684   0.679612 0.102502    0.057019     0.073477  0.076309 0.406956      0.008797
+
+======================================= NHL goals ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.798692        0.0 -0.201819    0.302635     0.380936  0.263067 -3.75888      0.002915
+ 0.798693        0.0 -0.201819    0.300468     0.379294  0.263067 -3.75888      0.004416
 
 ==================================== NHL goalsAgainst ====================================
  Distribution Model: Gaussian
@@ -351,4 +411,10 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.666314   0.757437 0.074361    0.068526     0.091267  0.131516 0.103056      0.021249
  0.645962   0.730202 0.089827    0.070137     0.094662  0.131516 0.103056      0.020132
+
+===================================== NHL timeOnIce ======================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.660803   0.692604 0.050970    0.098762     0.123132  0.323391 0.317895      0.011642
+ 0.655323   0.686764 0.046468    0.094558     0.119555  0.323391 0.317895      0.014556
 
