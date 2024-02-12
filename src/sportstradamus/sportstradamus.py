@@ -716,7 +716,7 @@ def find_correlation(offers, stats, platform, parlays):
             idx_base = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
 
             best_bets = []
-            for bet_size in np.arange(2, len(payout_table[platform]) + 2):
+            for bet_size in np.arange(3, len(payout_table[platform]) + 2):
                 n_candidates = 32-2*bet_size
                 idx = idx_base.groupby('Team').head(int(n_candidates/2)+2).head(n_candidates).sort_values(['Team', 'Player']).index
                 combos = combinations(
@@ -862,10 +862,10 @@ def find_correlation(offers, stats, platform, parlays):
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
                 player_set = set.union(*df5.Players.to_list())
-                for fam_size in tqdm(np.arange(2,4), desc="Filtering...", leave=False):
+                for fam_size in tqdm(np.arange(3,4), desc="Filtering...", leave=False):
                     best_parlays = []
                     families = []
-                    filtered_df = df5.loc[df5["Bet Size"] <= fam_size + 2]
+                    filtered_df = df5.loc[df5["Bet Size"] <= fam_size + 3]
                     for family in combinations(player_set, fam_size):
                         family_val = filtered_df.loc[filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size, "Model EV"].sum()
                         if family_val > 0:
