@@ -928,7 +928,7 @@ class StatsNBA(Stats):
             "Position": positions.index(position)
         }
 
-        if data["Line"] == 0:
+        if data["Line"] <= 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         if len(game_res) < 5:
@@ -1951,6 +1951,11 @@ class StatsMLB(Stats):
 
         Date = datetime.strptime(date, "%Y-%m-%d")
 
+        if Date.date() < datetime.today().date():
+            pitcher = offer.get("Pitcher", "")
+        else:
+            pitcher = self.pitchers.get(opponent, "")
+
         if any([string in market for string in ["allowed", "pitch"]]):
             player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
                 pd.to_datetime(self.gamelog.gameDate) < Date) & self.gamelog["starting pitcher"]]
@@ -1988,10 +1993,6 @@ class StatsMLB(Stats):
             line = 0.5 if line < 1 else line
 
         try:
-            if datetime.strptime(date, "%Y-%m-%d").date() < datetime.today().date():
-                pitcher = offer.get("Pitcher", "")
-            else:
-                pitcher = self.pitchers.get(opponent, "")
 
             if pitcher not in self.pitcherProfile.index:
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
@@ -2092,7 +2093,7 @@ class StatsMLB(Stats):
             "Home": home,
         }
 
-        if data["Line"] == 0:
+        if data["Line"] <= 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         if Date.date() < datetime.today().date():
@@ -4235,7 +4236,7 @@ class StatsNHL(Stats):
             "Home": home
         }
 
-        if data["Line"] == 0:
+        if data["Line"] <= 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
         positions = ["C", "R", "L", "D"]
