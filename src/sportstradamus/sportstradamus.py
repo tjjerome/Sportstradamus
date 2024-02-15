@@ -857,29 +857,39 @@ def find_correlation(offers, stats, platform, parlays):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            if len(best_bets) > 0:                
+            if len(best_bets) > 0:
                 df5 = pd.DataFrame(best_bets)
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
                 player_set = set.union(*df5.Players.to_list())
-                # for fam_size in tqdm(np.arange(3,4), desc="Filtering...", leave=False):
-                fam_size = 3
                 best_parlays = []
                 families = []
-                # filtered_df = df5.loc[df5["Bet Size"] <= fam_size + 2]
-                for family in combinations(player_set, fam_size):
-                    family_val = df5.loc[df5.Players.apply(lambda x: len(x.intersection(family))) == fam_size, "Model EV"].sum()
-                    if family_val > 0:
-                        families.append((family, family_val))
+                for fam_size in tqdm(np.arange(3,5), desc="Filtering...", leave=False):
+                    filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 2) & (df5["Bet Size"] >= fam_size)]
+                    if filtered_df.empty:
+                        continue
+                    for family in combinations(player_set, fam_size):
+                        family_val = filtered_df.loc[filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size, "Model EV"].sum()
+                        if family_val > 0:
+                            families.append((family, family_val))
 
                 families.sort(reverse=True, key=(lambda x: x[1]))
                 best_fam = []
                 for family, _ in families:
-                    if not any([len(set(family).intersection(f)) > 1 for f in best_fam]):
+                    if len(best_fam) >= 10:
+                        continue
+                    if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
                         best_fam.append(family)
 
-                for family in best_fam[:fam_size+1]:
-                    best_parlays.append(df5.loc[df5.Players.apply(lambda x: len(x.intersection(family))) == fam_size].iloc[0].drop(["Players", "Bet Size"]))
+                df5["Family"] = [[]]*len(df5)
+                for i, family in enumerate(best_fam):
+                    mask = (df5["Bet Size"] <= len(family) + 2) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
+                    df5.loc[mask, "Family"] = df5.loc[mask, "Family"].apply(lambda x: x+[i])
+
+                for i in np.arange(0, len(best_fam)):
+                    mask = df5["Family"].apply(lambda x: x[0]==i if len(x) else False)
+                    if mask.sum():
+                        best_parlays.append(df5.loc[mask].iloc[0].drop(["Players", "Bet Size", "Family"]))
 
                 if len(best_parlays):
                     parlay_df = pd.concat([parlay_df, pd.DataFrame(best_parlays).sort_values("Model EV", ascending=False).drop_duplicates()])
