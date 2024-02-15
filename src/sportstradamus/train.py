@@ -675,17 +675,15 @@ def see_features():
         for c in categories:
             X[c] = X[c].astype('category')
 
-        models = filedict['model']
+        model = filedict['model']
 
         vals = np.zeros(len(X.columns))
-        for bounds, model in models.items():
-            mask = X["Player z"].between(bounds[0], bounds[1], 'left')
-            explainer = shap.TreeExplainer(model.booster)
-            subvals = explainer.shap_values(X[mask])
-            if filedict["distribution"] == "Gaussian":
-                subvals = np.abs(subvals[0]) + np.abs(subvals[1])
+        explainer = shap.TreeExplainer(model.booster)
+        subvals = explainer.shap_values(X)
+        if filedict["distribution"] == "Gaussian":
+            subvals = np.abs(subvals[0]) + np.abs(subvals[1])
 
-            vals = vals + np.mean(np.abs(subvals), axis=0)
+        vals = vals + np.mean(np.abs(subvals), axis=0)
 
         vals = vals/np.sum(vals)*100
         feature_importances.append(

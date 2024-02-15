@@ -10,6 +10,12 @@
  0.728401   0.464286 -0.176215    0.164824     0.212405  0.062835 -1.326703      0.031530
  0.723532   0.457778 -0.165749    0.163098     0.210642  0.062835 -1.326703      0.032727
 
+================================= MLB batter strikeouts ==================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.629658   0.642002  0.02877    0.042087     0.057195  0.142326 -0.101727      0.005985
+ 0.626470   0.638704  0.03495    0.041876     0.057147  0.142326 -0.101727      0.006132
+
 =================================== MLB hits+runs+rbi ====================================
  Distribution Model: Poisson
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
@@ -21,6 +27,12 @@
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
  0.627439   0.605809 -0.239249    0.057767     0.076517  0.109232 -0.039702      0.034233
  0.625514   0.608365 -0.231585    0.047789     0.065024  0.109232 -0.039702      0.041149
+
+======================================== MLB hits ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.643587   0.644719 0.244821    0.036915     0.050113  0.161862 -0.019737      0.016133
+ 0.593489   0.623727 0.141855    0.006891     0.016648  0.161862 -0.019737      0.036944
 
 =========================== MLB hitter fantasy points underdog ===========================
  Distribution Model: Gaussian
@@ -64,11 +76,35 @@
  0.629085   0.707366 0.021994    0.061482     0.078621  0.124083 0.354499      0.009840
  0.626178   0.703775 0.023071    0.058840     0.076566  0.124083 0.354499      0.011672
 
+======================================== MLB rbi =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.707813   0.500000 -0.290761    0.133562     0.177808  0.049288 -1.353826      0.005809
+ 0.706795   0.464286 -0.291665    0.135572     0.180242  0.049288 -1.353826      0.004416
+
 ==================================== MLB runs allowed ====================================
  Distribution Model: Poisson
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.650524   0.720963 0.004487    0.094294     0.118286  0.269587 0.069727      0.034876
  0.640297   0.702523 0.007835    0.083269     0.105752  0.269587 0.069727      0.042518
+
+======================================== MLB runs ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.634712   0.663043 -0.365330    0.064443     0.086196  0.052393 -0.791465      0.085458
+ 0.628644   0.628676 -0.348027   -0.000963     0.021086  0.052393 -0.791465      0.130794
+
+====================================== MLB singles =======================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.568148   0.597368 -0.430922    0.011667     0.016013  0.022998 -0.295773      0.019832
+ 0.557311   0.574887 -0.415801   -0.004475    -0.004567  0.022998 -0.295773      0.031021
+
+==================================== MLB stolen bases ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.916856        0.0 -0.083934    0.333556     0.445112  0.685125 0.665709      0.000149
+ 0.916304        0.0 -0.083934    0.611856     0.704549  0.685125 0.665709     -0.192754
 
 ==================================== MLB total bases =====================================
  Distribution Model: Poisson
@@ -81,6 +117,12 @@
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
  0.630611   0.617978 -0.267400    0.035783     0.051114  0.064553 -0.115215      0.035252
  0.626939   0.631313 -0.258745    0.030947     0.046286  0.064553 -0.115215      0.038604
+
+======================================= MLB walks ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.595180   0.565789 -0.406374    0.025486     0.035239  0.013701 -0.687534      0.014756
+ 0.595109   0.569444 -0.406588    0.027788     0.038140  0.013701 -0.687534      0.013160
 
 ======================================== NBA AST =========================================
  Distribution Model: Gaussian
