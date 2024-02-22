@@ -7,6 +7,11 @@ import importlib.resources as pkg_resources
 from sportstradamus import data, creds
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL
 from tqdm import tqdm
+from sklearn.metrics import (
+    accuracy_score,
+    brier_score_loss,
+    log_loss
+)
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -215,6 +220,105 @@ def reflect():
     wks.clear()
     wks.update([profits.columns.values.tolist()] +
             profits.values.tolist())
+    
+
+    filepath = pkg_resources.files(data) / "history.dat"
+    if os.path.isfile(filepath):
+        history = pd.read_pickle(filepath)
+
+        nameStr = {"MLB": "playerName", "NBA": "PLAYER_NAME",
+                "NFL": "player display name", "NHL": "playerName"}
+        dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
+                "NFL": "gameday", "NHL": "gameDate"}
+        for i, row in tqdm(history.loc[history.isna().any(axis=1) & (pd.to_datetime(history.Date).dt.date < datetime.datetime.today().date())].iterrows(), desc="Checking history", total=len(history)):
+            if np.isnan(row["Result"]):
+                gamelog = stats[row["League"]].gamelog
+                if " + " in row["Player"]:
+                    players = row["Player"].split(" + ")
+                    game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
+                        pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                    game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
+                        pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                    if not game1.empty and not game2.empty and not game1[row["Market"]].isna().any() and not game2[row["Market"]].isna().any():
+                        history.at[i, "Result"] = "Over" if ((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) > row["Line"]) else ("Under" if ((game1.iloc[0][row["Market"]] + game2.iloc[0][row["Market"]]) < row["Line"]) else "Push")
+
+                elif " vs. " in row["Player"]:
+                    players = row["Player"].split(" vs. ")
+                    game1 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[0]) & (
+                        pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                    game2 = gamelog.loc[(gamelog[nameStr[row["League"]]] == players[1]) & (
+                        pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                    if not game1.empty and not game2.empty and not game1[row["Market"]].isna().any() and not game2[row["Market"]].isna().any():
+                        history.at[i, "Result"] = "Over" if ((game1.iloc[0][row["Market"]] + row["Line"]) > game2.iloc[0][row["Market"]]) else ("Under" if ((game1.iloc[0][row["Market"]] + row["Line"]) < game2.iloc[0][row["Market"]]) else "Push")
+
+                else:
+                    game = gamelog.loc[(gamelog[nameStr[row["League"]]] == row["Player"]) & (
+                        pd.to_datetime(gamelog[dateStr[row["League"]]]).dt.date == pd.to_datetime(row["Date"]).date())]
+                    if not game.empty and not game[row["Market"]].isna().any():
+                        history.at[i, "Result"] = "Over" if (game.iloc[0][row["Market"]] > row["Line"]) else ("Under" if (game.iloc[0][row["Market"]] < row["Line"]) else "Push")
+
+        history.to_pickle(filepath)
+        history.dropna(inplace=True, ignore_index=True)
+
+        if len(history) > 0:
+            wks = gc.open("Sportstradamus").worksheet("History")
+            wks.clear()
+            wks.update([history.columns.values.tolist()] +
+                    history.values.tolist())
+            wks.set_basic_filter()
+
+            history = history.loc[history["Result"] != "Push"]
+            hist_stats = pd.DataFrame(columns=["Accuracy", "Balance", "LogLoss", "Brier", "Samples"])
+            hist_stats.loc["All"] = {
+                "Accuracy": accuracy_score(history["Bet"], history["Result"]),
+                "Balance": (history["Bet"] == "Over").mean() - (history["Result"] == "Over").mean(),
+                "LogLoss": log_loss((history["Bet"] == history["Result"]).astype(int), history["Model"], labels=[0,1]),
+                "Brier": brier_score_loss((history["Bet"] == history["Result"]).astype(int), history["Model"], pos_label=1),
+                "Samples": len(history)
+            }
+            hist_filt = history.loc[history["Books"] > .52]
+            hist_stats.loc["All, Book Filtered"] = {
+                "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
+                "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
+                "LogLoss": log_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], labels=[0,1]),
+                "Brier": brier_score_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], pos_label=1),
+                "Samples": len(hist_filt)
+            }
+            for league in history["League"].unique():
+                league_hist = history.loc[history["League"] == league]
+                hist_stats.loc[league] = {
+                    "Accuracy": accuracy_score(league_hist["Bet"], league_hist["Result"]),
+                    "Balance": (league_hist["Bet"] == "Over").mean() - (league_hist["Result"] == "Over").mean(),
+                    "LogLoss": log_loss((league_hist["Bet"] == league_hist["Result"]).astype(int), league_hist["Model"], labels=[0,1]),
+                    "Brier": brier_score_loss((league_hist["Bet"] == league_hist["Result"]).astype(int), league_hist["Model"], pos_label=1),
+                    "Samples": len(league_hist)
+                }
+                hist_filt = league_hist.loc[league_hist["Books"] > .52]
+                hist_stats.loc[f"{league}, Book Filtered"] = {
+                    "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
+                    "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
+                    "LogLoss": log_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], labels=[0,1]),
+                    "Brier": brier_score_loss((hist_filt["Bet"] == hist_filt["Result"]).astype(int), hist_filt["Model"], pos_label=1),
+                    "Samples": len(hist_filt)
+                }
+                for market in league_hist["Market"].unique():
+                    market_hist = league_hist.loc[league_hist["Market"] == market]
+                    hist_stats.loc[f"{league} - {market}"] = {
+                        "Accuracy": accuracy_score(market_hist["Bet"], market_hist["Result"]),
+                        "Balance": (market_hist["Bet"] == "Over").mean() - (market_hist["Result"] == "Over").mean(),
+                        "LogLoss": log_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], labels=[0,1]),
+                        "Brier": brier_score_loss((market_hist["Bet"] == market_hist["Result"]).astype(int), market_hist["Model"], pos_label=1),
+                        "Samples": len(market_hist)
+                    }
+                    
+            hist_stats["Split"] = hist_stats.index
+            hist_stats = hist_stats[["Split", "Accuracy", "Balance", "LogLoss", "Brier", "Samples"]].sort_values('Samples', ascending=False)
+            
+            wks = gc.open("Sportstradamus").worksheet("Model Stats")
+            wks.clear()
+            wks.update([hist_stats.columns.values.tolist()] +
+                    hist_stats.values.tolist())
+            wks.set_basic_filter()
     
 if __name__ == "__main__":
     reflect()

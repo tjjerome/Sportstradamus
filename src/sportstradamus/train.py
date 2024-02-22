@@ -36,7 +36,7 @@ import gc
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
 def meditate(force, stats, league):
@@ -70,6 +70,30 @@ def meditate(force, stats, league):
     np.random.seed(69)
 
     all_markets = {
+        "NBA": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN",
+        ],
         "NFL": [
             "passing yards",
             "rushing yards",
@@ -97,30 +121,6 @@ def meditate(force, stats, league):
             "first downs",
             "fumbles lost",
             "completion percentage"
-        ],
-        "NBA": [
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-            "MIN",
         ],
         "NHL": [
             "saves",
@@ -368,9 +368,6 @@ def meditate(force, stats, league):
                     target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
 
                 dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
-                                  
-                max_hist_bin = int(np.min([.75*len(X_train)/3,
-                                           9*1024*1024*1024/(20*2047*len(X_train.columns))]))
                 
                 params = {
                     "feature_pre_filter": ["none", [False]],
@@ -483,26 +480,6 @@ def meditate(force, stats, league):
                 entropy = np.mean(
                     np.abs(norm.cdf(y_test["Result"], prob_params["loc"], prob_params["scale"])-.5))
                 cv = y.Result.std()/y.Result.mean()
-            elif dist == "Gamma":
-                y_proba_train = gamma.cdf(
-                    X_train["Line"], prob_params_train["concentration"], scale=1/prob_params_train["rate"])
-                y_proba = gamma.cdf(
-                    X_test["Line"], prob_params["concentration"], scale=1/prob_params["rate"])
-                p = 2
-                ev = prob_params["concentration"]/prob_params["rate"]
-                entropy = np.mean(np.abs(gamma.cdf(
-                    y_test["Result"], prob_params["concentration"], scale=1/prob_params["rate"])-.5))
-                y_test.loc[y_test["Result"] == 0, 'Result'] = 1
-            elif dist == "NegativeBinomial":
-                y_proba_train = nbinom.cdf(
-                    X_train["Line"], prob_params_train["total_count"], prob_params_train["probs"])
-                y_proba = nbinom.cdf(
-                    X_test["Line"], prob_params["total_count"], prob_params["probs"])
-                p = 1
-                ev = prob_params["total_count"] * \
-                    (1-prob_params["probs"])/prob_params["probs"]
-                entropy = np.mean(np.abs(norm.cdf(
-                    y_test["Result"], prob_params["total_count"], prob_params["probs"])-.5))
 
             dev = mean_tweedie_deviance(y_test, ev, power=p)
 
@@ -517,7 +494,13 @@ def meditate(force, stats, league):
             y_proba = (1-y_proba).reshape(-1, 1)
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=100).fit(np.concatenate([y_proba_train, X_train.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1, y_class)
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
+            odds_filt = LogisticRegression(
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(X_train.Odds.to_numpy().reshape(-1,1)*2-1, y_class)
+            Cs = np.concatenate([filt.coef_, odds_filt.coef_], axis=1)
+            Cs = np.clip(Cs,0,None)
+            filt.coef_ = Cs/np.linalg.norm(Cs)*np.min([np.linalg.norm(Cs), 2])
+            filt.n_features_in_ = 2
             y_proba_filt = filt.predict_proba(
                 np.concatenate([y_proba, X_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
 
