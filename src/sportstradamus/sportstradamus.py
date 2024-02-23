@@ -560,6 +560,7 @@ def find_correlation(offers, stats, platform, parlays):
                 lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
             league_df = pd.concat([league_df, combo_df])
         else:
+            continue
             # TODO MLB Combos
             league_df = league_df.loc[league_df.Position.apply(
                 lambda x: not isinstance(x, list))]
