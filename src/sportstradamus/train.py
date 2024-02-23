@@ -15,9 +15,7 @@ from sklearn.metrics import (
 )
 from scipy.stats import (
     norm,
-    poisson,
-    gamma,
-    nbinom
+    poisson
 )
 import lightgbm as lgb
 import pandas as pd
@@ -31,7 +29,6 @@ from lightgbmlss.distributions import (
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
-import gc
 
 
 @click.command()
