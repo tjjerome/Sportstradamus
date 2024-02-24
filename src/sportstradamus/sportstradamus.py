@@ -620,7 +620,7 @@ def find_correlation(offers, stats, platform, parlays):
             idx_base = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
 
             best_bets = []
-            for bet_size in np.arange(3, len(payout_table[platform]) + 2):
+            for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                 n_candidates = 32-2*bet_size
                 idx = idx_base.groupby('Team').head(int(n_candidates/2)+2).head(n_candidates).sort_values(['Team', 'Player']).index
                 combos = combinations(
@@ -767,9 +767,10 @@ def find_correlation(offers, stats, platform, parlays):
                 df5.sort_values('Model EV', ascending=False, inplace=True)
                 player_set = set.union(*df5.Players.to_list())
                 best_parlays = []
-                families = []
-                for fam_size in tqdm(np.arange(3,5), desc="Filtering...", leave=False):
-                    filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 2) & (df5["Bet Size"] >= fam_size)]
+                best_fam = []
+                for fam_size in tqdm(np.arange(2,6), desc="Filtering...", leave=False):
+                    families = []
+                    filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 1) & (df5["Bet Size"] >= fam_size)]
                     if filtered_df.empty:
                         continue
                     for family in combinations(player_set, fam_size):
@@ -777,14 +778,16 @@ def find_correlation(offers, stats, platform, parlays):
                         if family_val > 0:
                             families.append((family, family_val))
 
-                families.sort(reverse=True, key=(lambda x: x[1]))
-                best_fam = []
-                for family, _ in families:
-                    if len(best_fam) >= 10:
-                        continue
-                    if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
-                        best_fam.append(family)
+                    families.sort(reverse=True, key=(lambda x: x[1]))
+                    added = 0
+                    for family, _ in families:
+                        if added >= fam_size-1:
+                            continue
+                        if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
+                            added += 1
+                            best_fam.append(family)
 
+                best_fam.sort(reverse=True, key=(lambda x: x[1]))
                 df5["Family"] = [[]]*len(df5)
                 for i, family in enumerate(best_fam):
                     mask = (df5["Bet Size"] <= len(family) + 2) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
