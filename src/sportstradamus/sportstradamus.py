@@ -794,7 +794,7 @@ def find_correlation(offers, stats, platform, parlays):
                 best_fam.sort(reverse=True, key=(lambda x: x[1]))
                 df5["Family"] = [[]]*len(df5)
                 for i, family in enumerate(best_fam):
-                    mask = (df5["Bet Size"] <= len(family) + 2) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
+                    mask = (df5["Bet Size"] <= len(family) + 1) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
                     df5.loc[mask, "Family"] = df5.loc[mask, "Family"].apply(lambda x: x+[i])
 
                 for i in np.arange(0, len(best_fam)):
