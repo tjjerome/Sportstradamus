@@ -774,15 +774,19 @@ def find_correlation(offers, stats, platform, parlays):
                     if filtered_df.empty:
                         continue
                     for family in combinations(player_set, fam_size):
-                        family_val = filtered_df.loc[filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size, "Model EV"].sum()
+                        mask = filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size
+                        family_val = filtered_df.loc[mask, "Model EV"].sum()
+                        family_boost = filtered_df.loc[mask, "Boost"].max()
                         if family_val > 0:
-                            families.append((family, family_val))
+                            families.append((family, family_val, family_boost))
 
                     families.sort(reverse=True, key=(lambda x: x[1]))
                     added = 0
-                    for family, _ in families:
-                        if added >= fam_size-1:
+                    for family, family_val, family_boost in families:
+                        if added == fam_size-2 and family_boost > 1.5:
                             continue
+                        elif added >= fam_size-1:
+                            break
                         if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
                             added += 1
                             best_fam.append(family)
