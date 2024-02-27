@@ -209,7 +209,7 @@ def reflect():
                 df = league_df.loc[pd.to_datetime(league_df.Date).dt.date > datetime.today().date() - timedelta(days=days)]
 
                 if not df.empty:
-                    profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(5).mean()).sum()
+                    profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(10).mean()).sum()
 
     # filepath = pkg_resources.files(data) / "parlay_masks.json"
     # with open(filepath, 'w') as of:
