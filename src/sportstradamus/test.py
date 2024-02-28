@@ -39,10 +39,8 @@ import requests
 
 # (scrapeops, scrapefish)
 
-NFL = StatsNFL()
-NFL.load()
+# NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
-NFL.update()
 # NFL.season_start = datetime(2019, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2020, 9, 1).date()
@@ -54,7 +52,19 @@ NFL.update()
 # NFL.season_start = datetime(2023, 9, 1).date()
 # NFL.update()
 
-# NBA = StatsNBA()
+NBA = StatsNBA()
+NBA.load()
+NBA.update()
+NBA.profile_market("fantasy points prizepicks")
+NBA.get_stats({
+    "Player": "Alperen Sengun",
+    "Market": "fantasy points prizepicks",
+    "Line": 42.5,
+    "Date": datetime(2024, 2, 25).date(),
+    "Team": "HOU",
+    "Opponent": "OKC",
+    "League": "NBA"
+})
 # NBA.season = "2021-22"
 # NBA.season_start = datetime(2021, 10, 1).date()
 # NBA.update()

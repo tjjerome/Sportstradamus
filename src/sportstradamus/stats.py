@@ -874,6 +874,8 @@ class StatsNBA(Stats):
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
                         ev += v
 
@@ -888,6 +890,8 @@ class StatsNBA(Stats):
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
                     else:
                         ev += v*weight
 
@@ -2026,6 +2030,8 @@ class StatsMLB(Stats):
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
                         ev += v
                         
@@ -2050,6 +2056,8 @@ class StatsMLB(Stats):
                             p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
                             p *= poisson.cdf(3, v_runs)
                             ev += p*weight
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
                     else:
                         ev += v*weight
 
@@ -3248,6 +3256,8 @@ class StatsNFL(Stats):
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
                         ev += v
                         
@@ -3265,6 +3275,8 @@ class StatsNFL(Stats):
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
                     else:
                         ev += v*weight
 
@@ -4176,6 +4188,8 @@ class StatsNHL(Stats):
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
                         ev += v
                         
@@ -4198,6 +4212,8 @@ class StatsNHL(Stats):
                         elif submarket == "Moneyline":
                             p = 1-archive["NHL"].get("Moneyline", {}).get(date, {}).get(team, 0.5)
                             ev += p*weight
+                        else:
+                            ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
                     else:
                         ev += v*weight
 
