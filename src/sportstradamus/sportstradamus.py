@@ -785,7 +785,9 @@ def find_correlation(offers, stats, platform, parlays):
                     for family, family_val, family_boost in families:
                         if added == fam_size-2 and family_boost > 1.5:
                             continue
-                        elif added >= fam_size-1:
+                        elif added == fam_size-1 and family_boost > 1.2:
+                            continue
+                        elif added >= fam_size:
                             break
                         if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
                             added += 1
