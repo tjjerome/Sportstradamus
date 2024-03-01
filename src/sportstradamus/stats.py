@@ -839,7 +839,10 @@ class StatsNBA(Stats):
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
-        dvpoa = self.defenseProfile.loc[opponent, position]
+        if opponent in self.defenseProfile:
+            dvpoa = self.defenseProfile.loc[opponent, position]
+        else:
+            dvpoa = 1
 
         if line == 0:
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
