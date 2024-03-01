@@ -944,6 +944,8 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
             if len(teams) < len(players):
                 teams = teams*len(players)
             opponents = o["Opponent"].split("/")
+            if len(opponents[0]) > 3:
+                opponents = list(map(''.join, zip(*[iter(o["Opponent"])]*3)))
             opponents = [i for i in opponents if i]
             if len(opponents) < len(players):
                 opponents = opponents*len(players)
