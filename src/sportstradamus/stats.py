@@ -839,7 +839,7 @@ class StatsNBA(Stats):
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
-        if opponent in self.defenseProfile:
+        if opponent in self.defenseProfile.index:
             dvpoa = self.defenseProfile.loc[opponent, position]
         else:
             dvpoa = 1
