@@ -842,7 +842,7 @@ class StatsNBA(Stats):
         if opponent in self.defenseProfile.index:
             dvpoa = self.defenseProfile.loc[opponent, position]
         else:
-            dvpoa = 1
+            dvpoa = 0
 
         if line == 0:
             line = np.median(game_res[-one_year_ago:]) if game_res else 0
