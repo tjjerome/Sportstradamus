@@ -770,7 +770,8 @@ def find_correlation(offers, stats, platform, parlays):
                 player_set = set.union(*df5.Players.to_list())
                 best_parlays = []
                 best_fam = []
-                for fam_size in tqdm(np.arange(2,6), desc="Filtering...", leave=False):
+                max_size = 6 if platform == "PrizePicks" else 5
+                for fam_size in tqdm(np.arange(2, max_size), desc="Filtering...", leave=False):
                     families = []
                     filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 1) & (df5["Bet Size"] >= fam_size)]
                     if filtered_df.empty:
