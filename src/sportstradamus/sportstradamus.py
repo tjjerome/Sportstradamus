@@ -1223,8 +1223,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
                     p = [0.5/o.get("Boost", 1)] * 2
-                    p = [0.5/(o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1/o.get("Boost_Under", 1)),
-                         0.5/(o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1/o.get("Boost_Over", 1))]
+                    p = [0.5/(o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1/o.get("Boost_Over", 1)),
+                         0.5/(o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1/o.get("Boost_Under", 1))]
                     p = p/np.sum(p)
                     stats["Odds"] = p[1]
                 else:
