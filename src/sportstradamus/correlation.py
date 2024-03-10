@@ -5,21 +5,30 @@ from sportstradamus import data
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import os.path
 
 pd.set_option('mode.chained_assignment', None)
 
-# NFL
 nfl = StatsNFL()
 nfl.load()
 nfl.update()
 
-if os.path.isfile((pkg_resources.files(data) / "nfl_corr_data.csv")):
-    matrix = pd.read_csv((pkg_resources.files(
-        data) / "nfl_corr_data.csv"), index_col=0)
-else:
-    stats = {
+nba = StatsNBA()
+nba.load()
+nba.update()
+
+nhl = StatsNHL()
+nhl.load()
+nhl.update()
+
+mlb = StatsMLB()
+mlb.load()
+mlb.update()
+
+
+tracked_stats = { 
+    "NFL": {
         "QB": [
             "passing yards",
             "rushing yards",
@@ -58,7 +67,7 @@ else:
             "first downs",
             "fumbles lost"
         ],
-        "WRTE": [
+        "WR": [
             "receiving yards",
             "yards",
             "fantasy points prizepicks",
@@ -71,227 +80,203 @@ else:
             "first downs",
             "fumbles lost"
         ],
-    }
-
-    games = nfl.gamelog['game id'].unique()
-    matrix = pd.DataFrame()
-
-    for gameId in tqdm(games):
-        game_df = nfl.gamelog.loc[nfl.gamelog['game id'] == gameId]
-        gameDate = datetime.strptime(game_df.iloc[0]['gameday'], '%Y-%m-%d')
-        if gameDate < datetime(2021, 9, 1):
-            continue
-        nfl.profile_market('snap pct', date=gameDate)
-        usage = pd.DataFrame(
-            nfl.playerProfile[['snap pct short', 'route participation short']])
-        usage.reset_index(inplace=True)
-        game_df = game_df.merge(usage)
-        ranks = game_df.sort_values('route participation short', ascending=False).groupby(
-            ["recent team", "position group"]).rank(ascending=False, method='first')["snap pct short"].astype(int)
-        game_df['position group'] = game_df['position group'] + \
-            ranks.astype(str)
-        game_df.index = game_df['position group']
-
-        homeStats = game_df.loc[game_df['home'] & game_df['position group'].str.contains(
-            "QB"), stats["QB"]].to_dict('index')
-        homeStats.update(game_df.loc[game_df['home'] & game_df['position group'].str.contains(
-            "WR"), stats["WRTE"]].to_dict('index'))
-        homeStats.update(game_df.loc[game_df['home'] & game_df['position group'].str.contains(
-            "TE"), stats["WRTE"]].to_dict('index'))
-        homeStats.update(game_df.loc[game_df['home'] & game_df['position group'].str.contains(
-            "RB"), stats["RB"]].to_dict('index'))
-
-        awayStats = game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
-            "QB"), stats["QB"]].to_dict('index')
-        awayStats.update(game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
-            "WR"), stats["WRTE"]].to_dict('index'))
-        awayStats.update(game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
-            "TE"), stats["WRTE"]].to_dict('index'))
-        awayStats.update(game_df.loc[~game_df['home'] & game_df['position group'].str.contains(
-            "RB"), stats["RB"]].to_dict('index'))
-
-        matrix = pd.concat([matrix, pd.json_normalize(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
-        matrix = pd.concat([matrix, pd.json_normalize(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
-
-    matrix.to_csv((pkg_resources.files(data) / "nfl_corr_data.csv"))
-
-matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
-matrix = matrix.reindex(sorted(matrix.columns), axis=1)
-c = matrix.corr().unstack()
-c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
-c = c.reindex(c.abs().sort_values(ascending=False).index)
-
-c.to_csv((pkg_resources.files(data) / "NFL_corr.csv"))
-
-# NBA
-nba = StatsNBA()
-nba.load()
-nba.update()
-
-if os.path.isfile((pkg_resources.files(data) / "nba_corr_data.csv")):
-    matrix = pd.read_csv((pkg_resources.files(
-        data) / "nba_corr_data.csv"), index_col=0)
-else:
-    stats = [
-        "PTS",
-        "REB",
-        "AST",
-        "PRA",
-        "PR",
-        "RA",
-        "PA",
-        "FG3M",
-        "fantasy points prizepicks",
-        "TOV",
-        "BLK",
-        "STL",
-        "BLST",
-        "FG3A",
-        "FTM",
-        "FGM",
-        "FGA",
-        "OREB",
-        "DREB",
-        "PF",
-        "MIN"
-    ]
-
-    games = nba.gamelog['GAME_ID'].unique()
-    matrix = pd.DataFrame()
-
-    for gameId in tqdm(games):
-        game_df = nba.gamelog.loc[nba.gamelog['GAME_ID'] == gameId]
-        gameDate = datetime.strptime(
-            game_df["GAME_DATE"].max()[:10], '%Y-%m-%d')
-        if gameDate < datetime(2021, 10, 26):
-            continue
-        nba.profile_market('MIN', date=gameDate)
-        usage = pd.DataFrame(nba.playerProfile[['MIN short', 'USG_PCT short']])
-        usage.reset_index(inplace=True)
-        game_df = game_df.merge(usage)
-        ranks = game_df.sort_values('USG_PCT short', ascending=False).groupby(
-            ["TEAM_ABBREVIATION", "POS"]).rank(ascending=False, method='first')["MIN short"].astype(int)
-        game_df['POS'] = game_df['POS'] + \
-            ranks.astype(str)
-        game_df.index = game_df['POS']
-
-        homeStats = game_df.loc[game_df['HOME'], stats].to_dict('index')
-        awayStats = game_df.loc[~game_df['HOME'].astype(
-            bool), stats].to_dict('index')
-
-        matrix = pd.concat([matrix, pd.json_normalize(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
-        matrix = pd.concat([matrix, pd.json_normalize(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
-
-    matrix.to_csv((pkg_resources.files(data) / "nba_corr_data.csv"))
-
-matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
-matrix = matrix.reindex(sorted(matrix.columns), axis=1)
-c = matrix.corr().unstack()
-c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
-c = c.reindex(c.abs().sort_values(ascending=False).index)
-
-c.to_csv((pkg_resources.files(data) / "NBA_corr.csv"))
-
-
-# NHL
-nhl = StatsNHL()
-nhl.load()
-nhl.update()
-
-if os.path.isfile((pkg_resources.files(data) / "nhl_corr_data.csv")):
-    matrix = pd.read_csv((pkg_resources.files(
-        data) / "nhl_corr_data.csv"), index_col=0)
-else:
-    skater_stats = [
-        "points",
-        "shots",
-        "sogBS",
-        "fantasy points prizepicks",
-        "skater fantasy points underdog",
-        "blocked",
-        "hits",
-        "goals",
-        "assists",
-        "faceOffWins",
-        "timeOnIce",
-    ]
-
-    goalie_stats = [
-        "saves",
-        "goalsAgainst",
-        "goalie fantasy points underdog"
-    ]
-
-    games = nhl.gamelog.gameId.unique()
-    matrix = pd.DataFrame()
-
-    for gameId in tqdm(games):
-        game_df = nhl.gamelog.loc[nhl.gamelog['gameId'] == gameId]
-        gameDate = datetime.strptime(game_df.gameDate.max(), '%Y-%m-%d')
-        if gameDate < datetime(2021, 10, 19):
-            continue
-        nhl.profile_market('TimeShare', date=gameDate)
-        usage = pd.DataFrame(
-            nhl.playerProfile[['TimeShare short', 'Fenwick short']])
-        usage.reset_index(inplace=True)
-        game_df = game_df.merge(usage)
-        ranks = game_df.sort_values('Fenwick short', ascending=False).groupby(["team", "position"]).rank(
-            ascending=False, method='first')["TimeShare short"].astype(int)
-        game_df['position'] = game_df['position'] + \
-            ranks.astype(str)
-        game_df.index = game_df['position']
-
-        homeStats = game_df.loc[game_df['home'] &
-                                (game_df['position'] == "G"), goalie_stats].to_dict('index')
-        homeStats.update(
-            game_df.loc[game_df['home'] & (game_df['position'] != "G"), skater_stats].to_dict('index'))
-
-        awayStats = game_df.loc[~game_df['home'] &
-                                (game_df['position'] == "G"), goalie_stats].to_dict('index')
-        awayStats.update(
-            game_df.loc[~game_df['home'] & (game_df['position'] != "G"), skater_stats].to_dict('index'))
-
-        matrix = pd.concat([matrix, pd.json_normalize(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
-        matrix = pd.concat([matrix, pd.json_normalize(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
-
-    matrix = pd.DataFrame(matrix)
-    matrix.to_csv((pkg_resources.files(data) / "nhl_corr_data.csv"))
-
-matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
-matrix = matrix.reindex(sorted(matrix.columns), axis=1)
-c = matrix.corr().unstack()
-c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
-c = c.reindex(c.abs().sort_values(ascending=False).index)
-
-c.to_csv((pkg_resources.files(data) / "NHL_corr.csv"))
-
-
-# MLB
-mlb = StatsMLB()
-mlb.load()
-mlb.update()
-
-if os.path.isfile((pkg_resources.files(data) / "mlb_corr_data.csv")):
-    matrix = pd.read_csv((pkg_resources.files(
-        data) / "mlb_corr_data.csv"), index_col=0)
-else:
-    stats = {
-        "pitcher": [
+        "TE": [
+            "receiving yards",
+            "yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "tds",
+            "receiving tds",
+            "receptions",
+            "targets",
+            "longest reception",
+            "first downs",
+            "fumbles lost"
+        ],
+    },
+    "NHL": {
+        "G": [
+            "saves",
+            "goalsAgainst",
+            "goalie fantasy points underdog"
+        ],
+        "C": [
+            "points",
+            "shots",
+            "sogBS",
+            "fantasy points prizepicks",
+            "skater fantasy points underdog",
+            "blocked",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
+        "L": [
+            "points",
+            "shots",
+            "sogBS",
+            "fantasy points prizepicks",
+            "skater fantasy points underdog",
+            "blocked",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
+        "R": [
+            "points",
+            "shots",
+            "sogBS",
+            "fantasy points prizepicks",
+            "skater fantasy points underdog",
+            "blocked",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
+        "D": [
+            "points",
+            "shots",
+            "sogBS",
+            "fantasy points prizepicks",
+            "skater fantasy points underdog",
+            "blocked",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ]
+    },
+    "NBA": {
+        "C": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "TOV",
+            "BLK",
+            "STL",
+            "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN"
+        ],
+        "P": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "TOV",
+            "BLK",
+            "STL",
+            "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN"
+        ],
+        "B": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "TOV",
+            "BLK",
+            "STL",
+            "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN"
+        ],
+        "F": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "TOV",
+            "BLK",
+            "STL",
+            "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN"
+        ],
+        "W": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "TOV",
+            "BLK",
+            "STL",
+            "BLST",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN"
+        ]
+    },
+    "MLB": {
+        "P": [
             "pitcher strikeouts",
             "pitching outs",
             "pitches thrown",
@@ -303,7 +288,7 @@ else:
             "pitcher fantasy points underdog",
             "walks allowed"
         ],
-        "batter": [
+        "B1": [
             "hitter fantasy score",
             "hitter fantasy points underdog",
             "hits+runs+rbi",
@@ -315,51 +300,228 @@ else:
             "rbi",
             "batter strikeouts",
             "singles"
-        ]
+        ],
+        "B2": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B3": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B4": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B5": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B6": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B7": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B8": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
+        "B9": [
+            "hitter fantasy score",
+            "hitter fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles"
+        ],
     }
+}
 
-    games = mlb.gamelog.gameId.unique()
-    matrix = pd.DataFrame()
+log_strings = {
+    "NFL": {
+        "game": "game id",
+        "date": "gameday",
+        "usage": "snap pct",
+        "usage_sec": "route participation",
+        "position": "position group",
+        "team": "recent team",
+        "home": "home"
+    },
+    "NBA": {
+        "game": "GAME_ID",
+        "date": "GAME_DATE",
+        "usage": "MIN",
+        "usage_sec": "USG_PCT",
+        "position": "POS",
+        "team": "TEAM_ABBREVIATION",
+        "home": "HOME"
+    },
+    "NHL": {
+        "game": "gameId",
+        "date": "gameDate",
+        "usage": "TimeShare",
+        "usage_sec": "Fenwick",
+        "position": "position",
+        "team": "team",
+        "home": "home"
+    },
+    "MLB": {
+        "game": "gameId",
+        "date": "gameDate",
+        "position": "position",
+        "team": "team",
+        "home": "home"
+    },
+}
+gamelogs = {
+    "NFL": nfl,
+    "NBA": nba,
+    "NHL": nhl,
+    "MLB": mlb
+}
 
-    for gameId in tqdm(games):
-        game_df = mlb.gamelog.loc[mlb.gamelog['gameId'] == gameId]
-        bat_df = game_df.loc[game_df['starting batter']]
-        bat_df.position = "B" + bat_df.battingOrder.astype(str)
-        bat_df.index = bat_df.position
-        pitch_df = game_df.loc[game_df['starting pitcher']]
-        pitch_df.position = "P"
-        pitch_df.index = pitch_df.position
-        gameDate = datetime.strptime(game_df.gameDate.values[0], '%Y-%m-%d')
+for league in ["NFL", "NBA", "MLB", "NHL"]:
 
-        homeStats = pitch_df.loc[pitch_df['home'],
-                                 stats['pitcher']].to_dict("index")
-        homeStats.update(
-            bat_df.loc[bat_df['home'], stats['batter']].to_dict("index"))
+    stats = tracked_stats[league]
+    log = gamelogs[league]
+    log_str = log_strings[league]
 
-        awayStats = pitch_df.loc[~pitch_df['home'],
-                                 stats['pitcher']].to_dict("index")
-        awayStats.update(
-            bat_df.loc[~bat_df['home'], stats['batter']].to_dict("index"))
+    filepath = pkg_resources.files(data) / f"{league}_corr_data.csv"
+    if os.path.isfile(filepath) and datetime.fromtimestamp(os.path.getmtime(filepath)) > datetime.today() - timedelta(days=27):
+        matrix = pd.read_csv(filepath, index_col=0)
+    else:
 
-        matrix = pd.concat([matrix, pd.json_normalize(
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})], ignore_index=True)
-        matrix = pd.concat([matrix, pd.json_normalize(
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})], ignore_index=True)
+        games = log.gamelog[log_str["game"]].unique()
+        matrix = []
 
-    matrix.to_csv((pkg_resources.files(data) / "mlb_corr_data.csv"))
+        for gameId in tqdm(games):
+            game_df = log.gamelog.loc[log.gamelog[log_str["game"]] == gameId]
+            gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
+            if gameDate < datetime.today()-timedelta(days=400):
+                continue
+            home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
+            away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
 
-matrix = matrix.dropna(axis=1, thresh=int(len(matrix)/2))
-matrix = matrix.reindex(sorted(matrix.columns), axis=1)
-c = matrix.corr().unstack()
-c = c.iloc[:int(len(c)/2)]
-l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-c = c.loc[[x != y and "OPP" not in x for x, y in zip(l1, l2)]]
-c = c.reindex(c.abs().sort_values(ascending=False).index)
+            if league == "MLB":
+                bat_df = game_df.loc[game_df['starting batter']]
+                bat_df.position = "B" + bat_df.battingOrder.astype(str)
+                bat_df.index = bat_df.position
+                pitch_df = game_df.loc[game_df['starting pitcher']]
+                pitch_df.position = "P"
+                pitch_df.index = pitch_df.position
+                game_df = pd.concat([bat_df, pitch_df])
+            else:
+                log.profile_market(log_str["usage"], date=gameDate)
+                usage = pd.DataFrame(
+                    log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
+                usage.reset_index(inplace=True)
+                game_df = game_df.merge(usage)
+                ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
+                    [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
+                game_df[log_str["position"]] = game_df[log_str["position"]] + \
+                    ranks.astype(str)
+                game_df.index = game_df[log_str["position"]]
 
-c = c.loc[~(c.index.get_level_values(0).str.startswith("P") &
-            c.index.get_level_values(1).str.startswith("_OPP_B"))]
-c = c.loc[~(c.index.get_level_values(0).str.startswith("B") &
-            c.index.get_level_values(1).str.startswith("_OPP_P"))]
+            homeStats = {}
+            awayStats = {}
+            for position in stats.keys():
+                homeStats.update(game_df.loc[game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+                    position), stats[position]].to_dict('index'))
+                awayStats.update(game_df.loc[~game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+                    position), stats[position]].to_dict('index'))
 
-c.to_csv((pkg_resources.files(data) / "MLB_corr.csv"))
+            matrix.append({"TEAM": home_team} |
+                homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
+            matrix.append({"TEAM": away_team} |
+                awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
+
+        matrix = pd.json_normalize(matrix)
+        matrix.to_csv(filepath)
+
+    big_c = {}
+    matrix.fillna(0, inplace=True)
+    for team in matrix.TEAM.unique():
+        team_matrix = matrix.loc[matrix.TEAM == team].drop(columns="TEAM")
+        team_matrix = team_matrix.loc[:,((team_matrix==0).mean() < .5)]
+        team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
+        c = team_matrix.corr(min_periods=int(len(team_matrix)*.75)).unstack()
+        # c = c.iloc[:int(len(c)/2)]
+        # l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+        # l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
+        # c = c.loc[[x != y for x, y in zip(l1, l2)]]
+        c = c.reindex(c.abs().sort_values(ascending=False).index).dropna()
+        c = c.loc[(c>0.001) & (c<1)]
+        big_c.update({team: c})
+
+    pd.concat(big_c).to_csv((pkg_resources.files(data) / f"{league}_corr.csv"))

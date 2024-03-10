@@ -30,6 +30,7 @@ import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations
 
+pd.set_option('mode.chained_assignment', None)
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
@@ -503,20 +504,19 @@ def find_correlation(offers, stats, platform, parlays):
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
             continue
-        c = pd.read_csv(pkg_resources.files(data) / (league+"_corr.csv"))
-        c.columns = ["market", "correlation", "R"]
-        team_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
-            ".")[1]] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
-        opp_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
-            ".")[1]] if "_OPP_" in x.correlation else ["", ""], axis=1).to_list()
-        mask1 = [pair not in banned[platform][league]['team'] and pair[::-1]
-                 not in banned[platform][league]['team'] for pair in team_pairs]
-        mask2 = [pair not in banned[platform][league]['opponent'] and pair[::-1]
-                 not in banned[platform][league]['opponent'] for pair in opp_pairs]
-        c = c.loc[[a and b for a, b in zip(mask1, mask2)]]
-        c_map = c
-        c_map.index = c.correlation
-        c_map = c_map.groupby('market').apply(lambda x: x)['R'].to_dict()
+        c = pd.read_csv(pkg_resources.files(data) / (f"{league}_corr.csv"), index_col = [0,1,2])
+        c.rename_axis(["team", "market", "correlation"], inplace=True)
+        c.columns = ["R"]
+        # team_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
+        #     ".")[1]] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
+        # opp_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
+        #     ".")[1]] if "_OPP_" in x.correlation else ["", ""], axis=1).to_list()
+        # mask1 = [pair not in banned[platform][league]['team'] and pair[::-1]
+        #          not in banned[platform][league]['team'] for pair in team_pairs]
+        # mask2 = [pair not in banned[platform][league]['opponent'] and pair[::-1]
+        #          not in banned[platform][league]['opponent'] for pair in opp_pairs]
+
+        # c = c.loc[[a and b for a, b in zip(mask1, mask2)]]
         stat_data = stats.get(league)
         banned_team_markets = banned[platform][league]['team']
         banned_opponent_markets = banned[platform][league]['opponent']
@@ -610,6 +610,11 @@ def find_correlation(offers, stats, platform, parlays):
             checked_teams.append(opp)
             if platform != "Underdog":
                 game_df.loc[:, 'Boost'] = 1
+
+            team_c = c.loc[team]
+            opp_c = c.loc[opp]
+            opp_c.index = pd.MultiIndex.from_tuples([(f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", "")) for x, y in opp_c.index], names=("market", "correlation"))
+            c_map = team_c["R"].add(opp_c["R"], fill_value=0).div(2).to_dict()
 
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
                 game_df['Boost']
@@ -705,9 +710,6 @@ def find_correlation(offers, stats, platform, parlays):
                         rho_matrix = np.zeros((len(cm1), len(cm2)))
                         for xi, x in enumerate(cm1):
                             for yi, y in enumerate(cm2):
-                                if ("_OPP_" in x) and ("_OPP_" in y):
-                                    x = x.replace("_OPP_", "")
-                                    y = y.replace("_OPP_", "")
                                 rho = c_map.get((x, y), c_map.get((y, x), 0))
                                 if b1[xi] != b2[yi]:
                                     rho = -rho
@@ -808,26 +810,32 @@ def find_correlation(offers, stats, platform, parlays):
                     parlay_df = pd.concat([parlay_df, pd.DataFrame(best_parlays).sort_values("Model EV", ascending=False).drop_duplicates()])
 
             # Find best pairs, TODO add corr modifier
+            c_map = pd.Series(c_map)
             for i, offer in game_df.iterrows():
-                R_map = pd.Series(0, index=c.index.drop_duplicates())
+                R_map = pd.Series(0, index=c_map.index.levels[1])
                 for market in offer.cMarket:
-                    if "_OPP_" in market:
-                        mask = (c.market == market.replace("_OPP_", ""))
-                        add = c.loc[mask].drop_duplicates(
-                            "correlation").set_index("correlation")["R"]
-                        add.index = [ind.replace(
-                            "_OPP_", "") if "_OPP_" in ind else "_OPP_" + ind for ind in add.index]
-                        R_map += add
-                    else:
-                        mask = (c.market == market)
-                        R_map += c.loc[mask].drop_duplicates(
-                            "correlation").set_index("correlation")["R"]
+                    if market in c_map:
+                        R_map = R_map.add(c_map.loc[market], fill_value=0)
 
-                pos = R_map.loc[R_map > 0.1]
-                neg = R_map.loc[R_map < -0.1]
+                for market in offer.cMarket:
+                    position, stat = tuple(market.split("."))
+                    R_map.loc[[x.split(".")[0] == position for x in R_map.index]] = 0
+                    if "_OPP_" in position:
+                        if len(banned_team_markets) > 0:
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_team_markets if stat in sublist])) & R_map.index.str.contains("_OPP_")] = 0
+                        if len(banned_opponent_markets) > 0:
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_opponent_markets if stat in sublist])) & ~R_map.index.str.contains("_OPP_")] = 0
+                    else:
+                        if len(banned_opponent_markets) > 0:
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_opponent_markets if stat in sublist])) & ~R_map.index.str.contains("_OPP_")] = 0
+                        if len(banned_team_markets) > 0:
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_team_markets if stat in sublist])) & R_map.index.str.contains("_OPP_")] = 0
+
+                pos = R_map.loc[R_map > 0.1].index.to_list()
+                neg = R_map.loc[R_map < -0.1].index.to_list()
                 R_map = R_map.abs().to_dict()
-                corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos.index.to_list() if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet) & (game_df.Books*game_df.Boost > .5)],
-                                  game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg.index.to_list() if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet) & (game_df.Books*game_df.Boost > .5)]])
+                corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet) & (game_df.Books*game_df.Boost > .5)],
+                                  game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet) & (game_df.Books*game_df.Boost > .5)]])
                 corr["R"] = corr.cMarket.apply(lambda x: R_map[x[0]])
                 corr["P"] = (np.exp(corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])
                                                       * corr["Model"]*(1-corr["Model"])))*offer["Model"]*corr["Model"])*3
@@ -839,7 +847,7 @@ def find_correlation(offers, stats, platform, parlays):
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
-    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df.sort_values("Model EV", ascending=False).drop_duplicates()
+    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
 
 
 def save_data(df, book, gc):
@@ -866,34 +874,19 @@ def save_data(df, book, gc):
             wks.set_basic_filter()
 
             # Apply number formatting to the relevant columns
-            if book == "ParlayPlay" or book == "Underdog":
-                wks.format(
-                    "J:K", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
-                wks.format(
-                    "N:P", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
-                wks.update_cell(
-                    1, 18,
-                    "Last Updated: "
-                    + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
-                )
-            else:
-                wks.format(
-                    "I:J", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
-                wks.format(
-                    "M:O", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
-                wks.update_cell(
-                    1, 17,
-                    "Last Updated: "
-                    + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
-                )
+            wks.format(
+                "J:K", {"numberFormat": {
+                    "type": "PERCENT", "pattern": "0.00%"}}
+            )
+            wks.format(
+                "N:P", {"numberFormat": {
+                    "type": "PERCENT", "pattern": "0.00%"}}
+            )
+            wks.update_cell(
+                1, 18,
+                "Last Updated: "
+                + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
+            )
         except Exception:
             # Log the exception if there is an error writing the offers to the worksheet
             logger.exception(f"Error writing {book} offers")
@@ -1229,6 +1222,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
                     p = [0.5/o.get("Boost", 1)] * 2
+                    p = [0.5/(o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1/o.get("Boost_Under", 1)),
+                         0.5/(o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1/o.get("Boost_Over", 1))]
+                    p = p/np.sum(p)
+                    stats["Odds"] = p[1]
                 else:
                     p = [1-stats["Odds"], stats["Odds"]]
 
@@ -1246,14 +1243,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         low, params["loc"], params["scale"])
                     under = under - push/2
 
-            proba = [0.5/o.get("Boost", 1)] * 2
             if ("+" in o["Player"]) or ("vs." in o["Player"]):
                 probb = []
                 for stat in stats:
                     probb.append(filt.predict_proba([[2*(1-under)-1, 2*stat["Odds"]-1]])[0][1])
 
                 proba = np.mean(probb)
-                proba = [1- proba, proba]
+                proba = [1-proba, proba]
             else:
                 proba = filt.predict_proba([[2*(1-under)-1, 2*stats["Odds"]-1]])[0]
 
@@ -1305,15 +1301,19 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
             proba = p
 
-
-        if proba[1] > proba[0] or o.get("Boost", 1) > 1:
+        if proba[1]*o.get("Boost_Over", 1) > proba[0]*o.get("Boost_Under", 1) or o.get("Boost", 1) > 1:
+            o["Boost"] = o.get("Boost_Over", 1)
             o["Bet"] = "Over"
             o["Books"] = p[1]
             o["Model"] = proba[1]
         else:
+            o["Boost"] = o.get("Boost_Under", 1)
             o["Bet"] = "Under"
             o["Books"] = p[0]
             o["Model"] = proba[0]
+
+        o.pop("Boost_Over", None)
+        o.pop("Boost_Under", None)
 
         if "+" in o["Player"]:
             avg5 = np.sum([s["Avg5"] for s in stats])

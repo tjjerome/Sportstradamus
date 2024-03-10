@@ -889,6 +889,12 @@ def get_ud():
         if opponent == player["Team"]:
             opponent = game["Away"]
         market = o["over_under"]["appearance_stat"]["display_stat"]
+        boosts = [0, 0]
+        for option in o["options"]:
+            if option["choice"] == "higher":
+                boosts[0] = float(option["payout_multiplier"])
+            elif option["choice"] == "lower":
+                boosts[1] = float(option["payout_multiplier"])
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"],
@@ -897,7 +903,8 @@ def get_ud():
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
-            "Boost": float(o["options"][0]["payout_multiplier"]),
+            "Boost_Over": boosts[0],
+            "Boost_Under": boosts[1],
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
