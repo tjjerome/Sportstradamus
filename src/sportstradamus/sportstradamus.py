@@ -822,14 +822,14 @@ def find_correlation(offers, stats, platform, parlays):
                     R_map.loc[[x.split(".")[0] == position for x in R_map.index]] = 0
                     if "_OPP_" in position:
                         if len(banned_team_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_team_markets if stat in sublist])) & R_map.index.str.contains("_OPP_")] = 0
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat][0] for sublist in banned_team_markets if stat in sublist])) & R_map.index.str.contains("_OPP_")] = 0
                         if len(banned_opponent_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_opponent_markets if stat in sublist])) & ~R_map.index.str.contains("_OPP_")] = 0
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat][0] for sublist in banned_opponent_markets if stat in sublist])) & ~R_map.index.str.contains("_OPP_")] = 0
                     else:
                         if len(banned_opponent_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_opponent_markets if stat in sublist])) & ~R_map.index.str.contains("_OPP_")] = 0
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat][0] for sublist in banned_opponent_markets if stat in sublist])) & ~R_map.index.str.contains("_OPP_")] = 0
                         if len(banned_team_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat] for sublist in banned_team_markets if stat in sublist])) & R_map.index.str.contains("_OPP_")] = 0
+                            R_map.loc[R_map.index.str.contains("|".join([[x for x in sublist if x != stat][0] for sublist in banned_team_markets if stat in sublist])) & R_map.index.str.contains("_OPP_")] = 0
 
                 pos = R_map.loc[R_map > 0.1].index.to_list()
                 neg = R_map.loc[R_map < -0.1].index.to_list()
