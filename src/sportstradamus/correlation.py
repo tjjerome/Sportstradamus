@@ -451,7 +451,7 @@ gamelogs = {
     "MLB": mlb
 }
 
-for league in ["NFL", "NBA", "MLB", "NHL"]:
+for league in ["NHL", "NBA", "MLB", "NFL"]:
 
     stats = tracked_stats[league]
     log = gamelogs[league]
@@ -486,7 +486,7 @@ for league in ["NFL", "NBA", "MLB", "NHL"]:
                 usage = pd.DataFrame(
                     log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
                 usage.reset_index(inplace=True)
-                game_df = game_df.merge(usage)
+                game_df = game_df.merge(usage, how="left").fillna(0)
                 ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
                     [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
                 game_df[log_str["position"]] = game_df[log_str["position"]] + \
