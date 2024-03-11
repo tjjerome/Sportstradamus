@@ -8,7 +8,7 @@ from sportstradamus.books import (
     get_pp,
     get_ud,
 )
-from sportstradamus.helpers import archive, get_ev, get_active_sports, stat_cv
+from sportstradamus.helpers import archive, get_ev, get_active_sports, stat_cv, accel_asc
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -28,7 +28,7 @@ import os.path
 import datetime
 import importlib.resources as pkg_resources
 import warnings
-from itertools import combinations
+from itertools import combinations, permutations, product
 
 pd.set_option('mode.chained_assignment', None)
 
@@ -606,6 +606,9 @@ def find_correlation(offers, stats, platform, parlays):
                 split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
                     x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
             game_df = pd.concat([team_df, opp_df, split_df])
+            team_players = team_df.Player.unique()
+            opp_players = opp_df.Player.unique()
+            combo_players = split_df.Player.unique()
             checked_teams.append(team)
             checked_teams.append(opp)
             if platform != "Underdog":
@@ -627,17 +630,25 @@ def find_correlation(offers, stats, platform, parlays):
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                 n_candidates = 32-2*bet_size
-                idx = idx_base.groupby('Team').head(int(n_candidates/2)+2).head(n_candidates).sort_values(['Team', 'Player']).index
-                combos = combinations(
-                    game_df.loc[idx, ["Player", "Team", "cMarket", "Bet", "Model", "Books", "Boost", "Desc"]].to_dict('records'), bet_size)
+                idx = idx_base.groupby('Team').head(int(n_candidates/2)+2).head(n_candidates).sort_values(['Team', 'Player'])
+                team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
+                team_splits = set.union(*[set(permutations(x)) for x in team_splits])
+                combos = []
+                for split in team_splits:
+                    for i in combinations(team_players, split[0]):
+                        for j in combinations(opp_players, split[1]):
+                            for k in combinations(combo_players, split[2]):
+                                if len(k):
+                                    not_k = i+j
+                                    all_k = "".join(k)
+                                    if any([player in all_k for player in not_k]):
+                                        continue
+                                combos.extend(product(*[idx.loc[idx_base.Player == player].index for player in i+j+k]))
 
                 threshold = 1/payout_table[platform][bet_size-2]
 
-                for bet in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False, total=comb(len(idx), bet_size)):
-                    players = []
-                    markets = []
-                    unique_teams = set()
-                    unique_players = set()
+                for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
+                    bet = game_df.loc[list(bet_id)].to_dict('records')
 
                     p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
                     pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
@@ -645,38 +656,7 @@ def find_correlation(offers, stats, platform, parlays):
                     if p/threshold < np.exp(0.075*(bet_size-2)) or pb/threshold < .75:
                         continue
 
-                    for leg in bet:
-                        this_team = leg["Team"]
-                        player = leg["Player"]
-                        cMarket = leg["cMarket"]
-
-                        if "/" not in this_team:
-                            unique_teams.add(this_team)
-                        elif "vs." not in player:
-                            unique_teams.update(this_team.split("/"))
-                        else:
-                            unique_teams.add(this_team.split("/")[0] if leg["Bet"] == "Over" else this_team.split("/")[1])
-
-                        if "+" in player:
-                            these_players = player.split(" + ")
-                            unique_players.update(these_players)
-                            players.extend(these_players)
-                        elif "vs." in player:
-                            these_players = player.split(" vs. ")
-                            unique_players.update(these_players)
-                            players.extend(these_players)
-                        else:
-                            unique_players.add(player)
-                            players.append(player)
-
-                        if isinstance(cMarket, list):
-                            markets.extend(cMarket)
-                        else:
-                            markets.append(cMarket)
-
-                    if (len(unique_teams) != 2) or (len(unique_players) != len(players)):
-                        continue
-
+                    markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
                     team1_markets = [leg.split(".")[1]
                                      for leg in markets if "_OPP_" not in leg]
                     team2_markets = [leg.split(".")[1]
