@@ -521,7 +521,7 @@ for league in ["NHL", "NBA", "MLB", "NFL"]:
         # l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
         # c = c.loc[[x != y for x, y in zip(l1, l2)]]
         c = c.reindex(c.abs().sort_values(ascending=False).index).dropna()
-        c = c.loc[(c>0.001) & (c<1)]
+        c = c.loc[c>0.001]
         big_c.update({team: c})
 
     pd.concat(big_c).to_csv((pkg_resources.files(data) / f"{league}_corr.csv"))
