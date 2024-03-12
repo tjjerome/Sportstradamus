@@ -620,18 +620,17 @@ def find_correlation(offers, stats, platform, parlays):
             opp_c.index = pd.MultiIndex.from_tuples([(f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", "")) for x, y in opp_c.index], names=("market", "correlation"))
             c_map = team_c["R"].add(opp_c["R"], fill_value=0).div(2).to_dict()
 
+            game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
                 game_df['Boost']
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * \
                 game_df['Boost']
-            game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
 
             idx_base = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            idx = idx_base.groupby('Team').head(20).head(30).sort_values(['Team', 'Player'])
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                n_candidates = 32-2*bet_size
-                idx = idx_base.groupby('Team').head(int(n_candidates/2)+2).head(n_candidates).sort_values(['Team', 'Player'])
                 team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
@@ -644,15 +643,15 @@ def find_correlation(offers, stats, platform, parlays):
                                     all_k = "".join(k)
                                     if any([player in all_k for player in not_k]):
                                         continue
-                                combos.extend(product(*[idx.loc[idx_base.Player == player].index for player in i+j+k]))
+                                combos.extend(product(*[idx.loc[idx.Player == player].index for player in i+j+k]))
 
                 threshold = 1/payout_table[platform][bet_size-2]
 
                 for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
-                    bet = game_df.loc[list(bet_id)].to_dict('records')
+                    bet = game_df.loc[list(bet_id)].to_dict('records') # TODO Consider leveraging pandas to speed this up?
 
-                    p = np.product([leg["Model"]*leg["Boost"] for leg in bet])
-                    pb = np.product([leg["Books"]*leg["Boost"] for leg in bet])
+                    p = np.product([leg["Boosted Model"] for leg in bet])
+                    pb = np.product([leg["Boosted Books"] for leg in bet])
 
                     if p/threshold < np.exp(0.075*(bet_size-2)) or pb/threshold < .75:
                         continue
@@ -737,7 +736,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 4": "",
                             "Leg 5": "",
                             "Leg 6": "",
-                            "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
+                            # "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
                             "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
                             "Bet Size": bet_size
                         }
@@ -765,9 +764,9 @@ def find_correlation(offers, stats, platform, parlays):
                 rho_matrix += np.eye(len(df5))
                 df5["Family"] = fclusterdata(1-rho_matrix, 3, criterion='maxclust', method='ward')
                 parlay_df = pd.concat([parlay_df,
-                                       df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Bet Size", "Family"]),
+                                       df5.groupby("Family").head(1).drop(columns=["Markets", "Bet Size", "Family"]),
                                        df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
-                                        drop(columns=["Players", "Markets", "Bet Size", "Family"])]).\
+                                        drop(columns=["Markets", "Bet Size", "Family"])]).\
                                         sort_values("Model EV", ascending=False).drop_duplicates()
 
                 # player_set = set.union(*df5.Players.to_list())
