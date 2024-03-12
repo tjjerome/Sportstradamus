@@ -258,15 +258,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    # try:
-    #     pp_dict = get_pp(books)
-    #     pp_offers, pp5 = process_offers(
-    #         pp_dict, "PrizePicks", stats, parlays)
-    #     save_data(pp_offers, "PrizePicks", gc)
-    #     best5 = pd.concat([best5, pp5])
-    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    # except Exception as exc:
-    #     logger.exception("Failed to get PrizePicks")
+    try:
+        pp_dict = get_pp(books)
+        pp_offers, pp5 = process_offers(
+            pp_dict, "PrizePicks", stats, parlays)
+        save_data(pp_offers, "PrizePicks", gc)
+        best5 = pd.concat([best5, pp5])
+        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    except Exception as exc:
+        logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -560,6 +560,8 @@ def find_correlation(offers, stats, platform, parlays):
             combo_df.Position = combo_df.Player.apply(
                 lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
             league_df = pd.concat([league_df, combo_df])
+        elif platform == "Underdog" and league == "NHL":
+            continue
         else:
             continue
             # TODO MLB Combos
@@ -626,11 +628,11 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * \
                 game_df['Boost']
 
-            idx_base = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            idx_base = game_df.loc[game_df["Boosted Books"] > .495].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                idx = idx_base.groupby('Team').head(15).head(32-2*bet_size).sort_values(['Team', 'Player'])
+                idx = idx_base.groupby('Team').head(15).head(30-2*bet_size).sort_values(['Team', 'Player'])
                 team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
