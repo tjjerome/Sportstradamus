@@ -29,6 +29,7 @@ import datetime
 import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations, permutations, product
+from scipy.cluster.hierarchy import fclusterdata
 
 pd.set_option('mode.chained_assignment', None)
 
@@ -737,6 +738,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 5": "",
                             "Leg 6": "",
                             "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
+                            "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
                             "Bet Size": bet_size
                         }
                         for i in np.arange(bet_size):
@@ -747,48 +749,69 @@ def find_correlation(offers, stats, platform, parlays):
                 df5 = pd.DataFrame(best_bets)
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
-                player_set = set.union(*df5.Players.to_list())
-                best_parlays = []
-                best_fam = []
-                max_size = 6 if platform == "PrizePicks" else 5
-                for fam_size in tqdm(np.arange(2, max_size), desc="Filtering...", leave=False):
-                    families = []
-                    filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 1) & (df5["Bet Size"] >= fam_size)]
-                    if filtered_df.empty:
-                        continue
-                    for family in combinations(player_set, fam_size):
-                        mask = filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size
-                        family_val = filtered_df.loc[mask, "Model EV"].sum()
-                        family_boost = filtered_df.loc[mask, "Boost"].max()
-                        if family_val > 0:
-                            families.append((family, family_val, family_boost))
+                df5 = df5.groupby('Bet Size').head(50)
 
-                    families.sort(reverse=True, key=(lambda x: x[1]))
-                    added = 0
-                    for family, family_val, family_boost in families:
-                        if added == fam_size-2 and family_boost > 1.5:
-                            continue
-                        elif added == fam_size-1 and family_boost > 1.2:
-                            continue
-                        elif added >= fam_size:
-                            break
-                        if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
-                            added += 1
-                            best_fam.append(family)
+                rho_matrix = np.zeros([len(df5), len(df5)])
+                for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
+                    bet1 = df5.iloc[i]["Markets"]
+                    bet2 = df5.iloc[j]["Markets"]
+                    rho = []
+                    for leg1, leg2 in product(bet1, bet2):
+                        rho.append(c_map.get((leg1[0], leg2[0]), 0) * (1 if leg1[1]==leg2[1] else -1))
 
-                best_fam.sort(reverse=True, key=(lambda x: x[1]))
-                df5["Family"] = [[]]*len(df5)
-                for i, family in enumerate(best_fam):
-                    mask = (df5["Bet Size"] <= len(family) + 1) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
-                    df5.loc[mask, "Family"] = df5.loc[mask, "Family"].apply(lambda x: x+[i])
+                    rho_matrix[i, j] = np.mean(rho)
 
-                for i in np.arange(0, len(best_fam)):
-                    mask = df5["Family"].apply(lambda x: x[0]==i if len(x) else False)
-                    if mask.sum():
-                        best_parlays.append(df5.loc[mask].iloc[0].drop(["Players", "Bet Size", "Family"]))
+                rho_matrix += rho_matrix.T
+                rho_matrix += np.eye(len(df5))
+                df5["Family"] = fclusterdata(1-rho_matrix, 3, criterion='maxclust', method='ward')
+                parlay_df = pd.concat([parlay_df,
+                                       df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Bet Size", "Family"]),
+                                       df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
+                                        drop(columns=["Players", "Markets", "Bet Size", "Family"])]).\
+                                        sort_values("Model EV", ascending=False).drop_duplicates()
 
-                if len(best_parlays):
-                    parlay_df = pd.concat([parlay_df, pd.DataFrame(best_parlays).sort_values("Model EV", ascending=False).drop_duplicates()])
+                # player_set = set.union(*df5.Players.to_list())
+                # best_parlays = []
+                # best_fam = []
+                # max_size = 6 if platform == "PrizePicks" else 5
+                # for fam_size in tqdm(np.arange(2, max_size), desc="Filtering...", leave=False):
+                #     families = []
+                #     filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 1) & (df5["Bet Size"] >= fam_size)]
+                #     if filtered_df.empty:
+                #         continue
+                #     for family in combinations(player_set, fam_size):
+                #         mask = filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size
+                #         family_val = filtered_df.loc[mask, "Model EV"].sum()
+                #         family_boost = filtered_df.loc[mask, "Boost"].max()
+                #         if family_val > 0:
+                #             families.append((family, family_val, family_boost))
+
+                #     families.sort(reverse=True, key=(lambda x: x[1]))
+                #     added = 0
+                #     for family, family_val, family_boost in families:
+                #         if added == fam_size-2 and family_boost > 1.5:
+                #             continue
+                #         elif added == fam_size-1 and family_boost > 1.2:
+                #             continue
+                #         elif added >= fam_size:
+                #             break
+                #         if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
+                #             added += 1
+                #             best_fam.append(family)
+
+                # best_fam.sort(reverse=True, key=(lambda x: x[1]))
+                # df5["Family"] = [[]]*len(df5)
+                # for i, family in enumerate(best_fam):
+                #     mask = (df5["Bet Size"] <= len(family) + 1) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
+                #     df5.loc[mask, "Family"] = df5.loc[mask, "Family"].apply(lambda x: x+[i])
+
+                # for i in np.arange(0, len(best_fam)):
+                #     mask = df5["Family"].apply(lambda x: x[0]==i if len(x) else False)
+                #     if mask.sum():
+                #         best_parlays.append(df5.loc[mask].iloc[0].drop(["Players", "Markets", "Bet Size", "Family"]))
+
+                # if len(best_parlays):
+                #     parlay_df = pd.concat([parlay_df, pd.DataFrame(best_parlays).sort_values("Model EV", ascending=False).drop_duplicates()])
 
             # Find best pairs, TODO add corr modifier
             c_map = pd.Series(c_map)
