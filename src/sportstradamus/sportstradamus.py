@@ -627,10 +627,10 @@ def find_correlation(offers, stats, platform, parlays):
                 game_df['Boost']
 
             idx_base = game_df.loc[game_df["Boosted Books"] > .49].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
-            idx = idx_base.groupby('Team').head(20).head(30).sort_values(['Team', 'Player'])
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
+                idx = idx_base.groupby('Team').head(15).head(32-2*bet_size).sort_values(['Team', 'Player'])
                 team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
