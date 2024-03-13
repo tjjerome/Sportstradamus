@@ -30,6 +30,7 @@ import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations, permutations, product
 from scipy.cluster.hierarchy import fclusterdata
+from operator import itemgetter
 
 pd.set_option('mode.chained_assignment', None)
 
@@ -235,20 +236,27 @@ def main(progress, books, parlays):
     """
     Start gathering player stats
     """
-    nba = StatsNBA()
-    nba.load()
-    nba.update()
-    mlb = StatsMLB()
-    mlb.load()
-    mlb.update()
-    nhl = StatsNHL()
-    nhl.load()
-    nhl.update()
-    nfl = StatsNFL()
-    nfl.load()
-    nfl.update()
-
-    stats = {"NBA": nba, "MLB": mlb, "NHL": nhl, "NFL": nfl}
+    stats = {}
+    if "NBA" in sports:
+        nba = StatsNBA()
+        nba.load()
+        nba.update()
+        stats.update({"NBA": nba})
+    if "MLB" in sports:
+        mlb = StatsMLB()
+        mlb.load()
+        mlb.update()
+        stats.update({"MLB": mlb})
+    if "NHL" in sports:
+        nhl = StatsNHL()
+        nhl.load()
+        nhl.update()
+        stats.update({"NHL": nhl})
+    if "NFL" in sports:
+        nfl = StatsNFL()
+        nfl.load()
+        nfl.update()
+        stats.update({"NFL": nfl})
 
     untapped_markets = []
 
@@ -522,7 +530,9 @@ def find_correlation(offers, stats, platform, parlays):
         banned_team_markets = banned[platform][league]['team']
         banned_opponent_markets = banned[platform][league]['opponent']
 
-        if league != "MLB":
+        if platform == "Underdog" and league == "NHL":
+            continue
+        elif league != "MLB":
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
                 x, int) else [positions[league][i] for i in x])
             combo_df = league_df.loc[league_df.Position.apply(
@@ -560,8 +570,6 @@ def find_correlation(offers, stats, platform, parlays):
             combo_df.Position = combo_df.Player.apply(
                 lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
             league_df = pd.concat([league_df, combo_df])
-        elif platform == "Underdog" and league == "NHL":
-            continue
         else:
             continue
             # TODO MLB Combos
@@ -629,6 +637,7 @@ def find_correlation(offers, stats, platform, parlays):
                 game_df['Boost']
 
             idx_base = game_df.loc[game_df["Boosted Books"] > .495].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            bet_df = idx_base.to_dict('index')
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
@@ -637,20 +646,24 @@ def find_correlation(offers, stats, platform, parlays):
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
                 for split in team_splits:
+                    if split[2] > len(combo_players):
+                        continue
+                    
                     for i in combinations(team_players, split[0]):
                         for j in combinations(opp_players, split[1]):
-                            for k in combinations(combo_players, split[2]):
-                                if len(k):
-                                    not_k = i+j
-                                    all_k = "".join(k)
-                                    if any([player in all_k for player in not_k]):
+                            selected_players = i + j
+                            if split[2] != 0:
+                                for k in combinations(combo_players, split[2]):
+                                    if any(player in "".join(k) for player in selected_players):
                                         continue
-                                combos.extend(product(*[idx.loc[idx.Player == player].index for player in i+j+k]))
+                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
+                            else:
+                                combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
 
                 threshold = 1/payout_table[platform][bet_size-2]
 
                 for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
-                    bet = game_df.loc[list(bet_id)].to_dict('records') # TODO Consider leveraging pandas to speed this up?
+                    bet = itemgetter(*bet_id)(bet_df)
 
                     p = np.product([leg["Boosted Model"] for leg in bet])
                     pb = np.product([leg["Boosted Books"] for leg in bet])
