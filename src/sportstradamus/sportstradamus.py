@@ -777,7 +777,7 @@ def find_correlation(offers, stats, platform, parlays):
 
                 rho_matrix += rho_matrix.T
                 rho_matrix += np.eye(len(df5))
-                df5["Family"] = fclusterdata(1-rho_matrix, 3, criterion='maxclust', method='ward')
+                df5["Family"] = fclusterdata(1-rho_matrix, 3, criterion='maxclust', method='ward', metric='correlation')
                 parlay_df = pd.concat([parlay_df,
                                        df5.groupby("Family").head(1).drop(columns=["Markets", "Bet Size", "Family"]),
                                        df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\

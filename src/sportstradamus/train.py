@@ -33,7 +33,7 @@ import json
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=True, help="Regenerate model reports")
+@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
 def meditate(force, stats, league):
@@ -371,14 +371,14 @@ def meditate(force, stats, league):
                     "num_threads": ["none", [8]],
                     # "force_col_wise": ["none", [True]],
                     "max_depth": ["int", {"low": 4, "high": 32, "log": False}],
-                    # "max_bin": ["none", [max_hist_bin]],
+                    "max_bin": ["none", [63]],
                     "hist_pool_size": ["none", [9*1024]],
-                    "num_leaves": ["int", {"low": 23, "high": 2047, "log": False}],
+                    "num_leaves": ["int", {"low": 23, "high": 1024, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 20, "high": 500, "log": False}],
+                    "min_child_samples": ["int", {"low": 30, "high": 100, "log": False}],
                     "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
-                    "learning_rate": ["float", {"low": 1e-3, "high": 0.4, "log": True}],
+                    "learning_rate": ["float", {"low": 0.001, "high": 0.1, "log": True}],
                     "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
@@ -394,11 +394,11 @@ def meditate(force, stats, league):
                 model.start_values = sv
                 opt_param = model.hyper_opt(params,
                                             dtrain,
-                                            num_boost_round=500,
+                                            num_boost_round=999,
                                             nfold=4,
                                             early_stopping_rounds=50,
-                                            max_minutes=60,
-                                            n_trials=250,
+                                            max_minutes=30,
+                                            n_trials=100,
                                             silence=True,
                                             )
                 opt_params = opt_param.copy()
