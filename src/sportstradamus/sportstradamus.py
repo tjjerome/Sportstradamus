@@ -604,10 +604,10 @@ def find_correlation(offers, stats, platform, parlays):
         for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
             if team in checked_teams:
                 continue
-            team_df = league_df.loc[league_df["Team"] == team]
+            team_df = league_df.loc[(league_df["Team"] == team) | (league_df["Team"] == f"{team}/{team}")]
             opp = team_df.Opponent.mode().values[0]
             date = team_df.Date.mode().values[0]
-            opp_df = league_df.loc[league_df["Team"] == opp]
+            opp_df = league_df.loc[(league_df["Team"] == opp) | (league_df["Team"] == f"{opp}/{opp}")]
             if not opp_df.empty:
                 opp_df["cMarket"] = opp_df.apply(
                     lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
@@ -656,7 +656,7 @@ def find_correlation(offers, stats, platform, parlays):
                                 for k in combinations(combo_players, split[2]):
                                     if any(player in "".join(k) for player in selected_players):
                                         continue
-                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
+                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players+k]))
                             else:
                                 combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
 
@@ -665,11 +665,8 @@ def find_correlation(offers, stats, platform, parlays):
                 for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                     bet = itemgetter(*bet_id)(bet_df)
 
-                    try:
-                        p = np.product([leg["Boosted Model"] for leg in bet])
-                        pb = np.product([leg["Boosted Books"] for leg in bet])
-                    except:
-                        continue
+                    p = np.product([leg["Boosted Model"] for leg in bet])
+                    pb = np.product([leg["Boosted Books"] for leg in bet])
 
                     if p/threshold < np.exp(0.075*(bet_size-2)) or pb/threshold < .75:
                         continue
