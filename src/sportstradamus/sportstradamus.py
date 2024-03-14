@@ -751,7 +751,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 4": "",
                             "Leg 5": "",
                             "Leg 6": "",
-                            # "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
+                            "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
                             "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
                             "Bet Size": bet_size
                         }
@@ -763,7 +763,7 @@ def find_correlation(offers, stats, platform, parlays):
                 df5 = pd.DataFrame(best_bets)
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
-                # df5.drop_duplicates('Players', inplace=True)
+                df5.drop_duplicates('Players', inplace=True)
                 df5 = df5.groupby('Bet Size').head(100)
 
                 rho_matrix = np.zeros([len(df5), len(df5)])
@@ -886,10 +886,12 @@ def save_data(df, book, gc):
         with open((pkg_resources.files(data) / f"results/{book}.csv"), "w") as outfile:
             df.to_csv(outfile)
         try:
+            df["Books"] = df["Books"]*df["Boost"]
+            df["Model"] = df["Model"]*df["Boost"]
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
-            wks.update([df.columns.values.tolist()] + df.values.tolist())
+            wks.update([df.columns.values.tolist()] + df.loc[df.Books > .53].values.tolist() + df.loc[df.Books <= .53].values.tolist())
             wks.set_basic_filter()
 
             # Apply number formatting to the relevant columns
