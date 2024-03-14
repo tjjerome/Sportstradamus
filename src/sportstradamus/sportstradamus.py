@@ -29,7 +29,7 @@ import datetime
 import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations, permutations, product
-from scipy.cluster.hierarchy import fclusterdata
+from scipy.cluster.hierarchy import fcluster, linkage
 from operator import itemgetter
 
 pd.set_option('mode.chained_assignment', None)
@@ -665,8 +665,11 @@ def find_correlation(offers, stats, platform, parlays):
                 for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                     bet = itemgetter(*bet_id)(bet_df)
 
-                    p = np.product([leg["Boosted Model"] for leg in bet])
-                    pb = np.product([leg["Boosted Books"] for leg in bet])
+                    try:
+                        p = np.product([leg["Boosted Model"] for leg in bet])
+                        pb = np.product([leg["Boosted Books"] for leg in bet])
+                    except:
+                        continue
 
                     if p/threshold < np.exp(0.075*(bet_size-2)) or pb/threshold < .75:
                         continue
@@ -763,7 +766,7 @@ def find_correlation(offers, stats, platform, parlays):
                 df5 = pd.DataFrame(best_bets)
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
-                df5 = df5.groupby('Bet Size').head(50)
+                df5 = df5.groupby('Bet Size').head(100)
 
                 rho_matrix = np.zeros([len(df5), len(df5)])
                 for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
@@ -775,9 +778,9 @@ def find_correlation(offers, stats, platform, parlays):
 
                     rho_matrix[i, j] = np.mean(rho)
 
-                rho_matrix += rho_matrix.T
-                rho_matrix += np.eye(len(df5))
-                df5["Family"] = fclusterdata(1-rho_matrix, 3, criterion='maxclust', method='ward', metric='correlation')
+                X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
+                Z = linkage(X, 'ward')
+                df5["Family"] = fcluster(Z, 3, criterion='maxclust')
                 parlay_df = pd.concat([parlay_df,
                                        df5.groupby("Family").head(1).drop(columns=["Markets", "Bet Size", "Family"]),
                                        df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
