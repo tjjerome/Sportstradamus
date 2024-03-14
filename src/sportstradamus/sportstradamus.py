@@ -762,7 +762,7 @@ def find_correlation(offers, stats, platform, parlays):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            if len(best_bets) > 0:
+            if len(best_bets) > 1:
                 df5 = pd.DataFrame(best_bets)
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
