@@ -763,7 +763,7 @@ def find_correlation(offers, stats, platform, parlays):
                 df5 = pd.DataFrame(best_bets)
                 
                 df5.sort_values('Model EV', ascending=False, inplace=True)
-                df5.drop_duplicates('Players', inplace=True)
+                # df5.drop_duplicates('Players', inplace=True)
                 df5 = df5.groupby('Bet Size').head(100)
 
                 rho_matrix = np.zeros([len(df5), len(df5)])
@@ -778,7 +778,7 @@ def find_correlation(offers, stats, platform, parlays):
 
                 X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
                 Z = linkage(X, 'ward')
-                df5["Family"] = fcluster(Z, 5, criterion='maxclust')
+                df5["Family"] = fcluster(Z, 3, criterion='maxclust')
                 parlay_df = pd.concat([parlay_df,
                                        df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Bet Size", "Family"]),
                                        df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
