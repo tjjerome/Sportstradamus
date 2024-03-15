@@ -735,7 +735,7 @@ def find_correlation(offers, stats, platform, parlays):
                         continue
                     
                     units = np.round((p - 1)/(payout - 1)/0.05*2)/2
-                    if units > 0 and pb > 1:
+                    if units > 0 and pb > 1.01:
                         parlay = {
                             "Game": "/".join(sorted([team, opp])),
                             "Date": date,
