@@ -888,10 +888,12 @@ def save_data(df, book, gc):
         try:
             df["Books"] = df["Books"]*df["Boost"]
             df["Model"] = df["Model"]*df["Boost"]
+            df.sort_values("Model", ascending=False, inplace=True)
+            mask = (df.Books > .54) & (df.Model > .58)
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
-            wks.update([df.columns.values.tolist()] + df.loc[df.Books > .53].values.tolist() + df.loc[df.Books <= .53].values.tolist())
+            wks.update([df.columns.values.tolist()] + df.loc[mask].values.tolist() + df.loc[~mask].values.tolist())
             wks.set_basic_filter()
 
             # Apply number formatting to the relevant columns
