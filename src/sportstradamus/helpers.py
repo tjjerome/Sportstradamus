@@ -3,6 +3,7 @@ import requests
 import json
 import pickle
 import os
+import re
 import random
 import unicodedata
 import datetime
@@ -34,6 +35,9 @@ with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
 
 with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
     stat_cv = json.load(infile)
+
+with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
+    books = json.load(infile)
 
 with open((pkg_resources.files(data) / "goalies.csv"), "r") as infile:
     nhl_goalies = pd.read_csv(infile)
@@ -204,16 +208,18 @@ def remove_accents(input_str):
     """
     nfkd_form = unicodedata.normalize("NFKD", input_str)
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    out_str = out_str.replace("’", "'")
+    out_str = re.sub("[\(\[].*?[\)\]]", "", out_str).strip()
     if "+" in out_str:
-        names = out_str.split("+")
+        names = out_str.replace(".","").split("+")
         out_str = " + ".join([name_map.get(n.strip(), n.strip())
                              for n in names])
     elif "vs." in out_str:
         names = out_str.split("vs.")
         out_str = " vs. ".join(
-            [name_map.get(n.strip(), n.strip()) for n in names])
+            [name_map.get(n.replace(".","").strip(), n.replace(".","").strip()) for n in names])
     else:
-        out_str = name_map.get(out_str, out_str)
+        out_str = name_map.get(out_str.replace(".",""), out_str.replace(".",""))
     return out_str
 
 

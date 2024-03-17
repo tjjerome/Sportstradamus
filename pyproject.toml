@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Sportstradamus"
-version = "3.6.1"
+version = "3.7.0"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
@@ -32,7 +32,7 @@ torch = {url = "https://download.pytorch.org/whl/cpu/torch-2.1.2-cp311-cp311-man
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"
-get-money = "sportstradamus.moneylines:get_moneylines"
+confer = "sportstradamus.moneylines:confer"
 meditate = "sportstradamus.train:meditate"
 reflect = "sportstradamus.analyze_parlay_hist:reflect"
 
