@@ -378,5 +378,62 @@
         "powerPlayPoints": "Total Power Play Points",
         "longest reception": "Longest Reception",
         "longest completion": "Longest Passing Completion"
+    },
+    "Odds API": {
+        "NFL": {
+            "player_pass_tds": "passing tds",
+            "player_anytime_td": "tds",
+            "player_pass_interceptions": "interceptions",
+            "player_pass_yds": "passing yards",
+            "player_pass_completions": "completions",
+            "player_pass_attempts": "attempts",
+            "player_reception_yds": "receiving yards",
+            "player_receptions": "receptions",
+            "player_rush_yds": "rushing yards",
+            "player_rush_attempts": "carries"
+        },
+        "NBA": {
+            "player_points": "PTS",
+            "player_rebounds": "REB",
+            "player_assists": "AST",
+            "player_threes": "FG3M",
+            "player_blocks": "BLK",
+            "player_steals": "STL",
+            "player_blocks_steals": "BLST",
+            "player_turnovers": "TOV",
+            "player_points_rebounds_assists": "PRA",
+            "player_points_rebounds": "PR",
+            "player_points_assists": "PA",
+            "player_rebounds_assists": "RA"
+        },
+        "MLB": {
+            "batter_home_runs": "home runs",
+            "batter_hits": "hits",
+            "batter_total_bases": "total bases",
+            "batter_rbis": "rbi",
+            "batter_runs_scored": "runs",
+            "batter_hits_runs_rbis": "hits+runs+rbi",
+            "batter_singles": "singles",
+            "batter_doubles": "doubles",
+            "batter_triples": "triples",
+            "batter_walks": "walks",
+            "batter_strikeouts": "batter strikeouts",
+            "batter_stolen_bases": "stolen bases",
+            "pitcher_strikeouts": "pitcher strikeouts",
+            "pitcher_record_a_win": "pitcher win",
+            "pitcher_hits_allowed": "hits allowed",
+            "pitcher_walks": "walks allowed",
+            "pitcher_earned_runs": "runs allowed",
+            "pitcher_outs": "pitching outs"
+        },
+        "NHL": {
+            "player_points": "points",
+            "player_power_play_points": "powerPlayPoints",
+            "player_assists": "assists",
+            "player_blocked_shots": "blocked",
+            "player_shots_on_goal": "shots",
+            "player_total_saves": "saves",
+            "player_goal_scorer_anytime": "goals"
+        }
     }
 }

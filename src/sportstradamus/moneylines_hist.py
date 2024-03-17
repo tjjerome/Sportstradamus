@@ -1,86 +1,42 @@
 from sportstradamus.helpers import scraper, no_vig_odds, abbreviations, remove_accents, Archive
+from sportstradamus.moneylines import get_moneylines, get_props
 import pickle
+import json
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, tzinfo
+import pytz
 import importlib.resources as pkg_resources
-from sportstradamus import data
+from sportstradamus import data, creds
 from itertools import cycle
 
-filepath = pkg_resources.files(data) / "archive.dat"
-with open(filepath, "rb") as infile:
-    archive = pickle.load(infile)
+archive = Archive("All")
 
-apikey = "2d1d69177847c97238489e7332968625"
+# Load prop markets
+filepath = pkg_resources.files(data) / "stat_map.json"
+with open(filepath, "r") as infile:
+    stat_map = json.load(infile)
 
-sport = "americanfootball_nfl"
-league = "NFL"
+filepath = pkg_resources.files(creds) / "keys.json"
+with open(filepath, "r") as infile:
+    keys = json.load(infile)
+    apikey = keys["odds_api"]
+    apikey_plus = keys["odds_api_plus"]
 
-Date = datetime.strptime("2020-09-05T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+Date = datetime(2023, 9, 10, 9)
+Date = pytz.timezone("America/Chicago").localize(Date)
 
-while Date < datetime.strptime("2021-02-03T17:00:00Z", "%Y-%m-%dT%H:%M:%SZ"):
-    # for date in ['2020-10-13', '2020-12-19', '2021-12-26', '2022-01-02', '2022-11-20',
-    #              '2022-12-25', '2023-01-01', '2023-01-08', '2023-09-07', '2023-09-10',
-    #              '2023-09-11', '2023-09-14']:
-    date = Date.strftime("%Y-%m-%dT%H:%M:%SZ")
-    print(date)
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals,spreads&date={date}&apiKey={apikey}"
-    res = scraper.get(url)["data"]
+sport="NFL"
+key="americanfootball_nfl"
 
-    for game in res:
-        gameDate = datetime.strptime(
-            game["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
-        gameDate = (gameDate - timedelta(hours=5)).strftime("%Y-%m-%d")
+while Date.astimezone(pytz.utc).date() < datetime(2024, 2, 12).date():
+    if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
+        Date = Date + timedelta(days=1)
+        continue
 
-        if "League" in game["home_team"]:
-            continue
-        homeTeam = abbreviations[league][remove_accents(game["home_team"])]
-        awayTeam = abbreviations[league][remove_accents(game["away_team"])]
+    print(Date)
 
-        moneyline = []
-        totals = []
-        spread = []
-        for book in game["bookmakers"]:
-            for market in book["markets"]:
-                if market["key"] == "h2h" and market["outcomes"][0].get("price"):
-                    odds = [o["price"] for o in market["outcomes"]]
-                    odds = no_vig_odds(odds[0], odds[1])
-                    if market["outcomes"][0]["name"] == game["home_team"]:
-                        moneyline.append(odds[0])
-                    else:
-                        moneyline.append(odds[1])
-                elif market["key"] == "totals" and market["outcomes"][0].get("point"):
-                    totals.append(market["outcomes"][0]["point"])
-                elif market["key"] == "spreads" and market["outcomes"][0].get("point"):
-                    if market["outcomes"][0]["name"] == game["home_team"]:
-                        spread.append(market["outcomes"][0]["point"])
-                    else:
-                        spread.append(market["outcomes"][1]["point"])
-
-        moneyline = np.mean(moneyline)
-        totals = np.mean(totals)
-        spread = np.mean(spread)
-
-        if not league in archive:
-            archive[league] = {}
-
-        if not "Moneyline" in archive[league]:
-            archive[league]["Moneyline"] = {}
-        if not "Totals" in archive[league]:
-            archive[league]["Totals"] = {}
-
-        if not gameDate in archive[league]["Moneyline"]:
-            archive[league]["Moneyline"][gameDate] = {}
-        if not gameDate in archive[league]["Totals"]:
-            archive[league]["Totals"][gameDate] = {}
-
-        archive[league]["Moneyline"][gameDate][awayTeam] = 1 - moneyline
-        archive[league]["Moneyline"][gameDate][homeTeam] = moneyline
-
-        archive[league]["Totals"][gameDate][awayTeam] = (totals+spread)/2
-        archive[league]["Totals"][gameDate][homeTeam] = (totals-spread)/2
+    archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
 
     Date = Date + timedelta(days=1)
 
-filepath = pkg_resources.files(data) / "archive.dat"
-with open(filepath, "wb") as outfile:
-    pickle.dump(archive, outfile, -1)
+archive.write()
