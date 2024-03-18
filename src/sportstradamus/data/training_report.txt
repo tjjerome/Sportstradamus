@@ -142,6 +142,12 @@
  0.584622   0.608200 -0.141807    0.015037     0.021612  0.080597 -0.077914      0.027651
  0.585528   0.613724 -0.141662    0.017449     0.024819  0.080597 -0.077914      0.025979
 
+======================================== NBA FG3A ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.637512   0.687861 -0.066666    0.057263     0.076821  0.119882 -0.005175      0.042296
+ 0.637502   0.687649 -0.066778    0.058275     0.077617  0.119882 -0.005175      0.041594
+
 ======================================== NBA FG3M ========================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap

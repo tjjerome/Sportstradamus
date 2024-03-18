@@ -11,6 +11,7 @@ from sportstradamus import creds, data
 from tqdm import tqdm
 from operator import itemgetter
 from itertools import groupby
+from time import sleep
 
 def confer():
 
@@ -24,11 +25,11 @@ def confer():
     archive = get_moneylines(archive, keys["odds_api"])
     
     # Load prop markets
-    # filepath = pkg_resources.files(data) / "stat_map.json"
-    # with open(filepath, "r") as infile:
-    #     stat_map = json.load(infile)
+    filepath = pkg_resources.files(data) / "stat_map.json"
+    with open(filepath, "r") as infile:
+        stat_map = json.load(infile)
 
-    # archive = get_props(archive, keys["odds_api_plus"], stat_map["Odds API"])
+    archive = get_props(archive, keys["odds_api_plus"], stat_map["Odds API"])
     archive.write()
 
 
@@ -42,10 +43,12 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
     url = f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}"
     res = requests.get(url)
 
+    historical = date.date() != datetime.today().date()
+
     if sport == "All":
-        if date.date() != datetime.today().date():
+        if historical:
             logger.warning("All sports only supported if date is today")
-            return
+            return archive
         # Get available sports from the API
         res = requests.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}")
         if res.status_code != 200:
@@ -53,32 +56,41 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
 
         res = res.json()
 
-        url = "https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets=h2h,totals,spreads&apiKey={apikey}"
-        dayDelta = 6
         # Filter sports
         sports = [
             (s["key"], s["title"])
             for s in res
             if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
         ]
-        params = {"apikey": apikey}
     elif key is None:
         logger.warning("Key needed for sports other than All")
-        return
+        return archive
     else:
+        sports = [(key, sport)]
+
+    if historical:
         url = "https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets=h2h,totals,spreads&date={date}&apiKey={apikey}"
         dayDelta = 1
-        sports = [(key, sport)]
         params = {"apikey": apikey, "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    else:
+        url = "https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets=h2h,totals,spreads&apiKey={apikey}"
+        dayDelta = 6
+        params = {"apikey": apikey}
 
     # Retrieve odds data for each sport
     for sport, league in sports:
         params.update({"sport": sport})
         res = requests.get(url.format(**params))
+        if res.status_code == 429:
+            sleep(1)
+            res = requests.get(url.format(**params))
         if res.status_code != 200:
             continue
 
-        res = res.json()
+        if historical:
+            res = res.json()['data']
+        else:
+            res = res.json()
 
         # Process odds data for each game
         for game in tqdm(res, desc=f"Getting {league} Data", unit="game"):
@@ -142,8 +154,10 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     Process the data and store it in the archive file.
     """
 
+    historical = date.date() != datetime.today().date()
+
     if sport == "All":
-        if date.date() != datetime.today().date():
+        if historical:
             logger.warning("All sports only supported if date is today")
             return archive
         # Get available sports from the API
@@ -152,28 +166,31 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             return archive
 
         res = res.json()
-        url = "https://api.the-odds-api.com/v4/sports/{sport}/events/{eventId}/odds?apiKey={apikey}&regions={regions}&markets={markets}"
-        event_url = "https://api.the-odds-api.com/v4/sports/{sport}/events?apiKey={apikey}"
-        dayDelta = 6
         # Filter sports
         sports = [
             (s["key"], s["title"])
             for s in res
             if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
         ]
-        params = {"apikey": apikey}
     elif key is None:
         logger.warning("Key needed for sports other than All")
         return
     else:
+        sports = [(key, sport)]
+
+    if historical:
         url = "https://api.the-odds-api.com/v4/historical/sports/{sport}/events/{eventId}/odds?apiKey={apikey}&regions=us&markets={markets}&date={date}"
         event_url = "https://api.the-odds-api.com/v4/historical/sports/{sport}/events?date={date}&apiKey={apikey}"
         dayDelta = 1
-        sports = [(key, sport)]
         params = {
             "apikey": apikey, 
             "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             }
+    else:
+        url = "https://api.the-odds-api.com/v4/sports/{sport}/events/{eventId}/odds?apiKey={apikey}&regions=us&markets={markets}"
+        event_url = "https://api.the-odds-api.com/v4/sports/{sport}/events?apiKey={apikey}"
+        dayDelta = 6
+        params = {"apikey": apikey}
 
     # Retrieve odds data for each sport
     for sport, league in sports:
@@ -183,10 +200,16 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             # "markets": ",".join(list(props[league].keys())[:2])
             })
         events = requests.get(event_url.format(**params))
+        if events.status_code == 429:
+            sleep(1)
+            events = requests.get(event_url.format(**params))
         if events.status_code != 200:
             continue
 
-        events = events.json()['data']
+        if historical:
+            events = events.json()['data']
+        else:
+            events = events.json()
 
         for event in events:
             gameDate = datetime.fromisoformat(event['commence_time']).astimezone(pytz.timezone("America/Chicago"))
@@ -195,10 +218,19 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             gameDate = gameDate.strftime("%Y-%m-%d")
             params.update({"eventId": event['id']})
             res = requests.get(url.format(**params))
-            if res.status_code != 200:
+            if res.status_code == 429:
+                sleep(1)
+                res = requests.get(url.format(**params))
+            if res.status_code == 404:
+                return archive
+            elif res.status_code != 200:
                 continue
 
-            game = res.json()['data']
+            if historical:
+                game = res.json()['data']
+            else:
+                game = res.json()
+
             odds = {}
 
             # Extract prop data from bookmakers and markets
@@ -216,7 +248,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                     
                     for player, lines in groupby(outcomes, itemgetter('description')):
                         player = remove_accents(player)
-                        odds[market_name].setdefault(player, {"EV": np.empty(len(books))*np.nan, "Lines":[]})
+                        odds[market_name].setdefault(player, {"EV": {}, "Lines":[]})
                         lines = list(lines)
                         if len(lines) > 2:
                             ev = []
@@ -228,7 +260,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                                 else:
                                     prices = [x['price'] for x in prices]
                                 price = no_vig_odds(*prices)
-                                ev.append(get_ev(line, price[1], stat_cv[league][market_name]))
+                                ev.append(get_ev(line, price[1], stat_cv[league].get(market_name,1)))
 
                             ev = np.mean(ev)
 
@@ -236,9 +268,9 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                             line = lines[0]['point'] if 'point' in lines[0] else 0.5
                             odds[market_name][player]["Lines"].append(line)
                             price = no_vig_odds(*[x['price'] for x in lines])
-                            ev = get_ev(line, price[1], stat_cv[league][market_name])
+                            ev = get_ev(line, price[1], stat_cv[league].get(market_name,1))
 
-                        odds[market_name][player]["EV"][book_pos] = ev
+                        odds[market_name][player]["EV"][book['key']] = ev
 
 
             # Update archive data with the processed odds
@@ -246,12 +278,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                 archive[league].setdefault(market, {})
                 archive[league][market].setdefault(gameDate, {})
                 for player in odds[market].keys():
-                    archive[league][market][gameDate].setdefault(player, {"EV": np.empty(len(books))*np.nan, "Lines": []})
-                    for i, v in enumerate(odds[market][player]["EV"]):
-                        if np.isnan(v):
-                            continue
-
-                        archive[league][market][gameDate][player]["EV"][i] = v
+                    archive[league][market][gameDate].setdefault(player, {"EV": {}, "Lines": []})
+                    archive[league][market][gameDate][player]["EV"].update(odds[market][player]["EV"])
 
                     line = np.median(odds[market][player]['Lines'])
                     if line not in archive[league][market][gameDate][player]["Lines"]:

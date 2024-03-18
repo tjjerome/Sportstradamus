@@ -492,7 +492,7 @@ class StatsNBA(Stats):
         self.teamlog.loc[self.teamlog['OPP']
                          == 'SA', 'OPP'] = "SAS"
 
-        self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+        # self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
@@ -852,7 +852,7 @@ class StatsNBA(Stats):
 
         try:
             ev = archive["NBA"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", [None] * 4)
+                date, {}).get(player, {}).get("EV", {})
             moneyline = archive["NBA"]["Moneyline"].get(
                 date, {}).get(team, 0.5)
             total = archive["NBA"]["Totals"].get(date, {}).get(team, 112)
@@ -866,7 +866,7 @@ class StatsNBA(Stats):
         if np.isnan(total):
             total = 112
 
-        ev = np.array(ev, dtype=np.float64)
+        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
@@ -874,8 +874,8 @@ class StatsNBA(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     data = archive["NBA"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
@@ -890,8 +890,8 @@ class StatsNBA(Stats):
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     data = archive["NBA"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
@@ -1625,7 +1625,7 @@ class StatsMLB(Stats):
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
 
-        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
@@ -2010,7 +2010,7 @@ class StatsMLB(Stats):
                     self.pitcherProfile.columns)
 
             ev = archive["MLB"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", [None] * 4)
+                date, {}).get(player, {}).get("EV", {})
             moneyline = archive["MLB"]["Moneyline"].get(
                 date, {}).get(team, 0.5)
             total = archive["MLB"]["Totals"].get(date, {}).get(team, 4.5)
@@ -2024,7 +2024,7 @@ class StatsMLB(Stats):
         if np.isnan(total):
             total = 4.5
 
-        ev = np.array(ev, dtype=np.float64)
+        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
@@ -2032,8 +2032,8 @@ class StatsMLB(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     data = archive["MLB"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
@@ -2051,8 +2051,8 @@ class StatsMLB(Stats):
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     data = archive["MLB"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
@@ -2563,7 +2563,7 @@ class StatsNFL(Stats):
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
 
-        self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
+        # self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -3238,7 +3238,7 @@ class StatsNFL(Stats):
 
         try:
             ev = archive["NFL"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", [None] * 4)
+                date, {}).get(player, {}).get("EV", {})
             moneyline = archive["NFL"]["Moneyline"].get(
                 date, {}).get(team, 0.5)
             total = archive["NFL"]["Totals"].get(date, {}).get(team, 22.5)
@@ -3252,7 +3252,7 @@ class StatsNFL(Stats):
         if np.isnan(total):
             total = 22.5
 
-        ev = np.array(ev, dtype=np.float64)
+        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
@@ -3260,8 +3260,8 @@ class StatsNFL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     data = archive["NFL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
@@ -3279,8 +3279,8 @@ class StatsNFL(Stats):
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     data = archive["NFL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
@@ -3758,7 +3758,7 @@ class StatsNHL(Stats):
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
-        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
@@ -4171,7 +4171,7 @@ class StatsNHL(Stats):
                                                                           self.goalie_stats]
 
             ev = archive["NHL"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", [None] * 4)
+                date, {}).get(player, {}).get("EV", {})
             moneyline = archive["NHL"]["Moneyline"].get(
                 date, {}).get(team, 0.5)
             total = archive["NHL"]["Totals"].get(
@@ -4186,7 +4186,7 @@ class StatsNHL(Stats):
         if np.isnan(total):
             total = 3
 
-        ev = np.array(ev, dtype=np.float64)
+        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
         ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
@@ -4194,8 +4194,8 @@ class StatsNHL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     data = archive["NHL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv)
@@ -4215,8 +4215,8 @@ class StatsNHL(Stats):
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     data = archive["NHL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": [None]*4})
-                    v = np.nanmean(np.array(data["EV"], dtype=float))
+                        date, {}).get(player, {"Lines": [], "EV": {}})
+                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
                     if np.isnan(v):
                         if len(data["Lines"]) > 0:
                             ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
