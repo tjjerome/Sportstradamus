@@ -45,13 +45,6 @@
         "Meeting 4"
     ],
     "MLB_pitcher-strikeouts": [],
-    "MLB_pitches-thrown": [
-        "Odds",
-        "Meeting 1",
-        "Meeting 2",
-        "PF OBP"
-    ],
-    "MLB_pitching-outs": [],
     "MLB_rbi": [
         "Line",
         "Meeting 1"
@@ -67,14 +60,8 @@
     "MLB_stolen-bases": [
         "Odds",
         "Line",
-        "Avg10",
         "AvgYr",
-        "AvgH2H",
-        "Meeting 1",
-        "Meeting 2",
-        "Meeting 3",
-        "Meeting 5",
-        "Game 1"
+        "Meeting 1"
     ],
     "MLB_total-bases": [],
     "MLB_walks-allowed": [
@@ -89,27 +76,6 @@
         "Odds",
         "Line"
     ],
-    "NBA_AST": [
-        "IQR10",
-        "Home",
-        "Meeting 4",
-        "Game 1",
-        "Player PCT_FG3A",
-        "Player DREB_48 short",
-        "Player FTR growth",
-        "Player DREB_48 growth",
-        "Team BLKA",
-        "Team FTR",
-        "Team OPP_PCT_FGA_3PT",
-        "Team OPP_PCT_UAST_3PM",
-        "Defense PCT_PTS_2PT",
-        "Defense PCT_PTS_FT",
-        "Defense PCT_UAST_2PM",
-        "Defense OPP_FG3_PCT",
-        "Defense OPP_PCT_PTS_2PT",
-        "Defense OPP_OFF_RATING",
-        "Defense OPP_DEF_RATING"
-    ],
     "NBA_BLK": [
         "Team OPP_OFF_RATING",
         "Team OPP_DEF_RATING",
@@ -123,22 +89,7 @@
         "Player AST_PCT growth",
         "Team OPP_REB_PCT"
     ],
-    "NBA_DREB": [
-        "Odds",
-        "Home"
-    ],
-    "NBA_FG3A": [
-        "Odds",
-        "Meeting 2"
-    ],
     "NBA_FG3M": [],
-    "NBA_FGA": [
-        "Odds"
-    ],
-    "NBA_FGM": [
-        "Odds",
-        "Meeting 3"
-    ],
     "NBA_FTM": [
         "Odds",
         "Home",
@@ -253,32 +204,6 @@
         "Defense PIE",
         "Defense OPP_DEF_RATING"
     ],
-    "NBA_RA": [
-        "Player BLKA_48",
-        "Player BLKA_48 short",
-        "Team PCT_FGA_3PT",
-        "Team PCT_PTS_3PT",
-        "Team REB_PCT",
-        "Team TM_TOV_PCT",
-        "Defense PCT_PTS_2PT_MR",
-        "Defense PCT_AST_3PM",
-        "Defense OPP_PCT_AST_FGM",
-        "Defense OPP_DREB_PCT"
-    ],
-    "NBA_REB": [
-        "Game 4",
-        "Player FTR",
-        "Player PCT_FGA",
-        "Player FG3A_48",
-        "Team OPP_OFF_RATING",
-        "Defense home",
-        "Defense PCT_UAST_2PM",
-        "Defense PCT_UAST_3PM",
-        "Defense OPP_PCT_AST_2PM",
-        "Defense OPP_OFF_RATING",
-        "Defense OPP_DEF_RATING",
-        "Defense OPP_PIE"
-    ],
     "NBA_STL": [
         "Home"
     ],
@@ -313,34 +238,6 @@
         "Defense OPP_PCT_AST_FGM",
         "Defense OPP_DEF_RATING"
     ],
-    "NFL_attempts": [
-        "Odds",
-        "IQRH2H",
-        "MeanH2H",
-        "TrendH2H",
-        "Home",
-        "Position",
-        "Meeting 1",
-        "Meeting 2",
-        "Meeting 3",
-        "Meeting 5",
-        "Game 1",
-        "Game 2",
-        "Player passer adot growth",
-        "Team pass_rate",
-        "Team exp_per_rush",
-        "Team yards_per_pass",
-        "Defense z",
-        "Defense first_read_success_rate_allowed",
-        "Defense epa_allowed_per_blitz"
-    ],
-    "NFL_carries": [
-        "Home",
-        "Meeting 2",
-        "Meeting 5",
-        "Defense first_read_success_rate_allowed",
-        "Defense epa_allowed_per_blitz"
-    ],
     "NFL_completion-percentage": [
         "Odds",
         "Line",
@@ -355,27 +252,6 @@
         "Defense totals gain",
         "Defense epa_allowed_per_pass",
         "Defense redzone_epa_allowed"
-    ],
-    "NFL_completions": [
-        "Odds",
-        "IQRH2H",
-        "DaysOff",
-        "Home",
-        "Position",
-        "Meeting 1",
-        "Meeting 2",
-        "Meeting 4",
-        "Meeting 5",
-        "Game 3",
-        "Game 5",
-        "Player completion percentage over expected",
-        "Team first_read_success_rate",
-        "Team epa_per_blitz",
-        "Team time_per_play",
-        "Defense first_read_success_rate_allowed",
-        "Defense blitz_rate",
-        "Defense epa_allowed_per_blitz",
-        "Defense time_of_possession"
     ],
     "NFL_fantasy-points-prizepicks": [
         "Meeting 1",
@@ -416,13 +292,27 @@
         "Player rushing yards over expected growth"
     ],
     "NFL_fumbles-lost": [
+        "DVPOA",
         "Odds",
         "Line",
+        "Avg5",
+        "Avg10",
+        "AvgYr",
         "AvgH2H",
+        "IQR10",
+        "IQRYr",
         "IQRH2H",
+        "Mean5",
         "MeanH2H",
+        "STD10",
+        "Trend5",
         "TrendH2H",
+        "GamesPlayed",
+        "DaysIntoSeason",
         "DaysOff",
+        "Moneyline",
+        "Total",
+        "Home",
         "Position",
         "Meeting 1",
         "Meeting 2",
@@ -432,15 +322,83 @@
         "Game 1",
         "Game 2",
         "Game 3",
+        "Game 4",
         "Game 5",
+        "Player completion percentage over expected",
+        "Player passer adot",
+        "Player receiver drops",
+        "Player snap pct",
+        "Player rushing yards over expected",
+        "Player yards per carry",
+        "Player air yards share",
+        "Player wopr",
+        "Player yards per target",
         "Player yac over expected",
-        "Player separation created",
         "Player first read targets per route run",
+        "Player yards per route run",
+        "Player average depth of target",
+        "Player first read target share",
+        "Player drop rate",
+        "Player longest reception",
+        "Player completion percentage over expected short",
+        "Player completion percentage short",
+        "Player passer adot differential short",
+        "Player time to throw short",
+        "Player snap pct short",
+        "Player rushing yards over expected short",
+        "Player rushing success rate short",
+        "Player redzone carry share short",
         "Player broken tackles short",
+        "Player target share short",
+        "Player yards per target short",
+        "Player yac over expected short",
         "Player first read targets per route run short",
+        "Player route participation short",
+        "Player midfield tprr short",
+        "Player receiver cp over expected short",
         "Player first read target share short",
+        "Player drop rate short",
+        "Player longest reception short",
+        "Player completion percentage over expected growth",
+        "Player passer rating growth",
+        "Player passer adot growth",
+        "Player passer adot differential growth",
+        "Player aggressiveness growth",
+        "Player pass yards per attempt growth",
+        "Player midfield target rate growth",
+        "Player longest completion growth",
+        "Player rushing yards over expected growth",
+        "Player yards per carry growth",
+        "Player breakaway yards growth",
+        "Player broken tackles growth",
+        "Player longest rush growth",
+        "Player air yards share growth",
+        "Player wopr growth",
+        "Player yards per target growth",
+        "Player yac over expected growth",
         "Player separation created growth",
-        "Player first read targets per route run growth"
+        "Player targets per route run growth",
+        "Player first read targets per route run growth",
+        "Player yards per route run growth",
+        "Player midfield tprr growth",
+        "Player average depth of target growth",
+        "Player first read target share growth",
+        "Player redzone target share growth",
+        "Player drop rate growth",
+        "Player longest reception growth",
+        "Team redzone_success_rate",
+        "Team first_read_success_rate",
+        "Team first_read_epa",
+        "Team expected_yards_per_rush",
+        "Team epa_per_blitz",
+        "Team plays_per_game",
+        "Team time_of_possession",
+        "Defense pass_rate_over_expected_against",
+        "Defense completion_percentage_allowed",
+        "Defense blitz_rate",
+        "Defense epa_allowed_per_blitz",
+        "Defense time_of_possession",
+        "Defense time_per_play"
     ],
     "NFL_interceptions": [
         "DVPOA",
@@ -508,46 +466,6 @@
         "Player longest rush growth",
         "Defense first_read_epa_allowed",
         "Defense epa_allowed_per_blitz"
-    ],
-    "NFL_passing-first-downs": [
-        "Odds",
-        "Avg5",
-        "Avg10",
-        "AvgYr",
-        "AvgH2H",
-        "IQRH2H",
-        "Trend3",
-        "TrendH2H",
-        "DaysOff",
-        "Home",
-        "Position",
-        "Meeting 1",
-        "Meeting 2",
-        "Meeting 3",
-        "Meeting 5",
-        "Game 1",
-        "Game 4",
-        "Player passer rating",
-        "Player pass yards per attempt",
-        "Player completion percentage over expected short",
-        "Player passer rating short",
-        "Player completion percentage over expected growth",
-        "Player receiver drops growth",
-        "Team rush_success_rate",
-        "Team first_read_success_rate",
-        "Team first_read_epa",
-        "Team yards_per_rush",
-        "Team yards_per_pass",
-        "Team expected_yards_per_rush",
-        "Team epa_per_blitz",
-        "Team time_of_possession",
-        "Defense totals gain",
-        "Defense pass_rate_against",
-        "Defense first_read_success_rate_allowed",
-        "Defense first_read_epa_allowed",
-        "Defense blitz_rate",
-        "Defense epa_allowed_per_blitz",
-        "Defense plays_per_game"
     ],
     "NFL_passing-tds": [
         "Odds",
@@ -654,9 +572,16 @@
         "Odds",
         "Line",
         "AvgH2H",
+        "TrendH2H",
         "Meeting 1",
+        "Meeting 2",
         "Meeting 4",
-        "Meeting 5"
+        "Meeting 5",
+        "Game 1",
+        "Player first read targets per route run",
+        "Player first read target share",
+        "Player first read target share short",
+        "Defense epa_allowed_per_blitz"
     ],
     "NFL_receiving-yards": [
         "Odds",
@@ -726,9 +651,6 @@
         "Defense blitz_rate",
         "Defense epa_allowed_per_blitz"
     ],
-    "NFL_targets": [
-        "Odds"
-    ],
     "NFL_tds": [
         "Line",
         "Avg5",
@@ -781,21 +703,19 @@
         "Game 4"
     ],
     "NHL_goalsAgainst": [
-        "Avg5",
-        "Meeting 1",
+        "IQR10",
+        "Meeting 2",
         "Meeting 3",
         "Meeting 5",
-        "Game 5",
-        "Player Freeze"
+        "Game 2",
+        "Game 5"
     ],
     "NHL_hits": [],
     "NHL_points": [],
     "NHL_powerPlayPoints": [
-        "Line"
-    ],
-    "NHL_saves": [
-        "Odds",
-        "Meeting 1"
+        "Line",
+        "Avg5",
+        "AvgYr"
     ],
     "NHL_shots": [],
     "NHL_skater-fantasy-points-underdog": [

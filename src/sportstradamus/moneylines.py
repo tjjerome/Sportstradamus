@@ -246,8 +246,13 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                 archive[league].setdefault(market, {})
                 archive[league][market].setdefault(gameDate, {})
                 for player in odds[market].keys():
-                    archive[league][market][gameDate].setdefault(player, {"Lines": []})
-                    archive[league][market][gameDate][player]["EV"] = odds[market][player]["EV"]
+                    archive[league][market][gameDate].setdefault(player, {"EV": np.empty(len(books))*np.nan, "Lines": []})
+                    for i, v in enumerate(odds[market][player]["EV"]):
+                        if np.isnan(v):
+                            continue
+
+                        archive[league][market][gameDate][player]["EV"][i] = v
+
                     line = np.median(odds[market][player]['Lines'])
                     if line not in archive[league][market][gameDate][player]["Lines"]:
                         archive[league][market][gameDate][player]["Lines"].append(line)
