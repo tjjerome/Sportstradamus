@@ -12,7 +12,7 @@
         "pitches thrown": 0.13384418123152625,
         "pitching outs": 0.21330052253689466,
         "runs allowed": 1,
-        "stolen bases": 3.3231519304130233,
+        "stolen bases": 1,
         "total bases": 1,
         "walks": 1,
         "walks allowed": 1,
@@ -57,7 +57,7 @@
         "passing yards": 0.2766566791951792,
         "qb tds": 1,
         "qb yards": 0.2628779833263619,
-        "receiving tds": 1.4834862111298392,
+        "receiving tds": 1,
         "receiving yards": 0.8370541717781734,
         "receptions": 1,
         "rushing tds": 1,
@@ -71,17 +71,17 @@
         "sacks taken": 1,
         "passing first downs": 0.2840152399113485,
         "first downs": 1,
-        "fumbles lost": 2.2072173504663577,
+        "fumbles lost": 1,
         "completion percentage": 0.1165417437202936
     },
     "NHL": {
         "assists": 1,
         "blocked": 1,
-        "faceOffWins": 1.1380624353588775,
+        "faceOffWins": 1,
         "fantasy points prizepicks": 0.8275517865269297,
         "goalie fantasy points underdog": 0.4947810153108584,
         "goals": 1,
-        "goalsAgainst": 0.5241642520531248,
+        "goalsAgainst": 1,
         "hits": 1,
         "points": 1,
         "saves": 0.2851203521605306,
@@ -89,6 +89,6 @@
         "skater fantasy points underdog": 0.6859971366423298,
         "sogBS": 1,
         "timeOnIce": 0.2491672929763853,
-        "powerPlayPoints": 2.097661712287741
+        "powerPlayPoints": 1
     }
 }
