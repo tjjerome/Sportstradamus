@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
-from sportstradamus.helpers import get_ev
+from sportstradamus.helpers import get_ev, stat_cv
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -358,13 +358,16 @@ def meditate(force, stats, league):
             if need_model:
                 y_train_labels = np.ravel(y_train.to_numpy())
 
-                lgblss_dist_class = DistributionClass()
-                candidate_distributions = [Gaussian, Poisson]
+                if stat_cv[league].get(market, 0) == 1:
+                    dist = "Poisson"
+                else:
+                    lgblss_dist_class = DistributionClass()
+                    candidate_distributions = [Gaussian, Poisson]
 
-                dist = lgblss_dist_class.dist_select(
-                    target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
+                    dist = lgblss_dist_class.dist_select(
+                        target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
 
-                dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
+                    dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
                 
                 params = {
                     "feature_pre_filter": ["none", [False]],
