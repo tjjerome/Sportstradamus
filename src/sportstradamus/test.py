@@ -56,15 +56,16 @@ NBA = StatsNBA()
 NBA.load()
 NBA.update()
 NBA.profile_market("fantasy points prizepicks")
-NBA.get_stats({
-    "Player": "Alperen Sengun",
-    "Market": "fantasy points prizepicks",
-    "Line": 42.5,
-    "Date": datetime(2024, 2, 25).date(),
-    "Team": "HOU",
-    "Opponent": "OKC",
+stat=NBA.get_stats({
+    "Player": "Tyrese Maxey",
+    "Market": "PTS",
+    "Line": 24.5,
+    "Date": datetime(2024, 3, 18).date(),
+    "Team": "PHI",
+    "Opponent": "MIA",
     "League": "NBA"
 })
+pass
 # NBA.season = "2021-22"
 # NBA.season_start = datetime(2021, 10, 1).date()
 # NBA.update()

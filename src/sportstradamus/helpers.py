@@ -469,7 +469,7 @@ class Archive:
                 market = market.replace("underdog", "prizepicks")
 
             self.archive.setdefault(o["League"], {}).setdefault(market, {})
-            self.archive[o["League"]][market].setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": np.empty(len(books))*np.nan, "Lines": []})
+            self.archive[o["League"]][market].setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": {}, "Lines": []})
 
             if o["Line"] and float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
                 self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
