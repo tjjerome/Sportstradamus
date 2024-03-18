@@ -358,8 +358,10 @@ def meditate(force, stats, league):
             if need_model:
                 y_train_labels = np.ravel(y_train.to_numpy())
 
-                if stat_cv[league].get(market, 0) == 1:
+                if stat_cv[league].get(market) == 1:
                     dist = "Poisson"
+                elif stat_cv[league].get(market) is not None:
+                    dist = "Gaussian"
                 else:
                     lgblss_dist_class = DistributionClass()
                     candidate_distributions = [Gaussian, Poisson]

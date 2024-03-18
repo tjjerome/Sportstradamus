@@ -1,8 +1,8 @@
-from sportstradamus.helpers import Archive, merge_dict, get_ev, odds_to_prob, prob_to_odds
+from sportstradamus.helpers import Archive, merge_dict, get_ev, get_odds, odds_to_prob, prob_to_odds, remove_accents
 from sportstradamus.stats import StatsNBA
 from datetime import datetime
 from tqdm import tqdm
-from scipy.stats import norm
+from scipy.stats import norm, iqr
 import requests
 import importlib.resources as pkg_resources
 from sportstradamus import creds, data
@@ -13,8 +13,15 @@ import pickle
 with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
     stat_cv = json.load(f)
 
+with open(pkg_resources.files(data) / "old/stat_cv.json", "r") as f:
+    old_stat_cv = json.load(f)
+
+with open(pkg_resources.files(data) / "prop_books.json", "r") as f:
+    books = json.load(f)
+
 archive = Archive("All")
 
+book_pos = [5, 6, -1, 9]
 leagues = list(archive.archive.keys())
 for league in tqdm(leagues, unit="leagues", position=0):
     markets = list(archive[league].keys())
@@ -25,41 +32,23 @@ for league in tqdm(leagues, unit="leagues", position=0):
         cv = stat_cv.get(league, {}).get(market, 1)
         for date in tqdm(list(archive[league][market].keys()), desc=market, unit="Gamedays", position=2):
             for player in list(archive[league][market][date].keys()):
-                if len(archive[league][market][date][player]["EV"]) == 0:
-                    archive[league][market][date][player]["EV"] = [None]*4
-                # lines = list(archive[league][market][date][player].keys())
-                # EV = []
-                # if "Closing Lines" in archive[league][market][date][player]:
-                #     lines.remove("Closing Lines")
-                #     for i, book in enumerate(archive[league][market][date][player]["Closing Lines"]):
-                #         if book:
-                #             line = float(book["Line"])
-                #             if line not in lines:
-                #                 lines.insert(0, line)
-                #             ev = get_ev(line, odds_to_prob(
-                #                 int(book["Under"])), cv)
-                #             EV.append(ev)
-                #         else:
-                #             EV.append(None)
-                # else:
-                #     for line in lines:
-                #         books = archive[league][market][date][player][line]
-                #         for p in books:
-                #             if p:
-                #                 ev = get_ev(line, 1-p, cv)
-                #                 EV.append(ev)
-                #             else:
-                #                 EV.append(None)
+                player_name = remove_accents(player)
+                archive[league][market][date][player_name] = archive[league][market][date].pop(player)
+                ev = np.empty(len(books))*np.nan
+                for i, book_ev in enumerate(archive[league][market][date][player_name]["EV"]):
+                    if book_ev and book_pos[i]>=0:
+                        lines = archive[league][market][date][player_name]["Lines"]
+                        if len(lines) > 2:
+                            mu = np.median(lines)
+                            sig = iqr(lines)
+                            lines = [line for line in lines if mu - sig <= line <= mu + sig]
 
-            #     if len(lines) > 0:
-            #         archive[league][market][date][player] = {
-            #             "EV": EV,
-            #             "Lines": lines
-            #         }
-            #     else:
-            #         archive[league][market][date].pop(player)
+                        line = lines[-1]
+                        book_under = get_odds(line, book_ev, old_stat_cv[league].get(market, 1))
+                        book_ev = get_ev(line, book_under, stat_cv[league].get(market, 1))
+                        ev[book_pos[i]] = book_ev
 
-            # if len(archive[league][market][date]) == 0:
-            #     archive[league][market].pop(date)
+                archive[league][market][date][player_name]["EV"] = ev
+
 
 archive.write()

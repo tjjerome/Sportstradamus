@@ -492,6 +492,8 @@ class StatsNBA(Stats):
         self.teamlog.loc[self.teamlog['OPP']
                          == 'SA', 'OPP'] = "SAS"
 
+        self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
             pickle.dump({"players": self.players,
@@ -1623,6 +1625,8 @@ class StatsMLB(Stats):
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
 
+        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+
         # Write to file
         with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
             pickle.dump({"players": self.players,
@@ -2558,6 +2562,8 @@ class StatsNFL(Stats):
             lambda x: six_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= datetime.today().date())]
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
+
+        self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -3751,6 +3757,8 @@ class StatsNHL(Stats):
         self.teamlog = self.teamlog[pd.to_datetime(
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
+
+        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:

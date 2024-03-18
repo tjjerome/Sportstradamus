@@ -91,6 +91,8 @@
         "Runs": "runs",
         "Earned Runs": "runs",
         "Singles": "singles",
+        "Doubles": "doubles",
+        "Pitcher Wins": "pitcher win",
         "Stolen Bases": "stolen bases",
         "Batter Walks": "walks",
         "Hits": "hits",
@@ -134,7 +136,9 @@
         "Passing First Downs": "passing first downs",
         "First Downs": "first downs",
         "Fumbles Lost": "fumbles lost",
-        "Completion Percentage": "completion percentage"
+        "Completion Percentage": "completion percentage",
+        "Time on Ice": "timeOnIce",
+        "1st Inning Runs Allowed": "1st inning runs allowed"
     },
     "Thrive": {
         "GOLs + ASTs": "points",

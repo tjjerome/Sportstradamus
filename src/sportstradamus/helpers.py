@@ -208,18 +208,21 @@ def remove_accents(input_str):
     """
     nfkd_form = unicodedata.normalize("NFKD", input_str)
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    for substr in [".", " Jr", " Sr", " II", " III", " IV"]:
+        if substr in out_str:
+            out_str.replace(substr, "")
     out_str = out_str.replace("’", "'")
     out_str = re.sub("[\(\[].*?[\)\]]", "", out_str).strip()
     if "+" in out_str:
-        names = out_str.replace(".","").split("+")
+        names = out_str.split("+")
         out_str = " + ".join([name_map.get(n.strip(), n.strip())
                              for n in names])
-    elif "vs." in out_str:
-        names = out_str.split("vs.")
+    elif " vs " in out_str:
+        names = out_str.split(" vs ")
         out_str = " vs. ".join(
-            [name_map.get(n.replace(".","").strip(), n.replace(".","").strip()) for n in names])
+            [name_map.get(n.strip(), n.strip()) for n in names])
     else:
-        out_str = name_map.get(out_str.replace(".",""), out_str.replace(".",""))
+        out_str = name_map.get(out_str, out_str)
     return out_str
 
 
@@ -307,6 +310,14 @@ def get_ev(line, under, cv=1, force_gauss=False):
         line = float(line)
         return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
 
+def get_odds(line, ev, cv=1, force_gauss=False):
+    if cv == 1:
+        if force_gauss:
+            return norm.cdf(line, ev, ev)
+        else:
+            return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
+    else:
+        return norm.cdf(line, ev, ev*cv)
 
 def merge_dict(a, b, path=None):
     "merges b into a"
@@ -445,16 +456,23 @@ class Archive:
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]]["EV"] = evs
 
-    def add_books(self, offers, position, key):
-        key = {v: k for k, v in key.items()}
-        for offer in offers:
-            lines = [None]*4
-            lines[position] = offer
-            self.add(offer, lines, key)
-
     def add_dfs(self, offers, key):
-        for offer in offers:
-            self.add(offer, [None]*4, key)
+        for o in offers:
+            market = o["Market"].replace("H2H ", "")
+            market = key.get(market, market)
+            cv = stat_cv.get(market, 1)
+            if o["League"] == "NHL":
+                market_swap = {"AST": "assists",
+                            "PTS": "points", "BLK": "blocked"}
+                market = market_swap.get(market, market)
+            if o["League"] == "NBA":
+                market = market.replace("underdog", "prizepicks")
+
+            self.archive.setdefault(o["League"], {}).setdefault(market, {})
+            self.archive[o["League"]][market].setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": np.empty(len(books))*np.nan, "Lines": []})
+
+            if o["Line"] and float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
+                self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
 
     def write(self, overwrite=False):
         """
