@@ -31,7 +31,9 @@
         "Tampa Bay Rays": "TB",
         "Texas Rangers": "TEX",
         "Toronto Blue Jays": "TOR",
-        "Washington Nationals": "WAS"
+        "Washington Nationals": "WAS",
+        "American League": "AL",
+        "National League": "NL"
     },
     "NHL": {
         "Anaheim Ducks": "ANA",
