@@ -955,7 +955,7 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
         if "+" in o["Player"] or "vs." in o["Player"]:
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
-            teams = o["Team"].split("/")
+            teams = o["Team"].replace(" VS ", "/").split("/")
             teams = [i for i in teams if i]
             if len(teams) < len(players):
                 teams = teams*len(players)

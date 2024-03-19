@@ -55,14 +55,14 @@ import requests
 NBA = StatsNBA()
 NBA.load()
 NBA.update()
-NBA.profile_market("fantasy points prizepicks")
+NBA.profile_market("PTS")
 stat=NBA.get_stats({
-    "Player": "Tyrese Maxey",
+    "Player": "Herbert Jones",
     "Market": "PTS",
-    "Line": 24.5,
-    "Date": datetime(2024, 3, 18).date(),
-    "Team": "PHI",
-    "Opponent": "MIA",
+    "Line": 7.5,
+    "Date": datetime(2024, 3, 19).date(),
+    "Team": "BKN",
+    "Opponent": "NO",
     "League": "NBA"
 })
 pass
