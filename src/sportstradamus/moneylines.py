@@ -86,10 +86,6 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
     # Retrieve odds data for each sport
     for sport, league in sports:
         params.update({"sport": sport})
-        # if league == "MLB":
-        #     params.update({"markets": ",".join(markets+["totals_1st_1_innings", "spreads_1st_1_innings"])})
-        # else:
-        #     params.update({"markets": ",".join(markets)})
         res = requests.get(url.format(**params))
         if res.status_code == 429:
             sleep(1)
@@ -208,6 +204,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             "markets": ",".join(props[league].keys())
             # "markets": ",".join(list(props[league].keys())[:2])
             })
+        if league == "MLB":
+            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
@@ -241,14 +239,35 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                 game = res.json()
 
             odds = {}
+            totals = {}
+            spread_home = {}
+            spread_away = {}
 
             # Extract prop data from bookmakers and markets
             for book in game["bookmakers"]:
-                if book['key'] in books:
-                    book_pos = books.index(book['key'])
-                else:
-                    continue
                 for market in book["markets"]:
+                    if "totals" in market["key"]:
+                        spread_name = " ".join(market["key"].split("_")[1:])
+                        outcomes = sorted(market["outcomes"], key=itemgetter('name'))
+                        sub_odds = no_vig_odds(outcomes[0]['price'], outcomes[1]['price'])
+                        totals.setdefault(spread_name, {})
+                        totals[spread_name][book["key"]] = get_ev(outcomes[1]["point"], sub_odds[1])
+                        continue
+                    elif "spread" in market["key"]:
+                        spread_name = " ".join(market["key"].split("_")[1:])
+                        outcomes = sorted(market["outcomes"], key=itemgetter('point'))
+                        sub_odds = no_vig_odds(outcomes[0]['price'], outcomes[1]['price'])
+                        spread = get_ev(outcomes[1]['point'], sub_odds[1])
+                        spread_home.setdefault(spread_name, {})
+                        spread_home.setdefault(spread_name, {})
+                        if market["outcomes"][0]["name"] == game["home_team"]:
+                            spread_home[spread_name][book["key"]] = spread
+                            spread_away[spread_name][book["key"]] = -spread
+                        else:
+                            spread_home[spread_name][book["key"]] = -spread
+                            spread_away[spread_name][book["key"]] = spread
+                        continue
+
                     market_name = props[league].get(market["key"])
 
                     odds.setdefault(market_name, {})
@@ -259,6 +278,9 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         player = remove_accents(player)
                         odds[market_name].setdefault(player, {"EV": {}, "Lines":[]})
                         lines = list(lines)
+                        for line in lines:
+                            line.setdefault('point', 0.5)
+                            line['name'] = {"Yes":"Over", "No": "Under"}.get(line['name'], line['name'])
                         if len(lines) > 2:
                             ev = []
                             for line, prices in groupby(sorted(lines, key=itemgetter('point')), itemgetter('point')):
@@ -284,8 +306,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
 
             # Update archive data with the processed odds
             for market in odds.keys():
-                archive[league].setdefault(market, {})
-                archive[league][market].setdefault(gameDate, {})
+                archive[league].setdefault(market, {}).setdefault(gameDate, {})
                 for player in odds[market].keys():
                     archive[league][market][gameDate].setdefault(player, {"EV": {}, "Lines": []})
                     archive[league][market][gameDate][player]["EV"].update(odds[market][player]["EV"])
@@ -294,6 +315,11 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                     if line not in archive[league][market][gameDate][player]["Lines"]:
                         archive[league][market][gameDate][player]["Lines"].append(line)
 
+            for market in totals.keys():
+                archive[league].setdefault(market, {}).setdefault(gameDate, {})
+                
+                archive[league][market][gameDate][abbreviations[league][remove_accents(game["home_team"])]] = {k:(v+spread_home.get(k,0))/2 for k, v in totals[market].items()}
+                archive[league][market][gameDate][abbreviations[league][remove_accents(game["away_team"])]] = {k:(v+spread_away.get(k,0))/2 for k, v in totals[market].items()}
 
     return archive
 

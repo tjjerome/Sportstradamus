@@ -563,6 +563,13 @@ class Archive:
                                 self.archive[league][market].pop(date)
                         except:
                             self.archive[league][market].pop(date)
+                else:
+                    for date in list(self.archive[league][market].keys()):
+                        try:
+                            if datetime.datetime.strptime(date, "%Y-%m-%d") < (datetime.datetime.today() - datetime.timedelta(days=300)):
+                                self.archive[league][market].pop(date)
+                        except:
+                            self.archive[league][market].pop(date)
 
     def merge(self, filepath):
         if os.path.isfile(filepath):
