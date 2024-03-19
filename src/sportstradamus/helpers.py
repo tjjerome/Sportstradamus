@@ -478,19 +478,25 @@ class Archive:
 
     def get_moneyline(self, league, date, team):
         arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
-        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
-        if np.isnan(v):
-            return .5
+        if type(arr) is dict:
+            v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
+            if np.isnan(v):
+                return .5
+            else:
+                return v
         else:
-            return v
+            return arr
 
     def get_total(self, league, date, team):
         arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
-        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
-        if np.isnan(v):
-            return self.default_totals.get(league, 1)
+        if type(arr) is dict:
+            v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
+            if np.isnan(v):
+                return self.default_totals.get(league, 1)
+            else:
+                return v
         else:
-            return v
+            return arr
 
     def get_ev(self, league, market, date, player):
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
