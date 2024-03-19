@@ -131,6 +131,30 @@
         "Line",
         "PF K"
     ],
+    "MLB_pitches-thrown": [
+        "Player IP growth",
+        "Moneyline",
+        "Game 5",
+        "MeanYr",
+        "Player avg",
+        "Player z",
+        "DaysOff",
+        "STDYr",
+        "Line",
+        "DaysIntoSeason"
+    ],
+    "MLB_pitching-outs": [
+        "IQRYr",
+        "STD10",
+        "DaysOff",
+        "Player IP",
+        "Player avg",
+        "Line",
+        "Moneyline",
+        "Player z",
+        "STDYr",
+        "MeanYr"
+    ],
     "MLB_rbi": [
         "GamesPlayed",
         "Team OBP",
@@ -227,6 +251,18 @@
         "PF BB",
         "DVPOA"
     ],
+    "NBA_AST": [
+        "Game 5",
+        "Player AST_48",
+        "Odds",
+        "Player MIN",
+        "Player MIN short",
+        "Player AST_TO",
+        "Line",
+        "Player z",
+        "MeanYr",
+        "Player avg"
+    ],
     "NBA_BLK": [
         "Player REB_PCT",
         "Player PCT_OREB",
@@ -251,6 +287,30 @@
         "Line",
         "Player MIN short"
     ],
+    "NBA_DREB": [
+        "Player position avg",
+        "AvgYr",
+        "DaysOff",
+        "Player MIN",
+        "Player avg",
+        "Player MIN growth",
+        "Player MIN short",
+        "Player z",
+        "Line",
+        "MeanYr"
+    ],
+    "NBA_FG3A": [
+        "Moneyline",
+        "Mean5",
+        "AvgYr",
+        "Player MIN",
+        "Player MIN short",
+        "Game 5",
+        "Player avg",
+        "Line",
+        "MeanYr",
+        "Player z"
+    ],
     "NBA_FG3M": [
         "Player avg",
         "Odds",
@@ -262,6 +322,30 @@
         "Line",
         "Player MIN",
         "Player PCT_FG3A short"
+    ],
+    "NBA_FGA": [
+        "Player z",
+        "AvgYr",
+        "Line",
+        "Mean5",
+        "Player MIN short",
+        "Player MIN",
+        "Moneyline",
+        "Game 5",
+        "STDYr",
+        "MeanYr"
+    ],
+    "NBA_FGM": [
+        "Game 5",
+        "DaysOff",
+        "Player MIN growth",
+        "Moneyline",
+        "STDYr",
+        "Player MIN",
+        "Player avg",
+        "MeanYr",
+        "Line",
+        "Player MIN short"
     ],
     "NBA_FTM": [
         "Defense z",
@@ -359,6 +443,30 @@
         "Player avg",
         "Player z"
     ],
+    "NBA_RA": [
+        "Mean10",
+        "Player MIN",
+        "Defense avg",
+        "Player avg",
+        "Player MIN short",
+        "AvgYr",
+        "STDYr",
+        "Player z",
+        "Line",
+        "MeanYr"
+    ],
+    "NBA_REB": [
+        "Player position avg",
+        "Defense avg",
+        "Player avg",
+        "Player z",
+        "Player MIN growth",
+        "Line",
+        "Player MIN",
+        "Odds",
+        "Player MIN short",
+        "MeanYr"
+    ],
     "NBA_STL": [
         "Position",
         "Odds",
@@ -407,6 +515,30 @@
         "DaysIntoSeason",
         "MeanYr"
     ],
+    "NFL_attempts": [
+        "Defense pass_rate_over_expected_against",
+        "Player position z",
+        "GamesPlayed",
+        "Mean10",
+        "Player aggressiveness",
+        "Player z",
+        "Player position avg",
+        "Player passer adot",
+        "MeanYr",
+        "STDYr"
+    ],
+    "NFL_carries": [
+        "Player rushing success rate",
+        "Player z",
+        "Player position avg",
+        "Trend5",
+        "STDYr",
+        "Player snap pct",
+        "MeanYr",
+        "Player snap pct short",
+        "Player carry share short",
+        "Player snap pct growth"
+    ],
     "NFL_completion-percentage": [
         "Mean5",
         "IQRYr",
@@ -418,6 +550,18 @@
         "Player completion percentage",
         "STDYr",
         "MeanYr"
+    ],
+    "NFL_completions": [
+        "Team pass_rate_over_expected_110",
+        "Avg5",
+        "DaysIntoSeason",
+        "IQRYr",
+        "Player z",
+        "MeanYr",
+        "STDYr",
+        "Player position z",
+        "Player time to throw",
+        "Player avg"
     ],
     "NFL_fantasy-points-prizepicks": [
         "Player avg",
@@ -514,6 +658,18 @@
         "STD10",
         "Player avg",
         "STDYr"
+    ],
+    "NFL_passing-first-downs": [
+        "Defense z",
+        "Player position avg",
+        "Player z",
+        "Player time to throw",
+        "Player avg",
+        "Total",
+        "MeanYr",
+        "Team pass_rate_over_expected_110",
+        "Team time_per_play",
+        "Player position z"
     ],
     "NFL_passing-tds": [
         "Defense exp_allowed_per_rush",
@@ -634,6 +790,18 @@
         "MeanYr",
         "Player avg",
         "Total"
+    ],
+    "NFL_targets": [
+        "Player z",
+        "Player position avg",
+        "Player route participation short",
+        "Player yards per target",
+        "Player avg",
+        "MeanYr",
+        "Player route participation growth",
+        "AvgYr",
+        "Line",
+        "Player position z"
     ],
     "NFL_tds": [
         "Player route participation growth",
@@ -779,6 +947,18 @@
         "Player Ast60",
         "Player TimeShare short"
     ],
+    "NHL_saves": [
+        "AvgYr",
+        "STD10",
+        "MeanYr",
+        "Defense z",
+        "Home",
+        "Defense Fenwick",
+        "Player avg",
+        "Player z",
+        "DVPOA",
+        "STDYr"
+    ],
     "NHL_shots": [
         "Player Ast60",
         "MeanYr",
@@ -829,15 +1009,15 @@
     ],
     "NBA_ALL": [
         "Line",
-        "Player MIN short",
         "MeanYr",
+        "Player MIN short",
         "STDYr",
-        "AvgYr",
-        "Odds",
-        "Player z",
         "Player MIN",
-        "Player MIN growth",
-        "Player avg"
+        "Player avg",
+        "Player z",
+        "AvgYr",
+        "Game 5",
+        "Player MIN growth"
     ],
     "NFL_ALL": [
         "STDYr",
@@ -849,23 +1029,23 @@
         "Player avg",
         "IQRYr",
         "AvgYr",
-        "Mean5"
+        "GamesPlayed"
     ],
     "NHL_ALL": [
         "Player TimeShare short",
-        "Line",
-        "MeanYr",
         "STDYr",
+        "MeanYr",
+        "Line",
         "Player avg",
         "Odds",
         "Player ShotShare",
         "Player z",
         "Moneyline",
-        "Game 5"
+        "AvgYr"
     ],
     "MLB_ALL": [
-        "Total",
         "Moneyline",
+        "Total",
         "MeanYr",
         "STDYr",
         "Player avg",
@@ -878,13 +1058,13 @@
     "ALL": [
         "MeanYr",
         "STDYr",
-        "Total",
         "Line",
+        "Total",
         "Moneyline",
         "Player avg",
         "Player z",
-        "Odds",
         "AvgYr",
+        "Odds",
         "Player position avg"
     ]
 }

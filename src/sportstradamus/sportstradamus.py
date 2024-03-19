@@ -1006,7 +1006,7 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
 
                 lines = []
 
-                archive.add(this_o, lines, stat_map[platform])
+                archive.add_dfs([this_o], stat_map[platform])
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", category=RuntimeWarning)
                     stats = stat_data.get_stats(this_o, date=o["Date"])
