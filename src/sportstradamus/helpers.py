@@ -10,7 +10,7 @@ import datetime
 import importlib.resources as pkg_resources
 from sportstradamus import creds, data
 from time import sleep
-from scipy.stats import poisson, skellam, norm
+from scipy.stats import poisson, skellam, norm, iqr
 from scipy.optimize import fsolve
 from scipy.integrate import dblquad
 import numpy as np
@@ -314,7 +314,7 @@ def get_ev(line, under, cv=1, force_gauss=False):
 def get_odds(line, ev, cv=1, force_gauss=False):
     if cv == 1:
         if force_gauss:
-            return norm.cdf(line, ev, ev)
+            return norm.cdf(line, ev, np.sqrt(ev))
         else:
             return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
     else:
@@ -363,6 +363,12 @@ class Archive:
         Loads the archive data from a file if it exists.
         """
         self.archive = {}
+        self.default_totals = {
+            "MLB": 4.671,
+            "NBA": 111.667,
+            "NFL": 22.668,
+            "NHL": 2.674
+            }
         filepath = pkg_resources.files(data) / "archive.dat"
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
@@ -469,6 +475,37 @@ class Archive:
 
             if o["Line"] and float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
                 self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
+
+    def get_moneyline(self, league, date, team):
+        arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
+        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
+        if np.isnan(v):
+            return .5
+        else:
+            return v
+
+    def get_total(self, league, date, team):
+        arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
+        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
+        if np.isnan(v):
+            return self.default_totals.get(league, 1)
+        else:
+            return v
+
+    def get_ev(self, league, market, date, player):
+        arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
+        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
+        return v
+
+    def get_line(self, league, market, date, player):
+        arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("Lines", [np.nan])
+
+        if len(arr) > 2:
+            mu = np.median(arr)
+            sig = iqr(arr)
+            arr = [line for line in arr if mu - sig <= line <= mu + sig]
+
+        return arr[-1]
 
     def write(self, overwrite=False):
         """

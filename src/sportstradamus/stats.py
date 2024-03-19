@@ -607,18 +607,9 @@ class StatsNBA(Stats):
         teamlog = self.teamlog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
 
-        # Retrieve moneyline and totals data from archive
-        k = [[(date, team) for team in teams.keys()]
-             for date, teams in archive["NBA"]["Moneyline"].items()]
-        k = [item for row in k for item in row]
-        flat_money = {t: archive["NBA"]["Moneyline"].get(
-            t[0], {}).get(t[1], 0.5) for t in k}
-        flat_total = {t: archive["NBA"]["Totals"].get(
-            t[0], {}).get(t[1], 112) for t in k}
-        tup_s = pd.Series(
-            zip(gamelog['GAME_DATE'].str[:10], gamelog['TEAM_ABBREVIATION']), index=gamelog.index)
-        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
-        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
+        # Retrieve moneyline and totals data
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NBA", x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NBA", x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
@@ -851,34 +842,24 @@ class StatsNBA(Stats):
             line = 0.5 if line < 1 else line
 
         try:
-            ev = archive["NBA"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", {})
-            moneyline = archive["NBA"]["Moneyline"].get(
-                date, {}).get(team, 0.5)
-            total = archive["NBA"]["Totals"].get(date, {}).get(team, 112)
+            ev = archive.get_ev("NBA", market, date, player)
+            moneyline = archive.get_moneyline("NBA", date, team)
+            total = archive.get_total("NBA", date, team)
 
         except:
             logger.exception(f"{player}, {market}")
             return 0
 
-        if np.isnan(moneyline):
-            moneyline = 0.5
-        if np.isnan(total):
-            total = 112
-
-        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
-        ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
-                    data = archive["NBA"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("NBA", submarket, date, player)
+                    line = archive.get_line("NBA", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv)
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
@@ -889,12 +870,11 @@ class StatsNBA(Stats):
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
-                    data = archive["NBA"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("NBA", submarket, date, player)
+                    line = archive.get_line("NBA", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv, force_gauss=True)*weight
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
                     else:
@@ -996,15 +976,7 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            lines = archive["NBA"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
-
-            if len(lines) > 2:
-                mu = np.median(lines)
-                sig = iqr(lines)
-                lines = [line for line in lines if mu - sig <= line <= mu + sig]
-
-            line = lines[-1]
+            line = archive.get_line("NBA", market, gameDate, name)
 
             offer = {
                 "Player": name,
@@ -1720,17 +1692,8 @@ class StatsMLB(Stats):
             gamelog = gamelog[gamelog["starting batter"]].copy()
 
         # Retrieve moneyline and totals data from archive
-        k = [[(date, team) for team in teams.keys()]
-             for date, teams in archive["MLB"]["Moneyline"].items()]
-        k = [item for row in k for item in row]
-        flat_money = {t: archive["MLB"]["Moneyline"].get(
-            t[0], {}).get(t[1], 0.5) for t in k}
-        flat_total = {t: archive["MLB"]["Totals"].get(
-            t[0], {}).get(t[1], 4.5) for t in k}
-        tup_s = pd.Series(
-            zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
-        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
-        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("MLB", x["gameDate"][:10], x["team"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("MLB", x["gameDate"][:10], x["team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
             lambda x: np.mean(x.tail(10)[x.columns[4:]], 0))
@@ -2009,34 +1972,24 @@ class StatsMLB(Stats):
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
 
-            ev = archive["MLB"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", {})
-            moneyline = archive["MLB"]["Moneyline"].get(
-                date, {}).get(team, 0.5)
-            total = archive["MLB"]["Totals"].get(date, {}).get(team, 4.5)
+            ev = archive.get_ev("MLB", market, date, player)
+            moneyline = archive.get_moneyline("MLB", date, team)
+            total = archive.get_total("MLB", date, team)
 
         except:
             logger.exception(f"{player}, {market}")
             return 0
 
-        if np.isnan(moneyline):
-            moneyline = 0.5
-        if np.isnan(total):
-            total = 4.5
-
-        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
-        ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
-                    data = archive["MLB"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("MLB", submarket, date, player)
+                    line = archive.get_line("MLB", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv)
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
@@ -2050,14 +2003,13 @@ class StatsMLB(Stats):
                     fantasy_props = [("Moneyline", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
-                    data = archive["MLB"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("MLB", submarket, date, player)
+                    line = archive.get_line("MLB", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv, force_gauss=True)*weight
                         elif submarket == "Moneyline":
-                            p = 1-archive["MLB"].get("Moneyline", {}).get(date, {}).get(team, 0.5)
+                            p = 1-moneyline
                             ev += p*weight
                         elif submarket == "quality start":
                             p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
@@ -2247,17 +2199,7 @@ class StatsMLB(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            lines = archive["MLB"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
-
-            if len(lines) > 2:
-                mu = np.median(lines)
-                sig = iqr(lines)
-                lines = [line for line in lines if mu - sig <= line <= mu + sig]
-            elif lines == [0] and any([name in k for k in archive["MLB"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()]):
-                lines = [archive["MLB"][market][gameDate.strftime("%Y-%m-%d")][k]["Lines"][-1] for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys() if name in k]
-
-            line = lines[-1]
+            line = archive.get_line("MLB", market, gameDate, name)
 
             # Construct an offer dictionary with player, team, market, opponent, and pitcher information
             offer = {
@@ -2991,17 +2933,8 @@ class StatsNFL(Stats):
         teamlog.drop(columns=['gameday'], inplace=True)
 
         # Retrieve moneyline and totals data from archive
-        k = [[(date, team) for team in teams.keys()]
-             for date, teams in archive["NFL"]["Moneyline"].items()]
-        k = [item for row in k for item in row]
-        flat_money = {t: archive["NFL"]["Moneyline"].get(
-            t[0], {}).get(t[1], 0.5) for t in k}
-        flat_total = {t: archive["NFL"]["Totals"].get(
-            t[0], {}).get(t[1], 22.5) for t in k}
-        tup_s = pd.Series(
-            zip(gamelog['gameday'], gamelog['recent team']), index=gamelog.index)
-        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
-        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NFL", x["gameday"][:10], x["recent team"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["recent team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
             lambda x: np.mean(x.tail(5)[x.columns[3:]], 0))
@@ -3237,34 +3170,24 @@ class StatsNFL(Stats):
             line = 0.5 if line < 1 else line
 
         try:
-            ev = archive["NFL"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", {})
-            moneyline = archive["NFL"]["Moneyline"].get(
-                date, {}).get(team, 0.5)
-            total = archive["NFL"]["Totals"].get(date, {}).get(team, 22.5)
+            ev = archive.get_ev("NFL", market, date, player)
+            moneyline = archive.get_moneyline("NFL", date, team)
+            total = archive.get_total("NFL", date, team)
 
         except:
             logger.exception(f"{player}, {market}")
             return 0
 
-        if np.isnan(moneyline):
-            moneyline = 0.5
-        if np.isnan(total):
-            total = 22.5
-
-        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
-        ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
-                    data = archive["NFL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("NFL", submarket, date, player)
+                    line = archive.get_line("NFL", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv)
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
@@ -3278,12 +3201,11 @@ class StatsNFL(Stats):
                     fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
-                    data = archive["NFL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("NFL", submarket, date, player)
+                    line = archive.get_line("NFL", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv, force_gauss=True)*weight
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
                     else:
@@ -3386,15 +3308,7 @@ class StatsNFL(Stats):
             if ((game['position group'] == 'QB') and (game['snap pct'] < 0.8)) or (game['snap pct'] < 0.3):
                 continue
 
-            lines = archive["NFL"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
-
-            if len(lines) > 2:
-                mu = np.median(lines)
-                sig = iqr(lines)
-                lines = [line for line in lines if mu - sig <= line <= mu + sig]
-
-            line = lines[-1]
+            line = archive.get_line("NFL", market, gameDate, name)
 
             offer = {
                 "Player": name,
@@ -3889,17 +3803,8 @@ class StatsNHL(Stats):
             gamelog = gamelog[gamelog["position"] != "G"].copy()
 
         # Retrieve moneyline and totals data from archive
-        k = [[(date, team) for team in teams.keys()]
-             for date, teams in archive["NHL"]["Moneyline"].items()]
-        k = [item for row in k for item in row]
-        flat_money = {t: archive["NHL"]["Moneyline"].get(
-            t[0], {}).get(t[1], 0.5) for t in k}
-        flat_total = {t: archive["NHL"]["Totals"].get(
-            t[0], {}).get(t[1], 3) for t in k}
-        tup_s = pd.Series(
-            zip(gamelog['gameDate'], gamelog['team']), index=gamelog.index)
-        gamelog.loc[:, "moneyline"] = tup_s.map(flat_money)
-        gamelog.loc[:, "totals"] = tup_s.map(flat_total)
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NHL", x["gameDate"][:10], x["team"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NHL", x["gameDate"][:10], x["team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
             lambda x: np.mean(x.tail(10)[x.columns[5:]], 0))
@@ -4170,35 +4075,24 @@ class StatsNHL(Stats):
                     self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent,
                                                                           self.goalie_stats]
 
-            ev = archive["NHL"].get(market, {}).get(
-                date, {}).get(player, {}).get("EV", {})
-            moneyline = archive["NHL"]["Moneyline"].get(
-                date, {}).get(team, 0.5)
-            total = archive["NHL"]["Totals"].get(
-                date, {}).get(team, 3)
+            ev = archive.get_ev("NHL", market, date, player)
+            moneyline = archive.get_moneyline("NHL", date, team)
+            total = archive.get_total("NHL", date, team)
 
         except:
             logger.exception(f"{player}, {market}")
             return 0
 
-        if np.isnan(moneyline):
-            moneyline = 0.5
-        if np.isnan(total):
-            total = 3
-
-        ev = np.array([v for k, v in ev.items()], dtype=np.float64)
-        ev = np.nanmean(ev)
         if np.isnan(ev):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
-                    data = archive["NHL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("NHL", submarket, date, player)
+                    line = archive.get_line("NHL", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv)
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv)
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)
                     else:
@@ -4214,14 +4108,13 @@ class StatsNHL(Stats):
                     fantasy_props = [("saves", .6), ("goalsAgainst", -3), ("Moneyline", 6)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
-                    data = archive["NHL"].get(submarket, {}).get(
-                        date, {}).get(player, {"Lines": [], "EV": {}})
-                    v = np.nanmean(np.array([v for k, v in data["EV"].items()], dtype=float))
+                    v = archive.get_ev("NHL", submarket, date, player)
+                    line = archive.get_line("NHL", submarket, date, player)
                     if np.isnan(v):
-                        if len(data["Lines"]) > 0:
-                            ev += get_ev(data["Lines"][-1], .5, sub_cv, force_gauss=True)*weight
+                        if not np.isnan(line):
+                            ev += get_ev(line, .5, sub_cv, force_gauss=True)*weight
                         elif submarket == "Moneyline":
-                            p = 1-archive["NHL"].get("Moneyline", {}).get(date, {}).get(team, 0.5)
+                            p = 1-moneyline
                             ev += p*weight
                         elif not player_games.empty:
                             ev += get_ev(player_games.iloc[-10:][submarket].median(), .5, sub_cv)*weight
@@ -4345,17 +4238,7 @@ class StatsNHL(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            lines = archive["NHL"][market].get(gameDate.strftime(
-                "%Y-%m-%d"), {}).get(name, {}).get("Lines", [0])
-
-            if len(lines) > 2:
-                mu = np.median(lines)
-                sig = iqr(lines)
-                lines = [line for line in lines if mu - sig <= line <= mu + sig]
-            elif lines == [0] and any([name in k for k in archive["MLB"][market].get(gameDate.strftime("%Y-%m-%d"), {}).keys()]):
-                lines = [archive["MLB"][market][gameDate.strftime("%Y-%m-%d")][k]["Lines"][-1] for k in archive["MLB"][market][gameDate.strftime("%Y-%m-%d")].keys() if name in k]
-
-            line = lines[-1]
+            line = archive.get_line("NHL", market, gameDate, name)
 
             offer = {
                 "Player": name,
