@@ -208,9 +208,10 @@ def remove_accents(input_str):
     """
     nfkd_form = unicodedata.normalize("NFKD", input_str)
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
-    for substr in [".", " Jr", " Sr", " II", " III", " IV"]:
-        if substr in out_str:
-            out_str.replace(substr, "")
+    out_str = out_str.replace(".", "")
+    for substr in [" Jr", " Sr", " II", " III", " IV"]:
+        if out_str.endswith(substr):
+            out_str = out_str.replace(substr, "")
     out_str = out_str.replace("’", "'")
     out_str = re.sub("[\(\[].*?[\)\]]", "", out_str).strip()
     if "+" in out_str:
@@ -333,13 +334,8 @@ def merge_dict(a, b, path=None):
                 # raise Exception('Conflict at %s' % '.'.join(path + [str(key)]))
                 if key == "Line":
                     a[key].extend(b[key])
-                elif key == "EV" and len(a[key]) == 4:
-                    evs = b[key]
-                    for i, ev in enumerate(evs):
-                        if not ev:
-                            evs[i] = a[key][i]
-
-                    a[key] = evs
+                elif key == "EV":
+                    a[key].update(b[key])
                 else:
                     a[key] = b[key]
         else:
