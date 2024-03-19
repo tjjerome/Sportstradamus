@@ -1,4 +1,4 @@
-from sportstradamus.helpers import Archive, merge_dict, get_ev, get_odds, odds_to_prob, prob_to_odds, remove_accents
+from sportstradamus.helpers import Archive, merge_dict, get_ev, get_odds, odds_to_prob, prob_to_odds, remove_accents, merge_dict
 from sportstradamus.stats import StatsNBA
 from datetime import datetime
 from tqdm import tqdm
@@ -37,37 +37,38 @@ for league in tqdm(leagues, unit="leagues", position=0):
                     archive[league][market][date].pop(player)
                     continue
                 player_name = remove_accents(player)
-                archive[league][market][date][player_name] = archive[league][market][date].pop(player)
-                ev = {}
-                old_ev = archive[league][market][date][player_name].get("EV", [None]*4)
-                if type(old_ev) is np.ndarray:
-                    old_ev = list(old_ev)
-                lines = archive[league][market][date][player_name]["Lines"]
-                if len(lines) > 2:
-                    mu = np.median(lines)
-                    sig = iqr(lines)
-                    lines = [line for line in lines if mu - sig <= line <= mu + sig]
+                if player_name != player:
+                    archive[league][market][date][player_name] = merge_dict(archive[league][market][date].get(player_name,{}), archive[league][market][date].pop(player))
+        #         ev = {}
+        #         old_ev = archive[league][market][date][player_name].get("EV", [None]*4)
+        #         if type(old_ev) is np.ndarray:
+        #             old_ev = list(old_ev)
+        #         lines = archive[league][market][date][player_name]["Lines"]
+        #         if len(lines) > 2:
+        #             mu = np.median(lines)
+        #             sig = iqr(lines)
+        #             lines = [line for line in lines if mu - sig <= line <= mu + sig]
 
-                if type(old_ev) is not list or len(lines) == 0:
-                    continue
+        #         if type(old_ev) is not list or len(lines) == 0:
+        #             continue
 
-                line = lines[-1]
-                for i, book_ev in enumerate(old_ev):
-                    if book_ev:
-                        book_under = get_odds(line, book_ev, old_stat_cv[league].get(market, 1))
-                        book_ev = get_ev(line, book_under, stat_cv[league].get(market, 1))
-                        ev[book_pos[i]] = book_ev
+        #         line = lines[-1]
+        #         for i, book_ev in enumerate(old_ev):
+        #             if book_ev:
+        #                 book_under = get_odds(line, book_ev, old_stat_cv[league].get(market, 1))
+        #                 book_ev = get_ev(line, book_under, stat_cv[league].get(market, 1))
+        #                 ev[book_pos[i]] = book_ev
 
-                archive[league][market][date][player_name]["EV"] = ev
+        #         archive[league][market][date][player_name]["EV"] = ev
 
-                if not archive[league][market][date][player_name]["EV"] and not archive[league][market][date][player_name]["Lines"]:
-                    archive[league][market][date].pop(player_name)
+        #         if not archive[league][market][date][player_name]["EV"] and not archive[league][market][date][player_name]["Lines"]:
+        #             archive[league][market][date].pop(player_name)
 
-            if not archive[league][market][date]:
-                archive[league][market].pop(date)
+        #     if not archive[league][market][date]:
+        #         archive[league][market].pop(date)
 
-        if not archive[league][market]:
-            archive[league].pop(market)
+        # if not archive[league][market]:
+        #     archive[league].pop(market)
 
 
 archive.write()
