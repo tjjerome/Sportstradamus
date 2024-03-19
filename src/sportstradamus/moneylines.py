@@ -21,8 +21,10 @@ def confer():
         keys = json.load(infile)
 
     archive = Archive("All")
+    logger.info("Archive loaded")
 
     archive = get_moneylines(archive, keys["odds_api"])
+    logger.info("Game data complete")
     
     # Load prop markets
     filepath = pkg_resources.files(data) / "stat_map.json"
@@ -30,8 +32,10 @@ def confer():
         stat_map = json.load(infile)
 
     archive = get_props(archive, keys["odds_api_plus"], stat_map["Odds API"])
-    archive.write()
+    logger.info("Player data complete, writing to file...")
 
+    archive.write()
+    logger.info("Success!")
 
 def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone("America/Chicago")), sport="All", key=None):
     """
