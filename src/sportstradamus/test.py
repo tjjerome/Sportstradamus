@@ -55,14 +55,14 @@ import requests
 NBA = StatsNBA()
 NBA.load()
 NBA.update()
-NBA.profile_market("PTS")
+NBA.profile_market("PR")
 stat=NBA.get_stats({
     "Player": "Herbert Jones",
-    "Market": "PTS",
-    "Line": 7.5,
+    "Market": "PR",
+    "Line": 12.5,
     "Date": datetime(2024, 3, 19).date(),
-    "Team": "BKN",
-    "Opponent": "NO",
+    "Team": "NO",
+    "Opponent": "BKN",
     "League": "NBA"
 })
 pass
