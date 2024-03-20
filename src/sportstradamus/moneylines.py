@@ -281,25 +281,16 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         for line in lines:
                             line.setdefault('point', 0.5)
                             line['name'] = {"Yes":"Over", "No": "Under"}.get(line['name'], line['name'])
+                        if len({line['point'] for line in lines}) > 1:
+                            trueline = sorted(lines, key=(lambda x: np.abs(x['price']-2)))[0]['point']
+                            lines = [line for line in lines if line['point'] == trueline]
                         if len(lines) > 2:
-                            ev = []
-                            for line, prices in groupby(sorted(lines, key=itemgetter('point')), itemgetter('point')):
-                                odds[market_name][player]["Lines"].append(line)
-                                prices = list(prices)
-                                if len(prices) > 2:
-                                    prices = [[x['price'] for x in lines if x['name']=='Over'][0],[x['price'] for x in lines if x['name']=='Under'][0]]
-                                else:
-                                    prices = [x['price'] for x in prices]
-                                price = no_vig_odds(*prices)
-                                ev.append(get_ev(line, price[1], stat_cv[league].get(market_name,1)))
+                            lines = [[line for line in lines if line['name']=='Over'][0],[line for line in lines if line['name']=='Under'][0]]
 
-                            ev = np.mean(ev)
-
-                        else:
-                            line = lines[0]['point'] if 'point' in lines[0] else 0.5
-                            odds[market_name][player]["Lines"].append(line)
-                            price = no_vig_odds(*[x['price'] for x in lines])
-                            ev = get_ev(line, price[1], stat_cv[league].get(market_name,1))
+                        line = lines[0]['point'] if 'point' in lines[0] else 0.5
+                        odds[market_name][player]["Lines"].append(line)
+                        price = no_vig_odds(*[x['price'] for x in lines])
+                        ev = get_ev(line, price[1], stat_cv[league].get(market_name,1))
 
                         odds[market_name][player]["EV"][book['key']] = ev
 
