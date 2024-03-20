@@ -23,7 +23,7 @@ def confer():
     archive = Archive("All")
     logger.info("Archive loaded")
 
-    archive = get_moneylines(archive, keys)
+    # archive = get_moneylines(archive, keys)
     logger.info("Game data complete")
     
     # Load prop markets
