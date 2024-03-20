@@ -52,20 +52,20 @@ import requests
 # NFL.season_start = datetime(2023, 9, 1).date()
 # NFL.update()
 
-NBA = StatsNBA()
-NBA.load()
-NBA.update()
-NBA.profile_market("BLST")
-stat=NBA.get_stats({
-    "Player": "Tim Hardaway",
-    "Market": "BLST",
-    "Line": 0.5,
-    "Date": datetime(2024, 3, 19).date(),
-    "Team": "DAL",
-    "Opponent": "SAS",
-    "League": "NBA"
-})
-pass
+# NBA = StatsNBA()
+# NBA.load()
+# NBA.update()
+# NBA.profile_market("BLST")
+# stat=NBA.get_stats({
+#     "Player": "Tim Hardaway",
+#     "Market": "BLST",
+#     "Line": 0.5,
+#     "Date": datetime(2024, 3, 19).date(),
+#     "Team": "DAL",
+#     "Opponent": "SAS",
+#     "League": "NBA"
+# })
+# pass
 # NBA.season = "2021-22"
 # NBA.season_start = datetime(2021, 10, 1).date()
 # NBA.update()
@@ -84,22 +84,22 @@ pass
 # NHL.season_start = datetime(2023, 10, 10).date()
 # NHL.update()
 
-# MLB = StatsMLB()
-# MLB.load()
-# MLB.gamelog = pd.DataFrame()
-# MLB.teamlog = pd.DataFrame()
-# MLB.season_start = datetime(2021, 3, 1).date()
-# MLB.update()
-# MLB.update()
-# MLB.update()
-# MLB.update()
-# MLB.season_start = datetime(2022, 3, 1).date()
-# MLB.update()
-# MLB.update()
-# MLB.update()
-# MLB.update()
-# MLB.season_start = datetime(2023, 3, 30).date()
-# MLB.update()
-# MLB.update()
-# MLB.update()
-# MLB.update()
+MLB = StatsMLB()
+MLB.load()
+MLB.gamelog = pd.DataFrame()
+MLB.teamlog = pd.DataFrame()
+MLB.season_start = datetime(2021, 3, 1).date()
+MLB.update()
+MLB.update()
+MLB.update()
+MLB.update()
+MLB.season_start = datetime(2022, 3, 1).date()
+MLB.update()
+MLB.update()
+MLB.update()
+MLB.update()
+MLB.season_start = datetime(2023, 3, 30).date()
+MLB.update()
+MLB.update()
+MLB.update()
+MLB.update()

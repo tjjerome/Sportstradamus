@@ -1124,6 +1124,8 @@ class StatsMLB(Stats):
                         "singles": v["stats"]["batting"].get("hits", 0) - v["stats"]["batting"].get("doubles", 0) -
                         v["stats"]["batting"].get(
                             "triples", 0) - v["stats"]["batting"].get("homeRuns", 0),
+                        "doubles": v["stats"]["batting"].get("doubles", 0),
+                        "triples": v["stats"]["batting"].get("triples", 0),
                         "home runs": v["stats"]["batting"].get("homeRuns", 0),
                         "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
                         "runs": v["stats"]["batting"].get("runs", 0),
@@ -1277,6 +1279,8 @@ class StatsMLB(Stats):
                         - v["stats"]["batting"].get("doubles", 0)
                         - v["stats"]["batting"].get("triples", 0)
                         - v["stats"]["batting"].get("homeRuns", 0),
+                        "doubles": v["stats"]["batting"].get("doubles", 0),
+                        "triples": v["stats"]["batting"].get("triples", 0),
                         "home runs": v["stats"]["batting"].get("homeRuns", 0),
                         "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
                         "runs": v["stats"]["batting"].get("runs", 0),
@@ -2003,12 +2007,19 @@ class StatsMLB(Stats):
                     else:
                         ev += v
                         
-            elif ("fantasy" in market) and ("pitcher" in market):
+            elif "fantasy" in market:
                 ev = 0
-                if "underdog" in market:
-                    fantasy_props = [("Moneyline", 2), ("pitcher strikeouts", 1), ("runs allowed", -1), ("pitching outs", 1/3), ("quality start", 3)]
+                if "pitcher" in market:
+                    if "underdog" in market:
+                        fantasy_props = [("Moneyline", 2), ("pitcher strikeouts", 1), ("runs allowed", -1), ("pitching outs", 1/3), ("quality start", 3)]
+                    else:
+                        fantasy_props = [("Moneyline", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
                 else:
-                    fantasy_props = [("Moneyline", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
+                    if "underdog" in market:
+                        fantasy_props = [("singles", 3), ("doubles", 6), ("triples", 8), ("home runs", 10), ("walks", 3), ("rbi", 2), ("runs", 2), ("stolen bases", 4)]
+                    else:
+                        fantasy_props = [("singles", 3), ("doubles", 5), ("triples", 8), ("home runs", 10), ("walks", 2), ("rbi", 2), ("runs", 2), ("stolen bases", 5)]
+
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
@@ -2035,6 +2046,9 @@ class StatsMLB(Stats):
                         v_runs = v
                     if submarket == "pitching outs":
                         v_outs = v
+
+            elif market == "1st inning runs allowed":
+                ev = archive.get_team_market("MLB", '1st 1 innings', date, opponent)
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
