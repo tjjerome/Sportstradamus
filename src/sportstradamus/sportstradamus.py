@@ -260,8 +260,8 @@ def main(progress, books, parlays):
 
     untapped_markets = []
 
-    pp_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
-    ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Model", "Correct"])
+    pp_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Correct"])
+    ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Correct"])
     best5 = pd.DataFrame()
 
     # PrizePicks
@@ -1053,12 +1053,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     """
     global stat_map
 
-    totals_map = {
-        "NBA": 112,
-        "NFL": 22.5,
-        "MLB": 4.5,
-        "NHL": 3
-    }
+    totals_map = archive.default_totals
 
     market = stat_map[platform].get(market, market)
     if league == "NHL":
@@ -1153,9 +1148,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if os.path.isfile(filepath) and all([player in playerStats.index for player in players]):
             if "+" in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[1]["Odds"] != 0.5 else None
 
                 if ev1 and ev2:
                     ev = ev1 + ev2
@@ -1199,9 +1194,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
             elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[1]["Odds"] != 0.5 else None
                 if ev1 and ev2:
                     if cv == 1:
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
@@ -1278,9 +1273,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         else:
             if "+" in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[1]["Odds"] != 0.5 else None
 
                 if ev1 and ev2:
                     ev = ev1 + ev2
@@ -1298,9 +1293,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     p = [0.5] * 2
             elif "vs." in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv) if stats[0]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
                 ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv) if stats[1]["Odds"] != 0 else None
+                            ["Odds"], cv) if stats[1]["Odds"] != 0.5 else None
                 if ev1 and ev2:
                     if cv == 1:
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))

@@ -503,6 +503,11 @@ class Archive:
         v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
         return v
 
+    def get_team_market(self, league, market, date, team):
+        arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(team, {})
+        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
+        return v
+
     def get_line(self, league, market, date, player):
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("Lines", [np.nan])
 
