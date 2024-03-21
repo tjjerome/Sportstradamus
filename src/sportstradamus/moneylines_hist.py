@@ -19,67 +19,13 @@ with open(filepath, "r") as infile:
     apikey = keys["odds_api"]
     apikey_plus = keys["odds_api_plus"]
 
-# Date = datetime(2023, 9, 7, 9)
-# Date = pytz.timezone("America/Chicago").localize(Date)
-
-# sport="NFL"
-# key="americanfootball_nfl"
-
-# while Date.astimezone(pytz.utc).date() < datetime(2024, 2, 12).date():
-#     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
-#         Date = Date + timedelta(days=1)
-#         continue
-
-#     print(Date)
-
-#     # archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-#     archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
-
-#     Date = Date + timedelta(days=1)
-
-# Date = datetime(2023, 10, 7, 13)
-# Date = pytz.timezone("America/Chicago").localize(Date)
-
-# sport="NBA"
-# key="basketball_nba"
-
-# while Date.astimezone(pytz.utc).date() < datetime(2024, 3, 21).date():
-#     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
-#         Date = Date + timedelta(days=1)
-#         continue
-
-#     print(Date)
-
-#     # archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-#     archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
-
-#     Date = Date + timedelta(days=1)
-
-# Date = datetime(2023, 10, 10, 13)
-# Date = pytz.timezone("America/Chicago").localize(Date)
-
-# sport="NHL"
-# key="icehockey_nhl"
-
-# while Date.astimezone(pytz.utc).date() < datetime(2024, 3, 21).date():
-#     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
-#         Date = Date + timedelta(days=1)
-#         continue
-
-#     print(Date)
-
-#     # archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-#     archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
-
-#     Date = Date + timedelta(days=1)
-
-Date = datetime(2023, 5, 3, 12)
+Date = datetime(2023, 9, 7, 9)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
-sport="MLB"
-key="baseball_mlb"
+sport="NFL"
+key="americanfootball_nfl"
 
-while Date.astimezone(pytz.utc).date() < datetime(2023, 11, 2).date():
+while Date.astimezone(pytz.utc).date() < datetime(2024, 2, 12).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue
@@ -91,8 +37,5 @@ while Date.astimezone(pytz.utc).date() < datetime(2023, 11, 2).date():
 
     Date = Date + timedelta(days=1)
 
-Date = datetime(2023, 3, 20, 12)
-Date = pytz.timezone("America/Chicago").localize(Date)
-archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
 
 archive.write()
