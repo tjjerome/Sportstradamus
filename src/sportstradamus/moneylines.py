@@ -259,7 +259,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         sub_odds = no_vig_odds(outcomes[0]['price'], outcomes[1]['price'])
                         spread = get_ev(outcomes[1]['point'], sub_odds[1])
                         spread_home.setdefault(spread_name, {})
-                        spread_home.setdefault(spread_name, {})
+                        spread_away.setdefault(spread_name, {})
                         if market["outcomes"][0]["name"] == game["home_team"]:
                             spread_home[spread_name][book["key"]] = spread
                             spread_away[spread_name][book["key"]] = -spread
@@ -275,7 +275,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                     outcomes = sorted(market['outcomes'], key=itemgetter('description', 'name'))
                     
                     for player, lines in groupby(outcomes, itemgetter('description')):
-                        player = remove_accents(player)
+                        player = remove_accents(player).replace(" Total", "")
                         odds[market_name].setdefault(player, {"EV": {}, "Lines":[]})
                         lines = list(lines)
                         for line in lines:
