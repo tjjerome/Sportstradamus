@@ -517,6 +517,21 @@ class Archive:
             arr = [line for line in arr if mu - sig <= line <= mu + sig]
 
         return arr[-1]
+    
+    def to_pandas(self, league, market):
+        records = {}
+        for date in list(self.archive[league][market].keys()):
+            for player in list(self.archive[league][market][date].keys()):
+                if "EV" in self.archive[league][market][date][player]:
+                    line = self.get_line(league, market, date, player)
+                    # cv = stat_cv[league].get(market, 1)
+                    record = self.archive[league][market][date][player]["EV"]
+                    record["Line"] = line
+                    records[(date, player)] = self.archive[league][market][date][player]["EV"]
+                else:
+                    records[(date, player)] = self.archive[league][market][date][player]
+
+        return pd.DataFrame(records).T
 
     def write(self, overwrite=False):
         """
