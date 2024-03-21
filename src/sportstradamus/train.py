@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
-from sportstradamus.helpers import get_ev, stat_cv
+from sportstradamus.helpers import get_ev, stat_cv, Archive
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -30,6 +30,82 @@ from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
 
+with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
+    stat_cv = json.load(f)
+
+dist_params = {
+    "stabilization": "None",
+    "response_fn": "softplus",
+    "loss_fn": "nll"
+}
+
+distributions = {
+    "Gaussian": Gaussian.Gaussian(**dist_params),
+    "Poisson": Poisson.Poisson(**dist_params)
+}
+
+log_strings = {
+    "NFL": {
+        "game": "game id",
+        "date": "gameday",
+        "player": "player display name",
+        "usage": "snap pct",
+        "usage_sec": "route participation",
+        "position": "position group",
+        "team": "recent team",
+        "home": "home"
+    },
+    "NBA": {
+        "game": "GAME_ID",
+        "date": "GAME_DATE",
+        "player": "PLAYER_NAME",
+        "usage": "MIN",
+        "usage_sec": "USG_PCT",
+        "position": "POS",
+        "team": "TEAM_ABBREVIATION",
+        "home": "HOME"
+    },
+    "NHL": {
+        "game": "gameId",
+        "date": "gameDate",
+        "player": "playerName",
+        "usage": "TimeShare",
+        "usage_sec": "Fenwick",
+        "position": "position",
+        "team": "team",
+        "home": "home"
+    },
+    "MLB": {
+        "game": "gameId",
+        "date": "gameDate",
+        "player": "playerName",
+        "position": "position",
+        "team": "team",
+        "home": "home"
+    },
+}
+
+mlb = StatsMLB()
+mlb.load()
+mlb.update()
+nba = StatsNBA()
+nba.load()
+nba.update()
+nhl = StatsNHL()
+nhl.load()
+nhl.update()
+nfl = StatsNFL()
+nfl.load()
+nfl.update()
+
+stats = {
+    "NBA": nba,
+    "NFL": nfl,
+    "MLB": mlb,
+    "NHL": nhl
+}
+
+archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
@@ -38,32 +114,6 @@ import json
               help="Select league to train on")
 def meditate(force, stats, league):
 
-    with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
-        stat_cv = json.load(f)
-
-    dist_params = {
-        "stabilization": "None",
-        "response_fn": "softplus",
-        "loss_fn": "nll"
-    }
-
-    distributions = {
-        "Gaussian": Gaussian.Gaussian(**dist_params),
-        "Poisson": Poisson.Poisson(**dist_params)
-    }
-
-    mlb = StatsMLB()
-    mlb.load()
-    mlb.update()
-    nba = StatsNBA()
-    nba.load()
-    nba.update()
-    nhl = StatsNHL()
-    nhl.load()
-    nhl.update()
-    nfl = StatsNFL()
-    nfl.load()
-    nfl.update()
     np.random.seed(69)
 
     all_markets = {
@@ -164,16 +214,7 @@ def meditate(force, stats, league):
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
         for market in markets:
-            if league == "MLB":
-                stat_data = mlb
-            elif league == "NBA":
-                stat_data = nba
-            elif league == "NHL":
-                stat_data = nhl
-            elif league == "NFL":
-                stat_data = nfl
-            else:
-                continue
+            stat_data = stats[league]
 
             need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
@@ -693,6 +734,16 @@ def see_features():
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
+def evaluate_books(league, market):
+    df = archive.to_pandas(league, market)
+    stat_data = stats[league]
+    log = stat_data.gamelog[[log_strings[league]["player"], log_strings[league]["date"], market]]
+    log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
+    log.set_index([log_strings[league]["date"], log_strings[league]["player"]])
+    df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["player"]]).set_index([log_strings[league]["date"], log_strings[league]["player"]])[market]
+    df.dropna(subset="Result", inplace=True)
+    if "Line" in df.columns:
+        df["Over"] = df["Result"] > df["Line"]
 
 if __name__ == "__main__":
     meditate()
