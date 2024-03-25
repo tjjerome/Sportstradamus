@@ -314,14 +314,20 @@ def get_ev(line, under, cv=1, force_gauss=False):
         line = float(line)
         return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
 
-def get_odds(line, ev, cv=1, force_gauss=False):
+def get_odds(line, ev, cv=1, force_gauss=False, step=1):
+    high = np.floor((step-line)/step)*step
+    low = np.ceil((-step-line)/step)*step
     if cv == 1:
         if force_gauss:
-            return norm.cdf(line, ev, np.sqrt(ev))
+            under = norm.cdf(high, ev, np.sqrt(ev))
+            push = under - norm.cdf(low, ev, np.sqrt(ev))
+            return under - push/2
         else:
             return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
     else:
-        return norm.cdf(line, ev, ev*cv)
+        under = norm.cdf(high, ev, ev*cv)
+        push = under - norm.cdf(low, ev, ev*cv)
+        return under - push/2
 
 def merge_dict(a, b, path=None):
     "merges b into a"
