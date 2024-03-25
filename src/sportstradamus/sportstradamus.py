@@ -759,12 +759,13 @@ def find_correlation(offers, stats, platform, parlays):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            if len(best_bets) > 5:
-                df5 = pd.DataFrame(best_bets)
-                
-                df5.sort_values('Model EV', ascending=False, inplace=True)
-                df5.drop_duplicates('Players', inplace=True)
-                df5 = df5.groupby('Bet Size').head(100)
+            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Players', 'Markets', 'Bet Size'])
+            
+            df5.sort_values('Model EV', ascending=False, inplace=True)
+            df5.drop_duplicates('Players', inplace=True)
+            df5 = df5.groupby('Bet Size').head(100)
+            
+            if len(df5) > 5:
 
                 rho_matrix = np.zeros([len(df5), len(df5)])
                 for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
@@ -784,8 +785,7 @@ def find_correlation(offers, stats, platform, parlays):
                                        df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
                                         drop(columns=["Players", "Markets", "Bet Size", "Family"])]).\
                                         sort_values("Model EV", ascending=False).drop_duplicates()
-            elif len(best_bets) > 0:
-                df5 = pd.DataFrame(best_bets)
+            elif len(df5) > 0:
                 parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Bet Size"])])
 
                 # player_set = set.union(*df5.Players.to_list())
