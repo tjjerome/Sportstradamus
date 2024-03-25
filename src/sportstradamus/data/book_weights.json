@@ -1,0 +1,535 @@
+{
+    "NBA": {
+        "PTS": {
+            "draftkings": 4.892604564161623,
+            "williamhill_us": 10.0,
+            "fanduel": 6.466349007596046,
+            "betmgm": 1.0,
+            "pointsbetus": 2.344003565939708,
+            "bovada": 1.0,
+            "betonlineag": 10.0,
+            "mybookieag": 2.9332542215051722,
+            "barstool": 3.556771956983844,
+            "unibet_us": 1.0,
+            "betrivers": 5.842602180788656,
+            "wynnbet": 1.0
+        },
+        "REB": {
+            "draftkings": 1.0,
+            "fanduel": 10.0,
+            "williamhill_us": 1.0,
+            "betmgm": 1.0,
+            "pointsbetus": 1.0,
+            "bovada": 1.0,
+            "betonlineag": 2.2009559427251464,
+            "mybookieag": 8.914913247203632,
+            "barstool": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "wynnbet": 1.0
+        },
+        "AST": {
+            "draftkings": 3.9384643833890642,
+            "fanduel": 10.0,
+            "williamhill_us": 1.0,
+            "betmgm": 1.0,
+            "pointsbetus": 8.25379641723669,
+            "bovada": 1.0,
+            "betonlineag": 10.0,
+            "mybookieag": 10.0,
+            "barstool": 1.0,
+            "unibet_us": 6.456454350778218,
+            "betrivers": 1.0,
+            "wynnbet": 1.0
+        },
+        "PRA": {
+            "draftkings": 10.0,
+            "fanduel": 10.0,
+            "williamhill_us": 1.0,
+            "betmgm": 1.0,
+            "pointsbetus": 8.161331508693387,
+            "bovada": 1.0,
+            "betonlineag": 1.0,
+            "barstool": 10.0,
+            "unibet_us": 10.0,
+            "betrivers": 10.0
+        },
+        "PR": {
+            "draftkings": 10.0,
+            "fanduel": 10.0,
+            "williamhill_us": 10.0,
+            "betmgm": 1.0,
+            "pointsbetus": 1.0,
+            "bovada": 1.0,
+            "barstool": 10.0
+        },
+        "RA": {
+            "draftkings": 9.858489181568595,
+            "fanduel": 8.040896373680502,
+            "williamhill_us": 1.184800903685007,
+            "betmgm": 1.0,
+            "pointsbetus": 3.1357464809042397,
+            "bovada": 10.0,
+            "barstool": 5.363410974271534
+        },
+        "PA": {
+            "draftkings": 9.109587797735358,
+            "fanduel": 10.0,
+            "williamhill_us": 7.016126777870855,
+            "betmgm": 1.0,
+            "pointsbetus": 10.0,
+            "bovada": 1.0,
+            "barstool": 4.0228199120660175
+        },
+        "FG3M": {
+            "draftkings": 8.197652686691391,
+            "fanduel": 1.0,
+            "williamhill_us": 5.63883205464925,
+            "betmgm": 1.0,
+            "pointsbetus": 1.0,
+            "betonlineag": 10.0,
+            "mybookieag": 10.0,
+            "barstool": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 2.158835220051633,
+            "bovada": 1.0,
+            "wynnbet": 10.0
+        },
+        "fantasy points prizepicks": {
+            "draftkings": 5.0,
+            "fanduel": 5.0,
+            "williamhill_us": 5.0
+        },
+        "FG3A": {},
+        "FTM": {},
+        "FGM": {},
+        "FGA": {},
+        "STL": {
+            "draftkings": 4.455561974984364,
+            "fanduel": 8.891739563627711,
+            "williamhill_us": 4.515480290449458,
+            "betmgm": 10.0,
+            "bovada": 1.0,
+            "mybookieag": 1.0,
+            "barstool": 4.578857350337928,
+            "unibet_us": 6.872861923695691,
+            "betrivers": 10.0,
+            "pointsbetus": 1.8967162148141097
+        },
+        "BLK": {
+            "draftkings": 10.0,
+            "fanduel": 1.0000068791514103,
+            "williamhill_us": 2.3875548897105725,
+            "betmgm": 1.0516222547252694,
+            "bovada": 4.0719036416230345,
+            "mybookieag": 1.0,
+            "barstool": 9.9999994821738,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "pointsbetus": 1.0,
+            "betonlineag": 1.0
+        },
+        "BLST": {
+            "draftkings": 1.0,
+            "fanduel": 9.711167527846136,
+            "williamhill_us": 2.387067772741911,
+            "betmgm": 9.372087143531466
+        },
+        "TOV": {
+            "draftkings": 10.0,
+            "fanduel": 10.0,
+            "williamhill_us": 10.0,
+            "betmgm": 1.0,
+            "bovada": 1.0,
+            "barstool": 1.0,
+            "pointsbetus": 1.0
+        },
+        "OREB": {
+            "draftkings": 5.0,
+            "fanduel": 5.0,
+            "williamhill_us": 5.0
+        },
+        "DREB": {},
+        "PF": {
+            "draftkings": 5.0,
+            "fanduel": 5.0,
+            "williamhill_us": 5.0
+        },
+        "MIN": {}
+    },
+    "NFL": {
+        "passing yards": {
+            "draftkings": 1.0,
+            "fanduel": 1.0,
+            "williamhill_us": 10.0,
+            "pointsbetus": 2.1196248179138135,
+            "betrivers": 1.0,
+            "unibet_us": 1.0,
+            "betonlineag": 1.0,
+            "bovada": 6.669376232582442,
+            "betmgm": 3.2814804809581317,
+            "barstool": 7.786003281899532
+        },
+        "rushing yards": {
+            "draftkings": 10.0,
+            "fanduel": 4.292916397329962,
+            "williamhill_us": 1.0,
+            "pointsbetus": 5.552496916389678,
+            "betrivers": 7.380769672382568,
+            "unibet_us": 10.0,
+            "betonlineag": 1.0,
+            "bovada": 2.673919128444235,
+            "betmgm": 5.749870031737261,
+            "barstool": 1.0
+        },
+        "receiving yards": {
+            "draftkings": 10.0,
+            "fanduel": 10.0,
+            "williamhill_us": 8.671217552534461,
+            "pointsbetus": 1.0,
+            "betrivers": 2.1954712251725903,
+            "unibet_us": 1.0,
+            "betonlineag": 1.0,
+            "bovada": 10.0,
+            "betmgm": 1.0,
+            "barstool": 1.0
+        },
+        "yards": {
+            "draftkings": 10.0,
+            "fanduel": 1.0,
+            "williamhill_us": 1.0
+        },
+        "qb yards": {
+            "draftkings": 1.0,
+            "fanduel": 10.0
+        },
+        "fantasy points prizepicks": {},
+        "fantasy points underdog": {},
+        "passing tds": {
+            "draftkings": 1.0,
+            "fanduel": 1.0,
+            "williamhill_us": 1.0156015151958204,
+            "betrivers": 1.0,
+            "unibet_us": 10.0,
+            "betonlineag": 1.0,
+            "bovada": 1.0,
+            "betmgm": 10.0,
+            "barstool": 1.0
+        },
+        "tds": {
+            "fanduel": 10.0,
+            "williamhill_us": 3.67461724539724,
+            "pointsbetus": 10.0,
+            "betrivers": 1.0,
+            "unibet_us": 1.0,
+            "bovada": 1.0,
+            "betmgm": 1.0,
+            "draftkings": 10.0,
+            "barstool": 1.0
+        },
+        "rushing tds": {
+            "draftkings": 1.0,
+            "fanduel": 10.0
+        },
+        "receiving tds": {
+            "draftkings": 5.000018544495106
+        },
+        "qb tds": {},
+        "completions": {
+            "draftkings": 8.2944239433637,
+            "fanduel": 1.0,
+            "williamhill_us": 5.346621821066117,
+            "betonlineag": 1.0,
+            "bovada": 7.783030665035917,
+            "betmgm": 6.4220499199880505,
+            "betrivers": 1.8299906528686165,
+            "unibet_us": 1.8737003765612226
+        },
+        "carries": {
+            "draftkings": 2.211999528582788,
+            "fanduel": 10.0,
+            "williamhill_us": 2.25443198207443,
+            "bovada": 10.0,
+            "betmgm": 5.788104448254105,
+            "unibet_us": 3.737855379684603,
+            "betrivers": 5.444530131125155
+        },
+        "receptions": {
+            "draftkings": 10.0,
+            "williamhill_us": 1.0,
+            "fanduel": 1.0,
+            "betonlineag": 1.0,
+            "bovada": 1.0,
+            "betmgm": 1.0,
+            "barstool": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "pointsbetus": 1.0
+        },
+        "interceptions": {
+            "draftkings": 5.554358469694153,
+            "williamhill_us": 9.56654682931078,
+            "betonlineag": 1.0,
+            "bovada": 1.0,
+            "betmgm": 1.0,
+            "barstool": 10.0,
+            "betrivers": 10.0,
+            "unibet_us": 10.0,
+            "fanduel": 1.0
+        },
+        "attempts": {
+            "williamhill_us": 1.0,
+            "fanduel": 1.0,
+            "betonlineag": 10.0,
+            "draftkings": 10.0,
+            "bovada": 10.0,
+            "betmgm": 1.0,
+            "betrivers": 1.0,
+            "unibet_us": 1.0
+        },
+        "targets": {},
+        "longest completion": {
+            "draftkings": 1.0,
+            "fanduel": 1.0,
+            "williamhill_us": 10.0
+        },
+        "longest rush": {
+            "draftkings": 10.0,
+            "fanduel": 1.0
+        },
+        "longest reception": {
+            "draftkings": 10.0,
+            "fanduel": 1.0,
+            "williamhill_us": 10.0
+        },
+        "sacks taken": {},
+        "passing first downs": {},
+        "first downs": {},
+        "fumbles lost": {},
+        "completion percentage": {}
+    },
+    "NHL": {
+        "saves": {
+            "draftkings": 1.7207862470876814,
+            "fanduel": 1.0,
+            "williamhill_us": 10.0,
+            "bovada": 1.0,
+            "barstool": 1.0,
+            "betmgm": 1.0
+        },
+        "shots": {
+            "draftkings": 9.066330925229835,
+            "fanduel": 1.0,
+            "williamhill_us": 8.651798097734883,
+            "betonlineag": 1.0,
+            "bovada": 1.0,
+            "betmgm": 1.0,
+            "unibet_us": 10.0,
+            "betrivers": 10.0,
+            "barstool": 10.0,
+            "wynnbet": 1.0,
+            "pointsbetus": 1.0
+        },
+        "points": {
+            "draftkings": 10.0,
+            "fanduel": 10.0,
+            "williamhill_us": 1.0,
+            "betonlineag": 10.0,
+            "betmgm": 10.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "bovada": 1.0,
+            "barstool": 10.0,
+            "wynnbet": 1.0,
+            "pointsbetus": 1.0
+        },
+        "goalsAgainst": {},
+        "goalie fantasy points underdog": {},
+        "skater fantasy points underdog": {},
+        "blocked": {
+            "draftkings": 9.79883346581725,
+            "fanduel": 5.0,
+            "williamhill_us": 1.0,
+            "betmgm": 1.4692299022501558,
+            "barstool": 5.437880950767403
+        },
+        "powerPlayPoints": {
+            "draftkings": 1.5065800318715885,
+            "fanduel": 1.0,
+            "williamhill_us": 1.0,
+            "betmgm": 10.0,
+            "bovada": 10.0,
+            "unibet_us": 6.210343636824429,
+            "betrivers": 1.6952485261009431,
+            "barstool": 4.719227444463215
+        },
+        "sogBS": {
+            "draftkings": 5.0,
+            "fanduel": 5.0,
+            "williamhill_us": 5.0
+        },
+        "fantasy points prizepicks": {
+            "draftkings": 5.0,
+            "fanduel": 5.0,
+            "williamhill_us": 5.0
+        },
+        "hits": {
+            "draftkings": 5.0,
+            "fanduel": 5.0,
+            "williamhill_us": 5.0
+        },
+        "goals": {
+            "draftkings": 3.9101723767831107,
+            "fanduel": 10.0,
+            "williamhill_us": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "bovada": 1.0,
+            "betmgm": 8.878996591003293,
+            "wynnbet": 1.0,
+            "pointsbetus": 10.0
+        },
+        "assists": {
+            "draftkings": 10.0,
+            "fanduel": 6.644353104963567,
+            "williamhill_us": 1.0,
+            "betmgm": 10.0,
+            "bovada": 1.0,
+            "barstool": 10.0,
+            "pointsbetus": 3.213993843331581
+        },
+        "faceOffWins": {},
+        "timeOnIce": {}
+    },
+    "MLB": {
+        "pitcher strikeouts": {
+            "draftkings": 10.0,
+            "fanduel": 1.0,
+            "williamhill_us": 1.0,
+            "pointsbetus": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "bovada": 10.0,
+            "betonlineag": 1.0,
+            "betmgm": 1.0,
+            "mybookieag": 1.0,
+            "barstool": 10.0
+        },
+        "pitching outs": {
+            "draftkings": 8.912938234432882,
+            "williamhill_us": 7.55422314076638,
+            "betmgm": 1.0,
+            "barstool": 1.0,
+            "betonlineag": 10.0
+        },
+        "pitches thrown": {},
+        "hits allowed": {
+            "draftkings": 10.0,
+            "williamhill_us": 1.0,
+            "bovada": 2.7613201318355105,
+            "betonlineag": 3.776538278212577,
+            "barstool": 4.968495825312889,
+            "fanduel": 9.779272360186074,
+            "betmgm": 4.123592781815849
+        },
+        "runs allowed": {
+            "draftkings": 1.0,
+            "williamhill_us": 1.0,
+            "bovada": 4.325690577624716,
+            "betmgm": 1.0,
+            "barstool": 10.0,
+            "betonlineag": 10.0
+        },
+        "walks allowed": {
+            "williamhill_us": 1.0,
+            "draftkings": 3.801525300144258,
+            "bovada": 9.012365999468472,
+            "barstool": 10.0,
+            "fanduel": 4.698898948259205
+        },
+        "1st inning runs allowed": {},
+        "1st inning hits allowed": {},
+        "hitter fantasy score": {},
+        "pitcher fantasy score": {},
+        "hitter fantasy points underdog": {},
+        "pitcher fantasy points underdog": {},
+        "hits+runs+rbi": {
+            "draftkings": 10.0,
+            "bovada": 2.4716465726128574,
+            "barstool": 6.162883862970274,
+            "betmgm": 1.0,
+            "betonlineag": 10.0
+        },
+        "total bases": {
+            "draftkings": 10.0,
+            "williamhill_us": 1.0,
+            "fanduel": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "betonlineag": 9.996953482910673,
+            "betmgm": 1.0,
+            "mybookieag": 1.0,
+            "barstool": 5.101053283608048
+        },
+        "walks": {
+            "draftkings": 10.0,
+            "betmgm": 1.0
+        },
+        "stolen bases": {
+            "draftkings": 10.0,
+            "betmgm": 1.0,
+            "barstool": 2.764831857992611,
+            "fanduel": 5.664209150412618,
+            "betrivers": 1.0,
+            "unibet_us": 1.0,
+            "bovada": 1.0
+        },
+        "hits": {
+            "draftkings": 10.0,
+            "williamhill_us": 5.647715885702831,
+            "betmgm": 1.0,
+            "pointsbetus": 3.721480030947609,
+            "bovada": 1.0,
+            "fanduel": 4.511313836844361,
+            "unibet_us": 1.0,
+            "betrivers": 1.9664054092597327,
+            "barstool": 10.0,
+            "betonlineag": 10.0,
+            "mybookieag": 1.0
+        },
+        "runs": {
+            "draftkings": 10.0,
+            "fanduel": 1.0,
+            "unibet_us": 5.144605272704766,
+            "betrivers": 4.598493594068839,
+            "bovada": 1.0,
+            "williamhill_us": 1.0,
+            "betmgm": 3.2352481740445986,
+            "barstool": 1.0
+        },
+        "rbi": {
+            "draftkings": 10.0,
+            "williamhill_us": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 1.0,
+            "bovada": 1.0,
+            "betmgm": 1.1867963784752655,
+            "barstool": 1.0,
+            "fanduel": 1.0
+        },
+        "batter strikeouts": {
+            "draftkings": 10.0,
+            "fanduel": 1.0,
+            "williamhill_us": 1.0
+        },
+        "singles": {
+            "draftkings": 10.0,
+            "williamhill_us": 1.0,
+            "fanduel": 1.0,
+            "betmgm": 1.923860797492602,
+            "barstool": 1.0,
+            "unibet_us": 1.3787522346560346,
+            "betrivers": 1.0795649017538214
+        }
+    }
+}

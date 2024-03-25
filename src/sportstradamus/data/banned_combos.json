@@ -234,7 +234,18 @@
                         "sogBS"
                     ]
                 ],
-                "modified": {}
+                "modified": {
+                    "G.goalsAgainst": {
+                        "_OPP_D.points": 0.79,
+                        "_OPP_R.points": 0.77,
+                        "_OPP_L.points": 0.77,
+                        "_OPP_C.points": 0.77,
+                        "_OPP_D.goals": 0.81,
+                        "_OPP_R.goals": 0.81,
+                        "_OPP_L.goals": 0.81,
+                        "_OPP_C.goals": 0.81
+                    }
+                }
             },
             "MLB": {
                 "team": [

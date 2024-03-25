@@ -1,11 +1,12 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
-from sportstradamus.helpers import get_ev, stat_cv, Archive
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from scipy.optimize import minimize
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -29,6 +30,7 @@ from lightgbmlss.distributions import (
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
+import warnings
 
 with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
     stat_cv = json.load(f)
@@ -98,7 +100,7 @@ nfl = StatsNFL()
 nfl.load()
 nfl.update()
 
-stats = {
+stat_structs = {
     "NBA": nba,
     "NFL": nfl,
     "MLB": mlb,
@@ -127,7 +129,6 @@ def meditate(force, stats, league):
             "PA",
             "FG3M",
             "fantasy points prizepicks",
-            "fantasy points underdog",
             "FG3A",
             "FTM",
             "FGM",
@@ -207,14 +208,51 @@ def meditate(force, stats, league):
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
+
+        if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
+            with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
+                book_weights = json.load(infile)
+        else:
+            book_weights = {}
+
+        book_weights.setdefault(league, {}).setdefault("Moneyline", {})
+        book_weights[league]["Moneyline"] = evaluate_books(league, "Moneyline")
+
+        book_weights.setdefault(league, {}).setdefault("Total", {})
+        book_weights[league]["Total"] = evaluate_books(league, "Total")
+
+        if league=="MLB":
+            book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
+            book_weights[league]["1st 1 innings"] = evaluate_books(league, "1st 1 innings")
+
+        with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
+            json.dump(book_weights, outfile, indent=4)
+
+        continue
+
         for market in markets:
-            stat_data = stats[league]
+            stat_data = stat_structs[league]
+
+            if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
+                with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
+                    book_weights = json.load(infile)
+            else:
+                book_weights = {}
+
+            book_weights.setdefault(league, {}).setdefault(market, {})
+            book_weights[league][market] = evaluate_books(league, market)
+
+            with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
+                json.dump(book_weights, outfile, indent=4)
 
             need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
@@ -735,15 +773,38 @@ def see_features():
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
 def evaluate_books(league, market):
-    df = archive.to_pandas(league, market)
-    stat_data = stats[league]
-    log = stat_data.gamelog[[log_strings[league]["player"], log_strings[league]["date"], market]]
-    log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
-    log.set_index([log_strings[league]["date"], log_strings[league]["player"]])
-    df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["player"]]).set_index([log_strings[league]["date"], log_strings[league]["player"]])[market]
-    df.dropna(subset="Result", inplace=True)
-    if "Line" in df.columns:
+    if market == "1st inning runs allowed":
+        return {}
+    elif market == "goalsAgainst":
+        return {}
+    else:
+        df = archive.to_pandas(league, market)
+        df = df[[col for col in df.columns if col != "pinnacle"]]
+        if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
+            return {}
+        stat_data = stat_structs[league]
+        cv = stat_cv[league].get(market, 1)
+        log = stat_data.gamelog[[log_strings[league]["player"], log_strings[league]["date"], market]]
+        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
+        log.set_index([log_strings[league]["date"], log_strings[league]["player"]])
+        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["player"]]).set_index([log_strings[league]["date"], log_strings[league]["player"]])[market]
+        df.dropna(subset="Result", inplace=True)
         df["Over"] = df["Result"] > df["Line"]
+        result = df["Over"]
+        lines = df["Line"]
+        test_df = df[[col for col in df.columns if col not in ["Line", "Result", "Over"]]]
+        test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(lines.to_numpy(), x.to_numpy(), cv))
+        
+        def objective(w, x, y):
+            prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
+            return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
+        
+        x = test_df.to_numpy()
+        y = result.to_numpy()
+        res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+        
+        return {k:res.x[i] for i, k in enumerate(test_df.columns)}
 
 if __name__ == "__main__":
+    warnings.simplefilter('ignore', UserWarning)
     meditate()
