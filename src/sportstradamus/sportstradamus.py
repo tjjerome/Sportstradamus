@@ -1243,7 +1243,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 if stats["Line"] != o["Line"]:
                     ev = get_ev(stats["Line"], 1-stats["Odds"], cv)
-                    stats["Odds"] = get_odds(o["Line"], ev, cv, step=step)
+                    stats["Odds"] = 1-get_odds(o["Line"], ev, cv, step=step)
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
                     p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
