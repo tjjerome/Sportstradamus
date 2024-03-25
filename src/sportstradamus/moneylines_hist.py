@@ -19,21 +19,21 @@ with open(filepath, "r") as infile:
     apikey = keys["odds_api"]
     apikey_plus = keys["odds_api_plus"]
 
-Date = datetime(2023, 5, 3, 13)
+Date = datetime(2024, 3, 19, 12)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
-sport="NBA"
-key="basketball_nba"
+sport="MLB"
+key="baseball_mlb"
 
-while Date.astimezone(pytz.utc).date() < datetime(2023, 6, 13).date():
+while Date.astimezone(pytz.utc).date() < datetime(2024, 3, 26).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue
 
     print(Date)
 
-    # archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-    archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
+    archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
+    # archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
 
     Date = Date + timedelta(days=1)
 

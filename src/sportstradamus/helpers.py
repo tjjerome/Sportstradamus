@@ -506,6 +506,8 @@ class Archive:
         a = []
         w = []
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
+        if not arr:
+            return np.nan
         for book, ev in arr.items():
             a.append(ev)
             w.append(book_weights.get(league,{}).get(market, {}).get(book, 1))
