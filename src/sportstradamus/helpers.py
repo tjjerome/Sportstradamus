@@ -315,8 +315,8 @@ def get_ev(line, under, cv=1, force_gauss=False):
         return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
 
 def get_odds(line, ev, cv=1, force_gauss=False, step=1):
-    high = np.floor((step-line)/step)*step
-    low = np.ceil((-step-line)/step)*step
+    high = np.floor((line+step)/step)*step
+    low = np.ceil((line-step)/step)*step
     if cv == 1:
         if force_gauss:
             under = norm.cdf(high, ev, np.sqrt(ev))
