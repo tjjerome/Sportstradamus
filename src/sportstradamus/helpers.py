@@ -36,6 +36,9 @@ with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
 with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
     stat_cv = json.load(infile)
 
+with open((pkg_resources.files(data) / "book_weights.json"), "r") as infile:
+    book_weights = json.load(infile)
+
 with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
     books = json.load(infile)
 
@@ -460,6 +463,8 @@ class Archive:
 
     def add_dfs(self, offers, key):
         for o in offers:
+            if not o["Line"]:
+                continue
             market = o["Market"].replace("H2H ", "")
             market = key.get(market, market)
             cv = stat_cv.get(market, 1)
@@ -470,10 +475,9 @@ class Archive:
             if o["League"] == "NBA":
                 market = market.replace("underdog", "prizepicks")
 
-            self.archive.setdefault(o["League"], {}).setdefault(market, {})
-            self.archive[o["League"]][market].setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": {}, "Lines": []})
+            self.archive.setdefault(o["League"], {}).setdefault(market, {}).setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": {}, "Lines": []})
 
-            if o["Line"] and float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
+            if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
                 self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
 
     def get_moneyline(self, league, date, team):
@@ -499,9 +503,14 @@ class Archive:
             return arr
 
     def get_ev(self, league, market, date, player):
+        a = []
+        w = []
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
-        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
-        return v
+        for book, ev in arr.items():
+            a.append(ev)
+            w.append(book_weights.get(league,{}).get(market, {}).get(book, 1))
+
+        return np.average(a, weights=w)
 
     def get_team_market(self, league, market, date, team):
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(team, {})
@@ -517,6 +526,25 @@ class Archive:
             arr = [line for line in arr if mu - sig <= line <= mu + sig]
 
         return arr[-1]
+    
+    def to_pandas(self, league, market):
+        records = {}
+        if market not in self.archive[league]:
+            return pd.DataFrame()
+        for date in list(self.archive[league][market].keys()):
+            if market not in ["Moneyline", "Total"] and datetime.datetime.strptime(date, "%Y-%m-%d").date() < datetime.datetime(2023, 5, 3).date():
+                continue
+            for player in list(self.archive[league][market][date].keys()):
+                if "EV" in self.archive[league][market][date][player]:
+                    line = self.get_line(league, market, date, player)
+                    # cv = stat_cv[league].get(market, 1)
+                    record = self.archive[league][market][date][player]["EV"]
+                    record["Line"] = line
+                    records[(date, player)] = self.archive[league][market][date][player]["EV"]
+                else:
+                    records[(date, player)] = self.archive[league][market][date][player]
+
+        return pd.DataFrame(records).T
 
     def write(self, overwrite=False):
         """

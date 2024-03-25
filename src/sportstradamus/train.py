@@ -1,11 +1,12 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
-from sportstradamus.helpers import get_ev, stat_cv
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from scipy.optimize import minimize
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -29,7 +30,84 @@ from lightgbmlss.distributions import (
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
+import warnings
 
+with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
+    stat_cv = json.load(f)
+
+dist_params = {
+    "stabilization": "None",
+    "response_fn": "softplus",
+    "loss_fn": "nll"
+}
+
+distributions = {
+    "Gaussian": Gaussian.Gaussian(**dist_params),
+    "Poisson": Poisson.Poisson(**dist_params)
+}
+
+log_strings = {
+    "NFL": {
+        "game": "game id",
+        "date": "gameday",
+        "player": "player display name",
+        "usage": "snap pct",
+        "usage_sec": "route participation",
+        "position": "position group",
+        "team": "recent team",
+        "home": "home"
+    },
+    "NBA": {
+        "game": "GAME_ID",
+        "date": "GAME_DATE",
+        "player": "PLAYER_NAME",
+        "usage": "MIN",
+        "usage_sec": "USG_PCT",
+        "position": "POS",
+        "team": "TEAM_ABBREVIATION",
+        "home": "HOME"
+    },
+    "NHL": {
+        "game": "gameId",
+        "date": "gameDate",
+        "player": "playerName",
+        "usage": "TimeShare",
+        "usage_sec": "Fenwick",
+        "position": "position",
+        "team": "team",
+        "home": "home"
+    },
+    "MLB": {
+        "game": "gameId",
+        "date": "gameDate",
+        "player": "playerName",
+        "position": "position",
+        "team": "team",
+        "home": "home"
+    },
+}
+
+mlb = StatsMLB()
+mlb.load()
+mlb.update()
+nba = StatsNBA()
+nba.load()
+nba.update()
+nhl = StatsNHL()
+nhl.load()
+nhl.update()
+nfl = StatsNFL()
+nfl.load()
+nfl.update()
+
+stat_structs = {
+    "NBA": nba,
+    "NFL": nfl,
+    "MLB": mlb,
+    "NHL": nhl
+}
+
+archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
@@ -38,32 +116,6 @@ import json
               help="Select league to train on")
 def meditate(force, stats, league):
 
-    with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
-        stat_cv = json.load(f)
-
-    dist_params = {
-        "stabilization": "None",
-        "response_fn": "softplus",
-        "loss_fn": "nll"
-    }
-
-    distributions = {
-        "Gaussian": Gaussian.Gaussian(**dist_params),
-        "Poisson": Poisson.Poisson(**dist_params)
-    }
-
-    mlb = StatsMLB()
-    mlb.load()
-    mlb.update()
-    nba = StatsNBA()
-    nba.load()
-    nba.update()
-    nhl = StatsNHL()
-    nhl.load()
-    nhl.update()
-    nfl = StatsNFL()
-    nfl.load()
-    nfl.update()
     np.random.seed(69)
 
     all_markets = {
@@ -77,7 +129,6 @@ def meditate(force, stats, league):
             "PA",
             "FG3M",
             "fantasy points prizepicks",
-            "fantasy points underdog",
             "FG3A",
             "FTM",
             "FGM",
@@ -157,23 +208,51 @@ def meditate(force, stats, league):
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
+
+        if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
+            with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
+                book_weights = json.load(infile)
+        else:
+            book_weights = {}
+
+        book_weights.setdefault(league, {}).setdefault("Moneyline", {})
+        book_weights[league]["Moneyline"] = evaluate_books(league, "Moneyline")
+
+        book_weights.setdefault(league, {}).setdefault("Total", {})
+        book_weights[league]["Total"] = evaluate_books(league, "Total")
+
+        if league=="MLB":
+            book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
+            book_weights[league]["1st 1 innings"] = evaluate_books(league, "1st 1 innings")
+
+        with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
+            json.dump(book_weights, outfile, indent=4)
+
+        continue
+
         for market in markets:
-            if league == "MLB":
-                stat_data = mlb
-            elif league == "NBA":
-                stat_data = nba
-            elif league == "NHL":
-                stat_data = nhl
-            elif league == "NFL":
-                stat_data = nfl
+            stat_data = stat_structs[league]
+
+            if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
+                with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
+                    book_weights = json.load(infile)
             else:
-                continue
+                book_weights = {}
+
+            book_weights.setdefault(league, {}).setdefault(market, {})
+            book_weights[league][market] = evaluate_books(league, market)
+
+            with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
+                json.dump(book_weights, outfile, indent=4)
 
             need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
@@ -693,6 +772,39 @@ def see_features():
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
+def evaluate_books(league, market):
+    if market == "1st inning runs allowed":
+        return {}
+    elif market == "goalsAgainst":
+        return {}
+    else:
+        df = archive.to_pandas(league, market)
+        df = df[[col for col in df.columns if col != "pinnacle"]]
+        if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
+            return {}
+        stat_data = stat_structs[league]
+        cv = stat_cv[league].get(market, 1)
+        log = stat_data.gamelog[[log_strings[league]["player"], log_strings[league]["date"], market]]
+        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
+        log.set_index([log_strings[league]["date"], log_strings[league]["player"]])
+        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["player"]]).set_index([log_strings[league]["date"], log_strings[league]["player"]])[market]
+        df.dropna(subset="Result", inplace=True)
+        df["Over"] = df["Result"] > df["Line"]
+        result = df["Over"]
+        lines = df["Line"]
+        test_df = df[[col for col in df.columns if col not in ["Line", "Result", "Over"]]]
+        test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(lines.to_numpy(), x.to_numpy(), cv))
+        
+        def objective(w, x, y):
+            prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
+            return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
+        
+        x = test_df.to_numpy()
+        y = result.to_numpy()
+        res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+        
+        return {k:res.x[i] for i, k in enumerate(test_df.columns)}
 
 if __name__ == "__main__":
+    warnings.simplefilter('ignore', UserWarning)
     meditate()
