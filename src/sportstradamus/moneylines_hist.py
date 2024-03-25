@@ -19,13 +19,13 @@ with open(filepath, "r") as infile:
     apikey = keys["odds_api"]
     apikey_plus = keys["odds_api_plus"]
 
-Date = datetime(2023, 9, 7, 9)
+Date = datetime(2023, 5, 3, 13)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
-sport="NFL"
-key="americanfootball_nfl"
+sport="NBA"
+key="basketball_nba"
 
-while Date.astimezone(pytz.utc).date() < datetime(2024, 2, 12).date():
+while Date.astimezone(pytz.utc).date() < datetime(2023, 6, 13).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue
