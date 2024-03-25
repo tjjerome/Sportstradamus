@@ -273,7 +273,7 @@ class StatsNBA(Stats):
 
         i = 0
 
-        while (i < 3):
+        while (i < 10):
             try:
                 nba_gamelog = nba.playergamelogs.PlayerGameLogs(
                     **params).get_normalized_dict()["PlayerGameLogs"]
@@ -1420,6 +1420,8 @@ class StatsMLB(Stats):
                 "opponent": awayTeam,
                 "gameId": gameId,
                 "gameDate": game["game_date"],
+                "WL": "W" if float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]) > float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]) else "L",
+                "runs": float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]),
                 "OBP": float(boxscore["teams"]["home"]["teamStats"]["batting"]["obp"])/bpf["OBP"],
                 "AVG": float(boxscore["teams"]["home"]["teamStats"]["batting"]["avg"]),
                 "SLG": float(boxscore["teams"]["home"]["teamStats"]["batting"]["slg"]),
@@ -1447,6 +1449,8 @@ class StatsMLB(Stats):
                 "opponent": homeTeam,
                 "gameId": gameId,
                 "gameDate": game["game_date"],
+                "WL": "W" if float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]) > float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]) else "L",
+                "runs": float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]),
                 "OBP": float(boxscore["teams"]["away"]["teamStats"]["batting"]["obp"])/bpf["OBP"],
                 "AVG": float(boxscore["teams"]["away"]["teamStats"]["batting"]["avg"]),
                 "SLG": float(boxscore["teams"]["away"]["teamStats"]["batting"]["slg"]),
@@ -2532,7 +2536,7 @@ class StatsNFL(Stats):
             self.pbp["play_time"] = self.pbp["game_seconds_remaining"].diff(
                 -1).fillna(0)
             self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
-                ['run', 'pass'])]
+                ['run', 'pass']) | (self.pbp['desc'] == "END GAME")]
             if self.season_start.year > 2021:
                 ftn = nfl.import_ftn_data([self.season_start.year])
                 ftn['game_id'] = ftn['nflverse_game_id']
@@ -2594,6 +2598,7 @@ class StatsNFL(Stats):
             return 0
         pbp_off = pbp.loc[pbp.posteam == team]
         pbp_def = pbp.loc[pbp.posteam != team]
+        home = pbp.iloc[0].home_team == team
         if playerName == "":
             pr = pbp_off['pass'].mean()
             proe = pbp_off['pass'].mean() - pbp_off['xpass'].mean()
@@ -2656,6 +2661,9 @@ class StatsNFL(Stats):
             time_of_possession = pbp_off["play_time"].sum(
             ) / pbp["play_time"].sum()
             time_per_play = pbp_off["play_time"].mean()
+            points = pbp["home_score"].iloc[-1] if home else pbp["away_score"].iloc[-1]
+            pointsAgainst = pbp["away_score"].iloc[-1] if home else pbp["home_score"].iloc[-1]
+            win = "W" if points > pointsAgainst else "L"
 
             return {
                 "pass_rate": pr,
@@ -2703,7 +2711,9 @@ class StatsNFL(Stats):
                 "epa_allowed_per_blitz": def_blitz_epa,
                 "plays_per_game": plays,
                 "time_of_possession": time_of_possession,
-                "time_per_play": time_per_play
+                "time_per_play": time_per_play,
+                "points": points,
+                "WL": win
             }
 
         else:
@@ -3521,10 +3531,12 @@ class StatsNHL(Stats):
                         "Block_Pct": float(player["OffIce_A_blockedShotAttempts"]) / float(player["OffIce_A_shotAttempts"]),
                         "xGoals": float(player["OffIce_F_flurryScoreVenueAdjustedxGoals"]),
                         "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"]),
-                        "goalsAgainst": float(player["OffIce_A_goals"])
+                        "goalsAgainst": float(player["OffIce_A_goals"]),
+                        "goals": float(player["OffIce_F_goals"]),
                     }
                     shotsAgainst = float(player['OffIce_A_shotsOnGoal'])
                     stats.update({
+                        "WL": "W" if stats["goals"] > stats["goalsAgainst"] else "L",
                         "GOE": (float(player["OffIce_F_goals"]) - stats["xGoals"]) / float(player["OffIce_F_shotAttempts"]),
                         "SV": (float(player['OffIce_A_savedShotsOnGoal']) / shotsAgainst) if shotsAgainst else 0,
                         "SOE": ((float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"]) - float(player["OffIce_A_goals"])) / shotsAgainst) if shotsAgainst else 0,
