@@ -54,8 +54,10 @@ log_strings = {
         "usage": "snap pct",
         "usage_sec": "route participation",
         "position": "position group",
-        "team": "recent team",
-        "home": "home"
+        "team": "team",
+        "home": "home",
+        "win": "WL",
+        "score": "points"
     },
     "NBA": {
         "game": "GAME_ID",
@@ -65,7 +67,9 @@ log_strings = {
         "usage_sec": "USG_PCT",
         "position": "POS",
         "team": "TEAM_ABBREVIATION",
-        "home": "HOME"
+        "home": "HOME",
+        "win": "WL",
+        "score": "PTS"
     },
     "NHL": {
         "game": "gameId",
@@ -75,7 +79,9 @@ log_strings = {
         "usage_sec": "Fenwick",
         "position": "position",
         "team": "team",
-        "home": "home"
+        "home": "home",
+        "win": "WL",
+        "score": "goals"
     },
     "MLB": {
         "game": "gameId",
@@ -83,7 +89,9 @@ log_strings = {
         "player": "playerName",
         "position": "position",
         "team": "team",
-        "home": "home"
+        "home": "home",
+        "win": "WL",
+        "score": "runs"
     },
 }
 
@@ -227,8 +235,8 @@ def meditate(force, stats, league):
         book_weights.setdefault(league, {}).setdefault("Moneyline", {})
         book_weights[league]["Moneyline"] = evaluate_books(league, "Moneyline")
 
-        book_weights.setdefault(league, {}).setdefault("Total", {})
-        book_weights[league]["Total"] = evaluate_books(league, "Total")
+        book_weights.setdefault(league, {}).setdefault("Totals", {})
+        book_weights[league]["Totals"] = evaluate_books(league, "Totals")
 
         if league=="MLB":
             book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
@@ -236,8 +244,6 @@ def meditate(force, stats, league):
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
-
-        continue
 
         for market in markets:
             stat_data = stat_structs[league]
@@ -773,20 +779,42 @@ def see_features():
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
 def evaluate_books(league, market):
-    if market == "1st inning runs allowed":
+    df = archive.to_pandas(league, market)
+    df = df[[col for col in df.columns if col != "pinnacle"]]
+    if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
         return {}
-    elif market == "goalsAgainst":
-        return {}
+    stat_data = stat_structs[league]
+    cv = stat_cv[league].get(market, 1)
+    
+    if market == "Moneyline":
+        log = stat_data.teamlog[[log_strings[league]["team"], log_strings[league]["date"], log_strings[league]["win"]]]
+        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["team"]]).set_index([log_strings[league]["date"], log_strings[league]["team"]])[log_strings[league]["win"]]
+        df.dropna(subset="Result", inplace=True)
+        result = df["Result"] == "W"
+        test_df = df.drop(columns='Result')
+
+    elif market == "Totals":
+        log = stat_data.teamlog[[log_strings[league]["team"], log_strings[league]["date"], log_strings[league]["score"]]]
+        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["team"]]).set_index([log_strings[league]["date"], log_strings[league]["team"]])[log_strings[league]["score"]]
+        df.dropna(subset="Result", inplace=True)
+        result = df["Result"]
+        test_df = df.drop(columns='Result')
+    
+    elif market == "1st 1 innings":
+        log = stat_data.gamelog.loc[stat_data.gamelog["starting pitcher"], ["opponent", log_strings[league]["date"], "1st inning runs allowed"]]
+        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([log_strings[league]["date"], "opponent"]).set_index([log_strings[league]["date"], "opponent"])["1st inning runs allowed"]
+        df.dropna(subset="Result", inplace=True)
+        df["Over"] = df["Result"] > 0.5
+        result = df["Over"]
+        test_df = df[[col for col in df.columns if col not in ["Line", "Result", "Over"]]]
+        test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(np.ones(len(test_df))*0.5, x.to_numpy(), cv))
+    
     else:
-        df = archive.to_pandas(league, market)
-        df = df[[col for col in df.columns if col != "pinnacle"]]
-        if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
-            return {}
-        stat_data = stat_structs[league]
-        cv = stat_cv[league].get(market, 1)
         log = stat_data.gamelog[[log_strings[league]["player"], log_strings[league]["date"], market]]
         log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
-        log.set_index([log_strings[league]["date"], log_strings[league]["player"]])
         df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["player"]]).set_index([log_strings[league]["date"], log_strings[league]["player"]])[market]
         df.dropna(subset="Result", inplace=True)
         df["Over"] = df["Result"] > df["Line"]
@@ -795,15 +823,22 @@ def evaluate_books(league, market):
         test_df = df[[col for col in df.columns if col not in ["Line", "Result", "Over"]]]
         test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(lines.to_numpy(), x.to_numpy(), cv))
         
+
+    if market in ["Totals"]:
+        def objective(w, x, y):
+            prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
+            return mean_tweedie_deviance(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)], power=1)
+
+    else:
         def objective(w, x, y):
             prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
-        
-        x = test_df.to_numpy()
-        y = result.to_numpy()
-        res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
-        
-        return {k:res.x[i] for i, k in enumerate(test_df.columns)}
+    
+    x = test_df.to_numpy()
+    y = result.to_numpy()
+    res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+    
+    return {k:res.x[i] for i, k in enumerate(test_df.columns)}
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)

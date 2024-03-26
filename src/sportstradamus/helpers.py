@@ -487,26 +487,28 @@ class Archive:
                 self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
 
     def get_moneyline(self, league, date, team):
-        arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
-        if type(arr) is dict:
-            v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
-            if np.isnan(v):
-                return .5
-            else:
-                return v
-        else:
-            return arr
+        a = []
+        w = []
+        arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
+        if not arr:
+            return .5
+        for book, ev in arr.items():
+            a.append(ev)
+            w.append(book_weights.get(league, {}).get("Totals", {}).get(book, 1))
+
+        return np.average(a, weights=w)
 
     def get_total(self, league, date, team):
+        a = []
+        w = []
         arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
-        if type(arr) is dict:
-            v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
-            if np.isnan(v):
-                return self.default_totals.get(league, 1)
-            else:
-                return v
-        else:
-            return arr
+        if not arr:
+            return self.default_totals.get(league, 1)
+        for book, ev in arr.items():
+            a.append(ev)
+            w.append(book_weights.get(league, {}).get("Totals", {}).get(book, 1))
+
+        return np.average(a, weights=w)
 
     def get_ev(self, league, market, date, player):
         a = []
@@ -516,24 +518,26 @@ class Archive:
             return np.nan
         for book, ev in arr.items():
             a.append(ev)
-            w.append(book_weights.get(league,{}).get(market, {}).get(book, 1))
+            w.append(book_weights.get(league, {}).get(market, {}).get(book, 1))
 
         return np.average(a, weights=w)
 
     def get_team_market(self, league, market, date, team):
+        a = []
+        w = []
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(team, {})
-        v = np.nanmean(np.array([v for k, v in arr.items()], dtype=np.float64))
-        return v
+        if not arr:
+            return np.nan
+        for book, ev in arr.items():
+            a.append(ev)
+            w.append(book_weights.get(league, {}).get(market, {}).get(book, 1))
+
+        return np.average(a, weights=w)
 
     def get_line(self, league, market, date, player):
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("Lines", [np.nan])
 
-        if len(arr) > 2:
-            mu = np.median(arr)
-            sig = iqr(arr)
-            arr = [line for line in arr if mu - sig <= line <= mu + sig]
-
-        return arr[-1]
+        return np.floor(2*np.median(arr))/2
     
     def to_pandas(self, league, market):
         records = {}
@@ -545,7 +549,6 @@ class Archive:
             for player in list(self.archive[league][market][date].keys()):
                 if "EV" in self.archive[league][market][date][player]:
                     line = self.get_line(league, market, date, player)
-                    # cv = stat_cv[league].get(market, 1)
                     record = self.archive[league][market][date][player]["EV"]
                     record["Line"] = line
                     records[(date, player)] = self.archive[league][market][date][player]["EV"]

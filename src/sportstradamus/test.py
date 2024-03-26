@@ -41,6 +41,7 @@ import requests
 
 # NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
+# NFL.update()
 # NFL.season_start = datetime(2019, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2020, 9, 1).date()
