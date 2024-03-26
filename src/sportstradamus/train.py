@@ -54,10 +54,10 @@ log_strings = {
         "usage": "snap pct",
         "usage_sec": "route participation",
         "position": "position group",
-        "team": "recent team",
+        "team": "team",
         "home": "home",
         "win": "WL",
-        "score": "PTS"
+        "score": "points"
     },
     "NBA": {
         "game": "GAME_ID",
@@ -81,7 +81,7 @@ log_strings = {
         "team": "team",
         "home": "home",
         "win": "WL",
-        "score": "PTS"
+        "score": "goals"
     },
     "MLB": {
         "game": "gameId",
@@ -244,8 +244,6 @@ def meditate(force, stats, league):
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
-
-        continue
 
         for market in markets:
             stat_data = stat_structs[league]
