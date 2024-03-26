@@ -23,23 +23,26 @@ archive = Archive("All")
 book_pos = {0: 'draftkings', 1: 'fanduel', 2: 'pinnacle', 3: 'williamhill_us'}
 leagues = list(archive.archive.keys())
 for league in tqdm(leagues, unit="leagues", position=0):
-    markets = list(archive[league].keys())
-    if "Moneyline" in markets:
-        markets.remove("Moneyline")
-        markets.remove("Totals")
-    if "1st 1 innings" in markets:
-        markets.remove("1st 1 innings")
+    # markets = list(archive[league].keys())
+    markets = ["Moneyline", "Totals"]
+    # if "Moneyline" in markets:
+    #     markets.remove("Moneyline")
+    #     markets.remove("Totals")
+    # if "1st 1 innings" in markets:
+    #     markets.remove("1st 1 innings")
     for market in tqdm(markets, desc=league, unit="Markets", position=1):
-        cv = stat_cv.get(league, {}).get(market, 1)
+        # cv = stat_cv.get(league, {}).get(market, 1)
+        if market not in archive[league]:
+            continue
         for date in tqdm(list(archive[league][market].keys()), desc=market, unit="Gamedays", position=2):
             players = list(archive[league][market][date].keys())
             for player in players:
-                if " + " in player or " vs. " in player:
-                    archive[league][market][date].pop(player)
-                    continue
+                # if " + " in player or " vs. " in player:
+                #     archive[league][market][date].pop(player)
+                #     continue
                 player_name = remove_accents(player)
-                if player_name != player:
-                    archive[league][market][date][player_name] = merge_dict(archive[league][market][date].get(player_name,{}), archive[league][market][date].pop(player))
+                # if player_name != player:
+                #     archive[league][market][date][player_name] = merge_dict(archive[league][market][date].get(player_name,{}), archive[league][market][date].pop(player))
                 # ev = {}
                 # old_ev = archive[league][market][date][player_name].get("EV", [None]*4)
                 # if type(old_ev) is np.ndarray:
@@ -62,7 +65,7 @@ for league in tqdm(leagues, unit="leagues", position=0):
 
                 # archive[league][market][date][player_name]["EV"] = ev
 
-                if not archive[league][market][date][player_name]["Lines"]:
+                if not type(archive[league][market][date][player_name]) is dict:
                     archive[league][market][date].pop(player_name)
 
             if not archive[league][market][date]:
