@@ -489,12 +489,12 @@ class Archive:
     def get_moneyline(self, league, date, team):
         a = []
         w = []
-        arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
+        arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
         if not arr:
             return .5
         for book, ev in arr.items():
             a.append(ev)
-            w.append(book_weights.get(league, {}).get("Totals", {}).get(book, 1))
+            w.append(book_weights.get(league, {}).get("Moneyline", {}).get(book, 1))
 
         return np.average(a, weights=w)
 

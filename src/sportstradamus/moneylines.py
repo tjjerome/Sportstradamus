@@ -54,7 +54,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
             logger.warning("All sports only supported if date is today")
             return archive
         # Get available sports from the API
-        res = requests.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}")
+        res = requests.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey['odds_api']}")
         if res.status_code != 200:
             return archive
 
