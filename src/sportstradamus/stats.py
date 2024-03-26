@@ -1092,6 +1092,8 @@ class StatsMLB(Stats):
             homeInning1Runs = linescore["innings"][0]["home"]["runs"]
             awayInning1Hits = linescore["innings"][0]["away"]["hits"]
             homeInning1Hits = linescore["innings"][0]["home"]["hits"]
+
+            away_bullpen = {k: 0 for k in ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced", "walks allowed", "hits allowed", "home runs allowed", "runs allowed"]}
             for v in boxscore["teams"]["away"]["players"].values():
                 if (v["person"]["id"] == awayPitcherId or
                         v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"]):
@@ -1139,6 +1141,7 @@ class StatsMLB(Stats):
                         "pitching outs": 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
                         int(v["stats"]["pitching"].get(
                             "inningsPitched", "0.0").split(".")[1]),
+                        "batters faced": v["stats"]["pitching"].get("battersFaced", 0),
                         "1st inning runs allowed": homeInning1Runs if v["person"]["id"] ==
                         game["away_pitcher_lineup"][0] else 0,
                         "1st inning hits allowed": homeInning1Hits if v["person"]["id"] ==
@@ -1231,7 +1234,7 @@ class StatsMLB(Stats):
                         "ERA": (9*adj["RA"]/n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "K9": (27*adj["K"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "BB9": (27*adj["BB"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
-                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "PA9": (27*n["batters faced"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
                         "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["atBats"] > 0 else 0,
                         "AVG": (n["hits"]/n["atBats"]) if n["atBats"] > 0 else 0,
@@ -1243,6 +1246,18 @@ class StatsMLB(Stats):
 
                     new_games.append(n)
 
+                elif v.get("position", {}).get("type", "") == "Pitcher":
+                    away_bullpen["pitches thrown"] += v["stats"]["pitching"].get("numberOfPitches", 0)
+                    away_bullpen["pitcher strikeouts"] += v["stats"]["pitching"].get("strikeOuts", 0)
+                    away_bullpen["pitching outs"] += 3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])\
+                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1])
+                    away_bullpen["batters faced"] += v["stats"]["pitching"].get("battersFaced", 0)
+                    away_bullpen["walks allowed"] += v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0)
+                    away_bullpen["hits allowed"] += v["stats"]["pitching"].get("hits", 0)
+                    away_bullpen["home runs allowed"] += v["stats"]["pitching"].get("homeRuns", 0)
+                    away_bullpen["runs allowed"] += v["stats"]["pitching"].get("runs", 0)
+
+            home_bullpen = {k: 0 for k in ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced", "walks allowed", "hits allowed", "home runs allowed", "runs allowed"]}
             for v in boxscore["teams"]["home"]["players"].values():
                 if (v["person"]["id"] == homePitcherId or
                         v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"]):
@@ -1307,6 +1322,7 @@ class StatsMLB(Stats):
                             .get("inningsPitched", "0.0")
                             .split(".")[1]
                         ),
+                        "batters faced": v["stats"]["pitching"].get("battersFaced", 0),
                         "1st inning runs allowed": awayInning1Runs if v["person"]["id"] ==
                         game["home_pitcher_lineup"][0] else 0,
                         "1st inning hits allowed": awayInning1Hits if v["person"]["id"] ==
@@ -1399,7 +1415,7 @@ class StatsMLB(Stats):
                         "ERA": (9*adj["RA"]/n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "K9": (27*adj["K"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "BB9": (27*adj["BB"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
-                        "PA9": (27*v["stats"]["pitching"].get("battersFaced", 0) / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
+                        "PA9": (27*n["batters faced"] / n["pitching outs"]) if (n["starting pitcher"] and n["pitching outs"]) else 0,
                         "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
                         "OBP": ((n["hits"] + n["walks"])/n["atBats"]/bpf["OBP"]) if n["atBats"] > 0 else 0,
                         "AVG": (n["hits"]/n["atBats"]) if n["atBats"] > 0 else 0,
@@ -1410,6 +1426,33 @@ class StatsMLB(Stats):
                     })
 
                     new_games.append(n)
+
+                elif v.get("position", {}).get("type", "") == "Pitcher":
+                    home_bullpen["pitches thrown"] += v["stats"]["pitching"].get("numberOfPitches", 0)
+                    home_bullpen["pitcher strikeouts"] += v["stats"]["pitching"].get("strikeOuts", 0)
+                    home_bullpen["pitching outs"] += 3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])\
+                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1])
+                    home_bullpen["batters faced"] += v["stats"]["pitching"].get("battersFaced", 0)
+                    home_bullpen["walks allowed"] += v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0)
+                    home_bullpen["hits allowed"] += v["stats"]["pitching"].get("hits", 0)
+                    home_bullpen["home runs allowed"] += v["stats"]["pitching"].get("homeRuns", 0)
+                    home_bullpen["runs allowed"] += v["stats"]["pitching"].get("runs", 0)
+
+        home_adj = {
+            "RA": home_bullpen["runs allowed"]/bpf["R"],
+            "HA": home_bullpen["hits allowed"]/bpf["H"],
+            "HRA": home_bullpen["home runs allowed"]/bpf["HR"],
+            "BB": home_bullpen["walks allowed"]/bpf["BB"],
+            "K": home_bullpen["pitcher strikeouts"]/bpf["K"]
+        }
+
+        away_adj = {
+            "RA": away_bullpen["runs allowed"]/bpf["R"],
+            "HA": away_bullpen["hits allowed"]/bpf["H"],
+            "HRA": away_bullpen["home runs allowed"]/bpf["HR"],
+            "BB": away_bullpen["walks allowed"]/bpf["BB"],
+            "K": away_bullpen["pitcher strikeouts"]/bpf["K"]
+        }
 
         self.gamelog = pd.concat(
             [self.gamelog, pd.DataFrame.from_records(new_games)], ignore_index=True)
@@ -1442,7 +1485,14 @@ class StatsMLB(Stats):
                             boxscore["teams"]["away"]["teamStats"]["batting"]["baseOnBalls"] -
                             boxscore["teams"]["away"]["teamStats"]["batting"]["hitByPitch"] -
                             boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"] -
-                            boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]))
+                            boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"])),
+                "FIP": (3*(13*home_adj["HRA"] + 3*home_adj["BB"] - 2*home_adj["K"])/home_bullpen["pitching outs"] + 3.2) if home_bullpen["pitching outs"] else 0,
+                "WHIP": (3*(home_adj["BB"] + home_adj["HA"])/home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0,
+                "ERA": (9*home_adj["RA"]/home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0,
+                "K9": (27*home_adj["K"] / home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0,
+                "BB9": (27*home_adj["BB"] / home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0,
+                "IP": home_bullpen["pitching outs"] / 3,
+                "PA": home_bullpen["batters faced"]
             },
             {
                 "team": awayTeam,
@@ -1471,7 +1521,14 @@ class StatsMLB(Stats):
                             boxscore["teams"]["home"]["teamStats"]["batting"]["baseOnBalls"] -
                             boxscore["teams"]["home"]["teamStats"]["batting"]["hitByPitch"] -
                             boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"] -
-                            boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]))
+                            boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"])),
+                "FIP": (3*(13*away_adj["HRA"] + 3*away_adj["BB"] - 2*away_adj["K"])/away_bullpen["pitching outs"] + 3.2) if away_bullpen["pitching outs"] else 0,
+                "WHIP": (3*(away_adj["BB"] + away_adj["HA"])/away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0,
+                "ERA": (9*away_adj["RA"]/away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0,
+                "K9": (27*away_adj["K"] / away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0,
+                "BB9": (27*away_adj["BB"] / away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0,
+                "IP": away_bullpen["pitching outs"] / 3,
+                "PA": away_bullpen["batters faced"]
             },
         ]
 
@@ -1703,7 +1760,7 @@ class StatsMLB(Stats):
         gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("MLB", x["gameDate"][:10], x["team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(10)[x.columns[4:]], 0))
+            lambda x: np.mean(x.tail(10)[self.stat_types['batting'] + self.stat_types['fielding']], 0))
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -2287,7 +2344,8 @@ class StatsNFL(Stats):
                 'longest completion', 'longest rush', 'longest reception', 'sacks taken', 'passing first downs',
                 'first downs']
         self.gamelog = pd.DataFrame(columns=cols)
-        team_cols = ['season', 'week', 'team', 'pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110',
+        team_cols = ['season', 'week', 'team', 'gameday', 'points', 'WL',
+                     'pass_rate', 'pass_rate_over_expected', 'pass_rate_over_expected_110',
                      'pass_rate_against', 'pass_rate_over_expected_against', 'rush_success_rate', 'pass_success_rate',
                      'redzone_success_rate', 'first_read_success_rate', 'midfield_success_rate', 'rush_success_rate_allowed',
                      'pass_success_rate_allowed', 'redzone_success_rate_allowed', 'first_read_success_rate_allowed',
@@ -2960,7 +3018,7 @@ class StatsNFL(Stats):
         gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["recent team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(5)[x.columns[3:]], 0))
+            lambda x: np.mean(x.tail(5)[self.stat_types['offense'] + self.stat_types['defense']], 0))
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -3805,6 +3863,9 @@ class StatsNHL(Stats):
         self.profiled_market = market
         self.profile_latest_date = date
 
+        team_stat_types = ['Corsi', 'Fenwick', 'Hits', 'Takeaways', 'PIM', 'Corsi_Pct', 'Fenwick_Pct', 'Hits_Pct', 'Takeaways_Pct',
+                            'PIM_Pct', 'Block_Pct', 'xGoals', 'xGoalsAgainst', 'goalsAgainst', 'GOE', 'SV', 'SOE', 'Freeze', 'Rebound', 'RG']
+
         # Initialize playerStats and edges
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
@@ -3831,7 +3892,7 @@ class StatsNHL(Stats):
         gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NHL", x["gameDate"][:10], x["team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(10)[x.columns[5:]], 0))
+            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
