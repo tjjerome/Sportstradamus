@@ -729,7 +729,8 @@ def get_pp(books=True):
             "JAC": "JAX",
             "LAV": "LV",
             "NJY": "NYJ",
-            "NJD": "NJ"
+            "NJD": "NJ",
+            "AZ": "ARI"
         }
 
         for p in players:
@@ -873,7 +874,8 @@ def get_ud():
         "WSH": "WAS",
         "GS": "GSW",
         "PHO": "PHX",
-        "NOP": "NO"
+        "NOP": "NO",
+        "AZ": "ARI"
     }
 
     offers = {}
