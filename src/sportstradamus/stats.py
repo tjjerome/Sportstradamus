@@ -1057,9 +1057,7 @@ class StatsMLB(Stats):
                 "AZ", "ARI").replace("WSH", "WAS")
             bpf = self.park_factors[homeTeam]
             awayPitcherId = game["away_pitcher_lineup"][0]
-            awayPitcher = boxscore["teams"]["away"]["players"]["ID" + str(awayPitcherId)]["person"][
-                "fullName"
-            ]
+            awayPitcher = remove_accents(boxscore["teams"]["away"]["players"]["ID" + str(awayPitcherId)]["person"]["fullName"])
             if awayPitcherId in self.players and "throws" in self.players[awayPitcherId]:
                 awayPitcherHand = self.players[awayPitcherId]["throws"]
             else:
@@ -1073,9 +1071,7 @@ class StatsMLB(Stats):
                 else:
                     self.players[awayPitcherId]["throws"] = awayPitcherHand
             homePitcherId = game["home_pitcher_lineup"][0]
-            homePitcher = boxscore["teams"]["home"]["players"]["ID" + str(homePitcherId)]["person"][
-                "fullName"
-            ]
+            homePitcher = remove_accents(boxscore["teams"]["home"]["players"]["ID" + str(homePitcherId)]["person"]["fullName"])
             if homePitcherId in self.players and "throws" in self.players[homePitcherId]:
                 homePitcherHand = self.players[homePitcherId]["throws"]
             else:
@@ -1101,7 +1097,7 @@ class StatsMLB(Stats):
                         "gameId": gameId,
                         "gameDate": game["game_date"],
                         "playerId": v["person"]["id"],
-                        "playerName": v["person"]["fullName"],
+                        "playerName": remove_accents(v["person"]["fullName"]),
                         "position": v.get("position", {"abbreviation": ""})["abbreviation"],
                         "team": awayTeam,
                         "opponent": homeTeam,
@@ -1265,7 +1261,7 @@ class StatsMLB(Stats):
                         "gameId": gameId,
                         "gameDate": game["game_date"],
                         "playerId": v["person"]["id"],
-                        "playerName": v["person"]["fullName"],
+                        "playerName": remove_accents(v["person"]["fullName"]),
                         "position": v.get("position", {"abbreviation": ""})[
                             "abbreviation"
                         ],
