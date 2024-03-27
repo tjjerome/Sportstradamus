@@ -571,13 +571,7 @@ def find_correlation(offers, stats, platform, parlays):
                 lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
             league_df = pd.concat([league_df, combo_df])
         else:
-            continue
-            # TODO MLB Combos
-            league_df = league_df.loc[league_df.Position.apply(
-                lambda x: not isinstance(x, list))]
-            league_df.Position = "B" + league_df.Position.add(1).astype(str)
-            league_df.loc[league_df["Market"].map(new_map).str.contains(
-                "allowed") | league_df["Market"].map(new_map).str.contains("pitch"), "Position"] = "P"
+            league_df.Position = league_df.Position.apply(lambda x: ("B"+str(x) if x>0 else "P") if isinstance(x, int) else ["B"+str(i) if i>0 else "P" for i in x])
 
         if league == "NHL":
             new_map.update({
@@ -713,6 +707,12 @@ def find_correlation(offers, stats, platform, parlays):
                                 # Modify boost based on conditions
                                 x_key = re.sub(r'[0-9]', '', x)
                                 y_key = re.sub(r'[0-9]', '', y)
+                                if "_OPP_" in x_key:
+                                    x_key = x_key.replace("_OPP_", "")
+                                    if "_OPP_" in y_key:
+                                        y_key = y_key.replace("_OPP_", "")
+                                    else:
+                                        y_key = "_OPP_" + y_key
                                 if x_key in banned[platform][league]['modified']:
                                     modifier = banned[platform][league]['modified'][x_key].get(y_key, 1)
                                     boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
@@ -734,8 +734,8 @@ def find_correlation(offers, stats, platform, parlays):
                     except:
                         continue
                     
-                    units = np.round((p - 1)/(payout - 1)/0.05*2)/2
-                    if units > 0 and pb > 1.01:
+                    units = (p - 1)/(payout - 1)/0.05
+                    if units >= 0.5 and pb > 1.01:
                         parlay = {
                             "Game": "/".join(sorted([team, opp])),
                             "Date": date,
@@ -787,49 +787,6 @@ def find_correlation(offers, stats, platform, parlays):
                                         sort_values("Model EV", ascending=False).drop_duplicates()
             elif len(df5) > 0:
                 parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Bet Size"])])
-
-                # player_set = set.union(*df5.Players.to_list())
-                # best_parlays = []
-                # best_fam = []
-                # max_size = 6 if platform == "PrizePicks" else 5
-                # for fam_size in tqdm(np.arange(2, max_size), desc="Filtering...", leave=False):
-                #     families = []
-                #     filtered_df = df5.loc[(df5["Bet Size"] <= fam_size + 1) & (df5["Bet Size"] >= fam_size)]
-                #     if filtered_df.empty:
-                #         continue
-                #     for family in combinations(player_set, fam_size):
-                #         mask = filtered_df.Players.apply(lambda x: len(x.intersection(family))) == fam_size
-                #         family_val = filtered_df.loc[mask, "Model EV"].sum()
-                #         family_boost = filtered_df.loc[mask, "Boost"].max()
-                #         if family_val > 0:
-                #             families.append((family, family_val, family_boost))
-
-                #     families.sort(reverse=True, key=(lambda x: x[1]))
-                #     added = 0
-                #     for family, family_val, family_boost in families:
-                #         if added == fam_size-2 and family_boost > 1.5:
-                #             continue
-                #         elif added == fam_size-1 and family_boost > 1.2:
-                #             continue
-                #         elif added >= fam_size:
-                #             break
-                #         if not any([len(set(family).intersection(f)) > 1 and len(f) == len(family) for f in best_fam]):
-                #             added += 1
-                #             best_fam.append(family)
-
-                # best_fam.sort(reverse=True, key=(lambda x: x[1]))
-                # df5["Family"] = [[]]*len(df5)
-                # for i, family in enumerate(best_fam):
-                #     mask = (df5["Bet Size"] <= len(family) + 1) & (df5.Players.apply(lambda x: len(x.intersection(family))) == len(family))
-                #     df5.loc[mask, "Family"] = df5.loc[mask, "Family"].apply(lambda x: x+[i])
-
-                # for i in np.arange(0, len(best_fam)):
-                #     mask = df5["Family"].apply(lambda x: x[0]==i if len(x) else False)
-                #     if mask.sum():
-                #         best_parlays.append(df5.loc[mask].iloc[0].drop(["Players", "Markets", "Bet Size", "Family"]))
-
-                # if len(best_parlays):
-                #     parlay_df = pd.concat([parlay_df, pd.DataFrame(best_parlays).sort_values("Model EV", ascending=False).drop_duplicates()])
 
             # Find best pairs, TODO add corr modifier
             c_map = pd.Series(c_map)

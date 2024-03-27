@@ -132,178 +132,532 @@
             "NHL": {
                 "team": [
                     [
-                        "skater fantasy points underdog",
-                        "skater fantasy points underdog"
-                    ],
-                    [
-                        "skater fantasy points underdog",
-                        "goalie fantasy points underdog"
-                    ],
-                    [
-                        "points",
-                        "points"
-                    ],
-                    [
-                        "points",
-                        "goals"
-                    ],
-                    [
-                        "points",
-                        "assists"
-                    ],
-                    [
-                        "powerPlayPoints",
-                        "points"
-                    ],
-                    [
                         "powerPlayPoints",
                         "powerPlayPoints"
-                    ],
-                    [
-                        "powerPlayPoints",
-                        "goals"
-                    ],
-                    [
-                        "powerPlayPoints",
-                        "assists"
-                    ],
-                    [
-                        "goals",
-                        "assists"
                     ]
                 ],
-                "opponent": [
-                    [
-                        "skater fantasy points underdog",
-                        "goalie fantasy points underdog"
-                    ],
-                    [
-                        "goalie fantasy points underdog",
-                        "goalie fantasy points underdog"
-                    ],
-                    [
-                        "goalsAgainst",
-                        "goalie fantasy points underdog"
-                    ],
-                    [
-                        "goalsAgainst",
-                        "points"
-                    ],
-                    [
-                        "goalsAgainst",
-                        "powerPlayPoints"
-                    ],
-                    [
-                        "goalsAgainst",
-                        "assists"
-                    ],
-                    [
-                        "goalsAgainst",
-                        "goals"
-                    ],
-                    [
-                        "goalsAgainst",
-                        "skater fantasy points underdog"
-                    ],
-                    [
-                        "saves",
-                        "points"
-                    ],
-                    [
-                        "saves",
-                        "powerPlayPoints"
-                    ],
-                    [
-                        "saves",
-                        "goals"
-                    ],
-                    [
-                        "saves",
-                        "assists"
-                    ],
-                    [
-                        "saves",
-                        "skater fantasy points underdog"
-                    ],
-                    [
-                        "saves",
-                        "shots"
-                    ],
-                    [
-                        "saves",
-                        "sogBS"
-                    ]
-                ],
+                "opponent": [],
                 "modified": {
                     "G.goalsAgainst": {
+                        "_OPP_G.goalie fantasy points underdog": 0.79,
                         "_OPP_D.points": 0.79,
-                        "_OPP_R.points": 0.77,
-                        "_OPP_L.points": 0.77,
-                        "_OPP_C.points": 0.77,
                         "_OPP_D.goals": 0.81,
+                        "_OPP_D.assists": 0.81,
+                        "_OPP_D.powerPlayPoints": 0.83,
+                        "_OPP_D.skater fantasy points underdog": 0.82,
+                        "_OPP_C.points": 0.77,
+                        "_OPP_C.goals": 0.81,
+                        "_OPP_C.assists": 0.78,
+                        "_OPP_C.powerPlayPoints": 0.87,
+                        "_OPP_C.skater fantasy points underdog": 0.78,
+                        "_OPP_R.points": 0.77,
                         "_OPP_R.goals": 0.81,
+                        "_OPP_R.assists": 0.78,
+                        "_OPP_R.powerPlayPoints": 0.87,
+                        "_OPP_R.skater fantasy points underdog": 0.78,
+                        "_OPP_L.points": 0.77,
                         "_OPP_L.goals": 0.81,
-                        "_OPP_C.goals": 0.81
+                        "_OPP_L.assists": 0.78,
+                        "_OPP_L.powerPlayPoints": 0.87,
+                        "_OPP_L.skater fantasy points underdog": 0.78
+                    },
+                    "G.saves": {
+                        "_OPP_G.saves": 1.05,
+                        "_OPP_G.goalie fantasy points underdog": 1.12,
+                        "_OPP_D.shots": 0.78,
+                        "_OPP_C.shots": 0.78,
+                        "_OPP_L.shots": 0.78,
+                        "_OPP_R.shots": 0.78
+                    },
+                    "G.goalie fantasy points underdog": {
+                        "_OPP_G.goalsAgainst": 0.79,
+                        "_OPP_G.saves": 1.12,
+                        "_OPP_G.goalie fantasy points underdog": 1.31,
+                        "_OPP_D.points": 1.16,
+                        "_OPP_D.goals": 1.13,
+                        "_OPP_D.assists": 1.19,
+                        "_OPP_D.powerPlayPoints": 1.14,
+                        "_OPP_D.skater fantasy points underdog": 1.09,
+                        "_OPP_C.points": 1.19,
+                        "_OPP_C.goals": 1.13,
+                        "_OPP_C.assists": 1.16,
+                        "_OPP_C.powerPlayPoints": 1.07,
+                        "_OPP_C.skater fantasy points underdog": 1.14,
+                        "_OPP_R.points": 1.19,
+                        "_OPP_R.goals": 1.13,
+                        "_OPP_R.assists": 1.16,
+                        "_OPP_R.powerPlayPoints": 1.07,
+                        "_OPP_R.skater fantasy points underdog": 1.14,
+                        "_OPP_L.points": 1.19,
+                        "_OPP_L.goals": 1.13,
+                        "_OPP_L.assists": 1.16,
+                        "_OPP_L.powerPlayPoints": 1.07,
+                        "_OPP_L.skater fantasy points underdog": 1.14,
+                        "D.points": 0.89,
+                        "D.goals": 0.85,
+                        "D.assists": 0.9,
+                        "D.powerPlayPoints": 0.76,
+                        "D.skater fantasy points underdog": 0.86,
+                        "C.points": 0.88,
+                        "C.goals": 0.89,
+                        "C.assists": 0.89,
+                        "C.powerPlayPoints": 0.89,
+                        "C.skater fantasy points underdog": 0.89,
+                        "R.points": 0.88,
+                        "R.goals": 0.89,
+                        "R.assists": 0.89,
+                        "R.powerPlayPoints": 0.89,
+                        "R.skater fantasy points underdog": 0.89,
+                        "L.points": 0.88,
+                        "L.goals": 0.89,
+                        "L.assists": 0.89,
+                        "L.powerPlayPoints": 0.89,
+                        "L.skater fantasy points underdog": 0.89
+                    },
+                    "D.points": {
+                        "D.points": 0.85,
+                        "D.goals": 0.87,
+                        "D.assists": 0.92,
+                        "D.powerPlayPoints": 0.76,
+                        "D.skater fantasy points underdog": 0.79,
+                        "C.points": 0.85,
+                        "C.goals": 0.87,
+                        "C.assists": 0.87,
+                        "C.powerPlayPoints": 0.85,
+                        "C.skater fantasy points underdog": 0.86,
+                        "R.points": 0.85,
+                        "R.goals": 0.87,
+                        "R.assists": 0.87,
+                        "R.powerPlayPoints": 0.85,
+                        "R.skater fantasy points underdog": 0.86,
+                        "L.points": 0.85,
+                        "L.goals": 0.87,
+                        "L.assists": 0.87,
+                        "L.powerPlayPoints": 0.85,
+                        "L.skater fantasy points underdog": 0.86
+                    },
+                    "D.goals": {
+                        "D.points": 0.87,
+                        "D.powerPlayPoints": 0.91,
+                        "C.points": 0.86,
+                        "C.assists": 0.86,
+                        "C.powerPlayPoints": 0.86,
+                        "R.points": 0.86,
+                        "R.assists": 0.86,
+                        "R.powerPlayPoints": 0.86,
+                        "L.points": 0.86,
+                        "L.assists": 0.86,
+                        "L.powerPlayPoints": 0.86
+                    },
+                    "D.assists": {
+                        "D.points": 0.83,
+                        "D.assists": 0.92,
+                        "D.powerPlayPoints": 0.89,
+                        "D.skater fantasy points underdog": 0.84,
+                        "C.points": 0.86,
+                        "C.goals": 0.87,
+                        "C.assists": 0.92,
+                        "C.powerPlayPoints": 0.90,
+                        "C.skater fantasy points underdog": 0.88,
+                        "R.points": 0.86,
+                        "R.goals": 0.87,
+                        "R.assists": 0.92,
+                        "R.powerPlayPoints": 0.90,
+                        "R.skater fantasy points underdog": 0.88,
+                        "L.points": 0.86,
+                        "L.goals": 0.87,
+                        "L.assists": 0.92,
+                        "L.powerPlayPoints": 0.90,
+                        "L.skater fantasy points underdog": 0.88
+                    },
+                    "D.powerPlayPoints": {
+                        "D.points": 0.76,
+                        "D.goals": 0.91,
+                        "D.assists": 0.89,
+                        "D.skater fantasy points underdog": 0.85,
+                        "C.points": 0.76,
+                        "C.goals": 0.91,
+                        "C.assists": 0.89,
+                        "C.skater fantasy points underdog": 0.85,
+                        "R.points": 0.76,
+                        "R.goals": 0.91,
+                        "R.assists": 0.89,
+                        "R.skater fantasy points underdog": 0.85,
+                        "L.points": 0.76,
+                        "L.goals": 0.91,
+                        "L.assists": 0.89,
+                        "L.skater fantasy points underdog": 0.85
+                    },
+                    "D.skater fantasy points underdog": {
+                        "D.points": 0.79,
+                        "D.assists": 0.84,
+                        "D.powerPlayPoints": 0.85,
+                        "D.skater fantasy points underdog": 1,
+                        "C.points": 0.89,
+                        "C.goals": 0.90,
+                        "C.assists": 0.90,
+                        "C.powerPlayPoints": 0.90,
+                        "C.skater fantasy points underdog": 0.88,
+                        "R.points": 0.89,
+                        "R.goals": 0.90,
+                        "R.assists": 0.90,
+                        "R.powerPlayPoints": 0.90,
+                        "R.skater fantasy points underdog": 0.88,
+                        "L.points": 0.89,
+                        "L.goals": 0.90,
+                        "L.assists": 0.90,
+                        "L.powerPlayPoints": 0.90,
+                        "L.skater fantasy points underdog": 0.88
+                    },
+                    "C.points": {
+                        "C.points": 0.79,
+                        "C.goals": 0.86,
+                        "C.assists": 0.83,
+                        "C.powerPlayPoints": 0.85,
+                        "C.skater fantasy points underdog": 0.83,
+                        "R.points": 0.79,
+                        "R.goals": 0.86,
+                        "R.assists": 0.83,
+                        "R.powerPlayPoints": 0.85,
+                        "R.skater fantasy points underdog": 0.83,
+                        "L.points": 0.79,
+                        "L.goals": 0.86,
+                        "L.assists": 0.83,
+                        "L.powerPlayPoints": 0.85,
+                        "L.skater fantasy points underdog": 0.83
+                    },
+                    "C.goals": {
+                        "C.points": 0.86,
+                        "C.assists": 0.9,
+                        "C.powerPlayPoints": 0.92,
+                        "C.skater fantasy points underdog": 0.87,
+                        "R.points": 0.86,
+                        "R.assists": 0.9,
+                        "R.powerPlayPoints": 0.92,
+                        "R.skater fantasy points underdog": 0.87,
+                        "L.points": 0.86,
+                        "L.assists": 0.9,
+                        "L.powerPlayPoints": 0.92,
+                        "L.skater fantasy points underdog": 0.87
+                    },
+                    "C.assists": {
+                        "C.points": 0.83,
+                        "C.goals": 0.9,
+                        "C.assists": 0.88,
+                        "C.powerPlayPoints": 0.88,
+                        "C.skater fantasy points underdog": 0.84,
+                        "R.points": 0.83,
+                        "R.goals": 0.9,
+                        "R.assists": 0.88,
+                        "R.powerPlayPoints": 0.88,
+                        "R.skater fantasy points underdog": 0.84,
+                        "L.points": 0.83,
+                        "L.goals": 0.9,
+                        "L.assists": 0.88,
+                        "L.powerPlayPoints": 0.88,
+                        "L.skater fantasy points underdog": 0.84
+                    },
+                    "C.powerPlayPoints": {
+                        "C.points": 0.85,
+                        "C.goals": 0.92,
+                        "C.assists": 0.88,
+                        "C.skater fantasy points underdog": 0.83,
+                        "R.points": 0.85,
+                        "R.goals": 0.92,
+                        "R.assists": 0.88,
+                        "R.skater fantasy points underdog": 0.83,
+                        "L.points": 0.85,
+                        "L.goals": 0.92,
+                        "L.assists": 0.88,
+                        "L.skater fantasy points underdog": 0.83
+                    },
+                    "C.skater fantasy points underdog": {
+                        "C.points": 0.83,
+                        "C.goals": 0.87,
+                        "C.assists": 0.84,
+                        "C.powerPlayPoints": 0.83,
+                        "C.skater fantasy points underdog": 0.85,
+                        "R.points": 0.83,
+                        "R.goals": 0.87,
+                        "R.assists": 0.84,
+                        "R.powerPlayPoints": 0.83,
+                        "R.skater fantasy points underdog": 0.85,
+                        "L.points": 0.83,
+                        "L.goals": 0.87,
+                        "L.assists": 0.84,
+                        "L.powerPlayPoints": 0.83,
+                        "L.skater fantasy points underdog": 0.85
+                    },
+                    "R.points": {
+                        "C.points": 0.79,
+                        "C.goals": 0.86,
+                        "C.assists": 0.83,
+                        "C.powerPlayPoints": 0.85,
+                        "C.skater fantasy points underdog": 0.83,
+                        "R.points": 0.79,
+                        "R.goals": 0.86,
+                        "R.assists": 0.83,
+                        "R.powerPlayPoints": 0.85,
+                        "R.skater fantasy points underdog": 0.83,
+                        "L.points": 0.79,
+                        "L.goals": 0.86,
+                        "L.assists": 0.83,
+                        "L.powerPlayPoints": 0.85,
+                        "L.skater fantasy points underdog": 0.83
+                    },
+                    "R.goals": {
+                        "C.points": 0.86,
+                        "C.assists": 0.9,
+                        "C.powerPlayPoints": 0.92,
+                        "C.skater fantasy points underdog": 0.87,
+                        "R.points": 0.86,
+                        "R.assists": 0.9,
+                        "R.powerPlayPoints": 0.92,
+                        "R.skater fantasy points underdog": 0.87,
+                        "L.points": 0.86,
+                        "L.assists": 0.9,
+                        "L.powerPlayPoints": 0.92,
+                        "L.skater fantasy points underdog": 0.87
+                    },
+                    "R.assists": {
+                        "C.points": 0.83,
+                        "C.goals": 0.9,
+                        "C.assists": 0.88,
+                        "C.powerPlayPoints": 0.88,
+                        "C.skater fantasy points underdog": 0.84,
+                        "R.points": 0.83,
+                        "R.goals": 0.9,
+                        "R.assists": 0.88,
+                        "R.powerPlayPoints": 0.88,
+                        "R.skater fantasy points underdog": 0.84,
+                        "L.points": 0.83,
+                        "L.goals": 0.9,
+                        "L.assists": 0.88,
+                        "L.powerPlayPoints": 0.88,
+                        "L.skater fantasy points underdog": 0.84
+                    },
+                    "R.powerPlayPoints": {
+                        "C.points": 0.85,
+                        "C.goals": 0.92,
+                        "C.assists": 0.88,
+                        "C.skater fantasy points underdog": 0.83,
+                        "R.points": 0.85,
+                        "R.goals": 0.92,
+                        "R.assists": 0.88,
+                        "R.skater fantasy points underdog": 0.83,
+                        "L.points": 0.85,
+                        "L.goals": 0.92,
+                        "L.assists": 0.88,
+                        "L.skater fantasy points underdog": 0.83
+                    },
+                    "R.skater fantasy points underdog": {
+                        "C.points": 0.83,
+                        "C.goals": 0.87,
+                        "C.assists": 0.84,
+                        "C.powerPlayPoints": 0.83,
+                        "C.skater fantasy points underdog": 0.85,
+                        "R.points": 0.83,
+                        "R.goals": 0.87,
+                        "R.assists": 0.84,
+                        "R.powerPlayPoints": 0.83,
+                        "R.skater fantasy points underdog": 0.85,
+                        "L.points": 0.83,
+                        "L.goals": 0.87,
+                        "L.assists": 0.84,
+                        "L.powerPlayPoints": 0.83,
+                        "L.skater fantasy points underdog": 0.85
+                    },
+                    "L.points": {
+                        "C.points": 0.79,
+                        "C.goals": 0.86,
+                        "C.assists": 0.83,
+                        "C.powerPlayPoints": 0.85,
+                        "C.skater fantasy points underdog": 0.83,
+                        "R.points": 0.79,
+                        "R.goals": 0.86,
+                        "R.assists": 0.83,
+                        "R.powerPlayPoints": 0.85,
+                        "R.skater fantasy points underdog": 0.83,
+                        "L.points": 0.79,
+                        "L.goals": 0.86,
+                        "L.assists": 0.83,
+                        "L.powerPlayPoints": 0.85,
+                        "L.skater fantasy points underdog": 0.83
+                    },
+                    "L.goals": {
+                        "C.points": 0.86,
+                        "C.assists": 0.9,
+                        "C.powerPlayPoints": 0.92,
+                        "C.skater fantasy points underdog": 0.87,
+                        "R.points": 0.86,
+                        "R.assists": 0.9,
+                        "R.powerPlayPoints": 0.92,
+                        "R.skater fantasy points underdog": 0.87,
+                        "L.points": 0.86,
+                        "L.assists": 0.9,
+                        "L.powerPlayPoints": 0.92,
+                        "L.skater fantasy points underdog": 0.87
+                    },
+                    "L.assists": {
+                        "C.points": 0.83,
+                        "C.goals": 0.9,
+                        "C.assists": 0.88,
+                        "C.powerPlayPoints": 0.88,
+                        "C.skater fantasy points underdog": 0.84,
+                        "R.points": 0.83,
+                        "R.goals": 0.9,
+                        "R.assists": 0.88,
+                        "R.powerPlayPoints": 0.88,
+                        "R.skater fantasy points underdog": 0.84,
+                        "L.points": 0.83,
+                        "L.goals": 0.9,
+                        "L.assists": 0.88,
+                        "L.powerPlayPoints": 0.88,
+                        "L.skater fantasy points underdog": 0.84
+                    },
+                    "L.powerPlayPoints": {
+                        "C.points": 0.85,
+                        "C.goals": 0.92,
+                        "C.assists": 0.88,
+                        "C.skater fantasy points underdog": 0.83,
+                        "R.points": 0.85,
+                        "R.goals": 0.92,
+                        "R.assists": 0.88,
+                        "R.skater fantasy points underdog": 0.83,
+                        "L.points": 0.85,
+                        "L.goals": 0.92,
+                        "L.assists": 0.88,
+                        "L.skater fantasy points underdog": 0.83
+                    },
+                    "L.skater fantasy points underdog": {
+                        "C.points": 0.83,
+                        "C.goals": 0.87,
+                        "C.assists": 0.84,
+                        "C.powerPlayPoints": 0.83,
+                        "C.skater fantasy points underdog": 0.85,
+                        "R.points": 0.83,
+                        "R.goals": 0.87,
+                        "R.assists": 0.84,
+                        "R.powerPlayPoints": 0.83,
+                        "R.skater fantasy points underdog": 0.85,
+                        "L.points": 0.83,
+                        "L.goals": 0.87,
+                        "L.assists": 0.84,
+                        "L.powerPlayPoints": 0.83,
+                        "L.skater fantasy points underdog": 0.85
                     }
                 }
             },
             "MLB": {
-                "team": [
+                "team": [],
+                "opponent": [
                     [
-                        "hitter fantasy points underdog",
-                        "hitter fantasy points underdog"
+                        "runs allowed",
+                        "home runs"
                     ],
                     [
-                        "pitcher fantasy points underdog",
-                        "hitter fantasy points underdog"
-                    ],
-                    [
-                        "hitter fantasy points underdog",
+                        "runs allowed",
                         "hits+runs+rbi"
                     ],
                     [
-                        "pitcher fantasy points underdog",
-                        "hits+runs+rbi"
-                    ],
-                    [
-                        "hitter fantasy points underdog",
-                        "rbi"
-                    ],
-                    [
-                        "pitcher fantasy points underdog",
-                        "rbi"
-                    ],
-                    [
-                        "hitter fantasy points underdog",
-                        "runs"
-                    ],
-                    [
-                        "pitcher fantasy points underdog",
-                        "runs"
-                    ],
-                    [
-                        "hits+runs+rbi",
-                        "hits+runs+rbi"
-                    ],
-                    [
-                        "hits+runs+rbi",
-                        "rbi"
-                    ],
-                    [
-                        "hits+runs+rbi",
-                        "runs"
-                    ],
-                    [
-                        "rbi",
-                        "runs"
-                    ],
-                    [
-                        "runs",
+                        "runs allowed",
                         "runs"
                     ]
                 ],
-                "opponent": [],
-                "modified": {}
+                "modified": {
+                    "P.pitcher strikeouts": {
+                        "_OPP_B.home runs": 1.05,
+                        "_OPP_B.hitter fantasy points underdog": 1.04,
+                        "_OPP_B.hits+runs+rbi": 1.06,
+                        "_OPP_B.runs": 1.03
+                    },
+                    "P.pitcher fantasy points underdog": {
+                        "_OPP_B.home runs": 1.1,
+                        "_OPP_B.hitter fantasy points underdog": 1.1,
+                        "_OPP_B.total bases": 1.08,
+                        "_OPP_B.hits+runs+rbi": 1.2,
+                        "_OPP_B.rbi": 1.02,
+                        "_OPP_B.runs": 1.2,
+                        "_OPP_B.singles": 1.06,
+                        "_OPP_B.doubles": 1.05,
+                        "B.hitter fantasy points underdog": 0.93,
+                        "_OPP_P.pitcher fantasy points underdog": 1.06
+                    },
+                    "P.runs allowed": {
+                        "_OPP_B.hitter fantasy points underdog": 0.78,
+                        "_OPP_B.total bases": 0.83,
+                        "_OPP_B.singles": 0.9,
+                        "_OPP_B.doubles": 0.9
+                    },
+                    "P.hits allowed": {
+                        "_OPP_B.home runs": 0.8,
+                        "_OPP_B.hitter fantasy points underdog": 0.86,
+                        "_OPP_B.total bases": 0.83,
+                        "_OPP_B.hits+runs+rbi": 0.77,
+                        "_OPP_B.runs": 0.82,
+                        "_OPP_B.singles": 0.83,
+                        "_OPP_B.doubles": 0.85
+                    },
+                    "P.1st inning runs allowed": {
+                        "_OPP_B.hits+runs+rbi": 0.85,
+                        "_OPP_B.runs": 0.75
+                    },
+                    "B.home runs": {
+                        "B.hitter fantasy points underdog": 0.8,
+                        "B.total bases": 0.85,
+                        "B.hits+runs+rbi": 0.8,
+                        "B.rbi": 0.9,
+                        "B.runs": 0.8,
+                        "B.singles": 0.95,
+                        "B.doubles": 0.95
+                    },
+                    "B.hitter fantasy points underdog": {
+                        "B.home runs": 0.8,
+                        "B.hitter fantasy points underdog": 0.82,
+                        "B.total bases": 0.85,
+                        "B.hits+runs+rbi": 0.83,
+                        "B.rbi": 0.75,
+                        "B.runs": 0.79
+                    },
+                    "B.total bases": {
+                        "B.home runs": 0.85,
+                        "B.hitter fantasy points underdog": 0.85,
+                        "B.hits+runs+rbi": 0.88,
+                        "B.rbi": 0.81,
+                        "B.runs": 0.84
+                    },
+                    "B.hits+runs+rbi": {
+                        "B.home runs": 0.8,
+                        "B.hitter fantasy points underdog": 0.83,
+                        "B.total bases": 0.88,
+                        "B.hits+runs+rbi": 0.81,
+                        "B.rbi": 0.8,
+                        "B.runs": 0.8,
+                        "B.singles": 0.91
+                    },
+                    "B.rbi": {
+                        "B.home runs": 0.9,
+                        "B.hitter fantasy points underdog": 0.75,
+                        "B.total bases": 0.81,
+                        "B.hits+runs+rbi": 0.8,
+                        "B.runs": 0.8
+                    },
+                    "B.runs": {
+                        "B.home runs": 0.8,
+                        "B.hitter fantasy points underdog": 0.79,
+                        "B.total bases": 0.84,
+                        "B.hits+runs+rbi": 0.8,
+                        "B.rbi": 0.8,
+                        "B.runs": 0.82
+                    },
+                    "B.singles": {
+                        "B.home runs": 0.95,
+                        "B.hits+runs+rbi": 0.91
+                    },
+                    "B.doubles": {
+                        "B.home runs": 0.95
+                    }
+                }
             }
         },
 

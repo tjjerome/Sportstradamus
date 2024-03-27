@@ -168,7 +168,7 @@ def reflect():
     parlays.dropna(subset=['Legs'], inplace=True)
     parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
     parlays["Profit"] = parlays.apply(lambda x: np.clip(payout_table[x.Platform][x.Legs][x.Misses]*(x.Boost if x.Boost < 2 or x.Misses==0 else 1),None,100)-1, axis=1)
-    parlays["Profit"] = parlays["Profit"]*parlays["Rec Bet"]
+    parlays["Profit"] = parlays["Profit"]*np.round(parlays["Rec Bet"]*2)/2
 
     pd.concat([parlays, parlays_clean]).drop_duplicates(subset=parlays.columns[:-3]).to_pickle(filepath)
 
