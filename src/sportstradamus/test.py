@@ -12,6 +12,10 @@ from tqdm import tqdm
 from time import time
 import requests
 
+start = time()
+archive.write()
+print(time()-start)
+
 # url = "https://api.prizepicks.com/projections?league_id=7"
 # params = {
 #     "api_key": "82ccbf28-ddd6-4e37-b3a1-0097b10fd412",
@@ -85,22 +89,22 @@ import requests
 # NHL.season_start = datetime(2023, 10, 10).date()
 # NHL.update()
 
-MLB = StatsMLB()
-MLB.load()
-MLB.gamelog = pd.DataFrame()
-MLB.teamlog = pd.DataFrame()
-MLB.season_start = datetime(2021, 3, 1).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2022, 3, 1).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2023, 3, 30).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
+# MLB = StatsMLB()
+# MLB.load()
+# MLB.gamelog = pd.DataFrame()
+# MLB.teamlog = pd.DataFrame()
+# MLB.season_start = datetime(2021, 3, 1).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2022, 3, 1).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2023, 3, 30).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
