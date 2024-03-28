@@ -624,6 +624,7 @@ def find_correlation(offers, stats, platform, parlays):
             opp_c.index = pd.MultiIndex.from_tuples([(f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", "")) for x, y in opp_c.index], names=("market", "correlation"))
             c_map = team_c["R"].add(opp_c["R"], fill_value=0).div(2).to_dict()
 
+            game_df = game_df.loc[game_df['Boost'] <= 2] #TODO come back to this
             game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
                 game_df['Boost']
