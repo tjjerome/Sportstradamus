@@ -530,9 +530,7 @@ def find_correlation(offers, stats, platform, parlays):
         banned_team_markets = banned[platform][league]['team']
         banned_opponent_markets = banned[platform][league]['opponent']
 
-        if platform == "Underdog" and league == "NHL":
-            continue
-        elif league != "MLB":
+        if league != "MLB":
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
                 x, int) else [positions[league][i] for i in x])
             combo_df = league_df.loc[league_df.Position.apply(
@@ -762,7 +760,7 @@ def find_correlation(offers, stats, platform, parlays):
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             df5.drop_duplicates('Players', inplace=True)
-            df5 = df5.groupby('Bet Size').head(100)
+            df5 = df5.groupby('Bet Size').head(50)
             
             if len(df5) > 5:
 
@@ -1288,7 +1286,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
             proba = p
 
-        if proba[1]*(o.get("Boost_Over", 1)+1)/2 > proba[0]*(o.get("Boost_Under", 1)+1)/2 or o.get("Boost", 1) > 1:
+        if o.get("Boost_Under", 1) == 0 or proba[1]*(o.get("Boost_Over", 1)+1)/2 > proba[0]*(o.get("Boost_Under", 1)+1)/2 or o.get("Boost", 1) > 1:
             o["Boost"] = o.get("Boost_Over", 1)
             o["Bet"] = "Over"
             o["Books"] = p[1]

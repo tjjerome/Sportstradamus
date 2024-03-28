@@ -1168,11 +1168,11 @@ class StatsMLB(Stats):
                         3*v["stats"]["batting"].get("baseOnBalls", 0) +
                         3*v["stats"]["batting"].get("hitByPitch", 0) +
                         4*v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points underdog": 2*v["stats"]["pitching"].get("wins", 0) +
-                        v["stats"]["pitching"].get("strikeOuts", 0) -
-                        v["stats"]["pitching"].get("earnedRuns", 0) +
-                        int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
-                        (3 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
+                        "pitcher fantasy points underdog": 5*v["stats"]["pitching"].get("wins", 0) +
+                        3*v["stats"]["pitching"].get("strikeOuts", 0) -
+                        3*v["stats"]["pitching"].get("earnedRuns", 0) +
+                        3*int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]) +
+                        (5 if int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[
                             0]) > 5 and v["stats"]["pitching"].get("earnedRuns", 0) < 4 else 0),
                         "hitter fantasy points parlay": 3*v["stats"]["batting"].get("hits", 0) +
                         3*v["stats"]["batting"].get("doubles", 0) +
@@ -2056,9 +2056,9 @@ class StatsMLB(Stats):
                 ev = 0
                 if "pitcher" in market:
                     if "underdog" in market:
-                        fantasy_props = [("Moneyline", 2), ("pitcher strikeouts", 1), ("runs allowed", -1), ("pitching outs", 1/3), ("quality start", 3)]
+                        fantasy_props = [("pitcher win", 5), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 5)]
                     else:
-                        fantasy_props = [("Moneyline", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
+                        fantasy_props = [("pitcher win", 6), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 4)]
                 else:
                     if "underdog" in market:
                         fantasy_props = [("singles", 3), ("doubles", 6), ("triples", 8), ("home runs", 10), ("walks", 3), ("rbi", 2), ("runs", 2), ("stolen bases", 4)]
@@ -2071,7 +2071,7 @@ class StatsMLB(Stats):
                     subline = archive.get_line("MLB", submarket, date, player)
                     if np.isnan(v):
                         if submarket == "Moneyline":
-                            p = 1-moneyline
+                            p = moneyline
                             ev += p*weight
                         elif submarket == "quality start":
                             p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
