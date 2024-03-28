@@ -626,10 +626,8 @@ def find_correlation(offers, stats, platform, parlays):
 
             game_df = game_df.loc[game_df['Boost'] <= 2] #TODO come back to this
             game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
-            game_df.loc[:, 'Boosted Model'] = game_df['Model'] * \
-                game_df['Boost']
-            game_df.loc[:, 'Boosted Books'] = game_df['Books'] * \
-                game_df['Boost']
+            game_df.loc[:, 'Boosted Model'] = game_df['Model'] * (game_df["Boost"]+1)/2
+            game_df.loc[:, 'Boosted Books'] = game_df['Books'] * (game_df["Boost"]+1)/2
 
             idx_base = game_df.loc[game_df["Boosted Books"] > .495].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
             bet_df = idx_base.to_dict('index')
@@ -847,8 +845,8 @@ def save_data(df, book, gc):
         with open((pkg_resources.files(data) / f"results/{book}.csv"), "w") as outfile:
             df.to_csv(outfile)
         try:
-            df["Books"] = df["Books"]*df["Boost"]
-            df["Model"] = df["Model"]*df["Boost"]
+            df["Books"] = df["Books"]*(df["Boost"]+1)/2
+            df["Model"] = df["Model"]*(df["Boost"]+1)/2
             df.sort_values("Model", ascending=False, inplace=True)
             mask = (df.Books > .54) & (df.Model > .58)
             # Access the Google Sheets worksheet and update its contents
@@ -1204,8 +1202,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     stats["Odds"] = 1-get_odds(o["Line"], ev, cv, step=step)
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
-                    p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
-                         0.5/o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1-0.5/o.get("Boost_Under", 1)]
+                    p = [1/(o.get("Boost_Under", 1)+1) if o.get("Boost_Under", 1) > 0 else 1-1/(o.get("Boost_Over", 1)+1),
+                         1/(o.get("Boost_Over", 1)+1) if o.get("Boost_Over", 1) > 0 else 1-1/(o.get("Boost_Under", 1)+1)]
                     p = p/np.sum(p)
                     stats["Odds"] = p[1]
                 else:
@@ -1281,8 +1279,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     stats["Odds"] = get_odds(o["Line"], ev, cv, step)
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
-                    p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
-                         0.5/o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1-0.5/o.get("Boost_Under", 1)]
+                    p = [1/(o.get("Boost_Under", 1)+1) if o.get("Boost_Under", 1) > 0 else 1-1/(o.get("Boost_Over", 1)+1),
+                         1/(o.get("Boost_Over", 1)+1) if o.get("Boost_Over", 1) > 0 else 1-1/(o.get("Boost_Under", 1)+1)]
                     p = p/np.sum(p)
                     stats["Odds"] = p[1]
                 else:
@@ -1290,7 +1288,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
             proba = p
 
-        if proba[1]*o.get("Boost_Over", 1) > proba[0]*o.get("Boost_Under", 1) or o.get("Boost", 1) > 1:
+        if proba[1]*(o.get("Boost_Over", 1)+1)/2 > proba[0]*(o.get("Boost_Under", 1)+1)/2 or o.get("Boost", 1) > 1:
             o["Boost"] = o.get("Boost_Over", 1)
             o["Bet"] = "Over"
             o["Books"] = p[1]
