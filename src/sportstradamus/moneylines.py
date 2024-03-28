@@ -20,7 +20,7 @@ def confer():
     with open(filepath, "r") as infile:
         keys = json.load(infile)
 
-    archive = Archive("All")
+    archive = Archive()
     logger.info("Archive loaded")
 
     archive = get_moneylines(archive, keys)
