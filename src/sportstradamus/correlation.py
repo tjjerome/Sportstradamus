@@ -299,7 +299,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B2": [
             "hitter fantasy score",
@@ -312,7 +315,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B3": [
             "hitter fantasy score",
@@ -325,7 +331,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B4": [
             "hitter fantasy score",
@@ -338,7 +347,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B5": [
             "hitter fantasy score",
@@ -351,7 +363,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B6": [
             "hitter fantasy score",
@@ -364,7 +379,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B7": [
             "hitter fantasy score",
@@ -377,7 +395,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B8": [
             "hitter fantasy score",
@@ -390,7 +411,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
         "B9": [
             "hitter fantasy score",
@@ -403,7 +427,10 @@ tracked_stats = {
             "runs",
             "rbi",
             "batter strikeouts",
-            "singles"
+            "singles",
+            "doubles",
+            "triples",
+            "home runs"
         ],
     }
 }
