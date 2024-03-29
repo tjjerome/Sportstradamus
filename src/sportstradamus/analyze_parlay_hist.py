@@ -2,9 +2,11 @@ import pandas as pd
 import numpy as np
 import os.path
 import json
+import re
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
 from sportstradamus import data, creds
+from sportstradamus.helpers import remove_accents
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL
 from tqdm import tqdm
 from sklearn.metrics import (
@@ -169,8 +171,10 @@ def reflect():
     parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
     parlays["Profit"] = parlays.apply(lambda x: np.clip(payout_table[x.Platform][x.Legs][x.Misses]*(x.Boost if x.Boost < 2 or x.Misses==0 else 1),None,100)-1, axis=1)
     parlays["Profit"] = parlays["Profit"]*np.round(parlays["Rec Bet"]*2)/2
+    parlays["Players"] = parlays[[col for col in parlays.columns if "Leg " in col]].apply(lambda x: ", ".join([remove_accents(a[:re.search(r"\d", a).start()-1 if re.search(r"\d", a) else 0]) for a in x.to_list()]), axis=1)
+    parlays = parlays.sort_values("Model EV", ascending=False).drop_duplicates(subset=["Players", "Date"])
 
-    pd.concat([parlays, parlays_clean]).drop_duplicates(subset=parlays.columns[:-3]).to_pickle(filepath)
+    pd.concat([parlays, parlays_clean]).sort_values("Model EV", ascending=False).drop_duplicates(subset=["Players", "Date"]).to_pickle(filepath)
 
     parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99
 
@@ -230,7 +234,7 @@ def reflect():
                 "NFL": "player display name", "NHL": "playerName"}
         dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
                 "NFL": "gameday", "NHL": "gameDate"}
-        for i, row in tqdm(history.loc[history.isna().any(axis=1) & (pd.to_datetime(history.Date).dt.date < datetime.datetime.today().date())].iterrows(), desc="Checking history", total=len(history)):
+        for i, row in tqdm(history.loc[history.isna().any(axis=1) & (pd.to_datetime(history.Date).dt.date < datetime.today().date())].iterrows(), desc="Checking history", total=len(history)):
             if np.isnan(row["Result"]):
                 gamelog = stats[row["League"]].gamelog
                 if " + " in row["Player"]:
