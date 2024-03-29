@@ -759,7 +759,7 @@ def find_correlation(offers, stats, platform, parlays):
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             df5.drop_duplicates('Players', inplace=True)
-            df5 = df5.groupby('Bet Size').head(50)
+            df5 = df5.groupby('Bet Size').head(20)
             
             if len(df5) > 5:
 
