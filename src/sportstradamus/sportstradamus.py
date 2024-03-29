@@ -529,6 +529,7 @@ def find_correlation(offers, stats, platform, parlays):
         stat_data = stats.get(league)
         banned_team_markets = banned[platform][league]['team']
         banned_opponent_markets = banned[platform][league]['opponent']
+        mod_map = banned[platform][league]['modified']
 
         if league != "MLB":
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
@@ -658,7 +659,7 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Boosted Model"] for leg in bet])
                     pb = np.product([leg["Boosted Books"] for leg in bet])
 
-                    if p/threshold < np.exp(0.075*(bet_size-2)) or pb/threshold < .75:
+                    if p/threshold < np.exp(0.08*(bet_size-2)) or pb/threshold < .8:
                         continue
 
                     markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
@@ -709,11 +710,11 @@ def find_correlation(offers, stats, platform, parlays):
                                         y_key = y_key.replace("_OPP_", "")
                                     else:
                                         y_key = "_OPP_" + y_key
-                                if x_key in banned[platform][league]['modified']:
-                                    modifier = banned[platform][league]['modified'][x_key].get(y_key, 1)
+                                if x_key in mod_map:
+                                    modifier = mod_map[x_key].get(y_key, 1)
                                     boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
-                                elif y_key in banned[platform][league]['modified']:
-                                    modifier = banned[platform][league]['modified'][y_key].get(x_key, 1)
+                                elif y_key in mod_map:
+                                    modifier = mod_map[y_key].get(x_key, 1)
                                     boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
 
                         # Sum rho_matrix to update SIG
@@ -846,7 +847,7 @@ def save_data(df, book, gc):
             df["Books"] = df["Books"]*df["Boost"]
             df["Model"] = df["Model"]*df["Boost"]
             df.sort_values("Model", ascending=False, inplace=True)
-            mask = (df.Books > .54) & (df.Model > .58) & (2 >= df.Boost >= .75)
+            mask = (df.Books > .54) & (df.Model > .58) & (2 >= df.Boost) & (df.Boost >= .75)
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
