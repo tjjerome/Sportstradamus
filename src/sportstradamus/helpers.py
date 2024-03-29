@@ -549,9 +549,9 @@ class Archive:
             for player in list(self.archive[league][market][date].keys()):
                 if "EV" in self.archive[league][market][date][player]:
                     line = self.get_line(league, market, date, player)
-                    record = self.archive[league][market][date][player]["EV"]
+                    record = self.archive[league][market][date][player]["EV"].copy()
                     record["Line"] = line
-                    records[(date, player)] = self.archive[league][market][date][player]["EV"]
+                    records[(date, player)] = record
                 else:
                     records[(date, player)] = self.archive[league][market][date][player]
 

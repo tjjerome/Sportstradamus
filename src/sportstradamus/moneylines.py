@@ -179,7 +179,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
         ]
     elif key is None:
         logger.warning("Key needed for sports other than All")
-        return
+        return archive
     else:
         sports = [(key, sport)]
 
