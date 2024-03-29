@@ -1129,6 +1129,7 @@ class StatsMLB(Stats):
                         "atBats": v["stats"]["batting"].get("atBats", 0),
                         "plateAppearances": v["stats"]["batting"].get("plateAppearances", 0),
                         "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
+                        "pitcher win": v["stats"]["pitching"].get("wins", 0),
                         "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0),
                         "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
                         "runs allowed": v["stats"]["pitching"].get("runs", 0),
@@ -1300,6 +1301,7 @@ class StatsMLB(Stats):
                         "pitcher strikeouts": v["stats"]["pitching"].get(
                             "strikeOuts", 0
                         ),
+                        "pitcher win": v["stats"]["pitching"].get("wins", 0),
                         "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0) + v["stats"]["pitching"].get("hitByPitch", 0),
                         "pitches thrown": v["stats"]["pitching"].get(
                             "numberOfPitches", 0
@@ -1488,7 +1490,7 @@ class StatsMLB(Stats):
                 "K9": (27*home_adj["K"] / home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0,
                 "BB9": (27*home_adj["BB"] / home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0,
                 "IP": home_bullpen["pitching outs"] / 3,
-                "PA": home_bullpen["batters faced"]
+                "PA9": (27*home_bullpen["batters faced"] / home_bullpen["pitching outs"]) if home_bullpen["pitching outs"] else 0
             },
             {
                 "team": awayTeam,
@@ -1524,7 +1526,7 @@ class StatsMLB(Stats):
                 "K9": (27*away_adj["K"] / away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0,
                 "BB9": (27*away_adj["BB"] / away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0,
                 "IP": away_bullpen["pitching outs"] / 3,
-                "PA": away_bullpen["batters faced"]
+                "PA9": (27*away_bullpen["batters faced"] / away_bullpen["pitching outs"]) if away_bullpen["pitching outs"] else 0
             },
         ]
 
