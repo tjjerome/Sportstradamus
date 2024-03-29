@@ -759,14 +759,15 @@ def find_correlation(offers, stats, platform, parlays):
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             df5.drop_duplicates('Players', inplace=True)
-            df5 = df5.groupby('Bet Size').head(20)
+            df5 = df5.groupby('Bet Size').head(50)
             
             if len(df5) > 5:
 
                 rho_matrix = np.zeros([len(df5), len(df5)])
+                bets = df5["Markets"].to_list()
                 for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
-                    bet1 = df5.iloc[i]["Markets"]
-                    bet2 = df5.iloc[j]["Markets"]
+                    bet1 = bets[i]
+                    bet2 = bets[j]
                     rho = []
                     for leg1, leg2 in product(bet1, bet2):
                         rho.append(c_map.get((leg1[0], leg2[0]), 0) * (1 if leg1[1]==leg2[1] else -1))
