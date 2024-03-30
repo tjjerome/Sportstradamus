@@ -715,6 +715,12 @@
             "betrivers": 1.0,
             "unibet_us": 1.0,
             "fanduel": 10.0
+        },
+        "pitcher win": {
+            "draftkings": 1.0,
+            "williamhill_us": 10.0,
+            "barstool": 2.7912968455737173,
+            "betonlineag": 1.0
         }
     }
 }
