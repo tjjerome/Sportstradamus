@@ -537,7 +537,9 @@ class Archive:
     def get_line(self, league, market, date, player):
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("Lines", [np.nan])
 
-        return np.floor(2*np.median(arr))/2
+        line = np.floor(2*np.median(arr))/2
+
+        return 0 if np.isnan(line) else line
     
     def to_pandas(self, league, market):
         records = {}

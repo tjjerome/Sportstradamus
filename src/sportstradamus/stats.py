@@ -975,7 +975,7 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            line = archive.get_line("NBA", market, gameDate, name)
+            line = archive.get_line("NBA", market, game["GAME_DATE"], name)
 
             offer = {
                 "Player": name,
@@ -2271,7 +2271,7 @@ class StatsMLB(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            line = archive.get_line("MLB", market, gameDate, name)
+            line = archive.get_line("MLB", market, game['gameDate'], name)
 
             # Construct an offer dictionary with player, team, market, opponent, and pitcher information
             offer = {
@@ -3386,7 +3386,7 @@ class StatsNFL(Stats):
             if ((game['position group'] == 'QB') and (game['snap pct'] < 0.8)) or (game['snap pct'] < 0.3):
                 continue
 
-            line = archive.get_line("NFL", market, gameDate, name)
+            line = archive.get_line("NFL", market, game["gameday"], name)
 
             offer = {
                 "Player": name,
@@ -4323,7 +4323,7 @@ class StatsNHL(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            line = archive.get_line("NHL", market, gameDate, name)
+            line = archive.get_line("NHL", market, game["gameDate"], name)
 
             offer = {
                 "Player": name,
