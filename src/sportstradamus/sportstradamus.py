@@ -632,7 +632,7 @@ def find_correlation(offers, stats, platform, parlays):
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                idx = idx_base.groupby('Team').head(12).head(28-2*bet_size).sort_values(['Team', 'Player'])
+                idx = idx_base.groupby('Team').head(15).head(30-2*bet_size).sort_values(['Team', 'Player'])
                 team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
@@ -651,7 +651,7 @@ def find_correlation(offers, stats, platform, parlays):
                             else:
                                 combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
 
-                threshold = 1/payout_table[platform][bet_size-2]
+                threshold = payout_table[platform][bet_size-2]
 
                 for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                     bet = itemgetter(*bet_id)(bet_df)
@@ -659,7 +659,7 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Boosted Model"] for leg in bet])
                     pb = np.product([leg["Boosted Books"] for leg in bet])
 
-                    if p/threshold < np.exp(0.08*(bet_size-2)) or pb/threshold < .8:
+                    if p*threshold < np.exp(0.1*(bet_size-2)) or pb*threshold < .9:
                         continue
 
                     markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
