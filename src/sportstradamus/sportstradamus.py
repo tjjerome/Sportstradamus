@@ -266,15 +266,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp(books)
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp(books)
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats, parlays)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -647,12 +647,12 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
 
-            idx_base = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            idx_base = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(4)
             bet_df = idx_base.to_dict('index')
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                idx = idx_base.groupby('Team').head(15).head(30-2*bet_size).sort_values(['Team', 'Player'])
+                idx = idx_base.groupby('Team').head(18).head(30).sort_values(['Team', 'Player'])
                 team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
@@ -780,7 +780,7 @@ def find_correlation(offers, stats, platform, parlays):
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             df5.drop_duplicates('Players', inplace=True)
-            df5 = df5.groupby('Bet Size').head(50)
+            df5 = df5.groupby('Bet Size').head(100)
             
             if len(df5) > 5:
 
@@ -806,9 +806,9 @@ def find_correlation(offers, stats, platform, parlays):
             elif len(df5) > 0:
                 parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Bet Size"])])
 
-            # Find best pairs, TODO add corr modifier
+            # Find best pairs
             c_map = pd.Series(c_map)
-            for i, offer in tqdm(game_df.iterrows(), desc=f"Correlating {team}/{opp} bets...", leave=False):
+            for i, offer in tqdm(game_df.iterrows(), desc=f"Correlating {team}/{opp} bets...", leave=False, total=len(game_df)):
                 R_map = pd.Series(0, index=c_map.index.levels[1])
                 for market in offer.cMarket:
                     if market in c_map:
@@ -837,6 +837,8 @@ def find_correlation(offers, stats, platform, parlays):
                 corr["P"] = (np.exp(corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])
                                                       * corr["Model"]*(1-corr["Model"])))*offer["Model"]*corr["Model"])*3
                 if platform == "Underdog":
+                    for cm in offer["cMarket"]:
+                        corr["Boost"] *= corr["cMarket"].apply(lambda x: np.product([mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), {}).get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), 1) if mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", "")) else mod_map.get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), {}).get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), 1) for i in x]))
                     corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
                 corr.sort_values("P", ascending=False, inplace=True)
                 corr.drop_duplicates("Player", inplace=True)
