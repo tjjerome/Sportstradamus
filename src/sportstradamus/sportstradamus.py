@@ -508,6 +508,24 @@ def find_correlation(offers, stats, platform, parlays):
         "Underdog": [3, 6, 10.9, 20.2],
         "PrizePicks": [3, 5.3, 10, 20.8, 38.8]
     }
+    league_cutoff_values = { # (m, b)
+        "NBA": {
+            "Model": (0.170, 0.808),
+            "Books": (-0.055, 1.141)
+        },
+        "MLB": {
+            "Model": (0.125, 1.090),
+            "Books": (-0.052, 1.310)
+        },
+        "NHL": {
+            "Model": (0.071, 0.940),
+            "Books": (-0.057, 1.310)
+        },
+        "NFL": {
+            "Model": (0.071, 0.940),
+            "Books": (-0.057, 1.310)
+        }
+    }
 
     for league in ["NFL", "NBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
@@ -516,6 +534,8 @@ def find_correlation(offers, stats, platform, parlays):
         c = pd.read_csv(pkg_resources.files(data) / (f"{league}_corr.csv"), index_col = [0,1,2])
         c.rename_axis(["team", "market", "correlation"], inplace=True)
         c.columns = ["R"]
+        league_cutoff_model = league_cutoff_values[league]["Model"]
+        league_cutoff_books = league_cutoff_values[league]["Books"]
         # team_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
         #     ".")[1]] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
         # opp_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
@@ -659,7 +679,7 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Boosted Model"] for leg in bet])
                     pb = np.product([leg["Boosted Books"] for leg in bet])
 
-                    if p*threshold < np.exp(0.1*(bet_size-2)) or pb*threshold < .9: #TODO Tune these
+                    if p*threshold < (league_cutoff_model[0]*bet_size+league_cutoff_model[1]) or pb*threshold < (league_cutoff_books[0]*bet_size+league_cutoff_books[1]):
                         continue
 
                     markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
