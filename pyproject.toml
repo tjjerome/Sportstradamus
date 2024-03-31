@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "Sportstradamus"
-version = "3.7.0"
+version = "3.7.1"
 description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
@@ -20,7 +20,6 @@ pandas = ">=2.0.1"
 protobuf = ">=4.23.0"
 requests = ">=2.30.0"
 scipy = ">=1.10.1"
-scrapeops-python-requests = ">=0.4.7"
 tqdm = ">=4.65.0"
 importlib = "^1.0.4"
 click = "^8.1.3"
