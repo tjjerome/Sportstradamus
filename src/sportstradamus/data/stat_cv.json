@@ -6,7 +6,7 @@
         "hits allowed": 1,
         "hitter fantasy points underdog": 0.9208241507339544,
         "hitter fantasy score": 0.9579319509156097,
-        "pitcher fantasy points underdog": 0.5424834857548332,
+        "pitcher fantasy points underdog": 0.5075994473435744,
         "pitcher fantasy score": 0.4809813612803274,
         "pitcher strikeouts": 1,
         "pitches thrown": 0.13384418123152625,
@@ -20,7 +20,9 @@
         "runs": 1,
         "rbi": 1,
         "batter strikeouts": 1,
-        "singles": 1
+        "singles": 1,
+        "doubles": 2.1946821348564303,
+        "home runs": 2.424392215030276
     },
     "NBA": {
         "AST": 1,

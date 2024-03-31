@@ -18,6 +18,11 @@
     "MLB_batter-strikeouts": [
         "Meeting 2"
     ],
+    "MLB_doubles": [
+        "Line",
+        "Meeting 1",
+        "Meeting 2"
+    ],
     "MLB_hits+runs+rbi": [],
     "MLB_hits-allowed": [],
     "MLB_hits": [
@@ -35,8 +40,13 @@
     "MLB_hitter-fantasy-score": [
         "Odds"
     ],
+    "MLB_home-runs": [
+        "Line",
+        "Meeting 1"
+    ],
     "MLB_pitcher-fantasy-points-underdog": [
-        "Odds"
+        "Odds",
+        "Meeting 1"
     ],
     "MLB_pitcher-fantasy-score": [
         "Odds",
@@ -62,13 +72,23 @@
         "Meeting 1"
     ],
     "MLB_singles": [
-        "Line"
+        "Avg5",
+        "Meeting 5",
+        "Game 1"
     ],
     "MLB_stolen-bases": [
-        "Odds",
         "Line",
+        "Avg10",
         "AvgYr",
-        "Meeting 1"
+        "AvgH2H",
+        "IQR10",
+        "IQRYr",
+        "Meeting 1",
+        "Meeting 2",
+        "Meeting 5",
+        "Game 2",
+        "Game 4",
+        "Player avg"
     ],
     "MLB_total-bases": [],
     "MLB_walks-allowed": [
