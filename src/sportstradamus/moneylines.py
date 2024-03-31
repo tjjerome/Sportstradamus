@@ -58,6 +58,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
         if res.status_code != 200:
             return archive
 
+        low_on_credits = int(res.headers.get('X-Requests-Remaining'))<50
         res = res.json()
 
         # Filter sports
@@ -81,7 +82,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
     else:
         url = "https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets={markets}&apiKey={apikey}"
         dayDelta = 6
-        params = {"apikey": apikey["odds_api"], "markets": ",".join(markets)}
+        params = {"apikey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"], "markets": ",".join(markets)}
 
     # Retrieve odds data for each sport
     for sport, league in sports:
