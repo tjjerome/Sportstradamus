@@ -627,12 +627,12 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
 
-            idx_base = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            idx_base = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(4)
             bet_df = idx_base.to_dict('index')
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                idx = idx_base.groupby('Team').head(15).head(30-2*bet_size).sort_values(['Team', 'Player'])
+                idx = idx_base.groupby('Team').head(20).head(30).sort_values(['Team', 'Player'])
                 team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                 team_splits = set.union(*[set(permutations(x)) for x in team_splits])
                 combos = []
@@ -656,11 +656,11 @@ def find_correlation(offers, stats, platform, parlays):
                 for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                     bet = itemgetter(*bet_id)(bet_df)
 
-                    p = np.product([leg["Boosted Model"] for leg in bet])
-                    pb = np.product([leg["Boosted Books"] for leg in bet])
+                    p1 = np.product([leg["Boosted Model"] for leg in bet])*threshold
+                    pb1 = np.product([leg["Boosted Books"] for leg in bet])*threshold
 
-                    if p*threshold < np.exp(0.1*(bet_size-2)) or pb*threshold < .9: #TODO Tune these
-                        continue
+                    # if p*threshold < np.exp(0.1*(bet_size-2)) or pb*threshold < .9: #TODO Tune these
+                    #     continue
 
                     markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
                     team1_markets = [leg.split(".")[1]
@@ -740,6 +740,8 @@ def find_correlation(offers, stats, platform, parlays):
                             "Platform": platform,
                             "Model EV": p,
                             "Books EV": pb,
+                            "Model EV Prev": p1,
+                            "Books EV Prev": pb1,
                             "Boost": boost,
                             "Rec Bet": units,
                             "Leg 1": "",
@@ -756,73 +758,76 @@ def find_correlation(offers, stats, platform, parlays):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Players', 'Markets', 'Bet Size'])
+            # df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Players', 'Markets', 'Bet Size'])
             
-            df5.sort_values('Model EV', ascending=False, inplace=True)
-            df5.drop_duplicates('Players', inplace=True)
-            df5 = df5.groupby('Bet Size').head(50)
+            # df5.sort_values('Model EV', ascending=False, inplace=True)
+            # df5.drop_duplicates('Players', inplace=True)
+            # df5 = df5.groupby('Bet Size').head(50)
             
-            if len(df5) > 5:
+            # if len(df5) > 5:
 
-                rho_matrix = np.zeros([len(df5), len(df5)])
-                bets = df5["Markets"].to_list()
-                for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
-                    bet1 = bets[i]
-                    bet2 = bets[j]
-                    rho = []
-                    for leg1, leg2 in product(bet1, bet2):
-                        rho.append(c_map.get((leg1[0], leg2[0]), 0) * (1 if leg1[1]==leg2[1] else -1))
+            #     rho_matrix = np.zeros([len(df5), len(df5)])
+            #     bets = df5["Markets"].to_list()
+            #     for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
+            #         bet1 = bets[i]
+            #         bet2 = bets[j]
+            #         rho = []
+            #         for leg1, leg2 in product(bet1, bet2):
+            #             rho.append(c_map.get((leg1[0], leg2[0]), 0) * (1 if leg1[1]==leg2[1] else -1))
 
-                    rho_matrix[i, j] = np.mean(rho)
+            #         rho_matrix[i, j] = np.mean(rho)
 
-                X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
-                Z = linkage(X, 'ward')
-                df5["Family"] = fcluster(Z, 3, criterion='maxclust')
-                parlay_df = pd.concat([parlay_df,
-                                       df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Bet Size", "Family"]),
-                                       df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
-                                        drop(columns=["Players", "Markets", "Bet Size", "Family"])]).\
-                                        sort_values("Model EV", ascending=False).drop_duplicates()
-            elif len(df5) > 0:
-                parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Bet Size"])])
+            #     X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
+            #     Z = linkage(X, 'ward')
+            #     df5["Family"] = fcluster(Z, 3, criterion='maxclust')
+            #     parlay_df = pd.concat([parlay_df,
+            #                            df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Bet Size", "Family"]),
+            #                            df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
+            #                             drop(columns=["Players", "Markets", "Bet Size", "Family"])]).\
+            #                             sort_values("Model EV", ascending=False).drop_duplicates()
+            # if len(df5) > 0:
+            #     parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Bet Size"])])
+
+            if len(best_bets) > 0:
+                parlay_df = pd.concat([parlay_df, pd.DataFrame(best_bets)])
 
             # Find best pairs, TODO add corr modifier
-            c_map = pd.Series(c_map)
-            for i, offer in game_df.iterrows():
-                R_map = pd.Series(0, index=c_map.index.levels[1])
-                for market in offer.cMarket:
-                    if market in c_map:
-                        R_map = R_map.add(c_map.loc[market], fill_value=0)
+            # c_map = pd.Series(c_map)
+            # for i, offer in game_df.iterrows():
+            #     R_map = pd.Series(0, index=c_map.index.levels[1])
+            #     for market in offer.cMarket:
+            #         if market in c_map:
+            #             R_map = R_map.add(c_map.loc[market], fill_value=0)
 
-                for market in offer.cMarket:
-                    position, stat = tuple(market.split("."))
-                    R_map.loc[[x.split(".")[0] == position for x in R_map.index]] = 0
-                    if "_OPP_" in position:
-                        if len(banned_team_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_team_markets if stat in x])) & R_map.index.str.contains("_OPP_")] = 0
-                        if len(banned_opponent_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_opponent_markets if stat in x])) & ~R_map.index.str.contains("_OPP_")] = 0
-                    else:
-                        if len(banned_opponent_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_opponent_markets if stat in x])) & ~R_map.index.str.contains("_OPP_")] = 0
-                        if len(banned_team_markets) > 0:
-                            R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_team_markets if stat in x])) & R_map.index.str.contains("_OPP_")] = 0
+            #     for market in offer.cMarket:
+            #         position, stat = tuple(market.split("."))
+            #         R_map.loc[[x.split(".")[0] == position for x in R_map.index]] = 0
+            #         if "_OPP_" in position:
+            #             if len(banned_team_markets) > 0:
+            #                 R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_team_markets if stat in x])) & R_map.index.str.contains("_OPP_")] = 0
+            #             if len(banned_opponent_markets) > 0:
+            #                 R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_opponent_markets if stat in x])) & ~R_map.index.str.contains("_OPP_")] = 0
+            #         else:
+            #             if len(banned_opponent_markets) > 0:
+            #                 R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_opponent_markets if stat in x])) & ~R_map.index.str.contains("_OPP_")] = 0
+            #             if len(banned_team_markets) > 0:
+            #                 R_map.loc[R_map.index.str.contains("|".join([x[0] if x[1] == stat else x[1] for x in banned_team_markets if stat in x])) & R_map.index.str.contains("_OPP_")] = 0
 
-                pos = R_map.loc[R_map > 0.1].index.to_list()
-                neg = R_map.loc[R_map < -0.1].index.to_list()
-                R_map = R_map.abs().to_dict()
-                corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet) & (game_df.Books*game_df.Boost > .5)],
-                                  game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet) & (game_df.Books*game_df.Boost > .5)]])
-                corr["R"] = corr.cMarket.apply(lambda x: R_map[x[0]])
-                corr["P"] = (np.exp(corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])
-                                                      * corr["Model"]*(1-corr["Model"])))*offer["Model"]*corr["Model"])*3
-                if platform == "Underdog":
-                    corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
-                corr.sort_values("P", ascending=False, inplace=True)
-                corr.drop_duplicates("Player", inplace=True)
-                corr = corr.loc[corr["P"] > 0.9]
-                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
-                    (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
+            #     pos = R_map.loc[R_map > 0.1].index.to_list()
+            #     neg = R_map.loc[R_map < -0.1].index.to_list()
+            #     R_map = R_map.abs().to_dict()
+            #     corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet) & (game_df.Books*game_df.Boost > .5)],
+            #                       game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet) & (game_df.Books*game_df.Boost > .5)]])
+            #     corr["R"] = corr.cMarket.apply(lambda x: R_map[x[0]])
+            #     corr["P"] = (np.exp(corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])
+            #                                           * corr["Model"]*(1-corr["Model"])))*offer["Model"]*corr["Model"])*3
+            #     if platform == "Underdog":
+            #         corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
+            #     corr.sort_values("P", ascending=False, inplace=True)
+            #     corr.drop_duplicates("Player", inplace=True)
+            #     corr = corr.loc[corr["P"] > 0.9]
+            #     df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
+            #         (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
 
     return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
 
