@@ -35,6 +35,18 @@
         "Line",
         "Player PASO"
     ],
+    "MLB_doubles": [
+        "Player avg",
+        "Defense K9",
+        "GamesPlayed",
+        "STDYr",
+        "Moneyline",
+        "PF 2B",
+        "Position",
+        "Odds",
+        "MeanYr",
+        "Player PASO"
+    ],
     "MLB_hits+runs+rbi": [
         "PF H",
         "GamesPlayed",
@@ -95,17 +107,29 @@
         "MeanYr",
         "Total"
     ],
+    "MLB_home-runs": [
+        "Defense FIP",
+        "Player z",
+        "Position",
+        "GamesPlayed",
+        "STDYr",
+        "Moneyline",
+        "MeanYr",
+        "PF HR",
+        "Total",
+        "Odds"
+    ],
     "MLB_pitcher-fantasy-points-underdog": [
-        "Defense PASO",
-        "Player avg",
-        "Player PA9",
+        "Player IP short",
         "DaysOff",
         "STDYr",
         "Moneyline",
         "MeanYr",
-        "Player ERA",
-        "Total",
-        "Player z"
+        "Player avg",
+        "Player PA9",
+        "IQRYr",
+        "Player z",
+        "Player ERA"
     ],
     "MLB_pitcher-fantasy-score": [
         "IQRYr",
@@ -192,28 +216,28 @@
         "Team SLG"
     ],
     "MLB_singles": [
-        "STDYr",
-        "MeanYr",
-        "Player OBP",
+        "Player PASO",
         "Moneyline",
         "Position",
-        "Total",
-        "PF 1B",
+        "PF H",
+        "MeanYr",
+        "Team BABIP",
+        "Player OBP",
         "Defense K9",
         "Odds",
-        "PF H"
+        "PF 1B"
     ],
     "MLB_stolen-bases": [
-        "Player OBP",
-        "STD10",
-        "GamesPlayed",
-        "DaysOff",
-        "Position",
         "Mean10",
+        "DaysOff",
+        "Player OBP",
         "Defense z",
-        "MeanYr",
+        "GamesPlayed",
+        "DVPOA",
         "STDYr",
-        "DVPOA"
+        "MeanYr",
+        "Odds",
+        "Position"
     ],
     "MLB_total-bases": [
         "Odds",
@@ -1044,9 +1068,9 @@
         "AvgYr"
     ],
     "MLB_ALL": [
+        "MeanYr",
         "Moneyline",
         "Total",
-        "MeanYr",
         "STDYr",
         "Player avg",
         "Player z",
@@ -1063,8 +1087,8 @@
         "Moneyline",
         "Player avg",
         "Player z",
-        "AvgYr",
         "Odds",
+        "AvgYr",
         "Player position avg"
     ]
 }

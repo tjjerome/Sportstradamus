@@ -659,7 +659,7 @@ def find_correlation(offers, stats, platform, parlays):
                     p = np.product([leg["Boosted Model"] for leg in bet])
                     pb = np.product([leg["Boosted Books"] for leg in bet])
 
-                    if p*threshold < np.exp(0.1*(bet_size-2)) or pb*threshold < .9:
+                    if p*threshold < np.exp(0.1*(bet_size-2)) or pb*threshold < .9: #TODO Tune these
                         continue
 
                     markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
