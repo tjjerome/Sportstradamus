@@ -808,7 +808,7 @@ def find_correlation(offers, stats, platform, parlays):
 
             # Find best pairs, TODO add corr modifier
             c_map = pd.Series(c_map)
-            for i, offer in game_df.iterrows():
+            for i, offer in tqdm(game_df.iterrows(), desc=f"Correlating {team}/{opp} bets...", leave=False):
                 R_map = pd.Series(0, index=c_map.index.levels[1])
                 for market in offer.cMarket:
                     if market in c_map:
