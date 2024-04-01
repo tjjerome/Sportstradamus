@@ -510,20 +510,20 @@ def find_correlation(offers, stats, platform, parlays):
     }
     league_cutoff_values = { # (m, b)
         "NBA": {
-            "Model": (0.170, 0.808),
-            "Books": (-0.055, 1.141)
+            "Model": (0.145, 0.834),
+            "Books": (-0.065, 1.138)
         },
         "MLB": {
-            "Model": (0.125, 1.090),
-            "Books": (-0.052, 1.310)
+            "Model": (0.082, 1.129),
+            "Books": (-0.069, 1.305)
         },
         "NHL": {
-            "Model": (0.071, 0.940),
-            "Books": (-0.057, 1.310)
+            "Model": (0.051, 0.964),
+            "Books": (-0.065, 1.322)
         },
         "NFL": {
-            "Model": (0.071, 0.940),
-            "Books": (-0.057, 1.310)
+            "Model": (0.108, 1.107),
+            "Books": (-0.097, 1.314)
         }
     }
 
