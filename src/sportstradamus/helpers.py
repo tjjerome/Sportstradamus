@@ -305,10 +305,11 @@ def get_ev(line, under, cv=1, force_gauss=False):
     """
     # Poisson dist
     if cv == 1:
-        line = np.ceil(float(line) - 1)
         if force_gauss:
+            line = float(line)
             return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), line)[0]
         else:
+            line = np.ceil(float(line) - 1)
             return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
     else:
         line = float(line)
