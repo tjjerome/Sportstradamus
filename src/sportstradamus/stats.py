@@ -12,7 +12,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds
 import pandas as pd
 import warnings
 import requests
@@ -869,11 +869,13 @@ class StatsNBA(Stats):
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     v = archive.get_ev("NBA", submarket, date, player)
                     subline = archive.get_line("NBA", submarket, date, player)
+                    if sub_cv == 1:
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v):
-                        if np.isnan(subline) and not player_games.empty:
+                        if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                        if not np.isnan(subline):
+                        if not subline == 0:
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                             ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
@@ -2071,6 +2073,8 @@ class StatsMLB(Stats):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
+                    if sub_cv == 1:
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v):
                         if submarket == "Moneyline":
                             p = moneyline
@@ -2080,10 +2084,10 @@ class StatsMLB(Stats):
                             p *= poisson.cdf(3, v_runs)
                             ev += p*weight
                         else:
-                            if np.isnan(subline) and not player_games.empty:
+                            if subline == 0 and not player_games.empty:
                                 subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                            if not np.isnan(subline):
+                            if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                                 ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
@@ -3279,13 +3283,15 @@ class StatsNFL(Stats):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
+                    if sub_cv == 1:
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v):
-                        if np.isnan(subline) and not player_games.empty:
+                        if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                        if not np.isnan(subline):
+                        if not subline == 0:
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv)
+                            ev += get_ev(subline, under, sub_cv, force_gauss=True)
                     else:
                         ev += v*weight
 
@@ -4191,16 +4197,18 @@ class StatsNHL(Stats):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
+                    if sub_cv == 1:
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v):
                         if submarket == "Moneyline":
                             p = 1-moneyline
                             ev += p*weight
                         else:
                             if np.isnan(v):
-                                if np.isnan(subline) and not player_games.empty:
+                                if subline == 0 and not player_games.empty:
                                     subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                                if not np.isnan(subline):
+                                if not subline == 0:
                                     under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                                     ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
