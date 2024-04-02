@@ -770,13 +770,14 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 6": "",
                             "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
                             "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
+                            "Fun": np.sum([leg["Line"] for leg in bet if leg["Bet"] == "Over"]),
                             "Bet Size": bet_size
                         }
                         for i in np.arange(bet_size):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Players', 'Markets', 'Bet Size'])
+            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Players', 'Markets', 'Fun', 'Bet Size'])
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             df5.drop_duplicates('Players', inplace=True)
@@ -799,12 +800,14 @@ def find_correlation(offers, stats, platform, parlays):
                 Z = linkage(X, 'ward')
                 df5["Family"] = fcluster(Z, 3, criterion='maxclust')
                 parlay_df = pd.concat([parlay_df,
-                                       df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Bet Size", "Family"]),
-                                       df5.sort_values(["Rec Bet", "Model EV"], ascending=False).groupby("Family").head(1).\
-                                        drop(columns=["Players", "Markets", "Bet Size", "Family"])]).\
+                                       df5.groupby("Family").head(1).drop(columns=["Players", "Markets", "Fun", "Bet Size", "Family"]),
+                                       df5.sort_values("Rec Bet", ascending=False).groupby("Family").head(1).\
+                                        drop(columns=["Players", "Markets", "Fun", "Bet Size", "Family"]), 
+                                       df5.sort_values("Fun", ascending=False).groupby("Family").head(1).\
+                                        drop(columns=["Players", "Markets", "Fun", "Bet Size", "Family"]), ]).\
                                         sort_values("Model EV", ascending=False).drop_duplicates()
             elif len(df5) > 0:
-                parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Bet Size"])])
+                parlay_df = pd.concat([parlay_df, df5.drop(columns=["Players", "Markets", "Fun", "Bet Size"])])
 
             # Find best pairs
             c_map = pd.Series(c_map)
