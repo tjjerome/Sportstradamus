@@ -1025,7 +1025,7 @@ class StatsMLB(Stats):
         Initialize the StatsMLB instance.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2023-03-30", "%Y-%m-%d"
+        self.season_start = datetime.strptime("2024-03-28", "%Y-%m-%d"
                                               ).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
