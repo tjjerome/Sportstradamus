@@ -5,12 +5,27 @@ from datetime import datetime
 import importlib.resources as pkg_resources
 from sportstradamus import data
 import pickle
+import json
 from scipy.stats import norm, poisson
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from time import time
 import requests
+
+filepath = pkg_resources.files(data) / "banned_combos.json"
+with open(filepath, "r") as infile:
+    banned = json.load(infile)
+
+for platform in banned.keys():
+    for league in banned[platform].keys():
+        if "modified" in banned[platform][league]:
+            for market in banned[platform][league]["modified"]:
+                for submarket in banned[platform][league]["modified"][market]:
+                    banned[platform][league]["modified"][market][submarket] = [banned[platform][league]["modified"][market][submarket], np.round(1/banned[platform][league]["modified"][market][submarket],2)]
+
+with open(filepath, "w") as outfile:
+    json.dump(banned, outfile, indent=4)
 
 # url = "https://api.prizepicks.com/projections?league_id=7"
 # params = {
@@ -85,8 +100,8 @@ import requests
 # NHL.season_start = datetime(2023, 10, 10).date()
 # NHL.update()
 
-MLB = StatsMLB()
-MLB.load()
+# MLB = StatsMLB()
+# MLB.load()
 # MLB.gamelog = pd.DataFrame()
 # MLB.teamlog = pd.DataFrame()
 # MLB.season_start = datetime(2021, 3, 1).date()
@@ -94,13 +109,13 @@ MLB.load()
 # MLB.update()
 # MLB.update()
 # MLB.update()
-MLB.season_start = datetime(2022, 3, 1).date()
+# MLB.season_start = datetime(2022, 3, 1).date()
 # MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2023, 3, 30).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2023, 3, 30).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()

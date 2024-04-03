@@ -731,11 +731,11 @@ def find_correlation(offers, stats, platform, parlays):
                                     else:
                                         y_key = "_OPP_" + y_key
                                 if x_key in mod_map:
-                                    modifier = mod_map[x_key].get(y_key, 1)
-                                    boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
+                                    modifier = mod_map[x_key].get(y_key, [1,1])
+                                    boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
                                 elif y_key in mod_map:
-                                    modifier = mod_map[y_key].get(x_key, 1)
-                                    boost *= modifier if b1[xi] == b2[yi] else 1 / modifier
+                                    modifier = mod_map[y_key].get(x_key, [1,1])
+                                    boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
 
                         # Sum rho_matrix to update SIG
                         SIG[i, j] = np.sum(rho_matrix)
