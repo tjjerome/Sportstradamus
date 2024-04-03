@@ -3613,10 +3613,10 @@ class StatsNHL(Stats):
                         "gameDate": gameDate,
                         "team": team,
                         "opponent": opponent,
-                        "opponent goalie": game_df.loc[(game_df.position == "G") & (game_df.team != team), 'playerName'].iat[0],
+                        "opponent goalie": remove_accents(game_df.loc[(game_df.position == "G") & (game_df.team != team), 'playerName'].iat[0]),
                         "home": home,
                         "playerId": player['playerId'],
-                        "playerName": player['playerName'],
+                        "playerName": remove_accents(player['playerName']),
                         "position": player['position']
                     }
                     stats = {
@@ -3758,7 +3758,7 @@ class StatsNHL(Stats):
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
-        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
