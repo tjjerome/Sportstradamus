@@ -179,7 +179,6 @@ def reflect():
     parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99
 
     profits = {}
-    masks = {}
 
     for platform in payout_table.keys():
         platform_df = parlays.loc[parlays["Platform"] == platform]

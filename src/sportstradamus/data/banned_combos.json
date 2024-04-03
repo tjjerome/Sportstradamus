@@ -1831,6 +1831,10 @@
                 [
                     "runs allowed",
                     "runs"
+                ],
+                [
+                    "walks allowed",
+                    "walks"
                 ]
             ],
             "modified": {
@@ -1850,6 +1854,10 @@
                     "_OPP_B.runs": [
                         1.03,
                         0.91
+                    ],
+                    "_OPP_B.batter strikeouts": [
+                        0.86,
+                        1.06
                     ]
                 },
                 "P.pitcher fantasy points underdog": {
