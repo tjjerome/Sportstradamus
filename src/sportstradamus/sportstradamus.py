@@ -834,15 +834,18 @@ def find_correlation(offers, stats, platform, parlays):
                 pos = R_map.loc[R_map > 0.1].index.to_list()
                 neg = R_map.loc[R_map < -0.1].index.to_list()
                 R_map = R_map.abs().to_dict()
-                corr = pd.concat([game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet) & (game_df.Books*game_df.Boost > .5)],
-                                  game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet) & (game_df.Books*game_df.Boost > .5)]])
+                pos_df = game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in pos if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet == offer.Bet)]
+                neg_df = game_df.loc[game_df.apply(lambda x: x["cMarket"][0] in neg if len(x["cMarket"]) == 1 else False, axis=1) & (game_df.Bet != offer.Bet)]
+                if platform == "Underdog":
+                    for cm in offer["cMarket"]:
+                        pos_df["Boost"] *= pos_df["cMarket"].apply(lambda x: np.product([mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), {}).get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), [1,1])[0] if mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", "")) else mod_map.get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), {}).get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), [1,1])[0] for i in x]))
+                        neg_df["Boost"] *= neg_df["cMarket"].apply(lambda x: np.product([mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), {}).get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), [1,1])[1] if mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", "")) else mod_map.get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), {}).get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), [1,1])[1] for i in x]))
+                
+                corr = pd.concat([pos_df, neg_df])
                 corr["R"] = corr.cMarket.apply(lambda x: R_map[x[0]])
                 corr["P"] = (np.exp(corr["R"]*np.sqrt(offer["Model"]*(1-offer["Model"])
                                                       * corr["Model"]*(1-corr["Model"])))*offer["Model"]*corr["Model"])*3
-                if platform == "Underdog":
-                    for cm in offer["cMarket"]:
-                        corr["Boost"] *= corr["cMarket"].apply(lambda x: np.product([mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), {}).get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), 1) if mod_map.get(re.sub(r'[0-9]', '', i).replace("_OPP_", "")) else mod_map.get("_OPP_"+re.sub(r'[0-9]', '', cm) if "_OPP_" in i else re.sub(r'[0-9]', '', cm), {}).get(re.sub(r'[0-9]', '', i).replace("_OPP_", ""), 1) for i in x]))
-                    corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
+                corr["P"] = corr["P"]*offer["Boost"]*corr["Boost"]
                 corr.sort_values("P", ascending=False, inplace=True)
                 corr.drop_duplicates("Player", inplace=True)
                 corr = corr.loc[corr["P"] > 0.9]
