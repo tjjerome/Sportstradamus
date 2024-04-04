@@ -206,7 +206,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             # "markets": ",".join(list(props[league].keys())[:2])
             })
         if league == "MLB":
-            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+            # params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+            params['markets'] = ",".join(["batter_doubles", "batter_triples", "batter_home_runs"])
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
@@ -287,6 +288,9 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                             lines = [line for line in lines if line['point'] == trueline]
                         if len(lines) > 2:
                             lines = [[line for line in lines if line['name']=='Over'][0],[line for line in lines if line['name']=='Under'][0]]
+                        if len(lines) == 1 and lines[0]['name'] == 'Under':
+                            lines[0]['name'] = 'Over'
+                            lines[0]['price'] = 1/(1-1/lines[0]['price'])
 
                         line = lines[0]['point'] if 'point' in lines[0] else 0.5
                         odds[market_name][player]["Lines"].append(line)

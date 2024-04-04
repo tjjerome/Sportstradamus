@@ -21,8 +21,9 @@
         "rbi": 1,
         "batter strikeouts": 1,
         "singles": 1,
-        "doubles": 2.1946821348564303,
-        "home runs": 2.424392215030276
+        "doubles": 1,
+        "triples": 1,
+        "home runs": 1
     },
     "NBA": {
         "AST": 1,

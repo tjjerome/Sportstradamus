@@ -3758,7 +3758,7 @@ class StatsNHL(Stats):
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
-        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:

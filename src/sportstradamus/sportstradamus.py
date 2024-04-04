@@ -294,7 +294,7 @@ def main(progress, books, parlays):
         best5.sort_values("Model EV", ascending=False, inplace=True)
         parlay_df = best5.copy()
 
-        best5.drop(columns=["Players", "Markets", "Fun", "Bet Size"], inplace=True)
+        best5.drop(columns=["Markets", "Fun", "Bet Size"], inplace=True)
         wks = gc.open("Sportstradamus").worksheet("Best Parlays")
         wks.clear()
         wks.update([best5.columns.values.tolist()] +
@@ -306,7 +306,7 @@ def main(progress, books, parlays):
         filepath = pkg_resources.files(data) / "parlay_hist.dat"
         if os.path.isfile(filepath):
             old5 = pd.read_pickle(filepath)
-            parlay_df = pd.concat([parlay_df, old5]).drop_duplicates(ignore_index=True)
+            parlay_df = pd.concat([parlay_df, old5], ignore_index=True).drop_duplicates(ignore_index=True)
 
         parlay_df.to_pickle(filepath)
 
@@ -627,9 +627,6 @@ def find_correlation(offers, stats, platform, parlays):
                 split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
                     x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
             game_df = pd.concat([team_df, opp_df, split_df])
-            team_players = team_df.Player.unique()
-            opp_players = opp_df.Player.unique()
-            combo_players = split_df.Player.unique()
             checked_teams.append(team)
             checked_teams.append(opp)
             if platform != "Underdog":
@@ -644,9 +641,13 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
 
-            idx_base = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25) & (game_df["Model"] >= .3)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
-            bet_df = idx_base.to_dict('index')
-            idx = idx_base.groupby('Team').head(15).head(26).sort_values(['Team', 'Player'])
+            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25) & (game_df["Model"] >= .3)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(15)
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(28).sort_values(['Team', 'Player'])
+            bet_df = idx.to_dict('index')
+            team_players = idx.loc[idx.Team == team, 'Player'].unique()
+            opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
+            combo_players = idx.loc[idx.Team.apply(lambda x: len(set(x.split("/")))>1), 'Player'].unique()
 
             best_bets = []
             for bet_size in np.arange(2, len(payout_table[platform]) + 2):
@@ -662,7 +663,7 @@ def find_correlation(offers, stats, platform, parlays):
                             selected_players = i + j
                             if split[2] != 0:
                                 for k in combinations(combo_players, split[2]):
-                                    if any(player in "".join(k) for player in selected_players):
+                                    if len(set([item for row in [l.replace(" vs. ", " + ").split(" + ") for l in k] for item in row]).union(selected_players)) != bet_size+split[2]:
                                         continue
                                     combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players+k]))
                             else:
@@ -800,7 +801,7 @@ def find_correlation(offers, stats, platform, parlays):
                                  df5.sort_values("Rec Bet", ascending=False).groupby("Family").head(1), 
                                  df5.sort_values(["Fun", "Model EV"], ascending=False).groupby("Family").head(1)]).\
                                   drop(columns=["Players", "Family"])
-                parlay_df = pd.concat([parlay_df, df5.loc[df5.index.drop_duplicates()]])
+                parlay_df = pd.concat([parlay_df, df5.drop_duplicates(subset=["Model EV", "Books EV"])])
 
             elif len(df5) > 0:
                 parlay_df = pd.concat([parlay_df, df5.drop(columns="Players")])
