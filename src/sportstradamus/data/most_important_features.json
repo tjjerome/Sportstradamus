@@ -36,14 +36,14 @@
         "Player PASO"
     ],
     "MLB_doubles": [
-        "Player avg",
-        "Defense K9",
-        "GamesPlayed",
-        "STDYr",
+        "DaysOff",
+        "Total",
         "Moneyline",
-        "PF 2B",
-        "Position",
         "Odds",
+        "Position",
+        "PF 2B",
+        "GamesPlayed",
+        "Defense K9",
         "MeanYr",
         "Player PASO"
     ],
@@ -108,16 +108,16 @@
         "Total"
     ],
     "MLB_home-runs": [
-        "Defense FIP",
-        "Player z",
-        "Position",
-        "GamesPlayed",
+        "Player OBP short",
         "STDYr",
+        "Odds",
         "Moneyline",
-        "MeanYr",
-        "PF HR",
+        "DaysIntoSeason",
+        "Defense FIP",
         "Total",
-        "Odds"
+        "PF HR",
+        "MeanYr",
+        "Position"
     ],
     "MLB_pitcher-fantasy-points-underdog": [
         "Player IP short",
@@ -1068,9 +1068,9 @@
         "AvgYr"
     ],
     "MLB_ALL": [
-        "MeanYr",
         "Moneyline",
         "Total",
+        "MeanYr",
         "STDYr",
         "Player avg",
         "Player z",
