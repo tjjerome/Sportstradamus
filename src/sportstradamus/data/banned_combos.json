@@ -1960,6 +1960,48 @@
                         1.05
                     ]
                 },
+                "P.pitching outs": {
+                    "_OPP_P.pitching outs": [
+                        0.9,
+                        1.04
+                    ],
+                    "_OPP_B.home runs": [
+                        1.1,
+                        0.8
+                    ],
+                    "_OPP_B.hitter fantasy points underdog": [
+                        1.1,
+                        0.8
+                    ],
+                    "_OPP_B.total bases": [
+                        1.05,
+                        0.85
+                    ],
+                    "_OPP_B.hits+runs+rbi": [
+                        1.1,
+                        0.82
+                    ],
+                    "_OPP_B.rbi": [
+                        1.02,
+                        0.9
+                    ],
+                    "_OPP_B.runs": [
+                        1.04,
+                        0.89
+                    ],
+                    "_OPP_B.walks": [
+                        1.1,
+                        0.82
+                    ],
+                    "_OPP_B.singles": [
+                        1.05,
+                        0.88
+                    ],
+                    "_OPP_B.doubles": [
+                        1.02,
+                        0.9
+                    ]
+                },
                 "B.home runs": {
                     "B.hitter fantasy points underdog": [
                         0.8,
