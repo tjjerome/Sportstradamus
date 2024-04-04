@@ -17,10 +17,10 @@
  0.631489   0.646033 0.020796    0.042574     0.057839  0.144524 -0.104276      0.008690
 
 ====================================== MLB doubles =======================================
- Distribution Model: Gaussian
+ Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
- 0.825211        0.0 -0.174663    0.228136     0.307335  0.406982 -0.177919      0.001287
- 0.825211        0.0 -0.174663    0.217125     0.292762  0.406982 -0.177919      0.008919
+ 0.825078        0.0 -0.174863    0.333143     0.424317  0.313399 -4.939856      0.005303
+ 0.825078        0.0 -0.174863    0.288254     0.379322  0.313399 -4.939856      0.036418
 
 =================================== MLB hits+runs+rbi ====================================
  Distribution Model: Poisson
@@ -53,10 +53,10 @@
  0.585375   0.523904 0.142456    0.024235     0.031759  0.049142 0.450931      0.009464
 
 ===================================== MLB home runs ======================================
- Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
- 0.851225        0.0 -0.148740    0.268710     0.359601  0.487739 -0.085366      0.002647
- 0.851268        0.0 -0.148818    0.248309     0.334318  0.487739 -0.085366      0.016787
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.855175        0.0 -0.144746    0.411981     0.510555  0.395203  -6.5864      0.003254
+ 0.855175        0.0 -0.144746    0.359777     0.464530  0.395203  -6.5864      0.039439
 
 ========================== MLB pitcher fantasy points underdog ===========================
  Distribution Model: Gaussian

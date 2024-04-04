@@ -20,8 +20,13 @@
     ],
     "MLB_doubles": [
         "Line",
+        "Avg10",
+        "AvgYr",
+        "AvgH2H",
         "Meeting 1",
-        "Meeting 2"
+        "Meeting 2",
+        "Game 3",
+        "Game 4"
     ],
     "MLB_hits+runs+rbi": [],
     "MLB_hits-allowed": [],
@@ -42,7 +47,11 @@
     ],
     "MLB_home-runs": [
         "Line",
-        "Meeting 1"
+        "Avg10",
+        "AvgYr",
+        "IQR10",
+        "Meeting 1",
+        "Meeting 5"
     ],
     "MLB_pitcher-fantasy-points-underdog": [
         "Odds",

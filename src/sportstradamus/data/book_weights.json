@@ -666,29 +666,29 @@
             "bovada": 5.0
         },
         "Moneyline": {
-            "draftkings": 1.0,
-            "betmgm": 1.0,
+            "draftkings": 6.40243174941527,
+            "betmgm": 9.534895801218674,
             "mybookieag": 1.0,
             "foxbet": 10.0,
             "circasports": 1.0,
             "williamhill_us": 1.0,
-            "pointsbetus": 1.0,
+            "pointsbetus": 10.0,
             "lowvig": 1.0,
             "betonlineag": 1.0,
             "superbook": 1.0,
-            "wynnbet": 1.0,
-            "fanduel": 1.6163648657147816,
-            "bovada": 2.2873875806283577,
-            "unibet_us": 1.0,
-            "twinspires": 1.0,
+            "wynnbet": 5.888762044569072,
+            "fanduel": 5.080844539657671,
+            "bovada": 1.0,
+            "unibet_us": 5.756576025575778,
+            "twinspires": 4.4153044071522,
             "betrivers": 1.0,
             "barstool": 1.0,
-            "betus": 10.0,
-            "sugarhouse": 1.0,
-            "intertops": 1.0,
+            "betus": 1.0,
+            "sugarhouse": 3.1815587946672204,
+            "intertops": 8.198937871951426,
             "gtbets": 10.0,
-            "betfair": 10.0,
-            "unibet": 1.0
+            "betfair": 7.885612943204759,
+            "unibet": 4.120626203931173
         },
         "Totals": {
             "draftkings": 1.0,
@@ -704,11 +704,11 @@
             "unibet_us": 1.0,
             "twinspires": 1.0,
             "betrivers": 1.0,
-            "barstool": 1.6321850874311998,
+            "barstool": 1.0932369413111305,
             "betus": 1.0,
             "bovada": 1.0,
             "sugarhouse": 1.0,
-            "wynnbet": 1.0
+            "wynnbet": 3.02712472665183
         },
         "1st 1 innings": {
             "bovada": 1.0,
@@ -719,37 +719,37 @@
         },
         "pitcher win": {
             "draftkings": 1.0,
-            "williamhill_us": 10.0,
-            "barstool": 2.7912968455737173,
+            "williamhill_us": 8.333708182592275,
+            "barstool": 3.5911276682258757,
             "betonlineag": 1.0
         },
         "doubles": {
-            "draftkings": 4.454317622207029,
+            "draftkings": 2.469765564151758,
             "fanduel": 10.0,
             "williamhill_us": 1.0,
-            "unibet_us": 10.0,
-            "betrivers": 10.0,
-            "betmgm": 1.0,
+            "unibet_us": 7.287704275403128,
+            "betrivers": 7.276726901411083,
+            "betmgm": 3.8045470551373697,
             "barstool": 1.0,
-            "bovada": 5.0
+            "bovada": 4.7851751042347725
         },
         "triples": {
             "fanduel": 10.0,
             "betmgm": 1.0,
-            "draftkings": 5.0
+            "draftkings": 1.0
         },
         "home runs": {
             "draftkings": 10.0,
             "fanduel": 10.0,
-            "bovada": 2.3414894895014213,
-            "unibet_us": 4.411498171829566,
-            "betrivers": 5.282942828196936,
+            "bovada": 1.0,
+            "unibet_us": 1.0,
+            "betrivers": 2.6866689083260145,
             "pointsbetus": 10.0,
             "williamhill_us": 1.0,
             "betmgm": 1.0,
-            "barstool": 1.876483252793974,
+            "barstool": 1.0,
             "mybookieag": 1.0,
-            "betonlineag": 5.0
+            "betonlineag": 10.0
         }
     }
 }
