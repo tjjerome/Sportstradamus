@@ -218,7 +218,6 @@ def meditate(force, stats, league):
             "batter strikeouts",
             "singles",
             "doubles",
-            "triples",
             "home runs"
         ],
     }
@@ -243,6 +242,8 @@ def meditate(force, stats, league):
             book_weights[league]["1st 1 innings"] = evaluate_books(league, "1st 1 innings")
             book_weights.setdefault(league, {}).setdefault("pitcher win", {})
             book_weights[league]["pitcher win"] = evaluate_books(league, "pitcher win")
+            book_weights.setdefault(league, {}).setdefault("triples", {})
+            book_weights[league]["triples"] = evaluate_books(league, "triples")
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
