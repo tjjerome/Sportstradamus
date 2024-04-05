@@ -641,7 +641,7 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25) & (game_df["Model"] >= .3)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Player').head(3)
+            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25) & (game_df["Model"] >= .3)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(15)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(28).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
@@ -768,7 +768,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 6": "",
                             "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
                             "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
-                            "Fun": np.sum([leg["Line"] for leg in bet if leg["Bet"] == "Over"]),
+                            "Fun": np.sum([leg["Line"] for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
                             "Bet Size": bet_size
                         }
                         for i in np.arange(bet_size):

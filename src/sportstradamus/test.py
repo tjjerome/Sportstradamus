@@ -18,11 +18,17 @@ with open(filepath, "r") as infile:
     banned = json.load(infile)
 
 for platform in banned.keys():
-    for league in banned[platform].keys():
-        if "modified" in banned[platform][league]:
-            for market in banned[platform][league]["modified"]:
-                for submarket in banned[platform][league]["modified"][market]:
-                    banned[platform][league]["modified"][market][submarket] = [banned[platform][league]["modified"][market][submarket], np.round(1/banned[platform][league]["modified"][market][submarket],2)]
+    for league in list(banned[platform].keys()):
+        if "modified" in list(banned[platform][league].keys()):
+            for market in list(banned[platform][league]["modified"].keys()):
+                for submarket in list(banned[platform][league]["modified"][market].keys()):
+                    market2 = market
+                    submarket2 = submarket
+                    if "_OPP_" in submarket:
+                        market2 = "_OPP_"+market2
+                        submarket2 = submarket2.replace("_OPP_", "")
+                    banned[platform][league]["modified"].setdefault(submarket2, {})
+                    banned[platform][league]["modified"][submarket2][market2] = banned[platform][league]["modified"][market][submarket]
 
 with open(filepath, "w") as outfile:
     json.dump(banned, outfile, indent=4)
