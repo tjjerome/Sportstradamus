@@ -1851,6 +1851,10 @@
                         1.06,
                         0.86
                     ],
+                    "_OPP_B.hits": [
+                        1.03,
+                        0.90
+                    ],
                     "_OPP_B.runs": [
                         1.03,
                         0.91
@@ -1937,6 +1941,10 @@
                         0.77,
                         1.2
                     ],
+                    "_OPP_B.hits": [
+                        0.85,
+                        1.1
+                    ],
                     "_OPP_B.runs": [
                         0.82,
                         1.1
@@ -1958,6 +1966,28 @@
                     "_OPP_B.runs": [
                         0.75,
                         1.05
+                    ]
+                },
+                "P.1st inning hits allowed": {
+                    "_OPP_B.hitter fantasy points underdog": [
+                        0.9,
+                        1
+                    ],
+                    "_OPP_B.total bases": [
+                        0.9,
+                        1
+                    ],
+                    "_OPP_B.hits+runs+rbi": [
+                        0.85,
+                        1
+                    ],
+                    "_OPP_B.hits": [
+                        0.85,
+                        1
+                    ],
+                    "_OPP_B.singles": [
+                        0.9,
+                        1
                     ]
                 },
                 "P.pitching outs": {
@@ -2000,6 +2030,12 @@
                     "_OPP_B.doubles": [
                         1.02,
                         0.9
+                    ]
+                },
+                "P.walks allowed": {
+                    "_OPP_B.hitter fantasy points underdog": [
+                        0.86,
+                        1.06
                     ]
                 },
                 "B.home runs": {
@@ -2112,6 +2148,24 @@
                     "B.singles": [
                         0.91,
                         1.03
+                    ]
+                },
+                "B.hits": {
+                    "B.home runs": [
+                        0.85,
+                        1.08
+                    ],
+                    "B.total bases": [
+                        0.9,
+                        1.05
+                    ],
+                    "B.hits+runs+rbi": [
+                        0.87,
+                        1.06
+                    ],
+                    "B.hits": [
+                        0.87,
+                        1.06
                     ]
                 },
                 "B.rbi": {
