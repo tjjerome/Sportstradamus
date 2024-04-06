@@ -306,7 +306,7 @@ def main(progress, books, parlays):
         filepath = pkg_resources.files(data) / "parlay_hist.dat"
         if os.path.isfile(filepath):
             old5 = pd.read_pickle(filepath)
-            parlay_df = pd.concat([parlay_df, old5], ignore_index=True).drop_duplicates(ignore_index=True)
+            parlay_df = pd.concat([parlay_df, old5], ignore_index=True).drop_duplicates(subset=["Model EV", "Books EV"], ignore_index=True)
 
         parlay_df.to_pickle(filepath)
 
