@@ -2076,7 +2076,7 @@ class StatsMLB(Stats):
                     if sub_cv == 1:
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v):
-                        if submarket == "Moneyline":
+                        if submarket == "pitcher win":
                             p = moneyline
                             ev += p*weight
                         elif submarket == "quality start":
