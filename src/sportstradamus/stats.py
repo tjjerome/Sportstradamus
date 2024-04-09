@@ -856,7 +856,7 @@ class StatsNBA(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     v = archive.get_ev("NBA", submarket, date, player)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
@@ -871,7 +871,7 @@ class StatsNBA(Stats):
                     subline = archive.get_line("NBA", submarket, date, player)
                     if sub_cv == 1:
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
@@ -2050,7 +2050,7 @@ class StatsMLB(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
@@ -2085,7 +2085,7 @@ class StatsMLB(Stats):
                         if sub_cv == 1:
                             v = get_ev(subline, get_odds(subline, v), force_gauss=True)
 
-                        if np.isnan(v):
+                        if np.isnan(v) or v == 0:
                             if subline == 0 and not player_games.empty:
                                 subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
@@ -3269,7 +3269,7 @@ class StatsNFL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     v = archive.get_ev("NFL", submarket, date, player)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
@@ -3287,7 +3287,7 @@ class StatsNFL(Stats):
                     subline = archive.get_line("NFL", submarket, date, player)
                     if sub_cv == 1:
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
@@ -4180,7 +4180,7 @@ class StatsNHL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     v = archive.get_ev("NHL", submarket, date, player)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
 
@@ -4201,18 +4201,17 @@ class StatsNHL(Stats):
                     subline = archive.get_line("NHL", submarket, date, player)
                     if sub_cv == 1:
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         if submarket == "Moneyline":
                             p = 1-moneyline
                             ev += p*weight
                         else:
-                            if np.isnan(v):
-                                if subline == 0 and not player_games.empty:
-                                    subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
+                            if subline == 0 and not player_games.empty:
+                                subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                                if not subline == 0:
-                                    under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                                    ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                            if not subline == 0:
+                                under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
+                                ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
                         ev += v*weight
 
