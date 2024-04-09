@@ -161,6 +161,12 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     Process the data and store it in the archive file.
     """
 
+    these_props = {
+        "NFL": ["player_anytime_td", "player_pass_interceptions"],
+        "MLB": ["batter_home_runs", "batter_hits", "batter_rbis", "batter_runs_scored", "batter_singles", "batter_doubles", "batter_triples", "batter_walks", "batter_strikeouts", "batter_stolen_bases", "pitcher_record_a_win"],
+        "NHL": ["player_points", "player_power_play_points", "player_assists", "player_blocked_shots", "player_goal_scorer_anytime"]
+    }
+
     historical = date.date() != datetime.today().date()
 
     if sport == "All":
@@ -203,11 +209,11 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     for sport, league in sports:
         params.update({
             "sport": sport,
-            "markets": ",".join(props[league].keys())
-            # "markets": ",".join(list(props[league].keys())[:2])
+            # "markets": ",".join(props[league].keys())
+            "markets": ",".join(these_props[league])
             })
-        if league == "MLB":
-            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+        # if league == "MLB":
+        #     params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
@@ -282,7 +288,9 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         lines = list(lines)
                         for line in lines:
                             line.setdefault('point', 0.5)
-                            line['name'] = {"Yes":"Over", "No": "Under"}.get(line['name'], line['name'])
+                            line['name'] = {"Yes": "Over", "No": "Under"}.get(line['name'], line['name'])
+
+                        lines = sorted(lines, key=itemgetter('name'))
                         if len({line['point'] for line in lines}) > 1:
                             trueline = sorted(lines, key=(lambda x: np.abs(x['price']-2)))[0]['point']
                             lines = [line for line in lines if line['point'] == trueline]
