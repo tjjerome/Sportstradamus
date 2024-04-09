@@ -2073,25 +2073,27 @@ class StatsMLB(Stats):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
-                    if sub_cv == 1:
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
-                        if submarket == "pitcher win":
-                            p = moneyline
-                            ev += p*weight
-                        elif submarket == "quality start":
-                            p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
-                            p *= poisson.cdf(3, v_runs)
-                            ev += p*weight
-                        else:
+                    if submarket == "pitcher win":
+                        p = 1-get_odds(subline, v)
+                        ev += p*weight
+                    elif submarket == "quality start":
+                        std = stat_cv["MLB"].get(submarket, 1)*v_outs
+                        p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
+                        p *= poisson.cdf(3, v_runs)
+                        ev += p*weight
+                    else:
+                        if sub_cv == 1:
+                            v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+
+                        if np.isnan(v):
                             if subline == 0 and not player_games.empty:
                                 subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                             if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                                 ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
-                    else:
-                        ev += v*weight
+                        else:
+                            ev += v*weight
 
                     if submarket == "runs allowed":
                         v_runs = v
