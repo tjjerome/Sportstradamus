@@ -48,6 +48,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
     res = requests.get(url)
 
     historical = date.date() != datetime.today().date()
+    low_on_credits = 0
 
     if sport == "All":
         if historical:
@@ -206,8 +207,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             # "markets": ",".join(list(props[league].keys())[:2])
             })
         if league == "MLB":
-            # params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
-            params['markets'] = ",".join(["batter_doubles", "batter_triples", "batter_home_runs"])
+            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
