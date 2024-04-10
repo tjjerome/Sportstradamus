@@ -307,13 +307,13 @@ def get_ev(line, under, cv=1, force_gauss=False):
     if cv == 1:
         if force_gauss:
             line = float(line)
-            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), line)[0]
+            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
         else:
             line = np.ceil(float(line) - 1)
-            return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
+            return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
     else:
         line = float(line)
-        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
+        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
 
 def get_odds(line, ev, cv=1, force_gauss=False, step=1):
     high = np.floor((line+step)/step)*step

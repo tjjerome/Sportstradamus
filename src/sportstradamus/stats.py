@@ -492,7 +492,7 @@ class StatsNBA(Stats):
         self.teamlog.loc[self.teamlog['OPP']
                          == 'SA', 'OPP'] = "SAS"
 
-        # self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+        self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
@@ -856,20 +856,27 @@ class StatsNBA(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     v = archive.get_ev("NBA", submarket, date, player)
+                    subline = archive.get_line("NBA", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
                         ev += v
 
+            elif market in ["DREB", "OREB"]:
+                ev = (archive.get_ev("NBA", "REB", date, player)*player_games.iloc[-one_year_ago:][market].sum()/player_games.iloc[-one_year_ago:]["REB"].sum()) if player_games.iloc[-one_year_ago:]["REB"].sum() else 0
+
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     v = archive.get_ev("NBA", submarket, date, player)
                     subline = archive.get_line("NBA", submarket, date, player)
-                    if sub_cv == 1:
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
@@ -879,7 +886,11 @@ class StatsNBA(Stats):
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                             ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
+                        book_odds = True
                         ev += v*weight
+
+                if not book_odds:
+                    ev = 0
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
@@ -1093,8 +1104,7 @@ class StatsMLB(Stats):
 
             away_bullpen = {k: 0 for k in ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced", "walks allowed", "hits allowed", "home runs allowed", "runs allowed"]}
             for v in boxscore["teams"]["away"]["players"].values():
-                if (v["person"]["id"] == awayPitcherId or
-                        v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"]):
+                if v["person"]["id"] == awayPitcherId or v.get("battingOrder"):
                     n = {
                         "gameId": gameId,
                         "gameDate": game["game_date"],
@@ -1108,9 +1118,8 @@ class StatsMLB(Stats):
                         "opponent pitcher hand": homePitcherHand,
                         "home": False,
                         "starting pitcher": v["person"]["id"] == awayPitcherId,
-                        "starting batter": v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"],
-                        "battingOrder": boxscore["teams"]["away"]["battingOrder"].index(v["person"]["id"]) + 1
-                        if v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"] else 0,
+                        "starting batter": int(v.get('battingOrder', '000')[2]) == 0,
+                        "battingOrder": int(v.get('battingOrder', '000')[0]),
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("doubles", 0) +
                         2 * v["stats"]["batting"].get("triples", 0) +
@@ -1258,8 +1267,7 @@ class StatsMLB(Stats):
 
             home_bullpen = {k: 0 for k in ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced", "walks allowed", "hits allowed", "home runs allowed", "runs allowed"]}
             for v in boxscore["teams"]["home"]["players"].values():
-                if (v["person"]["id"] == homePitcherId or
-                        v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"]):
+                if v["person"]["id"] == homePitcherId or v.get("battingOrder"):
                     n = {
                         "gameId": gameId,
                         "gameDate": game["game_date"],
@@ -1275,9 +1283,8 @@ class StatsMLB(Stats):
                         "opponent pitcher hand": awayPitcherHand,
                         "home": True,
                         "starting pitcher": v["person"]["id"] == homePitcherId,
-                        "starting batter": v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"],
-                        "battingOrder": boxscore["teams"]["home"]["battingOrder"].index(v["person"]["id"]) + 1
-                        if v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"] else 0,
+                        "starting batter": int(v.get('battingOrder', '000')[2]) == 0,
+                        "battingOrder": int(v.get('battingOrder', '000')[0]),
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0)
                         + v["stats"]["batting"].get("doubles", 0)
@@ -2031,7 +2038,6 @@ class StatsMLB(Stats):
             line = 0.5 if line < 1 else line
 
         try:
-
             if pitcher not in self.pitcherProfile.index:
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
@@ -2050,6 +2056,9 @@ class StatsMLB(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
+                    subline = archive.get_line("MLB", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -2058,6 +2067,7 @@ class StatsMLB(Stats):
                         
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 if "pitcher" in market:
                     if "underdog" in market:
                         fantasy_props = [("pitcher win", 5), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 5)]
@@ -2081,8 +2091,14 @@ class StatsMLB(Stats):
                         p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
                         p *= poisson.cdf(3, v_runs)
                         ev += p*weight
+                    elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
+                        v = archive.get_ev("MLB", "hits", date, player)
+                        subline = archive.get_line("MLB", "hits", date, player)
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v *= (player_games.iloc[-one_year_ago:][submarket].sum()/player_games.iloc[-one_year_ago:]["hits"].sum()) if player_games.iloc[-one_year_ago:]["hits"].sum() else 0
+                        ev += v*weight
                     else:
-                        if sub_cv == 1:
+                        if sub_cv == 1 and cv != 1 and not np.isnan(v):
                             v = get_ev(subline, get_odds(subline, v), force_gauss=True)
 
                         if np.isnan(v) or v == 0:
@@ -2093,12 +2109,16 @@ class StatsMLB(Stats):
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                                 ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                         else:
+                            book_odds = True
                             ev += v*weight
 
                     if submarket == "runs allowed":
                         v_runs = v
                     if submarket == "pitching outs":
                         v_outs = v
+
+                if not book_odds:
+                    ev = 0
 
             elif market == "1st inning runs allowed":
                 ev = archive.get_team_market("MLB", '1st 1 innings', date, opponent)
@@ -3269,14 +3289,21 @@ class StatsNFL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     v = archive.get_ev("NFL", submarket, date, player)
+                    subline = archive.get_line("NFL", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
                         ev += v
+
+            elif market in ["rushing tds", "receiving tds"]:
+                ev = (archive.get_ev("NFL", "tds", date, player)*player_games.iloc[-one_year_ago:][market].sum()/player_games.iloc[-one_year_ago:]["tds"].sum()) if player_games.iloc[-one_year_ago:]["tds"].sum() else 0
                         
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 if "prizepicks" in market:
                     fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", 1)]
                 else:
@@ -3285,7 +3312,7 @@ class StatsNFL(Stats):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
-                    if sub_cv == 1:
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
@@ -3295,7 +3322,11 @@ class StatsNFL(Stats):
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                             ev += get_ev(subline, under, sub_cv, force_gauss=True)
                     else:
+                        book_odds = True
                         ev += v*weight
+
+                if not book_odds:
+                    ev = 0
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
@@ -3760,7 +3791,7 @@ class StatsNHL(Stats):
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
-        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
@@ -4180,6 +4211,9 @@ class StatsNHL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     v = archive.get_ev("NHL", submarket, date, player)
+                    subline = archive.get_line("NHL", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -4189,6 +4223,7 @@ class StatsNHL(Stats):
                         
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 if "prizepicks" in market:
                     fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
                 elif ("underdog" in market) and ("skater" in market):
@@ -4199,12 +4234,17 @@ class StatsNHL(Stats):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
-                    if sub_cv == 1:
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         if submarket == "Moneyline":
-                            p = 1-moneyline
+                            p = moneyline
                             ev += p*weight
+                        elif submarket == "goalsAgainst":
+                            v = archive.get_total("NHL", date, opponent)
+                            subline = np.floor(v) + 0.5
+                            v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                            ev += v*weight
                         else:
                             if subline == 0 and not player_games.empty:
                                 subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
@@ -4213,7 +4253,11 @@ class StatsNHL(Stats):
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                                 ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
+                        book_odds = True
                         ev += v*weight
+
+                if not book_odds:
+                    ev = 0
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0.5
