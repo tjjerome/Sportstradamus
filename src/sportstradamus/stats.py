@@ -4220,6 +4220,9 @@ class StatsNHL(Stats):
 
                     else:
                         ev += v
+
+            elif market == "goalsAgainst":
+                ev = archive.get_total("NHL", date, opponent)
                         
             elif "fantasy" in market:
                 ev = 0

@@ -149,8 +149,8 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
             archive[league]["Moneyline"][gameDate][awayTeam] = moneyline_away
             archive[league]["Moneyline"][gameDate][homeTeam] = moneyline_home
 
-            archive[league]["Totals"][gameDate][awayTeam] = {k:(v+spread_away[k])/2 for k, v in totals.items() if spread_away.get(k)}
-            archive[league]["Totals"][gameDate][homeTeam] = {k:(v+spread_home[k])/2 for k, v in totals.items() if spread_home.get(k)}
+            archive[league]["Totals"][gameDate][awayTeam] = {k:(v+spread_away.get(k,0))/2 for k, v in totals.items()}
+            archive[league]["Totals"][gameDate][homeTeam] = {k:(v+spread_home.get(k,0))/2 for k, v in totals.items()}
 
     return archive
 
@@ -204,7 +204,6 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
         params.update({
             "sport": sport,
             "markets": ",".join(props[league].keys())
-            # "markets": ",".join(these_props[league])
             })
         if league == "MLB":
             params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
