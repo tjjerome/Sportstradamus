@@ -208,8 +208,8 @@ def reflect():
                     # p = np.polyfit(np.log(6-model_threshold), book_threshold, 1)
                     # masks[league] = list(p)
 
-            for tf, days in [("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
-                df = league_df.loc[pd.to_datetime(league_df.Date).dt.date > datetime.today().date() - timedelta(days=days)]
+            for tf, days in [("Yesterday", 1), ("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
+                df = league_df.loc[pd.to_datetime(league_df.Date).dt.date >= datetime.today().date() - timedelta(days=days)]
 
                 if not df.empty:
                     profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(10).mean()).sum()

@@ -161,12 +161,6 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     Process the data and store it in the archive file.
     """
 
-    these_props = {
-        "NFL": ["player_anytime_td", "player_pass_interceptions"],
-        "MLB": ["batter_home_runs", "batter_hits", "batter_rbis", "batter_runs_scored", "batter_singles", "batter_doubles", "batter_triples", "batter_walks", "batter_strikeouts", "batter_stolen_bases", "pitcher_record_a_win"],
-        "NHL": ["player_points", "player_power_play_points", "player_assists", "player_blocked_shots", "player_goal_scorer_anytime"]
-    }
-
     historical = date.date() != datetime.today().date()
 
     if sport == "All":
@@ -209,11 +203,11 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     for sport, league in sports:
         params.update({
             "sport": sport,
-            # "markets": ",".join(props[league].keys())
-            "markets": ",".join(these_props[league])
+            "markets": ",".join(props[league].keys())
+            # "markets": ",".join(these_props[league])
             })
-        # if league == "MLB":
-        #     params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+        if league == "MLB":
+            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
