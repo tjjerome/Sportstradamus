@@ -893,7 +893,7 @@ class StatsNBA(Stats):
                     ev = 0
 
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -1007,6 +1007,7 @@ class StatsNBA(Stats):
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )
@@ -1118,7 +1119,7 @@ class StatsMLB(Stats):
                         "opponent pitcher hand": homePitcherHand,
                         "home": False,
                         "starting pitcher": v["person"]["id"] == awayPitcherId,
-                        "starting batter": int(v.get('battingOrder', '000')[2]) == 0,
+                        "starting batter": int(v.get('battingOrder', '001')[2]) == 0,
                         "battingOrder": int(v.get('battingOrder', '000')[0]),
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("doubles", 0) +
@@ -1283,7 +1284,7 @@ class StatsMLB(Stats):
                         "opponent pitcher hand": awayPitcherHand,
                         "home": True,
                         "starting pitcher": v["person"]["id"] == homePitcherId,
-                        "starting batter": int(v.get('battingOrder', '000')[2]) == 0,
+                        "starting batter": int(v.get('battingOrder', '001')[2]) == 0,
                         "battingOrder": int(v.get('battingOrder', '000')[0]),
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0)
@@ -2124,7 +2125,7 @@ class StatsMLB(Stats):
                 ev = archive.get_team_market("MLB", '1st 1 innings', date, opponent)
 
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -2320,6 +2321,7 @@ class StatsMLB(Stats):
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )
@@ -3329,7 +3331,7 @@ class StatsNFL(Stats):
                     ev = 0
 
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -3445,6 +3447,7 @@ class StatsNFL(Stats):
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )
@@ -4263,7 +4266,7 @@ class StatsNHL(Stats):
                     ev = 0
 
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -4399,6 +4402,7 @@ class StatsNHL(Stats):
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )

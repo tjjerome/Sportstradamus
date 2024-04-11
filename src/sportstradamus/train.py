@@ -127,6 +127,31 @@ def meditate(force, stats, league):
     np.random.seed(69)
 
     all_markets = {
+        "MLB": [
+            "pitcher strikeouts",
+            "pitching outs",
+            "pitches thrown",
+            "hits allowed",
+            "runs allowed",
+            "walks allowed",
+            "1st inning runs allowed",
+            "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles",
+            "doubles",
+            "home runs"
+        ],
         "NBA": [
             "PTS",
             "REB",
@@ -194,31 +219,6 @@ def meditate(force, stats, league):
             "assists",
             "faceOffWins",
             "timeOnIce",
-        ],
-        "MLB": [
-            "pitcher strikeouts",
-            "pitching outs",
-            "pitches thrown",
-            "hits allowed",
-            "runs allowed",
-            "walks allowed",
-            "1st inning runs allowed",
-            "1st inning hits allowed",
-            "hitter fantasy score",
-            "pitcher fantasy score",
-            "hitter fantasy points underdog",
-            "pitcher fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "home runs"
         ],
     }
     if not league == "All":
@@ -401,32 +401,33 @@ def meditate(force, stats, league):
                             chopping_block, n, replace=False, p=p)
                         M.drop(cut, inplace=True)
 
-                M = M.loc[(M["Odds"] > .2) & (M["Odds"] < .8)]
+                M = M.loc[((M["Odds"] > .2) & (M["Odds"] < .8)) | M["Odds"] == 0]
                 target = (M.loc[(M["Archived"] == 1), "Result"] >
                             M.loc[(M["Archived"] == 1), "Line"]).mean()
                 balance = (M["Result"] > M["Line"]).mean()
                 n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
-                if balance < target:
-                    chopping_block = M.loc[(M["Archived"] != 1) & (
-                        M["Result"] < M["Line"])].index
-                    p = (1/M.loc[chopping_block,
-                                    "MeanYr"].clip(0.1)).to_numpy()
-                    p = p/np.sum(p)
-                else:
-                    chopping_block = M.loc[(M["Archived"] != 1) & (
-                        M["Result"] > M["Line"])].index
-                    p = (M.loc[chopping_block, "MeanYr"].clip(
-                        0.1)).to_numpy()
-                    p = p/np.sum(p)
 
                 if n > 0:
+                    if balance < target:
+                        chopping_block = M.loc[(M["Archived"] != 1) & (
+                            M["Result"] < M["Line"])].index
+                        p = (1/M.loc[chopping_block,
+                                        "MeanYr"].clip(0.1)).to_numpy()
+                        p = p/np.sum(p)
+                    else:
+                        chopping_block = M.loc[(M["Archived"] != 1) & (
+                            M["Result"] > M["Line"])].index
+                        p = (M.loc[chopping_block, "MeanYr"].clip(
+                            0.1)).to_numpy()
+                        p = p/np.sum(p)
+
                     cut = np.random.choice(
                         chopping_block, n, replace=False, p=p)
                     M.drop(cut, inplace=True)
 
-                M.drop(columns=["Archived"], inplace=True)
                 M.to_csv(filepath)
 
+            M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
             X = M.drop(columns=['Result'])
             step = M["Result"].drop_duplicates().sort_values().diff().min()
@@ -585,6 +586,7 @@ def meditate(force, stats, league):
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             filt = LogisticRegression(
                 fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
+            X_train.loc[X_train["Odds"] == 0] = 0.5
             odds_filt = LogisticRegression(
                 fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(X_train.Odds.to_numpy().reshape(-1,1)*2-1, y_class)
             Cs = np.concatenate([filt.coef_, odds_filt.coef_], axis=1)
@@ -837,11 +839,14 @@ def evaluate_books(league, market):
             prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
     
-    x = test_df.to_numpy()
-    y = result.to_numpy()
-    res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+    x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
+    y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
+    if len(x) > 9:
+        res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
     
-    return {k:res.x[i] for i, k in enumerate(test_df.columns)}
+        return {k:res.x[i] for i, k in enumerate(test_df.columns)}
+    else:
+        return {}
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
