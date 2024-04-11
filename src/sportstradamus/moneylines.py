@@ -107,8 +107,10 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
                 continue
             gameDate = gameDate.strftime("%Y-%m-%d")
 
-            homeTeam = abbreviations[league][remove_accents(game["home_team"])]
-            awayTeam = abbreviations[league][remove_accents(game["away_team"])]
+            homeTeam = abbreviations[league].get(remove_accents(game["home_team"]))
+            awayTeam = abbreviations[league].get(remove_accents(game["away_team"]))
+            if homeTeam is None or awayTeam is None:
+                continue
 
             moneyline_home = {}
             moneyline_away = {}
@@ -160,7 +162,9 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     Retrieve moneyline and totals data from the odds API for NBA, MLB, and NHL.
     Process the data and store it in the archive file.
     """
-
+    stat_cv["WNBA"] = stat_cv["NBA"]
+    stat_cv["NCAAB"] = stat_cv["NBA"]
+    stat_cv["NCAAF"] = stat_cv["NFL"]
     historical = date.date() != datetime.today().date()
 
     if sport == "All":
@@ -273,7 +277,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
 
                     odds.setdefault(market_name, {})
 
-                    outcomes = sorted(market['outcomes'], key=itemgetter('description', 'name'))
+                    outcomes = [o for o in market['outcomes'] if "description" in o and "name" in o]
+                    outcomes = sorted(outcomes, key=itemgetter('description', 'name'))
                     
                     for player, lines in groupby(outcomes, itemgetter('description')):
                         player = remove_accents(player).replace(" Total", "")

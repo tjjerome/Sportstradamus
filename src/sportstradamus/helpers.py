@@ -384,7 +384,7 @@ class Archive:
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
 
-        self.leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
+        self.leagues = ["MLB", "NBA", "NHL", "NFL", "NCAAF", "NCAAB", "WNBA", "MISC"]
         if league != "None" and league != "All":
             self.leagues = [league]
             filepath = pkg_resources.files(data) / f"archive_{league}.dat"
