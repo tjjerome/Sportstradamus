@@ -853,13 +853,11 @@ def trim_matrix(M):
         M.drop(cut, inplace=True)
 
     n = int(push_rate*len(M))-pushes["Archived"].sum()
+    chopping_block = pushes.loc[pushes["Archived"]==0].index
+    n = np.clip(n, None, len(chopping_block))
     if n > 0:
-        chopping_block = pushes.loc[pushes["Archived"]==0].index
-        if len(chopping_block) > 0:
-            cut = np.random.choice(chopping_block, n, replace=False)
-        else:
-            cut = []
-    pushes.drop(cut, inplace=True)
+        cut = np.random.choice(chopping_block, n, replace=False)
+        pushes.drop(cut, inplace=True)
 
     M = pd.concat([M,pushes]).sort_values("Date")
 

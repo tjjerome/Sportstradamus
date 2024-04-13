@@ -266,15 +266,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp(books)
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp(books)
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats, parlays)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -731,9 +731,9 @@ def find_correlation(offers, stats, platform, parlays):
                                 if x_key in mod_map:
                                     modifier = mod_map[x_key].get(y_key, [1,1])
                                     boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
-                                elif y_key in mod_map:
-                                    modifier = mod_map[y_key].get(x_key, [1,1])
-                                    boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
+                                # elif y_key in mod_map:
+                                #     modifier = mod_map[y_key].get(x_key, [1,1])
+                                #     boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
 
                         # Sum rho_matrix to update SIG
                         SIG[i, j] = np.sum(rho_matrix)

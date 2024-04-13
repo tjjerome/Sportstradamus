@@ -622,25 +622,25 @@
         },
         "hits": {
             "draftkings": 10.0,
-            "williamhill_us": 5.647715885702831,
-            "betmgm": 1.0,
-            "pointsbetus": 3.721480030947609,
+            "williamhill_us": 2.374706014783587,
+            "betmgm": 5.12435697341768,
+            "pointsbetus": 1.0,
             "bovada": 1.0,
-            "fanduel": 4.511313836844361,
+            "fanduel": 1.0,
             "unibet_us": 1.0,
-            "betrivers": 1.9664054092597327,
-            "barstool": 10.0,
-            "betonlineag": 10.0,
+            "betrivers": 1.0,
+            "barstool": 5.021544031269162,
+            "betonlineag": 8.148202704808881,
             "mybookieag": 1.0
         },
         "runs": {
             "draftkings": 10.0,
             "fanduel": 1.0,
-            "unibet_us": 5.144605272704766,
-            "betrivers": 4.598493594068839,
+            "unibet_us": 1.0,
+            "betrivers": 4.486544413441489,
             "bovada": 1.0,
             "williamhill_us": 1.0,
-            "betmgm": 3.2352481740445986,
+            "betmgm": 7.406145699702831,
             "barstool": 1.0
         },
         "rbi": {
@@ -649,14 +649,15 @@
             "unibet_us": 1.0,
             "betrivers": 1.0,
             "bovada": 1.0,
-            "betmgm": 1.1867963784752655,
+            "betmgm": 1.0,
             "barstool": 1.0,
             "fanduel": 1.0
         },
         "batter strikeouts": {
-            "draftkings": 10.0,
+            "draftkings": 9.43937532334566,
             "fanduel": 1.0,
-            "williamhill_us": 1.0
+            "williamhill_us": 1.0,
+            "betmgm": 10.0
         },
         "singles": {
             "draftkings": 10.0,
@@ -664,9 +665,9 @@
             "fanduel": 1.0,
             "betmgm": 1.0,
             "barstool": 1.0,
-            "unibet_us": 1.0,
-            "betrivers": 1.0,
-            "bovada": 5.0
+            "unibet_us": 5.756782103994255,
+            "betrivers": 8.665255926554233,
+            "bovada": 1.2104120010242836
         },
         "Moneyline": {
             "draftkings": 1.0,

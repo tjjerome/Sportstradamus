@@ -2173,9 +2173,9 @@ class StatsMLB(Stats):
             order = self.upcoming_games.get(
                 team, {}).get('Batting Order', [])
             if player in order:
-                position = order.index(player)
+                position = order.index(player)+1
             elif player_games.empty:
-                position = 9
+                position = 10
             else:
                 position = int(
                     player_games['battingOrder'].iloc[-10:].median())
