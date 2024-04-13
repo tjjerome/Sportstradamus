@@ -10,6 +10,12 @@
  0.695297       0.25 -0.288209    0.092153     0.125436 -0.007047 -0.904809      0.066501
  0.699132       0.00 -0.300478    0.091971     0.135529 -0.007047 -0.904809      0.066627
 
+================================= MLB batter strikeouts ==================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.634011   0.646283 0.032194    0.045104     0.061354  0.148627 -0.100121      0.006377
+ 0.633023   0.641068 0.047404    0.035885     0.050925  0.148627 -0.100121      0.012767
+
 =================================== MLB hits+runs+rbi ====================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
@@ -21,6 +27,12 @@
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.517073   0.605381 -0.148111   -0.013170    -0.017544  0.005933  0.00652      0.040586
  0.556978   0.625000  0.051128   -0.003318    -0.003033  0.005933  0.00652      0.033757
+
+======================================== MLB hits ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.625314   0.625844 0.248900    0.036608     0.050258  0.161569 -0.029804      0.008606
+ 0.605290   0.617021 0.208418    0.009381     0.018206  0.161569 -0.029804      0.027478
 
 =========================== MLB hitter fantasy points underdog ===========================
  Distribution Model: Gaussian
@@ -64,11 +76,29 @@
  0.545797   0.615566  0.038488   -0.001863    -0.001392  0.003446 0.357724      0.018440
  0.432227   0.554795 -0.355118   -0.125598    -0.161816  0.003446 0.357724      0.104207
 
+======================================== MLB rbi =========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.715297   0.404372 -0.276506    0.130234     0.174174  0.039028 -1.179884      0.001721
+ 0.712585   0.400000 -0.285432    0.102687     0.156577  0.039028 -1.179884      0.020815
+
 ==================================== MLB runs allowed ====================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
  0.568922   0.578249 -0.036043    0.010190     0.013725  0.084218 -0.015007      0.037435
  0.527845   0.558621 -0.157385   -0.044413    -0.052574  0.084218 -0.015007      0.075283
+
+======================================== MLB runs ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.626761   0.592105 -0.374276    0.055401     0.075153  0.045242 -0.758729      0.088527
+ 0.623247   0.629139 -0.369950   -0.001910     0.015143  0.045242 -0.758729      0.128252
+
+==================================== MLB stolen bases ====================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance    Entropy  Training Gap
+ 0.927970        0.0 -0.071832    0.653934     0.742244   0.62633 -16.111135      0.028353
+ 0.927977        0.0 -0.071832    0.640828     0.739103   0.62633 -16.111135      0.037437
 
 ==================================== MLB total bases =====================================
  Distribution Model: Poisson
@@ -81,4 +111,10 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.577367   0.692157 0.171917    0.014247     0.020237  0.048488 0.087921      0.043772
  0.656513   0.699495 0.414935    0.053426     0.073025  0.048488 0.087921      0.016615
+
+======================================= MLB walks ========================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.670056   0.524590 -0.330075    0.098419     0.131550  0.056684 -1.262171      0.014318
+ 0.668679   0.553191 -0.328147   -0.028256     0.021154  0.056684 -1.262171      0.102123
 
