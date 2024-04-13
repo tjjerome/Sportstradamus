@@ -979,7 +979,7 @@ class StatsNBA(Stats):
             if game[market] < 0:
                 continue
 
-            if gameDate < (pd.to_datetime(self.gamelog["GAME_DATE"]).min() + timedelta(days=14)):
+            if gameDate < (datetime.today()-timedelta(days=850)):
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -2289,7 +2289,7 @@ class StatsMLB(Stats):
             # Retrieve data from the archive based on game date and player name
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
             
-            if gameDate < (pd.to_datetime(self.gamelog["gameDate"]).min() + timedelta(days=14)):
+            if gameDate < (datetime.today()-timedelta(days=850)):
                 continue
 
             self.profile_market(market, date=gameDate.date())
@@ -3412,7 +3412,7 @@ class StatsNFL(Stats):
             gameDate = datetime.strptime(
                 game["gameday"], "%Y-%m-%d")
 
-            if gameDate < (pd.to_datetime(self.gamelog["gameday"]).min() + timedelta(days=14)):
+            if gameDate < (datetime.today()-timedelta(days=850)):
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -3717,8 +3717,7 @@ class StatsNHL(Stats):
         # Get game ids
         latest_date = self.season_start
         if not self.gamelog.empty:
-            latest_date = (datetime.strptime(
-                self.gamelog["gameDate"].max().split("T")[0], "%Y-%m-%d") + timedelta(days=1)).date()
+            latest_date = pd.to_datetime(self.gamelog["gameDate"]).max().date() + timedelta(days=1)
         today = datetime.today().date()
         ids = []
         while latest_date <= today:
@@ -3726,7 +3725,7 @@ class StatsNHL(Stats):
             res = scraper.get(
                 f"https://api-web.nhle.com/v1/schedule/{start_date}")
             latest_date = datetime.strptime(
-                res['nextStartDate'], '%Y-%m-%d').date()
+                res.get('nextStartDate', (today+timedelta(days=1)).strftime("%Y-%m-%d")), '%Y-%m-%d').date()
 
             if len(res.get('gameWeek', [])) > 0:
                 for day in res.get('gameWeek'):
@@ -4369,7 +4368,7 @@ class StatsNHL(Stats):
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
             
-            if gameDate < (pd.to_datetime(self.gamelog["gameDate"]).min() + timedelta(days=14)):
+            if gameDate < (datetime.today()-timedelta(days=850)):
                 continue
 
             if game[market] < 0:

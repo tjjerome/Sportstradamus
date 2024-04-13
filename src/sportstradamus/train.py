@@ -290,141 +290,8 @@ def meditate(force, stats, league):
 
                 if M.empty:
                     continue
-
-                while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
-                    M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                             < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
-                    M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                               > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
-                                                                                                                > 300, "DaysIntoSeason"].min()
-
-                # Trim the fat
-                M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
-                    M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
-                M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
-
-                if "Position" in M.columns:
-                    for i in M.Position.unique():
-                        target = M.loc[(M["Archived"] == 1) & (
-                            M["Position"] == i), "Line"].median()
-
-                        less = M.loc[(M["Archived"] != 1) & (
-                            M["Position"] == i) & (M["Line"] < target), "Line"]
-                        more = M.loc[(M["Archived"] != 1) & (
-                            M["Position"] == i) & (M["Line"] > target), "Line"]
-
-                        n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
-                        if n > 0:
-                            if less.count() > more.count():
-                                chopping_block = less.index
-                                counts, bins = np.histogram(less)
-                                counts = counts/len(less)
-                                actuals = M.loc[(M["Archived"] == 1) & (
-                                    M["Position"] == i) & (M["Line"] < target), "Line"]
-                                actual_counts, bins = np.histogram(
-                                    actuals, bins)
-                                if len(actuals):
-                                    actual_counts = actual_counts / \
-                                        len(actuals)
-                                diff = np.clip(
-                                    counts-actual_counts, 1e-8, None)
-                                p = np.zeros(len(less))
-                                for j, a in enumerate(bins[:-1]):
-                                    p[less >= a] = diff[j]
-                                p = p/np.sum(p)
-                            else:
-                                chopping_block = more.index
-                                counts, bins = np.histogram(more)
-                                counts = counts/len(more)
-                                actuals = M.loc[(M["Archived"] == 1) & (
-                                    M["Position"] == i) & (M["Line"] > target), "Line"]
-                                actual_counts, bins = np.histogram(
-                                    actuals, bins)
-                                if len(actuals):
-                                    actual_counts = actual_counts / \
-                                        len(actuals)
-                                diff = np.clip(
-                                    counts-actual_counts, 1e-8, None)
-                                p = np.zeros(len(more))
-                                for j, a in enumerate(bins[:-1]):
-                                    p[more >= a] = diff[j]
-                                p = p/np.sum(p)
-
-                            cut = np.random.choice(
-                                chopping_block, n, replace=False, p=p)
-                            M.drop(cut, inplace=True)
-                else:
-                    if len(M[(M["Archived"] == 1)]) > 4:
-                        target = M.loc[(M["Archived"] == 1), "Line"].median()
-                    else:
-                        target = M["Line"].mean()
-
-                    less = M.loc[(M["Archived"] != 1) & (M["Line"] < target), "Line"]
-                    more = M.loc[(M["Archived"] != 1) & (M["Line"] > target), "Line"]
-
-                    n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
-                    if n > 0:
-                        if less.count() > more.count():
-                            chopping_block = less.index
-                            counts, bins = np.histogram(less)
-                            counts = counts/len(less)
-                            actuals = M.loc[(M["Archived"] == 1) & (
-                                M["Line"] < target), "Line"]
-                            actual_counts, bins = np.histogram(
-                                actuals, bins)
-                            if len(actuals):
-                                actual_counts = actual_counts/len(actuals)
-                            diff = np.clip(
-                                counts-actual_counts, 1e-8, None)
-                            p = np.zeros(len(less))
-                            for j, a in enumerate(bins[:-1]):
-                                p[less >= a] = diff[j]
-                            p = p/np.sum(p)
-                        else:
-                            chopping_block = more.index
-                            counts, bins = np.histogram(more)
-                            counts = counts/len(more)
-                            actuals = M.loc[(M["Archived"] == 1) & (
-                                M["Line"] > target), "Line"]
-                            actual_counts, bins = np.histogram(
-                                actuals, bins)
-                            if len(actuals):
-                                actual_counts = actual_counts/len(actuals)
-                            diff = np.clip(
-                                counts-actual_counts, 1e-8, None)
-                            p = np.zeros(len(more))
-                            for j, a in enumerate(bins[:-1]):
-                                p[more >= a] = diff[j]
-                            p = p/np.sum(p)
-
-                        cut = np.random.choice(
-                            chopping_block, n, replace=False, p=p)
-                        M.drop(cut, inplace=True)
-
-                M = M.loc[((M["Odds"] > .2) & (M["Odds"] < .8)) | M["Odds"] == 0]
-                target = (M.loc[(M["Archived"] == 1), "Result"] >
-                            M.loc[(M["Archived"] == 1), "Line"]).mean()
-                balance = (M["Result"] > M["Line"]).mean()
-                n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
-
-                if n > 0:
-                    if balance < target:
-                        chopping_block = M.loc[(M["Archived"] != 1) & (
-                            M["Result"] < M["Line"])].index
-                        p = (1/M.loc[chopping_block,
-                                        "MeanYr"].clip(0.1)).to_numpy()
-                        p = p/np.sum(p)
-                    else:
-                        chopping_block = M.loc[(M["Archived"] != 1) & (
-                            M["Result"] > M["Line"])].index
-                        p = (M.loc[chopping_block, "MeanYr"].clip(
-                            0.1)).to_numpy()
-                        p = p/np.sum(p)
-
-                    cut = np.random.choice(
-                        chopping_block, n, replace=False, p=p)
-                    M.drop(cut, inplace=True)
-
+                
+                M = trim_matrix(M)
                 M.to_csv(filepath)
 
             M.drop(columns=["Date", "Archived"], inplace=True)
@@ -586,7 +453,7 @@ def meditate(force, stats, league):
             y_proba_filt = np.ones_like(y_proba_no_filt)*.5
             filt = LogisticRegression(
                 fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
-            X_train.loc[X_train["Odds"] == 0] = 0.5
+            X_train.loc[X_train["Odds"] == 0, "Odds"] = 0.5
             odds_filt = LogisticRegression(
                 fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(X_train.Odds.to_numpy().reshape(-1,1)*2-1, y_class)
             Cs = np.concatenate([filt.coef_, odds_filt.coef_], axis=1)
@@ -847,6 +714,156 @@ def evaluate_books(league, market):
         return {k:res.x[i] for i, k in enumerate(test_df.columns)}
     else:
         return {}
+
+def trim_matrix(M):
+    
+    # Trim the fat
+    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
+        M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
+                                                                    < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
+        M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
+                                                                    > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
+                                                                                                    > 300, "DaysIntoSeason"].min()
+
+    M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
+        M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
+    M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
+
+    if "Position" in M.columns:
+        for i in M.Position.unique():
+            target = M.loc[(M["Archived"] == 1) & (
+                M["Position"] == i), "Line"].median()
+
+            less = M.loc[(M["Archived"] != 1) & (
+                M["Position"] == i) & (M["Line"] < target), "Line"]
+            more = M.loc[(M["Archived"] != 1) & (
+                M["Position"] == i) & (M["Line"] > target), "Line"]
+
+            n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
+            if n > 0:
+                if less.count() > more.count():
+                    chopping_block = less.index
+                    counts, bins = np.histogram(less)
+                    counts = counts/len(less)
+                    actuals = M.loc[(M["Archived"] == 1) & (
+                        M["Position"] == i) & (M["Line"] < target), "Line"]
+                    actual_counts, bins = np.histogram(
+                        actuals, bins)
+                    if len(actuals):
+                        actual_counts = actual_counts / \
+                            len(actuals)
+                    diff = np.clip(
+                        counts-actual_counts, 1e-8, None)
+                    p = np.zeros(len(less))
+                    for j, a in enumerate(bins[:-1]):
+                        p[less >= a] = diff[j]
+                    p = p/np.sum(p)
+                else:
+                    chopping_block = more.index
+                    counts, bins = np.histogram(more)
+                    counts = counts/len(more)
+                    actuals = M.loc[(M["Archived"] == 1) & (
+                        M["Position"] == i) & (M["Line"] > target), "Line"]
+                    actual_counts, bins = np.histogram(
+                        actuals, bins)
+                    if len(actuals):
+                        actual_counts = actual_counts / \
+                            len(actuals)
+                    diff = np.clip(
+                        counts-actual_counts, 1e-8, None)
+                    p = np.zeros(len(more))
+                    for j, a in enumerate(bins[:-1]):
+                        p[more >= a] = diff[j]
+                    p = p/np.sum(p)
+
+                cut = np.random.choice(
+                    chopping_block, n, replace=False, p=p)
+                M.drop(cut, inplace=True)
+    else:
+        if len(M[(M["Archived"] == 1)]) > 4:
+            target = M.loc[(M["Archived"] == 1), "Line"].median()
+        else:
+            target = M["Line"].mean()
+
+        less = M.loc[(M["Archived"] != 1) & (M["Line"] < target), "Line"]
+        more = M.loc[(M["Archived"] != 1) & (M["Line"] > target), "Line"]
+
+        n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
+        if n > 0:
+            if less.count() > more.count():
+                chopping_block = less.index
+                counts, bins = np.histogram(less)
+                counts = counts/len(less)
+                actuals = M.loc[(M["Archived"] == 1) & (
+                    M["Line"] < target), "Line"]
+                actual_counts, bins = np.histogram(
+                    actuals, bins)
+                if len(actuals):
+                    actual_counts = actual_counts/len(actuals)
+                diff = np.clip(
+                    counts-actual_counts, 1e-8, None)
+                p = np.zeros(len(less))
+                for j, a in enumerate(bins[:-1]):
+                    p[less >= a] = diff[j]
+                p = p/np.sum(p)
+            else:
+                chopping_block = more.index
+                counts, bins = np.histogram(more)
+                counts = counts/len(more)
+                actuals = M.loc[(M["Archived"] == 1) & (
+                    M["Line"] > target), "Line"]
+                actual_counts, bins = np.histogram(
+                    actuals, bins)
+                if len(actuals):
+                    actual_counts = actual_counts/len(actuals)
+                diff = np.clip(
+                    counts-actual_counts, 1e-8, None)
+                p = np.zeros(len(more))
+                for j, a in enumerate(bins[:-1]):
+                    p[more >= a] = diff[j]
+                p = p/np.sum(p)
+
+            cut = np.random.choice(
+                chopping_block, n, replace=False, p=p)
+            M.drop(cut, inplace=True)
+
+    pushes = M.loc[M["Result"]==M["Line"]]
+    push_rate = pushes["Archived"].sum()/M["Archived"].sum()
+    M = M.loc[M["Result"]!=M["Line"]]
+    target = (M.loc[(M["Archived"] == 1), "Result"] >
+                M.loc[(M["Archived"] == 1), "Line"]).mean()
+    balance = (M["Result"] > M["Line"]).mean()
+    n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
+
+    if n > 0:
+        if balance < target:
+            chopping_block = M.loc[(M["Archived"] != 1) & (
+                M["Result"] < M["Line"])].index
+            p = (1/M.loc[chopping_block,
+                            "MeanYr"].clip(0.1)).to_numpy()
+            p = p/np.sum(p)
+        else:
+            chopping_block = M.loc[(M["Archived"] != 1) & (
+                M["Result"] > M["Line"])].index
+            p = (M.loc[chopping_block, "MeanYr"].clip(
+                0.1)).to_numpy()
+            p = p/np.sum(p)
+
+        cut = np.random.choice(chopping_block, n, replace=False, p=p)
+        M.drop(cut, inplace=True)
+
+    n = int(push_rate*len(M))-pushes["Archived"].sum()
+    if n > 0:
+        chopping_block = pushes.loc[pushes["Archived"]==0].index
+        if len(chopping_block) > 0:
+            cut = np.random.choice(chopping_block, n, replace=False)
+        else:
+            cut = []
+    pushes.drop(cut, inplace=True)
+
+    M = pd.concat([M,pushes]).sort_values("Date")
+
+    return M
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
