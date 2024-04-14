@@ -94,6 +94,12 @@
  0.626761   0.592105 -0.374276    0.055401     0.075153  0.045242 -0.758729      0.088527
  0.623247   0.629139 -0.369950   -0.001910     0.015143  0.045242 -0.758729      0.128252
 
+====================================== MLB singles =======================================
+ Distribution Model: Poisson
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
+ 0.569353   0.565657 -0.413452    0.012684     0.017494  0.027329 -0.343012      0.007557
+ 0.567875   0.557989 -0.359251   -0.084785    -0.079839  0.027329 -0.343012      0.075117
+
 ==================================== MLB stolen bases ====================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance    Entropy  Training Gap
