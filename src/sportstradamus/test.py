@@ -13,25 +13,25 @@ from tqdm import tqdm
 from time import time
 import requests
 
-filepath = pkg_resources.files(data) / "banned_combos.json"
-with open(filepath, "r") as infile:
-    banned = json.load(infile)
+# filepath = pkg_resources.files(data) / "banned_combos.json"
+# with open(filepath, "r") as infile:
+#     banned = json.load(infile)
 
-for platform in banned.keys():
-    for league in list(banned[platform].keys()):
-        if "modified" in list(banned[platform][league].keys()):
-            for market in list(banned[platform][league]["modified"].keys()):
-                for submarket in list(banned[platform][league]["modified"][market].keys()):
-                    market2 = market
-                    submarket2 = submarket
-                    if "_OPP_" in submarket:
-                        market2 = "_OPP_"+market2
-                        submarket2 = submarket2.replace("_OPP_", "")
-                    banned[platform][league]["modified"].setdefault(submarket2, {})
-                    banned[platform][league]["modified"][submarket2][market2] = banned[platform][league]["modified"][market][submarket]
+# for platform in banned.keys():
+#     for league in list(banned[platform].keys()):
+#         if "modified" in list(banned[platform][league].keys()):
+#             for market in list(banned[platform][league]["modified"].keys()):
+#                 for submarket in list(banned[platform][league]["modified"][market].keys()):
+#                     market2 = market
+#                     submarket2 = submarket
+#                     if "_OPP_" in submarket:
+#                         market2 = "_OPP_"+market2
+#                         submarket2 = submarket2.replace("_OPP_", "")
+#                     banned[platform][league]["modified"].setdefault(submarket2, {})
+#                     banned[platform][league]["modified"][submarket2][market2] = banned[platform][league]["modified"][market][submarket]
 
-with open(filepath, "w") as outfile:
-    json.dump(banned, outfile, indent=4)
+# with open(filepath, "w") as outfile:
+#     json.dump(banned, outfile, indent=4)
 
 # url = "https://api.prizepicks.com/projections?league_id=7"
 # params = {
@@ -60,7 +60,7 @@ with open(filepath, "w") as outfile:
 
 # (scrapeops, scrapefish)
 
-# NFL = StatsNFL()
+NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2019, 9, 1).date()
@@ -72,7 +72,8 @@ with open(filepath, "w") as outfile:
 # NFL.season_start = datetime(2022, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2023, 9, 1).date()
-# NFL.update()
+NFL.load()
+NFL.update()
 
 # NBA = StatsNBA()
 # NBA.load()
@@ -106,22 +107,22 @@ with open(filepath, "w") as outfile:
 # NHL.season_start = datetime(2023, 10, 10).date()
 # NHL.update()
 
-MLB = StatsMLB()
-MLB.load()
-MLB.gamelog = pd.DataFrame()
-MLB.teamlog = pd.DataFrame()
-MLB.season_start = datetime(2021, 3, 1).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2022, 3, 1).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.season_start = datetime(2023, 3, 30).date()
-MLB.update()
-MLB.update()
-MLB.update()
-MLB.update()
+# MLB = StatsMLB()
+# MLB.load()
+# MLB.gamelog = pd.DataFrame()
+# MLB.teamlog = pd.DataFrame()
+# MLB.season_start = datetime(2021, 3, 1).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2022, 3, 1).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.season_start = datetime(2023, 3, 30).date()
+# MLB.update()
+# MLB.update()
+# MLB.update()
+# MLB.update()
