@@ -988,7 +988,7 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            line = archive.get_line("NBA", market, game["GAME_DATE"], name)
+            line = archive.get_line("NBA", market, game["GAME_DATE"][:10], name)
 
             offer = {
                 "Player": name,
@@ -3044,7 +3044,7 @@ class StatsNFL(Stats):
         gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["recent team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(5)[self.stat_types['offense'] + self.stat_types['defense']], 0))
+            lambda x: np.mean(x.tail(5)[list(set(self.stat_types['offense']) | set(self.stat_types['defense']))], 0))
 
         playerGroups = gamelog.\
             groupby('player display name').\
