@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -31,6 +31,8 @@ from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
 import warnings
+pd.options.mode.chained_assignment = None
+np.seterr(divide='ignore', invalid='ignore')
 
 with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
     stat_cv = json.load(f)
@@ -123,10 +125,56 @@ archive = Archive("All")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
 def meditate(force, stats, league):
+    global book_weights
 
     np.random.seed(69)
 
     all_markets = {
+        "NFL": [
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "qb yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "passing tds",
+            "tds",
+            "rushing tds",
+            "receiving tds",
+            "qb tds",
+            "completions",
+            "carries",
+            "receptions",
+            "interceptions",
+            "attempts",
+            "targets",
+            "longest completion",
+            "longest rush",
+            "longest reception",
+            "sacks taken",
+            "passing first downs",
+            "first downs",
+            "fumbles lost",
+            "completion percentage"
+        ],
+        "NHL": [
+            "saves",
+            "shots",
+            "points",
+            "goalsAgainst",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "blocked",
+            "powerPlayPoints",
+            "sogBS",
+            "fantasy points prizepicks",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
         "MLB": [
             "pitcher strikeouts",
             "pitching outs",
@@ -175,75 +223,24 @@ def meditate(force, stats, league):
             "PF",
             "MIN",
         ],
-        "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
-            "yards",
-            "qb yards",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "passing tds",
-            "tds",
-            "rushing tds",
-            "receiving tds",
-            "qb tds",
-            "completions",
-            "carries",
-            "receptions",
-            "interceptions",
-            "attempts",
-            "targets",
-            "longest completion",
-            "longest rush",
-            "longest reception",
-            "sacks taken",
-            "passing first downs",
-            "first downs",
-            "fumbles lost",
-            "completion percentage"
-        ],
-        "NHL": [
-            "saves",
-            "shots",
-            "points",
-            "goalsAgainst",
-            "goalie fantasy points underdog",
-            "skater fantasy points underdog",
-            "blocked",
-            "powerPlayPoints",
-            "sogBS",
-            "fantasy points prizepicks",
-            "hits",
-            "goals",
-            "assists",
-            "faceOffWins",
-            "timeOnIce",
-        ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
-
-        if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
-            with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
-                book_weights = json.load(infile)
-        else:
-            book_weights = {}
-
+        
         book_weights.setdefault(league, {}).setdefault("Moneyline", {})
-        book_weights[league]["Moneyline"] = evaluate_books(league, "Moneyline")
+        book_weights[league]["Moneyline"] = fit_book_weights(league, "Moneyline")
 
         book_weights.setdefault(league, {}).setdefault("Totals", {})
-        book_weights[league]["Totals"] = evaluate_books(league, "Totals")
+        book_weights[league]["Totals"] = fit_book_weights(league, "Totals")
 
         if league=="MLB":
             book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
-            book_weights[league]["1st 1 innings"] = evaluate_books(league, "1st 1 innings")
+            book_weights[league]["1st 1 innings"] = fit_book_weights(league, "1st 1 innings")
             book_weights.setdefault(league, {}).setdefault("pitcher win", {})
-            book_weights[league]["pitcher win"] = evaluate_books(league, "pitcher win")
+            book_weights[league]["pitcher win"] = fit_book_weights(league, "pitcher win")
             book_weights.setdefault(league, {}).setdefault("triples", {})
-            book_weights[league]["triples"] = evaluate_books(league, "triples")
+            book_weights[league]["triples"] = fit_book_weights(league, "triples")
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
@@ -258,7 +255,7 @@ def meditate(force, stats, league):
                 book_weights = {}
 
             book_weights.setdefault(league, {}).setdefault(market, {})
-            book_weights[league][market] = evaluate_books(league, market)
+            book_weights[league][market] = fit_book_weights(league, market)
 
             with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
                 json.dump(book_weights, outfile, indent=4)
@@ -450,16 +447,9 @@ def meditate(force, stats, league):
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
-            y_proba_filt = np.ones_like(y_proba_no_filt)*.5
-            filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
             X_train.loc[X_train["Odds"] == 0, "Odds"] = 0.5
-            odds_filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(X_train.Odds.to_numpy().reshape(-1,1)*2-1, y_class)
-            Cs = np.concatenate([filt.coef_, odds_filt.coef_], axis=1)
-            Cs = np.clip(Cs,0,None)
-            filt.coef_ = Cs/np.linalg.norm(Cs)*np.min([np.linalg.norm(Cs), 2])
-            filt.n_features_in_ = 2
+            X_test.loc[X_test["Odds"] == 0, "Odds"] = 0.5
+            filt = fit_model_weight(y_proba_train, X_train.Odds.to_numpy().reshape(-1,1), y_class)
             y_proba_filt = filt.predict_proba(
                 np.concatenate([y_proba, X_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
 
@@ -577,7 +567,7 @@ def report():
             if league not in stat_cv:
                 stat_cv[league] = {}
 
-            stat_cv[league][market] = cv
+            stat_cv[league][market] = float(cv)
 
             f.write(f" {league} {market} ".center(90, "="))
             f.write("\n")
@@ -650,7 +640,10 @@ def see_features():
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
-def evaluate_books(league, market):
+def fit_book_weights(league, market):
+    global book_weights
+    warnings.simplefilter('ignore', UserWarning)
+    print(f"Fitting Book Weights - {league}, {market}")
     df = archive.to_pandas(league, market)
     df = df[[col for col in df.columns if col != "pinnacle"]]
     if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
@@ -709,14 +702,36 @@ def evaluate_books(league, market):
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
     y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
     if len(x) > 9:
-        res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+        guess = book_weights.get(league, {}).get(market, {})
+        for book in test_df.columns:
+            guess.setdefault(book, 1)
+            
+        guess = list(guess.values())
+        res = minimize(objective, guess, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
     
         return {k:res.x[i] for i, k in enumerate(test_df.columns)}
     else:
         return {}
 
+def fit_model_weight(model_prob, odds_prob, y_class):
+    x = np.concatenate([model_prob, odds_prob], axis=1)*2-1
+    filt = LogisticRegression(
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(x, y_class)
+    Cs = filt.coef_
+    guess = Cs/np.linalg.norm(Cs)*np.min([np.linalg.norm(Cs), 2])
+    guess = np.clip(guess[0], 0, 2)
+
+    def objective(w, x, y):
+        filt.coef_ = np.array([w])
+        proba = filt.predict_proba(x)
+        return brier_score_loss(y, proba[:,1], pos_label=1) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
+
+    res = minimize(objective, guess, args=(x, y_class), bounds=[(0, 2)]*2, tol=1e-8, method='TNC')
+    filt.coef_ = np.array([res.x])
+    return filt
+
 def trim_matrix(M):
-    
+    warnings.simplefilter('ignore', UserWarning)
     # Trim the fat
     while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
         M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
