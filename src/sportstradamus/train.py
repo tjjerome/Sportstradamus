@@ -34,9 +34,6 @@ import warnings
 pd.options.mode.chained_assignment = None
 np.seterr(divide='ignore', invalid='ignore')
 
-with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
-    stat_cv = json.load(f)
-
 dist_params = {
     "stabilization": "None",
     "response_fn": "softplus",
@@ -436,6 +433,7 @@ def meditate(force, stats, league):
                     np.abs(norm.cdf(y_test["Result"], prob_params["loc"], prob_params["scale"])-.5))
                 cv = y.Result.std()/y.Result.mean()
 
+            stat_std = y.Result.std()
             dev = mean_tweedie_deviance(y_test, ev, power=p)
 
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
@@ -511,7 +509,8 @@ def meditate(force, stats, league):
                 },
                 "params": params,
                 "distribution": dist,
-                "cv": cv
+                "cv": cv,
+                "std": stat_std
             }
 
             X_test['Result'] = y_test['Result']
@@ -554,6 +553,8 @@ def report():
     model_list.sort()
     with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
         stat_cv = json.load(f)
+    with open(pkg_resources.files(data) / "stat_std.json", "r") as f:
+        stat_std = json.load(f)
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
             with open(pkg_resources.files(data) / model_str, "rb") as infile:
@@ -561,13 +562,16 @@ def report():
 
             name = model_str.split("_")
             cv = model['cv']
+            std = model.get('std',0)
             league = name[0]
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
-            if league not in stat_cv:
-                stat_cv[league] = {}
 
+            stat_cv.setdefault(league, {})
             stat_cv[league][market] = float(cv)
+
+            stat_std.setdefault(league, {})
+            stat_std[league][market] = float(std)
 
             f.write(f" {league} {market} ".center(90, "="))
             f.write("\n")
@@ -578,6 +582,9 @@ def report():
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
         json.dump(stat_cv, f, indent=4)
+
+    with open(pkg_resources.files(data) / "stat_std.json", "w") as f:
+        json.dump(stat_std, f, indent=4)
 
 
 def see_features():
