@@ -36,6 +36,9 @@ with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
 with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
     stat_cv = json.load(infile)
 
+with open((pkg_resources.files(data) / "stat_std.json"), "r") as infile:
+    stat_std = json.load(infile)
+
 with open((pkg_resources.files(data) / "book_weights.json"), "r") as infile:
     book_weights = json.load(infile)
 

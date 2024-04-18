@@ -8,7 +8,7 @@ from sportstradamus.books import (
     get_pp,
     get_ud,
 )
-from sportstradamus.helpers import archive, get_ev, get_odds, get_active_sports, stat_cv, accel_asc
+from sportstradamus.helpers import archive, get_ev, get_odds, get_active_sports, stat_cv, stat_std, accel_asc
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -768,7 +768,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 6": "",
                             "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
                             "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
-                            "Fun": np.sum([leg["Line"] for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
+                            "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(league, {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else leg["Line"]/stat_std.get(league, {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
                             "Bet Size": bet_size
                         }
                         for i in np.arange(bet_size):
