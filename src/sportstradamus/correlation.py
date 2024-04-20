@@ -484,7 +484,7 @@ for league in ["NHL", "NBA", "MLB", "NFL"]:
     log = gamelogs[league]
     log_str = log_strings[league]
 
-    filepath = pkg_resources.files(data) / f"{league}_corr_data.csv"
+    filepath = pkg_resources.files(data) / f"training_data/{league}_corr.csv"
     if os.path.isfile(filepath) and datetime.fromtimestamp(os.path.getmtime(filepath)) > datetime.today() - timedelta(days=27):
         matrix = pd.read_csv(filepath, index_col=0)
     else:
