@@ -243,7 +243,7 @@ def meditate(force, league):
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
 
-        correlate(league)
+        correlate(league, force)
 
         for market in markets:
             stat_data = stat_structs[league]
@@ -887,7 +887,7 @@ def trim_matrix(M):
 
     return M
 
-def correlate(league):
+def correlate(league, force=False):
     print(f"Correlating {league}...")
     tracked_stats = { 
         "NFL": {
@@ -1174,7 +1174,7 @@ def correlate(league):
     log_str = log_strings[league]
 
     filepath = pkg_resources.files(data) / f"training_data/{league}_corr.csv"
-    if False or os.path.isfile(filepath):
+    if os.path.isfile(filepath) and not force:
         matrix = pd.read_csv(filepath, index_col=0)
         matrix.DATE = pd.to_datetime(matrix.DATE)
         latest_date = matrix.DATE.max()
