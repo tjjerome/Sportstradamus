@@ -174,4 +174,8 @@ docs/build
 src/sportstradamus/data/training_report.txt
 src/sportstradamus/data/~$feature_importances.xlsx
 src/sportstradamus/data/feature_importances.xlsx
-src/sportstradamus/data/training_report.txt
+src/sportstradamus/data/stat_cv.json
+src/sportstradamus/data/stat_std.json
+src/sportstradamus/data/most_important_features.json
+src/sportstradamus/data/features_to_filter.json
+src/sportstradamus/data/book_weights.json
