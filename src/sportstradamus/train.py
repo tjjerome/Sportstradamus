@@ -257,8 +257,8 @@ def meditate(force, league):
             with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
                 json.dump(book_weights, outfile, indent=4)
 
-            filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-            filepath = pkg_resources.files(data) / filename
+            filename = "_".join([league, market]).replace(" ", "-")
+            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
             if os.path.isfile(filepath):
                 with open(filepath, 'rb') as infile:
                     filedict = pickle.load(infile)
@@ -272,8 +272,7 @@ def meditate(force, league):
 
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
-            filename = "_".join([league, market]).replace(" ", "-")
-            filepath = pkg_resources.files(data) / (filename + ".csv")
+            filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0).dropna()
                 cutoff_date = pd.to_datetime(M.loc[M.Archived==1, "Date"]).max().date()
@@ -532,16 +531,11 @@ def meditate(force, league):
 
             X_test['P'] = y_proba_filt[:, 1]
 
-            filename = "_".join(["test", league, market]
-                                ).replace(" ", "-") + ".csv"
-
-            filepath = pkg_resources.files(data) / filename
-            with open(filepath, "wb") as outfile:
+            filepath = pkg_resources.files(data) / f"test_sets/{filename}.csv"
+            with open(filepath, "w") as outfile:
                 X_test.to_csv(filepath)
 
-            filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-
-            filepath = pkg_resources.files(data) / filename
+            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
             with open(filepath, "wb") as outfile:
                 pickle.dump(filedict, outfile, -1)
                 del filedict
