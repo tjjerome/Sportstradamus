@@ -958,7 +958,7 @@ class StatsNBA(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -972,14 +972,17 @@ class StatsNBA(Stats):
 
         matrix = []
 
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=850)
+
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(
-                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
+                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").date()
 
             if game[market] < 0:
                 continue
 
-            if gameDate < (datetime.today()-timedelta(days=850)):
+            if gameDate <= cutoff_date:
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -1001,7 +1004,7 @@ class StatsNBA(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["GAME_DATE"][:10]
                 )
                 if type(new_get_stats) is dict:
                     new_get_stats.update(
@@ -2251,7 +2254,7 @@ class StatsMLB(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves the training data matrix and target labels for the specified market.
 
@@ -2265,6 +2268,9 @@ class StatsMLB(Stats):
 
         # Initialize an empty list for the target labels
         matrix = []
+
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=850)
 
         # Iterate over the gamelog to collect training data
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
@@ -2287,12 +2293,12 @@ class StatsMLB(Stats):
                 continue
 
             # Retrieve data from the archive based on game date and player name
-            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d").date()
             
-            if gameDate < (datetime.today()-timedelta(days=850)):
+            if gameDate <= cutoff_date:
                 continue
 
-            self.profile_market(market, date=gameDate.date())
+            self.profile_market(market, date=gameDate)
             name = game['playerName']
 
             if name not in self.playerProfile.index:
@@ -2314,7 +2320,7 @@ class StatsMLB(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["gameDate"]
                 )
                 if type(new_get_stats) is dict:
                     # Determine the result
@@ -3393,7 +3399,7 @@ class StatsNFL(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -3408,11 +3414,14 @@ class StatsNFL(Stats):
         # Initialize an empty list for the target labels
         matrix = []
 
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=1200)
+
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(
-                game["gameday"], "%Y-%m-%d")
+                game["gameday"], "%Y-%m-%d").date()
 
-            if gameDate < (datetime.today()-timedelta(days=850)):
+            if gameDate <= cutoff_date:
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -3440,7 +3449,7 @@ class StatsNFL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["gameday"]
                 )
                 if type(new_get_stats) is dict:
 
@@ -4348,7 +4357,7 @@ class StatsNHL(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieve the training matrix for the specified market.
 
@@ -4364,14 +4373,17 @@ class StatsNHL(Stats):
 
         matrix = []
 
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=850)
+
         # Iterate over each game in the gamelog
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
-            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d").date()
             
-            if gameDate < (datetime.today()-timedelta(days=850)):
+            if gameDate < cutoff_date:
                 continue
 
-            if game[market] < 0:
+            if game[market] <= 0:
                 continue
 
             data = {}
@@ -4395,7 +4407,7 @@ class StatsNHL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["gameDate"]
                 )
                 if type(new_get_stats) is dict:
                     new_get_stats.update(
