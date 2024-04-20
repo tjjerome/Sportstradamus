@@ -288,7 +288,7 @@ tracked_stats = {
             "pitcher fantasy points underdog",
             "walks allowed"
         ],
-        "B1": [
+        "B": [
             "hitter fantasy score",
             "hitter fantasy points underdog",
             "hits+runs+rbi",
@@ -303,135 +303,7 @@ tracked_stats = {
             "doubles",
             "triples",
             "home runs"
-        ],
-        "B2": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B3": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B4": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B5": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B6": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B7": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B8": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
-        "B9": [
-            "hitter fantasy score",
-            "hitter fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "triples",
-            "home runs"
-        ],
+        ]
     }
 }
 
@@ -485,58 +357,64 @@ for league in ["NHL", "NBA", "MLB", "NFL"]:
     log_str = log_strings[league]
 
     filepath = pkg_resources.files(data) / f"training_data/{league}_corr.csv"
-    if os.path.isfile(filepath) and datetime.fromtimestamp(os.path.getmtime(filepath)) > datetime.today() - timedelta(days=27):
+    if False or os.path.isfile(filepath):
         matrix = pd.read_csv(filepath, index_col=0)
+        matrix.DATE = pd.to_datetime(matrix.DATE)
+        latest_date = matrix.DATE.max()
+        matrix = matrix.loc[matrix.DATE >= datetime.today()-timedelta(days=300)]
     else:
+        matrix = pd.DataFrame()
+        latest_date = datetime.today()-timedelta(days=300)
 
-        games = log.gamelog[log_str["game"]].unique()
-        matrix = []
+    games = log.gamelog[log_str["game"]].unique()
+    game_data = []
 
-        for gameId in tqdm(games):
-            game_df = log.gamelog.loc[log.gamelog[log_str["game"]] == gameId]
-            gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
-            if gameDate < datetime.today()-timedelta(days=400):
-                continue
-            home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
-            away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
+    for gameId in tqdm(games):
+        game_df = log.gamelog.loc[log.gamelog[log_str["game"]] == gameId]
+        gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
+        if gameDate < latest_date:
+            continue
+        home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
+        away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
 
-            if league == "MLB":
-                bat_df = game_df.loc[game_df['starting batter']]
-                bat_df.position = "B" + bat_df.battingOrder.astype(str)
-                bat_df.index = bat_df.position
-                pitch_df = game_df.loc[game_df['starting pitcher']]
-                pitch_df.position = "P"
-                pitch_df.index = pitch_df.position
-                game_df = pd.concat([bat_df, pitch_df])
-            else:
-                log.profile_market(log_str["usage"], date=gameDate)
-                usage = pd.DataFrame(
-                    log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
-                usage.reset_index(inplace=True)
-                game_df = game_df.merge(usage, how="left").fillna(0)
-                ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
-                    [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
-                game_df[log_str["position"]] = game_df[log_str["position"]] + \
-                    ranks.astype(str)
-                game_df.index = game_df[log_str["position"]]
+        if league == "MLB":
+            bat_df = game_df.loc[game_df['starting batter']]
+            bat_df.position = "B" + bat_df.battingOrder.astype(str)
+            bat_df.index = bat_df.position
+            pitch_df = game_df.loc[game_df['starting pitcher']]
+            pitch_df.position = "P"
+            pitch_df.index = pitch_df.position
+            game_df = pd.concat([bat_df, pitch_df])
+        else:
+            log.profile_market(log_str["usage"], date=gameDate)
+            usage = pd.DataFrame(
+                log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
+            usage.reset_index(inplace=True)
+            game_df = game_df.merge(usage, how="left").fillna(0)
+            ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
+                [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
+            game_df[log_str["position"]] = game_df[log_str["position"]] + \
+                ranks.astype(str)
+            game_df.index = game_df[log_str["position"]]
 
-            homeStats = {}
-            awayStats = {}
-            for position in stats.keys():
-                homeStats.update(game_df.loc[game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
-                    position), stats[position]].to_dict('index'))
-                awayStats.update(game_df.loc[~game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
-                    position), stats[position]].to_dict('index'))
+        homeStats = {}
+        awayStats = {}
+        for position in stats.keys():
+            homeStats.update(game_df.loc[game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+                position), stats[position]].to_dict('index'))
+            awayStats.update(game_df.loc[~game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+                position), stats[position]].to_dict('index'))
 
-            matrix.append({"TEAM": home_team} |
-                homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
-            matrix.append({"TEAM": away_team} |
-                awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
+        game_data.append({"TEAM": home_team} | {"DATE": gameDate.date()} |
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
+        game_data.append({"TEAM": away_team} | {"DATE": gameDate.date()} |
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
 
-        matrix = pd.json_normalize(matrix)
-        matrix.to_csv(filepath)
+    matrix = pd.concat([matrix, pd.json_normalize(game_data)], ignore_index=True)
+    matrix.to_csv(filepath)
 
     big_c = {}
+    matrix.drop(columns="DATE", inplace=True)
     matrix.fillna(0, inplace=True)
     for team in matrix.TEAM.unique():
         team_matrix = matrix.loc[matrix.TEAM == team].drop(columns="TEAM")
