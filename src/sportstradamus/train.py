@@ -22,6 +22,7 @@ import lightgbm as lgb
 import pandas as pd
 import click
 import os
+from datetime import datetime, timedelta
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions import (
     Gaussian,
@@ -118,60 +119,14 @@ archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
-def meditate(force, stats, league):
+def meditate(force, league):
     global book_weights
 
     np.random.seed(69)
 
     all_markets = {
-        "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
-            "yards",
-            "qb yards",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "passing tds",
-            "tds",
-            "rushing tds",
-            "receiving tds",
-            "qb tds",
-            "completions",
-            "carries",
-            "receptions",
-            "interceptions",
-            "attempts",
-            "targets",
-            "longest completion",
-            "longest rush",
-            "longest reception",
-            "sacks taken",
-            "passing first downs",
-            "first downs",
-            "fumbles lost",
-            "completion percentage"
-        ],
-        "NHL": [
-            "saves",
-            "shots",
-            "points",
-            "goalsAgainst",
-            "goalie fantasy points underdog",
-            "skater fantasy points underdog",
-            "blocked",
-            "powerPlayPoints",
-            "sogBS",
-            "fantasy points prizepicks",
-            "hits",
-            "goals",
-            "assists",
-            "faceOffWins",
-            "timeOnIce",
-        ],
         "MLB": [
             "pitcher strikeouts",
             "pitching outs",
@@ -220,6 +175,51 @@ def meditate(force, stats, league):
             "PF",
             "MIN",
         ],
+        "NFL": [
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "qb yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "passing tds",
+            "tds",
+            "rushing tds",
+            "receiving tds",
+            "qb tds",
+            "completions",
+            "carries",
+            "receptions",
+            "interceptions",
+            "attempts",
+            "targets",
+            "longest completion",
+            "longest rush",
+            "longest reception",
+            "sacks taken",
+            "passing first downs",
+            "first downs",
+            "fumbles lost",
+            "completion percentage"
+        ],
+        "NHL": [
+            "saves",
+            "shots",
+            "points",
+            "goalsAgainst",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "blocked",
+            "powerPlayPoints",
+            "sogBS",
+            "fantasy points prizepicks",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
+        ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -257,36 +257,41 @@ def meditate(force, stats, league):
             with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
                 json.dump(book_weights, outfile, indent=4)
 
-            need_model = True
             filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
             filepath = pkg_resources.files(data) / filename
-            if os.path.isfile(filepath) and not force:
-                if stats:
-                    with open(filepath, 'rb') as infile:
-                        filedict = pickle.load(infile)
-                        model = filedict['model']
-                        params = filedict['params']
-                        dist = filedict['distribution']
-                        cv = filedict['cv']
-                        step = filedict['step']
-                    need_model = False
-                else:
-                    continue
+            if os.path.isfile(filepath):
+                with open(filepath, 'rb') as infile:
+                    filedict = pickle.load(infile)
+                    model = filedict['model']
+                    params = filedict['params']
+                    dist = filedict['distribution']
+                    cv = filedict['cv']
+                    step = filedict['step']
+            else:
+                filedict = {}
 
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / (filename + ".csv")
-            if os.path.isfile(filepath) and not force:
+            if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0).dropna()
+                cutoff_date = pd.to_datetime(M.loc[M.Archived==1, "Date"]).max().date()
+                start_date = datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))
+                M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:
-                M = stat_data.get_training_matrix(market)
+                cutoff_date = None
+                M = []
 
-                if M.empty:
-                    continue
-                
-                M = trim_matrix(M)
-                M.to_csv(filepath)
+            new_M = stat_data.get_training_matrix(market, cutoff_date)
+
+            if new_M.empty and not force:
+                continue
+            
+            M = pd.concat([M,new_M], ignore_index=True)
+            M.Date = pd.to_datetime(M.Date)
+            M = trim_matrix(M)
+            M.to_csv(filepath)
 
             M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
@@ -305,22 +310,33 @@ def meditate(force, stats, league):
                 X, y, test_size=0.2, random_state=42
             )
 
-            if need_model:
-                y_train_labels = np.ravel(y_train.to_numpy())
+            y_train_labels = np.ravel(y_train.to_numpy())
 
-                if stat_cv[league].get(market) == 1:
-                    dist = "Poisson"
-                elif stat_cv[league].get(market) is not None:
-                    dist = "Gaussian"
-                else:
-                    lgblss_dist_class = DistributionClass()
-                    candidate_distributions = [Gaussian, Poisson]
+            if stat_cv[league].get(market) == 1:
+                dist = "Poisson"
+            elif stat_cv[league].get(market) is not None:
+                dist = "Gaussian"
+            else:
+                lgblss_dist_class = DistributionClass()
+                candidate_distributions = [Gaussian, Poisson]
 
-                    dist = lgblss_dist_class.dist_select(
-                        target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
+                dist = lgblss_dist_class.dist_select(
+                    target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
 
-                    dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
-                
+                dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
+            
+            opt_params = filedict.get("params")
+            dtrain = lgb.Dataset(
+                X_train, label=y_train_labels)
+            model = LightGBMLSS(distributions[dist])
+
+            sv = X_train[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+            model.start_values = sv
+
+            if opt_params is None or opt_params.get("opt_rounds") is None or force:
                 params = {
                     "feature_pre_filter": ["none", [False]],
                     "num_threads": ["none", [8]],
@@ -338,16 +354,7 @@ def meditate(force, stats, league):
                     "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
                 }
-
-                dtrain = lgb.Dataset(
-                    X_train, label=y_train_labels)
-                model = LightGBMLSS(distributions[dist])
-                sv = X_train[["MeanYr", "STDYr"]].to_numpy()
-                if dist == "Poisson":
-                    sv = sv[:,0]
-                    sv.shape = (len(sv),1)
-                model.start_values = sv
-                opt_param = model.hyper_opt(params,
+                opt_params = model.hyper_opt(params,
                                             dtrain,
                                             num_boost_round=999,
                                             nfold=4,
@@ -356,14 +363,11 @@ def meditate(force, stats, league):
                                             n_trials=100,
                                             silence=True,
                                             )
-                opt_params = opt_param.copy()
-                n_rounds = opt_params["opt_rounds"]
-                del opt_params["opt_rounds"]
 
-                model.train(opt_params,
-                            dtrain,
-                            num_boost_round=n_rounds
-                            )
+            model.train(opt_params,
+                        dtrain,
+                        num_boost_round=opt_params["opt_rounds"]
+                        )
 
             prob_params_train = pd.DataFrame()
             prob_params = pd.DataFrame()
@@ -507,7 +511,7 @@ def meditate(force, stats, league):
                     "Entropy": e,
                     "Training Gap": g
                 },
-                "params": params,
+                "params": opt_params,
                 "distribution": dist,
                 "cv": cv,
                 "std": stat_std
@@ -707,6 +711,7 @@ def fit_book_weights(league, market):
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
     
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
+    x[x<0] = np.nan
     y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
     if len(x) > 9:
         guess = book_weights.get(league, {}).get(market, {})
