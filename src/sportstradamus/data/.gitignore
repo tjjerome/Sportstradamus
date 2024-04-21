@@ -7,3 +7,4 @@ stat_std.json
 most_important_features.json
 features_to_filter.json
 book_weights.json
+training_report.txt
