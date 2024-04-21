@@ -2358,7 +2358,7 @@ class StatsNFL(Stats):
         """
         super().__init__()
         self.season_start = datetime.strptime("2023-09-07", "%Y-%m-%d").date()
-        cols = ['player id', 'player display name', 'position group', 'recent team', 'season', 'week', 'season type',
+        cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
                 'rushing tds', 'rushing fumbles', 'rushing fumbles lost', 'rushing 2pt conversions', 'receptions',
@@ -2521,15 +2521,16 @@ class StatsNFL(Stats):
 
         nfl_data.rename(
             columns=lambda x: x.replace("_", " "), inplace=True)
+        nfl_data.rename(columns={"recent team": "team"}, inplace=True)
         nfl_data[['target share', 'air yards share', 'wopr', 'yards per target']] = nfl_data[[
             'target share', 'air yards share', 'wopr', 'yards per target']].fillna(0.0)
 
-        nfl_data.loc[nfl_data['recent team']
-                     == 'LA', 'recent team'] = "LAR"
-        nfl_data.loc[nfl_data['recent team']
-                     == 'WSH', 'recent team'] = "WAS"
-        nfl_data.loc[nfl_data['recent team']
-                     == 'OAK', 'recent team'] = "LV"
+        nfl_data.loc[nfl_data['team']
+                     == 'LA', 'team'] = "LAR"
+        nfl_data.loc[nfl_data['team']
+                     == 'WSH', 'team'] = "WAS"
+        nfl_data.loc[nfl_data['team']
+                     == 'OAK', 'team'] = "LV"
 
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
@@ -2551,45 +2552,45 @@ class StatsNFL(Stats):
         teamDataList = []
         for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog.loc[self.gamelog.isna().any(axis=1)])):
             if row['opponent'] != row['opponent']:
-                if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
+                if row['team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
-                                                               == row['recent team']), 'away_team'].values[0]
+                                                               == row['team']), 'away_team'].values[0]
                     self.gamelog.at[i, 'gameday'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
-                                                                                                == row['recent team']), 'gameday'].values[0]
+                                                                                                == row['team']), 'gameday'].values[0]
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
-                                                                                                == row['recent team']), 'game_id'].values[0]
+                                                                                                == row['team']), 'game_id'].values[0]
                 else:
                     self.gamelog.at[i, 'home'] = False
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
-                                                               == row['recent team']), 'home_team'].values[0]
+                                                               == row['team']), 'home_team'].values[0]
                     self.gamelog.at[i, 'gameday'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
-                                                                                                == row['recent team']), 'gameday'].values[0]
+                                                                                                == row['team']), 'gameday'].values[0]
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
-                                                                                                == row['recent team']), 'game_id'].values[0]
+                                                                                                == row['team']), 'game_id'].values[0]
             if row.isna().any():
                 if self.season_start.year != row['season']:
                     self.season_start = datetime(row['season'], 9, 1).date()
                     self.need_pbp = True
 
                 playerData = self.parse_pbp(
-                    row['week'], row['recent team'], row['season'], row['player display name'])
+                    row['week'], row['team'], row['season'], row['player display name'])
                 if type(playerData) is not int:
                     for k, v in playerData.items():
                         self.gamelog.at[i, k.replace(
                             "_", " ")] = np.nan_to_num(v)
 
-            if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
+            if row['team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
                                                           (self.teamlog.week == row.week), 'team'].to_list() and \
-                    (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
+                    (row['week'], row['team']) not in [(t['week'], t['team']) for t in teamDataList]:
                 teamData = {
                     "season": row.season,
                     "week": row.week,
-                    "team": row['recent team'],
+                    "team": row['team'],
                     "gameday": self.gamelog.at[i, 'gameday']
                 }
                 team_pbp = self.parse_pbp(
-                    row['week'], row['recent team'], row['season'])
+                    row['week'], row['team'], row['season'])
 
                 if type(team_pbp) is not int:
                     teamData.update(team_pbp)
@@ -3045,8 +3046,8 @@ class StatsNFL(Stats):
         teamlog.drop(columns=['gameday'], inplace=True)
 
         # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NFL", x["gameday"][:10], x["recent team"]), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["recent team"]), axis=1)
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NFL", x["gameday"][:10], x["team"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
             lambda x: np.mean(x.tail(5)[list(set(self.stat_types['offense']) | set(self.stat_types['defense']))], 0))
@@ -3439,7 +3440,7 @@ class StatsNFL(Stats):
 
             offer = {
                 "Player": name,
-                "Team": game["recent team"],
+                "Team": game["team"],
                 "Market": market,
                 "Opponent": game["opponent"],
                 "Home": int(game["home"])

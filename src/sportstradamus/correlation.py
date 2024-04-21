@@ -314,7 +314,7 @@ log_strings = {
         "usage": "snap pct",
         "usage_sec": "route participation",
         "position": "position group",
-        "team": "recent team",
+        "team": "team",
         "home": "home"
     },
     "NBA": {
