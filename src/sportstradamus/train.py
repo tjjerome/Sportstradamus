@@ -55,7 +55,7 @@ log_strings = {
         "usage": "snap pct",
         "usage_sec": "route participation",
         "position": "position group",
-        "team": "team",
+        "team": "recent team",
         "home": "home",
         "win": "WL",
         "score": "points"
