@@ -13,25 +13,42 @@ from tqdm import tqdm
 from time import time
 import requests
 
-# filepath = pkg_resources.files(data) / "banned_combos.json"
-# with open(filepath, "r") as infile:
-#     banned = json.load(infile)
+filepath = pkg_resources.files(data) / "banned_combos.json"
+with open(filepath, "r") as infile:
+    banned = json.load(infile)
 
-# for platform in banned.keys():
-#     for league in list(banned[platform].keys()):
-#         if "modified" in list(banned[platform][league].keys()):
-#             for market in list(banned[platform][league]["modified"].keys()):
-#                 for submarket in list(banned[platform][league]["modified"][market].keys()):
-#                     market2 = market
-#                     submarket2 = submarket
-#                     if "_OPP_" in submarket:
-#                         market2 = "_OPP_"+market2
-#                         submarket2 = submarket2.replace("_OPP_", "")
-#                     banned[platform][league]["modified"].setdefault(submarket2, {})
-#                     banned[platform][league]["modified"][submarket2][market2] = banned[platform][league]["modified"][market][submarket]
+platform = "Underdog"
+league = "NHL" 
+for market in list(banned[platform][league]["modified"].keys()):
+    for submarket in list(banned[platform][league]["modified"][market].keys()):
+        a = submarket.split(".")
+        if a[0] == "C":
+            banned[platform][league]["modified"][market][".".join(["R", a[1]])] = banned[platform][league]["modified"][market][submarket]
+            banned[platform][league]["modified"][market][".".join(["L", a[1]])] = banned[platform][league]["modified"][market][submarket]
+        elif a[0] == "_OPP_C":
+            banned[platform][league]["modified"][market][".".join(["_OPP_R", a[1]])] = banned[platform][league]["modified"][market][submarket]
+            banned[platform][league]["modified"][market][".".join(["_OPP_L", a[1]])] = banned[platform][league]["modified"][market][submarket]
+    
+    a = market.split(".")
+    if a[0] == "C":
+        banned[platform][league]["modified"][".".join(["R", a[1]])] = banned[platform][league]["modified"][market]
+        banned[platform][league]["modified"][".".join(["L", a[1]])] = banned[platform][league]["modified"][market]
 
-# with open(filepath, "w") as outfile:
-#     json.dump(banned, outfile, indent=4)
+for platform in banned.keys():
+    for league in list(banned[platform].keys()):
+        if "modified" in list(banned[platform][league].keys()):
+            for market in list(banned[platform][league]["modified"].keys()):
+                for submarket in list(banned[platform][league]["modified"][market].keys()):
+                    market2 = market
+                    submarket2 = submarket
+                    if "_OPP_" in submarket:
+                        market2 = "_OPP_"+market2
+                        submarket2 = submarket2.replace("_OPP_", "")
+                    banned[platform][league]["modified"].setdefault(submarket2, {})
+                    banned[platform][league]["modified"][submarket2][market2] = banned[platform][league]["modified"][market][submarket]
+
+with open(filepath, "w") as outfile:
+    json.dump(banned, outfile, indent=4)
 
 # url = "https://api.prizepicks.com/projections?league_id=7"
 # params = {
@@ -74,7 +91,7 @@ import requests
 # NFL.season_start = datetime(2023, 9, 1).date()
 # NFL.update()
 
-NBA = StatsNBA()
+# NBA = StatsNBA()
 # NBA.load()
 # NBA.update()
 # NBA.profile_market("BLST")
@@ -88,15 +105,15 @@ NBA = StatsNBA()
 #     "League": "NBA"
 # })
 # pass
-NBA.season = "2021-22"
-NBA.season_start = datetime(2021, 10, 1).date()
-NBA.update()
-NBA.season = "2022-23"
-NBA.season_start = datetime(2022, 10, 1).date()
-NBA.update()
-NBA.season = "2023-24"
-NBA.season_start = datetime(2023, 10, 1).date()
-NBA.update()
+# NBA.season = "2021-22"
+# NBA.season_start = datetime(2021, 10, 1).date()
+# NBA.update()
+# NBA.season = "2022-23"
+# NBA.season_start = datetime(2022, 10, 1).date()
+# NBA.update()
+# NBA.season = "2023-24"
+# NBA.season_start = datetime(2023, 10, 1).date()
+# NBA.update()
 
 # NHL = StatsNHL()
 # NHL.season_start = datetime(2021, 10, 12).date()

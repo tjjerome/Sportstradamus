@@ -266,15 +266,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp(books)
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp(books)
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats, parlays)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -642,8 +642,8 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
 
             idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25) & (game_df["Model"] >= .3)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(15)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(28).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20)
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
