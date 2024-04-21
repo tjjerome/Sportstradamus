@@ -86,7 +86,7 @@ def reflect():
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
                 "NFL": "gameday", "NHL": "gameDate"}
     teamStr = {"MLB": "team", "NBA": "TEAM_ABBREVIATION",
-                "NFL": "recent team", "NHL": "team"}
+                "NFL": "team", "NHL": "team"}
 
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
