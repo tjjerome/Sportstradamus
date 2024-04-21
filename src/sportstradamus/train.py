@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -22,6 +22,8 @@ import lightgbm as lgb
 import pandas as pd
 import click
 import os
+from datetime import datetime, timedelta
+from tqdm import tqdm
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions import (
     Gaussian,
@@ -31,9 +33,8 @@ from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
 import warnings
-
-with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
-    stat_cv = json.load(f)
+pd.options.mode.chained_assignment = None
+np.seterr(divide='ignore', invalid='ignore')
 
 dist_params = {
     "stabilization": "None",
@@ -119,37 +120,14 @@ archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--stats/--no-stats", default=False, help="Regenerate model reports")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
               help="Select league to train on")
-def meditate(force, stats, league):
+def meditate(force, league):
+    global book_weights
 
     np.random.seed(69)
 
     all_markets = {
-        "NBA": [
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-            "MIN",
-        ],
         "NFL": [
             "passing yards",
             "rushing yards",
@@ -178,22 +156,28 @@ def meditate(force, stats, league):
             "fumbles lost",
             "completion percentage"
         ],
-        "NHL": [
-            "saves",
-            "shots",
-            "points",
-            "goalsAgainst",
-            "goalie fantasy points underdog",
-            "skater fantasy points underdog",
-            "blocked",
-            "powerPlayPoints",
-            "sogBS",
+        "NBA": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
             "fantasy points prizepicks",
-            "hits",
-            "goals",
-            "assists",
-            "faceOffWins",
-            "timeOnIce",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN",
         ],
         "MLB": [
             "pitcher strikeouts",
@@ -218,34 +202,48 @@ def meditate(force, stats, league):
             "batter strikeouts",
             "singles",
             "doubles",
-            "triples",
             "home runs"
+        ],
+        "NHL": [
+            "saves",
+            "shots",
+            "points",
+            "goalsAgainst",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "blocked",
+            "powerPlayPoints",
+            "sogBS",
+            "fantasy points prizepicks",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+            "timeOnIce",
         ],
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
-
-        if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
-            with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
-                book_weights = json.load(infile)
-        else:
-            book_weights = {}
-
+        
         book_weights.setdefault(league, {}).setdefault("Moneyline", {})
-        book_weights[league]["Moneyline"] = evaluate_books(league, "Moneyline")
+        book_weights[league]["Moneyline"] = fit_book_weights(league, "Moneyline")
 
         book_weights.setdefault(league, {}).setdefault("Totals", {})
-        book_weights[league]["Totals"] = evaluate_books(league, "Totals")
+        book_weights[league]["Totals"] = fit_book_weights(league, "Totals")
 
         if league=="MLB":
             book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
-            book_weights[league]["1st 1 innings"] = evaluate_books(league, "1st 1 innings")
+            book_weights[league]["1st 1 innings"] = fit_book_weights(league, "1st 1 innings")
             book_weights.setdefault(league, {}).setdefault("pitcher win", {})
-            book_weights[league]["pitcher win"] = evaluate_books(league, "pitcher win")
+            book_weights[league]["pitcher win"] = fit_book_weights(league, "pitcher win")
+            book_weights.setdefault(league, {}).setdefault("triples", {})
+            book_weights[league]["triples"] = fit_book_weights(league, "triples")
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
+
+        correlate(league, force)
 
         for market in markets:
             stat_data = stat_structs[league]
@@ -257,175 +255,47 @@ def meditate(force, stats, league):
                 book_weights = {}
 
             book_weights.setdefault(league, {}).setdefault(market, {})
-            book_weights[league][market] = evaluate_books(league, market)
+            book_weights[league][market] = fit_book_weights(league, market)
 
             with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
                 json.dump(book_weights, outfile, indent=4)
 
-            need_model = True
-            filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-            filepath = pkg_resources.files(data) / filename
-            if os.path.isfile(filepath) and not force:
-                if stats:
-                    with open(filepath, 'rb') as infile:
-                        filedict = pickle.load(infile)
-                        model = filedict['model']
-                        params = filedict['params']
-                        dist = filedict['distribution']
-                        cv = filedict['cv']
-                        step = filedict['step']
-                    need_model = False
-                else:
-                    continue
+            filename = "_".join([league, market]).replace(" ", "-")
+            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+            if os.path.isfile(filepath):
+                with open(filepath, 'rb') as infile:
+                    filedict = pickle.load(infile)
+                    model = filedict['model']
+                    params = filedict['params']
+                    dist = filedict['distribution']
+                    cv = filedict['cv']
+                    step = filedict['step']
+            else:
+                filedict = {}
 
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
-            filename = "_".join([league, market]).replace(" ", "-")
-            filepath = pkg_resources.files(data) / (filename + ".csv")
-            if os.path.isfile(filepath) and not force:
+            filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
+            if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0).dropna()
+                cutoff_date = pd.to_datetime(M.loc[M.Archived==1, "Date"]).max().date()
+                start_date = (datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))).date()
+                M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:
-                M = stat_data.get_training_matrix(market)
+                cutoff_date = None
+                M = []
 
-                if M.empty:
-                    continue
+            new_M = stat_data.get_training_matrix(market, cutoff_date)
 
-                while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
-                    M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                             < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
-                    M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                               > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
-                                                                                                                > 300, "DaysIntoSeason"].min()
+            if new_M.empty and not force:
+                continue
+            
+            M = pd.concat([M,new_M], ignore_index=True)
+            M.Date = pd.to_datetime(M.Date)
+            M = trim_matrix(M)
+            M.to_csv(filepath)
 
-                # Trim the fat
-                M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
-                    M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
-                M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
-
-                if "Position" in M.columns:
-                    for i in M.Position.unique():
-                        target = M.loc[(M["Archived"] == 1) & (
-                            M["Position"] == i), "Line"].median()
-
-                        less = M.loc[(M["Archived"] != 1) & (
-                            M["Position"] == i) & (M["Line"] < target), "Line"]
-                        more = M.loc[(M["Archived"] != 1) & (
-                            M["Position"] == i) & (M["Line"] > target), "Line"]
-
-                        n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
-                        if n > 0:
-                            if less.count() > more.count():
-                                chopping_block = less.index
-                                counts, bins = np.histogram(less)
-                                counts = counts/len(less)
-                                actuals = M.loc[(M["Archived"] == 1) & (
-                                    M["Position"] == i) & (M["Line"] < target), "Line"]
-                                actual_counts, bins = np.histogram(
-                                    actuals, bins)
-                                if len(actuals):
-                                    actual_counts = actual_counts / \
-                                        len(actuals)
-                                diff = np.clip(
-                                    counts-actual_counts, 1e-8, None)
-                                p = np.zeros(len(less))
-                                for j, a in enumerate(bins[:-1]):
-                                    p[less >= a] = diff[j]
-                                p = p/np.sum(p)
-                            else:
-                                chopping_block = more.index
-                                counts, bins = np.histogram(more)
-                                counts = counts/len(more)
-                                actuals = M.loc[(M["Archived"] == 1) & (
-                                    M["Position"] == i) & (M["Line"] > target), "Line"]
-                                actual_counts, bins = np.histogram(
-                                    actuals, bins)
-                                if len(actuals):
-                                    actual_counts = actual_counts / \
-                                        len(actuals)
-                                diff = np.clip(
-                                    counts-actual_counts, 1e-8, None)
-                                p = np.zeros(len(more))
-                                for j, a in enumerate(bins[:-1]):
-                                    p[more >= a] = diff[j]
-                                p = p/np.sum(p)
-
-                            cut = np.random.choice(
-                                chopping_block, n, replace=False, p=p)
-                            M.drop(cut, inplace=True)
-                else:
-                    if len(M[(M["Archived"] == 1)]) > 4:
-                        target = M.loc[(M["Archived"] == 1), "Line"].median()
-                    else:
-                        target = M["Line"].mean()
-
-                    less = M.loc[(M["Archived"] != 1) & (M["Line"] < target), "Line"]
-                    more = M.loc[(M["Archived"] != 1) & (M["Line"] > target), "Line"]
-
-                    n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
-                    if n > 0:
-                        if less.count() > more.count():
-                            chopping_block = less.index
-                            counts, bins = np.histogram(less)
-                            counts = counts/len(less)
-                            actuals = M.loc[(M["Archived"] == 1) & (
-                                M["Line"] < target), "Line"]
-                            actual_counts, bins = np.histogram(
-                                actuals, bins)
-                            if len(actuals):
-                                actual_counts = actual_counts/len(actuals)
-                            diff = np.clip(
-                                counts-actual_counts, 1e-8, None)
-                            p = np.zeros(len(less))
-                            for j, a in enumerate(bins[:-1]):
-                                p[less >= a] = diff[j]
-                            p = p/np.sum(p)
-                        else:
-                            chopping_block = more.index
-                            counts, bins = np.histogram(more)
-                            counts = counts/len(more)
-                            actuals = M.loc[(M["Archived"] == 1) & (
-                                M["Line"] > target), "Line"]
-                            actual_counts, bins = np.histogram(
-                                actuals, bins)
-                            if len(actuals):
-                                actual_counts = actual_counts/len(actuals)
-                            diff = np.clip(
-                                counts-actual_counts, 1e-8, None)
-                            p = np.zeros(len(more))
-                            for j, a in enumerate(bins[:-1]):
-                                p[more >= a] = diff[j]
-                            p = p/np.sum(p)
-
-                        cut = np.random.choice(
-                            chopping_block, n, replace=False, p=p)
-                        M.drop(cut, inplace=True)
-
-                M = M.loc[(M["Odds"] > .2) & (M["Odds"] < .8)]
-                target = (M.loc[(M["Archived"] == 1), "Result"] >
-                            M.loc[(M["Archived"] == 1), "Line"]).mean()
-                balance = (M["Result"] > M["Line"]).mean()
-                n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
-                if balance < target:
-                    chopping_block = M.loc[(M["Archived"] != 1) & (
-                        M["Result"] < M["Line"])].index
-                    p = (1/M.loc[chopping_block,
-                                    "MeanYr"].clip(0.1)).to_numpy()
-                    p = p/np.sum(p)
-                else:
-                    chopping_block = M.loc[(M["Archived"] != 1) & (
-                        M["Result"] > M["Line"])].index
-                    p = (M.loc[chopping_block, "MeanYr"].clip(
-                        0.1)).to_numpy()
-                    p = p/np.sum(p)
-
-                if n > 0:
-                    cut = np.random.choice(
-                        chopping_block, n, replace=False, p=p)
-                    M.drop(cut, inplace=True)
-
-                M.drop(columns=["Archived"], inplace=True)
-                M.to_csv(filepath)
-
+            M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
             X = M.drop(columns=['Result'])
             step = M["Result"].drop_duplicates().sort_values().diff().min()
@@ -442,22 +312,33 @@ def meditate(force, stats, league):
                 X, y, test_size=0.2, random_state=42
             )
 
-            if need_model:
-                y_train_labels = np.ravel(y_train.to_numpy())
+            y_train_labels = np.ravel(y_train.to_numpy())
 
-                if stat_cv[league].get(market) == 1:
-                    dist = "Poisson"
-                elif stat_cv[league].get(market) is not None:
-                    dist = "Gaussian"
-                else:
-                    lgblss_dist_class = DistributionClass()
-                    candidate_distributions = [Gaussian, Poisson]
+            if stat_cv[league].get(market) == 1:
+                dist = "Poisson"
+            elif stat_cv[league].get(market) is not None:
+                dist = "Gaussian"
+            else:
+                lgblss_dist_class = DistributionClass()
+                candidate_distributions = [Gaussian, Poisson]
 
-                    dist = lgblss_dist_class.dist_select(
-                        target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
+                dist = lgblss_dist_class.dist_select(
+                    target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
 
-                    dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
-                
+                dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
+            
+            opt_params = filedict.get("params")
+            dtrain = lgb.Dataset(
+                X_train, label=y_train_labels)
+            model = LightGBMLSS(distributions[dist])
+
+            sv = X_train[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+            model.start_values = sv
+
+            if opt_params is None or opt_params.get("opt_rounds") is None or force:
                 params = {
                     "feature_pre_filter": ["none", [False]],
                     "num_threads": ["none", [8]],
@@ -475,16 +356,7 @@ def meditate(force, stats, league):
                     "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
                 }
-
-                dtrain = lgb.Dataset(
-                    X_train, label=y_train_labels)
-                model = LightGBMLSS(distributions[dist])
-                sv = X_train[["MeanYr", "STDYr"]].to_numpy()
-                if dist == "Poisson":
-                    sv = sv[:,0]
-                    sv.shape = (len(sv),1)
-                model.start_values = sv
-                opt_param = model.hyper_opt(params,
+                opt_params = model.hyper_opt(params,
                                             dtrain,
                                             num_boost_round=999,
                                             nfold=4,
@@ -493,14 +365,11 @@ def meditate(force, stats, league):
                                             n_trials=100,
                                             silence=True,
                                             )
-                opt_params = opt_param.copy()
-                n_rounds = opt_params["opt_rounds"]
-                del opt_params["opt_rounds"]
 
-                model.train(opt_params,
-                            dtrain,
-                            num_boost_round=n_rounds
-                            )
+            model.train(opt_params,
+                        dtrain,
+                        num_boost_round=opt_params["opt_rounds"]
+                        )
 
             prob_params_train = pd.DataFrame()
             prob_params = pd.DataFrame()
@@ -570,6 +439,7 @@ def meditate(force, stats, league):
                     np.abs(norm.cdf(y_test["Result"], prob_params["loc"], prob_params["scale"])-.5))
                 cv = y.Result.std()/y.Result.mean()
 
+            stat_std = y.Result.std()
             dev = mean_tweedie_deviance(y_test, ev, power=p)
 
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
@@ -581,15 +451,9 @@ def meditate(force, stats, league):
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
-            y_proba_filt = np.ones_like(y_proba_no_filt)*.5
-            filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
-            odds_filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(X_train.Odds.to_numpy().reshape(-1,1)*2-1, y_class)
-            Cs = np.concatenate([filt.coef_, odds_filt.coef_], axis=1)
-            Cs = np.clip(Cs,0,None)
-            filt.coef_ = Cs/np.linalg.norm(Cs)*np.min([np.linalg.norm(Cs), 2])
-            filt.n_features_in_ = 2
+            X_train.loc[X_train["Odds"] == 0, "Odds"] = 0.5
+            X_test.loc[X_test["Odds"] == 0, "Odds"] = 0.5
+            filt = fit_model_weight(y_proba_train, X_train.Odds.to_numpy().reshape(-1,1), y_class)
             y_proba_filt = filt.predict_proba(
                 np.concatenate([y_proba, X_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
 
@@ -649,9 +513,10 @@ def meditate(force, stats, league):
                     "Entropy": e,
                     "Training Gap": g
                 },
-                "params": params,
+                "params": opt_params,
                 "distribution": dist,
-                "cv": cv
+                "cv": cv,
+                "std": stat_std
             }
 
             X_test['Result'] = y_test['Result']
@@ -669,23 +534,18 @@ def meditate(force, stats, league):
 
             X_test['P'] = y_proba_filt[:, 1]
 
-            filename = "_".join(["test", league, market]
-                                ).replace(" ", "-") + ".csv"
-
-            filepath = pkg_resources.files(data) / filename
-            with open(filepath, "wb") as outfile:
+            filepath = pkg_resources.files(data) / f"test_sets/{filename}.csv"
+            with open(filepath, "w") as outfile:
                 X_test.to_csv(filepath)
 
-            filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-
-            filepath = pkg_resources.files(data) / filename
+            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
             with open(filepath, "wb") as outfile:
                 pickle.dump(filedict, outfile, -1)
                 del filedict
                 del model
 
             report()
-    see_features()
+    # see_features()
 
 
 def report():
@@ -694,6 +554,8 @@ def report():
     model_list.sort()
     with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
         stat_cv = json.load(f)
+    with open(pkg_resources.files(data) / "stat_std.json", "r") as f:
+        stat_std = json.load(f)
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
             with open(pkg_resources.files(data) / model_str, "rb") as infile:
@@ -701,13 +563,16 @@ def report():
 
             name = model_str.split("_")
             cv = model['cv']
+            std = model.get('std',0)
             league = name[0]
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
-            if league not in stat_cv:
-                stat_cv[league] = {}
 
-            stat_cv[league][market] = cv
+            stat_cv.setdefault(league, {})
+            stat_cv[league][market] = float(cv)
+
+            stat_std.setdefault(league, {})
+            stat_std[league][market] = float(std)
 
             f.write(f" {league} {market} ".center(90, "="))
             f.write("\n")
@@ -718,6 +583,9 @@ def report():
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
         json.dump(stat_cv, f, indent=4)
+
+    with open(pkg_resources.files(data) / "stat_std.json", "w") as f:
+        json.dump(stat_std, f, indent=4)
 
 
 def see_features():
@@ -780,7 +648,10 @@ def see_features():
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
 
-def evaluate_books(league, market):
+def fit_book_weights(league, market):
+    global book_weights
+    warnings.simplefilter('ignore', UserWarning)
+    print(f"Fitting Book Weights - {league}, {market}")
     df = archive.to_pandas(league, market)
     df = df[[col for col in df.columns if col != "pinnacle"]]
     if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
@@ -836,11 +707,547 @@ def evaluate_books(league, market):
             prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
     
-    x = test_df.to_numpy()
-    y = result.to_numpy()
-    res = minimize(objective, np.ones(len(test_df.columns))*5, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+    x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
+    x[x<0] = np.nan
+    y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
+    if len(x) > 9:
+        guess = book_weights.get(league, {}).get(market, {})
+        for book in test_df.columns:
+            guess.setdefault(book, 1)
+            
+        guess = list(guess.values())
+        res = minimize(objective, guess, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
     
-    return {k:res.x[i] for i, k in enumerate(test_df.columns)}
+        return {k:res.x[i] for i, k in enumerate(test_df.columns)}
+    else:
+        return {}
+
+def fit_model_weight(model_prob, odds_prob, y_class):
+    x = np.concatenate([model_prob, odds_prob], axis=1)*2-1
+    filt = LogisticRegression(
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(x, y_class)
+    Cs = filt.coef_
+    guess = Cs/np.linalg.norm(Cs)*np.min([np.linalg.norm(Cs), 2])
+    guess = np.clip(guess[0], 0, 2)
+
+    def objective(w, x, y):
+        filt.coef_ = np.array([w])
+        proba = filt.predict_proba(x)
+        return brier_score_loss(y, proba[:,1], pos_label=1) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
+
+    res = minimize(objective, guess, args=(x, y_class), bounds=[(0, 2)]*2, tol=1e-8, method='TNC')
+    filt.coef_ = np.array([res.x])
+    return filt
+
+def trim_matrix(M):
+    warnings.simplefilter('ignore', UserWarning)
+    # Trim the fat
+    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
+        M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
+                                                                    < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
+        M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
+                                                                    > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
+                                                                                                    > 300, "DaysIntoSeason"].min()
+
+    M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
+        M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
+    M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
+
+    if "Position" in M.columns:
+        for i in M.Position.unique():
+            target = M.loc[(M["Archived"] == 1) & (
+                M["Position"] == i), "Line"].median()
+
+            less = M.loc[(M["Archived"] != 1) & (
+                M["Position"] == i) & (M["Line"] < target), "Line"]
+            more = M.loc[(M["Archived"] != 1) & (
+                M["Position"] == i) & (M["Line"] > target), "Line"]
+
+            n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
+            if n > 0:
+                if less.count() > more.count():
+                    chopping_block = less.index
+                    counts, bins = np.histogram(less)
+                    counts = counts/len(less)
+                    actuals = M.loc[(M["Archived"] == 1) & (
+                        M["Position"] == i) & (M["Line"] < target), "Line"]
+                    actual_counts, bins = np.histogram(
+                        actuals, bins)
+                    if len(actuals):
+                        actual_counts = actual_counts / \
+                            len(actuals)
+                    diff = np.clip(
+                        counts-actual_counts, 1e-8, None)
+                    p = np.zeros(len(less))
+                    for j, a in enumerate(bins[:-1]):
+                        p[less >= a] = diff[j]
+                    p = p/np.sum(p)
+                else:
+                    chopping_block = more.index
+                    counts, bins = np.histogram(more)
+                    counts = counts/len(more)
+                    actuals = M.loc[(M["Archived"] == 1) & (
+                        M["Position"] == i) & (M["Line"] > target), "Line"]
+                    actual_counts, bins = np.histogram(
+                        actuals, bins)
+                    if len(actuals):
+                        actual_counts = actual_counts / \
+                            len(actuals)
+                    diff = np.clip(
+                        counts-actual_counts, 1e-8, None)
+                    p = np.zeros(len(more))
+                    for j, a in enumerate(bins[:-1]):
+                        p[more >= a] = diff[j]
+                    p = p/np.sum(p)
+
+                cut = np.random.choice(
+                    chopping_block, n, replace=False, p=p)
+                M.drop(cut, inplace=True)
+    else:
+        if len(M[(M["Archived"] == 1)]) > 4:
+            target = M.loc[(M["Archived"] == 1), "Line"].median()
+        else:
+            target = M["Line"].mean()
+
+        less = M.loc[(M["Archived"] != 1) & (M["Line"] < target), "Line"]
+        more = M.loc[(M["Archived"] != 1) & (M["Line"] > target), "Line"]
+
+        n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
+        if n > 0:
+            if less.count() > more.count():
+                chopping_block = less.index
+                counts, bins = np.histogram(less)
+                counts = counts/len(less)
+                actuals = M.loc[(M["Archived"] == 1) & (
+                    M["Line"] < target), "Line"]
+                actual_counts, bins = np.histogram(
+                    actuals, bins)
+                if len(actuals):
+                    actual_counts = actual_counts/len(actuals)
+                diff = np.clip(
+                    counts-actual_counts, 1e-8, None)
+                p = np.zeros(len(less))
+                for j, a in enumerate(bins[:-1]):
+                    p[less >= a] = diff[j]
+                p = p/np.sum(p)
+            else:
+                chopping_block = more.index
+                counts, bins = np.histogram(more)
+                counts = counts/len(more)
+                actuals = M.loc[(M["Archived"] == 1) & (
+                    M["Line"] > target), "Line"]
+                actual_counts, bins = np.histogram(
+                    actuals, bins)
+                if len(actuals):
+                    actual_counts = actual_counts/len(actuals)
+                diff = np.clip(
+                    counts-actual_counts, 1e-8, None)
+                p = np.zeros(len(more))
+                for j, a in enumerate(bins[:-1]):
+                    p[more >= a] = diff[j]
+                p = p/np.sum(p)
+
+            cut = np.random.choice(
+                chopping_block, n, replace=False, p=p)
+            M.drop(cut, inplace=True)
+
+    pushes = M.loc[M["Result"]==M["Line"]]
+    push_rate = pushes["Archived"].sum()/M["Archived"].sum()
+    M = M.loc[M["Result"]!=M["Line"]]
+    target = (M.loc[(M["Archived"] == 1), "Result"] >
+                M.loc[(M["Archived"] == 1), "Line"]).mean()
+    balance = (M["Result"] > M["Line"]).mean()
+    n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
+
+    if n > 0:
+        if balance < target:
+            chopping_block = M.loc[(M["Archived"] != 1) & (
+                M["Result"] < M["Line"])].index
+            p = (1/M.loc[chopping_block,
+                            "MeanYr"].clip(0.1)).to_numpy()
+            p = p/np.sum(p)
+        else:
+            chopping_block = M.loc[(M["Archived"] != 1) & (
+                M["Result"] > M["Line"])].index
+            p = (M.loc[chopping_block, "MeanYr"].clip(
+                0.1)).to_numpy()
+            p = p/np.sum(p)
+
+        cut = np.random.choice(chopping_block, n, replace=False, p=p)
+        M.drop(cut, inplace=True)
+
+    n = int(push_rate*len(M))-pushes["Archived"].sum()
+    chopping_block = pushes.loc[pushes["Archived"]==0].index
+    n = np.clip(n, None, len(chopping_block))
+    if n > 0:
+        cut = np.random.choice(chopping_block, n, replace=False)
+        pushes.drop(cut, inplace=True)
+
+    M = pd.concat([M,pushes]).sort_values("Date")
+
+    return M
+
+def correlate(league, force=False):
+    print(f"Correlating {league}...")
+    tracked_stats = { 
+        "NFL": {
+            "QB": [
+                "passing yards",
+                "rushing yards",
+                "qb yards",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "passing tds",
+                "rushing tds",
+                "qb tds",
+                "completions",
+                "carries",
+                "interceptions",
+                "attempts",
+                "sacks taken",
+                "longest completion",
+                "longest rush",
+                "passing first downs",
+                "first downs",
+                "fumbles lost",
+                "completion percentage"
+            ],
+            "RB": [
+                "rushing yards",
+                "receiving yards",
+                "yards",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "tds",
+                "rushing tds",
+                "receiving tds",
+                "carries",
+                "receptions",
+                "targets",
+                "longest rush",
+                "longest reception",
+                "first downs",
+                "fumbles lost"
+            ],
+            "WR": [
+                "receiving yards",
+                "yards",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "tds",
+                "receiving tds",
+                "receptions",
+                "targets",
+                "longest reception",
+                "first downs",
+                "fumbles lost"
+            ],
+            "TE": [
+                "receiving yards",
+                "yards",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "tds",
+                "receiving tds",
+                "receptions",
+                "targets",
+                "longest reception",
+                "first downs",
+                "fumbles lost"
+            ],
+        },
+        "NHL": {
+            "G": [
+                "saves",
+                "goalsAgainst",
+                "goalie fantasy points underdog"
+            ],
+            "C": [
+                "points",
+                "shots",
+                "sogBS",
+                "fantasy points prizepicks",
+                "skater fantasy points underdog",
+                "blocked",
+                "hits",
+                "goals",
+                "assists",
+                "faceOffWins",
+                "timeOnIce",
+            ],
+            "L": [
+                "points",
+                "shots",
+                "sogBS",
+                "fantasy points prizepicks",
+                "skater fantasy points underdog",
+                "blocked",
+                "hits",
+                "goals",
+                "assists",
+                "faceOffWins",
+                "timeOnIce",
+            ],
+            "R": [
+                "points",
+                "shots",
+                "sogBS",
+                "fantasy points prizepicks",
+                "skater fantasy points underdog",
+                "blocked",
+                "hits",
+                "goals",
+                "assists",
+                "faceOffWins",
+                "timeOnIce",
+            ],
+            "D": [
+                "points",
+                "shots",
+                "sogBS",
+                "fantasy points prizepicks",
+                "skater fantasy points underdog",
+                "blocked",
+                "hits",
+                "goals",
+                "assists",
+                "faceOffWins",
+                "timeOnIce",
+            ]
+        },
+        "NBA": {
+            "C": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
+            "P": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
+            "B": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
+            "F": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
+            "W": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ]
+        },
+        "MLB": {
+            "P": [
+                "pitcher strikeouts",
+                "pitching outs",
+                "pitches thrown",
+                "hits allowed",
+                "runs allowed",
+                "1st inning runs allowed",
+                "1st inning hits allowed",
+                "pitcher fantasy score",
+                "pitcher fantasy points underdog",
+                "walks allowed"
+            ],
+            "B": [
+                "hitter fantasy score",
+                "hitter fantasy points underdog",
+                "hits+runs+rbi",
+                "total bases",
+                "walks",
+                "stolen bases",
+                "hits",
+                "runs",
+                "rbi",
+                "batter strikeouts",
+                "singles",
+                "doubles",
+                "triples",
+                "home runs"
+            ]
+        }
+    }
+
+    stats = tracked_stats[league]
+    log = stat_structs[league]
+    log_str = log_strings[league]
+
+    filepath = pkg_resources.files(data) / f"training_data/{league}_corr.csv"
+    if os.path.isfile(filepath) and not force:
+        matrix = pd.read_csv(filepath, index_col=0)
+        matrix.DATE = pd.to_datetime(matrix.DATE, format="ISO8601")
+        latest_date = matrix.DATE.max()
+        matrix = matrix.loc[matrix.DATE >= datetime.today()-timedelta(days=300)]
+    else:
+        matrix = pd.DataFrame()
+        latest_date = datetime.today()-timedelta(days=300)
+
+    games = log.gamelog[log_str["game"]].unique()
+    game_data = []
+
+    for gameId in tqdm(games):
+        game_df = log.gamelog.loc[log.gamelog[log_str["game"]] == gameId]
+        gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
+        if gameDate < latest_date:
+            continue
+        home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
+        away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
+
+        if league == "MLB":
+            bat_df = game_df.loc[game_df['starting batter']]
+            bat_df.position = "B" + bat_df.battingOrder.astype(str)
+            bat_df.index = bat_df.position
+            pitch_df = game_df.loc[game_df['starting pitcher']]
+            pitch_df.position = "P"
+            pitch_df.index = pitch_df.position
+            game_df = pd.concat([bat_df, pitch_df])
+        else:
+            log.profile_market(log_str["usage"], date=gameDate)
+            usage = pd.DataFrame(
+                log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
+            usage.reset_index(inplace=True)
+            game_df = game_df.merge(usage, how="left").fillna(0)
+            game_df = game_df.loc[game_df[log_str["position"]] != None]
+            ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
+                [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
+            game_df[log_str["position"]] = game_df[log_str["position"]] + \
+                ranks.astype(str)
+            game_df.index = game_df[log_str["position"]]
+
+        homeStats = {}
+        awayStats = {}
+        for position in stats.keys():
+            homeStats.update(game_df.loc[game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+                position), stats[position]].to_dict('index'))
+            awayStats.update(game_df.loc[~game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+                position), stats[position]].to_dict('index'))
+
+        game_data.append({"TEAM": home_team} | {"DATE": gameDate.date()} |
+            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
+        game_data.append({"TEAM": away_team} | {"DATE": gameDate.date()} |
+            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
+
+    matrix = pd.concat([matrix, pd.json_normalize(game_data)], ignore_index=True)
+    matrix.to_csv(filepath)
+
+    big_c = {}
+    matrix.drop(columns="DATE", inplace=True)
+    matrix.fillna(0, inplace=True)
+    for team in matrix.TEAM.unique():
+        team_matrix = matrix.loc[matrix.TEAM == team].drop(columns="TEAM")
+        team_matrix = team_matrix.loc[:,((team_matrix==0).mean() < .5)]
+        team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
+        c = team_matrix.corr(min_periods=int(len(team_matrix)*.75)).unstack()
+        # c = c.iloc[:int(len(c)/2)]
+        # l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
+        # l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
+        # c = c.loc[[x != y for x, y in zip(l1, l2)]]
+        c = c.reindex(c.abs().sort_values(ascending=False).index).dropna()
+        c = c.loc[c.abs()>0.05]
+        big_c.update({team: c})
+
+    pd.concat(big_c).to_csv((pkg_resources.files(data) / f"{league}_corr.csv"))
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)

@@ -48,6 +48,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
     res = requests.get(url)
 
     historical = date.date() != datetime.today().date()
+    low_on_credits = 0
 
     if sport == "All":
         if historical:
@@ -58,6 +59,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
         if res.status_code != 200:
             return archive
 
+        low_on_credits = int(res.headers.get('X-Requests-Remaining'))<50
         res = res.json()
 
         # Filter sports
@@ -81,7 +83,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
     else:
         url = "https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets={markets}&apiKey={apikey}"
         dayDelta = 6
-        params = {"apikey": apikey["odds_api"], "markets": ",".join(markets)}
+        params = {"apikey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"], "markets": ",".join(markets)}
 
     # Retrieve odds data for each sport
     for sport, league in sports:
@@ -105,8 +107,10 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
                 continue
             gameDate = gameDate.strftime("%Y-%m-%d")
 
-            homeTeam = abbreviations[league][remove_accents(game["home_team"])]
-            awayTeam = abbreviations[league][remove_accents(game["away_team"])]
+            homeTeam = abbreviations[league].get(remove_accents(game["home_team"]))
+            awayTeam = abbreviations[league].get(remove_accents(game["away_team"]))
+            if homeTeam is None or awayTeam is None:
+                continue
 
             moneyline_home = {}
             moneyline_away = {}
@@ -147,8 +151,8 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
             archive[league]["Moneyline"][gameDate][awayTeam] = moneyline_away
             archive[league]["Moneyline"][gameDate][homeTeam] = moneyline_home
 
-            archive[league]["Totals"][gameDate][awayTeam] = {k:(v+spread_away[k])/2 for k, v in totals.items() if spread_away.get(k)}
-            archive[league]["Totals"][gameDate][homeTeam] = {k:(v+spread_home[k])/2 for k, v in totals.items() if spread_home.get(k)}
+            archive[league]["Totals"][gameDate][awayTeam] = {k:(v+spread_away.get(k,0))/2 for k, v in totals.items()}
+            archive[league]["Totals"][gameDate][homeTeam] = {k:(v+spread_home.get(k,0))/2 for k, v in totals.items()}
 
     return archive
 
@@ -158,7 +162,9 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     Retrieve moneyline and totals data from the odds API for NBA, MLB, and NHL.
     Process the data and store it in the archive file.
     """
-
+    stat_cv["WNBA"] = stat_cv["NBA"]
+    stat_cv["NCAAB"] = stat_cv["NBA"]
+    stat_cv["NCAAF"] = stat_cv["NFL"]
     historical = date.date() != datetime.today().date()
 
     if sport == "All":
@@ -202,7 +208,6 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
         params.update({
             "sport": sport,
             "markets": ",".join(props[league].keys())
-            # "markets": ",".join(list(props[league].keys())[:2])
             })
         if league == "MLB":
             params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
@@ -272,7 +277,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
 
                     odds.setdefault(market_name, {})
 
-                    outcomes = sorted(market['outcomes'], key=itemgetter('description', 'name'))
+                    outcomes = [o for o in market['outcomes'] if "description" in o and "name" in o]
+                    outcomes = sorted(outcomes, key=itemgetter('description', 'name'))
                     
                     for player, lines in groupby(outcomes, itemgetter('description')):
                         player = remove_accents(player).replace(" Total", "")
@@ -280,12 +286,17 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         lines = list(lines)
                         for line in lines:
                             line.setdefault('point', 0.5)
-                            line['name'] = {"Yes":"Over", "No": "Under"}.get(line['name'], line['name'])
+                            line['name'] = {"Yes": "Over", "No": "Under"}.get(line['name'], line['name'])
+
+                        lines = sorted(lines, key=itemgetter('name'))
                         if len({line['point'] for line in lines}) > 1:
                             trueline = sorted(lines, key=(lambda x: np.abs(x['price']-2)))[0]['point']
                             lines = [line for line in lines if line['point'] == trueline]
                         if len(lines) > 2:
                             lines = [[line for line in lines if line['name']=='Over'][0],[line for line in lines if line['name']=='Under'][0]]
+                        if len(lines) == 1 and lines[0]['name'] == 'Under':
+                            lines[0]['name'] = 'Over'
+                            lines[0]['price'] = 1/(1-1/lines[0]['price'])
 
                         line = lines[0]['point'] if 'point' in lines[0] else 0.5
                         odds[market_name][player]["Lines"].append(line)

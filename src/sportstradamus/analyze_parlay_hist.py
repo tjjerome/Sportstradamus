@@ -86,7 +86,7 @@ def reflect():
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE",
                 "NFL": "gameday", "NHL": "gameDate"}
     teamStr = {"MLB": "team", "NBA": "TEAM_ABBREVIATION",
-                "NFL": "recent team", "NHL": "team"}
+                "NFL": "team", "NHL": "team"}
 
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
@@ -179,7 +179,6 @@ def reflect():
     parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99
 
     profits = {}
-    masks = {}
 
     for platform in payout_table.keys():
         platform_df = parlays.loc[parlays["Platform"] == platform]
@@ -209,8 +208,8 @@ def reflect():
                     # p = np.polyfit(np.log(6-model_threshold), book_threshold, 1)
                     # masks[league] = list(p)
 
-            for tf, days in [("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
-                df = league_df.loc[pd.to_datetime(league_df.Date).dt.date > datetime.today().date() - timedelta(days=days)]
+            for tf, days in [("Yesterday", 1), ("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
+                df = league_df.loc[pd.to_datetime(league_df.Date).dt.date >= datetime.today().date() - timedelta(days=days)]
 
                 if not df.empty:
                     profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(10).mean()).sum()
