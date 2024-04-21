@@ -388,7 +388,6 @@ class StatsNBA(Stats):
                         player_id=player_id
                     ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
                     position = position_map.get(position)
-                    sleep(0.5)
 
                 self.players[self.season][game["TEAM_ABBREVIATION"]
                                           ][game["PLAYER_NAME"]] = position

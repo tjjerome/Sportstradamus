@@ -60,7 +60,7 @@ import requests
 
 # (scrapeops, scrapefish)
 
-NFL = StatsNFL()
+# NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2019, 9, 1).date()
@@ -72,10 +72,9 @@ NFL = StatsNFL()
 # NFL.season_start = datetime(2022, 9, 1).date()
 # NFL.update()
 # NFL.season_start = datetime(2023, 9, 1).date()
-NFL.load()
-NFL.update()
+# NFL.update()
 
-# NBA = StatsNBA()
+NBA = StatsNBA()
 # NBA.load()
 # NBA.update()
 # NBA.profile_market("BLST")
@@ -89,15 +88,15 @@ NFL.update()
 #     "League": "NBA"
 # })
 # pass
-# NBA.season = "2021-22"
-# NBA.season_start = datetime(2021, 10, 1).date()
-# NBA.update()
-# NBA.season = "2022-23"
-# NBA.season_start = datetime(2022, 10, 1).date()
-# NBA.update()
-# NBA.season = "2023-24"
-# NBA.season_start = datetime(2023, 10, 1).date()
-# NBA.update()
+NBA.season = "2021-22"
+NBA.season_start = datetime(2021, 10, 1).date()
+NBA.update()
+NBA.season = "2022-23"
+NBA.season_start = datetime(2022, 10, 1).date()
+NBA.update()
+NBA.season = "2023-24"
+NBA.season_start = datetime(2023, 10, 1).date()
+NBA.update()
 
 # NHL = StatsNHL()
 # NHL.season_start = datetime(2021, 10, 12).date()

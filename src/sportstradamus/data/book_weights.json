@@ -1,17 +1,17 @@
 {
     "NBA": {
         "PTS": {
-            "draftkings": 4.2403950267243085,
+            "draftkings": 4.214475990303737,
             "williamhill_us": 10.0,
             "fanduel": 1.0,
             "betmgm": 1.0,
             "pointsbetus": 1.0,
             "bovada": 1.0,
-            "betonlineag": 1.3751939275082607,
+            "betonlineag": 1.3136864281122929,
             "mybookieag": 1.0,
             "barstool": 1.0,
             "unibet_us": 1.0,
-            "betrivers": 1.3347939051243713,
+            "betrivers": 1.3176984349945258,
             "wynnbet": 1.0
         },
         "REB": {
@@ -25,21 +25,21 @@
             "mybookieag": 1.0,
             "barstool": 1.0,
             "unibet_us": 1.0,
-            "betrivers": 1.2305878403850707,
+            "betrivers": 1.397971309444122,
             "wynnbet": 1.0
         },
         "AST": {
-            "draftkings": 3.8598008711191545,
+            "draftkings": 3.868985158078666,
             "fanduel": 10.0,
             "williamhill_us": 1.0,
             "betmgm": 1.0,
             "pointsbetus": 10.0,
             "bovada": 1.0,
             "betonlineag": 10.0,
-            "mybookieag": 2.895097870938533,
+            "mybookieag": 3.0484913333642387,
             "barstool": 1.0,
-            "unibet_us": 10.0,
-            "betrivers": 3.1076061845075653,
+            "unibet_us": 9.470981882976103,
+            "betrivers": 1.7559180455733836,
             "wynnbet": 1.0
         },
         "PRA": {
@@ -199,7 +199,7 @@
             "pointsbetus": 1.0,
             "betus": 10.0,
             "sugarhouse": 1.0,
-            "wynnbet": 1.0960102667775704
+            "wynnbet": 1.0
         }
     },
     "NFL": {
