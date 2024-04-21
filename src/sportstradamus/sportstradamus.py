@@ -1046,8 +1046,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                   "BLK": "blocked"}.get(market, market)
     if league == "NBA":
         market = market.replace("underdog", "prizepicks")
-    filename = "_".join([league, market]).replace(" ", "-") + ".mdl"
-    filepath = pkg_resources.files(data) / filename
+    filename = "_".join([league, market]).replace(" ", "-")
+    filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
     new_offers = []
     if os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
