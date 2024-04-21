@@ -388,7 +388,6 @@ class StatsNBA(Stats):
                         player_id=player_id
                     ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
                     position = position_map.get(position)
-                    sleep(0.5)
 
                 self.players[self.season][game["TEAM_ABBREVIATION"]
                                           ][game["PLAYER_NAME"]] = position
@@ -492,7 +491,7 @@ class StatsNBA(Stats):
         self.teamlog.loc[self.teamlog['OPP']
                          == 'SA', 'OPP'] = "SAS"
 
-        # self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+        self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
@@ -856,22 +855,29 @@ class StatsNBA(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     v = archive.get_ev("NBA", submarket, date, player)
-                    if np.isnan(v):
+                    subline = archive.get_line("NBA", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
                         ev += v
 
+            elif market in ["DREB", "OREB"]:
+                ev = (archive.get_ev("NBA", "REB", date, player)*player_games.iloc[-one_year_ago:][market].sum()/player_games.iloc[-one_year_ago:]["REB"].sum()) if player_games.iloc[-one_year_ago:]["REB"].sum() else 0
+
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NBA"].get(submarket, 1)
                     v = archive.get_ev("NBA", submarket, date, player)
                     subline = archive.get_line("NBA", submarket, date, player)
-                    if sub_cv == 1:
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
@@ -879,10 +885,14 @@ class StatsNBA(Stats):
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                             ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
+                        book_odds = True
                         ev += v*weight
 
+                if not book_odds:
+                    ev = 0
+
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -947,7 +957,7 @@ class StatsNBA(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -961,14 +971,17 @@ class StatsNBA(Stats):
 
         matrix = []
 
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=850)
+
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(
-                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S")
+                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").date()
 
             if game[market] < 0:
                 continue
 
-            if gameDate < (pd.to_datetime(self.gamelog["GAME_DATE"]).min() + timedelta(days=14)):
+            if gameDate <= cutoff_date:
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -977,7 +990,7 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            line = archive.get_line("NBA", market, game["GAME_DATE"], name)
+            line = archive.get_line("NBA", market, game["GAME_DATE"][:10], name)
 
             offer = {
                 "Player": name,
@@ -990,12 +1003,13 @@ class StatsNBA(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["GAME_DATE"][:10]
                 )
                 if type(new_get_stats) is dict:
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )
@@ -1025,7 +1039,7 @@ class StatsMLB(Stats):
         Initialize the StatsMLB instance.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2023-03-30", "%Y-%m-%d"
+        self.season_start = datetime.strptime("2024-03-28", "%Y-%m-%d"
                                               ).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
@@ -1093,8 +1107,7 @@ class StatsMLB(Stats):
 
             away_bullpen = {k: 0 for k in ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced", "walks allowed", "hits allowed", "home runs allowed", "runs allowed"]}
             for v in boxscore["teams"]["away"]["players"].values():
-                if (v["person"]["id"] == awayPitcherId or
-                        v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"]):
+                if v["person"]["id"] == awayPitcherId or v.get("battingOrder"):
                     n = {
                         "gameId": gameId,
                         "gameDate": game["game_date"],
@@ -1108,9 +1121,8 @@ class StatsMLB(Stats):
                         "opponent pitcher hand": homePitcherHand,
                         "home": False,
                         "starting pitcher": v["person"]["id"] == awayPitcherId,
-                        "starting batter": v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"],
-                        "battingOrder": boxscore["teams"]["away"]["battingOrder"].index(v["person"]["id"]) + 1
-                        if v["person"]["id"] in boxscore["teams"]["away"]["battingOrder"] else 0,
+                        "starting batter": int(v.get('battingOrder', '001')[2]) == 0,
+                        "battingOrder": int(v.get('battingOrder', '000')[0]),
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0) + v["stats"]["batting"].get("doubles", 0) +
                         2 * v["stats"]["batting"].get("triples", 0) +
@@ -1258,8 +1270,7 @@ class StatsMLB(Stats):
 
             home_bullpen = {k: 0 for k in ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced", "walks allowed", "hits allowed", "home runs allowed", "runs allowed"]}
             for v in boxscore["teams"]["home"]["players"].values():
-                if (v["person"]["id"] == homePitcherId or
-                        v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"]):
+                if v["person"]["id"] == homePitcherId or v.get("battingOrder"):
                     n = {
                         "gameId": gameId,
                         "gameDate": game["game_date"],
@@ -1275,9 +1286,8 @@ class StatsMLB(Stats):
                         "opponent pitcher hand": awayPitcherHand,
                         "home": True,
                         "starting pitcher": v["person"]["id"] == homePitcherId,
-                        "starting batter": v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"],
-                        "battingOrder": boxscore["teams"]["home"]["battingOrder"].index(v["person"]["id"]) + 1
-                        if v["person"]["id"] in boxscore["teams"]["home"]["battingOrder"] else 0,
+                        "starting batter": int(v.get('battingOrder', '001')[2]) == 0,
+                        "battingOrder": int(v.get('battingOrder', '000')[0]),
                         "hits": v["stats"]["batting"].get("hits", 0),
                         "total bases": v["stats"]["batting"].get("hits", 0)
                         + v["stats"]["batting"].get("doubles", 0)
@@ -2031,7 +2041,6 @@ class StatsMLB(Stats):
             line = 0.5 if line < 1 else line
 
         try:
-
             if pitcher not in self.pitcherProfile.index:
                 self.pitcherProfile.loc[pitcher] = np.zeros_like(
                     self.pitcherProfile.columns)
@@ -2050,7 +2059,10 @@ class StatsMLB(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
-                    if np.isnan(v):
+                    subline = archive.get_line("MLB", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
@@ -2058,6 +2070,7 @@ class StatsMLB(Stats):
                         
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 if "pitcher" in market:
                     if "underdog" in market:
                         fantasy_props = [("pitcher win", 5), ("pitcher strikeouts", 3), ("runs allowed", -3), ("pitching outs", 1), ("quality start", 5)]
@@ -2073,36 +2086,48 @@ class StatsMLB(Stats):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
-                    if sub_cv == 1:
+                    if submarket == "pitcher win":
+                        p = 1-get_odds(subline, v)
+                        ev += p*weight
+                    elif submarket == "quality start":
+                        std = stat_cv["MLB"].get(submarket, 1)*v_outs
+                        p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
+                        p *= poisson.cdf(3, v_runs)
+                        ev += p*weight
+                    elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
+                        v = archive.get_ev("MLB", "hits", date, player)
+                        subline = archive.get_line("MLB", "hits", date, player)
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
-                        if submarket == "Moneyline":
-                            p = moneyline
-                            ev += p*weight
-                        elif submarket == "quality start":
-                            p = norm.sf(18, v_outs, sub_cv*v_outs) + norm.pdf(18, v_outs, sub_cv*v_outs)
-                            p *= poisson.cdf(3, v_runs)
-                            ev += p*weight
-                        else:
+                        v *= (player_games.iloc[-one_year_ago:][submarket].sum()/player_games.iloc[-one_year_ago:]["hits"].sum()) if player_games.iloc[-one_year_ago:]["hits"].sum() else 0
+                        ev += v*weight
+                    else:
+                        if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                            v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+
+                        if np.isnan(v) or v == 0:
                             if subline == 0 and not player_games.empty:
                                 subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                             if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                                 ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
-                    else:
-                        ev += v*weight
+                        else:
+                            book_odds = True
+                            ev += v*weight
 
                     if submarket == "runs allowed":
                         v_runs = v
                     if submarket == "pitching outs":
                         v_outs = v
 
+                if not book_odds:
+                    ev = 0
+
             elif market == "1st inning runs allowed":
                 ev = archive.get_team_market("MLB", '1st 1 innings', date, opponent)
 
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -2150,9 +2175,9 @@ class StatsMLB(Stats):
             order = self.upcoming_games.get(
                 team, {}).get('Batting Order', [])
             if player in order:
-                position = order.index(player)
+                position = order.index(player)+1
             elif player_games.empty:
-                position = 9
+                position = 10
             else:
                 position = int(
                     player_games['battingOrder'].iloc[-10:].median())
@@ -2228,7 +2253,7 @@ class StatsMLB(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves the training data matrix and target labels for the specified market.
 
@@ -2242,6 +2267,9 @@ class StatsMLB(Stats):
 
         # Initialize an empty list for the target labels
         matrix = []
+
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=850)
 
         # Iterate over the gamelog to collect training data
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
@@ -2264,12 +2292,12 @@ class StatsMLB(Stats):
                 continue
 
             # Retrieve data from the archive based on game date and player name
-            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d").date()
             
-            if gameDate < (pd.to_datetime(self.gamelog["gameDate"]).min() + timedelta(days=14)):
+            if gameDate <= cutoff_date:
                 continue
 
-            self.profile_market(market, date=gameDate.date())
+            self.profile_market(market, date=gameDate)
             name = game['playerName']
 
             if name not in self.playerProfile.index:
@@ -2291,13 +2319,14 @@ class StatsMLB(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["gameDate"]
                 )
                 if type(new_get_stats) is dict:
                     # Determine the result
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )
@@ -2329,7 +2358,7 @@ class StatsNFL(Stats):
         """
         super().__init__()
         self.season_start = datetime.strptime("2023-09-07", "%Y-%m-%d").date()
-        cols = ['player id', 'player display name', 'position group', 'recent team', 'season', 'week', 'season type',
+        cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
                 'rushing tds', 'rushing fumbles', 'rushing fumbles lost', 'rushing 2pt conversions', 'receptions',
@@ -2492,15 +2521,16 @@ class StatsNFL(Stats):
 
         nfl_data.rename(
             columns=lambda x: x.replace("_", " "), inplace=True)
+        nfl_data.rename(columns={"recent team": "team"}, inplace=True)
         nfl_data[['target share', 'air yards share', 'wopr', 'yards per target']] = nfl_data[[
             'target share', 'air yards share', 'wopr', 'yards per target']].fillna(0.0)
 
-        nfl_data.loc[nfl_data['recent team']
-                     == 'LA', 'recent team'] = "LAR"
-        nfl_data.loc[nfl_data['recent team']
-                     == 'WSH', 'recent team'] = "WAS"
-        nfl_data.loc[nfl_data['recent team']
-                     == 'OAK', 'recent team'] = "LV"
+        nfl_data.loc[nfl_data['team']
+                     == 'LA', 'team'] = "LAR"
+        nfl_data.loc[nfl_data['team']
+                     == 'WSH', 'team'] = "WAS"
+        nfl_data.loc[nfl_data['team']
+                     == 'OAK', 'team'] = "LV"
 
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
@@ -2522,45 +2552,45 @@ class StatsNFL(Stats):
         teamDataList = []
         for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog.loc[self.gamelog.isna().any(axis=1)])):
             if row['opponent'] != row['opponent']:
-                if row['recent team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
+                if row['team'] in sched.loc[sched['week'] == row['week'], 'home_team'].unique():
                     self.gamelog.at[i, 'home'] = True
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
-                                                               == row['recent team']), 'away_team'].values[0]
+                                                               == row['team']), 'away_team'].values[0]
                     self.gamelog.at[i, 'gameday'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
-                                                                                                == row['recent team']), 'gameday'].values[0]
+                                                                                                == row['team']), 'gameday'].values[0]
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['home_team']
-                                                                                                == row['recent team']), 'game_id'].values[0]
+                                                                                                == row['team']), 'game_id'].values[0]
                 else:
                     self.gamelog.at[i, 'home'] = False
                     self.gamelog.at[i, 'opponent'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
-                                                               == row['recent team']), 'home_team'].values[0]
+                                                               == row['team']), 'home_team'].values[0]
                     self.gamelog.at[i, 'gameday'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
-                                                                                                == row['recent team']), 'gameday'].values[0]
+                                                                                                == row['team']), 'gameday'].values[0]
                     self.gamelog.at[i, 'game id'] = sched.loc[(sched['week'] == row['week']) & (sched['away_team']
-                                                                                                == row['recent team']), 'game_id'].values[0]
+                                                                                                == row['team']), 'game_id'].values[0]
             if row.isna().any():
                 if self.season_start.year != row['season']:
                     self.season_start = datetime(row['season'], 9, 1).date()
                     self.need_pbp = True
 
                 playerData = self.parse_pbp(
-                    row['week'], row['recent team'], row['season'], row['player display name'])
+                    row['week'], row['team'], row['season'], row['player display name'])
                 if type(playerData) is not int:
                     for k, v in playerData.items():
                         self.gamelog.at[i, k.replace(
                             "_", " ")] = np.nan_to_num(v)
 
-            if row['recent team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
+            if row['team'] not in self.teamlog.loc[(self.teamlog.season == row.season) &
                                                           (self.teamlog.week == row.week), 'team'].to_list() and \
-                    (row['week'], row['recent team']) not in [(t['week'], t['team']) for t in teamDataList]:
+                    (row['week'], row['team']) not in [(t['week'], t['team']) for t in teamDataList]:
                 teamData = {
                     "season": row.season,
                     "week": row.week,
-                    "team": row['recent team'],
+                    "team": row['team'],
                     "gameday": self.gamelog.at[i, 'gameday']
                 }
                 team_pbp = self.parse_pbp(
-                    row['week'], row['recent team'], row['season'])
+                    row['week'], row['team'], row['season'])
 
                 if type(team_pbp) is not int:
                     teamData.update(team_pbp)
@@ -3016,11 +3046,11 @@ class StatsNFL(Stats):
         teamlog.drop(columns=['gameday'], inplace=True)
 
         # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NFL", x["gameday"][:10], x["recent team"]), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["recent team"]), axis=1)
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NFL", x["gameday"][:10], x["team"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NFL", x["gameday"][:10], x["team"]), axis=1)
 
         teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(5)[self.stat_types['offense'] + self.stat_types['defense']], 0))
+            lambda x: np.mean(x.tail(5)[list(set(self.stat_types['offense']) | set(self.stat_types['defense']))], 0))
 
         playerGroups = gamelog.\
             groupby('player display name').\
@@ -3267,14 +3297,21 @@ class StatsNFL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     v = archive.get_ev("NFL", submarket, date, player)
-                    if np.isnan(v):
+                    subline = archive.get_line("NFL", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
                     else:
                         ev += v
+
+            elif market in ["rushing tds", "receiving tds"]:
+                ev = (archive.get_ev("NFL", "tds", date, player)*player_games.iloc[-one_year_ago:][market].sum()/player_games.iloc[-one_year_ago:]["tds"].sum()) if player_games.iloc[-one_year_ago:]["tds"].sum() else 0
                         
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 if "prizepicks" in market:
                     fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", 1)]
                 else:
@@ -3283,9 +3320,9 @@ class StatsNFL(Stats):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
-                    if sub_cv == 1:
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
@@ -3293,10 +3330,14 @@ class StatsNFL(Stats):
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
                             ev += get_ev(subline, under, sub_cv, force_gauss=True)
                     else:
+                        book_odds = True
                         ev += v*weight
 
+                if not book_odds:
+                    ev = 0
+
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -3358,7 +3399,7 @@ class StatsNFL(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 
@@ -3373,11 +3414,14 @@ class StatsNFL(Stats):
         # Initialize an empty list for the target labels
         matrix = []
 
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=1200)
+
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(
-                game["gameday"], "%Y-%m-%d")
+                game["gameday"], "%Y-%m-%d").date()
 
-            if gameDate < (pd.to_datetime(self.gamelog["gameday"]).min() + timedelta(days=14)):
+            if gameDate <= cutoff_date:
                 continue
 
             self.profile_market(market, date=gameDate)
@@ -3396,7 +3440,7 @@ class StatsNFL(Stats):
 
             offer = {
                 "Player": name,
-                "Team": game["recent team"],
+                "Team": game["team"],
                 "Market": market,
                 "Opponent": game["opponent"],
                 "Home": int(game["home"])
@@ -3405,13 +3449,14 @@ class StatsNFL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["gameday"]
                 )
                 if type(new_get_stats) is dict:
 
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )
@@ -3613,10 +3658,10 @@ class StatsNHL(Stats):
                         "gameDate": gameDate,
                         "team": team,
                         "opponent": opponent,
-                        "opponent goalie": game_df.loc[(game_df.position == "G") & (game_df.team != team), 'playerName'].iat[0],
+                        "opponent goalie": remove_accents(game_df.loc[(game_df.position == "G") & (game_df.team != team), 'playerName'].iat[0]),
                         "home": home,
                         "playerId": player['playerId'],
-                        "playerName": player['playerName'],
+                        "playerName": remove_accents(player['playerName']),
                         "position": player['position']
                     }
                     stats = {
@@ -3681,8 +3726,7 @@ class StatsNHL(Stats):
         # Get game ids
         latest_date = self.season_start
         if not self.gamelog.empty:
-            latest_date = (datetime.strptime(
-                self.gamelog["gameDate"].max().split("T")[0], "%Y-%m-%d") + timedelta(days=1)).date()
+            latest_date = pd.to_datetime(self.gamelog["gameDate"]).max().date() + timedelta(days=1)
         today = datetime.today().date()
         ids = []
         while latest_date <= today:
@@ -3690,7 +3734,7 @@ class StatsNHL(Stats):
             res = scraper.get(
                 f"https://api-web.nhle.com/v1/schedule/{start_date}")
             latest_date = datetime.strptime(
-                res['nextStartDate'], '%Y-%m-%d').date()
+                res.get('nextStartDate', (today+timedelta(days=1)).strftime("%Y-%m-%d")), '%Y-%m-%d').date()
 
             if len(res.get('gameWeek', [])) > 0:
                 for day in res.get('gameWeek'):
@@ -3758,7 +3802,7 @@ class StatsNHL(Stats):
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
-        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
@@ -4178,15 +4222,22 @@ class StatsNHL(Stats):
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     v = archive.get_ev("NHL", submarket, date, player)
-                    if np.isnan(v):
+                    subline = archive.get_line("NHL", submarket, date, player)
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    if np.isnan(v) or v == 0:
                         ev = 0
                         break
 
                     else:
                         ev += v
+
+            elif market == "goalsAgainst":
+                ev = archive.get_total("NHL", date, opponent)
                         
             elif "fantasy" in market:
                 ev = 0
+                book_odds = False
                 if "prizepicks" in market:
                     fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
                 elif ("underdog" in market) and ("skater" in market):
@@ -4197,25 +4248,33 @@ class StatsNHL(Stats):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
-                    if sub_cv == 1:
+                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
-                    if np.isnan(v):
+                    if np.isnan(v) or v == 0:
                         if submarket == "Moneyline":
-                            p = 1-moneyline
+                            p = moneyline
                             ev += p*weight
+                        elif submarket == "goalsAgainst":
+                            v = archive.get_total("NHL", date, opponent)
+                            subline = np.floor(v) + 0.5
+                            v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                            ev += v*weight
                         else:
-                            if np.isnan(v):
-                                if subline == 0 and not player_games.empty:
-                                    subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
+                            if subline == 0 and not player_games.empty:
+                                subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                                if not subline == 0:
-                                    under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                                    ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                            if not subline == 0:
+                                under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
+                                ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
                     else:
+                        book_odds = True
                         ev += v*weight
 
+                if not book_odds:
+                    ev = 0
+
         if np.isnan(ev) or (ev <= 0):
-            odds = 0.5
+            odds = 0
         else:
             if cv == 1:
                 odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
@@ -4298,7 +4357,7 @@ class StatsNHL(Stats):
 
         return data
 
-    def get_training_matrix(self, market):
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieve the training matrix for the specified market.
 
@@ -4314,14 +4373,17 @@ class StatsNHL(Stats):
 
         matrix = []
 
+        if cutoff_date is None:
+            cutoff_date = datetime.today()-timedelta(days=850)
+
         # Iterate over each game in the gamelog
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
-            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d")
+            gameDate = datetime.strptime(game["gameDate"], "%Y-%m-%d").date()
             
-            if gameDate < (pd.to_datetime(self.gamelog["gameDate"]).min() + timedelta(days=14)):
+            if gameDate < cutoff_date:
                 continue
 
-            if game[market] < 0:
+            if game[market] <= 0:
                 continue
 
             data = {}
@@ -4345,12 +4407,13 @@ class StatsNHL(Stats):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 new_get_stats = self.get_stats(
-                    offer | {"Line": line}, gameDate
+                    offer | {"Line": line}, game["gameDate"]
                 )
                 if type(new_get_stats) is dict:
                     new_get_stats.update(
                         {
                             "Result": game[market],
+                            "Date": gameDate,
                             "Archived": int(line != 0)
                         }
                     )

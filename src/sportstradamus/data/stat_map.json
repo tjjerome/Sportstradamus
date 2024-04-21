@@ -138,7 +138,10 @@
         "Fumbles Lost": "fumbles lost",
         "Completion Percentage": "completion percentage",
         "Time on Ice": "timeOnIce",
-        "1st Inning Runs Allowed": "1st inning runs allowed"
+        "1st Inning Runs Allowed": "1st inning runs allowed",
+        "1st Inning Hits Allowed": "1st inning hits allowed",
+        "1st Inn. Runs Allowed": "1st inning runs allowed",
+        "1st Inn. Hits Allowed": "1st inning hits allowed"
     },
     "Thrive": {
         "GOLs + ASTs": "points",

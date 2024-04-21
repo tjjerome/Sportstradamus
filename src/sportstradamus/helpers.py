@@ -36,6 +36,9 @@ with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
 with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
     stat_cv = json.load(infile)
 
+with open((pkg_resources.files(data) / "stat_std.json"), "r") as infile:
+    stat_std = json.load(infile)
+
 with open((pkg_resources.files(data) / "book_weights.json"), "r") as infile:
     book_weights = json.load(infile)
 
@@ -307,13 +310,13 @@ def get_ev(line, under, cv=1, force_gauss=False):
     if cv == 1:
         if force_gauss:
             line = float(line)
-            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), line)[0]
+            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
         else:
             line = np.ceil(float(line) - 1)
-            return fsolve(lambda x: under - poisson.cdf(line, x), line)[0]
+            return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
     else:
         line = float(line)
-        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), line)[0]
+        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
 
 def get_odds(line, ev, cv=1, force_gauss=False, step=1):
     high = np.floor((line+step)/step)*step
@@ -384,7 +387,7 @@ class Archive:
             with open(filepath, "rb") as infile:
                 self.archive = pickle.load(infile)
 
-        self.leagues = ["MLB", "NBA", "NHL", "NFL", "MISC"]
+        self.leagues = ["MLB", "NBA", "NHL", "NFL", "NCAAF", "NCAAB", "WNBA", "MISC"]
         if league != "None" and league != "All":
             self.leagues = [league]
             filepath = pkg_resources.files(data) / f"archive_{league}.dat"
