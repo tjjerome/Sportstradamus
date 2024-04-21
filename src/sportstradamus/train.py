@@ -545,7 +545,7 @@ def meditate(force, league):
                 del model
 
             report()
-    see_features()
+    # see_features()
 
 
 def report():
