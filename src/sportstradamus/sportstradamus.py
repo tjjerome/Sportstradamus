@@ -301,7 +301,20 @@ def main(progress, books, parlays):
         wks.clear()
         wks.update([best5.columns.values.tolist()] +
                     best5.values.tolist())
-        wks.set_basic_filter()
+        
+        wks = gc.open("Sportstradamus").worksheet("Parlay Search")
+        wks.update_cell(1, 5, best5.iloc[0]["Platform"])
+        wks.update_cell(2, 5, best5.iloc[0]["League"])
+        wks.update_cell(3, 5, best5.iloc[0]["Game"])
+        wks.update_cell(4, 5, "Highest EV")
+        wks.update_cell(7, 2, 1)
+        wks.update_cell(7, 5, 1)
+        wks.update_cell(7, 8, 1)
+        wks.update_cell(
+            1, 10, "Last Updated: "
+            + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+        )
+
 
         best5 = pd.concat([best5.loc[best5["Model EV Rank"] == 1],
                            best5.loc[best5["Rec Bet Rank"] == 1], 
@@ -790,7 +803,7 @@ def find_correlation(offers, stats, platform, parlays):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Players', 'Markets', 'Fun', 'Bet Size'])
+            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Markets', 'Fun', 'Bet Size'])
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             # df5.drop_duplicates('Players', inplace=True)
