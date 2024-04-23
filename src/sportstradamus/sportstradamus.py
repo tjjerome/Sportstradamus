@@ -292,6 +292,8 @@ def main(progress, books, parlays):
 
     if parlays and not best5.empty:
         best5.sort_values("Model EV", ascending=False, inplace=True)
+        best5.drop_duplicates(subset=[col for col in best5.columns if col != "Markets"], inplace=True)
+        best5.reset_index(drop=True, inplace=True)
         parlay_df = best5.copy()
         best5.drop(columns="Markets", inplace=True)
         bet_ranks = best5.groupby(["Platform", "Game", "Family"]).rank('first', False)[["Model EV", "Rec Bet", "Fun"]]
