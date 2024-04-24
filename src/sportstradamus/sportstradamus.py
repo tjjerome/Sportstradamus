@@ -807,7 +807,7 @@ def find_correlation(offers, stats, platform, parlays):
                             parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                         best_bets.append(parlay)
 
-            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Markets', 'Fun', 'Bet Size'])
+            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Legs', 'Markets', 'Fun', 'Bet Size'])
             
             df5.sort_values('Model EV', ascending=False, inplace=True)
             # df5.drop_duplicates('Players', inplace=True)
