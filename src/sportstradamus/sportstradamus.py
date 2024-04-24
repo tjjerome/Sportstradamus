@@ -316,12 +316,13 @@ def main(progress, books, parlays):
             1, 10, "Last Updated: "
             + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
         )
+        wks.batch_clear(["J7:J50"])
 
 
         best5 = pd.concat([best5.loc[best5["Model EV Rank"] == 1],
                            best5.loc[best5["Rec Bet Rank"] == 1], 
                            best5.loc[best5["Fun Rank"] == 1]]).\
-                           drop(columns=["Family", "Fun", "Bet Size", "Model EV Rank", "Rec Bet Rank", "Fun Rank"]).\
+                           drop(columns=["Legs", "Family", "Fun", "Bet Size", "Model EV Rank", "Rec Bet Rank", "Fun Rank"]).\
                            sort_values("Model EV", ascending=False)
         best5 = best5.iloc[np.unique(best5.index, return_index=True)[1]]
 
@@ -796,6 +797,7 @@ def find_correlation(offers, stats, platform, parlays):
                             "Leg 4": "",
                             "Leg 5": "",
                             "Leg 6": "",
+                            "Legs": ", ".join([leg["Desc"] for leg in bet]),
                             # "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
                             "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
                             "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(league, {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(league, {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(league, {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
