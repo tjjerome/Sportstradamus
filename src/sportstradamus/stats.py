@@ -3837,6 +3837,11 @@ class StatsNHL(Stats):
                 "gamelog": self.gamelog,
                 "teamlog": self.teamlog}, outfile, -1)
 
+    def dump_goalie_list(self):
+        filepath = pkg_resources.files(data) / "goalies.json"
+        with open(filepath, "w") as outfile:
+            json.dump(list(self.gamelog.loc[self.gamelog.position == "G", "playerName"].unique()), outfile)
+
     def bucket_stats(self, market, date=datetime.today()):
         """
         Bucket the stats based on the specified market (e.g., 'goalsAgainst', 'saves').
