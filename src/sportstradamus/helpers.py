@@ -45,9 +45,8 @@ with open((pkg_resources.files(data) / "book_weights.json"), "r") as infile:
 with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
     books = json.load(infile)
 
-with open((pkg_resources.files(data) / "goalies.csv"), "r") as infile:
-    nhl_goalies = pd.read_csv(infile)
-    nhl_goalies = list(nhl_goalies.name.unique())
+with open((pkg_resources.files(data) / "goalies.json"), "r") as infile:
+    nhl_goalies = json.load(infile)
 
 
 def get_active_sports():

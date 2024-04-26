@@ -240,6 +240,8 @@ def meditate(force, league):
             book_weights.setdefault(league, {}).setdefault("triples", {})
             book_weights[league]["triples"] = fit_book_weights(league, "triples")
             mlb.update_player_comps()
+        elif league == "NHL":
+            nhl.dump_goalie_list()
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
