@@ -1047,6 +1047,7 @@ class StatsMLB(Stats):
         self.teamlog = pd.DataFrame()
         self.park_factors = {}
         self.players = {}
+        self.comps = {}
         self.stat_types = {
             "batting": ["OBP", "AVG", "SLG", "PASO", "BABIP"],
             "fielding": ["DER"],
@@ -1561,17 +1562,43 @@ class StatsMLB(Stats):
         if os.path.isfile(filepath):
             with open(filepath, 'r') as infile:
                 self.park_factors = json.load(infile)
+
         filepath = pkg_resources.files(
             data) / "affinity_pitchersBySHV_matchScores.csv"
-
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
             df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) &
                         (df.match_score >= 0.6)]
             df.key1 = df.key1.str[:-2].astype(int)
             df.key2 = df.key2.str[:-2].astype(int)
-            self.affinity = df.groupby('key1').apply(
+            self.comps['pitchers'] = df.groupby('key1').apply(
                 lambda x: x.key2.to_list()).to_dict()
+
+        filepath = pkg_resources.files(
+            data) / "affinity_hittersByHittingProfile_matchScores.csv"
+        if os.path.isfile(filepath):
+            df = pd.read_csv(filepath)
+            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) &
+                        (df.match_score >= 0.6)]
+            df.key1 = df.key1.str[:-2].astype(int)
+            df.key2 = df.key2.str[:-2].astype(int)
+            self.comps['hitters'] = df.groupby('key1').apply(
+                lambda x: x.key2.to_list()).to_dict()
+
+    def update_player_comps(self):
+        url = "https://baseballsavant.mlb.com/app/affinity/affinity_hittersByHittingProfile_matchScores.csv"
+        res = requests.get(url)
+        filepath = pkg_resources.files(
+            data) / "affinity_hittersByHittingProfile_matchScores.csv"
+        with open(filepath, "w") as outfile:
+            outfile.write(res.text)
+            
+        url = "https://baseballsavant.mlb.com/app/affinity/affinity_pitchersBySHV_matchScores.csv"
+        res = requests.get(url)
+        filepath = pkg_resources.files(
+            data) / "affinity_pitchersBySHV_matchScores.csv"
+        with open(filepath, "w") as outfile:
+            outfile.write(res.text)
 
     def update(self):
         """
@@ -2029,7 +2056,7 @@ class StatsMLB(Stats):
         else:
             pid = pid.iat[0]
 
-        affine_pitchers = self.affinity[pid] if pid in self.affinity else [pid]
+        affine_pitchers = self.comps['pitchers'][pid] if pid in self.comps['pitchers'] else [pid]
 
         one_year_ago = len(player_games.loc[
             pd.to_datetime(self.gamelog.gameDate) > Date-timedelta(days=300)])
