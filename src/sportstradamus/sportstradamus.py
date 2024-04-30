@@ -266,15 +266,15 @@ def main(progress, books, parlays):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp(books)
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp(books)
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats, parlays)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -379,7 +379,7 @@ def main(progress, books, parlays):
     if "NFL" in sports:
         logger.info("Getting NFL Fantasy Rankings")
 
-        filepath = pkg_resources.files(data) / "NFL_fantasy-points-underdog.mdl"
+        filepath = pkg_resources.files(data) / "models/NFL_fantasy-points-underdog.mdl"
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
         model = filedict["model"]
@@ -1260,7 +1260,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 if stats["Line"] != o["Line"]:
                     ev = get_ev(stats["Line"], 1-stats["Odds"], cv)
-                    stats["Odds"] = 1-get_odds(o["Line"], ev, cv, step=step)
+                    p = 1-get_odds(o["Line"], ev, cv, step=step)
+                    if np.isnan(p):
+                        stats["Odds"] = 0
+                    else:
+                        stats["Odds"] = p
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
                     p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
