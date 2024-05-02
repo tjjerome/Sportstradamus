@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pickle
 import json
 import importlib.resources as pkg_resources
+from sklearn.neighbors import BallTree
 from sportstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
@@ -12,7 +13,7 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, merge_dict
 import pandas as pd
 import warnings
 import requests
@@ -56,6 +57,7 @@ class Stats:
         self.profile_latest_date = datetime(year=1900, month=1, day=1).date()
         self.profiled_market = ""
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
+        self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.upcoming_games = {}
 
     def parse_game(self, game):
@@ -93,6 +95,9 @@ class Stats:
             None
         """
         # Implementation details...
+
+    def update_player_comps(self):
+        return
 
     def bucket_stats(self, market, date):
         """
@@ -191,6 +196,41 @@ class StatsNBA(Stats):
                 self.gamelog = nba_data['gamelog']
                 self.teamlog = nba_data['teamlog']
 
+        filepath = pkg_resources.files(data) / "nba_comps.json"
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                self.comps = json.load(infile)
+
+    def update_player_comps(self):
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
+            stats = json.load(infile)
+    
+        self.profile_market("MIN")
+        playerList = self.players.get(self.season, self.players.get('-'.join([str(int(n)-1) for n in self.season.split("-")])))
+        players = []
+        for team in playerList.keys():
+            players.extend([v|{"PLAYER_NAME":k, "TEAM_ABBREVIATION":team} for k, v in playerList[team].items()])
+        playerProfile = self.playerProfile.merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"), on="PLAYER_NAME", how='left', suffixes=('_x', None)).set_index("PLAYER_NAME")[list(stats["NBA"].keys())].dropna()
+        playerProfile = playerProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+        playerProfile = playerProfile.mul(np.sqrt(list(stats["NBA"].values())))
+        comps = {}
+        playerList = playerList.values()
+        playerDict = {}
+        for team in playerList:
+            playerDict.update(team)
+        for position in ["P", "C", "W", "F", "B"]:
+            positionProfile = playerProfile.loc[[player for player, value in playerDict.items() if value["POS"] == position and player in playerProfile.index]]
+            knn = BallTree(positionProfile)
+            d, i = knn.query(positionProfile.values, k=11)
+            r = np.median(np.max(d,axis=1))
+            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            players = positionProfile.index
+            comps[position] = {players[j]: list(players[i[j]]) for j in range(len(i))}
+
+        filepath = pkg_resources.files(data) / "nba_comps.json"
+        with open(filepath, "w") as outfile:
+            json.dump(comps, outfile, indent=4)
+
     def update(self):
         """
         Update data from the web API.
@@ -211,9 +251,45 @@ class StatsNBA(Stats):
             data) / f"nba_players_{self.season}.csv")
 
         player_df.Player = player_df.Player.apply(remove_accents)
-        player_df.index = player_df.Player
-        player_df = player_df.groupby("Team")["Pos"].apply(lambda x: x.str[0])
-        player_df = {level: player_df.xs(level).to_dict()
+        player_df.rename(columns={"Player":"PLAYER_NAME", "Team": "TEAM_ABBREVIATION", "Age": "AGE", "Pos": "POS"}, inplace=True)
+        i = 0
+        while (i < 10):
+            try:
+                playerBios = nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats(season=self.season).get_normalized_dict()["LeagueDashPlayerBioStats"]
+
+                shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(**{"season": self.season, "season_type_all_star": "Regular Season", "distance_range": "By Zone"}).get_dict()['resultSets']
+                break
+            except:
+                playerBios = []
+                shotData = {'rowSet':[]}
+                sleep(.1)
+                i = i+1
+
+        playerBios = pd.DataFrame(playerBios)
+        playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
+        shotMap = []
+        for row in shotData['rowSet']:
+            fga = np.nansum(np.array(row[7:-6:3],dtype=float))
+            if fga>0:
+                record = {
+                    "PLAYER_NAME": remove_accents(row[1]),
+                    "TEAM_ABBREVIATION": row[3],
+                    "RA_PCT": (row[7] if row[7] else 0)/fga,
+                    "ITP_PCT": (row[10] if row[10] else 0)/fga,
+                    "MR_PCT": (row[13] if row[13] else 0)/fga,
+                    "C3_PCT": (row[28] if row[28] else 0)/fga,
+                    "B3_PCT": (row[22] if row[22] else 0)/fga
+                }
+                shotMap.append(record)
+
+        player_df = player_df.merge(playerBios,on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y")).merge(pd.DataFrame(shotMap),on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y"))
+        # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
+        player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
+        player_df.POS = player_df.POS.str[0]
+        player_df.index = player_df.PLAYER_NAME
+        player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS", "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_WEIGHT", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]].apply(lambda x: x).replace(np.nan, 0)
+
+        player_df = {level: player_df.xs(level).T.to_dict()
                      for level in player_df.index.levels[0]}
         if self.season in self.players:
             self.players[self.season] = {team: players | player_df.get(
@@ -320,6 +396,7 @@ class StatsNBA(Stats):
 
                 break
             except:
+                sleep(0.1)
                 i += 1
 
         nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
@@ -381,7 +458,7 @@ class StatsNBA(Stats):
                 for season in list(self.players.keys())[::-1]:
                     if position is None:
                         position = self.players[season][game["TEAM_ABBREVIATION"]].get(
-                            game["PLAYER_NAME"])
+                            game["PLAYER_NAME"], {}).get("POS")
 
                 if position is None:
                     position = nba.commonplayerinfo.CommonPlayerInfo(
@@ -390,11 +467,11 @@ class StatsNBA(Stats):
                     position = position_map.get(position)
 
                 self.players[self.season][game["TEAM_ABBREVIATION"]
-                                          ][game["PLAYER_NAME"]] = position
+                                          ].setdefault(game["PLAYER_NAME"], {})["POS"] = position
 
             # Extract additional game information
             game["POS"] = self.players[self.season][game["TEAM_ABBREVIATION"]].get(
-                game["PLAYER_NAME"])
+                game["PLAYER_NAME"], {}).get("POS")
             game["HOME"] = "vs." in game["MATCHUP"]
             teams = game["MATCHUP"].replace("vs.", "@").split(" @ ")
             for team in teams:
