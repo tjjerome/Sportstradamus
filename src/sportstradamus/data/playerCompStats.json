@@ -1,0 +1,30 @@
+{
+    "NBA": {
+        "AGE": 1,
+        "PLAYER_HEIGHT_INCHES": 2.5,
+        "PLAYER_WEIGHT": 1.5,
+
+        "MIN": 6,
+        "USG_PCT": 4,
+
+        "TS_PCT": 4,
+        "RA_PCT": 1,
+        "ITP_PCT": 1,
+        "MR_PCT": 1,
+        "C3_PCT": 1,
+        "B3_PCT": 1,
+        "FTR": 1.5,
+        "FT_PCT": 1.5,
+        "FGA_48": 3,
+
+        "E_OFF_RATING": 2,
+        "AST_48": 4,
+        "TOV_48": 1,
+        "PIE": 3,
+
+        "E_DEF_RATING": 2.5,
+        "REB_48": 4,
+        "BLKA_48": 1.5,
+        "STL_48": 1.5
+    }
+}
