@@ -1,7 +1,7 @@
 {
     "NBA": {
-        "AGE": 1,
-        "PLAYER_HEIGHT_INCHES": 2.5,
+        "AGE": 0.5,
+        "PLAYER_HEIGHT_INCHES": 3,
         "PLAYER_WEIGHT": 1.5,
 
         "MIN": 6,
@@ -22,9 +22,37 @@
         "TOV_48": 1,
         "PIE": 3,
 
-        "E_DEF_RATING": 2.5,
+        "E_DEF_RATING": 2,
         "REB_48": 4,
         "BLKA_48": 1.5,
-        "STL_48": 1.5
+        "STL_48": 2.5
+    },
+    "NFL": {
+        "QB": {
+
+        },
+        "WR": {
+
+        },
+        "TE": {
+
+        },
+        "RB": {
+
+        }
+    },
+    "NHL": {
+        "C": {
+
+        },
+        "W": {
+
+        },
+        "D": {
+
+        },
+        "G": {
+
+        }
     }
 }

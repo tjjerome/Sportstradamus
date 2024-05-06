@@ -18,6 +18,7 @@ import pandas as pd
 import warnings
 import requests
 from time import time
+from io import StringIO
 
 
 class Stats:
@@ -206,7 +207,8 @@ class StatsNBA(Stats):
             stats = json.load(infile)
     
         self.profile_market("MIN")
-        playerList = self.players.get(self.season, self.players.get('-'.join([str(int(n)-1) for n in self.season.split("-")])))
+        playerList = self.players.get('-'.join([str(int(n)-1) for n in self.season.split("-")]), {})
+        playerList.update(self.players.get(self.season, {}))
         players = []
         for team in playerList.keys():
             players.extend([v|{"PLAYER_NAME":k, "TEAM_ABBREVIATION":team} for k, v in playerList[team].items()])
@@ -222,7 +224,7 @@ class StatsNBA(Stats):
             positionProfile = playerProfile.loc[[player for player, value in playerDict.items() if value["POS"] == position and player in playerProfile.index]]
             knn = BallTree(positionProfile)
             d, i = knn.query(positionProfile.values, k=11)
-            r = np.median(np.max(d,axis=1))
+            r = np.quantile(np.max(d,axis=1), .5)
             i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
             players = positionProfile.index
             comps[position] = {players[j]: list(players[i[j]]) for j in range(len(i))}
@@ -3680,6 +3682,7 @@ class StatsNHL(Stats):
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 nhl_data = pickle.load(infile)
+                self.players = nhl_data["players"]
                 self.gamelog = nhl_data["gamelog"]
                 self.teamlog = nhl_data["teamlog"]
 
@@ -3688,11 +3691,8 @@ class StatsNHL(Stats):
             f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
         season = game['season']
         res = requests.get(
-            f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv").text
-        res = [row.split(',') for row in res.split('\n')]
-        if res[1][0] != str(gameId):
-            return 0, 0
-        game_df = pd.DataFrame(res[1:-1], columns=res[0])
+            f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv")
+        game_df = pd.read_csv(StringIO(res.text))
         pp_df = game_df.loc[game_df.situation == '5on4']
         game_df = game_df.loc[game_df.situation == 'all']
         gamelog = []
@@ -3711,6 +3711,8 @@ class StatsNHL(Stats):
             awayTeam = team_map.get(awayTeam, awayTeam)
             homeTeam = team_map.get(homeTeam, homeTeam)
             game_df.team = game_df.team.apply(lambda x: team_map.get(x, x))
+            game_df.position.replace("L", "W", inplace=True)
+            game_df.position.replace("R", "W", inplace=True)
 
             for i, player in game_df.iterrows():
                 team = player['team']
@@ -3897,6 +3899,62 @@ class StatsNHL(Stats):
                     "Goalie": goalie
                 }
 
+        res = requests.get(f"https://moneypuck.com/moneypuck/playerData/playerBios/allPlayersLookup.csv")
+        player_df = pd.read_csv(StringIO(res.text))
+        player_df.height = player_df.height.str[:-1].str.split("' ").apply(lambda x: 12*int(x[0]) + int(x[1]) if type(x) is list else 0)
+        player_df['age'] = (datetime.now()-pd.to_datetime(player_df['birthDate'])).dt.days/365.25
+        player_df.name = player_df.name.apply(remove_accents)
+        player_df.position.replace("R", "W", inplace=True)
+        player_df.position.replace("L", "W", inplace=True)
+
+        res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv")
+        skater_df = pd.read_csv(StringIO(res.text))
+        skater_df = skater_df.loc[skater_df['situation']=='all']
+        skater_df["Fenwick"] = skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
+        skater_df["timePerGame"] = skater_df['icetime'] / skater_df["games_played"] / 60
+        skater_df["timePerShift"] = skater_df['icetime'] / skater_df["I_F_shifts"]
+        skater_df["xGoals"] = skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
+        skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
+        skater_df["goals"] = skater_df["I_F_goals"] / skater_df["I_F_shotAttempts"]
+        skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
+        skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
+        skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"])
+        skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
+        skater_df["shotAttempts"] = skater_df["I_F_shotAttempts"] / skater_df['icetime'] * 60 * 60
+        skater_df["hits"] = skater_df["I_F_hits"] / skater_df['icetime'] * 60 * 60
+        skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df['icetime'] * 60 * 60
+        skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df['icetime'] * 60 * 60
+        skater_df["assists"] = (skater_df["I_F_primaryAssists"] + skater_df["I_F_secondaryAssists"]) / skater_df['icetime'] * 60 * 60
+        skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
+        skater_df["penaltyMinutesDrawn"] = skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
+        skater_df["blockedShots"] = skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
+        skater_df = skater_df[["playerId", "name", "team", "position", "Fenwick", "timePerGame", "timePerShift", "shotAttempts", "xGoals", "shotsOnGoal", "goals", "rebounds", "freeze", "oZoneStarts", "flyStarts", "hits", "takeaways", "giveaways", "assists", "penaltyMinutes", "penaltyMinutesDrawn", "blockedShots"]]
+
+        # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
+        # shot_df = pd.read_csv(StringIO(res.text))
+
+        res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv")
+        goalie_df = pd.read_csv(StringIO(res.text))
+        goalie_df = goalie_df.loc[goalie_df['situation']=='all']
+        goalie_df["timePerGame"] = goalie_df['icetime'] / goalie_df["games_played"] / 60
+        goalie_df["saves"] = goalie_df['ongoal'] - goalie_df['goals']
+        goalie_df["savePct"] = goalie_df['saves'] / goalie_df["ongoal"]
+        goalie_df["freezeAgainst"] = (goalie_df['freeze'] - goalie_df['xFreeze']) / goalie_df["saves"]
+        goalie_df["reboundsAgainst"] = (goalie_df['rebounds'] - goalie_df['xRebounds']) / goalie_df["saves"]
+        goalie_df["goalsAgainst"] = (goalie_df['goals'] - goalie_df['flurryAdjustedxGoals']) / goalie_df["ongoal"]
+        goalie_df = goalie_df[["playerId", "name", "team", "position", "timePerGame", "savePct", "freezeAgainst", "reboundsAgainst", "goalsAgainst"]]
+
+        skater_df = player_df.merge(skater_df, how='right', on="playerId", suffixes=[None, "_y"])
+        skater_df.dropna(inplace=True)
+        skater_df.index = skater_df.playerId
+        skater_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'name_y', 'team_y', 'position_y'], inplace=True)
+        goalie_df = player_df.merge(goalie_df, how='right', on="playerId", suffixes=[None, "_y"])
+        goalie_df.dropna(inplace=True)
+        goalie_df.index = goalie_df.playerId
+        goalie_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'name_y', 'team_y', 'position_y'], inplace=True)
+
+        self.players[self.season_start.year] = skater_df.to_dict('index')|goalie_df.to_dict('index')
+
         # Remove old games to prevent file bloat
         four_years_ago = today - timedelta(days=1431)
         self.gamelog = self.gamelog[pd.to_datetime(
@@ -3911,6 +3969,7 @@ class StatsNHL(Stats):
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
             pickle.dump({
+                "players": self.players,
                 "gamelog": self.gamelog,
                 "teamlog": self.teamlog}, outfile, -1)
 
@@ -4090,7 +4149,7 @@ class StatsNHL(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
 
-        positions = ["C", "R", "L", "D"]
+        positions = ["C", "W", "D"]
         if market == "faceOffWins":
             positions.remove("D")
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
@@ -4420,7 +4479,7 @@ class StatsNHL(Stats):
         if data["Line"] <= 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
-        positions = ["C", "R", "L", "D"]
+        positions = ["C", "W", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             if len(player_games) > 0:
                 position = player_games.iloc[0]['position']
