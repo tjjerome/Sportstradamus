@@ -218,7 +218,7 @@ def remove_accents(input_str):
         if out_str.endswith(substr):
             out_str = out_str.replace(substr, "")
     out_str = out_str.replace("’", "'")
-    out_str = re.sub("[\(\[].*?[\)\]]", "", out_str).strip()
+    out_str = re.sub("[\(\[].*?[\)\]]", "", out_str).strip().title()
     if "+" in out_str:
         names = out_str.split("+")
         out_str = " + ".join([name_map.get(n.strip(), n.strip())

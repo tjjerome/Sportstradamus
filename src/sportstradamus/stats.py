@@ -289,7 +289,8 @@ class StatsNBA(Stats):
         player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
         player_df.POS = player_df.POS.str[0]
         player_df.index = player_df.PLAYER_NAME
-        player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS", "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_WEIGHT", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]].apply(lambda x: x).replace(np.nan, 0)
+        player_df["PLAYER_BMI"] = player_df["PLAYER_WEIGHT"]/player_df["PLAYER_HEIGHT_INCHES"]/player_df["PLAYER_HEIGHT_INCHES"]
+        player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS", "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]].apply(lambda x: x).replace(np.nan, 0)
 
         player_df = {level: player_df.xs(level).T.to_dict()
                      for level in player_df.index.levels[0]}
@@ -3686,6 +3687,34 @@ class StatsNHL(Stats):
                 self.gamelog = nhl_data["gamelog"]
                 self.teamlog = nhl_data["teamlog"]
 
+        filepath = pkg_resources.files(data) / "nhl_comps.json"
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                self.comps = json.load(infile)
+
+    def update_player_comps(self):
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
+            stats = json.load(infile)
+    
+        players = self.players.get(self.season_start.year - 1, {})
+        players.update(self.players.get(self.season_start.year, {}))
+        playerProfile = pd.DataFrame(players).T
+        comps = {}
+        for position in ["C", "W", "D", "G"]:
+            positionProfile = playerProfile.loc[[player for player, value in players.items() if value["position"] == position and player in playerProfile.index], list(stats["NHL"][position].keys())].dropna()
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
+            knn = BallTree(positionProfile)
+            d, i = knn.query(positionProfile.values, k=11)
+            r = np.quantile(np.max(d,axis=1), .5)
+            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            playerIds = positionProfile.index
+            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]] for j in range(len(i))}
+
+        filepath = pkg_resources.files(data) / "nhl_comps.json"
+        with open(filepath, "w") as outfile:
+            json.dump(comps, outfile, indent=4)
+
     def parse_game(self, gameId, gameDate):
         game = scraper.get(
             f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
@@ -3902,6 +3931,7 @@ class StatsNHL(Stats):
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/playerBios/allPlayersLookup.csv")
         player_df = pd.read_csv(StringIO(res.text))
         player_df.height = player_df.height.str[:-1].str.split("' ").apply(lambda x: 12*int(x[0]) + int(x[1]) if type(x) is list else 0)
+        player_df["bmi"] = player_df["weight"]/player_df["height"]/player_df["height"]
         player_df['age'] = (datetime.now()-pd.to_datetime(player_df['birthDate'])).dt.days/365.25
         player_df.name = player_df.name.apply(remove_accents)
         player_df.position.replace("R", "W", inplace=True)
@@ -3915,7 +3945,7 @@ class StatsNHL(Stats):
         skater_df["timePerShift"] = skater_df['icetime'] / skater_df["I_F_shifts"]
         skater_df["xGoals"] = skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
         skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
-        skater_df["goals"] = skater_df["I_F_goals"] / skater_df["I_F_shotAttempts"]
+        skater_df["goals"] = (skater_df["I_F_goals"] - skater_df["I_F_flurryScoreVenueAdjustedxGoals"]) / skater_df["I_F_shotAttempts"]
         skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
         skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
         skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"])
