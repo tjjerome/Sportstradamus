@@ -19,36 +19,81 @@ NHL.update()
 NHL.update_player_comps()
 NHL.load()
 
+# players = {}
+# NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
+# ppg = NHL.gamelog.groupby(["playerId", "season"])[["goalie fantasy points underdog", "skater fantasy points underdog"]].mean().to_dict('index')
+# for year in NHL.players.keys():
+#     for player in NHL.players[year].keys():
+#         data = NHL.players[year][player]|{"PPG": ppg[(str(player), str(year))]["goalie fantasy points underdog" if NHL.players[year][player]["position"]=="G" else "skater fantasy points underdog"]}
+#         players.setdefault(player, {}).update({f"{year}_{k}":v for k, v in data.items()})
+
+# player_df = pd.DataFrame(players).T
+
+# for position in ["C", "W", "D", "G"]:
+#     position_df = player_df.loc[player_df["2023_position"] == position].dropna(axis=1, how='all').dropna()
+#     position_df.drop(columns=[col for col in position_df.columns if any(substr in col for substr in ["name", "position", "team", "shootsCatches"])], inplace=True)
+#     C = position_df.corr()
+#     columns = list({col[5:] for col in C.columns})
+#     col_stats = {}
+#     n = len(NHL.players.keys())
+#     for col in columns:
+#         yearly = (C.loc[C.index.str.endswith(col), C.columns.str.endswith(col)]*(1-np.tri(3))).sum().sum()/n
+#         fantasy = (C.loc[C.index.str.endswith(col), C.columns.str.endswith("PPG")]*np.eye(n)).sum().sum()/n
+#         volume = (C.loc[C.index.str.endswith(col), C.columns.str.endswith("timePerGame")]*np.eye(n)).sum().sum()/n
+
+#         col_stats[col] = {
+#             "yearly": yearly,
+#             "fantasy": fantasy,
+#             "volume": volume
+#         }    
+#     col_df = pd.DataFrame(col_stats).T.sort_values("volume", ascending=False)
+#     pass
+
+
 # markets = ["fantasy points prizepicks", "PTS", "REB", "AST", "TOV", "BLK", "STL", "MIN"]
 
-# gamelog = NBA.gamelog.loc[pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (datetime.today().date() - timedelta(days=300))]
+gamelog = NHL.gamelog.loc[pd.to_datetime(NHL.gamelog["gameDate"]).dt.date > (datetime.today().date() - timedelta(days=300))]
 
-# gameRecords = []
-# gameRecords1 = []
-# gameRecords2 = []
-# for i, game in tqdm(gamelog.iterrows(), desc="Checking Player Comps", total=len(gamelog)):
-#     gameDate = pd.to_datetime(game["GAME_DATE"]).date()
-#     dateMask = (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (gameDate - timedelta(days=300))) & (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date < gameDate)
+gameRecords = []
+gameRecords1 = []
+gameRecords2 = []
+for i, game in tqdm(gamelog.iterrows(), desc="Checking Player Comps", total=len(gamelog)):
+    gameDate = pd.to_datetime(game["gameDate"]).date()
+    dateMask = (pd.to_datetime(NHL.gamelog["gameDate"]).dt.date > (gameDate - timedelta(days=300))) & (pd.to_datetime(NHL.gamelog["gameDate"]).dt.date < gameDate)
 
-#     defenseGames = NBA.gamelog.loc[dateMask & (NBA.gamelog["OPP"]==game["OPP"])]
-#     defenseAvg = defenseGames[markets].mean()
-#     defenseStd = defenseGames[markets].std()
-#     compGames = defenseGames.loc[defenseGames["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
-#     gameResult = game[markets].to_dict()
+    if not NHL.comps[game["position"]].get(game["playerId"]):
+        continue
 
-#     compResult = ((compGames[markets].mean()-defenseAvg)/defenseStd).to_dict()
-#     gameRecords.append(gameResult|{"comp_"+k:v for k, v in compResult.items()})
+    if game["position"] == "G":
+        markets = ["goalie fantasy points underdog", "saves", "goalsAgainst"]
+    else:
+        markets = ["skater fantasy points underdog", "shots", "points", "timeOnIce", "blocked"]
+
+    defenseGames = NHL.gamelog.loc[dateMask & (NHL.gamelog["opponent"]==game["opponent"])]
+    # defenseAvg = defenseGames[markets].mean()
+    # defenseStd = defenseGames[markets].std()
+    compGames = defenseGames.loc[defenseGames["playerId"].isin(NHL.comps[game["position"]].get(game["playerId"], []))]
+    posGames = defenseGames.loc[defenseGames["position"] == game["position"]]
+    gameResult = game[markets].to_dict()
+
+    # compResult = ((compGames[markets].mean()-defenseAvg)/defenseStd).to_dict()
+    # posResult = ((posGames[markets].mean()-defenseAvg)/defenseStd).to_dict()
+    # gameRecords.append(gameResult|{"comp_"+k:v for k, v in compResult.items()})
+    # gameRecords.append(gameResult|{"pos_"+k:v for k, v in posResult.items()})
         
-#     compResult = compGames[markets].mean().to_dict()
-#     gameRecords2.append(gameResult|{"comp_"+k:v for k, v in compResult.items()})
+    compResult = compGames[markets].mean().to_dict()
+    posResult = posGames[markets].mean().to_dict()
+    gameRecords2.append(gameResult|{"comp_"+k:v for k, v in compResult.items()})
+    gameRecords2.append(gameResult|{"pos_"+k:v for k, v in posResult.items()})
 
 # game_df = pd.DataFrame(gameRecords)
 # C1 = game_df.corr()
-# game_df = pd.DataFrame(gameRecords2)
-# C3 = game_df.corr()
-# C = pd.DataFrame([{market: C1.loc[market, "comp_"+market] for market in markets},
-#                   {market: C3.loc[market, "comp_"+market] for market in markets}])
-# print(C)
+game_df = pd.DataFrame(gameRecords2)
+markets = [col for col in game_df.columns if "_" not in col]
+C2 = game_df.corr()
+C = pd.DataFrame([{market: C2.loc[market, "comp_"+market] for market in markets},
+                  {market: C2.loc[market, "pos_"+market] for market in markets}])
+print(C)
 
 # filepath = pkg_resources.files(data) / "banned_combos.json"
 # with open(filepath, "r") as infile:
