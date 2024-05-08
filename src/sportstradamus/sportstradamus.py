@@ -347,10 +347,10 @@ def main(progress, books, parlays):
         history = pd.read_pickle(filepath)
     else:
         history = pd.DataFrame(
-            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Result"])
+            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Result"])
 
     df = pd.concat([ud_offers, pp_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model"]]
+                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model"]]
     df.loc[(df['Market'] == 'AST') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
     df.loc[(df['Market'] == 'PTS') & (
@@ -360,7 +360,6 @@ def main(progress, books, parlays):
     df.dropna(subset='Market', inplace=True, ignore_index=True)
     history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                        ignore_index=True)
-    history = history.loc[history["Model"] > .58]
     if "Result" not in history.columns:
         history["Result"] = np.nan
     gameDates = pd.to_datetime(history.Date).dt.date
@@ -638,7 +637,8 @@ def find_correlation(offers, stats, platform, parlays):
             "Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
 
         league_df["Desc"] = league_df["Desc"] + " - " + \
-            league_df["Model"].multiply(100).round(1).astype(str) + "%"
+            league_df["Model"].multiply(100).round(1).astype(str) + "% (" + \
+            league_df["Boost"].astype(str) + ")"
 
         checked_teams = []
         teams = [team for team in league_df.Team.unique() if "/" not in team]
@@ -672,7 +672,7 @@ def find_correlation(offers, stats, platform, parlays):
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .25) & (game_df["Model"] >= .3)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
+            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .3) & (game_df["Model"] >= .35)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(15)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(28).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
