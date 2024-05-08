@@ -166,7 +166,7 @@ def reflect():
 
             return legs, misses
 
-    parlays.loc[parlays.Legs.isna(), ["Legs", "Misses"]] = parlays.loc[parlays.Legs.isna()].progress_apply(check_bet, axis=1).to_list()
+    # parlays.loc[parlays.Legs.isna(), ["Legs", "Misses"]] = parlays.loc[parlays.Legs.isna()].progress_apply(check_bet, axis=1).to_list()
     parlays.dropna(subset=['Legs'], inplace=True)
     parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
     parlays["Profit"] = parlays.apply(lambda x: np.clip(payout_table[x.Platform][x.Legs][x.Misses]*(x.Boost if x.Boost < 2 or x.Misses==0 else 1),None,100)-1, axis=1)
@@ -175,8 +175,7 @@ def reflect():
     parlays = parlays.sort_values("Model EV", ascending=False).drop_duplicates(subset=["Players", "Date"])
 
     pd.concat([parlays, parlays_clean]).sort_values("Model EV", ascending=False).drop_duplicates(subset=["Players", "Date"]).to_pickle(filepath)
-
-    parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99
+    parlays.dropna(inplace=True)
 
     profits = {}
 
@@ -191,32 +190,11 @@ def reflect():
             if not league_df.empty:
                 profits.setdefault(f"{platform}, {league}", {})
 
-                # if platform == "Underdog":
-                    # n = .01
-                    # mean_profit = np.zeros([int(1/n), int(5/n)])
-                    # for i, bt in enumerate(tqdm(np.arange(1, 2, n))):
-                    #     for j, mt in enumerate(np.arange(1, 6, n)):
-                    #         test_df = league_df.loc[(league_df["Books EV"] > bt) & (league_df["Model EV"] > mt)]
-                    #         bets = test_df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(5).mean())
-                    #         if len(bets):
-                    #             mean_profit[i, j] = bets.sum()
-                            
-                    # model_threshold = np.argmax((mean_profit-np.nanmean(mean_profit))/np.nanstd(mean_profit) >= 1, axis=1)*n+1
-                    # book_threshold = np.arange(1,2,n)
-                    # book_threshold = book_threshold[model_threshold > 1]
-                    # model_threshold = model_threshold[model_threshold > 1]
-                    # p = np.polyfit(np.log(6-model_threshold), book_threshold, 1)
-                    # masks[league] = list(p)
-
             for tf, days in [("Yesterday", 1), ("Last Week", 7), ("Last Month", 30), ("Three Months", 91), ("Six Months", 183), ("Last Year", 365)]:
                 df = league_df.loc[pd.to_datetime(league_df.Date).dt.date >= datetime.today().date() - timedelta(days=days)]
 
                 if not df.empty:
-                    profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.head(10).mean()).sum()
-
-    # filepath = pkg_resources.files(data) / "parlay_masks.json"
-    # with open(filepath, 'w') as of:
-    #     json.dump(masks, of, indent=4)
+                    profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.mean()).sum()
 
     profits = pd.DataFrame(profits).T.reset_index(names='Split').fillna(0.0)
     wks = gc.open("Sportstradamus").worksheet("Parlay Profit")
@@ -271,6 +249,10 @@ def reflect():
             wks.set_basic_filter()
 
             history = history.loc[history["Result"] != "Push"]
+            boost_hist = history.loc[history["Model"]*history["Boost"] > .58]
+            history = history.loc[history["Boost"] > .58]
+
+            # boost_acc = (boost_hist.groupby("Boost").apply(lambda x: accuracy_score(x["Bet"], x["Result"])*x.Boost.iloc[0]) * boost_hist.groupby("Boost").count().mean().iloc[0].mean()).sum()/len(boost_hist)
             hist_stats = pd.DataFrame(columns=["Accuracy", "Balance", "LogLoss", "Brier", "Samples"])
             hist_stats.loc["All"] = {
                 "Accuracy": accuracy_score(history["Bet"], history["Result"]),
@@ -279,7 +261,7 @@ def reflect():
                 "Brier": brier_score_loss((history["Bet"] == history["Result"]).astype(int), history["Model"], pos_label=1),
                 "Samples": len(history)
             }
-            hist_filt = history.loc[history["Books"] > .52]
+            hist_filt = history.loc[history["Books"] > .54]
             hist_stats.loc["All, Book Filtered"] = {
                 "Accuracy": accuracy_score(hist_filt["Bet"], hist_filt["Result"]),
                 "Balance": (hist_filt["Bet"] == "Over").mean() - (hist_filt["Result"] == "Over").mean(),
