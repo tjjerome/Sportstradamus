@@ -12,12 +12,12 @@ import numpy as np
 from tqdm import tqdm
 from time import time
 import requests
-
-NHL = StatsNHL()
-NHL.load()
-NHL.update()
-NHL.update_player_comps()
-NHL.load()
+pd.options.mode.chained_assignment = None
+NBA = StatsNBA()
+NBA.load()
+NBA.update()
+NBA.update_player_comps()
+NBA.load()
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
@@ -50,41 +50,48 @@ NHL.load()
 #     pass
 
 
-# markets = ["fantasy points prizepicks", "PTS", "REB", "AST", "TOV", "BLK", "STL", "MIN"]
+markets = ["fantasy points prizepicks", "PTS", "REB", "AST", "TOV", "BLK", "STL"]
 
-gamelog = NHL.gamelog.loc[pd.to_datetime(NHL.gamelog["gameDate"]).dt.date > (datetime.today().date() - timedelta(days=300))]
+gamelog = NBA.gamelog.loc[pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (datetime.today().date() - timedelta(days=300))]
 
 gameRecords = []
 gameRecords1 = []
 gameRecords2 = []
 for i, game in tqdm(gamelog.iterrows(), desc="Checking Player Comps", total=len(gamelog)):
-    gameDate = pd.to_datetime(game["gameDate"]).date()
-    dateMask = (pd.to_datetime(NHL.gamelog["gameDate"]).dt.date > (gameDate - timedelta(days=300))) & (pd.to_datetime(NHL.gamelog["gameDate"]).dt.date < gameDate)
+    gameDate = pd.to_datetime(game["GAME_DATE"]).date()
+    if 11 >= gameDate.month >= 10:
+        continue
+    dateMask = (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (gameDate - timedelta(days=300))) & (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date < gameDate)
 
-    if not NHL.comps[game["position"]].get(game["playerId"]):
+    if not NBA.comps[game["POS"]].get(game["PLAYER_NAME"]):
         continue
 
-    if game["position"] == "G":
-        markets = ["goalie fantasy points underdog", "saves", "goalsAgainst"]
-    else:
-        markets = ["skater fantasy points underdog", "shots", "points", "timeOnIce", "blocked"]
+    # if game["position"] == "G":
+    #     markets = ["goalie fantasy points underdog", "saves", "goalsAgainst"]
+    # else:
+    #     markets = ["skater fantasy points underdog", "shots", "points", "timeOnIce", "blocked"]
 
-    defenseGames = NHL.gamelog.loc[dateMask & (NHL.gamelog["opponent"]==game["opponent"])]
-    # defenseAvg = defenseGames[markets].mean()
-    # defenseStd = defenseGames[markets].std()
-    compGames = defenseGames.loc[defenseGames["playerId"].isin(NHL.comps[game["position"]].get(game["playerId"], []))]
-    posGames = defenseGames.loc[defenseGames["position"] == game["position"]]
-    gameResult = game[markets].to_dict()
+    defenseVsLeague = NBA.gamelog.loc[dateMask & (NBA.gamelog["OPP"]==game["OPP"])]
+    compVsLeague = NBA.gamelog.loc[dateMask & NBA.gamelog["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
+    defenseVsPos = defenseVsLeague.loc[defenseVsLeague["POS"] == game["POS"]]
+    defenseVsComp = defenseVsLeague.loc[defenseVsLeague["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
+    defenseVsPlayer = defenseVsLeague.loc[defenseVsLeague["PLAYER_NAME"] == game["PLAYER_NAME"]]
+    posVsLeague = NBA.gamelog.loc[NBA.gamelog["POS"] == game["POS"]]
 
-    # compResult = ((compGames[markets].mean()-defenseAvg)/defenseStd).to_dict()
-    # posResult = ((posGames[markets].mean()-defenseAvg)/defenseStd).to_dict()
-    # gameRecords.append(gameResult|{"comp_"+k:v for k, v in compResult.items()})
-    # gameRecords.append(gameResult|{"pos_"+k:v for k, v in posResult.items()})
+    defenseVsLeague = defenseVsLeague[markets].div(defenseVsLeague["MIN"], axis=0)
+    compVsLeague = compVsLeague[markets].div(compVsLeague["MIN"], axis=0)
+    defenseVsPos = defenseVsPos[markets].div(defenseVsPos["MIN"], axis=0)
+    defenseVsComp = defenseVsComp[markets].div(defenseVsComp["MIN"], axis=0)
+    defenseVsPlayer = defenseVsPlayer[markets].div(defenseVsPlayer["MIN"], axis=0)
+    posVsLeague = posVsLeague[markets].div(posVsLeague["MIN"], axis=0)
         
-    compResult = compGames[markets].mean().to_dict()
-    posResult = posGames[markets].mean().to_dict()
-    gameRecords2.append(gameResult|{"comp_"+k:v for k, v in compResult.items()})
-    gameRecords2.append(gameResult|{"pos_"+k:v for k, v in posResult.items()})
+    defenseResult = (defenseVsComp.mean()/defenseVsLeague.mean()).to_dict()
+    compResult = (defenseVsComp.mean()/compVsLeague.mean()).to_dict()
+    
+    gameResult = (game[markets]/game["MIN"]).to_dict()
+    gameRecords2.append(gameResult|
+                        {"comp_"+k:v for k, v in compResult.items()}|
+                        {"def_"+k:v for k, v in defenseResult.items()})
 
 # game_df = pd.DataFrame(gameRecords)
 # C1 = game_df.corr()
@@ -92,7 +99,8 @@ game_df = pd.DataFrame(gameRecords2)
 markets = [col for col in game_df.columns if "_" not in col]
 C2 = game_df.corr()
 C = pd.DataFrame([{market: C2.loc[market, "comp_"+market] for market in markets},
-                  {market: C2.loc[market, "pos_"+market] for market in markets}])
+                  {market: C2.loc[market, "def_"+market] for market in markets}],
+                  index=['comp', 'def'])
 print(C)
 
 # filepath = pkg_resources.files(data) / "banned_combos.json"

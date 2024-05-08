@@ -213,8 +213,6 @@ class StatsNBA(Stats):
         for team in playerList.keys():
             players.extend([v|{"PLAYER_NAME":k, "TEAM_ABBREVIATION":team} for k, v in playerList[team].items()])
         playerProfile = self.playerProfile.merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"), on="PLAYER_NAME", how='left', suffixes=('_x', None)).set_index("PLAYER_NAME")[list(stats["NBA"].keys())].dropna()
-        playerProfile = playerProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
-        playerProfile = playerProfile.mul(np.sqrt(list(stats["NBA"].values())))
         comps = {}
         playerList = playerList.values()
         playerDict = {}
@@ -222,6 +220,8 @@ class StatsNBA(Stats):
             playerDict.update(team)
         for position in ["P", "C", "W", "F", "B"]:
             positionProfile = playerProfile.loc[[player for player, value in playerDict.items() if value["POS"] == position and player in playerProfile.index]]
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NBA"].values())))
             knn = BallTree(positionProfile)
             d, i = knn.query(positionProfile.values, k=11)
             r = np.quantile(np.max(d,axis=1), .5)
@@ -3705,7 +3705,7 @@ class StatsNHL(Stats):
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=11)
+            d, i = knn.query(positionProfile.values, k=(6 if position=="G" else 11))
             r = np.quantile(np.max(d,axis=1), .5)
             i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
             playerIds = positionProfile.index
