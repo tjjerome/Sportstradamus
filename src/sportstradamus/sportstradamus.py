@@ -638,7 +638,8 @@ def find_correlation(offers, stats, platform, parlays):
             "Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
 
         league_df["Desc"] = league_df["Desc"] + " - " + \
-            league_df["Model"].multiply(100).round(1).astype(str) + "%"
+            league_df["Model"].multiply(100).round(1).astype(str) + "% (" + \
+            league_df["Boost"].astype(str) + ")"
 
         checked_teams = []
         teams = [team for team in league_df.Team.unique() if "/" not in team]
