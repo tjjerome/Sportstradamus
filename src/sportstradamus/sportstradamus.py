@@ -776,7 +776,7 @@ def find_correlation(offers, stats, platform, parlays):
 
                     try:
                         p = payout*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
-                        pb = payout*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)
+                        pb = payout*(3*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)+np.product([leg["Books"] for leg in bet]))/4
                     except:
                         continue
                     
