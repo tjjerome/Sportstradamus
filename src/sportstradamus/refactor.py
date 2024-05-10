@@ -13,23 +13,15 @@ import pickle
 with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
     stat_cv = json.load(f)
 
-with open(pkg_resources.files(data) / "old/stat_cv.json", "r") as f:
-    old_stat_cv = json.load(f)
-
-with open(pkg_resources.files(data) / "prop_books.json", "r") as f:
-    books = json.load(f)
-
 archive = Archive("All")
-book_pos = {0: 'draftkings', 1: 'fanduel', 2: 'pinnacle', 3: 'williamhill_us'}
 leagues = list(archive.archive.keys())
 for league in tqdm(leagues, unit="leagues", position=0):
-    # markets = list(archive[league].keys())
-    markets = ["Moneyline", "Totals"]
-    # if "Moneyline" in markets:
-    #     markets.remove("Moneyline")
-    #     markets.remove("Totals")
-    # if "1st 1 innings" in markets:
-    #     markets.remove("1st 1 innings")
+    markets = list(archive[league].keys())
+    if "Moneyline" in markets:
+        markets.remove("Moneyline")
+        markets.remove("Totals")
+    if "1st 1 innings" in markets:
+        markets.remove("1st 1 innings")
     for market in tqdm(markets, desc=league, unit="Markets", position=1):
         # cv = stat_cv.get(league, {}).get(market, 1)
         if market not in archive[league]:
@@ -40,9 +32,11 @@ for league in tqdm(leagues, unit="leagues", position=0):
                 # if " + " in player or " vs. " in player:
                 #     archive[league][market][date].pop(player)
                 #     continue
+                if "Line" in archive[league][market][date][player]["EV"]:
+                    archive[league][market][date][player]["EV"].pop("Line")
                 player_name = remove_accents(player)
-                # if player_name != player:
-                #     archive[league][market][date][player_name] = merge_dict(archive[league][market][date].get(player_name,{}), archive[league][market][date].pop(player))
+                if player_name != player:
+                    archive[league][market][date][player_name] = merge_dict(archive[league][market][date].get(player_name,{}), archive[league][market][date].pop(player))
                 # ev = {}
                 # old_ev = archive[league][market][date][player_name].get("EV", [None]*4)
                 # if type(old_ev) is np.ndarray:

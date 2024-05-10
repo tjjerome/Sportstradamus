@@ -59,6 +59,7 @@ class Stats:
         self.profiled_market = ""
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
+        self.teamProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.upcoming_games = {}
 
     def parse_game(self, game):
@@ -882,9 +883,9 @@ class StatsNBA(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
         cv = stat_cv.get("NBA", {}).get(market, 1)
-        if self.defenseProfile.empty:
-            logger.exception(f"{market} not profiled")
-            return 0
+        # if self.defenseProfile.empty:
+        #     logger.exception(f"{market} not profiled")
+        #     return 0
         home = offer.get("Home")
         if home is None:
             home = self.upcoming_games.get(team, {}).get("Home", 0)
@@ -892,6 +893,14 @@ class StatsNBA(Stats):
         if player not in self.playerProfile.index:
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
+
+        if team not in self.teamProfile.index:
+            self.teamProfile.loc[team] = np.zeros_like(
+                self.teamProfile.columns)
+            
+        if opponent not in self.defenseProfile.index:
+            self.defenseProfile.loc[opponent] = np.zeros_like(
+                self.defenseProfile.columns)
 
         Date = datetime.strptime(date, "%Y-%m-%d")
 
@@ -911,7 +920,7 @@ class StatsNBA(Stats):
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
-        if opponent in self.defenseProfile.index:
+        if position in self.defenseProfile.loc[opponent]:
             dvpoa = self.defenseProfile.loc[opponent, position]
         else:
             dvpoa = 0
@@ -2088,9 +2097,9 @@ class StatsMLB(Stats):
         team = offer["Team"].replace("AZ", "ARI")
         market = offer["Market"]
         cv = stat_cv.get("MLB", {}).get(market, 1)
-        if self.defenseProfile.empty:
-            logger.exception(f"{market} not profiled")
-            return 0
+        # if self.defenseProfile.empty:
+        #     logger.exception(f"{market} not profiled")
+        #     return 0
         line = offer["Line"]
         opponent = offer["Opponent"].replace("AZ", "ARI").split(" (")[0]
         home = offer.get("Home")
@@ -2100,6 +2109,11 @@ class StatsMLB(Stats):
         if player not in self.playerProfile.index:
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
+
+        if team not in self.teamProfile.index:
+            self.teamProfile.loc[team] = np.zeros_like(
+                self.teamProfile.columns)
+            
         if opponent not in self.defenseProfile.index:
             self.defenseProfile.loc[opponent] = np.zeros_like(
                 self.defenseProfile.columns)
@@ -2723,7 +2737,7 @@ class StatsNFL(Stats):
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
 
-        # self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
+        self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -3351,9 +3365,9 @@ class StatsNFL(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
         cv = stat_cv.get("NFL", {}).get(market, 1)
-        if self.defenseProfile.empty:
-            logger.exception(f"{market} not profiled")
-            return 0
+        # if self.defenseProfile.empty:
+        #     logger.exception(f"{market} not profiled")
+        #     return 0
         home = offer.get("Home")
         if home is None:
             home = self.upcoming_games.get(team, {}).get("Home", 0)
@@ -3361,6 +3375,14 @@ class StatsNFL(Stats):
         if player not in self.playerProfile.index:
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
+
+        if team not in self.teamProfile.index:
+            self.teamProfile.loc[team] = np.zeros_like(
+                self.teamProfile.columns)
+            
+        if opponent not in self.defenseProfile.index:
+            self.defenseProfile.loc[opponent] = np.zeros_like(
+                self.defenseProfile.columns)
 
         Date = datetime.strptime(date, "%Y-%m-%d")
 
@@ -4360,9 +4382,9 @@ class StatsNHL(Stats):
         market = offer["Market"]
         market = stat_map.get(market, market)
         cv = stat_cv.get("NHL", {}).get(market, 1)
-        if self.defenseProfile.empty:
-            logger.exception(f"{market} not profiled")
-            return 0
+        # if self.defenseProfile.empty:
+        #     logger.exception(f"{market} not profiled")
+        #     return 0
         line = offer["Line"]
         opponent = offer["Opponent"]
         home = offer.get("Home")
@@ -4372,6 +4394,14 @@ class StatsNHL(Stats):
         if player not in self.playerProfile.index:
             self.playerProfile.loc[player] = np.zeros_like(
                 self.playerProfile.columns)
+
+        if team not in self.teamProfile.index:
+            self.teamProfile.loc[team] = np.zeros_like(
+                self.teamProfile.columns)
+            
+        if opponent not in self.defenseProfile.index:
+            self.defenseProfile.loc[opponent] = np.zeros_like(
+                self.defenseProfile.columns)
 
         Date = datetime.strptime(date, "%Y-%m-%d")
 

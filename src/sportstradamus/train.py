@@ -295,6 +295,9 @@ def meditate(force, league):
             
             M = pd.concat([M,new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
+            if league == "NHL" and not any([string in market for string in ["Against", "saves", "goalie"]]):
+                M.loc[M.Position==2, 'Position'] = 1
+                M.loc[M.Position==3, 'Position'] = 2
             M = trim_matrix(M)
             M.to_csv(filepath)
 
@@ -735,7 +738,7 @@ def fit_model_weight(model_prob, odds_prob, y_class):
     def objective(w, x, y):
         filt.coef_ = np.array([w])
         proba = filt.predict_proba(x)
-        return brier_score_loss(y, proba[:,1], pos_label=1) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
+        return log_loss(y, proba[:,1], pos_label=1) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
 
     res = minimize(objective, guess, args=(x, y_class), bounds=[(0, 2)]*2, tol=1e-8, method='TNC')
     filt.coef_ = np.array([res.x])
@@ -977,20 +980,7 @@ def correlate(league, force=False):
                 "faceOffWins",
                 "timeOnIce",
             ],
-            "L": [
-                "points",
-                "shots",
-                "sogBS",
-                "fantasy points prizepicks",
-                "skater fantasy points underdog",
-                "blocked",
-                "hits",
-                "goals",
-                "assists",
-                "faceOffWins",
-                "timeOnIce",
-            ],
-            "R": [
+            "W": [
                 "points",
                 "shots",
                 "sogBS",
