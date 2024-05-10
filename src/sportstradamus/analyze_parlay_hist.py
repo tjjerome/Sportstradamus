@@ -166,7 +166,7 @@ def reflect():
 
             return legs, misses
 
-    # parlays.loc[parlays.Legs.isna(), ["Legs", "Misses"]] = parlays.loc[parlays.Legs.isna()].progress_apply(check_bet, axis=1).to_list()
+    parlays.loc[parlays.Legs.isna(), ["Legs", "Misses"]] = parlays.loc[parlays.Legs.isna()].progress_apply(check_bet, axis=1).to_list()
     parlays.dropna(subset=['Legs'], inplace=True)
     parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
     parlays["Profit"] = parlays.apply(lambda x: np.clip(payout_table[x.Platform][x.Legs][x.Misses]*(x.Boost if x.Boost < 2 or x.Misses==0 else 1),None,100)-1, axis=1)
