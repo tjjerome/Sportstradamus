@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pickle
 import json
 import importlib.resources as pkg_resources
+from sklearn.neighbors import BallTree
 from sportstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
@@ -12,11 +13,12 @@ import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, merge_dict
 import pandas as pd
 import warnings
 import requests
 from time import time
+from io import StringIO
 
 
 class Stats:
@@ -56,6 +58,7 @@ class Stats:
         self.profile_latest_date = datetime(year=1900, month=1, day=1).date()
         self.profiled_market = ""
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
+        self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.upcoming_games = {}
 
     def parse_game(self, game):
@@ -93,6 +96,9 @@ class Stats:
             None
         """
         # Implementation details...
+
+    def update_player_comps(self):
+        return
 
     def bucket_stats(self, market, date):
         """
@@ -191,6 +197,42 @@ class StatsNBA(Stats):
                 self.gamelog = nba_data['gamelog']
                 self.teamlog = nba_data['teamlog']
 
+        filepath = pkg_resources.files(data) / "nba_comps.json"
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                self.comps = json.load(infile)
+
+    def update_player_comps(self):
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
+            stats = json.load(infile)
+    
+        self.profile_market("MIN")
+        playerList = self.players.get('-'.join([str(int(n)-1) for n in self.season.split("-")]), {})
+        playerList.update(self.players.get(self.season, {}))
+        players = []
+        for team in playerList.keys():
+            players.extend([v|{"PLAYER_NAME":k, "TEAM_ABBREVIATION":team} for k, v in playerList[team].items()])
+        playerProfile = self.playerProfile.merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"), on="PLAYER_NAME", how='left', suffixes=('_x', None)).set_index("PLAYER_NAME")[list(stats["NBA"].keys())].dropna()
+        comps = {}
+        playerList = playerList.values()
+        playerDict = {}
+        for team in playerList:
+            playerDict.update(team)
+        for position in ["P", "C", "W", "F", "B"]:
+            positionProfile = playerProfile.loc[[player for player, value in playerDict.items() if value["POS"] == position and player in playerProfile.index]]
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NBA"].values())))
+            knn = BallTree(positionProfile)
+            d, i = knn.query(positionProfile.values, k=11)
+            r = np.quantile(np.max(d,axis=1), .5)
+            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            players = positionProfile.index
+            comps[position] = {players[j]: list(players[i[j]]) for j in range(len(i))}
+
+        filepath = pkg_resources.files(data) / "nba_comps.json"
+        with open(filepath, "w") as outfile:
+            json.dump(comps, outfile, indent=4)
+
     def update(self):
         """
         Update data from the web API.
@@ -211,9 +253,46 @@ class StatsNBA(Stats):
             data) / f"nba_players_{self.season}.csv")
 
         player_df.Player = player_df.Player.apply(remove_accents)
-        player_df.index = player_df.Player
-        player_df = player_df.groupby("Team")["Pos"].apply(lambda x: x.str[0])
-        player_df = {level: player_df.xs(level).to_dict()
+        player_df.rename(columns={"Player":"PLAYER_NAME", "Team": "TEAM_ABBREVIATION", "Age": "AGE", "Pos": "POS"}, inplace=True)
+        i = 0
+        while (i < 10):
+            try:
+                playerBios = nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats(season=self.season).get_normalized_dict()["LeagueDashPlayerBioStats"]
+
+                shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(**{"season": self.season, "season_type_all_star": "Regular Season", "distance_range": "By Zone"}).get_dict()['resultSets']
+                break
+            except:
+                playerBios = []
+                shotData = {'rowSet':[]}
+                sleep(.1)
+                i = i+1
+
+        playerBios = pd.DataFrame(playerBios)
+        playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
+        shotMap = []
+        for row in shotData['rowSet']:
+            fga = np.nansum(np.array(row[7:-6:3],dtype=float))
+            if fga>0:
+                record = {
+                    "PLAYER_NAME": remove_accents(row[1]),
+                    "TEAM_ABBREVIATION": row[3],
+                    "RA_PCT": (row[7] if row[7] else 0)/fga,
+                    "ITP_PCT": (row[10] if row[10] else 0)/fga,
+                    "MR_PCT": (row[13] if row[13] else 0)/fga,
+                    "C3_PCT": (row[28] if row[28] else 0)/fga,
+                    "B3_PCT": (row[22] if row[22] else 0)/fga
+                }
+                shotMap.append(record)
+
+        player_df = player_df.merge(playerBios,on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y")).merge(pd.DataFrame(shotMap),on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y"))
+        # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
+        player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
+        player_df.POS = player_df.POS.str[0]
+        player_df.index = player_df.PLAYER_NAME
+        player_df["PLAYER_BMI"] = player_df["PLAYER_WEIGHT"]/player_df["PLAYER_HEIGHT_INCHES"]/player_df["PLAYER_HEIGHT_INCHES"]
+        player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS", "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]].apply(lambda x: x).replace(np.nan, 0)
+
+        player_df = {level: player_df.xs(level).T.to_dict()
                      for level in player_df.index.levels[0]}
         if self.season in self.players:
             self.players[self.season] = {team: players | player_df.get(
@@ -320,6 +399,7 @@ class StatsNBA(Stats):
 
                 break
             except:
+                sleep(0.1)
                 i += 1
 
         nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
@@ -381,7 +461,7 @@ class StatsNBA(Stats):
                 for season in list(self.players.keys())[::-1]:
                     if position is None:
                         position = self.players[season][game["TEAM_ABBREVIATION"]].get(
-                            game["PLAYER_NAME"])
+                            game["PLAYER_NAME"], {}).get("POS")
 
                 if position is None:
                     position = nba.commonplayerinfo.CommonPlayerInfo(
@@ -390,11 +470,11 @@ class StatsNBA(Stats):
                     position = position_map.get(position)
 
                 self.players[self.season][game["TEAM_ABBREVIATION"]
-                                          ][game["PLAYER_NAME"]] = position
+                                          ].setdefault(game["PLAYER_NAME"], {})["POS"] = position
 
             # Extract additional game information
             game["POS"] = self.players[self.season][game["TEAM_ABBREVIATION"]].get(
-                game["PLAYER_NAME"])
+                game["PLAYER_NAME"], {}).get("POS")
             game["HOME"] = "vs." in game["MATCHUP"]
             teams = game["MATCHUP"].replace("vs.", "@").split(" @ ")
             for team in teams:
@@ -3603,19 +3683,45 @@ class StatsNHL(Stats):
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 nhl_data = pickle.load(infile)
+                self.players = nhl_data["players"]
                 self.gamelog = nhl_data["gamelog"]
                 self.teamlog = nhl_data["teamlog"]
+
+        filepath = pkg_resources.files(data) / "nhl_comps.json"
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                self.comps = json.load(infile)
+
+    def update_player_comps(self):
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
+            stats = json.load(infile)
+    
+        players = self.players.get(self.season_start.year - 1, {})
+        players.update(self.players.get(self.season_start.year, {}))
+        playerProfile = pd.DataFrame(players).T
+        comps = {}
+        for position in ["C", "W", "D", "G"]:
+            positionProfile = playerProfile.loc[[player for player, value in players.items() if value["position"] == position and player in playerProfile.index], list(stats["NHL"][position].keys())].dropna()
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
+            knn = BallTree(positionProfile)
+            d, i = knn.query(positionProfile.values, k=(6 if position=="G" else 11))
+            r = np.quantile(np.max(d,axis=1), .5)
+            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            playerIds = positionProfile.index
+            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]] for j in range(len(i))}
+
+        filepath = pkg_resources.files(data) / "nhl_comps.json"
+        with open(filepath, "w") as outfile:
+            json.dump(comps, outfile, indent=4)
 
     def parse_game(self, gameId, gameDate):
         game = scraper.get(
             f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
         season = game['season']
         res = requests.get(
-            f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv").text
-        res = [row.split(',') for row in res.split('\n')]
-        if res[1][0] != str(gameId):
-            return 0, 0
-        game_df = pd.DataFrame(res[1:-1], columns=res[0])
+            f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv")
+        game_df = pd.read_csv(StringIO(res.text))
         pp_df = game_df.loc[game_df.situation == '5on4']
         game_df = game_df.loc[game_df.situation == 'all']
         gamelog = []
@@ -3634,6 +3740,8 @@ class StatsNHL(Stats):
             awayTeam = team_map.get(awayTeam, awayTeam)
             homeTeam = team_map.get(homeTeam, homeTeam)
             game_df.team = game_df.team.apply(lambda x: team_map.get(x, x))
+            game_df.position.replace("L", "W", inplace=True)
+            game_df.position.replace("R", "W", inplace=True)
 
             for i, player in game_df.iterrows():
                 team = player['team']
@@ -3820,6 +3928,63 @@ class StatsNHL(Stats):
                     "Goalie": goalie
                 }
 
+        res = requests.get(f"https://moneypuck.com/moneypuck/playerData/playerBios/allPlayersLookup.csv")
+        player_df = pd.read_csv(StringIO(res.text))
+        player_df.height = player_df.height.str[:-1].str.split("' ").apply(lambda x: 12*int(x[0]) + int(x[1]) if type(x) is list else 0)
+        player_df["bmi"] = player_df["weight"]/player_df["height"]/player_df["height"]
+        player_df['age'] = (datetime.now()-pd.to_datetime(player_df['birthDate'])).dt.days/365.25
+        player_df.name = player_df.name.apply(remove_accents)
+        player_df.position.replace("R", "W", inplace=True)
+        player_df.position.replace("L", "W", inplace=True)
+
+        res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv")
+        skater_df = pd.read_csv(StringIO(res.text))
+        skater_df = skater_df.loc[skater_df['situation']=='all']
+        skater_df["Fenwick"] = skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
+        skater_df["timePerGame"] = skater_df['icetime'] / skater_df["games_played"] / 60
+        skater_df["timePerShift"] = skater_df['icetime'] / skater_df["I_F_shifts"]
+        skater_df["xGoals"] = skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
+        skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
+        skater_df["goals"] = (skater_df["I_F_goals"] - skater_df["I_F_flurryScoreVenueAdjustedxGoals"]) / skater_df["I_F_shotAttempts"]
+        skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
+        skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
+        skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"])
+        skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
+        skater_df["shotAttempts"] = skater_df["I_F_shotAttempts"] / skater_df['icetime'] * 60 * 60
+        skater_df["hits"] = skater_df["I_F_hits"] / skater_df['icetime'] * 60 * 60
+        skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df['icetime'] * 60 * 60
+        skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df['icetime'] * 60 * 60
+        skater_df["assists"] = (skater_df["I_F_primaryAssists"] + skater_df["I_F_secondaryAssists"]) / skater_df['icetime'] * 60 * 60
+        skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
+        skater_df["penaltyMinutesDrawn"] = skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
+        skater_df["blockedShots"] = skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
+        skater_df = skater_df[["playerId", "name", "team", "position", "Fenwick", "timePerGame", "timePerShift", "shotAttempts", "xGoals", "shotsOnGoal", "goals", "rebounds", "freeze", "oZoneStarts", "flyStarts", "hits", "takeaways", "giveaways", "assists", "penaltyMinutes", "penaltyMinutesDrawn", "blockedShots"]]
+
+        # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
+        # shot_df = pd.read_csv(StringIO(res.text))
+
+        res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv")
+        goalie_df = pd.read_csv(StringIO(res.text))
+        goalie_df = goalie_df.loc[goalie_df['situation']=='all']
+        goalie_df["timePerGame"] = goalie_df['icetime'] / goalie_df["games_played"] / 60
+        goalie_df["saves"] = goalie_df['ongoal'] - goalie_df['goals']
+        goalie_df["savePct"] = goalie_df['saves'] / goalie_df["ongoal"]
+        goalie_df["freezeAgainst"] = (goalie_df['freeze'] - goalie_df['xFreeze']) / goalie_df["saves"]
+        goalie_df["reboundsAgainst"] = (goalie_df['rebounds'] - goalie_df['xRebounds']) / goalie_df["saves"]
+        goalie_df["goalsAgainst"] = (goalie_df['goals'] - goalie_df['flurryAdjustedxGoals']) / goalie_df["ongoal"]
+        goalie_df = goalie_df[["playerId", "name", "team", "position", "timePerGame", "savePct", "freezeAgainst", "reboundsAgainst", "goalsAgainst"]]
+
+        skater_df = player_df.merge(skater_df, how='right', on="playerId", suffixes=[None, "_y"])
+        skater_df.dropna(inplace=True)
+        skater_df.index = skater_df.playerId
+        skater_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'name_y', 'team_y', 'position_y'], inplace=True)
+        goalie_df = player_df.merge(goalie_df, how='right', on="playerId", suffixes=[None, "_y"])
+        goalie_df.dropna(inplace=True)
+        goalie_df.index = goalie_df.playerId
+        goalie_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'name_y', 'team_y', 'position_y'], inplace=True)
+
+        self.players[self.season_start.year] = skater_df.to_dict('index')|goalie_df.to_dict('index')
+
         # Remove old games to prevent file bloat
         four_years_ago = today - timedelta(days=1431)
         self.gamelog = self.gamelog[pd.to_datetime(
@@ -3834,6 +3999,7 @@ class StatsNHL(Stats):
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
             pickle.dump({
+                "players": self.players,
                 "gamelog": self.gamelog,
                 "teamlog": self.teamlog}, outfile, -1)
 
@@ -4013,7 +4179,7 @@ class StatsNHL(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
 
-        positions = ["C", "R", "L", "D"]
+        positions = ["C", "W", "D"]
         if market == "faceOffWins":
             positions.remove("D")
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
@@ -4343,7 +4509,7 @@ class StatsNHL(Stats):
         if data["Line"] <= 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
-        positions = ["C", "R", "L", "D"]
+        positions = ["C", "W", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             if len(player_games) > 0:
                 position = player_games.iloc[0]['position']

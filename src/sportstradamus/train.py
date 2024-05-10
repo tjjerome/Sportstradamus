@@ -128,6 +128,29 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
+        "NBA": [
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
+            "MIN",
+        ],
         "NFL": [
             "passing yards",
             "rushing yards",
@@ -155,29 +178,6 @@ def meditate(force, league):
             "first downs",
             "fumbles lost",
             "completion percentage"
-        ],
-        "NBA": [
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-            "MIN",
         ],
         "MLB": [
             "pitcher strikeouts",
@@ -225,6 +225,7 @@ def meditate(force, league):
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
+        stat_data = stat_structs[league]
         
         book_weights.setdefault(league, {}).setdefault("Moneyline", {})
         book_weights[league]["Moneyline"] = fit_book_weights(league, "Moneyline")
@@ -239,18 +240,17 @@ def meditate(force, league):
             book_weights[league]["pitcher win"] = fit_book_weights(league, "pitcher win")
             book_weights.setdefault(league, {}).setdefault("triples", {})
             book_weights[league]["triples"] = fit_book_weights(league, "triples")
-            mlb.update_player_comps()
+
         elif league == "NHL":
-            nhl.dump_goalie_list()
+            stat_data.dump_goalie_list()
 
         with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
             json.dump(book_weights, outfile, indent=4)
 
+        stat_data.update_player_comps()
         correlate(league, force)
 
         for market in markets:
-            stat_data = stat_structs[league]
-
             if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
                 with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
                     book_weights = json.load(infile)
@@ -592,18 +592,17 @@ def report():
 
 
 def see_features():
-    model_list = [f.name for f in pkg_resources.files(
-        data).iterdir() if ".mdl" in f.name]
+    model_list = [f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name]
     model_list.sort()
     feature_importances = []
     features_to_filter = {}
     most_important = {}
-    for model_str in model_list:
-        with open(pkg_resources.files(data) / model_str, "rb") as infile:
+    for model_str in tqdm(model_list, desc="Analyzing feature importances...", unit="market"):
+        with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
             filedict = pickle.load(infile)
 
         filepath = pkg_resources.files(
-            data) / ("test_" + model_str.replace(".mdl", ".csv"))
+            data) / ("test_sets/" + model_str.replace(".mdl", ".csv"))
         M = pd.read_csv(filepath, index_col=0)
 
         y = M[['Result']]

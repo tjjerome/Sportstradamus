@@ -1,0 +1,133 @@
+{
+    "NBA": {
+        "AGE": 0.5,
+        "PLAYER_HEIGHT_INCHES": 3,
+        "PLAYER_BMI": 1.5,
+
+        "MIN": 6,
+        "USG_PCT": 4,
+
+        "TS_PCT": 4,
+        "RA_PCT": 1,
+        "ITP_PCT": 1,
+        "MR_PCT": 1,
+        "C3_PCT": 1,
+        "B3_PCT": 1,
+        "FTR": 1.5,
+        "FT_PCT": 1.5,
+        "FGA_48": 3,
+
+        "E_OFF_RATING": 2,
+        "AST_48": 4,
+        "TOV_48": 1,
+        "PIE": 3,
+
+        "E_DEF_RATING": 2,
+        "REB_48": 4,
+        "BLKA_48": 1.5,
+        "STL_48": 2.5
+    },
+    "NFL": {
+        "QB": {
+
+        },
+        "WR": {
+
+        },
+        "TE": {
+
+        },
+        "RB": {
+
+        }
+    },
+    "NHL": {
+        "C": {
+            "age": 1,
+            "height": 2,
+            "bmi": 1,
+
+            "timePerGame": 5,
+            "timePerShift": 2,
+            "oZoneStarts": 1,
+            "flyStarts": 2,
+
+            "shotAttempts": 3,
+            "Fenwick": 4,
+            "xGoals": 1.5,
+            "goals": 1.5,
+
+            "rebounds": 1,
+            "hits": 3,
+            "assists": 4,
+            "penaltyMinutes": 1,
+            "penaltyMinutesDrawn": 1,
+
+            "takeaways": 2,
+            "giveaways": 4,
+            "blockedShots": 2
+        },
+        "W": {
+            "age": 1,
+            "height": 2,
+            "bmi": 1,
+
+            "timePerGame": 5,
+            "timePerShift": 2,
+            "oZoneStarts": 1,
+            "flyStarts": 2,
+
+            "shotAttempts": 3,
+            "Fenwick": 4,
+            "xGoals": 1.5,
+            "goals": 1.5,
+
+            "rebounds": 1,
+            "hits": 3,
+            "assists": 4,
+            "penaltyMinutes": 1,
+            "penaltyMinutesDrawn": 1,
+
+            "takeaways": 2,
+            "giveaways": 4,
+            "blockedShots": 2
+        },
+        "D": {
+            "age": 1,
+            "height": 1.5,
+            "bmi": 1.5,
+
+            "timePerGame": 5,
+            "timePerShift": 2,
+            "oZoneStarts": 1,
+            "flyStarts": 2,
+
+            "shotAttempts": 4,
+            "Fenwick": 3,
+            "xGoals": 2,
+            "goals": 1,
+
+            "rebounds": 1,
+            "hits": 3,
+            "assists": 4,
+            "penaltyMinutes": 1,
+            "penaltyMinutesDrawn": 1,
+
+            "takeaways": 2,
+            "giveaways": 2,
+            "blockedShots": 4
+        },
+        "G": {
+            "age": 1,
+            "height": 2,
+            "bmi": 2,
+
+            "timePerGame": 4,
+
+            "savePct": 6,
+            "freezeAgainst": 4,
+            "reboundsAgainst": 2,
+            "goalsAgainst": 2
+        }
+    }
+}
