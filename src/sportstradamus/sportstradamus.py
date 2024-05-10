@@ -76,7 +76,40 @@ def main(progress, books, parlays):
     with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
         stat_map = json.load(infile)
 
-    sports = get_active_sports()
+    sports = []
+    nba = StatsNBA()
+    nba.load()
+    if datetime.datetime.today().date() > (nba.season_start - datetime.timedelta(days=7)):
+        sports.append("NBA")
+    mlb = StatsMLB()
+    mlb.load()
+    if datetime.datetime.today().date() > (mlb.season_start - datetime.timedelta(days=7)):
+        sports.append("MLB")
+    nhl = StatsNHL()
+    nhl.load()
+    if datetime.datetime.today().date() > (nhl.season_start - datetime.timedelta(days=7)):
+        sports.append("NHL")
+    nfl = StatsNFL()
+    nfl.load()
+    if datetime.datetime.today().date() > (nfl.season_start - datetime.timedelta(days=7)):
+        sports.append("NFL")
+
+    """
+    Start gathering player stats
+    """
+    stats = {}
+    if "NBA" in sports:
+        nba.update()
+        stats.update({"NBA": nba})
+    if "MLB" in sports:
+        mlb.update()
+        stats.update({"MLB": mlb})
+    if "NHL" in sports:
+        nhl.update()
+        stats.update({"NHL": nhl})
+    if "NFL" in sports:
+        nfl.update()
+        stats.update({"NFL": nfl})
 
     """"
     Start gathering sportsbook data
@@ -232,31 +265,6 @@ def main(progress, books, parlays):
 
         archive.add_books(csb_data, 3, stat_map["Caesars"])
         archive.write()
-
-    """
-    Start gathering player stats
-    """
-    stats = {}
-    if "NBA" in sports:
-        nba = StatsNBA()
-        nba.load()
-        nba.update()
-        stats.update({"NBA": nba})
-    if "MLB" in sports:
-        mlb = StatsMLB()
-        mlb.load()
-        mlb.update()
-        stats.update({"MLB": mlb})
-    if "NHL" in sports:
-        nhl = StatsNHL()
-        nhl.load()
-        nhl.update()
-        stats.update({"NHL": nhl})
-    if "NFL" in sports:
-        nfl = StatsNFL()
-        nfl.load()
-        nfl.update()
-        stats.update({"NFL": nfl})
 
     untapped_markets = []
 

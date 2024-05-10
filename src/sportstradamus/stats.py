@@ -2464,7 +2464,7 @@ class StatsNFL(Stats):
         Initialize the StatsNFL class.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2023-09-07", "%Y-%m-%d").date()
+        self.season_start = datetime(2024, 9, 5).date()
         cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
@@ -2557,7 +2557,11 @@ class StatsNFL(Stats):
         except:
             nfl_data = pd.DataFrame(columns=cols)
 
-        snaps = nfl.import_snap_counts([self.season_start.year])
+        try:
+            snaps = nfl.import_snap_counts([self.season_start.year])
+        except:
+            snaps = pd.DataFrame(columns=['game_id', 'pfr_game_id', 'season', 'game_type', 'week', 'player', 'pfr_player_id', 'position', 'team', 'opponent', 'offense_snaps', 'offense_pct', 'defense_snaps', 'defense_pct', 'st_snaps', 'st_pct'])
+        
         sched = nfl.import_schedules([self.season_start.year])
         sched.loc[sched['away_team'] == 'LA', 'away_team'] = "LAR"
         sched.loc[sched['home_team'] == 'LA', 'home_team'] = "LAR"
@@ -3683,9 +3687,9 @@ class StatsNHL(Stats):
         if os.path.isfile(filepath):
             with open(filepath, "rb") as infile:
                 nhl_data = pickle.load(infile)
-                self.players = nhl_data["players"]
-                self.gamelog = nhl_data["gamelog"]
-                self.teamlog = nhl_data["teamlog"]
+                self.players = nhl_data.get("players",{})
+                self.gamelog = nhl_data.get("gamelog",{})
+                self.teamlog = nhl_data.get("teamlog",{})
 
         filepath = pkg_resources.files(data) / "nhl_comps.json"
         if os.path.isfile(filepath):
