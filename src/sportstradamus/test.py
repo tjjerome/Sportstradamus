@@ -13,6 +13,7 @@ from tqdm import tqdm
 from time import time
 import requests
 pd.options.mode.chained_assignment = None
+
 NBA = StatsNBA()
 NBA.load()
 NBA.update()
@@ -85,8 +86,8 @@ for i, game in tqdm(gamelog.iterrows(), desc="Checking Player Comps", total=len(
     defenseVsPlayer = defenseVsPlayer[markets].div(defenseVsPlayer["MIN"], axis=0)
     posVsLeague = posVsLeague[markets].div(posVsLeague["MIN"], axis=0)
         
-    defenseResult = (defenseVsComp.mean()/defenseVsLeague.mean()).to_dict()
-    compResult = (defenseVsComp.mean()/compVsLeague.mean()).to_dict()
+    defenseResult = (defenseVsComp.mean()/defenseVsLeague.mean().replace(0, np.inf)).to_dict()
+    compResult = (defenseVsComp.mean()/compVsLeague.mean().replace(0, np.inf)).to_dict()
     
     gameResult = (game[markets]/game["MIN"]).to_dict()
     gameRecords2.append(gameResult|
