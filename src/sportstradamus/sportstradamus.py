@@ -529,7 +529,7 @@ def find_correlation(offers, stats, platform, parlays):
     positions = {
         "NBA": ["P", "C", "F", "W", "B"],
         "NFL": ["QB", "WR", "RB", "TE"],
-        "NHL": ["C", "R", "L", "D", "G"]
+        "NHL": ["C", "W", "D", "G"]
     }
     payout_table = { # using equivalent payouts when insured picks are better
         "Underdog": [3, 6, 10.9, 20.2],
