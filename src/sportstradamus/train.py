@@ -738,7 +738,7 @@ def fit_model_weight(model_prob, odds_prob, y_class):
     def objective(w, x, y):
         filt.coef_ = np.array([w])
         proba = filt.predict_proba(x)
-        return log_loss(y, proba[:,1], pos_label=1) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
+        return log_loss(y, proba[:,1]) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
 
     res = minimize(objective, guess, args=(x, y_class), bounds=[(0, 2)]*2, tol=1e-8, method='TNC')
     filt.coef_ = np.array([res.x])
