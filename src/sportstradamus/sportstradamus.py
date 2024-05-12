@@ -915,7 +915,7 @@ def save_data(df, book, gc):
             df["Books"] = df["Books"]*df["Boost"]
             df["Model"] = df["Model"]*df["Boost"]
             df.sort_values("Model", ascending=False, inplace=True)
-            mask = (df.Books > .54) & (df.Model > .58) & (2 >= df.Boost) & (df.Boost >= .75)
+            mask = (df.Books > .54) & (df.Model > .58) & (1.5 >= df.Boost) & (df.Boost >= .9)
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
