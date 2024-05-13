@@ -14,11 +14,11 @@ from time import time
 import requests
 pd.options.mode.chained_assignment = None
 
-NBA = StatsNBA()
-NBA.load()
-NBA.update()
-NBA.update_player_comps()
-NBA.load()
+NFL = StatsNFL()
+NFL.load()
+NFL.update()
+NFL.update_player_comps()
+NFL.load()
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]

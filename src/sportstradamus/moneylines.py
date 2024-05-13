@@ -137,7 +137,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
                         outcomes = sorted(market["outcomes"], key=itemgetter('point'))
                         odds = no_vig_odds(outcomes[0]['price'], outcomes[1]['price'])
                         spread = get_ev(outcomes[1]['point'], odds[1])
-                        if market["outcomes"][0]["name"] == game["home_team"]:
+                        if outcomes[0]["name"] == game["home_team"]:
                             spread_home[book["key"]] = spread
                             spread_away[book["key"]] = -spread
                         else:
@@ -210,7 +210,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             "markets": ",".join(props[league].keys())
             })
         if league == "MLB":
-            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+            # params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+            params['markets'] = "totals_1st_1_innings,spreads_1st_1_innings"
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
@@ -265,7 +266,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         spread = get_ev(outcomes[1]['point'], sub_odds[1])
                         spread_home.setdefault(spread_name, {})
                         spread_away.setdefault(spread_name, {})
-                        if market["outcomes"][0]["name"] == game["home_team"]:
+                        if outcomes[0]["name"] == game["home_team"]:
                             spread_home[spread_name][book["key"]] = spread
                             spread_away[spread_name][book["key"]] = -spread
                         else:
