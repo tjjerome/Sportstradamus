@@ -29,15 +29,106 @@
     },
     "NFL": {
         "QB": {
+            "age": 1,
+            "height": 1,
+            "bmi": 2,
+            "dropbacks_per_game": 6,
 
+            "designed_yards_per_game": 2,
+            "scrambles_per_dropback": 1.5,
+            "grades_run": 2.5,
+            "explosive": 4,
+
+            "center_medium_attempts_percent": 2,
+            "deep_attempts_percent": 4,
+            "pa_dropbacks_percent": 4,
+
+            "grades_pass": 4,
+            "accuracy_percent": 3,
+            "twp_rate": 3,
+
+            "pressure_to_sack_rate": 2,
+            "blitz_grades_pass_diff": 2,
+            "less_grades_pass_diff": 3,
+            "more_btt_rate": 3
         },
         "WR": {
+            "age": 1.5,
+            "height": 2,
+            "bmi": 1.5,
+            "target share": 5,
+            "air yards share": 5,
 
+            "first read targets per route run": 3,
+            "redzone target share": 1.5,
+            "targets per route run": 4,
+            "route participation": 1.5,
+            
+            "contested_target_rate": 3,
+            "deep_contested_target_rate": 1,
+            "grades_pass_route": 4,
+            "zone_grades_pass_route_diff": 2,
+
+            "screen_targets_percent": 1,
+            "center_medium_targets_percent": 1,
+            "deep_targets_percent": 2,
+            "slot_rate": 3,
+            "yprr": 3,
+
+            "elu_recv_mtf": 2,
+            "yac over expected": 3,
+            "contested_catch_rate": 2.5,
+            "grades_hands_drop": 2.5
         },
         "TE": {
+            "age": 1,
+            "height": 1,
+            "bmi": 1,
+            "target share": 4,
+            "air yards share": 3,
 
+            "targets per route run": 1.5,
+            "route participation": 2.5,
+            "first read targets per route run": 3,
+            "redzone target share": 3,
+
+            "contested_target_rate": 1,
+            "deep_contested_target_rate": 1,
+            "grades_pass_route": 5,
+            "zone_grades_pass_route_diff": 3,
+
+            "center_medium_targets_percent": 2,
+            "deep_targets_percent": 2,
+            "slot_rate": 3,
+            "yprr": 3,
+
+            "grades_run_block": 1,
+            "block_percent": 4,
+            "grades_hands_drop": 2,
+            "elu_recv_mtf": 3,
+            "yac over expected": 2
         },
         "RB": {
+            "age": 1.5,
+            "height": 1,
+            "bmi": 1.5,
+            "total_touches_per_game": 6,
+
+            "block_percent": 2,
+            "route participation": 2,
+            "redzone target share": 1,
+            "redzone carry share": 3,
+            "target share": 2,
+
+            "grades_run": 3,
+            "breakaway_yards_per_game": 3,
+            "breakaway_percent": 2,
+            "rushing success rate": 2,
+
+            "grades_pass_route": 3,
+            "yards_after_catch_per_reception": 2,
+            "yprr": 3,
+            "elu_recv_mtf": 2
 
         }
     },
