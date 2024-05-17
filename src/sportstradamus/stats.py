@@ -2244,8 +2244,8 @@ class StatsMLB(Stats):
                 if not book_odds:
                     ev = 0
 
-            elif market == "1st inning runs allowed":
-                ev = archive.get_team_market("MLB", '1st 1 innings', date, opponent)
+            # elif market == "1st inning runs allowed":
+            #     ev = archive.get_team_market("MLB", '1st 1 innings', date, opponent)
 
         if np.isnan(ev) or (ev <= 0):
             odds = 0
