@@ -1127,6 +1127,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     else:
         cv = stat_cv.get(league,{}).get(market,1)
         logger.warning(f"{filename} missing")
+        return []
 
     for o in tqdm(offers, leave=False):
         players = [o["Player"]]
@@ -1173,7 +1174,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
 
-        if os.path.isfile(filepath) and all([player in playerStats.index for player in players]):
+        if all([player in playerStats.index for player in players]):
             if "+" in o["Player"]:
                 ev1 = get_ev(stats[0]["Line"], 1-stats[0]
                             ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
