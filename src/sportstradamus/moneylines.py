@@ -210,8 +210,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             "markets": ",".join(props[league].keys())
             })
         if league == "MLB":
-            # params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
-            params['markets'] = "totals_1st_1_innings,spreads_1st_1_innings"
+            params['markets'] = params['markets']+",totals_1st_1_innings,spreads_1st_1_innings"
+            # params['markets'] = "totals_1st_1_innings,spreads_1st_1_innings"
         events = requests.get(event_url.format(**params))
         if events.status_code == 429:
             sleep(1)
