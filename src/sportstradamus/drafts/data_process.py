@@ -9,7 +9,7 @@ import nfl_data_py as nfl
 from tqdm import tqdm
 
 # %%
-rosters = {2021: {}, 2022: {}}
+rosters = {2021: {}, 2022: {}, 2023: {}}
 for y in rosters.keys():
     depth_df = pd.read_csv(
         'https://github.com/nflverse/nflverse-data/releases/download/weekly_rosters/roster_weekly_{year}.csv'.format(year=y))
@@ -22,7 +22,7 @@ for y in rosters.keys():
     rosters[y] = depth_df.to_dict()['team']
 
 # %%
-schedules = nfl.import_schedules([2021, 2022])
+schedules = nfl.import_schedules([2021, 2022, 2023])
 schedules = schedules.loc[schedules.week < 18]
 schedules = schedules[['season', 'week', 'away_team', 'home_team']]
 schedules = schedules.groupby(['season', 'week']).apply(
