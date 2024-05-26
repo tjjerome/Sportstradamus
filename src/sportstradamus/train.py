@@ -570,7 +570,7 @@ def report():
         stat_std = json.load(f)
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
-            with open(pkg_resources.files(data) / model_str, "rb") as infile:
+            with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
                 model = pickle.load(infile)
 
             name = model_str.split("_")
