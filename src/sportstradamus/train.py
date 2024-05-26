@@ -1,4 +1,4 @@
-from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights
 import pickle
 import importlib.resources as pkg_resources
@@ -95,6 +95,7 @@ log_strings = {
         "score": "runs"
     },
 }
+log_strings["WNBA"] = log_strings["NBA"]
 
 mlb = StatsMLB()
 mlb.load()
@@ -108,19 +109,23 @@ nhl.update()
 nfl = StatsNFL()
 nfl.load()
 nfl.update()
+wnba = StatsWNBA()
+wnba.load()
+wnba.update()
 
 stat_structs = {
     "NBA": nba,
     "NFL": nfl,
     "MLB": mlb,
-    "NHL": nhl
+    "NHL": nhl,
+    "WNBA": wnba
 }
 
 archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL"]), default="All",
+@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
     global book_weights
@@ -222,6 +227,7 @@ def meditate(force, league):
             "timeOnIce",
         ],
     }
+    all_markets["WNBA"] = all_markets["NBA"]
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
@@ -286,14 +292,14 @@ def meditate(force, league):
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:
                 cutoff_date = None
-                M = []
+                M = pd.DataFrame()
 
             new_M = stat_data.get_training_matrix(market, cutoff_date)
 
             if new_M.empty and not force:
                 continue
             
-            M = pd.concat([M,new_M], ignore_index=True)
+            M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
             if league == "NHL" and not any([string in market for string in ["Against", "saves", "goalie"]]):
                 M.loc[M.Position==2, 'Position'] = 1
@@ -1128,6 +1134,80 @@ def correlate(league, force=False):
                 "PF",
                 "MIN"
             ]
+        },
+        "WNBA": {
+            "G": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
+            "F": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
+            "C": [
+                "PTS",
+                "REB",
+                "AST",
+                "PRA",
+                "PR",
+                "RA",
+                "PA",
+                "FG3M",
+                "fantasy points prizepicks",
+                "fantasy points underdog",
+                "TOV",
+                "BLK",
+                "STL",
+                "BLST",
+                "FG3A",
+                "FTM",
+                "FGM",
+                "FGA",
+                "OREB",
+                "DREB",
+                "PF",
+                "MIN"
+            ],
         },
         "MLB": {
             "P": [

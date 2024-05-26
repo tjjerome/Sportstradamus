@@ -10,6 +10,7 @@ from sportstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
+from sportsdataverse import wnba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
@@ -157,6 +158,8 @@ class StatsNBA(Stats):
         Initialize the StatsNBA class.
         """
         super().__init__()
+        self.league = "NBA"
+        self.positions = ['P', 'C', 'F', 'W', 'B']
         self.season_start = datetime.strptime("2023-10-24", "%Y-%m-%d").date()
         self.season = "2023-24"
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
@@ -169,6 +172,7 @@ class StatsNBA(Stats):
                 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV', 'PCT_STL', 'PCT_BLKA',
                 'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48', 'TOV_48', 'BLKA_48', 'STL_48']
         self.gamelog = pd.DataFrame(columns=cols)
+        
         team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME', 'GAME_ID', 'GAME_DATE', 'OPP',
                      'WL', 'MIN', 'FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB',
                      'DREB', 'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT', 'PCT_FGA_3PT',
@@ -185,6 +189,22 @@ class StatsNBA(Stats):
                      'OPP_DEF_RATING', 'OPP_AST_PCT', 'OPP_AST_TO', 'OPP_AST_RATIO', 'OPP_OREB_PCT', 'OPP_DREB_PCT',
                      'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_EFG_PCT', 'OPP_TS_PCT', 'OPP_E_PACE', 'OPP_PACE', 'OPP_PIE']
         self.teamlog = pd.DataFrame(columns=team_cols)
+
+        self.stat_types = ['PFD', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO', 'FG3_RATIO',
+                           'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
+                           'PIE', 'FTR', 'MIN', 'PACE', 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST',
+                           'PCT_TOV', 'PCT_STL', 'PCT_BLKA', 'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48',
+                           'TOV_48', 'BLKA_48', 'STL_48']
+
+        self.team_stat_types = ['FG_PCT', 'FG3_PCT', 'FT_PCT', 'BLKA', 'PF', 'PFD', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT',
+                                'PCT_FGA_3PT', 'PCT_PTS_2PT', 'PCT_PTS_2PT_MR', 'PCT_PTS_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV',
+                                'PCT_PTS_PAINT', 'PCT_AST_2PM', 'PCT_UAST_2PM', 'PCT_AST_3PM', 'PCT_UAST_3PM', 'PCT_AST_FGM',
+                                'PCT_UAST_FGM', 'OFF_RATING', 'DEF_RATING', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'PACE', 'PIE',
+                                'OPP_FG_PCT', 'OPP_FG3_PCT', 'OPP_FT_PCT', 'OPP_BLKA', 'OPP_FTR', 'OPP_BLK_RATIO', 'OPP_PCT_FGA_2PT',
+                                'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_2PT', 'OPP_PCT_PTS_2PT_MR', 'OPP_PCT_PTS_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT',
+                                'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
+                                'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_OFF_RATING',
+                                'OPP_DEF_RATING', 'OPP_OREB_PCT', 'OPP_DREB_PCT', 'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_PIE']
 
     def load(self):
         """
@@ -663,16 +683,6 @@ class StatsNBA(Stats):
         if market == self.profiled_market and date == self.profile_latest_date:
             return
 
-        team_stat_types = ['FG_PCT', 'FG3_PCT', 'FT_PCT', 'BLKA', 'PF', 'PFD', 'FTR', 'BLK_RATIO', 'PCT_FGA_2PT',
-                           'PCT_FGA_3PT', 'PCT_PTS_2PT', 'PCT_PTS_2PT_MR', 'PCT_PTS_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV',
-                           'PCT_PTS_PAINT', 'PCT_AST_2PM', 'PCT_UAST_2PM', 'PCT_AST_3PM', 'PCT_UAST_3PM', 'PCT_AST_FGM',
-                           'PCT_UAST_FGM', 'OFF_RATING', 'DEF_RATING', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'PACE', 'PIE',
-                           'OPP_FG_PCT', 'OPP_FG3_PCT', 'OPP_FT_PCT', 'OPP_BLKA', 'OPP_FTR', 'OPP_BLK_RATIO', 'OPP_PCT_FGA_2PT',
-                           'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_2PT', 'OPP_PCT_PTS_2PT_MR', 'OPP_PCT_PTS_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT',
-                           'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
-                           'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_OFF_RATING',
-                           'OPP_DEF_RATING', 'OPP_OREB_PCT', 'OPP_DREB_PCT', 'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_PIE']
-
         self.profiled_market = market
         self.profile_latest_date = date
 
@@ -688,8 +698,8 @@ class StatsNBA(Stats):
                                & (gameDates < date)].copy()
 
         # Retrieve moneyline and totals data
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("NBA", x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("NBA", x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
@@ -729,15 +739,9 @@ class StatsNBA(Stats):
         self.defenseProfile['away'] = defenseGroups.apply(
             lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
 
-        stat_types = ['PFD', 'E_OFF_RATING', 'E_DEF_RATING', 'AST_PCT', 'AST_TO', 'AST_RATIO', 'FG3_RATIO',
-                      'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
-                      'PIE', 'FTR', 'MIN', 'PACE', 'PCT_FGA', 'PCT_FG3A', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST',
-                      'PCT_TOV', 'PCT_STL', 'PCT_BLKA', 'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48',
-                      'TOV_48', 'BLKA_48', 'STL_48']
-
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
-            stat_types]
+            self.stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
         playershortstats = playerlogs.apply(lambda x: np.mean(
             x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
@@ -746,8 +750,7 @@ class StatsNBA(Stats):
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
-        positions = ['P', 'C', 'F', 'W', 'B']
-        for position in positions:
+        for position in self.positions:
             positionLogs = gamelog.loc[gamelog['POS'] == position]
             positionGroups = positionLogs.groupby('PLAYER_NAME')
             positionAvg = positionGroups[market].mean().mean()
@@ -792,14 +795,14 @@ class StatsNBA(Stats):
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
             
         teamstats = teamlog.groupby('TEAM_ABBREVIATION').apply(
-            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
+            lambda x: np.mean(x.tail(10)[self.team_stat_types], 0))
         
         i = self.defenseProfile.index
         self.defenseProfile = self.defenseProfile.merge(
-            teamstats[team_stat_types], left_on='OPP', right_on='TEAM_ABBREVIATION')
+            teamstats[self.team_stat_types], left_on='OPP', right_on='TEAM_ABBREVIATION')
         self.defenseProfile.index = i
 
-        self.teamProfile = teamstats[team_stat_types]
+        self.teamProfile = teamstats[self.team_stat_types]
 
         self.playerProfile = self.playerProfile.merge(
             playerstats, on='PLAYER_NAME')
@@ -882,7 +885,7 @@ class StatsNBA(Stats):
         market = offer["Market"]
         line = offer["Line"]
         opponent = offer["Opponent"]
-        cv = stat_cv.get("NBA", {}).get(market, 1)
+        cv = stat_cv.get(self.league, {}).get(market, 1)
         # if self.defenseProfile.empty:
         #     logger.exception(f"{market} not profiled")
         #     return 0
@@ -930,9 +933,9 @@ class StatsNBA(Stats):
             line = 0.5 if line < 1 else line
 
         try:
-            ev = archive.get_ev("NBA", market, date, player)
-            moneyline = archive.get_moneyline("NBA", date, team)
-            total = archive.get_total("NBA", date, team)
+            ev = archive.get_ev(self.league, market, date, player)
+            moneyline = archive.get_moneyline(self.league, date, team)
+            total = archive.get_total(self.league, date, team)
 
         except:
             logger.exception(f"{player}, {market}")
@@ -942,9 +945,9 @@ class StatsNBA(Stats):
             if market in combo_props:
                 ev = 0
                 for submarket in combo_props.get(market, []):
-                    sub_cv = stat_cv["NBA"].get(submarket, 1)
-                    v = archive.get_ev("NBA", submarket, date, player)
-                    subline = archive.get_line("NBA", submarket, date, player)
+                    sub_cv = stat_cv[self.league].get(submarket, 1)
+                    v = archive.get_ev(self.league, submarket, date, player)
+                    subline = archive.get_line(self.league, submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
@@ -954,16 +957,16 @@ class StatsNBA(Stats):
                         ev += v
 
             elif market in ["DREB", "OREB"]:
-                ev = (archive.get_ev("NBA", "REB", date, player)*player_games.iloc[-one_year_ago:][market].sum()/player_games.iloc[-one_year_ago:]["REB"].sum()) if player_games.iloc[-one_year_ago:]["REB"].sum() else 0
+                ev = (archive.get_ev(self.league, "REB", date, player)*player_games.iloc[-one_year_ago:][market].sum()/player_games.iloc[-one_year_ago:]["REB"].sum()) if player_games.iloc[-one_year_ago:]["REB"].sum() else 0
 
             elif "fantasy" in market:
                 ev = 0
                 book_odds = False
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
-                    sub_cv = stat_cv["NBA"].get(submarket, 1)
-                    v = archive.get_ev("NBA", submarket, date, player)
-                    subline = archive.get_line("NBA", submarket, date, player)
+                    sub_cv = stat_cv[self.league].get(submarket, 1)
+                    v = archive.get_ev(self.league, submarket, date, player)
+                    subline = archive.get_line(self.league, submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
                         v = get_ev(subline, get_odds(subline, v), force_gauss=True)
                     if np.isnan(v) or v == 0:
@@ -988,7 +991,6 @@ class StatsNBA(Stats):
             else:
                 odds = norm.sf(line, ev, ev*cv)
 
-        positions = ['P', 'C', 'F', 'W', 'B']
         data = {
             "DVPOA": dvpoa,
             "Odds": odds,
@@ -1014,7 +1016,7 @@ class StatsNBA(Stats):
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
-            "Position": positions.index(position)
+            "Position": self.positions.index(position)
         }
 
         if data["Line"] <= 0:
@@ -1042,7 +1044,7 @@ class StatsNBA(Stats):
 
         defense_data = self.defenseProfile.loc[opponent]
         data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in positions})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in self.positions})
 
         return data
 
@@ -1056,16 +1058,16 @@ class StatsNBA(Stats):
         Returns:
             tuple: A tuple containing the feature matrix (X) and the target vector (y).
         """
-        archive.__init__("NBA")
+        archive.__init__(self.league)
 
         matrix = []
 
         if cutoff_date is None:
-            cutoff_date = datetime.today()-timedelta(days=850)
+            cutoff_date = (datetime.today()-timedelta(days=850)).date()
 
         for i, game in tqdm(self.gamelog.iterrows(), unit="game", desc="Gathering Training Data", total=len(self.gamelog)):
             gameDate = datetime.strptime(
-                game["GAME_DATE"], "%Y-%m-%dT%H:%M:%S").date()
+                game["GAME_DATE"][:10], "%Y-%m-%d").date()
 
             if game[market] < 0:
                 continue
@@ -1079,7 +1081,7 @@ class StatsNBA(Stats):
             if name not in self.playerProfile.index:
                 continue
 
-            line = archive.get_line("NBA", market, game["GAME_DATE"][:10], name)
+            line = archive.get_line(self.league, market, game["GAME_DATE"][:10], name)
 
             offer = {
                 "Player": name,
@@ -1110,6 +1112,217 @@ class StatsNBA(Stats):
         return M
 
 
+class StatsWNBA(StatsNBA):
+    def __init__(self):
+        super().__init__()
+        self.league = "WNBA"
+        self.positions = ['G', 'F', 'C']
+        self.season_start = datetime(2024, 5, 14).date()
+
+        cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
+                'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
+                'REB', 'AST', 'TOV', 'STL', 'BLK', 'PF', 'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
+                'FG3_RATIO', 'POS', 'HOME', 'OPP', 'PRA', 'PR', 'PA', 'RA', 'BLST',
+                'fantasy points prizepicks', 'fantasy points underdog', 'fantasy points parlay',
+                'AST_TO', 'TS_PCT', 'FTR', 'USG_PCT',
+                'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48', 'TOV_48', 'STL_48']
+        self.gamelog = pd.DataFrame(columns=cols)
+        
+        self.team_cols = ['SEASON_YEAR', 'TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME', 'GAME_ID', 'GAME_DATE', 'OPP',
+                     'WL', 'FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB',
+                     'DREB', 'REB', 'AST', 'TOV', 'STL', 'BLK', 'PF', 'PTS', 'FTR', 'PCT_FGA_3PT',
+                     'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV', 'PCT_PTS_PAINT', 'PCT_AST_FGM', 'AST_TO',
+                     'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT', 'TS_PCT',
+                     'OPP_FGM', 'OPP_FGA', 'OPP_FG_PCT', 'OPP_FG3M', 'OPP_FG3A', 'OPP_FG3_PCT', 'OPP_FTM',
+                     'OPP_FTA', 'OPP_FT_PCT', 'OPP_OREB', 'OPP_DREB', 'OPP_REB', 'OPP_AST', 'OPP_TOV', 'OPP_STL',
+                     'OPP_BLK', 'OPP_PF', 'OPP_PTS', 'OPP_FTR', 'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_FB',
+                     'OPP_PCT_PTS_FT', 'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_FGM', 'OPP_AST_TO', 'OPP_TS_PCT']
+        self.teamlog = pd.DataFrame(columns=self.team_cols)
+
+        self.stat_types = ['AST_TO', 'FG3_RATIO', 'TS_PCT', 'USG_PCT', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
+                           'FTR', 'MIN', 'FGA_48', 'FG3A_48', 'REB_48', 'OREB_48', 'DREB_48', 'AST_48',
+                           'TOV_48', 'STL_48']
+
+        self.team_stat_types = ['FG_PCT', 'FG3_PCT', 'FT_PCT', 'PF', 'FTR', 'AST_TO', 'TS_PCT',
+                                'PCT_FGA_3PT', 'PCT_PTS_FB', 'PCT_PTS_FT', 'PCT_PTS_OFF_TOV', 'PCT_PTS_PAINT', 'PCT_AST_FGM',
+                                'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT',
+                                'OPP_FG_PCT', 'OPP_FG3_PCT', 'OPP_FT_PCT', 'OPP_PF', 'OPP_FTR', 'OPP_AST_TO', 'OPP_TS_PCT',
+                                'OPP_PCT_FGA_3PT', 'OPP_PCT_PTS_FB', 'OPP_PCT_PTS_FT',
+                                'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_FGM']
+
+    def load(self):
+        """
+        Load data from files.
+        """
+        filepath = pkg_resources.files(data) / "wnba_data.dat"
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                wnba_data = pickle.load(infile)
+                self.players = wnba_data['players']
+                self.gamelog = wnba_data['gamelog']
+                self.teamlog = wnba_data['teamlog']
+
+        filepath = pkg_resources.files(data) / "wnba_comps.json"
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                self.comps = json.load(infile)
+
+    def update(self):
+        stat_df = wnba.load_wnba_player_boxscore(self.season_start.year).to_pandas()
+        stat_df.rename(columns={
+            "game_id": "GAME_ID",
+            "season": "SEASON_YEAR",
+            "athlete_display_name": "PLAYER_NAME",
+            "athlete_id": "PLAYER_ID",
+            "team_abbreviation": "TEAM_ABBREVIATION",
+            "opponent_team_abbreviation": "OPP",
+            "game_date": "GAME_DATE",
+            "minutes": "MIN",
+            "field_goals_made": "FGM",
+            "field_goals_attempted": "FGA",
+            "three_point_field_goals_made": "FG3M",
+            "three_point_field_goals_attempted": "FG3A",
+            "free_throws_made": "FTM",
+            "free_throws_attempted": "FTA",
+            "offensive_rebounds": "OREB",
+            "defensive_rebounds": "DREB",
+            "rebounds": "REB",
+            "assists": "AST",
+            "points": "PTS",
+            "turnovers": "TOV",
+            "steals": "STL",
+            "blocks": "BLK",
+            "fouls": "PF",
+            "team_winner": "WL",
+            "home_away": "HOME",
+            "athlete_position_abbreviation": "POS"
+        }, inplace=True)
+        stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
+        stat_df = stat_df.loc[stat_df["MIN"] > 1]
+
+        stat_df["PRA"] = stat_df["PTS"] + stat_df["REB"] + stat_df["AST"]
+        stat_df["PR"] = stat_df["PTS"] + stat_df["REB"]
+        stat_df["PA"] = stat_df["PTS"] + stat_df["AST"]
+        stat_df["RA"] = stat_df["REB"] + stat_df["AST"]
+        stat_df["BLST"] = stat_df["BLK"] + stat_df["STL"]
+        stat_df["fantasy points prizepicks"] = stat_df["PTS"] + stat_df["REB"] * \
+            1.2 + stat_df["AST"]*1.5 + stat_df["BLST"]*3 - stat_df["TOV"]
+        stat_df["fantasy points underdog"] = stat_df["PTS"] + stat_df["REB"] * \
+            1.2 + stat_df["AST"]*1.5 + stat_df["BLST"]*3 - stat_df["TOV"]
+        stat_df["fantasy points parlay"] = stat_df["PRA"] + \
+            stat_df["BLST"]*2 - stat_df["TOV"]
+        stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
+        stat_df["AST_TO"] = stat_df["AST"] / stat_df["TOV"]
+        stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
+        stat_df["FG_PCT"] = stat_df["FGM"] / stat_df["FGA"]
+        stat_df["FG3_PCT"] = stat_df["FG3M"] / stat_df["FG3A"]
+        stat_df["FT_PCT"] = stat_df["FTM"] / stat_df["FTA"]
+        # stat_df["BLK_PCT"] = (stat_df["BLK"]/stat_df["BLKA"]) if stat_df["BLKA"] > 0 else 0
+        stat_df["FGA_48"] = stat_df["FGA"] / stat_df["MIN"] * 48
+        stat_df["FG3A_48"] = stat_df["FG3A"] / stat_df["MIN"] * 48
+        stat_df["REB_48"] = stat_df["REB"] / stat_df["MIN"] * 48
+        stat_df["OREB_48"] = stat_df["OREB"] / stat_df["MIN"] * 48
+        stat_df["DREB_48"] = stat_df["DREB"] / stat_df["MIN"] * 48
+        stat_df["AST_48"] = stat_df["AST"] / stat_df["MIN"] * 48
+        stat_df["TOV_48"] = stat_df["TOV"] / stat_df["MIN"] * 48
+        # stat_df["BLKA_48"] = stat_df["BLKA"] / stat_df["MIN"] * 48
+        stat_df["STL_48"] = stat_df["STL"] / stat_df["MIN"] * 48
+        stat_df["TS_PCT"] = stat_df["PTS"] / (2*(stat_df["FGA"] + .44*stat_df["FTA"]))
+        stat_df["HOME"] = stat_df["HOME"] == "home"
+
+        team_df = wnba.load_wnba_team_boxscore(self.season_start.year).to_pandas()
+        team_df.rename(columns={
+            "season": "SEASON_YEAR",
+            "team_id": "TEAM_ID",
+            "team_abbreviation": "TEAM_ABBREVIATION",
+            "team_display_name": "TEAM_NAME",
+            "game_id": "GAME_ID",
+            "game_date": "GAME_DATE",
+            "opponent_team_abbreviation": "OPP",
+            "field_goals_made": "FGM",
+            "field_goals_attempted": "FGA",
+            "three_point_field_goals_made": "FG3M",
+            "three_point_field_goals_attempted": "FG3A",
+            "free_throws_made": "FTM",
+            "free_throws_attempted": "FTA",
+            "offensive_rebounds": "OREB",
+            "defensive_rebounds": "DREB",
+            "total_rebounds": "REB",
+            "assists": "AST",
+            "total_turnovers": "TOV",
+            "steals": "STL",
+            "blocks": "BLK",
+            "fouls": "PF",
+            "free_throw_pct": "FT_PCT",
+            "three_point_field_goal_pct": "FG3_PCT",
+            "field_goal_pct": "FG_PCT",
+            "fast_break_points": "PTS_FB",
+            "points_in_paint": "PTS_PAINT",
+            "turnover_points": "PTS_OFF_TOV",
+            "team_score": "PTS",
+            "team_winner": "WL",
+            "team_home_away": "HOME"
+        }, inplace=True)
+
+        team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
+        team_df["FG_PCT"] = team_df["FGM"] / team_df["FGA"]
+        team_df["FG3_PCT"] = team_df["FG3M"] / team_df["FG3A"]
+        team_df["FT_PCT"] = team_df["FTM"] / team_df["FTA"]
+        team_df["PCT_FGA_3PT"] = team_df["FG3A"] / team_df["FGA"]
+        team_df["PCT_PTS_FB"] = team_df["PTS_FB"].astype(int) / team_df["PTS"] if "PTS_FB" in team_df else 0
+        team_df["PCT_PTS_FT"] = team_df["FTM"] / team_df["PTS"] if "FTM" in team_df else 0
+        team_df["PCT_PTS_PAINT"] = team_df["PTS_PAINT"].astype(int) / team_df["PTS"] if "PTS_PAINT" in team_df else 0
+        team_df["PCT_PTS_OFF_TOV"] = team_df["PTS_OFF_TOV"].astype(int) / team_df["PTS"] if "PTS_OFF_TOV" in team_df else 0
+        team_df["AST_TO"] = team_df["AST"] / team_df["TOV"]
+        team_df["PCT_AST_FGM"] = team_df["AST"] / team_df["FGM"]
+        team_df["TS_PCT"] = team_df["PTS"] / (2*(team_df["FGA"] + .44*team_df["FTA"]))
+        team_df["HOME"] = team_df["HOME"] == "home"
+        team_df["USG"] = team_df["FGA"] + .44*team_df["FTA"] + team_df["TOV"]
+        
+        stat_df = pd.merge(stat_df, team_df[["GAME_ID", "TEAM_ABBREVIATION", "USG"]], on=["GAME_ID", "TEAM_ABBREVIATION"])
+        stat_df["USG_PCT"] = 200*(stat_df["FGA"]+.44*stat_df["FTA"]+stat_df["TOV"])/(stat_df["USG"]*5*stat_df["MIN"])
+        stat_df.fillna(0)
+
+        stats = [stat for stat in self.team_cols if "OPP_" in stat]
+        home_teams = team_df.loc[team_df.HOME]
+        home_teams.index = home_teams.GAME_ID
+        away_teams = team_df.loc[~team_df.HOME]
+        away_teams.index = away_teams.GAME_ID
+        home_teams = home_teams.join(away_teams.add_prefix("OPP_")[stats])
+        away_teams = away_teams.join(home_teams.add_prefix("OPP_")[stats])
+        team_df = pd.concat([home_teams, away_teams], ignore_index=True)
+
+        team_df["OREB_PCT"] = team_df["OREB"] / (team_df["OREB"] + team_df["OPP_OREB"])
+        team_df["DREB_PCT"] = team_df["DREB"] / (team_df["DREB"] + team_df["OPP_DREB"])
+        team_df["REB_PCT"] = team_df["REB"] / (team_df["REB"] + team_df["OPP_REB"])
+        team_df["TM_TOV_PCT"] = team_df["TOV"] / (team_df["TOV"] + team_df["OPP_TOV"])
+        team_df.fillna(0)
+
+        stat_df["GAME_DATE"] = stat_df["GAME_DATE"].astype(str)
+        stat_df.loc[stat_df["WL"], "WL"] = "W"
+        stat_df.loc[~(stat_df["WL"]=="W"), "WL"] = "L"
+        team_df["GAME_DATE"] = team_df["GAME_DATE"].astype(str)
+        team_df.loc[team_df["WL"], "WL"] = "W"
+        team_df.loc[~(team_df["WL"]=="W"), "WL"] = "L"
+
+        if not stat_df.empty:
+            self.gamelog = pd.concat(
+                [stat_df[self.gamelog.columns], self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
+            
+        if not team_df.empty:
+            self.teamlog = pd.concat(
+                [team_df[self.teamlog.columns], self.teamlog]).sort_values("GAME_DATE").reset_index(drop=True)
+
+        self.gamelog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(inplace=True)
+        # Save the updated player data
+        with open(pkg_resources.files(data) / "wnba_data.dat", "wb") as outfile:
+            pickle.dump({"players": self.players,
+                         "gamelog": self.gamelog,
+                         "teamlog": self.teamlog}, outfile)
+
+    def update_player_comps(self):
+        return
 class StatsMLB(Stats):
     """
     A class for handling and analyzing MLB statistics.

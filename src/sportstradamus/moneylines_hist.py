@@ -293,8 +293,8 @@ with open(filepath, "r") as infile:
 
 #     Date = Date + timedelta(days=1)
 
-sport="MLB"
-key="baseball_mlb"
+sport="WNBA"
+key="basketball_wnba"
 
 # Date = datetime(2021, 4, 1, 12)
 # Date = pytz.timezone("America/Chicago").localize(Date)
@@ -344,11 +344,11 @@ key="baseball_mlb"
 
 #     Date = Date + timedelta(days=1)
 
-Date = datetime(2024, 5, 10, 12)
+Date = datetime(2024, 5, 14, 12)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
 print(sport)
-while Date.astimezone(pytz.utc).date() < datetime(2024, 5, 20).date():
+while Date.astimezone(pytz.utc).date() < datetime(2024, 5, 27).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue

@@ -1,4 +1,4 @@
-from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL
+from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.helpers import scraper, archive, stat_cv
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
@@ -14,11 +14,11 @@ from time import time
 import requests
 pd.options.mode.chained_assignment = None
 
-NFL = StatsNFL()
-NFL.load()
-NFL.update()
-NFL.update_player_comps()
-NFL.load()
+# NFL = StatsNFL()
+# NFL.load()
+# NFL.update()
+# NFL.update_player_comps()
+# NFL.load()
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
@@ -51,58 +51,58 @@ NFL.load()
 #     pass
 
 
-markets = ["fantasy points prizepicks", "PTS", "REB", "AST", "TOV", "BLK", "STL"]
+# markets = ["fantasy points prizepicks", "PTS", "REB", "AST", "TOV", "BLK", "STL"]
 
-gamelog = NBA.gamelog.loc[pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (datetime.today().date() - timedelta(days=300))]
+# gamelog = NBA.gamelog.loc[pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (datetime.today().date() - timedelta(days=300))]
 
-gameRecords = []
-gameRecords1 = []
-gameRecords2 = []
-for i, game in tqdm(gamelog.iterrows(), desc="Checking Player Comps", total=len(gamelog)):
-    gameDate = pd.to_datetime(game["GAME_DATE"]).date()
-    if 11 >= gameDate.month >= 10:
-        continue
-    dateMask = (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (gameDate - timedelta(days=300))) & (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date < gameDate)
+# gameRecords = []
+# gameRecords1 = []
+# gameRecords2 = []
+# for i, game in tqdm(gamelog.iterrows(), desc="Checking Player Comps", total=len(gamelog)):
+#     gameDate = pd.to_datetime(game["GAME_DATE"]).date()
+#     if 11 >= gameDate.month >= 10:
+#         continue
+#     dateMask = (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (gameDate - timedelta(days=300))) & (pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date < gameDate)
 
-    if not NBA.comps[game["POS"]].get(game["PLAYER_NAME"]):
-        continue
+#     if not NBA.comps[game["POS"]].get(game["PLAYER_NAME"]):
+#         continue
 
-    # if game["position"] == "G":
-    #     markets = ["goalie fantasy points underdog", "saves", "goalsAgainst"]
-    # else:
-    #     markets = ["skater fantasy points underdog", "shots", "points", "timeOnIce", "blocked"]
+#     # if game["position"] == "G":
+#     #     markets = ["goalie fantasy points underdog", "saves", "goalsAgainst"]
+#     # else:
+#     #     markets = ["skater fantasy points underdog", "shots", "points", "timeOnIce", "blocked"]
 
-    defenseVsLeague = NBA.gamelog.loc[dateMask & (NBA.gamelog["OPP"]==game["OPP"])]
-    compVsLeague = NBA.gamelog.loc[dateMask & NBA.gamelog["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
-    defenseVsPos = defenseVsLeague.loc[defenseVsLeague["POS"] == game["POS"]]
-    defenseVsComp = defenseVsLeague.loc[defenseVsLeague["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
-    defenseVsPlayer = defenseVsLeague.loc[defenseVsLeague["PLAYER_NAME"] == game["PLAYER_NAME"]]
-    posVsLeague = NBA.gamelog.loc[NBA.gamelog["POS"] == game["POS"]]
+#     defenseVsLeague = NBA.gamelog.loc[dateMask & (NBA.gamelog["OPP"]==game["OPP"])]
+#     compVsLeague = NBA.gamelog.loc[dateMask & NBA.gamelog["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
+#     defenseVsPos = defenseVsLeague.loc[defenseVsLeague["POS"] == game["POS"]]
+#     defenseVsComp = defenseVsLeague.loc[defenseVsLeague["PLAYER_NAME"].isin(NBA.comps[game["POS"]].get(game["PLAYER_NAME"], []))]
+#     defenseVsPlayer = defenseVsLeague.loc[defenseVsLeague["PLAYER_NAME"] == game["PLAYER_NAME"]]
+#     posVsLeague = NBA.gamelog.loc[NBA.gamelog["POS"] == game["POS"]]
 
-    defenseVsLeague = defenseVsLeague[markets].div(defenseVsLeague["MIN"], axis=0)
-    compVsLeague = compVsLeague[markets].div(compVsLeague["MIN"], axis=0)
-    defenseVsPos = defenseVsPos[markets].div(defenseVsPos["MIN"], axis=0)
-    defenseVsComp = defenseVsComp[markets].div(defenseVsComp["MIN"], axis=0)
-    defenseVsPlayer = defenseVsPlayer[markets].div(defenseVsPlayer["MIN"], axis=0)
-    posVsLeague = posVsLeague[markets].div(posVsLeague["MIN"], axis=0)
+#     defenseVsLeague = defenseVsLeague[markets].div(defenseVsLeague["MIN"], axis=0)
+#     compVsLeague = compVsLeague[markets].div(compVsLeague["MIN"], axis=0)
+#     defenseVsPos = defenseVsPos[markets].div(defenseVsPos["MIN"], axis=0)
+#     defenseVsComp = defenseVsComp[markets].div(defenseVsComp["MIN"], axis=0)
+#     defenseVsPlayer = defenseVsPlayer[markets].div(defenseVsPlayer["MIN"], axis=0)
+#     posVsLeague = posVsLeague[markets].div(posVsLeague["MIN"], axis=0)
         
-    defenseResult = (defenseVsComp.mean()/defenseVsLeague.mean().replace(0, np.inf)).to_dict()
-    compResult = (defenseVsComp.mean()/compVsLeague.mean().replace(0, np.inf)).to_dict()
+#     defenseResult = (defenseVsComp.mean()/defenseVsLeague.mean().replace(0, np.inf)).to_dict()
+#     compResult = (defenseVsComp.mean()/compVsLeague.mean().replace(0, np.inf)).to_dict()
     
-    gameResult = (game[markets]/game["MIN"]).to_dict()
-    gameRecords2.append(gameResult|
-                        {"comp_"+k:v for k, v in compResult.items()}|
-                        {"def_"+k:v for k, v in defenseResult.items()})
+#     gameResult = (game[markets]/game["MIN"]).to_dict()
+#     gameRecords2.append(gameResult|
+#                         {"comp_"+k:v for k, v in compResult.items()}|
+#                         {"def_"+k:v for k, v in defenseResult.items()})
 
-# game_df = pd.DataFrame(gameRecords)
-# C1 = game_df.corr()
-game_df = pd.DataFrame(gameRecords2)
-markets = [col for col in game_df.columns if "_" not in col]
-C2 = game_df.corr()
-C = pd.DataFrame([{market: C2.loc[market, "comp_"+market] for market in markets},
-                  {market: C2.loc[market, "def_"+market] for market in markets}],
-                  index=['comp', 'def'])
-print(C)
+# # game_df = pd.DataFrame(gameRecords)
+# # C1 = game_df.corr()
+# game_df = pd.DataFrame(gameRecords2)
+# markets = [col for col in game_df.columns if "_" not in col]
+# C2 = game_df.corr()
+# C = pd.DataFrame([{market: C2.loc[market, "comp_"+market] for market in markets},
+#                   {market: C2.loc[market, "def_"+market] for market in markets}],
+#                   index=['comp', 'def'])
+# print(C)
 
 # filepath = pkg_resources.files(data) / "banned_combos.json"
 # with open(filepath, "r") as infile:
@@ -161,6 +161,17 @@ print(C)
 # NBA.season = "2023-24"
 # NBA.season_start = datetime(2023, 10, 1).date()
 # NBA.update()
+
+NBA = StatsWNBA()
+NBA.season = "2021-22"
+NBA.season_start = datetime(2021, 10, 1).date()
+NBA.update()
+NBA.season = "2022-23"
+NBA.season_start = datetime(2022, 10, 1).date()
+NBA.update()
+NBA.season = "2023-24"
+NBA.season_start = datetime(2023, 10, 1).date()
+NBA.update()
 
 # NHL = StatsNHL()
 # NHL.season_start = datetime(2021, 10, 12).date()
