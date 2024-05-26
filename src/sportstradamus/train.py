@@ -561,8 +561,8 @@ def meditate(force, league):
 
 
 def report():
-    model_list = [f.name for f in pkg_resources.files(
-        data).iterdir() if ".mdl" in f.name]
+    model_list = [f.name for f in (pkg_resources.files(
+        data)/"models/").iterdir() if ".mdl" in f.name]
     model_list.sort()
     with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
         stat_cv = json.load(f)
