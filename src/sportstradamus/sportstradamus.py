@@ -1,5 +1,5 @@
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL
+from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.books import (
     get_caesars,
     get_fd,
@@ -93,6 +93,10 @@ def main(progress, books, parlays):
     nfl.load()
     if datetime.datetime.today().date() > (nfl.season_start - datetime.timedelta(days=7)):
         sports.append("NFL")
+    wnba = StatsWNBA()
+    wnba.load()
+    if datetime.datetime.today().date() > (wnba.season_start - datetime.timedelta(days=7)):
+        sports.append("WNBA")
 
     """
     Start gathering player stats
@@ -110,6 +114,9 @@ def main(progress, books, parlays):
     if "NFL" in sports:
         nfl.update()
         stats.update({"NFL": nfl})
+    if "WNBA" in sports:
+        wnba.update()
+        stats.update({"WNBA": wnba})
 
     """"
     Start gathering sportsbook data

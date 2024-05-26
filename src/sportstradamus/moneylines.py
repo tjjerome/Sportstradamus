@@ -66,7 +66,7 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
         sports = [
             (s["key"], s["title"])
             for s in res
-            if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
+            if s["title"] in ["NBA", "MLB", "NHL", "NFL", "WNBA"] and s["active"]
         ]
     elif key is None:
         logger.warning("Key needed for sports other than All")
@@ -162,7 +162,6 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
     Retrieve moneyline and totals data from the odds API for NBA, MLB, and NHL.
     Process the data and store it in the archive file.
     """
-    stat_cv["WNBA"] = stat_cv["NBA"]
     stat_cv["NCAAB"] = stat_cv["NBA"]
     stat_cv["NCAAF"] = stat_cv["NFL"]
     historical = date.date() != datetime.today().date()
@@ -181,7 +180,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
         sports = [
             (s["key"], s["title"])
             for s in res
-            if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]
+            if s["title"] in ["NBA", "MLB", "NHL", "NFL", "WNBA"] and s["active"]
         ]
     elif key is None:
         logger.warning("Key needed for sports other than All")

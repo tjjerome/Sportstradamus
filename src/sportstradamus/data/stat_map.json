@@ -413,6 +413,20 @@
             "player_points_assists": "PA",
             "player_rebounds_assists": "RA"
         },
+        "WNBA": {
+            "player_points": "PTS",
+            "player_rebounds": "REB",
+            "player_assists": "AST",
+            "player_threes": "FG3M",
+            "player_blocks": "BLK",
+            "player_steals": "STL",
+            "player_blocks_steals": "BLST",
+            "player_turnovers": "TOV",
+            "player_points_rebounds_assists": "PRA",
+            "player_points_rebounds": "PR",
+            "player_points_assists": "PA",
+            "player_rebounds_assists": "RA"
+        },
         "MLB": {
             "batter_home_runs": "home runs",
             "batter_hits": "hits",
