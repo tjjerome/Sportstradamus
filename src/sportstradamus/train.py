@@ -298,12 +298,14 @@ def meditate(force, league):
 
             if new_M.empty and not force:
                 continue
-            
+
             M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
-            if league == "NHL" and not any([string in market for string in ["Against", "saves", "goalie"]]):
-                M.loc[M.Position==2, 'Position'] = 1
-                M.loc[M.Position==3, 'Position'] = 2
+
+            if M.loc[M["Archived"]!=0].empty:
+                M.to_csv(filepath)
+                continue
+
             M = trim_matrix(M)
             M.to_csv(filepath)
 
