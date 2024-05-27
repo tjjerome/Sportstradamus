@@ -1313,6 +1313,23 @@ class StatsWNBA(StatsNBA):
             self.teamlog = pd.concat(
                 [team_df[self.teamlog.columns], self.teamlog]).sort_values("GAME_DATE").reset_index(drop=True)
 
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'CONN', 'TEAM_ABBREVIATION'] = "CON"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'LA', 'TEAM_ABBREVIATION'] = "LAS"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'CONN', 'TEAM_ABBREVIATION'] = "CON"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'LA', 'TEAM_ABBREVIATION'] = "LAS"
+        
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'CONN', 'OPP'] = "CON"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'LA', 'OPP'] = "LAS"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'CONN', 'OPP'] = "CON"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'LA', 'OPP'] = "LAS"
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
         # Save the updated player data

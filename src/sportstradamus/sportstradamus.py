@@ -275,8 +275,8 @@ def main(progress, books, parlays):
 
     untapped_markets = []
 
-    pp_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Correct"])
-    ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Model", "Correct"])
+    pp_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
+    ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
     best5 = pd.DataFrame()
 
     # PrizePicks
