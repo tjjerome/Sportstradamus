@@ -702,10 +702,10 @@ def get_pp(books=True):
         ]
         if not books:
             leagues = [league for league in leagues if int(league) in [
-                2, 7, 8, 9]]
+                2, 3, 7, 8, 9]]
     except:
         logger.exception("Retrieving leagues failed")
-        leagues = [2, 7, 8, 9]
+        leagues = [2, 3, 7, 8, 9]
 
     for l in tqdm(leagues, desc="Processing PrizePicks offers"):
         try:
