@@ -544,7 +544,8 @@ def find_correlation(offers, stats, platform, parlays):
     positions = {
         "NBA": ["P", "C", "F", "W", "B"],
         "NFL": ["QB", "WR", "RB", "TE"],
-        "NHL": ["C", "W", "D", "G"]
+        "NHL": ["C", "W", "D", "G"],
+        "WNBA": ['G', 'F', 'C']
     }
     payout_table = { # using equivalent payouts when insured picks are better
         "Underdog": [3, 6, 10.9, 20.2],
@@ -552,6 +553,10 @@ def find_correlation(offers, stats, platform, parlays):
     }
     league_cutoff_values = { # (m, b)
         "NBA": {
+            "Model": (0.156, 0.828),
+            "Books": (-0.061, 1.144)
+        },
+        "WNBA": {
             "Model": (0.156, 0.828),
             "Books": (-0.061, 1.144)
         },
@@ -569,7 +574,7 @@ def find_correlation(offers, stats, platform, parlays):
         }
     }
 
-    for league in ["NFL", "NBA", "MLB", "NHL"]:
+    for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
             continue
@@ -640,7 +645,7 @@ def find_correlation(offers, stats, platform, parlays):
                 "Blocked Shots": "blocked",
                 "Assists": "assists"
             })
-        if league == "NBA":
+        if league == "NBA" or league == "WNBA":
             new_map.update({
                 "Fantasy Points": "fantasy points prizepicks"
             })
