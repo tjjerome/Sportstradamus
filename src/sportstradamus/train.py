@@ -288,6 +288,8 @@ def meditate(force, league):
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0).dropna()
                 cutoff_date = pd.to_datetime(M.loc[M.Archived==1, "Date"]).max().date()
+                if pd.isnull(cutoff_date):
+                    cutoff_date = None
                 start_date = (datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))).date()
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:

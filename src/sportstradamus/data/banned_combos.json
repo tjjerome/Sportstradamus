@@ -580,6 +580,11 @@
             "opponent": [],
             "modified": {}
         },
+        "WNBA": {
+            "team": [],
+            "opponent": [],
+            "modified": {}
+        },
         "NHL": {
             "team": [
                 [
@@ -2914,6 +2919,11 @@
             }
         },
         "NBA": {
+            "team": [],
+            "opponent": [],
+            "modified": {}
+        },
+        "WNBA": {
             "team": [],
             "opponent": [],
             "modified": {}
