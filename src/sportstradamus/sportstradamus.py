@@ -533,11 +533,13 @@ def find_correlation(offers, stats, platform, parlays):
     df["Correlated Bets"] = ""
     usage_str = {
         "NBA": "MIN",
+        "WNBA": "MIN",
         "NFL": "snap pct",
         "NHL": "TimeShare"
     }
     tiebreaker_str = {
         "NBA": "USG_PCT short",
+        "WNBA": "USG_PCT short",
         "NFL": "route participation short",
         "NHL": "Fenwick short"
     }
