@@ -302,7 +302,7 @@ def meditate(force, league):
             M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
 
-            if M.loc[M["Archived"]!=0].empty:
+            if len(M.loc[M["Archived"]!=0]) < 10:
                 M.to_csv(filepath)
                 continue
 
