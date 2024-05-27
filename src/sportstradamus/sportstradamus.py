@@ -992,6 +992,9 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
         if o["Team"] == "":
             continue
 
+        if o.get("Boost", 1) > 2 or o.get("Boost", 1) < .75:
+            continue
+
         if "+" in o["Player"] or "vs." in o["Player"]:
             players = o["Player"].replace("vs.", "+").split("+")
             players = [player.strip() for player in players]
