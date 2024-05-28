@@ -378,6 +378,7 @@ class Archive:
         self.default_totals = {
             "MLB": 4.671,
             "NBA": 111.667,
+            "WNBA": 81.667,
             "NFL": 22.668,
             "NHL": 2.674
             }
