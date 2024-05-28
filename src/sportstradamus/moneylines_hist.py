@@ -328,34 +328,33 @@ key="basketball_wnba"
 
 #     Date = Date + timedelta(days=1)
 
-# Date = datetime(2023, 3, 30, 12)
-# Date = pytz.timezone("America/Chicago").localize(Date)
-
-# print(sport)
-# while Date.astimezone(pytz.utc).date() < datetime(2023, 2, 3).date():
-#     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
-#         Date = Date + timedelta(days=1)
-#         continue
-
-#     print(Date)
-
-#     archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-#     archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
-
-#     Date = Date + timedelta(days=1)
-
-Date = datetime(2024, 5, 14, 12)
+Date = datetime(2023, 5, 19, 12)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
-print(sport)
-while Date.astimezone(pytz.utc).date() < datetime(2024, 5, 27).date():
+while Date.astimezone(pytz.utc).date() < datetime(2023, 9, 11).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue
 
     print(Date)
 
-    archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
+    # archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
+    archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
+
+    Date = Date + timedelta(days=1)
+
+Date = datetime(2024, 5, 14, 12)
+Date = pytz.timezone("America/Chicago").localize(Date)
+
+print(sport)
+while Date.astimezone(pytz.utc).date() < datetime(2024, 5, 29).date():
+    if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
+        Date = Date + timedelta(days=1)
+        continue
+
+    print(Date)
+
+    # archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
     archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
 
     Date = Date + timedelta(days=1)
