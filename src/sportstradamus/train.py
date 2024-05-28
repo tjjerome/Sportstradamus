@@ -125,7 +125,7 @@ archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
+@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="WNBA",
               help="Select league to train on")
 def meditate(force, league):
     global book_weights
@@ -736,9 +736,10 @@ def fit_book_weights(league, market):
     x[x<0] = np.nan
     y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
     if len(x) > 9:
-        guess = book_weights.get(league, {}).get(market, {})
+        prev_weights = book_weights.get(league, {}).get(market, {})
+        guess = {}
         for book in test_df.columns:
-            guess.setdefault(book, 1)
+            guess.update({book: prev_weights.get(book,1)})
             
         guess = list(guess.values())
         res = minimize(objective, guess, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
