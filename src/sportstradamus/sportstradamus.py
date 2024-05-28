@@ -703,165 +703,166 @@ def find_correlation(offers, stats, platform, parlays):
             combo_players = idx.loc[idx.Team.apply(lambda x: len(set(x.split("/")))>1), 'Player'].unique()
 
             best_bets = []
-            for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
-                team_splits = set.union(*[set(permutations(x)) for x in team_splits])
-                combos = []
-                for split in team_splits:
-                    if split[2] > len(combo_players):
-                        continue
-                    
-                    for i in combinations(team_players, split[0]):
-                        for j in combinations(opp_players, split[1]):
-                            selected_players = i + j
-                            if split[2] != 0:
-                                for k in combinations(combo_players, split[2]):
-                                    if len(set([item for row in [l.replace(" vs. ", " + ").split(" + ") for l in k] for item in row]).union(selected_players)) != bet_size+split[2]:
-                                        continue
-                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players+k]))
-                            else:
-                                combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
+            if platform != "PrizePicks":
+                for bet_size in np.arange(2, len(payout_table[platform]) + 2):
+                    team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
+                    team_splits = set.union(*[set(permutations(x)) for x in team_splits])
+                    combos = []
+                    for split in team_splits:
+                        if split[2] > len(combo_players):
+                            continue
+                        
+                        for i in combinations(team_players, split[0]):
+                            for j in combinations(opp_players, split[1]):
+                                selected_players = i + j
+                                if split[2] != 0:
+                                    for k in combinations(combo_players, split[2]):
+                                        if len(set([item for row in [l.replace(" vs. ", " + ").split(" + ") for l in k] for item in row]).union(selected_players)) != bet_size+split[2]:
+                                            continue
+                                        combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players+k]))
+                                else:
+                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
 
-                threshold = payout_table[platform][bet_size-2]
+                    threshold = payout_table[platform][bet_size-2]
 
-                for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
-                    bet = itemgetter(*bet_id)(bet_df)
+                    for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
+                        bet = itemgetter(*bet_id)(bet_df)
 
-                    p = np.product([leg["Boosted Model"] for leg in bet])
-                    pb = np.product([leg["Boosted Books"] for leg in bet])
+                        p = np.product([leg["Boosted Model"] for leg in bet])
+                        pb = np.product([leg["Boosted Books"] for leg in bet])
 
-                    if p*threshold < (league_cutoff_model[0]*bet_size+league_cutoff_model[1]) or pb*threshold < (league_cutoff_books[0]*bet_size+league_cutoff_books[1]):
-                        continue
+                        if p*threshold < (league_cutoff_model[0]*bet_size+league_cutoff_model[1]) or pb*threshold < (league_cutoff_books[0]*bet_size+league_cutoff_books[1]):
+                            continue
 
-                    markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
-                    team1_markets = [leg.split(".")[1]
-                                     for leg in markets if "_OPP_" not in leg]
-                    team2_markets = [leg.split(".")[1]
-                                     for leg in markets if "_OPP_" in leg]
+                        markets = [i for j in [leg['cMarket'] for leg in bet] for i in j]
+                        team1_markets = [leg.split(".")[1]
+                                        for leg in markets if "_OPP_" not in leg]
+                        team2_markets = [leg.split(".")[1]
+                                        for leg in markets if "_OPP_" in leg]
 
-                    if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned_team_markets]) or
-                        any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned_team_markets]) or
-                        any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned_opponent_markets]) or
-                        any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned_opponent_markets])):
-                        continue
+                        if (any([bc[0] in team1_markets and bc[1] in team1_markets for bc in banned_team_markets]) or
+                            any([bc[0] in team2_markets and bc[1] in team2_markets for bc in banned_team_markets]) or
+                            any([bc[0] in team1_markets and bc[1] in team2_markets for bc in banned_opponent_markets]) or
+                            any([bc[0] in team2_markets and bc[1] in team1_markets for bc in banned_opponent_markets])):
+                            continue
 
-                    boost = 1
+                        boost = 1
 
-                    # get correlation matrix
-                    bet_indices = np.arange(bet_size)
-                    SIG = np.zeros([bet_size, bet_size])
+                        # get correlation matrix
+                        bet_indices = np.arange(bet_size)
+                        SIG = np.zeros([bet_size, bet_size])
 
-                    # Iterate over combinations of bets
-                    for i, j in combinations(bet_indices, 2):
-                        cm1 = bet[i]['cMarket']
-                        b1 = [bet[i]['Bet']] * len(cm1)
-                        if "vs." in bet[i]["Player"]:
-                            b1[1] = "Under" if b1[0] == "Over" else "Over"
+                        # Iterate over combinations of bets
+                        for i, j in combinations(bet_indices, 2):
+                            cm1 = bet[i]['cMarket']
+                            b1 = [bet[i]['Bet']] * len(cm1)
+                            if "vs." in bet[i]["Player"]:
+                                b1[1] = "Under" if b1[0] == "Over" else "Over"
 
-                        cm2 = bet[j]['cMarket']
-                        b2 = [bet[j]['Bet']] * len(cm2)
-                        if "vs." in bet[j]["Player"]:
-                            b2[1] = "Under" if b2[0] == "Over" else "Over"
+                            cm2 = bet[j]['cMarket']
+                            b2 = [bet[j]['Bet']] * len(cm2)
+                            if "vs." in bet[j]["Player"]:
+                                b2[1] = "Under" if b2[0] == "Over" else "Over"
 
-                        # Vectorized operation to compute rho for all combinations of x and y
-                        rho_matrix = np.zeros((len(cm1), len(cm2)))
-                        for xi, x in enumerate(cm1):
-                            for yi, y in enumerate(cm2):
-                                rho = c_map.get((x, y), c_map.get((y, x), 0))
-                                if b1[xi] != b2[yi]:
-                                    rho = -rho
-                                rho_matrix[xi, yi] = rho
+                            # Vectorized operation to compute rho for all combinations of x and y
+                            rho_matrix = np.zeros((len(cm1), len(cm2)))
+                            for xi, x in enumerate(cm1):
+                                for yi, y in enumerate(cm2):
+                                    rho = c_map.get((x, y), c_map.get((y, x), 0))
+                                    if b1[xi] != b2[yi]:
+                                        rho = -rho
+                                    rho_matrix[xi, yi] = rho
 
-                                # Modify boost based on conditions
-                                x_key = re.sub(r'[0-9]', '', x)
-                                y_key = re.sub(r'[0-9]', '', y)
-                                if "_OPP_" in x_key:
-                                    x_key = x_key.replace("_OPP_", "")
-                                    if "_OPP_" in y_key:
-                                        y_key = y_key.replace("_OPP_", "")
-                                    else:
-                                        y_key = "_OPP_" + y_key
-                                if x_key in mod_map:
-                                    modifier = mod_map[x_key].get(y_key, [1,1])
-                                    boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
-                                # elif y_key in mod_map:
-                                #     modifier = mod_map[y_key].get(x_key, [1,1])
-                                #     boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
+                                    # Modify boost based on conditions
+                                    x_key = re.sub(r'[0-9]', '', x)
+                                    y_key = re.sub(r'[0-9]', '', y)
+                                    if "_OPP_" in x_key:
+                                        x_key = x_key.replace("_OPP_", "")
+                                        if "_OPP_" in y_key:
+                                            y_key = y_key.replace("_OPP_", "")
+                                        else:
+                                            y_key = "_OPP_" + y_key
+                                    if x_key in mod_map:
+                                        modifier = mod_map[x_key].get(y_key, [1,1])
+                                        boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
+                                    # elif y_key in mod_map:
+                                    #     modifier = mod_map[y_key].get(x_key, [1,1])
+                                    #     boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
 
-                        # Sum rho_matrix to update SIG
-                        SIG[i, j] = np.sum(rho_matrix)
+                            # Sum rho_matrix to update SIG
+                            SIG[i, j] = np.sum(rho_matrix)
 
-                    SIG = SIG + SIG.T + np.eye(bet_size)
+                        SIG = SIG + SIG.T + np.eye(bet_size)
 
-                    boost = np.clip(boost, .667, 1.6125) * np.product([leg["Boost"] for leg in bet])
-                    payout = np.clip(payout_table[platform][bet_size-2]*boost, 1, 100)
+                        boost = np.clip(boost, .667, 1.6125) * np.product([leg["Boost"] for leg in bet])
+                        payout = np.clip(payout_table[platform][bet_size-2]*boost, 1, 100)
 
-                    try:
-                        p = payout*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
-                        pb = payout*(3*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)+np.product([leg["Books"] for leg in bet]))/4
-                    except:
-                        continue
-                    
-                    units = (p - 1)/(payout - 1)/0.05
-                    if units >= 0.9 and pb > 1.01 and p > 1.45:
-                        parlay = {
-                            "Game": "/".join(sorted([team, opp])),
-                            "Date": date,
-                            "League": league,
-                            "Platform": platform,
-                            "Model EV": p,
-                            "Books EV": pb,
-                            "Boost": boost,
-                            "Rec Bet": units,
-                            "Leg 1": "",
-                            "Leg 2": "",
-                            "Leg 3": "",
-                            "Leg 4": "",
-                            "Leg 5": "",
-                            "Leg 6": "",
-                            "Legs": ", ".join([leg["Desc"] for leg in bet]),
-                            # "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
-                            "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
-                            "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(league, {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(league, {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(league, {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
-                            "Bet Size": bet_size
-                        }
-                        for i in np.arange(bet_size):
-                            parlay["Leg " + str(i+1)] = bet[i]["Desc"]
-                        best_bets.append(parlay)
+                        try:
+                            p = payout*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
+                            pb = payout*(3*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)+np.product([leg["Books"] for leg in bet]))/4
+                        except:
+                            continue
+                        
+                        units = (p - 1)/(payout - 1)/0.05
+                        if units >= 0.9 and pb > 1.01 and p > 1.45:
+                            parlay = {
+                                "Game": "/".join(sorted([team, opp])),
+                                "Date": date,
+                                "League": league,
+                                "Platform": platform,
+                                "Model EV": p,
+                                "Books EV": pb,
+                                "Boost": boost,
+                                "Rec Bet": units,
+                                "Leg 1": "",
+                                "Leg 2": "",
+                                "Leg 3": "",
+                                "Leg 4": "",
+                                "Leg 5": "",
+                                "Leg 6": "",
+                                "Legs": ", ".join([leg["Desc"] for leg in bet]),
+                                # "Players": {f"{leg['Player']} {leg['Bet']}" for leg in bet},
+                                "Markets": [(market, "Under" if leg["Bet"] == "Over" else "Over") if i == 2 and "vs." in leg["Player"] else (market, leg["Bet"]) for leg in bet for i, market in enumerate(leg["cMarket"])],
+                                "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(league, {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(league, {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(league, {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
+                                "Bet Size": bet_size
+                            }
+                            for i in np.arange(bet_size):
+                                parlay["Leg " + str(i+1)] = bet[i]["Desc"]
+                            best_bets.append(parlay)
 
-            df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Legs', 'Markets', 'Fun', 'Bet Size'])
-            
-            df5.sort_values('Model EV', ascending=False, inplace=True)
-            # df5.drop_duplicates('Players', inplace=True)
-            # df5.drop(columns="Players", inplace=True)
-            df5 = df5.groupby('Bet Size').head(100)
-            
-            if len(df5) > 5:
+                df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Legs', 'Markets', 'Fun', 'Bet Size'])
+                
+                df5.sort_values('Model EV', ascending=False, inplace=True)
+                # df5.drop_duplicates('Players', inplace=True)
+                # df5.drop(columns="Players", inplace=True)
+                df5 = df5.groupby('Bet Size').head(100)
+                
+                if len(df5) > 5:
 
-                rho_matrix = np.zeros([len(df5), len(df5)])
-                bets = df5["Markets"].to_list()
-                for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
-                    bet1 = bets[i]
-                    bet2 = bets[j]
-                    rho = []
-                    for leg1, leg2 in product(bet1, bet2):
-                        rho.append(c_map.get((leg1[0], leg2[0]), 0) * (1 if leg1[1]==leg2[1] else -1))
+                    rho_matrix = np.zeros([len(df5), len(df5)])
+                    bets = df5["Markets"].to_list()
+                    for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
+                        bet1 = bets[i]
+                        bet2 = bets[j]
+                        rho = []
+                        for leg1, leg2 in product(bet1, bet2):
+                            rho.append(c_map.get((leg1[0], leg2[0]), 0) * (1 if leg1[1]==leg2[1] else -1))
 
-                    rho_matrix[i, j] = np.mean(rho)
+                        rho_matrix[i, j] = np.mean(rho)
 
-                X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
-                Z = linkage(X, 'ward')
-                df5["Family"] = fcluster(Z, 3, criterion='maxclust')
-            elif len(df5) > 0:
-                df5["Family"] = 1
+                    X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
+                    Z = linkage(X, 'ward')
+                    df5["Family"] = fcluster(Z, 3, criterion='maxclust')
+                elif len(df5) > 0:
+                    df5["Family"] = 1
 
-            # df5 = pd.concat([df5.groupby("Family").head(1),
-            #                     df5.sort_values("Rec Bet", ascending=False).groupby("Family").head(1), 
-            #                     df5.sort_values(["Fun", "Model EV"], ascending=False).groupby("Family").head(1)]).\
-            #                     drop(columns=["Players", "Family"])
-            # parlay_df = pd.concat([parlay_df, df5.drop_duplicates(subset=["Model EV", "Books EV"])])
+                # df5 = pd.concat([df5.groupby("Family").head(1),
+                #                     df5.sort_values("Rec Bet", ascending=False).groupby("Family").head(1), 
+                #                     df5.sort_values(["Fun", "Model EV"], ascending=False).groupby("Family").head(1)]).\
+                #                     drop(columns=["Players", "Family"])
+                # parlay_df = pd.concat([parlay_df, df5.drop_duplicates(subset=["Model EV", "Books EV"])])
 
-            parlay_df = pd.concat([parlay_df, df5], ignore_index=True)
+                parlay_df = pd.concat([parlay_df, df5], ignore_index=True)
 
             # Find best pairs
             c_map = pd.Series(c_map)
