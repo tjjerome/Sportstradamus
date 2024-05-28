@@ -226,8 +226,18 @@ def meditate(force, league):
             "faceOffWins",
             "timeOnIce",
         ],
+        "WNBA": [
+            "AST",
+            "FG3M",
+            "PA",
+            "PR",
+            "PTS",
+            "RA",
+            "REB",
+            "PRA",
+            "fantasy points prizepicks"
+        ]
     }
-    all_markets["WNBA"] = all_markets["NBA"]
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
