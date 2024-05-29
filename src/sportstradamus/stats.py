@@ -1316,18 +1316,26 @@ class StatsWNBA(StatsNBA):
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
                          == 'CONN', 'TEAM_ABBREVIATION'] = "CON"
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'NY', 'TEAM_ABBREVIATION'] = "NYL"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
                          == 'LA', 'TEAM_ABBREVIATION'] = "LAS"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'CONN', 'TEAM_ABBREVIATION'] = "CON"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'NY', 'TEAM_ABBREVIATION'] = "NYL"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'LA', 'TEAM_ABBREVIATION'] = "LAS"
         
         self.gamelog.loc[self.gamelog['OPP']
                          == 'CONN', 'OPP'] = "CON"
         self.gamelog.loc[self.gamelog['OPP']
+                         == 'NY', 'OPP'] = "NYL"
+        self.gamelog.loc[self.gamelog['OPP']
                          == 'LA', 'OPP'] = "LAS"
         self.teamlog.loc[self.teamlog['OPP']
                          == 'CONN', 'OPP'] = "CON"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'NY', 'OPP'] = "NYL"
         self.teamlog.loc[self.teamlog['OPP']
                          == 'LA', 'OPP'] = "LAS"
         self.gamelog.drop_duplicates(inplace=True)
