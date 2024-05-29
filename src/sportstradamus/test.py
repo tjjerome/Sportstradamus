@@ -6,12 +6,15 @@ import importlib.resources as pkg_resources
 from sportstradamus import data
 import pickle
 import json
+import re
+import os
 from scipy.stats import norm, poisson
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from time import time
 import requests
+
 pd.options.mode.chained_assignment = None
 
 # NFL = StatsNFL()
