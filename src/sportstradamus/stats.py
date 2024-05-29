@@ -1319,12 +1319,24 @@ class StatsWNBA(StatsNBA):
                          == 'NY', 'TEAM_ABBREVIATION'] = "NYL"
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
                          == 'LA', 'TEAM_ABBREVIATION'] = "LAS"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'LV', 'TEAM_ABBREVIATION'] = "LVA"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'PHX', 'TEAM_ABBREVIATION'] = "PHO"
+        self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
+                         == 'WSH', 'TEAM_ABBREVIATION'] = "WAS"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'CONN', 'TEAM_ABBREVIATION'] = "CON"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'NY', 'TEAM_ABBREVIATION'] = "NYL"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'LA', 'TEAM_ABBREVIATION'] = "LAS"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'LV', 'TEAM_ABBREVIATION'] = "LVA"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'PHX', 'TEAM_ABBREVIATION'] = "PHO"
+        self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
+                         == 'WSH', 'TEAM_ABBREVIATION'] = "WAS"
         
         self.gamelog.loc[self.gamelog['OPP']
                          == 'CONN', 'OPP'] = "CON"
@@ -1332,12 +1344,24 @@ class StatsWNBA(StatsNBA):
                          == 'NY', 'OPP'] = "NYL"
         self.gamelog.loc[self.gamelog['OPP']
                          == 'LA', 'OPP'] = "LAS"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'LV', 'OPP'] = "LVA"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'PHX', 'OPP'] = "PHO"
+        self.gamelog.loc[self.gamelog['OPP']
+                         == 'WSH', 'OPP'] = "WAS"
         self.teamlog.loc[self.teamlog['OPP']
                          == 'CONN', 'OPP'] = "CON"
         self.teamlog.loc[self.teamlog['OPP']
                          == 'NY', 'OPP'] = "NYL"
         self.teamlog.loc[self.teamlog['OPP']
                          == 'LA', 'OPP'] = "LAS"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'LV', 'OPP'] = "LVA"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'PHX', 'OPP'] = "PHO"
+        self.teamlog.loc[self.teamlog['OPP']
+                         == 'WSH', 'OPP'] = "WAS"
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
         # Save the updated player data
