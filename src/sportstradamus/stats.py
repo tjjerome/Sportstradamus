@@ -2789,6 +2789,11 @@ class StatsNFL(Stats):
                 else:
                     self.gamelog = pdata
 
+        filepath = pkg_resources.files(data) / "nfl_comps.json"
+        if os.path.isfile(filepath):
+            with open(filepath, "r") as infile:
+                self.comps = json.load(infile)
+
     def update(self):
         """
         Update data from the web API.
@@ -3332,6 +3337,76 @@ class StatsNFL(Stats):
                 "passing_first_downs": passing_first_downs,
                 "first_downs": first_downs,
             }
+
+    def update_player_comps(self):
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
+            stats = json.load(infile)
+
+        players = nfl.import_ids()
+        players = players.loc[players['position'].isin([
+            'QB', 'RB', 'WR', 'TE'])]
+        players.index = players.name.apply(remove_accents)
+        players["bmi"] = players["weight"]/players["height"]/players["height"]
+        players = players[['age', 'height', 'bmi']].dropna()
+
+        self.profile_market("snap pct")
+        playerProfile = pd.DataFrame()
+        for year in range(self.season_start.year - 1, self.season_start.year + 1):
+            playerFolder = pkg_resources.files(data) / f"player_data/NFL/{year}"
+            if os.path.exists(playerFolder):
+                for file in os.listdir(playerFolder):
+                    if file.endswith(".csv"):
+                        df = pd.read_csv(playerFolder/file)
+                        df.index = df.player_id
+                        playerProfile = playerProfile.combine_first(df)
+
+        if playerProfile.empty:
+            return
+        
+        playerProfile.loc[playerProfile.position=="HB", "position"] = "RB"
+        playerProfile.loc[playerProfile.position=="FB", "position"] = "RB"
+        playerProfile = playerProfile.loc[playerProfile.position.isin(["QB", "RB", "WR", "TE"])]
+        playerProfile.loc[playerProfile.position=="QB", "dropbacks_per_game"] = playerProfile.loc[playerProfile.position=="QB", "dropbacks"] / playerProfile.loc[playerProfile.position=="QB", "player_game_count"]
+        playerProfile.loc[playerProfile.position=="QB", "less_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "less_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position=="QB", "blitz_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "blitz_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position=="QB", "scrambles_per_dropback"] = playerProfile.loc[playerProfile.position=="QB", "scrambles"] / playerProfile.loc[playerProfile.position=="QB", "dropbacks"]
+        playerProfile.loc[playerProfile.position=="QB", "designed_yards_per_game"] = playerProfile.loc[playerProfile.position=="QB", "designed_yards"] / playerProfile.loc[playerProfile.position=="QB", "player_game_count"]
+        playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
+        playerProfile.loc[playerProfile.position=="RB", "breakaway_yards_per_game"] = playerProfile.loc[playerProfile.position=="RB", "breakaway_yards"] / playerProfile.loc[playerProfile.position=="RB", "player_game_count"]
+        playerProfile.loc[playerProfile.position=="RB", "total_touches_per_game"] = playerProfile.loc[playerProfile.position=="RB", "total_touches"] / playerProfile.loc[playerProfile.position=="RB", "player_game_count"]
+        playerProfile.loc[playerProfile.position!="QB", "contested_target_rate"] = playerProfile.loc[playerProfile.position!="QB", "contested_targets"] / playerProfile.loc[playerProfile.position!="QB", "targets"]
+        playerProfile.loc[playerProfile.position!="QB", "deep_contested_target_rate"] = playerProfile.loc[playerProfile.position!="QB", "deep_contested_targets"] / playerProfile.loc[playerProfile.position!="QB", "targets"]
+        playerProfile.loc[playerProfile.position!="QB", "zone_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "zone_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
+        playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
+        playerProfile.index = playerProfile.player.apply(remove_accents)
+        playerProfile = playerProfile.join(self.playerProfile)
+        playerProfile = playerProfile.join(players)
+
+        filterStat = {
+            "QB": "dropbacks",
+            "RB": "attempts",
+            "WR": "routes",
+            "TE": "routes"
+        }
+    
+        comps = {}
+        for position in ["QB", "RB", "WR", "TE"]:
+            positionProfile = playerProfile.loc[playerProfile.position==position]
+            positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].max()*.1]
+            positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
+            knn = BallTree(positionProfile)
+            d, i = knn.query(positionProfile.values, k=6)
+            r = np.quantile(np.max(d,axis=1), .5)
+            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            playerIds = positionProfile.index
+            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]] for j in range(len(i))}
+
+        filepath = pkg_resources.files(data) / "nfl_comps.json"
+        with open(filepath, "w") as outfile:
+            json.dump(comps, outfile, indent=4)
+
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
         """
