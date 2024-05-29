@@ -702,8 +702,52 @@ def find_correlation(offers, stats, platform, parlays):
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
             combo_players = idx.loc[idx.Team.apply(lambda x: len(set(x.split("/")))>1), 'Player'].unique()
 
+            C = np.eye(len(idx))
+            M = np.zeros([len(idx), len(idx)])
+            p = idx.Model.to_numpy()
+            V = p*(1-p)
+            V = V.reshape(len(idx),1)*V
+            V = np.sqrt(V)
+            P = p.reshape(len(idx),1)*p
+            for i, j in combinations(range(len(idx)), 2):
+                leg1 = idx.iloc[i]
+                leg2 = idx.iloc[j]
+                cm1 = leg1["cMarket"]
+                cm2 = leg2["cMarket"]
+                b1 = leg1["Bet"]
+                b2 = leg2["Bet"]
+                n1 = leg1["Player"]
+                n2 = leg2["Player"]
+                rho = 0
+                boost = 0 if (n1 in n2 or n2 in n1) else leg1["Boost"]*leg2["Boost"]
+                for xi, x in enumerate(cm1):
+                    for yi, y in enumerate(cm2):
+                        rho += c_map.get((x, y), c_map.get((y, x), 0))
+                        if b1[xi] != b2[yi]:
+                            rho -= 2*rho
+                            
+                        # Modify boost based on conditions
+                        x_key = re.sub(r'[0-9]', '', x)
+                        y_key = re.sub(r'[0-9]', '', y)
+                        if "_OPP_" in x_key:
+                            x_key = x_key.replace("_OPP_", "")
+                            if "_OPP_" in y_key:
+                                y_key = y_key.replace("_OPP_", "")
+                            else:
+                                y_key = "_OPP_" + y_key
+                        if x_key in mod_map:
+                            modifier = mod_map[x_key].get(y_key, [1,1])
+                            boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1] #TODO handle banned markets
+
+                C[i, j] = C[j, i] = rho
+                M[i, j] = M[j, i] = boost
+
+            EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),M)*3
+
+            #TODO implement recurvise greedy algorithm to search these matrixes quickly
+
             best_bets = []
-            if platform != "PrizePicks":
+            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]):
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                     team_splits = set.union(*[set(permutations(x)) for x in team_splits])
