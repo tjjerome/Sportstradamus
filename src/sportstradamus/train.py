@@ -125,7 +125,7 @@ archive = Archive("All")
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="WNBA",
+@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
     global book_weights
