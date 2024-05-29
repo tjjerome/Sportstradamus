@@ -1322,7 +1322,7 @@ class StatsWNBA(StatsNBA):
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
                          == 'LV', 'TEAM_ABBREVIATION'] = "LVA"
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
-                         == 'PHX', 'TEAM_ABBREVIATION'] = "PHO"
+                         == 'PHO', 'TEAM_ABBREVIATION'] = "PHX"
         self.gamelog.loc[self.gamelog['TEAM_ABBREVIATION']
                          == 'WSH', 'TEAM_ABBREVIATION'] = "WAS"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
@@ -1334,7 +1334,7 @@ class StatsWNBA(StatsNBA):
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'LV', 'TEAM_ABBREVIATION'] = "LVA"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
-                         == 'PHX', 'TEAM_ABBREVIATION'] = "PHO"
+                         == 'PHO', 'TEAM_ABBREVIATION'] = "PHX"
         self.teamlog.loc[self.teamlog['TEAM_ABBREVIATION']
                          == 'WSH', 'TEAM_ABBREVIATION'] = "WAS"
         
@@ -1347,7 +1347,7 @@ class StatsWNBA(StatsNBA):
         self.gamelog.loc[self.gamelog['OPP']
                          == 'LV', 'OPP'] = "LVA"
         self.gamelog.loc[self.gamelog['OPP']
-                         == 'PHX', 'OPP'] = "PHO"
+                         == 'PHO', 'OPP'] = "PHX"
         self.gamelog.loc[self.gamelog['OPP']
                          == 'WSH', 'OPP'] = "WAS"
         self.teamlog.loc[self.teamlog['OPP']
@@ -1359,7 +1359,7 @@ class StatsWNBA(StatsNBA):
         self.teamlog.loc[self.teamlog['OPP']
                          == 'LV', 'OPP'] = "LVA"
         self.teamlog.loc[self.teamlog['OPP']
-                         == 'PHX', 'OPP'] = "PHO"
+                         == 'PHO', 'OPP'] = "PHX"
         self.teamlog.loc[self.teamlog['OPP']
                          == 'WSH', 'OPP'] = "WAS"
         self.gamelog.drop_duplicates(inplace=True)
