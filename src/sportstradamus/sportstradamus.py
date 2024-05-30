@@ -744,8 +744,41 @@ def find_correlation(offers, stats, platform, parlays):
 
             EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),M)*3
 
-            #TODO implement recurvise greedy algorithm to search these matrixes quickly
+            #TODO implement recursive greedy algorithm to search these matrixes quickly
 
+            def find_bets(C, M, EV, model_odds, book_odds, bet_size, current_group=[]):
+                qualifying_groups = []
+
+                # Base case: If the current group size is equal to the desired group size
+                if len(current_group) == bet_size:
+                    SIG = C[np.ix_(current_group, current_group)]
+                    boost = np.product(M[np.ix_(current_group, current_group)][np.triu_indices(bet_size,1)])
+                    payout = np.clip(payout_table[platform][bet_size-2]*boost, 1, 100)
+                    p = payout*multivariate_normal.cdf(model_odds, np.zeros(bet_size), SIG)
+                    if p >= 1.5:
+                        return [(tuple(current_group), p)]
+                    else:
+                        return 0
+
+                # Recursive case: Try to add each of the remaining variables
+                if len(current_group) == 0:
+                    search_space = range(C.shape[0])
+                else:
+                    search_space = np.argsort(np.sum(EV[np.ix_(current_group)],0))[::-1]
+
+                for i in search_space:
+                    new_group = current_group + [i]
+                    if np.product(EV[np.ix_(new_group, [i])]) == 0:
+                        continue
+                    search = find_bets(C, M, EV, model_odds, book_odds, bet_size, new_group)
+                    if isinstance(search, int):
+                        break
+
+                    qualifying_groups.extend(search)
+
+                return qualifying_groups
+            
+            best_bets = find_bets(C, M, EV, norm.ppf(idx.Model), norm.ppf(idx.Books), 3)
             best_bets = []
             if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]):
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
