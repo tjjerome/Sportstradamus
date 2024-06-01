@@ -648,7 +648,7 @@ def get_caesars(sport, league):
     return players
 
 
-def get_pp(books=True):
+def get_pp(books=False):
     """
     Retrieves player offers data from the PrizePicks API.
 
