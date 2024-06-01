@@ -48,6 +48,13 @@ with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
 with open((pkg_resources.files(data) / "goalies.json"), "r") as infile:
     nhl_goalies = json.load(infile)
 
+with open(pkg_resources.files(data) / "banned_combos.json", "r") as infile:
+    banned = json.load(infile)
+    
+for platform in banned.keys():
+    for league in list(banned[platform].keys()):
+        banned[platform][league]["team"] = {frozenset(k.split(" & ")): v for k,v in banned[platform][league]["team"] .items()}
+        banned[platform][league]["opponent"] = {frozenset(k.split(" & ")): v for k,v in banned[platform][league]["opponent"] .items()}
 
 def get_active_sports():
     # Get available sports from the API
