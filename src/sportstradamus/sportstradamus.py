@@ -1,10 +1,6 @@
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.books import (
-    get_caesars,
-    get_fd,
-    get_pinnacle,
-    get_dk,
     get_pp,
     get_ud,
 )
@@ -37,9 +33,7 @@ pd.set_option('mode.chained_assignment', None)
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
-@click.option("--books/--no-books", default=False, help="Get data from sportsbooks")
-@click.option("--parlays/--no-parlays", default=True, help="Find best 5 leg parlays")
-def main(progress, books, parlays):
+def main(progress):
     global untapped_markets
     global stat_map
     # Initialize tqdm based on the value of 'progress' flag
@@ -119,161 +113,6 @@ def main(progress, books, parlays):
         wnba.update()
         stats.update({"WNBA": wnba})
 
-    """"
-    Start gathering sportsbook data
-    """
-    dk_data = []
-    fd_data = []
-    pin_data = []
-    csb_data = []
-    if books:
-        if "MLB" in sports:
-            logger.info("Getting DraftKings MLB lines")
-            try:
-                dk_data.extend(get_dk(84240, [743, 1024, 1031], "MLB"))  # MLB
-            except Exception as exc:
-                logger.exception("Failed to get DraftKings MLB lines")
-
-        if "NBA" in sports:
-            logger.info("Getting DraftKings NBA lines")
-            try:
-                dk_data.extend(
-                    get_dk(42648, [583, 1215, 1216, 1217, 1218, 1293], "NBA"))  # NBA
-            except Exception as exc:
-                logger.exception("Failed to get DraftKings NBA lines")
-
-        if "NHL" in sports:
-            logger.info("Getting DraftKings NHL lines")
-            try:
-                dk_data.extend(
-                    get_dk(42133, [550, 1064, 1189, 1190], "NHL"))  # NHL
-            except Exception as exc:
-                logger.exception("Failed to get DraftKings NHL lines")
-
-        if "NFL" in sports:
-            logger.info("Getting DraftKings NFL lines")
-            try:
-                dk_data.extend(
-                    get_dk(88808, [1000, 1001, 1003, 1002], "NFL"))  # NFL
-            except Exception as exc:
-                logger.exception("Failed to get DraftKings NFL lines")
-
-        logger.info(str(len(dk_data)) + " offers found")
-
-        archive.add_books(dk_data, 0, stat_map["DraftKings"])
-        archive.write()
-
-        if "MLB" in sports:
-            logger.info("Getting FanDuel MLB lines")
-            try:
-                fd_data.extend(
-                    get_fd("mlb", ["pitcher-props", "innings", "batter-props",]))
-            except Exception as exc:
-                logger.exception("Failed to get FanDuel MLB lines")
-
-        if "NBA" in sports:
-            logger.info("Getting FanDuel NBA lines")
-            try:
-                fd_data.extend(get_fd('nba', ['player-points', 'player-combos', 'player-rebounds',
-                                              'player-assists', 'player-threes', 'player-defense']))
-            except Exception as exc:
-                logger.exception("Failed to get FanDuel NBA lines")
-
-        if "NHL" in sports:
-            logger.info("Getting FanDuel NHL lines")
-            try:
-                fd_data.extend(
-                    get_fd('nhl', ['goalie-props', 'shots', 'points-assists', 'goal-scorer']))
-            except Exception as exc:
-                logger.exception("Failed to get FanDuel NHL lines")
-
-        if "NFL" in sports:
-            logger.info("Getting FanDuel NFL lines")
-            try:
-                fd_data.extend(
-                    get_fd('nfl', ['passing-props', 'receiving-props', 'rushing-props', 'td-scorer-props']))
-            except Exception as exc:
-                logger.exception("Failed to get FanDuel NFL lines")
-
-        logger.info(str(len(fd_data)) + " offers found")
-
-        archive.add_books(fd_data, 1, stat_map["FanDuel"])
-        archive.write()
-
-        if "MLB" in sports:
-            logger.info("Getting Pinnacle MLB lines")
-            try:
-                pin_data.extend(get_pinnacle(246))  # MLB
-            except Exception as exc:
-                logger.exception("Failed to get Pinnacle MLB lines")
-
-        if "NBA" in sports:
-            logger.info("Getting Pinnacle NBA lines")
-            try:
-                pin_data.extend(get_pinnacle(487))  # NBA
-            except Exception as exc:
-                logger.exception("Failed to get Pinnacle NBA lines")
-
-        if "NHL" in sports:
-            logger.info("Getting Pinnacle NHL lines")
-            try:
-                pin_data.extend(get_pinnacle(1456))  # NHL
-            except Exception as exc:
-                logger.exception("Failed to get Pinnacle NHL lines")
-
-        if "NFL" in sports:
-            logger.info("Getting Pinnacle NFL lines")
-            try:
-                pin_data.extend(get_pinnacle(889))  # NFL
-            except Exception as exc:
-                logger.exception("Failed to get Pinnacle NFL lines")
-
-        logger.info(str(len(pin_data)) + " offers found")
-
-        archive.add_books(pin_data, 2, stat_map["Pinnacle"])
-        archive.write()
-
-        if "MLB" in sports:
-            logger.info("Getting Caesars MLB Lines")
-            try:
-                sport = "baseball"
-                league = "04f90892-3afa-4e84-acce-5b89f151063d"
-                csb_data.extend(get_caesars(sport, league))
-            except Exception as exc:
-                logger.exception("Failed to get Caesars MLB lines")
-
-        if "NBA" in sports:
-            logger.info("Getting Caesars NBA Lines")
-            try:
-                sport = "basketball"
-                league = "5806c896-4eec-4de1-874f-afed93114b8c"  # NBA
-                csb_data.extend(get_caesars(sport, league))
-            except Exception as exc:
-                logger.exception("Failed to get Caesars NBA lines")
-
-        if "NHL" in sports:
-            logger.info("Getting Caesars NHL Lines")
-            try:
-                sport = "icehockey"
-                league = "b7b715a9-c7e8-4c47-af0a-77385b525e09"
-                csb_data.extend(get_caesars(sport, league))
-            except Exception as exc:
-                logger.exception("Failed to get Caesars NHL lines")
-
-        if "NFL" in sports:
-            logger.info("Getting Caesars NFL Lines")
-            try:
-                sport = "americanfootball"
-                league = "007d7c61-07a7-4e18-bb40-15104b6eac92"
-                csb_data.extend(get_caesars(sport, league))
-            except Exception as exc:
-                logger.exception("Failed to get Caesars NFL lines")
-
-        logger.info(str(len(csb_data)) + " offers found")
-
-        archive.add_books(csb_data, 3, stat_map["Caesars"])
-        archive.write()
-
     untapped_markets = []
 
     pp_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
@@ -283,9 +122,9 @@ def main(progress, books, parlays):
     # PrizePicks
 
     try:
-        pp_dict = get_pp(books)
+        pp_dict = get_pp()
         pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats, parlays)
+            pp_dict, "PrizePicks", stats)
         save_data(pp_offers, "PrizePicks", gc)
         best5 = pd.concat([best5, pp5])
         pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
@@ -297,7 +136,7 @@ def main(progress, books, parlays):
     try:
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
-            ud_dict, "Underdog", stats, parlays)
+            ud_dict, "Underdog", stats)
         save_data(ud_offers, "Underdog", gc)
         best5 = pd.concat([best5, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
@@ -306,7 +145,7 @@ def main(progress, books, parlays):
 
     archive.write()
 
-    if parlays and not best5.empty:
+    if not best5.empty:
         best5.sort_values("Model EV", ascending=False, inplace=True)
         best5.drop_duplicates(inplace=True)
         best5.reset_index(drop=True, inplace=True)
@@ -454,7 +293,7 @@ def main(progress, books, parlays):
     logger.info("Success!")
 
 
-def process_offers(offer_dict, book, stats, parlays):
+def process_offers(offer_dict, book, stats):
     """
     Process the offers from the given offer dictionary and match them with player statistics.
 
@@ -511,13 +350,13 @@ def process_offers(offer_dict, book, stats, parlays):
                         # Add the matched offers to the new_offers list
                         new_offers.extend(modeled_offers)
 
-    new_offers, best_fives = find_correlation(new_offers, stats, book, parlays)
+    new_offers, best_fives = find_correlation(new_offers, stats, book)
 
     logger.info(str(len(new_offers)) + " offers processed")
     return new_offers, best_fives
 
 
-def find_correlation(offers, stats, platform, parlays):
+def find_correlation(offers, stats, platform):
     global stat_map
     logger.info("Finding Correlations")
 
