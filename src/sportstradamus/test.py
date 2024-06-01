@@ -1,5 +1,5 @@
-from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
-from sportstradamus.helpers import scraper, archive, stat_cv
+# from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
+# from sportstradamus.helpers import scraper, archive, stat_cv
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
@@ -107,25 +107,85 @@ pd.options.mode.chained_assignment = None
 #                   index=['comp', 'def'])
 # print(C)
 
-# filepath = pkg_resources.files(data) / "banned_combos.json"
-# with open(filepath, "r") as infile:
-#     banned = json.load(infile)
+filepath = pkg_resources.files(data) / "banned_combos.json"
+with open(filepath, "r") as infile:
+    banned = json.load(infile)
 
-# for platform in banned.keys():
-#     for league in list(banned[platform].keys()):
-#         if "modified" in list(banned[platform][league].keys()):
-#             for market in list(banned[platform][league]["modified"].keys()):
-#                 for submarket in list(banned[platform][league]["modified"][market].keys()):
-#                     market2 = market
-#                     submarket2 = submarket
-#                     if "_OPP_" in submarket:
-#                         market2 = "_OPP_"+market2
-#                         submarket2 = submarket2.replace("_OPP_", "")
-#                     banned[platform][league]["modified"].setdefault(submarket2, {})
-#                     banned[platform][league]["modified"][submarket2][market2] = banned[platform][league]["modified"][market][submarket]
+for platform in banned.keys():
+    for league in list(banned[platform].keys()):
+        banned[platform][league]["team"] = {frozenset(k.split(" & ")): v for k,v in banned[platform][league]["team"] .items()}
+        banned[platform][league]["opponent"] = {frozenset(k.split(" & ")): v for k,v in banned[platform][league]["opponent"] .items()}
 
-# with open(filepath, "w") as outfile:
-#     json.dump(banned, outfile, indent=4)
+positions = {
+    "NBA": ["P", "C", "F", "W", "B"],
+    "NFL": ["QB", "WR", "RB", "TE"],
+    "NHL": ["C", "W", "D", "G"],
+    "WNBA": ['G', 'F', 'C']
+}
+
+new_banned = {}
+for platform in banned.keys():
+    new_banned.setdefault(platform, {})
+    for league in list(banned[platform].keys()):
+        new_banned[platform].setdefault(league, {})
+        new_banned[platform][league].setdefault("team", {})
+        new_banned[platform][league].setdefault("opponent", {})
+        if "modified" in list(banned[platform][league].keys()):
+            for market in list(banned[platform][league]["modified"].keys()):
+                for submarket in list(banned[platform][league]["modified"][market].keys()):
+                    value = banned[platform][league]["modified"][market][submarket]
+                    if "_OPP_" in submarket:
+                        submarket = submarket.replace("_OPP_", "")
+                        new_banned[platform][league]["opponent"][" & ".join([market, submarket])] = value
+                    else:
+                        new_banned[platform][league]["team"][" & ".join([market, submarket])] = value
+
+        for markets in list(banned[platform][league]["team"]):
+            market = markets[0]
+            submarket = markets[1]
+            if league == "MLB":
+                if any([string in market for string in ["allowed", "pitch"]]):
+                    market = "P." + market
+                else:
+                    market = "B." + market
+
+                if any([string in submarket for string in ["allowed", "pitch"]]):
+                    submarket = "P." + submarket
+                else:
+                    submarket = "B." + submarket
+
+                new_banned[platform][league]["team"][" & ".join([market, submarket])] = [0, 0]
+
+            else:
+                for p1 in positions[league]:
+                    for p2 in positions[league]:
+                        new_banned[platform][league]["team"][" & ".join([".".join([p1, market]), ".".join([p1, submarket])])] = [0, 0]
+
+        for market in list(banned[platform][league]["opponent"]):
+            market = markets[0]
+            submarket = markets[1]
+            if league == "MLB":
+                if any([string in market for string in ["allowed", "pitch"]]):
+                    market = "P." + market
+                else:
+                    market = "B." + market
+
+                if any([string in submarket for string in ["allowed", "pitch"]]):
+                    submarket = "P." + submarket
+                else:
+                    submarket = "B." + submarket
+
+                new_banned[platform][league]["opponent"][" & ".join([market, submarket])] = [0, 0]
+
+            else:
+                for p1 in positions[league]:
+                    for p2 in positions[league]:
+                        new_banned[platform][league]["opponent"][" & ".join([".".join([p1, market]), ".".join([p1, submarket])])] = [0, 0]
+
+
+
+with open(filepath, "w") as outfile:
+    json.dump(new_banned, outfile, indent=4)
 
 # NFL = StatsNFL()
 # NFL.season_start = datetime(2018, 9, 1).date()
@@ -165,16 +225,16 @@ pd.options.mode.chained_assignment = None
 # NBA.season_start = datetime(2023, 10, 1).date()
 # NBA.update()
 
-NBA = StatsWNBA()
-NBA.season = "2021-22"
-NBA.season_start = datetime(2021, 10, 1).date()
-NBA.update()
-NBA.season = "2022-23"
-NBA.season_start = datetime(2022, 10, 1).date()
-NBA.update()
-NBA.season = "2023-24"
-NBA.season_start = datetime(2023, 10, 1).date()
-NBA.update()
+# NBA = StatsWNBA()
+# NBA.season = "2021-22"
+# NBA.season_start = datetime(2021, 10, 1).date()
+# NBA.update()
+# NBA.season = "2022-23"
+# NBA.season_start = datetime(2022, 10, 1).date()
+# NBA.update()
+# NBA.season = "2023-24"
+# NBA.season_start = datetime(2023, 10, 1).date()
+# NBA.update()
 
 # NHL = StatsNHL()
 # NHL.season_start = datetime(2021, 10, 12).date()
