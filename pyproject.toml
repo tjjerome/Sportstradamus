@@ -29,6 +29,7 @@ shap = ">=0.44.0,<0.45.0"
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
 torch = {version = "2.1.2", source = "pytorch_cpu"}
 sportsdataverse = "^0.0.39"
+line-profiler = "^4.1.3"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"
