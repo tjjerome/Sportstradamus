@@ -20,6 +20,7 @@ import warnings
 import requests
 from time import time
 from io import StringIO
+import line_profiler
 
 
 class Stats:
@@ -675,6 +676,7 @@ class StatsNBA(Stats):
                     self.playerStats[player]["bucket"] = buckets - i
                     self.playerStats[player]["line"] = lines[i]
 
+    @line_profiler.profile
     def profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -866,6 +868,7 @@ class StatsNBA(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
+    @line_profiler.profile
     def get_stats(self, offer, date=datetime.today()):
         """
         Generate a pandas DataFrame with a summary of relevant stats.

@@ -12,6 +12,7 @@ import gspread
 import click
 import re
 from scipy.stats import poisson, skellam, norm, hmean, multivariate_normal
+from scipy.cluster.hierarchy import fcluster, linkage
 from math import comb
 import numpy as np
 import pickle
@@ -25,14 +26,16 @@ import datetime
 import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations, permutations, product
-from scipy.cluster.hierarchy import fcluster, linkage
 from operator import itemgetter
 from time import time
+import line_profiler
 
 pd.set_option('mode.chained_assignment', None)
+os.environ["LINE_PROFILE"] = "0"
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
+@line_profiler.profile
 def main(progress):
     global untapped_markets
     global stat_map
@@ -143,7 +146,6 @@ def main(progress):
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
-    archive.write()
 
     if not best5.empty:
         best5.sort_values("Model EV", ascending=False, inplace=True)
@@ -195,6 +197,7 @@ def main(progress):
 
         parlay_df.to_pickle(filepath)
 
+    archive.write()
     logger.info("Checking historical predictions")
     filepath = pkg_resources.files(data) / "history.dat"
     if os.path.isfile(filepath):
@@ -293,6 +296,7 @@ def main(progress):
     logger.info("Success!")
 
 
+@line_profiler.profile
 def process_offers(offer_dict, book, stats):
     """
     Process the offers from the given offer dictionary and match them with player statistics.
@@ -356,6 +360,7 @@ def process_offers(offer_dict, book, stats):
     return new_offers, best_fives
 
 
+@line_profiler.profile
 def find_correlation(offers, stats, platform):
     global stat_map
     logger.info("Finding Correlations")
@@ -420,16 +425,6 @@ def find_correlation(offers, stats, platform):
         c.columns = ["R"]
         league_cutoff_model = league_cutoff_values[league]["Model"]
         league_cutoff_books = league_cutoff_values[league]["Books"]
-        # team_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
-        #     ".")[1]] if "_OPP_" not in x.correlation else ["", ""], axis=1).to_list()
-        # opp_pairs = c.apply(lambda x: [x.market.split(".")[1], x.correlation.split(
-        #     ".")[1]] if "_OPP_" in x.correlation else ["", ""], axis=1).to_list()
-        # mask1 = [pair not in banned[platform][league]['team'] and pair[::-1]
-        #          not in banned[platform][league]['team'] for pair in team_pairs]
-        # mask2 = [pair not in banned[platform][league]['opponent'] and pair[::-1]
-        #          not in banned[platform][league]['opponent'] for pair in opp_pairs]
-
-        # c = c.loc[[a and b for a, b in zip(mask1, mask2)]]
         stat_data = stats.get(league)
         team_mod_map = banned[platform][league]['team']
         opp_mod_map = banned[platform][league]['opponent']
@@ -514,6 +509,7 @@ def find_correlation(offers, stats, platform):
                 split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
                     x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
             game_df = pd.concat([team_df, opp_df, split_df])
+            game_df.drop_duplicates(subset="Desc", inplace=True)
             checked_teams.append(team)
             checked_teams.append(opp)
             if platform != "Underdog":
@@ -688,7 +684,7 @@ def find_correlation(offers, stats, platform):
                         rho_bet1 = np.mean(C[np.ix_(bet1, bet1)])
                         rho_bet2 = np.mean(C[np.ix_(bet2, bet2)])
 
-                        rho_matrix[i, j] = rho_cross/rho_bet1/2 + rho_cross/rho_bet2/2
+                        rho_matrix[i, j] = np.clip(rho_cross/np.sqrt(rho_bet1)/np.sqrt(rho_bet2),-1,0.999)
 
                     X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
                     Z = linkage(X, 'ward')
@@ -749,6 +745,7 @@ def save_data(df, book, gc):
             logger.exception(f"Error writing {book} offers")
 
 
+@line_profiler.profile
 def match_offers(offers, league, market, platform, stat_data, pbar):
     """
     Matches offers with statistical data and applies various calculations and transformations.
