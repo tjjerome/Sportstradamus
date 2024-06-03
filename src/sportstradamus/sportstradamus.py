@@ -124,15 +124,15 @@ def main(progress):
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp()
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats)
-        save_data(pp_offers, "PrizePicks", gc)
-        best5 = pd.concat([best5, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp()
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats)
+    #     save_data(pp_offers, "PrizePicks", gc)
+    #     best5 = pd.concat([best5, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 

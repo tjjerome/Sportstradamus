@@ -47,55 +47,6 @@ distributions = {
     "Poisson": Poisson.Poisson(**dist_params)
 }
 
-log_strings = {
-    "NFL": {
-        "game": "game id",
-        "date": "gameday",
-        "player": "player display name",
-        "usage": "snap pct",
-        "usage_sec": "route participation",
-        "position": "position group",
-        "team": "team",
-        "home": "home",
-        "win": "WL",
-        "score": "points"
-    },
-    "NBA": {
-        "game": "GAME_ID",
-        "date": "GAME_DATE",
-        "player": "PLAYER_NAME",
-        "usage": "MIN",
-        "usage_sec": "USG_PCT",
-        "position": "POS",
-        "team": "TEAM_ABBREVIATION",
-        "home": "HOME",
-        "win": "WL",
-        "score": "PTS"
-    },
-    "NHL": {
-        "game": "gameId",
-        "date": "gameDate",
-        "player": "playerName",
-        "usage": "TimeShare",
-        "usage_sec": "Fenwick",
-        "position": "position",
-        "team": "team",
-        "home": "home",
-        "win": "WL",
-        "score": "goals"
-    },
-    "MLB": {
-        "game": "gameId",
-        "date": "gameDate",
-        "player": "playerName",
-        "position": "position",
-        "team": "team",
-        "home": "home",
-        "win": "WL",
-        "score": "runs"
-    },
-}
-log_strings["WNBA"] = log_strings["NBA"]
 
 mlb = StatsMLB()
 mlb.load()
@@ -685,25 +636,25 @@ def fit_book_weights(league, market):
     cv = stat_cv[league].get(market, 1)
     
     if market == "Moneyline":
-        log = stat_data.teamlog[[log_strings[league]["team"], log_strings[league]["date"], log_strings[league]["win"]]]
-        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["team"]]).set_index([log_strings[league]["date"], log_strings[league]["team"]])[log_strings[league]["win"]]
+        log = stat_data.teamlog[[stat_data.log_strings["team"], stat_data.log_strings["date"], stat_data.log_strings["win"]]]
+        log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["team"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[stat_data.log_strings["win"]]
         df.dropna(subset="Result", inplace=True)
         result = df["Result"] == "W"
         test_df = df.drop(columns='Result')
 
     elif market == "Totals":
-        log = stat_data.teamlog[[log_strings[league]["team"], log_strings[league]["date"], log_strings[league]["score"]]]
-        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["team"]]).set_index([log_strings[league]["date"], log_strings[league]["team"]])[log_strings[league]["score"]]
+        log = stat_data.teamlog[[stat_data.log_strings["team"], stat_data.log_strings["date"], stat_data.log_strings["score"]]]
+        log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["team"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[stat_data.log_strings["score"]]
         df.dropna(subset="Result", inplace=True)
         result = df["Result"]
         test_df = df.drop(columns='Result')
     
     elif market == "1st 1 innings":
-        log = stat_data.gamelog.loc[stat_data.gamelog["starting pitcher"], ["opponent", log_strings[league]["date"], "1st inning runs allowed"]]
-        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([log_strings[league]["date"], "opponent"]).set_index([log_strings[league]["date"], "opponent"])["1st inning runs allowed"]
+        log = stat_data.gamelog.loc[stat_data.gamelog["starting pitcher"], ["opponent", stat_data.log_strings["date"], "1st inning runs allowed"]]
+        log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], "opponent"]).set_index([stat_data.log_strings["date"], "opponent"])["1st inning runs allowed"]
         df.dropna(subset="Result", inplace=True)
         df["Over"] = df["Result"] > 0.5
         result = df["Over"]
@@ -711,9 +662,9 @@ def fit_book_weights(league, market):
         test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(np.ones(len(test_df))*0.5, x.to_numpy(), cv))
     
     else:
-        log = stat_data.gamelog[[log_strings[league]["player"], log_strings[league]["date"], market]]
-        log[log_strings[league]["date"]] = log[log_strings[league]["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([log_strings[league]["date"], log_strings[league]["player"]]).set_index([log_strings[league]["date"], log_strings[league]["player"]])[market]
+        log = stat_data.gamelog[[stat_data.log_strings["player"], stat_data.log_strings["date"], market]]
+        log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
+        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["player"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["player"]])[market]
         df.dropna(subset="Result", inplace=True)
         df["Over"] = df["Result"] > df["Line"]
         result = df["Over"]
@@ -1258,7 +1209,7 @@ def correlate(league, force=False):
 
     stats = tracked_stats[league]
     log = stat_structs[league]
-    log_str = log_strings[league]
+    log_str = log.log_strings
 
     filepath = pkg_resources.files(data) / f"training_data/{league}_corr.csv"
     if os.path.isfile(filepath) and not force:
