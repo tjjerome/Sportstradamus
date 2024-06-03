@@ -539,6 +539,10 @@ class StatsNBA(Stats):
         nba_df = pd.DataFrame(nba_df)
 
         if not nba_df.empty:
+            # Retrieve moneyline and totals data
+            nba_df.loc[:, "moneyline"] = nba_df.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+            nba_df.loc[:, "totals"] = nba_df.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+
             self.gamelog = pd.concat(
                 [nba_df[self.gamelog.columns], self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
 
@@ -593,7 +597,9 @@ class StatsNBA(Stats):
         self.teamlog.loc[self.teamlog['OPP']
                          == 'SA', 'OPP'] = "SAS"
 
-        self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+        # self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+        # self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        # self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
@@ -700,8 +706,8 @@ class StatsNBA(Stats):
                                & (gameDates < date)].copy()
 
         # Retrieve moneyline and totals data
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        # gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        # gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
         playerGroups = gamelog.\
             groupby('PLAYER_NAME').\
@@ -723,11 +729,7 @@ class StatsNBA(Stats):
             lambda x: x.loc[~x['HOME'].astype(bool), market].mean()/x[market].mean())-1
 
         defenseGroups = gamelog.groupby(['OPP', 'GAME_ID'])
-        defenseGames = pd.DataFrame()
-        defenseGames[market] = defenseGroups[market].sum()
-        defenseGames['HOME'] = defenseGroups['HOME'].mean().astype(int)
-        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
-        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGames = defenseGroups[[market, "HOME", "moneyline", "totals"]].agg({market: "sum", "HOME": lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
         defenseGroups = defenseGames.groupby('OPP')
 
         leagueavg = defenseGroups[market].mean().mean()
@@ -737,9 +739,9 @@ class StatsNBA(Stats):
         self.defenseProfile['z'] = (
             defenseGroups[market].mean()-leagueavg).div(leaguestd)
         self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x['HOME'] == 1, market].mean() / x[market].mean()) - 1
+            lambda x: x.loc[x['HOME'], market].mean() / x[market].mean()) - 1
         self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[x['HOME'] == 0, market].mean()/x[market].mean())-1
+            lambda x: x.loc[~x['HOME'], market].mean()/x[market].mean())-1
 
         playerlogs = gamelog.loc[gamelog['PLAYER_NAME'].isin(
             self.playerProfile.index)].fillna(0).groupby('PLAYER_NAME')[
@@ -1309,6 +1311,8 @@ class StatsWNBA(StatsNBA):
         team_df.loc[~(team_df["WL"]=="W"), "WL"] = "L"
 
         if not stat_df.empty:
+            stat_df.loc[:, "moneyline"] = stat_df.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+            stat_df.loc[:, "totals"] = stat_df.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
             self.gamelog = pd.concat(
                 [stat_df[self.gamelog.columns], self.gamelog]).sort_values("GAME_DATE").reset_index(drop=True)
             
@@ -1367,6 +1371,8 @@ class StatsWNBA(StatsNBA):
                          == 'WSH', 'OPP'] = "WAS"
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
+        # self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        # self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["GAME_DATE"][:10], x["TEAM_ABBREVIATION"]), axis=1)
         # Save the updated player data
         with open(pkg_resources.files(data) / "wnba_data.dat", "wb") as outfile:
             pickle.dump({"players": self.players,
@@ -1402,6 +1408,7 @@ class StatsMLB(Stats):
         self.park_factors = {}
         self.players = {}
         self.comps = {}
+        self.league = "MLB"
         self.stat_types = {
             "batting": ["OBP", "AVG", "SLG", "PASO", "BABIP"],
             "fielding": ["DER"],
@@ -1819,8 +1826,11 @@ class StatsMLB(Stats):
             "K": away_bullpen["pitcher strikeouts"]/bpf["K"]
         }
 
+        new_games = pd.DataFrame.from_records(new_games)
+        new_games.loc[:, "moneyline"] = new_games.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
+        new_games.loc[:, "totals"] = new_games.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
         self.gamelog = pd.concat(
-            [self.gamelog, pd.DataFrame.from_records(new_games)], ignore_index=True)
+            [self.gamelog, new_games], ignore_index=True)
 
         teams = [
             {
@@ -2053,6 +2063,8 @@ class StatsMLB(Stats):
         self.teamlog.drop_duplicates(inplace=True)
 
         # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"][:10], x["team"]), axis=1)
+        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"][:10], x["team"]), axis=1)
 
         # Write to file
         with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
@@ -2801,6 +2813,7 @@ class StatsNFL(Stats):
                         'plays_per_game', 'time_of_possession', 'time_per_play']
         }
         self.need_pbp = True
+        self.league = "NFL"
 
     def load(self):
         """
@@ -2927,6 +2940,9 @@ class StatsNFL(Stats):
         nfl_data.loc[nfl_data['team']
                      == 'OAK', 'team'] = "LV"
 
+        nfl_data.loc[:, "moneyline"] = nfl_data.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["recent team"]), axis=1)
+        nfl_data.loc[:, "totals"] = nfl_data.apply(lambda x: archive.get_total(self.league, x["gameday"], x["recent team"]), axis=1)
+
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
 
@@ -3008,6 +3024,8 @@ class StatsNFL(Stats):
         self.teamlog.drop_duplicates(inplace=True)
 
         self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
+        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["recent team"]), axis=1)
+        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameday"], x["recent team"]), axis=1)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -4257,6 +4275,8 @@ class StatsNHL(Stats):
                     nhl_teamlog.extend(teamlog)
 
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0)
+        nhl_df.loc[:, "moneyline"] = nhl_df.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
+        nhl_df.loc[:, "totals"] = nhl_df.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
         self.gamelog = pd.concat([nhl_df, self.gamelog]).sort_values(
             "gameDate").reset_index(drop=True)
         self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0), self.teamlog]).sort_values(
@@ -4361,6 +4381,8 @@ class StatsNHL(Stats):
         self.teamlog.drop_duplicates(inplace=True)
 
         self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
+        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
