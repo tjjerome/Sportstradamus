@@ -53,6 +53,7 @@ class Stats:
         self.season_start = datetime(year=1900, month=1, day=1).date()
         self.playerStats = {}
         self.edges = {}
+        self.positions = []
         self.dvp_index = {}
         self.dvpoa_latest_date = datetime(year=1900, month=1, day=1).date()
         self.bucket_latest_date = datetime(year=1900, month=1, day=1).date()
@@ -113,7 +114,7 @@ class Stats:
         
         self.profile_latest_date = date
 
-        self.playerProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain'])
+        self.playerProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain', 'position avg', 'position z'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']+self.positions)
 
         one_year_ago = date - timedelta(days=300)
@@ -124,8 +125,21 @@ class Stats:
         self.short_teamlog = self.teamlog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
 
+        if self.league == "NBA" or self.league == "WNBA":
+            stat_types = self.stat_types
+            team_stat_types = self.team_stat_types
+        elif self.league == "NFL":
+            stat_types = self.stat_types['passing'] + self.stat_types['rushing'] + self.stat_types['receiving']
+            team_stat_types = list(set(self.stat_types['offense']) | set(self.stat_types['defense']))
+        elif self.league == "MLB":
+            stat_types = self.stat_types['pitching'] + self.stat_types['batting']
+            team_stat_types = self.stat_types['fielding'] + self.stat_types['batting']
+        elif self.league == "NHL":
+            stat_types = self.stat_types["skater"] + self.stat_types["goalie"]
+            team_stat_types = self.team_stat_types
+
         playerlogs = self.short_gamelog.fillna(0).groupby(self.log_strings["player"])[
-            self.stat_types]
+            stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
         playershortstats = playerlogs.apply(lambda x: np.mean(
             x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
@@ -134,14 +148,106 @@ class Stats:
         playerstats = playerstats.join(playertrends)
 
         teamstats = self.short_teamlog.groupby(self.log_strings["team"]).apply(
-            lambda x: np.mean(x.tail(10)[self.team_stat_types], 0))
+            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
         
         self.defenseProfile = self.defenseProfile.join(teamstats, how='right').fillna(0)
         self.defenseProfile.index.name = self.log_strings["opponent"]
 
-        self.teamProfile = teamstats[self.team_stat_types]
+        self.teamProfile = teamstats[team_stat_types]
 
         self.playerProfile = self.playerProfile.join(playerstats, how='right').fillna(0)
+
+    @line_profiler.profile
+    def profile_market(self, market, date=datetime.today().date()):
+        if isinstance(date, str):
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+        elif isinstance(date, datetime):
+            date = date.date()
+        if market == self.profiled_market and date == self.profile_latest_date:
+            return
+
+        self.base_profile(date)
+        self.profiled_market = market
+
+        playerGroups = self.short_gamelog.\
+            groupby(self.log_strings["player"]).\
+            filter(lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).\
+            groupby(self.log_strings["player"])
+
+        leagueavg = playerGroups[market].mean().mean()
+        leaguestd = playerGroups[market].mean().std()
+        if np.isnan(leagueavg) or np.isnan(leaguestd):
+            return
+
+        self.playerProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain', 'position avg', 'position z']] = 0.0
+        self.playerProfile['avg'] = playerGroups[market].mean().div(
+            leagueavg) - 1
+        self.playerProfile['z'] = (
+            playerGroups[market].mean()-leagueavg).div(leaguestd)
+        self.playerProfile['home'] = playerGroups.apply(
+            lambda x: x.loc[x[self.log_strings["home"]], market].mean() / x[market].mean()) - 1
+        self.playerProfile['away'] = playerGroups.apply(
+            lambda x: x.loc[~x[self.log_strings["home"]].astype(bool), market].mean()/x[market].mean())-1
+
+        defenseGroups = self.short_gamelog.groupby([self.log_strings["opponent"], self.log_strings["game"]])
+        defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
+        defenseGroups = defenseGames.groupby(self.log_strings["opponent"])
+
+        self.defenseProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0.0
+        leagueavg = defenseGroups[market].mean().mean()
+        leaguestd = defenseGroups[market].mean().std()
+        self.defenseProfile['avg'] = defenseGroups[market].mean().div(
+            leagueavg) - 1
+        self.defenseProfile['z'] = (
+            defenseGroups[market].mean()-leagueavg).div(leaguestd)
+        self.defenseProfile['home'] = defenseGroups.apply(
+            lambda x: x.loc[x[self.log_strings["home"]], market].mean() / x[market].mean()) - 1
+        self.defenseProfile['away'] = defenseGroups.apply(
+            lambda x: x.loc[~x[self.log_strings["home"]], market].mean()/x[market].mean())-1
+
+        for position in self.positions:
+            positionLogs = self.short_gamelog.loc[self.short_gamelog[self.log_strings["position"]] == position]
+            positionGroups = positionLogs.groupby(self.log_strings["player"])
+            positionAvg = positionGroups[market].mean().mean()
+            positionStd = positionGroups[market].mean().std()
+            idx = list(set(positionGroups.groups.keys()).intersection(
+                set(self.playerProfile.index)))
+            self.playerProfile.loc[idx, 'position avg'] = positionGroups[market].mean().div(
+                positionAvg) - 1
+            self.playerProfile.loc[idx, 'position z'] = (
+                positionGroups[market].mean() - positionAvg).div(positionStd)
+            positionGroups = positionLogs.groupby(
+                [self.log_strings["opponent"], self.log_strings["game"]])
+            positionGames = positionGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
+            positionGroups = positionGames.groupby(self.log_strings["opponent"])
+            leagueavg = positionGroups[market].mean().mean()
+            if leagueavg == 0:
+                self.defenseProfile[position] = 0
+            else:
+                self.defenseProfile[position] = positionGroups[market].mean().div(
+                    leagueavg) - 1
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.playerProfile['moneyline gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float) / 0.5 - x.moneyline.fillna(0.5).mean(),
+                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+
+            self.playerProfile['totals gain'] = playerGroups.\
+                apply(lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
+                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+
+            self.defenseProfile['moneyline gain'] = defenseGroups.\
+                apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float) / 0.5 - x.moneyline.fillna(0.5).mean(),
+                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+
+            self.defenseProfile['totals gain'] = defenseGroups.\
+                apply(lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
+                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+            
+        self.defenseProfile.fillna(0.0, inplace=True)
+        self.teamProfile.fillna(0.0, inplace=True)
+        self.playerProfile.fillna(0.0, inplace=True)
 
     def get_stats(self, offer, game_date):
         """
@@ -234,7 +340,7 @@ class StatsNBA(Stats):
                                 'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
                                 'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_OFF_RATING',
                                 'OPP_DEF_RATING', 'OPP_OREB_PCT', 'OPP_DREB_PCT', 'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_PIE']
-        
+        self.default_total = 111.667
         self.log_strings = {
             "game": "GAME_ID",
             "date": "GAME_DATE",
@@ -725,7 +831,7 @@ class StatsNBA(Stats):
                     self.playerStats[player]["line"] = lines[i]
 
     @line_profiler.profile
-    def profile_market(self, market, date=datetime.today().date()):
+    def obs_profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
         elif isinstance(date, datetime):
@@ -915,8 +1021,7 @@ class StatsNBA(Stats):
 
         Date = datetime.strptime(date, "%Y-%m-%d")
 
-        player_games = self.gamelog.loc[(self.gamelog["PLAYER_NAME"] == player) & (
-            pd.to_datetime(self.gamelog[self.log_strings["date"]]) < Date)]
+        player_games = self.short_gamelog.loc[(self.short_gamelog["PLAYER_NAME"] == player)]
 
         if len(player_games) > 0:
             position = player_games.iloc[0]['POS']
@@ -924,8 +1029,7 @@ class StatsNBA(Stats):
             logger.warning(f"{player} not found")
             return 0
 
-        one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog[self.log_strings["date"]]) > Date-timedelta(days=300)])
+        one_year_ago = len(player_games)
         headtohead = player_games.loc[player_games["OPP"] == opponent]
 
         game_res = (player_games[market]).to_list()
@@ -1126,6 +1230,7 @@ class StatsWNBA(StatsNBA):
         self.league = "WNBA"
         self.positions = ['G', 'F', 'C']
         self.season_start = datetime(2024, 5, 14).date()
+        self.default_total = 81.667
 
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
                 'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
@@ -1417,12 +1522,14 @@ class StatsMLB(Stats):
             "fielding": ["DER"],
             "pitching": ["FIP", "WHIP", "ERA", "K9", "BB9", "PA9", "IP"]
         }
+        self.default_total = 4.671
         self.log_strings = {
             "game": "gameId",
             "date": "gameDate",
             "player": "playerName",
             "position": "position",
             "team": "team",
+            "opponent": "opponent",
             "home": "home",
             "win": "WL",
             "score": "runs"
@@ -2142,41 +2249,19 @@ class StatsMLB(Stats):
             date = datetime.strptime(date, "%Y-%m-%d").date()
         elif isinstance(date, datetime):
             date = date.date()
-
         if market == self.profiled_market and date == self.profile_latest_date:
             return
 
+        self.base_profile(date)
         self.profiled_market = market
-        self.profile_latest_date = date
 
-        # Initialize playerStats and edges
-        self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
-        self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
-        self.pitcherProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
-
-        # Filter gamelog for games within the date range
-        one_year_ago = (date - timedelta(days=300))
-        gameDates = pd.to_datetime(self.gamelog["gameDate"]).dt.date
-        gamelog = self.gamelog[(
-            one_year_ago <= gameDates) & (gameDates < date)]
-        gameDates = pd.to_datetime(self.teamlog["gameDate"]).dt.date
-        teamlog = self.teamlog[(
-            one_year_ago <= gameDates) & (gameDates < date)]
+        self.pitcherProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain'])
 
         # Filter non-starting pitchers or non-starting batters depending on the market
         if any([string in market for string in ["allowed", "pitch"]]):
-            gamelog2 = gamelog[gamelog["starting batter"]].copy()
-            gamelog = gamelog[gamelog["starting pitcher"]].copy()
+            gamelog = self.short_gamelog[self.short_gamelog["starting pitcher"]].copy()
         else:
-            gamelog2 = gamelog[gamelog["starting pitcher"]].copy()
-            gamelog = gamelog[gamelog["starting batter"]].copy()
-
-        # Retrieve moneyline and totals data from archive
-        gamelog.loc[:, "moneyline"] = gamelog.apply(lambda x: archive.get_moneyline("MLB", x["gameDate"][:10], x["team"]), axis=1)
-        gamelog.loc[:, "totals"] = gamelog.apply(lambda x: archive.get_total("MLB", x["gameDate"][:10], x["team"]), axis=1)
-
-        teamstats = teamlog.groupby('team').apply(
-            lambda x: np.mean(x.tail(10)[self.stat_types['batting'] + self.stat_types['fielding']], 0))
+            gamelog = self.short_gamelog[self.short_gamelog["starting batter"]].copy()
 
         # Filter players with at least 2 entries
         playerGroups = gamelog.groupby('playerName').filter(
@@ -2184,19 +2269,11 @@ class StatsMLB(Stats):
 
         # defenseGroups = gamelog.groupby('opponent')
         defenseGroups = gamelog.groupby(['opponent', 'gameId'])
-        defenseGames = pd.DataFrame()
-        defenseGames[market] = defenseGroups[market].sum()
-        defenseGames['home'] = defenseGroups['home'].mean().astype(int)
-        defenseGames['moneyline'] = defenseGroups['moneyline'].mean()
-        defenseGames['totals'] = defenseGroups['totals'].mean()
+        defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
         defenseGroups = defenseGames.groupby('opponent')
 
         pitcherGroups = gamelog.groupby(['opponent pitcher', 'gameId'])
-        pitcherGames = pd.DataFrame()
-        pitcherGames[market] = pitcherGroups[market].sum()
-        pitcherGames['home'] = pitcherGroups['home'].mean().astype(int)
-        pitcherGames['moneyline'] = pitcherGroups['moneyline'].mean()
-        pitcherGames['totals'] = pitcherGroups['totals'].mean()
+        pitcherGames = pitcherGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
         pitcherGroups = pitcherGames.groupby('opponent pitcher').filter(
             lambda x: x[market].count() > 1).groupby('opponent pitcher')
 
@@ -2209,6 +2286,7 @@ class StatsMLB(Stats):
         # Compute playerProfile DataFrame
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            self.playerProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0
             self.playerProfile['avg'] = playerGroups[market].mean().div(
                 leagueavg) - 1
             self.playerProfile['z'] = (
@@ -2220,6 +2298,7 @@ class StatsMLB(Stats):
 
             leagueavg = defenseGroups[market].mean().mean()
             leaguestd = defenseGroups[market].mean().std()
+            self.defenseProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0
             self.defenseProfile['avg'] = defenseGroups[market].mean().div(
                 leagueavg) - 1
             self.defenseProfile['z'] = (
@@ -2231,6 +2310,7 @@ class StatsMLB(Stats):
 
             leagueavg = pitcherGroups[market].mean().mean()
             leaguestd = pitcherGroups[market].mean().std()
+            self.pitcherProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0
             self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
                 leagueavg) - 1
             self.pitcherProfile['z'] = (
@@ -2264,61 +2344,13 @@ class StatsMLB(Stats):
                 lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
-        if any([string in market for string in ["allowed", "pitch"]]):
-            playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0).groupby('playerName')[
-                self.stat_types['pitching']]
-            playerstats = playerlogs.mean(numeric_only=True)
-            playershortstats = playerlogs.apply(lambda x: np.mean(
-                x.tail(5), 0)).fillna(0).add_suffix(" short", 1)
-            playertrends = playerlogs.apply(
-                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
-            playerstats = playerstats.join(playershortstats)
-            playerstats = playerstats.join(playertrends)
-
-            batterstats = gamelog2.groupby('playerName')[
-                self.stat_types['batting']].mean(numeric_only=True)
-
-            i = self.defenseProfile.index
-            self.defenseProfile = self.defenseProfile.merge(
-                teamstats[self.stat_types['batting']], left_on='opponent', right_on='team')
-            self.defenseProfile.index = i
-
-            self.teamProfile = teamstats[self.stat_types['fielding']]
-
-            self.batterProfile = batterstats
-
-            self.playerProfile = self.playerProfile.merge(
-                playerstats, on='playerName')
-
-        else:
-            playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0).groupby('playerName')[
-                self.stat_types['batting']]
-            playerstats = playerlogs.mean(numeric_only=True)
-            playershortstats = playerlogs.apply(lambda x: np.mean(
-                x.tail(3), 0)).fillna(0).add_suffix(" short", 1)
-            playertrends = playerlogs.apply(
-                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(3))), x.tail(3), 1)[0], index=x.columns)).fillna(0).add_suffix(" growth", 1)
-            playerstats = playerstats.join(playershortstats)
-            playerstats = playerstats.join(playertrends)
-
-            pitcherstats = gamelog2.drop(columns='opponent pitcher').rename(
-                columns={'playerName': 'opponent pitcher'}).groupby('opponent pitcher')[
-                self.stat_types['pitching']].mean(numeric_only=True)
-
-            i = self.defenseProfile.index
-            self.defenseProfile = self.defenseProfile.merge(
-                teamstats[self.stat_types['fielding']], left_on='opponent', right_on='team')
-            self.defenseProfile.index = i
-
-            self.teamProfile = teamstats[self.stat_types['batting']]
-
-            self.playerProfile = self.playerProfile.merge(
-                playerstats, on='playerName')
-
-            self.pitcherProfile = self.pitcherProfile.merge(
-                pitcherstats, on='opponent pitcher')
+        if not any([string in market for string in ["allowed", "pitch"]]):
+            self.pitcherProfile = self.pitcherProfile.join(self.playerProfile[self.stat_types["pitching"]])
+            
+        self.defenseProfile.fillna(0.0, inplace=True)
+        self.pitcherProfile.fillna(0.0, inplace=True)
+        self.teamProfile.fillna(0.0, inplace=True)
+        self.playerProfile.fillna(0.0, inplace=True)
 
     def dvpoa(self, team, market, date=datetime.today().date()):
         """
@@ -2416,21 +2448,17 @@ class StatsMLB(Stats):
             pitcher = self.pitchers.get(opponent, "")
 
         if any([string in market for string in ["allowed", "pitch"]]):
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < Date) & self.gamelog["starting pitcher"]]
+            player_games = self.short_gamelog.loc[(self.short_gamelog["playerName"] == player) & self.short_gamelog["starting pitcher"]]
 
             headtohead = player_games.loc[player_games["opponent"] == opponent]
 
-            pid = self.gamelog.loc[self.gamelog['playerName']
-                                   == player, 'playerId']
+            pid = self.gamelog.loc[self.gamelog['playerName'] == player, 'playerId']
         else:
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < Date) & self.gamelog["starting batter"]]
+            player_games = self.short_gamelog.loc[(self.short_gamelog["playerName"] == player) & self.short_gamelog["starting batter"]]
 
             headtohead = player_games.loc[player_games["opponent pitcher"] == pitcher]
 
-            pid = self.gamelog.loc[self.gamelog['opponent pitcher']
-                                   == pitcher, 'opponent pitcher id']
+            pid = self.gamelog.loc[self.gamelog['opponent pitcher'] == pitcher, 'opponent pitcher id']
 
         if player_games.empty:
             return 0
@@ -2442,8 +2470,7 @@ class StatsMLB(Stats):
 
         affine_pitchers = self.comps['pitchers'][pid] if pid in self.comps['pitchers'] else [pid]
 
-        one_year_ago = len(player_games.loc[
-            pd.to_datetime(self.gamelog.gameDate) > Date-timedelta(days=300)])
+        one_year_ago = len(player_games)
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
 
@@ -2613,12 +2640,12 @@ class StatsMLB(Stats):
             defense_data = self.defenseProfile.loc[team]
 
             for batter in order:
-                if batter not in self.batterProfile.index:
-                    self.batterProfile.loc[batter] = self.defenseProfile.loc[opponent,
+                if batter not in self.playerProfile.index:
+                    self.playerProfile.loc[batter] = self.defenseProfile.loc[opponent,
                                                                              self.stat_types['batting']]
 
             if len(order) > 0:
-                defense_data[self.stat_types['batting']] = self.batterProfile.loc[order,
+                defense_data[self.stat_types['batting']] = self.playerProfile.loc[order,
                                                                                   self.stat_types['batting']].mean()
 
             team_data = self.teamProfile.loc[team, self.stat_types['fielding']]
@@ -2826,6 +2853,8 @@ class StatsNFL(Stats):
                         'plays_per_game', 'time_of_possession', 'time_per_play']
         }
         self.need_pbp = True
+        self.default_total = 22.668
+        self.positions = ["QB", "WR", "RB", "TE"]
         self.league = "NFL"
         self.log_strings = {
             "game": "game id",
@@ -2835,6 +2864,7 @@ class StatsNFL(Stats):
             "usage_sec": "route participation",
             "position": "position group",
             "team": "team",
+            "opponent": "opponent",
             "home": "home",
             "win": "WL",
             "score": "points"
@@ -2866,7 +2896,7 @@ class StatsNFL(Stats):
         # Fetch game logs
         self.need_pbp = True
         cols = ['player_id', 'player_display_name', 'position_group',
-                'recent_team', 'season', 'week', 'season_type',
+                'recent_team', 'season', 'week', 'gameday', 'season_type',
                 'completions', 'attempts', 'passing_yards', 'passing_tds',
                 'interceptions', 'sacks', 'sack_fumbles', 'sack_fumbles_lost',
                 'passing_2pt_conversions', 'carries', 'rushing_yards', 'rushing_tds',
@@ -2965,8 +2995,9 @@ class StatsNFL(Stats):
         nfl_data.loc[nfl_data['team']
                      == 'OAK', 'team'] = "LV"
 
-        nfl_data.loc[:, "moneyline"] = nfl_data.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["recent team"]), axis=1)
-        nfl_data.loc[:, "totals"] = nfl_data.apply(lambda x: archive.get_total(self.league, x["gameday"], x["recent team"]), axis=1)
+        if not nfl_data.empty:
+            nfl_data.loc[:, "moneyline"] = nfl_data.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1)
+            nfl_data.loc[:, "totals"] = nfl_data.apply(lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1)
 
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
@@ -3049,8 +3080,8 @@ class StatsNFL(Stats):
         self.teamlog.drop_duplicates(inplace=True)
 
         self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
-        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["recent team"]), axis=1)
-        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameday"], x["recent team"]), axis=1)
+        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1)
+        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -3529,20 +3560,16 @@ class StatsNFL(Stats):
 
         self.playerStats = self.playerStats.to_dict(orient='index')
 
-    def profile_market(self, market, date=datetime.today().date()):
+    def obs_profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
-        if isinstance(date, datetime):
+        elif isinstance(date, datetime):
             date = date.date()
-
         if market == self.profiled_market and date == self.profile_latest_date:
             return
 
+        self.base_profile(date)
         self.profiled_market = market
-        self.profile_latest_date = date
-
-        self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
-        self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
         one_year_ago = date - timedelta(days=300)
         gameDates = pd.to_datetime(self.gamelog["gameday"]).dt.date
@@ -3769,11 +3796,9 @@ class StatsNFL(Stats):
 
         Date = datetime.strptime(date, "%Y-%m-%d")
 
-        player_games = self.gamelog.loc[(self.gamelog["player display name"] == player) & (
-            pd.to_datetime(self.gamelog["gameday"]) < Date)]
+        player_games = self.short_gamelog.loc[(self.short_gamelog["player display name"] == player)]
         position = self.players.get(player, "")
-        one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameday"]) > Date-timedelta(days=300)])
+        one_year_ago = len(player_games)
         if one_year_ago < 2:
             return 0
 
@@ -3886,7 +3911,7 @@ class StatsNFL(Stats):
             "Moneyline": moneyline,
             "Total": total,
             "Home": home,
-            "Position": ["QB", "WR", "RB", "TE"].index(position)
+            "Position": self.positions.index(position)
         }
 
         if len(game_res) < 5:
@@ -3897,13 +3922,33 @@ class StatsNFL(Stats):
             h2h_res = [0] * i + h2h_res
 
         # Update the data dictionary with additional values
+        stat_types = ["avg", "z", "home", "away", "moneyline gain", "totals gain"]
+        if any([string in market for string in ["pass", "completion", "attempts", "interceptions"]]):
+            stat_types = stat_types + self.stat_types['passing']
+        elif any([string in market for string in ["qb", "sacks"]]):
+            stat_types = stat_types + self.stat_types['passing'] + \
+                self.stat_types['rushing']
+        elif any([string in market for string in ["rush", "carries"]]):
+            stat_types = stat_types + self.stat_types['rushing']
+        elif any([string in market for string in ["receiving", "targets", "reception"]]):
+            stat_types = stat_types + self.stat_types['receiving']
+        elif market == "tds":
+            stat_types = stat_types + self.stat_types['receiving'] + \
+                self.stat_types['rushing']
+        elif market == "yards":
+            stat_types = stat_types + self.stat_types['receiving'] + \
+                self.stat_types['rushing']
+        else:
+            stat_types = stat_types + self.stat_types['passing'] + \
+                self.stat_types['rushing'] + \
+                self.stat_types['receiving']
         data.update(
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in player_data.index})
+            {"Player " + col: player_data[col] for col in stat_types})
 
         team_data = self.teamProfile.loc[team]
         data.update(
@@ -3911,7 +3956,7 @@ class StatsNFL(Stats):
 
         defense_data = self.defenseProfile.loc[opponent]
         data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in ["QB", "WR", "RB", "TE"]})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in self.positions})
 
         return data
 
@@ -4075,9 +4120,15 @@ class StatsNHL(Stats):
         self.season_start = datetime(2023, 10, 10).date()
         self.skater_stats = ["GOE", "Fenwick", "TimeShare",
                              "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
-        self.goalie_stats = ["SV", "SOE",
-                             "goalsAgainst", "Freeze", "Rebound", "RG"]
-        
+        self.stat_types = {
+            "skater": ["GOE", "Fenwick", "TimeShare", "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"],
+            "goalie": ["SV", "SOE", "goalsAgainst", "Freeze", "Rebound", "RG"]
+        }
+        self.team_stat_types = ['Corsi', 'Fenwick', 'Hits', 'Takeaways', 'PIM', 'Corsi_Pct', 'Fenwick_Pct', 'Hits_Pct', 'Takeaways_Pct',
+                            'PIM_Pct', 'Block_Pct', 'xGoals', 'xGoalsAgainst', 'goalsAgainst', 'GOE', 'SV', 'SOE', 'Freeze', 'Rebound', 'RG']
+        self.default_total = 2.674
+        self.positions = ["C", "W", "D"]
+        self.league = "NHL"
         self.log_strings = {
             "game": "gameId",
             "date": "gameDate",
@@ -4086,6 +4137,7 @@ class StatsNHL(Stats):
             "usage_sec": "Fenwick",
             "position": "position",
             "team": "team",
+            "opponent": "opponent",
             "home": "home",
             "win": "WL",
             "score": "goals"
@@ -4313,8 +4365,9 @@ class StatsNHL(Stats):
                     nhl_teamlog.extend(teamlog)
 
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0)
-        nhl_df.loc[:, "moneyline"] = nhl_df.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
-        nhl_df.loc[:, "totals"] = nhl_df.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
+        if not nhl_df.empty:
+            nhl_df.loc[:, "moneyline"] = nhl_df.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
+            nhl_df.loc[:, "totals"] = nhl_df.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
         self.gamelog = pd.concat([nhl_df, self.gamelog]).sort_values(
             "gameDate").reset_index(drop=True)
         self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0), self.teamlog]).sort_values(
@@ -4523,7 +4576,7 @@ class StatsNHL(Stats):
                         line += 0.5 if self.playerStats[player]['avg'] >= line else -0.5
                     self.playerStats[player]["line"] = line
 
-    def profile_market(self, market, date=datetime.today().date()):
+    def obs_profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
         if isinstance(date, datetime):
@@ -4541,7 +4594,6 @@ class StatsNHL(Stats):
         # Initialize playerStats and edges
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
-        self.pitcherProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
 
         # Filter gamelog for games within the date range
         one_year_ago = (date - timedelta(days=300))
@@ -4806,20 +4858,17 @@ class StatsNHL(Stats):
         Date = datetime.strptime(date, "%Y-%m-%d")
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < Date) & (self.gamelog["position"] == "G")]
+            player_games = self.short_gamelog.loc[(self.short_gamelog["playerName"] == player) & (self.short_gamelog["position"] == "G")]
 
         else:
-            player_games = self.gamelog.loc[(self.gamelog["playerName"] == player) & (
-                pd.to_datetime(self.gamelog.gameDate) < Date) & (self.gamelog["position"] != "G")]
+            player_games = self.short_gamelog.loc[(self.short_gamelog["playerName"] == player) & (self.short_gamelog["position"] != "G")]
 
         if player_games.empty:
             return 0
 
         headtohead = player_games.loc[player_games["opponent"] == opponent]
 
-        one_year_ago = len(player_games.loc[pd.to_datetime(
-            self.gamelog["gameDate"]) > Date-timedelta(days=300)])
+        one_year_ago = len(player_games)
 
         game_res = (player_games[market]).to_list()
         h2h_res = (headtohead[market]).to_list()
@@ -4943,7 +4992,6 @@ class StatsNHL(Stats):
         if data["Line"] <= 0:
             data["Line"] = data["AvgYr"] if data["AvgYr"] > 1 else 0.5
 
-        positions = ["C", "W", "D"]
         if not any([string in market for string in ["Against", "saves", "goalie"]]):
             if len(player_games) > 0:
                 position = player_games.iloc[0]['position']
@@ -4951,7 +4999,7 @@ class StatsNHL(Stats):
                 logger.warning(f"{player} not found")
                 return 0
 
-            data.update({"Position": positions.index(position)})
+            data.update({"Position": self.positions.index(position)})
 
         if len(game_res) < 5:
             i = 5 - len(game_res)
@@ -4972,20 +5020,20 @@ class StatsNHL(Stats):
         defense_data = self.defenseProfile.loc[opponent]
 
         data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in (positions + self.goalie_stats)})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in (self.positions + self.stat_types["goalie"])})
 
         team_data = self.teamProfile.loc[team]
 
         data.update(
-            {"Team " + col: team_data[col] for col in team_data.index if col not in self.goalie_stats})
+            {"Team " + col: team_data[col] for col in team_data.index if col not in self.stat_types["goalie"]})
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             data["DVPOA"] = data.pop("Defense avg")
         else:
             data["DVPOA"] = self.defenseProfile.loc[opponent, position]
-            goalie_data = self.goalieProfile.loc[goalie]
+            goalie_data = self.playerProfile.loc[goalie]
             data.update(
-                {"Goalie " + col: goalie_data[col] for col in goalie_data.index})
+                {"Goalie " + col: goalie_data[col] for col in self.stat_types["goalie"]})
 
         return data
 
@@ -5018,7 +5066,6 @@ class StatsNHL(Stats):
             if game[market] <= 0:
                 continue
 
-            data = {}
             self.profile_market(market, date=gameDate)
             name = game['playerName']
 
