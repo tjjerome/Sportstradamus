@@ -17,10 +17,11 @@ import requests
 
 pd.options.mode.chained_assignment = None
 
-NBA = StatsNBA()
-NBA.load()
-NBA.update()
-NBA.profile_market("PTS")
+MLB = StatsMLB()
+MLB.load()
+MLB.update()
+MLB.profile_market("runs allowed")
+MLB.profile_market("total bases")
 pass
 
 # players = {}
