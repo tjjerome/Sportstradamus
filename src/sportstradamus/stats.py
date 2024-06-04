@@ -104,6 +104,7 @@ class Stats:
     def update_player_comps(self):
         return
     
+    @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -133,7 +134,7 @@ class Stats:
             team_stat_types = list(set(self.stat_types['offense']) | set(self.stat_types['defense']))
         elif self.league == "MLB":
             stat_types = self.stat_types['pitching'] + self.stat_types['batting']
-            team_stat_types = self.stat_types['fielding'] + self.stat_types['batting']
+            team_stat_types = self.stat_types['fielding'] + self.stat_types['pitching'] + self.stat_types['batting']
         elif self.league == "NHL":
             stat_types = self.stat_types["skater"] + self.stat_types["goalie"]
             team_stat_types = self.team_stat_types
@@ -1147,8 +1148,15 @@ class StatsNBA(Stats):
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player]
+            
         data.update(
-            {"Player " + col: player_data[col] for col in player_data.index})
+            {f"Player {col}": player_data[f"{col}"] for col in ["avg", "home", "away", "z", "moneyline gain", "totals gain", "position avg", "position z"]})
+        data.update(
+            {f"Player {col}": player_data[f"{col}"] for col in self.stat_types})
+        data.update(
+            {f"Player {col} short": player_data[f"{col} short"] for col in self.stat_types})
+        data.update(
+            {f"Player {col} growth": player_data[f"{col} growth"] for col in self.stat_types})
 
         team_data = self.teamProfile.loc[team]
         data.update(
@@ -1411,10 +1419,10 @@ class StatsWNBA(StatsNBA):
         team_df["TM_TOV_PCT"] = team_df["TOV"] / (team_df["TOV"] + team_df["OPP_TOV"])
         team_df.fillna(0)
 
-        stat_df[self.log_strings["date"]] = stat_df[self.log_strings["date"]].astype(str)
+        stat_df["GAME_DATE"] = stat_df['game_date'].astype(str)
         stat_df.loc[stat_df["WL"], "WL"] = "W"
         stat_df.loc[~(stat_df["WL"]=="W"), "WL"] = "L"
-        team_df[self.log_strings["date"]] = team_df[self.log_strings["date"]].astype(str)
+        team_df["GAME_DATE"] = team_df['game_date'].astype(str)
         team_df.loc[team_df["WL"], "WL"] = "W"
         team_df.loc[~(team_df["WL"]=="W"), "WL"] = "L"
 
@@ -1592,7 +1600,7 @@ class StatsMLB(Stats):
                 if v["person"]["id"] == awayPitcherId or v.get("battingOrder"):
                     n = {
                         "gameId": gameId,
-                        "gameDate": game[self.log_strings["date"]],
+                        "gameDate": game["game_date"],
                         "playerId": v["person"]["id"],
                         "playerName": remove_accents(v["person"]["fullName"]),
                         "position": v.get("position", {"abbreviation": ""})["abbreviation"],
@@ -1755,7 +1763,7 @@ class StatsMLB(Stats):
                 if v["person"]["id"] == homePitcherId or v.get("battingOrder"):
                     n = {
                         "gameId": gameId,
-                        "gameDate": game[self.log_strings["date"]],
+                        "gameDate": game["game_date"],
                         "playerId": v["person"]["id"],
                         "playerName": remove_accents(v["person"]["fullName"]),
                         "position": v.get("position", {"abbreviation": ""})[
@@ -1957,7 +1965,7 @@ class StatsMLB(Stats):
                 "team": homeTeam,
                 "opponent": awayTeam,
                 "gameId": gameId,
-                "gameDate": game[self.log_strings["date"]],
+                "gameDate": game["game_date"],
                 "WL": "W" if float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]) > float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]) else "L",
                 "runs": float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]),
                 "OBP": float(boxscore["teams"]["home"]["teamStats"]["batting"]["obp"])/bpf["OBP"],
@@ -1993,7 +2001,7 @@ class StatsMLB(Stats):
                 "team": awayTeam,
                 "opponent": homeTeam,
                 "gameId": gameId,
-                "gameDate": game[self.log_strings["date"]],
+                "gameDate": game["game_date"],
                 "WL": "W" if float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]) > float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]) else "L",
                 "runs": float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]),
                 "OBP": float(boxscore["teams"]["away"]["teamStats"]["batting"]["obp"])/bpf["OBP"],
@@ -2325,7 +2333,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.playerProfile['totals gain'] = playerGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['moneyline gain'] = defenseGroups.apply(
@@ -2333,7 +2341,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.defenseProfile['totals gain'] = defenseGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['moneyline gain'] = pitcherGroups.apply(
@@ -2341,7 +2349,7 @@ class StatsMLB(Stats):
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
             self.pitcherProfile['totals gain'] = pitcherGroups.apply(
-                lambda x: np.polyfit(x.totals.fillna(4.5).values.astype(float) / 4.5 - x.totals.fillna(4.5).mean(),
+                lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
                                      x[market].values / x[market].mean() - 1, 1)[0])
 
         if not any([string in market for string in ["allowed", "pitch"]]):
@@ -2634,9 +2642,16 @@ class StatsMLB(Stats):
 
         player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in player_data.index})
+            {f"Player {col}": player_data[f"{col}"] for col in ["avg", "home", "away", "z", "moneyline gain", "totals gain"]})
 
         if any([string in market for string in ["allowed", "pitch"]]):
+            data.update(
+                {f"Player {col}": player_data[f"{col}"] for col in self.stat_types['pitching']})
+            data.update(
+                {f"Player {col} short": player_data[f"{col} short"] for col in self.stat_types['pitching']})
+            data.update(
+                {f"Player {col} growth": player_data[f"{col} growth"] for col in self.stat_types['pitching']})
+            
             defense_data = self.defenseProfile.loc[team]
 
             for batter in order:
@@ -2654,7 +2669,24 @@ class StatsMLB(Stats):
                 pd.to_datetime(self.gamelog.gameDate) < date) & self.gamelog["starting pitcher"] & (
                 self.gamelog["playerId"].isin(affine_pitchers))]
             aff_data = affine[self.stat_types['pitching']].mean()
+
+            data.update({"H2H " + col: aff_data[col] for col in aff_data.index})
+
+            data.update({"Team " + col: team_data[col] for col in self.stat_types["fielding"]})
+
+            data.update(
+                {"Defense " + col: defense_data[col] for col in ["avg", "home", "away", "z", "moneyline gain", "totals gain"]})
+            data.update(
+                {"Defense " + col: defense_data[col] for col in self.stat_types["batting"]})
+            
         else:
+            data.update(
+                {f"Player {col}": player_data[f"{col}"] for col in self.stat_types['batting']})
+            data.update(
+                {f"Player {col} short": player_data[f"{col} short"] for col in self.stat_types['batting']})
+            data.update(
+                {f"Player {col} growth": player_data[f"{col} growth"] for col in self.stat_types['batting']})
+            
             defense_data = self.pitcherProfile.loc[pitcher]
             defense_data.loc['DER'] = self.defenseProfile.loc[opponent, 'DER']
 
@@ -2676,12 +2708,12 @@ class StatsMLB(Stats):
                 affine_pitchers)]
             aff_data = affine[self.stat_types['batting']].mean()
 
-        data.update({"H2H " + col: aff_data[col] for col in aff_data.index})
+            data.update({"H2H " + col: aff_data[col] for col in aff_data.index})
 
-        data.update({"Team " + col: team_data[col] for col in team_data.index})
+            data.update({"Team " + col: team_data[col] for col in team_data.index if col not in self.stat_types["fielding"]})
 
-        data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index})
+            data.update(
+                {"Defense " + col: defense_data[col] for col in defense_data.index if col not in self.stat_types["batting"]})
 
         park = team if home else opponent
         park_factors = self.park_factors[park]
@@ -3922,7 +3954,7 @@ class StatsNFL(Stats):
             h2h_res = [0] * i + h2h_res
 
         # Update the data dictionary with additional values
-        stat_types = ["avg", "z", "home", "away", "moneyline gain", "totals gain"]
+        stat_types = ["avg", "z", "home", "away", "moneyline gain", "totals gain", "position avg", "position z"]
         if any([string in market for string in ["pass", "completion", "attempts", "interceptions"]]):
             stat_types = stat_types + self.stat_types['passing']
         elif any([string in market for string in ["qb", "sacks"]]):
@@ -3942,13 +3974,20 @@ class StatsNFL(Stats):
             stat_types = stat_types + self.stat_types['passing'] + \
                 self.stat_types['rushing'] + \
                 self.stat_types['receiving']
+            
         data.update(
             {"Meeting " + str(i + 1): h2h_res[-5 + i] for i in range(5)})
         data.update({"Game " + str(i + 1): game_res[-5 + i] for i in range(5)})
 
         player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in stat_types})
+            {f"Player {col}": player_data[f"{col}"] for col in ["avg", "home", "away", "z", "moneyline gain", "totals gain", "position avg", "position z"]})
+        data.update(
+            {f"Player {col}": player_data[f"{col}"] for col in stat_types})
+        data.update(
+            {f"Player {col} short": player_data[f"{col} short"] for col in stat_types})
+        data.update(
+            {f"Player {col} growth": player_data[f"{col} growth"] for col in stat_types})
 
         team_data = self.teamProfile.loc[team]
         data.update(
@@ -4885,10 +4924,6 @@ class StatsNHL(Stats):
                     goalie = self.upcoming_games.get(
                         opponent, {}).get("Goalie", "")
 
-                if goalie not in self.goalieProfile.index:
-                    self.goalieProfile.loc[goalie] = self.teamProfile.loc[opponent,
-                                                                          self.goalie_stats]
-
             ev = archive.get_ev("NHL", market, date, player)
             moneyline = archive.get_moneyline("NHL", date, team)
             total = archive.get_total("NHL", date, team)
@@ -5015,7 +5050,21 @@ class StatsNHL(Stats):
 
         player_data = self.playerProfile.loc[player]
         data.update(
-            {"Player " + col: player_data[col] for col in player_data.index})
+            {f"Player {col}": player_data[f"{col}"] for col in ["avg", "home", "away", "z", "moneyline gain", "totals gain"]})
+        
+        if any([string in market for string in ["Against", "saves", "goalie"]]):
+            stat_types = self.stat_types["goalie"]
+        else:
+            stat_types = self.stat_types["skater"]
+            data.update(
+                {f"Player {col}": player_data[f"{col}"] for col in ["position avg", "position z"]})
+
+        data.update(
+            {f"Player {col}": player_data[f"{col}"] for col in stat_types})
+        data.update(
+            {f"Player {col} short": player_data[f"{col} short"] for col in stat_types})
+        data.update(
+            {f"Player {col} growth": player_data[f"{col} growth"] for col in stat_types})
 
         defense_data = self.defenseProfile.loc[opponent]
 
@@ -5031,7 +5080,11 @@ class StatsNHL(Stats):
             data["DVPOA"] = data.pop("Defense avg")
         else:
             data["DVPOA"] = self.defenseProfile.loc[opponent, position]
-            goalie_data = self.playerProfile.loc[goalie]
+            if goalie in self.playerProfile:
+                goalie_data = self.playerProfile.loc[goalie]
+            else:
+                goalie_data = self.defenseProfile.loc[opponent]
+            
             data.update(
                 {"Goalie " + col: goalie_data[col] for col in self.stat_types["goalie"]})
 
