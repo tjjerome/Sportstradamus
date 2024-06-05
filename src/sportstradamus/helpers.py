@@ -695,6 +695,12 @@ def prob_sum(X, Y, line):
     def joint_pdf(x, y): return X(x)*Y(y)
     return dblquad(joint_pdf, -np.inf, np.inf, -np.inf, lambda x: line - x)
 
+def get_trends(x):
+    if len(x) < 3:
+        trend = np.zeros(len(x.columns))
+    else:
+        trend = np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0]
+    return pd.Series(trend, index=x.columns)
 
 def hmean(items):
     total = 0
