@@ -601,7 +601,7 @@ def find_correlation(offers, stats, platform):
             
             player_array = idx['Player'].to_numpy()
             index_array = idx.index.to_numpy()
-            player_indices = {player: index_array[player_array == player] for player in selected_players}
+            player_indices = {player: index_array[player_array == player] for player in set(player_array)}
 
             info = {
                     "Game": "/".join(sorted([team, opp])),
