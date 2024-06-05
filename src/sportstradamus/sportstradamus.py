@@ -532,9 +532,9 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .3) & (game_df["Model"] >= .35)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
+            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(18).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(35).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -632,7 +632,7 @@ def find_correlation(offers, stats, platform):
                         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])
                         if boost == 0:
                             continue
-                        
+
                         pb = p_books[np.ix_(bet_id)]
                         if np.product(pb)*boost*threshold < (league_cutoff_books[0]*bet_size+league_cutoff_books[1]):
                             continue
