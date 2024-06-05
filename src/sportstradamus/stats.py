@@ -211,12 +211,12 @@ class Stats:
             positionGroups = positionLogs.groupby(self.log_strings["player"])
             positionAvg = positionGroups[market].mean().mean()
             positionStd = positionGroups[market].mean().std()
+            if positionAvg == 0 or positionStd == 0:
+                continue
             idx = list(set(positionGroups.groups.keys()).intersection(
                 set(self.playerProfile.index)))
-            self.playerProfile.loc[idx, 'position avg'] = positionGroups[market].mean().div(
-                positionAvg) - 1
-            self.playerProfile.loc[idx, 'position z'] = (
-                positionGroups[market].mean() - positionAvg).div(positionStd)
+            self.playerProfile.loc[idx, 'position avg'] = (positionGroups[market].mean().div(positionAvg) - 1).astype(float)
+            self.playerProfile.loc[idx, 'position z'] = (positionGroups[market].mean() - positionAvg).div(positionStd).astype(float)
             positionGroups = positionLogs.groupby(
                 [self.log_strings["opponent"], self.log_strings["game"]])
             positionGames = positionGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
@@ -3954,24 +3954,23 @@ class StatsNFL(Stats):
             h2h_res = [0] * i + h2h_res
 
         # Update the data dictionary with additional values
-        stat_types = ["avg", "z", "home", "away", "moneyline gain", "totals gain", "position avg", "position z"]
         if any([string in market for string in ["pass", "completion", "attempts", "interceptions"]]):
-            stat_types = stat_types + self.stat_types['passing']
+            stat_types = self.stat_types['passing']
         elif any([string in market for string in ["qb", "sacks"]]):
-            stat_types = stat_types + self.stat_types['passing'] + \
+            stat_types = self.stat_types['passing'] + \
                 self.stat_types['rushing']
         elif any([string in market for string in ["rush", "carries"]]):
-            stat_types = stat_types + self.stat_types['rushing']
+            stat_types = self.stat_types['rushing']
         elif any([string in market for string in ["receiving", "targets", "reception"]]):
-            stat_types = stat_types + self.stat_types['receiving']
+            stat_types = self.stat_types['receiving']
         elif market == "tds":
-            stat_types = stat_types + self.stat_types['receiving'] + \
+            stat_types = self.stat_types['receiving'] + \
                 self.stat_types['rushing']
         elif market == "yards":
-            stat_types = stat_types + self.stat_types['receiving'] + \
+            stat_types = self.stat_types['receiving'] + \
                 self.stat_types['rushing']
         else:
-            stat_types = stat_types + self.stat_types['passing'] + \
+            stat_types = self.stat_types['passing'] + \
                 self.stat_types['rushing'] + \
                 self.stat_types['receiving']
             
@@ -3991,11 +3990,11 @@ class StatsNFL(Stats):
 
         team_data = self.teamProfile.loc[team]
         data.update(
-            {"Team " + col: team_data[col] for col in team_data.index})
+            {"Team " + col: team_data[col] for col in self.stat_types["offense"]})
 
         defense_data = self.defenseProfile.loc[opponent]
         data.update(
-            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in self.positions})
+            {"Defense " + col: defense_data[col] for col in defense_data.index if col not in self.positions+self.stat_types["offense"]})
 
         return data
 

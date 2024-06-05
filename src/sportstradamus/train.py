@@ -1214,7 +1214,7 @@ def correlate(league, force=False):
     filepath = pkg_resources.files(data) / f"training_data/{league}_corr.csv"
     if os.path.isfile(filepath) and not force:
         matrix = pd.read_csv(filepath, index_col=0)
-        matrix.DATE = pd.to_datetime(matrix.DATE, format="ISO8601")
+        matrix.DATE = pd.to_datetime(matrix.DATE, format="mixed")
         latest_date = matrix.DATE.max()
         matrix = matrix.loc[matrix.DATE >= datetime.today()-timedelta(days=300)]
     else:
