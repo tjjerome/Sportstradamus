@@ -599,6 +599,10 @@ def find_correlation(offers, stats, platform):
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
             
+            player_array = idx['Player'].to_numpy()
+            index_array = idx.index.to_numpy()
+            player_indices = {player: index_array[player_array == player] for player in selected_players}
+
             info = {
                     "Game": "/".join(sorted([team, opp])),
                     "Date": date,
@@ -622,9 +626,9 @@ def find_correlation(offers, stats, platform):
                                     for k in combinations(combo_players, split[2]):
                                         if len(set([item for row in [l.replace(" vs. ", " + ").split(" + ") for l in k] for item in row]).union(selected_players)) != bet_size+split[2]:
                                             continue
-                                        combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players+k]))
+                                        combos.extend(product(*[player_indices[player] for player in selected_players+k]))
                                 else:
-                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
+                                    combos.extend(product(*[player_indices[player] for player in selected_players]))
 
                     threshold = payout_table[platform][bet_size-2]
 
