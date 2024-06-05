@@ -369,8 +369,17 @@ def find_correlation(offers, stats, platform):
     warnings.simplefilter('ignore')
 
     df = pd.DataFrame(offers)
-    parlay_df = pd.DataFrame()
+    versus_mask = df["Player"].str.contains(" vs. ")
+    if not df.loc[versus_mask].empty:
+        df.loc[versus_mask, "Team"] = df.loc[versus_mask].apply(lambda x: x["Team"].split("/")[0 if x["Bet"]=="Over" else 1])
+        df.loc[versus_mask, "Opponent"] = df.loc[versus_mask].apply(lambda x: x["Team"].split("/")[1 if x["Bet"]=="Over" else 0])
+
+    combo_mask = df["Team"].apply(lambda x: len(set(x.split("/"))) == 1)
+    df.loc[combo_mask, "Team"] = df.loc[combo_mask, "Team"].apply(lambda x: x.split("/")[0])
+    df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(lambda x: x.split("/")[0])
+
     df["Correlated Bets"] = ""
+    parlay_df = pd.DataFrame()
     usage_str = {
         "NBA": "MIN",
         "WNBA": "MIN",
@@ -390,7 +399,7 @@ def find_correlation(offers, stats, platform):
         "WNBA": ['G', 'F', 'C']
     }
     payout_table = { # using equivalent payouts when insured picks are better
-        "Underdog": [3, 6, 10.9, 20.2],
+        "Underdog": [3, 6, 10.9, 20.2, 39.9],
         "PrizePicks": [3, 5.3, 10, 20.8, 38.8]
     }
     league_cutoff_values = { # (m, b)
@@ -432,10 +441,8 @@ def find_correlation(offers, stats, platform):
         if league != "MLB":
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
                 x, int) else [positions[league][i] for i in x])
-            combo_df = league_df.loc[league_df.Position.apply(
-                lambda x: isinstance(x, list))]
-            league_df = league_df.loc[league_df.Position.apply(
-                lambda x: not isinstance(x, list))]
+            combo_df = league_df.loc[(league_df.Player.str.contains(" + ")) | (league_df.Player.str.contains(" vs. "))]
+            league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
             player_df = league_df[["Player", "Team", "Position"]]
             for i, row in combo_df.iterrows():
                 players = row.Player.replace("vs.", "+").split(" + ")
@@ -496,15 +503,14 @@ def find_correlation(offers, stats, platform):
         for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
             if team in checked_teams:
                 continue
-            team_df = league_df.loc[(league_df["Team"] == team) | (league_df["Team"] == f"{team}/{team}")]
+            team_df = league_df.loc[league_df["Team"] == team]
             opp = team_df.Opponent.mode().values[0]
             date = team_df.Date.mode().values[0]
-            opp_df = league_df.loc[(league_df["Team"] == opp) | (league_df["Team"] == f"{opp}/{opp}")]
+            opp_df = league_df.loc[league_df["Team"] == opp]
             if not opp_df.empty:
                 opp_df["cMarket"] = opp_df.apply(
                     lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
-            split_df = league_df.loc[league_df["Team"].str.contains(
-                "/") & league_df["Team"].str.contains(team) & league_df["Team"].str.contains(opp)]
+            split_df = league_df.loc[league_df["Team"].str.contains("/")]
             if not split_df.empty:
                 split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
                     x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
@@ -526,21 +532,22 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .3) & (game_df["Model"] >= .35)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(4)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20).sort_values(['Team', 'Player'])
-            # idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(35).sort_values(['Team', 'Player'])
+            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(18).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
-            combo_players = idx.loc[idx.Team.apply(lambda x: len(set(x.split("/")))>1), 'Player'].unique()
+            combo_players = idx.loc[idx.Team.str.contains("/"), 'Player'].unique()
 
             C = np.eye(len(game_dict))
             M = np.zeros([len(game_dict), len(game_dict)])
-            p = game_df.Model.to_numpy()
-            V = p*(1-p)
+            p_model = game_df.Model.to_numpy()
+            p_books = game_df.Books.to_numpy()
+            V = p_model*(1-p_model)
             V = V.reshape(len(game_dict),1)*V
             V = np.sqrt(V)
-            P = p.reshape(len(game_dict),1)*p
+            P = p_model.reshape(len(game_dict),1)*p_model
             for i, j in combinations(range(len(game_dict)), 2):
                 leg1 = game_dict[i]
                 leg2 = game_dict[j]
@@ -585,13 +592,17 @@ def find_correlation(offers, stats, platform):
             EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),M)*3
 
             for i, offer in game_df.iterrows():
-                indices = np.logical_and(EV[:,i]>.9, C[:,i]>0)
+                indices = np.logical_and(EV[:,i]>.95, C[:,i]>.05)
                 corr = game_df.loc[indices]
                 corr["P"] = EV[indices, i]
                 corr = corr.sort_values("P", ascending=False).groupby("Player").head(1)
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
                     (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
             
+            player_array = idx['Player'].to_numpy()
+            index_array = idx.index.to_numpy()
+            player_indices = {player: index_array[player_array == player] for player in selected_players}
+
             info = {
                     "Game": "/".join(sorted([team, opp])),
                     "Date": date,
@@ -600,7 +611,6 @@ def find_correlation(offers, stats, platform):
                     }
             best_bets = []
             if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]):
-                start = time()
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                     team_splits = set.union(*[set(permutations(x)) for x in team_splits])
@@ -616,34 +626,35 @@ def find_correlation(offers, stats, platform):
                                     for k in combinations(combo_players, split[2]):
                                         if len(set([item for row in [l.replace(" vs. ", " + ").split(" + ") for l in k] for item in row]).union(selected_players)) != bet_size+split[2]:
                                             continue
-                                        combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players+k]))
+                                        combos.extend(product(*[player_indices[player] for player in selected_players+k]))
                                 else:
-                                    combos.extend(product(*[idx.loc[idx.Player == player].index for player in selected_players]))
+                                    combos.extend(product(*[player_indices[player] for player in selected_players]))
 
-                    payout = payout_table[platform][bet_size-2]
+                    threshold = payout_table[platform][bet_size-2]
 
                     for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
-                        bet = itemgetter(*bet_id)(bet_df)
-
-                        p = np.product([leg["Boosted Model"] for leg in bet])
-                        pb = np.product([leg["Boosted Books"] for leg in bet])
-
-                        if p*payout < (league_cutoff_model[0]*bet_size+league_cutoff_model[1]) or pb*payout < (league_cutoff_books[0]*bet_size+league_cutoff_books[1]):
-                            continue
-
-                        SIG = C[np.ix_(bet_id, bet_id)]
                         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])
-                        payout = np.clip(payout*boost, 1, 100)
-                        
                         if boost == 0:
                             continue
 
+                        pb = p_books[np.ix_(bet_id)]
+                        if np.product(pb)*boost*threshold < (league_cutoff_books[0]*bet_size+league_cutoff_books[1]):
+                            continue
+
+                        p = p_model[np.ix_(bet_id)]
+                        if np.product(p)*boost*threshold < (league_cutoff_model[0]*bet_size+league_cutoff_model[1]):
+                            continue
+
+                        SIG = C[np.ix_(bet_id, bet_id)]
+                        payout = np.clip(threshold*boost, 1, 100)
+
                         try:
-                            p = payout*multivariate_normal.cdf([norm.ppf(leg["Model"]) for leg in bet], np.zeros(bet_size), SIG)
-                            pb = payout*(3*multivariate_normal.cdf([norm.ppf(leg["Books"]) for leg in bet], np.zeros(bet_size), SIG)+np.product([leg["Books"] for leg in bet]))/4
+                            p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+                            pb = payout*(3*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)+np.product(pb))/4
                         except:
                             continue
                         
+                        bet = itemgetter(*bet_id)(bet_df)
                         units = (p - 1)/(payout - 1)/0.05
                         if units > 0.9 and pb > 1.01 and p > 1.5:
                             parlay = info | {
@@ -665,8 +676,6 @@ def find_correlation(offers, stats, platform):
                             for i in np.arange(bet_size):
                                 parlay["Leg " + str(i+1)] = bet[i]["Desc"]
                             best_bets.append(parlay)
-
-                    loop = time() - start
 
                 df5 = pd.DataFrame(best_bets, columns=['Game', 'Date', 'League', 'Platform', 'Model EV', 'Books EV', 'Boost', 'Rec Bet', 'Leg 1', 'Leg 2', 'Leg 3', 'Leg 4', 'Leg 5', 'Leg 6', 'Legs', 'Bet ID', 'Fun', 'Bet Size'])
                 
