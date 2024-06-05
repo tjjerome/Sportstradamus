@@ -15,8 +15,8 @@
             "Mason Rudolph",
             "Justin Herbert",
             "Deshaun Watson",
-            "Jimmy Garoppolo",
             "Jordan Love",
+            "Jimmy Garoppolo",
             "Zach Wilson"
         ],
         "Anthony Richardson": [
@@ -34,8 +34,8 @@
             "Deshaun Watson",
             "Gardner Minshew",
             "Justin Herbert",
-            "Russell Wilson",
             "Sam Howell",
+            "Russell Wilson",
             "Kyler Murray",
             "Geno Smith",
             "Dak Prescott",
@@ -94,8 +94,7 @@
             "Cj Stroud",
             "Kyler Murray",
             "Jordan Love",
-            "Brock Purdy",
-            "Deshaun Watson"
+            "Brock Purdy"
         ],
         "Daniel Jones": [
             "Daniel Jones"
@@ -124,8 +123,7 @@
             "Jimmy Garoppolo",
             "Russell Wilson",
             "Aidan O'Connell",
-            "Geno Smith",
-            "Dak Prescott"
+            "Geno Smith"
         ],
         "Desmond Ridder": [
             "Desmond Ridder"
@@ -315,8 +313,8 @@
             "Deshaun Watson",
             "Zach Wilson",
             "Sam Howell",
-            "Russell Wilson",
             "Josh Dobbs",
+            "Russell Wilson",
             "Gardner Minshew",
             "Dak Prescott",
             "Jalen Hurts"
@@ -508,8 +506,8 @@
             "Ty Johnson",
             "Miles Sanders",
             "Antonio Gibson",
-            "Ty Chandler",
             "Kareem Hunt",
+            "Ty Chandler",
             "Roschon Johnson"
         ],
         "Chase Brown": [
@@ -528,8 +526,8 @@
             "Chris Rodriguez",
             "Jordan Mason",
             "Elijah Mitchell",
-            "Rico Dowdle",
             "Keaontay Ingram",
+            "Rico Dowdle",
             "Pierre Strong",
             "Royce Freeman"
         ],
@@ -584,8 +582,8 @@
             "D'Onta Foreman",
             "Kareem Hunt",
             "Aj Dillon",
-            "Alexander Mattison",
             "Ezekiel Elliott",
+            "Alexander Mattison",
             "David Montgomery"
         ],
         "Dalvin Cook": [
@@ -594,7 +592,8 @@
             "Keaontay Ingram",
             "Jamaal Williams",
             "D'Ernest Johnson",
-            "Rico Dowdle"
+            "Rico Dowdle",
+            "Isaiah Spiller"
         ],
         "Dameon Pierce": [
             "Dameon Pierce",
@@ -655,7 +654,8 @@
             "Keaontay Ingram",
             "Elijah Mitchell",
             "Rico Dowdle",
-            "Patrick Taylor"
+            "Patrick Taylor",
+            "Dalvin Cook"
         ],
         "Isiah Pacheco": [
             "Isiah Pacheco",
@@ -666,8 +666,8 @@
             "Joe Mixon",
             "Saquon Barkley",
             "James Conner",
-            "Aaron Jones",
             "Tony Pollard",
+            "Aaron Jones",
             "Kenneth Walker"
         ],
         "Jahmyr Gibbs": [
@@ -699,8 +699,8 @@
         "Javonte Williams": [
             "Javonte Williams",
             "D'Andre Swift",
-            "Josh Jacobs",
             "Najee Harris",
+            "Josh Jacobs",
             "Zack Moss",
             "Saquon Barkley"
         ],
@@ -734,8 +734,8 @@
             "Najee Harris",
             "David Montgomery",
             "Aaron Jones",
-            "Kenneth Walker",
-            "D'Andre Swift"
+            "D'Andre Swift",
+            "Kenneth Walker"
         ],
         "Jordan Mason": [
             "Jordan Mason",
@@ -759,9 +759,9 @@
         "Joshua Kelley": [
             "Joshua Kelley",
             "Trey Sermon",
-            "Matt Breida",
             "Patrick Taylor",
             "Elijah Mitchell",
+            "Matt Breida",
             "Keaontay Ingram"
         ],
         "Justice Hill": [
@@ -792,10 +792,10 @@
             "Patrick Taylor",
             "Rico Dowdle",
             "Dalvin Cook",
-            "Ronnie Rivers",
             "Chris Rodriguez",
-            "Matt Breida",
             "Jamaal Williams",
+            "Ronnie Rivers",
+            "Matt Breida",
             "Joshua Kelley"
         ],
         "Keaton Mitchell": [
@@ -832,9 +832,9 @@
         "Matt Breida": [
             "Matt Breida",
             "Joshua Kelley",
-            "Keaontay Ingram",
             "Elijah Mitchell",
-            "Patrick Taylor"
+            "Patrick Taylor",
+            "Keaontay Ingram"
         ],
         "Miles Sanders": [
             "Miles Sanders",
@@ -859,8 +859,8 @@
             "Tony Pollard",
             "James Conner",
             "Chuba Hubbard",
-            "Joe Mixon",
             "Saquon Barkley",
+            "Joe Mixon",
             "Jerome Ford",
             "Khalil Herbert",
             "Alexander Mattison",
@@ -914,17 +914,17 @@
             "Ty Johnson",
             "Chase Edmonds",
             "Zamir White",
-            "Keaontay Ingram",
             "Isaiah Spiller",
             "Justice Hill",
+            "Keaontay Ingram",
             "Ronnie Rivers",
-            "Cam Akers",
             "Ty Chandler",
+            "Cam Akers",
             "Antonio Gibson",
             "Pierre Strong",
             "Chris Rodriguez",
-            "Roschon Johnson",
             "Miles Sanders",
+            "Roschon Johnson",
             "Dameon Pierce",
             "Dalvin Cook",
             "Kendre Miller",
@@ -1013,8 +1013,8 @@
         "Tyler Allgeier": [
             "Tyler Allgeier",
             "Cam Akers",
-            "Brian Robinson",
             "Kendre Miller",
+            "Brian Robinson",
             "Ty Chandler",
             "Aj Dillon"
         ],
@@ -1091,8 +1091,8 @@
             "Greg Dortch",
             "Demarcus Robinson",
             "Jamal Agnew",
-            "Romeo Doubs",
             "Brandon Powell",
+            "Romeo Doubs",
             "Cedric Tillman"
         ],
         "Brandon Powell": [
@@ -1111,8 +1111,7 @@
             "Ray-Ray Mccloud",
             "Calvin Austin",
             "Kalif Raymond",
-            "Brandin Cooks",
-            "Cedric Tillman"
+            "Brandin Cooks"
         ],
         "Braxton Berrios": [
             "Braxton Berrios",
@@ -1135,8 +1134,8 @@
             "Tyler Scott",
             "Dyami Brown",
             "Xavier Hutchinson",
-            "Skyy Moore",
             "Jameson Williams",
+            "Skyy Moore",
             "Jalen Reagor",
             "Braxton Berrios",
             "Tyquan Thornton"
@@ -1167,8 +1166,7 @@
             "Khadarel Hodge",
             "Robert Woods",
             "Tyquan Thornton",
-            "Brandin Cooks",
-            "Brandon Powell"
+            "Brandin Cooks"
         ],
         "Ceedee Lamb": [
             "Ceedee Lamb",
@@ -1187,8 +1185,8 @@
             "Cooper Kupp",
             "Curtis Samuel",
             "Jordan Addison",
-            "Tank Dell",
             "Brandin Cooks",
+            "Tank Dell",
             "Dontayvion Wicks",
             "Gabe Davis",
             "Zay Flowers"
@@ -1235,12 +1233,14 @@
             "Darnell Mooney",
             "Trey Palmer",
             "Elijah Moore",
-            "Van Jefferson"
+            "Van Jefferson",
+            "Tyler Boyd"
         ],
         "Deandre Hopkins": [
             "Deandre Hopkins",
             "Calvin Ridley",
-            "Justin Jefferson"
+            "Justin Jefferson",
+            "Marquise Brown"
         ],
         "Deebo Samuel": [
             "Deebo Samuel",
@@ -1295,8 +1295,8 @@
             "Rashod Bateman",
             "Marvin Mims",
             "Tyquan Thornton",
-            "Calvin Austin",
             "Van Jefferson",
+            "Calvin Austin",
             "Jalen Reagor",
             "Tutu Atwell",
             "John Metchie"
@@ -1346,8 +1346,8 @@
         ],
         "George Pickens": [
             "George Pickens",
-            "Ja'Marr Chase",
-            "Jordan Addison"
+            "Jordan Addison",
+            "Ja'Marr Chase"
         ],
         "Greg Dortch": [
             "Greg Dortch",
@@ -1379,8 +1379,8 @@
             "Jordan Addison",
             "Elijah Moore",
             "Brandin Cooks",
-            "Gabe Davis",
             "Calvin Ridley",
+            "Gabe Davis",
             "Demarcus Robinson",
             "Rashod Bateman",
             "Robert Woods",
@@ -1390,8 +1390,7 @@
             "Bo Melton",
             "Rashid Shaheed",
             "Tank Dell",
-            "Curtis Samuel",
-            "Jauan Jennings"
+            "Curtis Samuel"
         ],
         "Jalen Reagor": [
             "Jalen Reagor",
@@ -1401,8 +1400,8 @@
             "Treylon Burks",
             "Quentin Johnston",
             "Xavier Hutchinson",
-            "Calvin Austin",
-            "Dyami Brown"
+            "Dyami Brown",
+            "Calvin Austin"
         ],
         "Jamal Agnew": [
             "Jamal Agnew",
@@ -1434,10 +1433,9 @@
             "Curtis Samuel",
             "Khalil Shakir",
             "Brandin Cooks",
-            "Tutu Atwell",
             "Tyler Boyd",
-            "Khadarel Hodge",
-            "Jakobi Meyers"
+            "Tutu Atwell",
+            "Khadarel Hodge"
         ],
         "Jayden Reed": [
             "Jayden Reed",
@@ -1494,12 +1492,12 @@
             "Curtis Samuel",
             "Elijah Moore",
             "Quentin Johnston",
+            "Robert Woods",
             "Tutu Atwell",
             "Rashid Shaheed",
-            "Robert Woods",
             "Christian Watson",
-            "Jameson Williams",
             "Trey Palmer",
+            "Jameson Williams",
             "Cedric Tillman",
             "Calvin Ridley"
         ],
@@ -1553,6 +1551,7 @@
         "Marquise Brown": [
             "Marquise Brown",
             "Calvin Ridley",
+            "Deandre Hopkins",
             "Garrett Wilson"
         ],
         "Marquise Goodwin": [
@@ -1756,8 +1755,8 @@
             "Rashid Shaheed",
             "Brandin Cooks",
             "Jordan Addison",
-            "Josh Palmer",
             "Brandon Powell",
+            "Josh Palmer",
             "Jakobi Meyers",
             "Tre Tucker",
             "Jauan Jennings",
@@ -1774,7 +1773,8 @@
             "Curtis Samuel",
             "Khalil Shakir",
             "Jauan Jennings",
-            "Robert Woods"
+            "Robert Woods",
+            "Darnell Mooney"
         ],
         "Tyler Scott": [
             "Tyler Scott",
@@ -1888,8 +1888,8 @@
         "Dallas Goedert": [
             "Dallas Goedert",
             "Jonnu Smith",
-            "Cole Kmet",
             "Gerald Everett",
+            "Cole Kmet",
             "Chigoziem Okonkwo",
             "Logan Thomas"
         ],
