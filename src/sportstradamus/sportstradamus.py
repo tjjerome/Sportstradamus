@@ -634,7 +634,7 @@ def find_correlation(offers, stats, platform):
 
                     for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])
-                        if boost == 0:
+                        if boost == 0 or boost > 3:
                             continue
 
                         pb = p_books[np.ix_(bet_id)]
