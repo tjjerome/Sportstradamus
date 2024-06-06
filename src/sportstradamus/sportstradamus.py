@@ -371,8 +371,8 @@ def find_correlation(offers, stats, platform):
     df = pd.DataFrame(offers)
     versus_mask = df["Player"].str.contains(" vs. ")
     if not df.loc[versus_mask].empty:
-        df.loc[versus_mask, "Team"] = df.loc[versus_mask].apply(lambda x: x["Team"].split("/")[0 if x["Bet"]=="Over" else 1])
-        df.loc[versus_mask, "Opponent"] = df.loc[versus_mask].apply(lambda x: x["Team"].split("/")[1 if x["Bet"]=="Over" else 0])
+        df.loc[versus_mask, "Team"] = df.loc[versus_mask].apply(lambda x: x["Team"].split("/")[0 if x["Bet"]=="Over" else 1], axis=1)
+        df.loc[versus_mask, "Opponent"] = df.loc[versus_mask].apply(lambda x: x["Opponent"].split("/")[0 if x["Bet"]=="Over" else 1], axis=1)
 
     combo_mask = df["Team"].apply(lambda x: len(set(x.split("/"))) == 1)
     df.loc[combo_mask, "Team"] = df.loc[combo_mask, "Team"].apply(lambda x: x.split("/")[0])
@@ -441,7 +441,7 @@ def find_correlation(offers, stats, platform):
         if league != "MLB":
             league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
                 x, int) else [positions[league][i] for i in x])
-            combo_df = league_df.loc[(league_df.Player.str.contains(" + ")) | (league_df.Player.str.contains(" vs. "))]
+            combo_df = league_df.loc[league_df.Player.str.contains("\+|vs.")]
             league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
             player_df = league_df[["Player", "Team", "Position"]]
             for i, row in combo_df.iterrows():
