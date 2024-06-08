@@ -6,6 +6,7 @@ from tqdm import tqdm
 import numpy as np
 import statsapi as mlb
 from time import sleep
+from operator import itemgetter
 from sportstradamus.helpers import (
     apikey,
     requests,
@@ -13,7 +14,6 @@ from sportstradamus.helpers import (
     remove_accents,
     no_vig_odds,
     get_ev,
-    prob_to_odds,
     mlb_pitchers,
     nhl_goalies
 )
@@ -989,7 +989,7 @@ def get_ud():
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
-            "Boost": 1,
+            "Boost": 1
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(mlb_pitchers.values()):
@@ -1007,6 +1007,67 @@ def get_ud():
     logger.info(str(len(offers)) + " offers found")
     return offers
 
+
+def get_sleeper():
+    offers = []
+    url = "https://api.sleeper.app/lines/available"
+    res = requests.get(url)
+
+    if res.status_code != 200:
+        return offers
+    
+    res = res.json()
+    leagues = set([x["sport"] for x in res])
+
+    url = "https://api.sleeper.app/lines/available_alt"
+    alt = requests.get(url)
+
+    if alt.status_code != 200:
+        res.extend(alt.json())
+
+    for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
+        url = f"https://api.sleeper.app/players/{league}?exclude_injury=false"
+        players = requests.get(url)
+        
+        if players.status_code != 200:
+            continue
+        
+        players = players.json()
+        props = [x for x in res if x["sport"] == league]
+
+        for prop in props:
+            player = players.get(prop["subject_id"])
+            if player is None:
+                continue
+
+            game_id = prop["game_id"].split("_")
+            teams = [x for x in game_id if not x.isnumeric()]
+            if len(teams) != 2:
+                continue
+
+            game_date = game_id[0]
+            game_date = game_date[:4]+'-'+game_date[4:6]+'-'+game_date[6:]
+
+            outcomes = sorted(prop["options"], key=itemgetter('outcome'))
+            player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
+            player_team = player["team"]
+            opp = [team for team in teams if team != player_team][0]
+
+            n = {
+                "Player": player_name,
+                "League": league,
+                "Team": player_team,
+                "Opponent": opp,
+                "Date": game_date,
+                "Market": prop["wager_type"],
+                "Line": float(outcomes[0]["outcome_value"]),
+                "Boost_Over": float(outcomes[0]["payout_multiplier"]),
+                "Boost_Under": float(outcomes[1]["payout_multiplier"]),
+            }
+
+            offers.append(n)
+
+    return offers
 
 def get_thrive():
     """
