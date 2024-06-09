@@ -497,11 +497,11 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
+            idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(18).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(15).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(28).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -617,17 +617,19 @@ def find_correlation(offers, stats, platform):
                             continue
 
                         SIG = C[np.ix_(bet_id, bet_id)]
-                        payout = np.clip(threshold*boost, 1, 100)
-
-                        try:
-                            p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
-                            pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
-                        except:
+                        if any(np.linalg.eigvals(SIG)<0.0001):
                             continue
                         
-                        bet = itemgetter(*bet_id)(bet_df)
+                        payout = np.clip(threshold*boost, 1, 100)
+                        pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
+                        if pb < 1.01:
+                            continue
+                        
+                        p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
                         units = (p - 1)/(payout - 1)/0.05
-                        if units > 0.9 and pb > 1.01 and p > 1.5:
+                        
+                        if units > 0.9 and p > 1.5:
+                            bet = itemgetter(*bet_id)(bet_df)
                             parlay = info | {
                                 "Model EV": p,
                                 "Books EV": pb,
