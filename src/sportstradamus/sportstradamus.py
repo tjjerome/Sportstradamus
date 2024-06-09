@@ -608,7 +608,7 @@ def find_correlation(offers, stats, platform):
 
                         pb = p_books[np.ix_(bet_id)]
                         # prev_pb = np.product(pb)*boost*threshold
-                        if np.product(pb)*boost*threshold < .75:
+                        if np.product(pb)*boost*threshold < .85:
                             continue
 
                         p = p_model[np.ix_(bet_id)]
