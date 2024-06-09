@@ -1,4 +1,5 @@
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
+from sportstradamus.books import get_sleeper
 from sportstradamus.helpers import scraper, archive, stat_cv
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
@@ -17,12 +18,7 @@ import requests
 
 pd.options.mode.chained_assignment = None
 
-MLB = StatsMLB()
-MLB.load()
-MLB.update()
-MLB.profile_market("runs allowed")
-MLB.profile_market("total bases")
-pass
+get_sleeper()
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]

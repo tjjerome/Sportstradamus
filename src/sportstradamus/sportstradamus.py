@@ -1,10 +1,7 @@
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.books import (
-    get_pp,
-    get_ud,
-)
-from sportstradamus.helpers import archive, get_ev, get_odds, get_active_sports, stat_cv, stat_std, accel_asc, banned
+from sportstradamus.books import get_pp, get_ud, get_sleeper, get_parp
+from sportstradamus.helpers import archive, get_ev, get_odds, stat_cv, stat_std, accel_asc, banned
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -122,7 +119,7 @@ def main(progress):
     ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
     parlay_df = pd.DataFrame()
 
-    # PrizePicks
+    # # PrizePicks
 
     try:
         pp_dict = get_pp()
@@ -145,6 +142,18 @@ def main(progress):
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
     except Exception as exc:
         logger.exception("Failed to get Underdog")
+
+    # Sleeper
+
+    try:
+        sl_dict = get_sleeper()
+        sl_offers, sl5 = process_offers(
+            sl_dict, "Sleeper", stats)
+        save_data(sl_offers, sl5, "Sleeper", gc)
+        parlay_df = pd.concat([parlay_df, sl5])
+        sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
+    except Exception as exc:
+        logger.exception("Failed to get Sleeper")
 
 
     if not parlay_df.empty:
@@ -366,7 +375,8 @@ def find_correlation(offers, stats, platform):
     }
     payout_table = { # using equivalent payouts when insured picks are better
         "Underdog": [3, 6, 10.9, 20.2, 39.9],
-        "PrizePicks": [3, 5.3, 10, 20.8, 38.8]
+        "PrizePicks": [3, 5.3, 10, 20.8, 38.8],
+        "Sleeper": [1, 1, 1, 1, 1]
     }
     # cutoff_values = { # (m, b)
     #     "Model": (0, 1.1),
@@ -466,8 +476,6 @@ def find_correlation(offers, stats, platform):
             game_df.drop_duplicates(subset="Desc", inplace=True)
             checked_teams.append(team)
             checked_teams.append(opp)
-            if platform != "Underdog":
-                game_df.loc[:, 'Boost'] = 1
 
             off_weight = .75
             team_c = c.loc[team]*.5
@@ -489,7 +497,9 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby(['Player', 'Bet']).head(3)
+            idx = game_df.loc[(game_df["Boosted Books"] > .495) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
+            idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
+            idx = idx.groupby(['Player', 'Bet']).head(3)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(18).sort_values(['Team', 'Player'])
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
@@ -547,7 +557,7 @@ def find_correlation(offers, stats, platform):
                 C[i, j] = C[j, i] = rho / len(cm1) / len(cm2)
                 M[i, j] = M[j, i] = boost
 
-            EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),boosts.reshape(len(boosts),1)*M*boosts)*3
+            EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),boosts.reshape(len(boosts),1)*M*boosts)*payout_table[platform][0]
 
             for i, offer in game_df.iterrows():
                 indices = np.logical_and(EV[:,i]>.95, C[:,i]>.05)
@@ -568,7 +578,7 @@ def find_correlation(offers, stats, platform):
                     "Platform": platform
                     }
             best_bets = []
-            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]):
+            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]) and not (platform == "Sleeper" and league in ["MLB"]):
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                     team_splits = set.union(*[set(permutations(x)) for x in team_splits])
@@ -589,20 +599,21 @@ def find_correlation(offers, stats, platform):
                                     combos.extend(product(*[player_indices[player] for player in selected_players]))
 
                     threshold = payout_table[platform][bet_size-2]
+                    max_boost = payout_table["Underdog"][bet_size-2]*1.75 if platform in ["Sleeper"] else 3
 
                     for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
-                        if boost <= 0.6 or boost > 3:
+                        if boost <= 0.7 or boost > max_boost:
                             continue
 
                         pb = p_books[np.ix_(bet_id)]
                         # prev_pb = np.product(pb)*boost*threshold
-                        if np.product(pb)*boost*threshold < 1.15:
+                        if np.product(pb)*boost*threshold < .75:
                             continue
 
                         p = p_model[np.ix_(bet_id)]
                         # prev_p = np.product(pb)*boost*threshold
-                        if np.product(p)*boost*threshold < .7:
+                        if np.product(p)*boost*threshold < 1.15:
                             continue
 
                         SIG = C[np.ix_(bet_id, bet_id)]
@@ -610,7 +621,7 @@ def find_correlation(offers, stats, platform):
 
                         try:
                             p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
-                            pb = payout*(3*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)+np.product(pb))/4
+                            pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
                         except:
                             continue
                         
@@ -693,7 +704,10 @@ def save_data(df, parlay_df, book, gc):
             df["Books"] = df["Books"]*df["Boost"]
             df["Model"] = df["Model"]*df["Boost"]
             df.sort_values("Model", ascending=False, inplace=True)
-            mask = (df.Books > .54) & (df.Model > .58) & (1.5 >= df.Boost) & (df.Boost >= .9)
+            if book == "Sleeper":
+                mask = (df.Books > .99) & (df.Model > 1.07) & (2.5 >= df.Boost)
+            else:
+                mask = (df.Books > .54) & (df.Model > .58) & (1.5 >= df.Boost) & (df.Boost >= .75)
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
@@ -703,10 +717,16 @@ def save_data(df, parlay_df, book, gc):
             df["Model"] = df["Model"]/df["Boost"]
 
             # Apply number formatting to the relevant columns
-            wks.format(
-                "J:K", {"numberFormat": {
-                    "type": "PERCENT", "pattern": "0.00%"}}
-            )
+            if book == "Sleeper":
+                wks.format(
+                    "J:K", {"numberFormat": {
+                        "type": "NUMBER", "pattern": "0.00"}}
+                )
+            else:
+                wks.format(
+                    "J:K", {"numberFormat": {
+                        "type": "PERCENT", "pattern": "0.00%"}}
+                )
             wks.format(
                 "N:P", {"numberFormat": {
                     "type": "PERCENT", "pattern": "0.00%"}}
@@ -981,12 +1001,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         if all([player in playerStats.index for player in players]):
             if "+" in o["Player"]:
-                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
-                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv) if stats[1]["Odds"] != 0.5 else None
+                ev1 = archive.get_ev(o["League"], market, o["Date"], players[0])
+                ev2 = archive.get_ev(o["League"], market, o["Date"], players[1])
 
-                if ev1 and ev2:
+                if not np.isnan(ev1) and not np.isnan(ev2):
                     ev = ev1 + ev2
                     if cv == 1:
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
@@ -1027,11 +1045,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     under = under - push/2
 
             elif "vs." in o["Player"]:
-                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv) if stats[0]["Odds"] != 0.5 else None
-                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv) if stats[1]["Odds"] != 0.5 else None
-                if ev1 and ev2:
+                ev1 = archive.get_ev(o["League"], market, o["Date"], players[0])
+                ev2 = archive.get_ev(o["League"], market, o["Date"], players[1])
+                if not np.isnan(ev1) and not np.isnan(ev2):
                     if cv == 1:
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
                         p = [skellam.cdf(line[0], ev2, ev1),
@@ -1102,15 +1118,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         low, params["loc"], params["scale"])
                     under = under - push/2
 
-            if ("+" in o["Player"]) or ("vs." in o["Player"]):
-                probb = []
-                for stat in stats:
-                    probb.append(filt.predict_proba([[2*(1-under)-1, 2*stat["Odds"]-1]])[0][1])
-
-                proba = np.mean(probb)
-                proba = [1-proba, proba]
-            else:
-                proba = filt.predict_proba([[2*(1-under)-1, 2*stats["Odds"]-1]])[0]
+            proba = filt.predict_proba([[2*(1-under)-1, 2*p[1]-1]])[0]
 
         else:
             if "+" in o["Player"]:
@@ -1224,7 +1232,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 o["Position"] = -1
 
-        if 2 > o.get("Boost", 1) > .75:
+        if 3 > o.get("Boost", 1) > .5:
             new_offers.append(o)
 
     return new_offers

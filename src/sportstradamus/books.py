@@ -1009,7 +1009,7 @@ def get_ud():
 
 
 def get_sleeper():
-    offers = []
+    offers = {}
     url = "https://api.sleeper.app/lines/available"
     res = requests.get(url)
 
@@ -1022,9 +1022,17 @@ def get_sleeper():
     url = "https://api.sleeper.app/lines/available_alt"
     alt = requests.get(url)
 
-    if alt.status_code != 200:
+    if alt.status_code == 200:
         res.extend(alt.json())
 
+
+    abbr_map = {
+        "WSH": "WAS",
+        "GS": "GSW",
+        "PHO": "PHX",
+        "NOP": "NO",
+        "AZ": "ARI"
+    }
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
         url = f"https://api.sleeper.app/players/{league}?exclude_injury=false"
         players = requests.get(url)
@@ -1049,23 +1057,30 @@ def get_sleeper():
             game_date = game_date[:4]+'-'+game_date[4:6]+'-'+game_date[6:]
 
             outcomes = sorted(prop["options"], key=itemgetter('outcome'))
+            line = float(outcomes[0]["outcome_value"])
+            if len(outcomes) < 2:
+                if outcomes[0]["outcome"] == "over":
+                    outcomes = outcomes + [{}]
+                else:
+                    outcomes = [{}] + outcomes
             player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
             player_team = player["team"]
             opp = [team for team in teams if team != player_team][0]
 
             n = {
                 "Player": player_name,
-                "League": league,
-                "Team": player_team,
-                "Opponent": opp,
+                "League": league.upper(),
+                "Team": abbr_map.get(player_team, player_team),
+                "Opponent": abbr_map.get(opp, opp),
                 "Date": game_date,
                 "Market": prop["wager_type"],
-                "Line": float(outcomes[0]["outcome_value"]),
-                "Boost_Over": float(outcomes[0]["payout_multiplier"]),
-                "Boost_Under": float(outcomes[1]["payout_multiplier"]),
+                "Line": line,
+                "Boost_Over": float(outcomes[0].get("payout_multiplier", 0)),
+                "Boost_Under": float(outcomes[1].get("payout_multiplier", 0)),
             }
 
-            offers.append(n)
+            offers.setdefault(n["League"], {}).setdefault(n["Market"], [])
+            offers[n["League"]][n["Market"]].append(n)
 
     return offers
 
