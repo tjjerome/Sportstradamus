@@ -647,14 +647,14 @@ def find_correlation(offers, stats, platform):
 def compute_bets(args):
     combos, p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost = args
     results = []
-    for bet_id in combos:
+    for bet_id in tqdm(combos, leave=False):
         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
         if boost <= 0.7 or boost > max_boost:
             continue
 
         pb = p_books[np.ix_(bet_id)]
         # prev_pb = np.product(pb)*boost*threshold
-        if np.product(pb)*boost*threshold < .85:
+        if np.product(pb)*boost*threshold < .9:
             continue
 
         p = p_model[np.ix_(bet_id)]
