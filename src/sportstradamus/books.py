@@ -1057,8 +1057,8 @@ def get_sleeper():
             game_date = game_date[:4]+'-'+game_date[4:6]+'-'+game_date[6:]
 
             all_outcomes = sorted(prop["options"], key=itemgetter('outcome', 'outcome_value'))
-            for line in set([x["outcome_value"] for x in all_outcomes]):
-                line = float(outcomes[0]["outcome_value"])
+            lines = set([x["outcome_value"] for x in all_outcomes])
+            for line in lines:
                 outcomes = [x for x in all_outcomes if x["outcome_value"] == line]
                 if len(outcomes) < 2:
                     if outcomes[0]["outcome"] == "over":
