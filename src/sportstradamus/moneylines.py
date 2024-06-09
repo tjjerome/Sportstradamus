@@ -1,6 +1,5 @@
-from sportstradamus.helpers import get_ev, stat_cv, books, no_vig_odds, abbreviations, remove_accents, Archive
+from sportstradamus.helpers import get_ev, stat_cv, no_vig_odds, abbreviations, remove_accents, Archive
 from sportstradamus.spiderLogger import logger
-import pickle
 import json
 import requests
 import numpy as np

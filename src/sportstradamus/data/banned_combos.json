@@ -3184,5 +3184,12 @@
             },
             "opponent": {}
         }
+    },
+    "Sleeper": {
+        "NFL": {"team": {}, "opponent": {}},
+        "NBA": {"team": {}, "opponent": {}},
+        "WNBA": {"team": {}, "opponent": {}},
+        "NHL": {"team": {}, "opponent": {}},
+        "MLB": {"team": {}, "opponent": {}}
     }
 }
