@@ -23,6 +23,7 @@ import datetime
 import importlib.resources as pkg_resources
 import warnings
 from itertools import combinations, permutations, product
+from multiprocessing import Pool, cpu_count
 from operator import itemgetter
 from time import time
 import line_profiler
@@ -601,65 +602,21 @@ def find_correlation(offers, stats, platform):
                     threshold = payout_table[platform][bet_size-2]
                     max_boost = payout_table["Underdog"][bet_size-2]*1.75 if platform in ["Sleeper"] else 3
 
-                    for bet_id in tqdm(combos, desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
-                        boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
-                        if boost <= 0.7 or boost > max_boost:
-                            continue
+                    with Pool(processes=4) as p:
+                        chunk_size = len(combos) // 4
+                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost) for i in range(0, len(combos), chunk_size)]
 
-                        pb = p_books[np.ix_(bet_id)]
-                        # prev_pb = np.product(pb)*boost*threshold
-                        if np.product(pb)*boost*threshold < .85:
-                            continue
-
-                        p = p_model[np.ix_(bet_id)]
-                        # prev_p = np.product(pb)*boost*threshold
-                        if np.product(p)*boost*threshold < 1.15:
-                            continue
-
-                        SIG = C[np.ix_(bet_id, bet_id)]
-                        if any(np.linalg.eigvals(SIG)<0.0001):
-                            continue
-                        
-                        payout = np.clip(threshold*boost, 1, 100)
-                        pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
-                        if pb < 1.01:
-                            continue
-                        
-                        p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
-                        units = (p - 1)/(payout - 1)/0.05
-                        
-                        if units > 0.9 and p > 1.5:
-                            bet = itemgetter(*bet_id)(bet_df)
-                            parlay = info | {
-                                "Model EV": p,
-                                "Books EV": pb,
-                                "Boost": boost,
-                                "Rec Bet": units,
-                                "Leg 1": "",
-                                "Leg 2": "",
-                                "Leg 3": "",
-                                "Leg 4": "",
-                                "Leg 5": "",
-                                "Leg 6": "",
-                                "Legs": ", ".join([leg["Desc"] for leg in bet]),
-                                "Bet ID": bet_id,
-                                # "P": prev_p,
-                                # "PB": prev_pb,
-                                "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(league, {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(league, {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(league, {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
-                                "Bet Size": bet_size
-                            }
-                            for i in np.arange(bet_size):
-                                parlay["Leg " + str(i+1)] = bet[i]["Desc"]
-                            best_bets.append(parlay)
+                        for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
+                            best_bets.extend(result)
 
                 if len(best_bets) > 0:
-                    df5 = pd.DataFrame(best_bets)
+                    bets = pd.DataFrame(best_bets)
                     
-                    df5.sort_values('Model EV', ascending=False, inplace=True)
-                    df5 = df5.groupby('Bet Size').head(200)
+                    df5 = pd.concat([bets.sort_values('Model EV', ascending=False).head(300),
+                                     bets.sort_values('Rec Bet', ascending=False).head(300),
+                                     bets.sort_values('Fun', ascending=False).head(300)]).drop_duplicates().sort_values('Model EV', ascending=False)
                     
                     if len(df5) > 5:
-
                         rho_matrix = np.zeros([len(df5), len(df5)])
                         bets = df5["Bet ID"].to_list()
                         for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
@@ -687,6 +644,64 @@ def find_correlation(offers, stats, platform):
     # np.polyfit(np.arange(3,7),test_df.groupby("Bet Size")["P"].min(),1)
     return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
 
+def compute_bets(args):
+    combos, p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost = args
+    results = []
+    for bet_id in combos:
+        boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
+        if boost <= 0.7 or boost > max_boost:
+            continue
+
+        pb = p_books[np.ix_(bet_id)]
+        # prev_pb = np.product(pb)*boost*threshold
+        if np.product(pb)*boost*threshold < .85:
+            continue
+
+        p = p_model[np.ix_(bet_id)]
+        # prev_p = np.product(pb)*boost*threshold
+        if np.product(p)*boost*threshold < 1.15:
+            continue
+
+        SIG = C[np.ix_(bet_id, bet_id)]
+        if any(np.linalg.eigvals(SIG)<0.0001):
+            continue
+        
+        payout = np.clip(threshold*boost, 1, 100)
+        pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
+        if pb < 1.01:
+            continue
+        
+        p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+        units = (p - 1)/(payout - 1)/0.05
+        
+        if units < 0.9 or p < 1.5:
+            continue
+        
+        bet = itemgetter(*bet_id)(bet_df)
+        parlay = info | {
+            "Model EV": p,
+            "Books EV": pb,
+            "Boost": boost,
+            "Rec Bet": units,
+            "Leg 1": "",
+            "Leg 2": "",
+            "Leg 3": "",
+            "Leg 4": "",
+            "Leg 5": "",
+            "Leg 6": "",
+            "Legs": ", ".join([leg["Desc"] for leg in bet]),
+            "Bet ID": bet_id,
+            # "P": prev_p,
+            # "PB": prev_pb,
+            "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
+            "Bet Size": bet_size
+        }
+        for i in np.arange(bet_size):
+            parlay["Leg " + str(i+1)] = bet[i]["Desc"]
+        
+        results.append(parlay)
+
+    return results
 
 def save_data(df, parlay_df, book, gc):
     """
