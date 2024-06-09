@@ -1056,31 +1056,33 @@ def get_sleeper():
             game_date = game_id[0]
             game_date = game_date[:4]+'-'+game_date[4:6]+'-'+game_date[6:]
 
-            outcomes = sorted(prop["options"], key=itemgetter('outcome'))
-            line = float(outcomes[0]["outcome_value"])
-            if len(outcomes) < 2:
-                if outcomes[0]["outcome"] == "over":
-                    outcomes = outcomes + [{}]
-                else:
-                    outcomes = [{}] + outcomes
-            player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
-            player_team = player["team"]
-            opp = [team for team in teams if team != player_team][0]
+            all_outcomes = sorted(prop["options"], key=itemgetter('outcome', 'outcome_value'))
+            for line in set([x["outcome_value"] for x in all_outcomes]):
+                line = float(outcomes[0]["outcome_value"])
+                outcomes = [x for x in all_outcomes if x["outcome_value"] == line]
+                if len(outcomes) < 2:
+                    if outcomes[0]["outcome"] == "over":
+                        outcomes = outcomes + [{}]
+                    else:
+                        outcomes = [{}] + outcomes
+                player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
+                player_team = player["team"]
+                opp = [team for team in teams if team != player_team][0]
 
-            n = {
-                "Player": player_name,
-                "League": league.upper(),
-                "Team": abbr_map.get(player_team, player_team),
-                "Opponent": abbr_map.get(opp, opp),
-                "Date": game_date,
-                "Market": prop["wager_type"],
-                "Line": line,
-                "Boost_Over": float(outcomes[0].get("payout_multiplier", 0)),
-                "Boost_Under": float(outcomes[1].get("payout_multiplier", 0)),
-            }
+                n = {
+                    "Player": player_name,
+                    "League": league.upper(),
+                    "Team": abbr_map.get(player_team, player_team),
+                    "Opponent": abbr_map.get(opp, opp),
+                    "Date": game_date,
+                    "Market": prop["wager_type"],
+                    "Line": line,
+                    "Boost_Over": float(outcomes[0].get("payout_multiplier", 0)),
+                    "Boost_Under": float(outcomes[1].get("payout_multiplier", 0)),
+                }
 
-            offers.setdefault(n["League"], {}).setdefault(n["Market"], [])
-            offers[n["League"]][n["Market"]].append(n)
+                offers.setdefault(n["League"], {}).setdefault(n["Market"], [])
+                offers[n["League"]][n["Market"]].append(n)
 
     return offers
 
