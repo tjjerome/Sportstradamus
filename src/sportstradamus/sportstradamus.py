@@ -501,8 +501,8 @@ def find_correlation(offers, stats, platform):
             idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(15).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(28).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(38).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -580,10 +580,10 @@ def find_correlation(offers, stats, platform):
                     }
             best_bets = []
             if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]) and not (platform == "Sleeper" and league in ["MLB"]):
+                combos = []
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
                     team_splits = set.union(*[set(permutations(x)) for x in team_splits])
-                    combos = []
                     for split in team_splits:
                         if split[2] > len(combo_players):
                             continue
@@ -599,16 +599,16 @@ def find_correlation(offers, stats, platform):
                                 else:
                                     combos.extend(product(*[player_indices[player] for player in selected_players]))
 
-                    threshold = payout_table[platform][bet_size-2]
-                    max_boost = payout_table["Underdog"][bet_size-2]*1.75 if platform in ["Sleeper"] else 3
+                thresholds = payout_table[platform]
+                max_boost = 60 if platform in ["Sleeper"] else 3
 
-                    with Pool(processes=4) as p:
-                        chunk_size = len(combos) // 4
-                        if chunk_size > 0:
-                            combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost) for i in range(0, len(combos), chunk_size)]
+                with Pool(processes=4) as p:
+                    chunk_size = len(combos) // 4
+                    if chunk_size > 0:
+                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost) for i in range(0, len(combos), chunk_size)]
 
-                            for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
-                                best_bets.extend(result)
+                        for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
+                            best_bets.extend(result)
 
                 if len(best_bets) > 0:
                     bets = pd.DataFrame(best_bets)
@@ -646,9 +646,11 @@ def find_correlation(offers, stats, platform):
     return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
-    combos, p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost = args
+    combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost = args
     results = []
     for bet_id in tqdm(combos, leave=False):
+        bet_size = len(bet_id)
+        threshold = thresholds[bet_size-2]
         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
         if boost <= 0.7 or boost > max_boost:
             continue
