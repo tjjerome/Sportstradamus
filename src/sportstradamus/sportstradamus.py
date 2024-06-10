@@ -604,7 +604,7 @@ def find_correlation(offers, stats, platform):
 
                     with Pool(processes=4) as p:
                         chunk_size = len(combos) // 4
-                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost) for i in range(0, len(combos), chunk_size)]
+                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, bet_size, threshold, max_boost) for i in range(0, len(combos), chunk_size) if len(combos[i:i + chunk_size])>0]
 
                         for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
                             best_bets.extend(result)
