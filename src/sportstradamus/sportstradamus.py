@@ -126,7 +126,7 @@ def main(progress):
         pp_dict = get_pp()
         pp_offers, pp5 = process_offers(
             pp_dict, "PrizePicks", stats)
-        save_data(pp_offers, pp5, "PrizePicks", gc)
+        save_data(pp_offers, pp5.drop(columns=["P", "PB"]), "PrizePicks", gc)
         parlay_df = pd.concat([parlay_df, pp5])
         pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
     except Exception as exc:
@@ -138,7 +138,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers, ud5, "Underdog", gc)
+        save_data(ud_offers, ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
     except Exception as exc:
@@ -150,7 +150,7 @@ def main(progress):
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict, "Sleeper", stats)
-        save_data(sl_offers, sl5, "Sleeper", gc)
+        save_data(sl_offers, sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
     except Exception as exc:
@@ -656,13 +656,13 @@ def compute_bets(args):
             continue
 
         pb = p_books[np.ix_(bet_id)]
-        # prev_pb = np.product(pb)*boost*threshold
-        if np.product(pb)*boost*threshold < .9:
+        prev_pb = np.product(pb)*boost*threshold
+        if prev_pb < .9:
             continue
 
         p = p_model[np.ix_(bet_id)]
-        # prev_p = np.product(pb)*boost*threshold
-        if np.product(p)*boost*threshold < 1.15:
+        prev_p = np.product(p)*boost*threshold
+        if prev_p < 1.15:
             continue
 
         SIG = C[np.ix_(bet_id, bet_id)]
@@ -694,8 +694,8 @@ def compute_bets(args):
             "Leg 6": "",
             "Legs": ", ".join([leg["Desc"] for leg in bet]),
             "Bet ID": bet_id,
-            # "P": prev_p,
-            # "PB": prev_pb,
+            "P": prev_p,
+            "PB": prev_pb,
             "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
             "Bet Size": bet_size
         }
