@@ -483,7 +483,7 @@ def find_correlation(offers, stats, platform):
             if not opp_df.empty:
                 opp_df["cMarket"] = opp_df.apply(
                     lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
-            split_df = league_df.loc[league_df["Team"].str.contains("/")]
+            split_df = league_df.loc[league_df["Team"].str.contains("/") & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))]
             if not split_df.empty:
                 split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
                     x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
@@ -593,7 +593,7 @@ def find_correlation(offers, stats, platform):
                     "Platform": platform
                     }
             best_bets = []
-            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]) and not (platform == "Sleeper" and league in ["MLB"]):
+            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]):
                 combos = []
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
@@ -614,7 +614,7 @@ def find_correlation(offers, stats, platform):
                                     combos.extend(product(*[player_indices[player] for player in selected_players]))
 
                 thresholds = payout_table[platform]
-                max_boost = 60 if platform in ["Sleeper"] else 3
+                max_boost = 60 if platform in ["Sleeper", "ParlayPlay", "Chalkboard"] else 3
 
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
@@ -738,7 +738,7 @@ def save_data(df, parlay_df, book, gc):
             df["Books"] = df["Books"]*df["Boost"]
             df["Model"] = df["Model"]*df["Boost"]
             df.sort_values("Model", ascending=False, inplace=True)
-            if book == "Sleeper":
+            if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
                 mask = (df.Books > .99) & (df.Model > 1.07) & (2.5 >= df.Boost)
             else:
                 mask = (df.Books > .54) & (df.Model > .58) & (1.5 >= df.Boost) & (df.Boost >= .75)
@@ -751,7 +751,7 @@ def save_data(df, parlay_df, book, gc):
             df["Model"] = df["Model"]/df["Boost"]
 
             # Apply number formatting to the relevant columns
-            if book == "Sleeper":
+            if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
                 wks.format(
                     "J:K", {"numberFormat": {
                         "type": "NUMBER", "pattern": "0.00"}}

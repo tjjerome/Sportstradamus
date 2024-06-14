@@ -2155,6 +2155,10 @@
                     0.83,
                     1.08
                 ],
+                "P.runs allowed & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
                 "P.runs allowed & B.singles": [
                     0.9,
                     1.04
@@ -3190,7 +3194,14 @@
         "NBA": {"team": {}, "opponent": {}},
         "WNBA": {"team": {}, "opponent": {}},
         "NHL": {"team": {}, "opponent": {}},
-        "MLB": {"team": {}, "opponent": {}}
+        "MLB": {"team": {}, 
+        "opponent": {
+            "P.runs allowed & B.hits+runs+rbi": [
+                0.0,
+                0.0
+            ]
+            }
+        }
     },
     "ParlayPlay": {
         "NFL": {"team": {}, "opponent": {}},
