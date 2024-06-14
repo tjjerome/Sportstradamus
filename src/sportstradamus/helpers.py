@@ -135,20 +135,18 @@ class Scrape:
     def get_proxy(self, url, headers={}):
         params = {
             "api_key": apikey,
-            "url": url,
-            "optimize_request": True
+            "url": url
         }
 
         if headers:
-            params["keep_headers"] = True
-            headers = headers | self.header
+            headers = self.header | headers
+            params["headers"] = json.dumps(headers)
 
         i = 0
         while (True):
             i += 1
             response = requests.get(
                 "https://scraping.narf.ai/api/v1/",
-                headers=headers,
                 params=params
             )
             if response.status_code != 500 or i > 2:
