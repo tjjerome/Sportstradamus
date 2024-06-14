@@ -1223,15 +1223,15 @@ def get_parp():
     """
     logger.info("Getting ParlayPlay Lines")
     header = {
-        "Accept": "application/json",
-        "X-CSRFToken": "FoEEn6o8fwxrKIrSzyphlphpVjBAEVZQANmhb2xeMmmRZwvbaDDZt5zGKoXNzrc2",
+        "X-CSRFToken": "1",
         "X-Parlay-Request": "1",
-        "X-Parlayplay-Platform": "web",
+        "X-ParlayPlay-Platform": "web",
+        "X-Requested-With": "XMLHttpRequest"
     }
     try:
         api = scraper.get_proxy(
-            "https://parlayplay.io/api/v1/crossgame/search/?format=json&league=&sport=All",
-            headers=header,
+            "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=&includeAlt=true",
+            headers=header
         )
     except:
         logger.exception(id)
@@ -1240,9 +1240,23 @@ def get_parp():
     if "players" not in api:
         logger.error("Error getting ParlayPlay Offers")
         return {}
-
+    
+    abbr_map = {
+        "WSH": "WAS",
+        "GS": "GSW",
+        "PHO": "PHX",
+        "NOP": "NO",
+        "JAC": "JAX",
+        "LAV": "LV",
+        "NJY": "NYJ",
+        "NJD": "NJ",
+        "AZ": "ARI",
+        "CHW": "CWS"
+    }
     offers = {}
     for player in tqdm(api["players"], desc="Getting ParlayPlay Offers", unit="offer"):
+        league = player["match"]["league"]["leagueNameShort"]
+        offers.setdefault(league, {})
         teams = [
             player["match"]["homeTeam"]["teamAbbreviation"],
             player["match"]["awayTeam"]["teamAbbreviation"],
@@ -1255,11 +1269,9 @@ def get_parp():
                          if team != player_team][0]
 
         if player_team is not None:
-            player_team = player_team.replace(
-                "CHW", "CWS").replace("WSH", "WAS")
+            player_team = abbr_map.get(player_team, player_team)
         if opponent_team is not None:
-            opponent_team = opponent_team.replace(
-                "CHW", "CWS").replace("WSH", "WAS")
+            opponent_team = abbr_map.get(opponent_team, opponent_team)
 
         for stat in player["stats"]:
             market = stat["challengeName"]
@@ -1269,27 +1281,23 @@ def get_parp():
                         market = "Pitcher Fantasy Points"
                     else:
                         market = "Hitter Fantasy Points"
+
+            offers[league].setdefault(market, [])
             n = {
                 "Player": remove_accents(player["player"]["fullName"]),
-                "League": player["match"]["league"]["leagueNameShort"],
+                "League": league,
                 "Team": player_team,
                 "Opponent": opponent_team,
                 "Date": player["match"]["matchDate"].split("T")[0],
-                "Market": market,
-                "Line": float(stat["statValue"]),
-                "Slide": "N",
+                "Market": market
             }
-
-            if n["League"] not in offers:
-                offers[n["League"]] = {}
-            if n["Market"] not in offers[n["League"]]:
-                offers[n["League"]][n["Market"]] = []
-
-            offers[n["League"]][n["Market"]].append(n)
-            if stat["slideRange"]:
-                m = n | {"Slide": "Y", "Line": np.min(stat["slideRange"])}
-                offers[n["League"]][n["Market"]].append(m)
-                m = n | {"Slide": "Y", "Line": np.max(stat["slideRange"])}
+            for altLine in stat["altLines"]["values"]:
+                m = n | {
+                    "Line": float(altLine["selectionPoints"]),
+                    "Boost_Over": float(altLine.get("decimalPriceOver", 0.0)),
+                    "Boost_Under": float(altLine.get("decimalPriceUnder", 0.0))
+                }
+                
                 offers[n["League"]][n["Market"]].append(m)
 
     for combo in tqdm(api["comboPackages"], desc="Getting ParlayPlay Combos", unit="offer"):
@@ -1300,17 +1308,18 @@ def get_parp():
             players.append(remove_accents(player["player"]["fullName"]))
 
             player_team = player["player"]["team"]["teamAbbreviation"]
-            if player_team is not None:
-                teams.append(player_team.replace(
-                    "CHW", "CWS").replace("WSH", "WAS"))
 
             opponent_team = [team for team in
                              [player["match"]["homeTeam"]["teamAbbreviation"],
                               player["match"]["awayTeam"]["teamAbbreviation"]]
                              if team != player_team][0]
+            
+            if player_team is not None:
+                player_team = abbr_map.get(player_team, player_team)
+                teams.append(player_team)
             if opponent_team is not None:
-                opponents.append(opponent_team.replace(
-                    "CHW", "CWS").replace("WSH", "WAS"))
+                opponent_team = abbr_map.get(opponent_team, opponent_team)
+                opponents.append(opponent_team)
 
         market = combo['pickType']['challengeName']
         if "Fantasy" in market:
@@ -1328,7 +1337,8 @@ def get_parp():
             "Date": player["match"]["matchDate"].split("T")[0],
             "Market": market,
             "Line": float(combo["pickValue"]),
-            "Slide": "N",
+            "Boost_Over": combo.get("defaultMultiplier", 1.77),
+            "Boost_Under": combo.get("defaultMultiplier", 1.77)
         }
 
         if n["League"] not in offers:

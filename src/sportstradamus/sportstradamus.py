@@ -120,7 +120,7 @@ def main(progress):
     ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
     parlay_df = pd.DataFrame()
 
-    # # PrizePicks
+    # PrizePicks
 
     try:
         pp_dict = get_pp()
@@ -155,6 +155,18 @@ def main(progress):
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
     except Exception as exc:
         logger.exception("Failed to get Sleeper")
+
+    # ParlayPlay
+
+    try:
+        parp_dict = get_parp()
+        parp_offers, parp5 = process_offers(
+            parp_dict, "ParlayPlay", stats)
+        save_data(parp_offers, parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
+        parlay_df = pd.concat([parlay_df, parp5])
+        parp_offers["Market"] = parp_offers["Market"].map(stat_map["ParlayPlay"])
+    except Exception as exc:
+        logger.exception("Failed to get ParlayPlay")
 
 
     if not parlay_df.empty:
@@ -355,7 +367,7 @@ def find_correlation(offers, stats, platform):
     df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(lambda x: x.split("/")[0])
 
     df["Correlated Bets"] = ""
-    parlay_df = pd.DataFrame()
+    parlay_df = pd.DataFrame(columns=["Game", "Date", "League", "Platform", "Model EV", "Books EV", "Boost", "Rec Bet", "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6", "Legs", "Bet ID", "P", "PB", "Fun", "Bet Size"])
     usage_str = {
         "NBA": "MIN",
         "WNBA": "MIN",
@@ -377,7 +389,9 @@ def find_correlation(offers, stats, platform):
     payout_table = { # using equivalent payouts when insured picks are better
         "Underdog": [3, 6, 10.9, 20.2, 39.9],
         "PrizePicks": [3, 5.3, 10, 20.8, 38.8],
-        "Sleeper": [1, 1, 1, 1, 1]
+        "Sleeper": [1, 1, 1, 1, 1],
+        "ParlayPlay": [1, 1, 1, 1, 1],
+        "Chalkboard": [1, 1, 1, 1, 1]
     }
     # cutoff_values = { # (m, b)
     #     "Model": (0, 1.1),
