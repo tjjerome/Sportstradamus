@@ -773,7 +773,8 @@ def save_data(df, parlay_df, book, gc):
 
             wks = gc.open("Sportstradamus").worksheet("All Parlays")
             sheet_df = pd.DataFrame(wks.get_all_records())
-            sheet_df = sheet_df.loc[sheet_df.Platform != book]
+            if not sheet_df.empty:
+                sheet_df = sheet_df.loc[sheet_df.Platform != book]
             if not parlay_df.empty:
                 bet_ranks = parlay_df.groupby(["Platform", "Game", "Family"]).rank('first', False)[["Model EV", "Rec Bet", "Fun"]]
                 parlay_df = parlay_df.join(bet_ranks, rsuffix=" Rank")
