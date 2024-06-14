@@ -593,7 +593,7 @@ def find_correlation(offers, stats, platform):
                     "Platform": platform
                     }
             best_bets = []
-            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]):
+            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]) and not (platform in ["Sleeper", "Chalkboard", "ParlayPlay"] and league == "MLB"):
                 combos = []
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
