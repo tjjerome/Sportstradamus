@@ -367,7 +367,7 @@ def find_correlation(offers, stats, platform):
     df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(lambda x: x.split("/")[0])
 
     df["Correlated Bets"] = ""
-    parlay_df = pd.DataFrame(columns=["Game", "Date", "League", "Platform", "Model EV", "Books EV", "Boost", "Rec Bet", "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6", "Legs", "Bet ID", "P", "PB", "Fun", "Bet Size"])
+    parlay_df = pd.DataFrame(columns=["Game", "Date", "League", "Platform", "Model EV", "Books EV", "Boost", "Rec Bet", "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6", "Legs", "P", "PB", "Fun", "Bet Size"])
     usage_str = {
         "NBA": "MIN",
         "WNBA": "MIN",
