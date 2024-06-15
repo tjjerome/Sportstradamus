@@ -490,165 +490,77 @@
                     1.15,
                     0.87
                 ],
-                "QB.passing tds & QB.tds": [
-                    0,
-                    0
+                "QB.passing first downs & WR.receptions": [
+                    0.0,
+                    0.0
                 ],
-                "WR.passing tds & WR.tds": [
-                    0,
-                    0
+                "QB.passing first downs & WR.receiving yards": [
+                    0.0,
+                    0.0
                 ],
-                "RB.passing tds & RB.tds": [
-                    0,
-                    0
+                "QB.passing first downs & WR.first downs": [
+                    0.0,
+                    0.0
                 ],
-                "TE.passing tds & TE.tds": [
-                    0,
-                    0
+                "QB.passing first downs & TE.receptions": [
+                    0.0,
+                    0.0
                 ],
-                "QB.passing tds & QB.receiving tds": [
-                    0,
-                    0
+                "QB.passing first downs & TE.receiving yards": [
+                    0.0,
+                    0.0
                 ],
-                "WR.passing tds & WR.receiving tds": [
-                    0,
-                    0
+                "QB.passing first downs & TE.first downs": [
+                    0.0,
+                    0.0
                 ],
-                "RB.passing tds & RB.receiving tds": [
-                    0,
-                    0
+                "QB.passing first downs & RB.receptions": [
+                    0.0,
+                    0.0
                 ],
-                "TE.passing tds & TE.receiving tds": [
-                    0,
-                    0
+                "QB.passing first downs & RB.receiving yards": [
+                    0.0,
+                    0.0
                 ],
-                "QB.qb tds & QB.tds": [
-                    0,
-                    0
+                "QB.passing tds & WR.tds": [
+                    0.0,
+                    0.0
                 ],
-                "WR.qb tds & WR.tds": [
-                    0,
-                    0
+                "QB.passing tds & TE.tds": [
+                    0.0,
+                    0.0
                 ],
-                "RB.qb tds & RB.tds": [
-                    0,
-                    0
+                "QB.passing tds & WR.receiving tds": [
+                    0.0,
+                    0.0
                 ],
-                "TE.qb tds & TE.tds": [
-                    0,
-                    0
+                "QB.passing tds & TE.receiving tds": [
+                    0.0,
+                    0.0
                 ],
-                "QB.qb tds & QB.receiving tds": [
-                    0,
-                    0
+                "QB.passing tds & RB.receiving tds": [
+                    0.0,
+                    0.0
                 ],
-                "WR.qb tds & WR.receiving tds": [
-                    0,
-                    0
+                "QB.qb tds & WR.tds": [
+                    0.0,
+                    0.0
                 ],
-                "RB.qb tds & RB.receiving tds": [
-                    0,
-                    0
+                "QB.qb tds & TE.tds": [
+                    0.0,
+                    0.0
                 ],
-                "TE.qb tds & TE.receiving tds": [
-                    0,
-                    0
+                "QB.qb tds & WR.receiving tds": [
+                    0.0,
+                    0.0
                 ],
-                "QB.tds & QB.tds": [
-                    0,
-                    0
+                "QB.qb tds & TE.receiving tds": [
+                    0.0,
+                    0.0
                 ],
-                "WR.tds & WR.tds": [
-                    0,
-                    0
-                ],
-                "RB.tds & RB.tds": [
-                    0,
-                    0
-                ],
-                "TE.tds & TE.tds": [
-                    0,
-                    0
-                ],
-                "QB.tds & QB.fantasy points underdog": [
-                    0,
-                    0
-                ],
-                "WR.tds & WR.fantasy points underdog": [
-                    0,
-                    0
-                ],
-                "RB.tds & RB.fantasy points underdog": [
-                    0,
-                    0
-                ],
-                "TE.tds & TE.fantasy points underdog": [
-                    0,
-                    0
-                ],
-                "QB.passing first downs & QB.receptions": [
-                    0,
-                    0
-                ],
-                "WR.passing first downs & WR.receptions": [
-                    0,
-                    0
-                ],
-                "RB.passing first downs & RB.receptions": [
-                    0,
-                    0
-                ],
-                "TE.passing first downs & TE.receptions": [
-                    0,
-                    0
-                ],
-                "QB.passing first downs & QB.receiving yards": [
-                    0,
-                    0
-                ],
-                "WR.passing first downs & WR.receiving yards": [
-                    0,
-                    0
-                ],
-                "RB.passing first downs & RB.receiving yards": [
-                    0,
-                    0
-                ],
-                "TE.passing first downs & TE.receiving yards": [
-                    0,
-                    0
-                ],
-                "QB.passing first downs & QB.first downs": [
-                    0,
-                    0
-                ],
-                "WR.passing first downs & WR.first downs": [
-                    0,
-                    0
-                ],
-                "RB.passing first downs & RB.first downs": [
-                    0,
-                    0
-                ],
-                "TE.passing first downs & TE.first downs": [
-                    0,
-                    0
-                ],
-                "QB.completions & QB.first downs": [
-                    0,
-                    0
-                ],
-                "WR.completions & WR.first downs": [
-                    0,
-                    0
-                ],
-                "RB.completions & RB.first downs": [
-                    0,
-                    0
-                ],
-                "TE.completions & TE.first downs": [
-                    0,
-                    0
+                "QB.qb tds & RB.receiving tds": [
+                    0.0,
+                    0.0
                 ]
             },
             "opponent": {}
@@ -1583,15 +1495,23 @@
                     0,
                     0
                 ],
+                "C.powerPlayPoints & W.powerPlayPoints": [
+                    0,
+                    0
+                ],
+                "C.powerPlayPoints & D.powerPlayPoints": [
+                    0,
+                    0
+                ],
                 "W.powerPlayPoints & W.powerPlayPoints": [
                     0,
                     0
                 ],
-                "D.powerPlayPoints & D.powerPlayPoints": [
+                "W.powerPlayPoints & D.powerPlayPoints": [
                     0,
                     0
                 ],
-                "G.powerPlayPoints & G.powerPlayPoints": [
+                "D.powerPlayPoints & D.powerPlayPoints": [
                     0,
                     0
                 ]
@@ -2979,10 +2899,6 @@
                     0,
                     0
                 ],
-                "G.fantasy points prizepicks & G.fantasy points prizepicks": [
-                    0,
-                    0
-                ],
                 "C.points & C.points": [
                     0,
                     0
@@ -3011,10 +2927,6 @@
                     0,
                     0
                 ],
-                "G.points & G.goals": [
-                    0,
-                    0
-                ],
                 "C.points & C.assists": [
                     0,
                     0
@@ -3024,10 +2936,6 @@
                     0
                 ],
                 "D.points & D.assists": [
-                    0,
-                    0
-                ],
-                "G.points & G.assists": [
                     0,
                     0
                 ],
@@ -3043,10 +2951,6 @@
                     0,
                     0
                 ],
-                "G.powerPlayPoints & G.points": [
-                    0,
-                    0
-                ],
                 "C.powerPlayPoints & C.powerPlayPoints": [
                     0,
                     0
@@ -3056,10 +2960,6 @@
                     0
                 ],
                 "D.powerPlayPoints & D.powerPlayPoints": [
-                    0,
-                    0
-                ],
-                "G.powerPlayPoints & G.powerPlayPoints": [
                     0,
                     0
                 ],
@@ -3075,10 +2975,6 @@
                     0,
                     0
                 ],
-                "G.powerPlayPoints & G.goals": [
-                    0,
-                    0
-                ],
                 "C.powerPlayPoints & C.assists": [
                     0,
                     0
@@ -3091,10 +2987,6 @@
                     0,
                     0
                 ],
-                "G.powerPlayPoints & G.assists": [
-                    0,
-                    0
-                ],
                 "C.goals & C.assists": [
                     0,
                     0
@@ -3104,32 +2996,11 @@
                     0
                 ],
                 "D.goals & D.assists": [
-                    0,
-                    0
-                ],
-                "G.goals & G.assists": [
                     0,
                     0
                 ]
             },
-            "opponent": {
-                "C.goals & C.assists": [
-                    0,
-                    0
-                ],
-                "W.goals & W.assists": [
-                    0,
-                    0
-                ],
-                "D.goals & D.assists": [
-                    0,
-                    0
-                ],
-                "G.goals & G.assists": [
-                    0,
-                    0
-                ]
-            }
+            "opponent": {}
         },
         "MLB": {
             "team": {
@@ -3145,23 +3016,11 @@
                     0,
                     0
                 ],
-                "P.pitcher fantasy score & B.hits+runs+rbi": [
-                    0,
-                    0
-                ],
                 "B.hitter fantasy score & B.rbi": [
                     0,
                     0
                 ],
-                "P.pitcher fantasy score & B.rbi": [
-                    0,
-                    0
-                ],
                 "B.hitter fantasy score & B.runs": [
-                    0,
-                    0
-                ],
-                "P.pitcher fantasy score & B.runs": [
                     0,
                     0
                 ],
@@ -3186,7 +3045,20 @@
                     0
                 ]
             },
-            "opponent": {}
+            "opponent": {
+                "P.pitcher fantasy score & B.hits+runs+rbi": [
+                    0,
+                    0
+                ],
+                "P.pitcher fantasy score & B.rbi": [
+                    0,
+                    0
+                ],
+                "P.pitcher fantasy score & B.runs": [
+                    0,
+                    0
+                ]
+            }
         }
     },
     "Sleeper": {
@@ -3194,12 +3066,282 @@
         "NBA": {"team": {}, "opponent": {}},
         "WNBA": {"team": {}, "opponent": {}},
         "NHL": {"team": {}, "opponent": {}},
-        "MLB": {"team": {}, 
-        "opponent": {
-            "P.runs allowed & B.hits+runs+rbi": [
-                0.0,
-                0.0
-            ]
+        "MLB": {
+            "team": {
+                "B.hits+runs+rbi & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "B.hits+runs+rbi & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
+                "B.hits+runs+rbi & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "B.hits+runs+rbi & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "B.hits+runs+rbi & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "B.hits+runs+rbi & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "B.runs & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "B.runs & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "B.runs & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "B.runs & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "B.runs & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "B.rbi & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "B.rbi & B.doubles": [
+                    0.0,
+                    0.0
+                ]
+            }, 
+            "opponent": {
+                "P.pitcher strikeouts & B.hits": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.batter strikeouts": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.singles": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.walks": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitcher strikeouts & B.triples": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.hits": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.batter strikeouts": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.singles": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.walks": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "P.runs allowed & B.triples": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.hits": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.batter strikeouts": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.singles": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.walks": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "P.hits allowed & B.triples": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.hits": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.batter strikeouts": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.singles": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.walks": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "P.walks allowed & B.triples": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.hits": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.hits+runs+rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.batter strikeouts": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.rbi": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.singles": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.walks": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.home runs": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.total bases": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.doubles": [
+                    0.0,
+                    0.0
+                ],
+                "P.pitching outs & B.triples": [
+                    0.0,
+                    0.0
+                ]
             }
         }
     },
