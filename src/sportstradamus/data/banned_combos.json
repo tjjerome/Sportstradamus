@@ -2075,10 +2075,6 @@
                     0.83,
                     1.08
                 ],
-                "P.runs allowed & B.hits+runs+rbi": [
-                    0.0,
-                    0.0
-                ],
                 "P.runs allowed & B.singles": [
                     0.9,
                     1.04
@@ -2363,7 +2359,11 @@
                     1.1,
                     0.82
                 ],
-                "B.powerPlayPoints & B.powerPlayPoints": [
+                "P.runs allowed & B.runs": [
+                    0,
+                    0
+                ],
+                "P.runs allowed & B.hits+runs+rbi": [
                     0,
                     0
                 ]
@@ -3063,7 +3063,131 @@
     },
     "Sleeper": {
         "NFL": {"team": {}, "opponent": {}},
-        "NBA": {"team": {}, "opponent": {}},
+        "NBA": {
+            "team": {},
+            "opponent": {
+                "P.TOV & P.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & P.STL": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & W.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & W.STL": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & C.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & C.STL": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & F.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & F.STL": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & B.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "P.TOV & B.STL": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & W.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & W.STL": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & C.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & C.STL": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & F.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & F.STL": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & B.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "W.TOV & B.STL": [
+                    0.0,
+                    0.0
+                ],
+                "C.TOV & C.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "C.TOV & C.STL": [
+                    0.0,
+                    0.0
+                ],
+                "C.TOV & F.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "C.TOV & F.STL": [
+                    0.0,
+                    0.0
+                ],
+                "C.TOV & B.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "C.TOV & B.STL": [
+                    0.0,
+                    0.0
+                ],
+                "F.TOV & F.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "F.TOV & F.STL": [
+                    0.0,
+                    0.0
+                ],
+                "F.TOV & B.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "F.TOV & B.STL": [
+                    0.0,
+                    0.0
+                ],
+                "B.TOV & B.BLST": [
+                    0.0,
+                    0.0
+                ],
+                "B.TOV & B.STL": [
+                    0.0,
+                    0.0
+                ]
+            }
+        },
         "WNBA": {"team": {}, "opponent": {}},
         "NHL": {"team": {}, "opponent": {}},
         "MLB": {
