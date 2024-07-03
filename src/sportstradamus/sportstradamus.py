@@ -116,21 +116,21 @@ def main(progress):
 
     untapped_markets = []
 
-    pp_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
-    ud_offers = pd.DataFrame(columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Books", "Boost", "Model", "Correct"])
+    all_offers = []
     parlay_df = pd.DataFrame()
 
     # PrizePicks
 
-    try:
-        pp_dict = get_pp()
-        pp_offers, pp5 = process_offers(
-            pp_dict, "PrizePicks", stats)
-        save_data(pp_offers, pp5.drop(columns=["P", "PB"]), "PrizePicks", gc)
-        parlay_df = pd.concat([parlay_df, pp5])
-        pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    except Exception as exc:
-        logger.exception("Failed to get PrizePicks")
+    # try:
+    #     pp_dict = get_pp()
+    #     pp_offers, pp5 = process_offers(
+    #         pp_dict, "PrizePicks", stats)
+    #     save_data(pp_offers, pp5.drop(columns=["P", "PB"]), "PrizePicks", gc)
+    #     parlay_df = pd.concat([parlay_df, pp5])
+    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
+        # all_offers.append(pp_offers)
+    # except Exception as exc:
+    #     logger.exception("Failed to get PrizePicks")
 
     # Underdog
 
@@ -141,6 +141,7 @@ def main(progress):
         save_data(ud_offers, ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
+        all_offers.append(ud_offers)
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
@@ -153,6 +154,7 @@ def main(progress):
         save_data(sl_offers, sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
+        all_offers.append(sl_offers)
     except Exception as exc:
         logger.exception("Failed to get Sleeper")
 
@@ -165,6 +167,7 @@ def main(progress):
         save_data(parp_offers, parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
         parlay_df = pd.concat([parlay_df, parp5])
         parp_offers["Market"] = parp_offers["Market"].map(stat_map["ParlayPlay"])
+        all_offers.append(parp_offers)
     except Exception as exc:
         logger.exception("Failed to get ParlayPlay")
 
@@ -194,7 +197,7 @@ def main(progress):
         history = pd.DataFrame(
             columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Result"])
 
-    df = pd.concat([ud_offers, pp_offers]).drop_duplicates(["Player", "League", "Date", "Market"],
+    df = pd.concat(all_offers).drop_duplicates(["Player", "League", "Date", "Market"],
                                                            ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model"]]
     df.loc[(df['Market'] == 'AST') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
