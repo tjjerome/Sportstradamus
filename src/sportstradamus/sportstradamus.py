@@ -534,6 +534,10 @@ def find_correlation(offers, stats, platform):
             V = V.reshape(len(game_dict),1)*V
             V = np.sqrt(V)
             P = p_model.reshape(len(p_model),1)*p_model
+            Vb = p_books*(1-p_books)
+            Vb = Vb.reshape(len(game_dict),1)*Vb
+            Vb = np.sqrt(Vb)
+            Pb = p_books.reshape(len(p_books),1)*p_books
             for i, j in combinations(range(len(game_dict)), 2):
                 leg1 = game_dict[i]
                 leg2 = game_dict[j]
@@ -576,9 +580,10 @@ def find_correlation(offers, stats, platform):
                 M[i, j] = M[j, i] = boost
 
             EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),boosts.reshape(len(boosts),1)*M*boosts)*payout_table[platform][0]
+            EVb = np.multiply(np.multiply(np.exp(np.multiply(C,Vb)),Pb),boosts.reshape(len(boosts),1)*M*boosts)*payout_table[platform][0]
 
             for i, offer in game_df.iterrows():
-                indices = np.logical_and(EV[:,i]>.95, C[:,i]>.05)
+                indices = np.logical_and(EV[:,i]>.95, C[:,i]>.05, EVb[:,i]>.9)
                 corr = game_df.loc[indices]
                 corr["P"] = EV[indices, i]
                 corr = corr.sort_values("P", ascending=False).groupby("Player").head(1)
