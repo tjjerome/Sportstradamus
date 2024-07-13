@@ -64,6 +64,8 @@ class Stats:
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.teamProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.upcoming_games = {}
+        self.usage_stat = ""
+        self.tiebreaker_stat = ""
 
     def parse_game(self, game):
         """
@@ -250,6 +252,48 @@ class Stats:
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
 
+    def get_depth(self, offers, date=datetime.today().date()):
+        players = set()
+        for x in offers.values():
+            for player in x:
+                if isinstance(player, dict):
+                    player = player["Player"]
+                if " + " in player.replace(" vs. ", " + "):
+                    split_players = player.replace(" vs. ", " + ").split(" + ")
+                    players.add(split_players[0])
+                    players.add(split_players[1])
+                else:
+                    players.add(player)
+
+        if date < datetime.today().date():
+            player_df = self.gamelog.loc[(self.gamelog[self.log_strings["date"]]==date.strftime("%Y-%m-%d")) & self.gamelog[self.log_strings["player"]].isin(list(players)), [self.log_strings["player"], self.log_strings["team"], self.log_strings["position"]]]
+            player_df.index = player_df[self.log_strings["player"]]
+            player_df.drop(columns=self.log_strings["player"], inplace=True)
+        else:
+            if self.league == "NBA":
+                player_df = {}
+                for team, roster in self.players[self.season].items():
+                    roster = {k: v|{self.log_strings["team"]: team} for k, v in roster.items()}
+                    player_df.update(roster)
+
+                player_df = pd.DataFrame(player_df).T
+                player_df = player_df.loc[list(set(player_df.index) & players)]
+            elif self.league == "NHL":
+                player_df = pd.DataFrame(self.players[self.season_start.year].values())
+                player_df.index = player_df.name
+                player_df = player_df.loc[list(set(player_df.index) & players)]
+            else:
+                player_df = self.players.loc[list(set(self.players.index) & players)]
+
+        self.profile_market(self.usage_stat, date=date)
+        usage = pd.DataFrame(
+            self.playerProfile[[self.usage_stat + " short", self.tiebreaker_stat]])
+        player_df = player_df.join(usage, how='left').fillna(0)
+        ranks = player_df.sort_values(self.tiebreaker_stat, ascending=False).groupby(
+            [self.log_strings['team'], self.log_strings['position']]).rank(ascending=False, method='first')[self.usage_stat + " short"].astype(int)
+
+        self.depth = ranks.to_dict()
+
     def get_stats(self, offer, game_date):
         """
         Retrieves statistics for a given offer and game date.
@@ -355,6 +399,8 @@ class StatsNBA(Stats):
             "win": "WL",
             "score": "PTS"
         }
+        self.usage_stat = "MIN"
+        self.tiebreaker_stat = "USG_PCT short"
 
     def load(self):
         """
@@ -1489,6 +1535,12 @@ class StatsWNBA(StatsNBA):
         self.teamlog.drop_duplicates(inplace=True)
         # self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
         # self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+
+        player_df = stat_df.drop_duplicates("PLAYER_ID")[["PLAYER_NAME", "TEAM_ABBREVIATION", "POS"]]
+        player_df.index = player_df.PLAYER_NAME
+        self.players = pd.concat([player_df[["TEAM_ABBREVIATION", "POS"]], self.players])
+        self.players = self.players[~self.players.index.duplicated(keep='first')]
+
         # Save the updated player data
         with open(pkg_resources.files(data) / "wnba_data.dat", "wb") as outfile:
             pickle.dump({"players": self.players,
@@ -2894,13 +2946,15 @@ class StatsNFL(Stats):
             "player": "player display name",
             "usage": "snap pct",
             "usage_sec": "route participation",
-            "position": "position group",
+            "position": "position",
             "team": "team",
             "opponent": "opponent",
             "home": "home",
             "win": "WL",
             "score": "points"
         }
+        self.usage_stat = "snap pct"
+        self.tiebreaker_stat = "route participation short"
 
     def load(self):
         """
@@ -2928,7 +2982,7 @@ class StatsNFL(Stats):
         # Fetch game logs
         self.need_pbp = True
         cols = ['player_id', 'player_display_name', 'position_group',
-                'recent_team', 'season', 'week', 'gameday', 'season_type',
+                'recent_team', 'season', 'week', 'season_type',
                 'completions', 'attempts', 'passing_yards', 'passing_tds',
                 'interceptions', 'sacks', 'sack_fumbles', 'sack_fumbles_lost',
                 'passing_2pt_conversions', 'carries', 'rushing_yards', 'rushing_tds',
@@ -2968,6 +3022,7 @@ class StatsNFL(Stats):
             self.upcoming_games = upcoming_games.groupby("Team").apply(
                 lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home', 'gameday', 'gametime']].to_dict(orient='index')
 
+        nfl_data = nfl_data.merge(pd.concat([sched.rename(columns={"home_team":"recent_team"}), sched.rename(columns={"away_team":"recent_team"})])[['recent_team', 'week', 'gameday']], how='left')
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(
             ["QB", "WR", "RB", "TE"])]
         snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
@@ -3016,7 +3071,7 @@ class StatsNFL(Stats):
 
         nfl_data.rename(
             columns=lambda x: x.replace("_", " "), inplace=True)
-        nfl_data.rename(columns={"recent team": "team"}, inplace=True)
+        nfl_data.rename(columns={"recent team": "team", "position group": "position"}, inplace=True)
         nfl_data[['target share', 'air yards share', 'wopr', 'yards per target']] = nfl_data[[
             'target share', 'air yards share', 'wopr', 'yards per target']].fillna(0.0)
 
@@ -3033,20 +3088,20 @@ class StatsNFL(Stats):
 
         self.gamelog = pd.concat(
             [self.gamelog, nfl_data], ignore_index=True).drop_duplicates(['season', 'week', 'player id'], ignore_index=True).reset_index(drop=True)
-
         self.gamelog['player display name'] = self.gamelog['player display name'].apply(
             remove_accents)
+        
         self.players = nfl.import_ids()
         self.players = self.players.loc[self.players['position'].isin([
-            'QB', 'RB', 'WR', 'TE'])]
+            'QB', 'RB', 'WR', 'TE']) & (self.players['team'] != "FA") & (self.players['team'] != "FA*")]
         self.players.name = self.players.name.apply(remove_accents)
+        self.players.team = self.players.team.map({"NOS": "NO", "GBP": "GB", "TBB": "TB", "SFO": "SF", "KCC": "KC", "LVR": "LV", "JAC": "JAX"})
         ids = self.players[['name', 'gsis_id']].dropna()
         ids.index = ids.name
         self.ids = ids.gsis_id.to_dict()
-        self.players = self.players.groupby(
-            'name')['position'].apply(lambda x: x.iat[-1]).to_dict()
-        self.players["Michael Pittman"] = "WR"
-        self.players["Justin Watson"] = "WR"
+        self.players = self.players.drop_duplicates('name')
+        self.players.index = self.players['name']
+        self.players = self.players[['age', 'height', 'weight', 'team', 'position']]
 
         teamDataList = []
         for i, row in tqdm(self.gamelog.loc[self.gamelog.isna().any(axis=1)].iterrows(), desc="Updating NFL data", unit="game", total=len(self.gamelog.loc[self.gamelog.isna().any(axis=1)])):
@@ -3118,8 +3173,9 @@ class StatsNFL(Stats):
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
         with open(filepath, 'wb') as outfile:
-            pickle.dump({'gamelog': self.gamelog,
-                        'teamlog': self.teamlog}, outfile, -1)
+            pickle.dump({'players': self.players,
+                         'gamelog': self.gamelog,
+                         'teamlog': self.teamlog}, outfile, -1)
 
     def parse_pbp(self, week, team, year, playerName=""):
         if self.need_pbp:
@@ -4180,6 +4236,8 @@ class StatsNHL(Stats):
             "win": "WL",
             "score": "goals"
         }
+        self.usage_stat = "TimeShare"
+        self.tiebreaker_stat = "Fenwick short"
 
     def load(self):
         """

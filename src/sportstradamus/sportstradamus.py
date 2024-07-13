@@ -1,7 +1,7 @@
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.books import get_pp, get_ud, get_sleeper, get_parp
-from sportstradamus.helpers import archive, get_ev, get_odds, stat_cv, stat_std, accel_asc, banned
+from sportstradamus.helpers import archive, get_ev, get_odds, stat_cv, stat_std, stat_map, accel_asc, banned
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -36,7 +36,6 @@ os.environ["LINE_PROFILE"] = "0"
 @line_profiler.profile
 def main(progress):
     global untapped_markets
-    global stat_map
     # Initialize tqdm based on the value of 'progress' flag
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -68,9 +67,6 @@ def main(progress):
             token.write(cred.to_json())
 
     gc = gspread.authorize(cred)
-
-    with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
-        stat_map = json.load(infile)
 
     sports = []
     nba = StatsNBA()
@@ -302,7 +298,6 @@ def process_offers(offer_dict, book, stats):
 
     """
     global untapped_markets
-    global stat_map
     new_offers = []
     logger.info(f"Processing {book} offers")
     if len(offer_dict) > 0:
@@ -353,7 +348,6 @@ def process_offers(offer_dict, book, stats):
 
 @line_profiler.profile
 def find_correlation(offers, stats, platform):
-    global stat_map
     logger.info("Finding Correlations")
 
     new_map = stat_map[platform].copy()
@@ -396,10 +390,6 @@ def find_correlation(offers, stats, platform):
         "ParlayPlay": [1, 1, 1, 1, 1],
         "Chalkboard": [1, 1, 1, 1, 1]
     }
-    # cutoff_values = { # (m, b)
-    #     "Model": (0, 1.1),
-    #     "Books": (-0.124, 0.936)
-    # }
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
@@ -408,8 +398,6 @@ def find_correlation(offers, stats, platform):
         c = pd.read_csv(pkg_resources.files(data) / (f"{league}_corr.csv"), index_col = [0,1,2])
         c.rename_axis(["team", "market", "correlation"], inplace=True)
         c.columns = ["R"]
-        # cutoff_model = cutoff_values["Model"]
-        # cutoff_books = cutoff_values["Books"]
         stat_data = stats.get(league)
         team_mod_map = banned[platform][league]['team']
         opp_mod_map = banned[platform][league]['opponent']
@@ -826,7 +814,6 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
     Returns:
         list: List of matched offers.
     """
-    global stat_map
 
     market = stat_map[platform].get(market, market)
     if league == "NHL":
@@ -947,7 +934,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     Returns:
         list: List of matched offers.
     """
-    global stat_map
 
     totals_map = archive.default_totals
 
