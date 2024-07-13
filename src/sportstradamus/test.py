@@ -1,6 +1,6 @@
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
-from sportstradamus.books import get_sleeper
-from sportstradamus.helpers import scraper, archive, stat_cv
+from sportstradamus.books import get_ud
+from sportstradamus.helpers import scraper, archive, stat_cv, stat_map
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
 import importlib.resources as pkg_resources
@@ -17,8 +17,25 @@ from time import time
 import requests
 
 pd.options.mode.chained_assignment = None
+archive.__init__("All")
 
-get_sleeper()
+stats = StatsNHL()
+stats.season_start = datetime(2023, 9, 1).date()
+stats.load()
+stats.update()
+
+# offers = get_ud()
+
+# offers = offers["NHL"]
+# offers = {stat_map["Underdog"].get(k): v for k, v in offers.items() if k in stat_map["Underdog"]}
+
+date = '2023-12-31'
+offers = {k: v.get(date) for k, v in archive["NHL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
+
+stats.get_depth(offers)
+# stats.get_depth(offers, date=datetime.strptime(date, "%Y-%m-%d").date())
+
+stats.depth
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
