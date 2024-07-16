@@ -2118,7 +2118,7 @@ class StatsMLB(Stats):
         mlb_teams = mlb.get("teams", {"sportId": 1})
         mlb_upcoming_games = {}
         for game in mlb_games:
-            if game["status"] in ["Pre-Game", "Scheduled"]:
+            if game["status"] in ["Pre-Game", "Scheduled"] and game['game_type'] not in ['A']:
                 awayTeam = [
                     team["abbreviation"].replace("AZ", "ARI")
                     for team in mlb_teams["teams"]
