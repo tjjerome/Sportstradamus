@@ -253,6 +253,9 @@ class Stats:
         self.playerProfile.fillna(0.0, inplace=True)
 
     def get_depth(self, offers, date=datetime.today().date()):
+        if self.league == "MLB":
+            return
+        
         players = set()
         for x in offers.values():
             for player in x:
@@ -1025,6 +1028,12 @@ class StatsNBA(Stats):
             dvpoa = np.nan_to_num(dvpoa, nan=0.0, posinf=0.0, neginf=0.0)
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
+
+    def get_volume_stats(self, offers, date=datetime.today().date()):
+        self.get_depth(offers, date)
+        self.profile_market("MIN", date)
+
+        
 
     @line_profiler.profile
     def get_stats(self, offer, date=datetime.today()):
