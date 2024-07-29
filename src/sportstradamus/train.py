@@ -85,109 +85,109 @@ def meditate(force, league):
 
     all_markets = {
         "NBA": [
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
             "MIN",
+            # "PTS",
+            # "REB",
+            # "AST",
+            # "PRA",
+            # "PR",
+            # "RA",
+            # "PA",
+            # "FG3M",
+            # "fantasy points prizepicks",
+            # "FG3A",
+            # "FTM",
+            # "FGM",
+            # "FGA",
+            # "STL",
+            # "BLK",
+            # "BLST",
+            # "TOV",
+            # "OREB",
+            # "DREB",
+            # "PF",
         ],
-        "NFL": [
-            "passing yards",
-            "rushing yards",
-            "receiving yards",
-            "yards",
-            "qb yards",
-            "fantasy points prizepicks",
-            "fantasy points underdog",
-            "passing tds",
-            "tds",
-            "rushing tds",
-            "receiving tds",
-            "qb tds",
-            "completions",
-            "carries",
-            "receptions",
-            "interceptions",
-            "attempts",
-            "targets",
-            "longest completion",
-            "longest rush",
-            "longest reception",
-            "sacks taken",
-            "passing first downs",
-            "first downs",
-            "fumbles lost",
-            "completion percentage"
-        ],
-        "MLB": [
-            "pitcher strikeouts",
-            "pitching outs",
-            "pitches thrown",
-            "hits allowed",
-            "runs allowed",
-            "walks allowed",
-            # "1st inning runs allowed",
-            # "1st inning hits allowed",
-            "hitter fantasy score",
-            "pitcher fantasy score",
-            "hitter fantasy points underdog",
-            "pitcher fantasy points underdog",
-            "hits+runs+rbi",
-            "total bases",
-            "walks",
-            "stolen bases",
-            "hits",
-            "runs",
-            "rbi",
-            "batter strikeouts",
-            "singles",
-            "doubles",
-            "home runs"
-        ],
-        "NHL": [
-            "saves",
-            "shots",
-            "points",
-            "goalsAgainst",
-            "goalie fantasy points underdog",
-            "skater fantasy points underdog",
-            "blocked",
-            "powerPlayPoints",
-            "sogBS",
-            "fantasy points prizepicks",
-            "hits",
-            "goals",
-            "assists",
-            "faceOffWins",
-            "timeOnIce",
-        ],
-        "WNBA": [
-            "AST",
-            "FG3M",
-            "PA",
-            "PR",
-            "PTS",
-            "RA",
-            "REB",
-            "PRA",
-            "fantasy points prizepicks"
-        ]
+        # "NFL": [
+        #     "passing yards",
+        #     "rushing yards",
+        #     "receiving yards",
+        #     "yards",
+        #     "qb yards",
+        #     "fantasy points prizepicks",
+        #     "fantasy points underdog",
+        #     "passing tds",
+        #     "tds",
+        #     "rushing tds",
+        #     "receiving tds",
+        #     "qb tds",
+        #     "completions",
+        #     "carries",
+        #     "receptions",
+        #     "interceptions",
+        #     "attempts",
+        #     "targets",
+        #     "longest completion",
+        #     "longest rush",
+        #     "longest reception",
+        #     "sacks taken",
+        #     "passing first downs",
+        #     "first downs",
+        #     "fumbles lost",
+        #     "completion percentage"
+        # ],
+        # "MLB": [
+        #     "pitcher strikeouts",
+        #     "pitching outs",
+        #     "pitches thrown",
+        #     "hits allowed",
+        #     "runs allowed",
+        #     "walks allowed",
+        #     # "1st inning runs allowed",
+        #     # "1st inning hits allowed",
+        #     "hitter fantasy score",
+        #     "pitcher fantasy score",
+        #     "hitter fantasy points underdog",
+        #     "pitcher fantasy points underdog",
+        #     "hits+runs+rbi",
+        #     "total bases",
+        #     "walks",
+        #     "stolen bases",
+        #     "hits",
+        #     "runs",
+        #     "rbi",
+        #     "batter strikeouts",
+        #     "singles",
+        #     "doubles",
+        #     "home runs"
+        # ],
+        # "NHL": [
+        #     "saves",
+        #     "shots",
+        #     "points",
+        #     "goalsAgainst",
+        #     "goalie fantasy points underdog",
+        #     "skater fantasy points underdog",
+        #     "blocked",
+        #     "powerPlayPoints",
+        #     "sogBS",
+        #     "fantasy points prizepicks",
+        #     "hits",
+        #     "goals",
+        #     "assists",
+        #     "faceOffWins",
+        #     "timeOnIce",
+        # ],
+        # "WNBA": [
+        #     "AST",
+        #     "FG3M",
+        #     "PA",
+        #     "PR",
+        #     "PTS",
+        #     "RA",
+        #     "REB",
+        #     "PRA",
+        #     "fantasy points prizepicks"
+        # ]
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -264,6 +264,12 @@ def meditate(force, league):
 
             M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
+            step = M["Result"].drop_duplicates().sort_values().diff().min()
+            for i, row in M.loc[M.Odds == 0].iterrows():
+                if np.isnan(row["EV"]):
+                    M.loc[i, "Odds"] = 0.5
+                else:
+                    M.loc[i, "Odds"] = get_odds(row["Line"], row["EV"], cv=cv, step=step)
 
             if len(M.loc[M["Archived"]!=0]) < 10:
                 M.to_csv(filepath)
@@ -275,7 +281,6 @@ def meditate(force, league):
             M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
             X = M.drop(columns=['Result'])
-            step = M["Result"].drop_duplicates().sort_values().diff().min()
 
             categories = ["Home", "Position"]
             if "Position" not in X.columns:
@@ -288,6 +293,14 @@ def meditate(force, league):
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
+
+            B_train = X_train[['Line', 'Odds', 'EV']]
+            B_test = X_test[['Line', 'Odds', 'EV']]
+            X_train.drop(columns=['Line', 'Odds', 'EV'], inplace=True)
+            X_test.drop(columns=['Line', 'Odds', 'EV'], inplace=True)
+
+            X_train.drop(columns=['Team'], inplace=True)
+            X_test.drop(columns=['Team'], inplace=True)
 
             y_train_labels = np.ravel(y_train.to_numpy())
 
@@ -376,35 +389,37 @@ def meditate(force, league):
             prob_params.sort_index(inplace=True)
             prob_params['result'] = y_test['Result']
             X_train.sort_index(inplace=True)
+            B_train.sort_index(inplace=True)
             y_train.sort_index(inplace=True)
             X_test.sort_index(inplace=True)
+            B_test.sort_index(inplace=True)
             y_test.sort_index(inplace=True)
             cv = 1
             if dist == "Poisson":
                 under = poisson.cdf(
-                    X_train["Line"], prob_params_train["rate"])
+                    B_train["Line"], prob_params_train["rate"])
                 push = poisson.pmf(
-                    X_train["Line"], prob_params_train["rate"])
+                    B_train["Line"], prob_params_train["rate"])
                 y_proba_train = under - push/2
                 under = poisson.cdf(
-                    X_test["Line"], prob_params["rate"])
+                    B_test["Line"], prob_params["rate"])
                 push = poisson.pmf(
-                    X_test["Line"], prob_params["rate"])
+                    B_test["Line"], prob_params["rate"])
                 y_proba = under - push/2
                 p = 1
                 ev = prob_params["rate"]
                 entropy = np.mean(
                     np.abs(poisson.cdf(y_test["Result"], prob_params["rate"])-.5))
             elif dist == "Gaussian":
-                high = np.floor((X_train["Line"]+step)/step)*step
-                low = np.ceil((X_train["Line"]-step)/step)*step
+                high = np.floor((B_train["Line"]+step)/step)*step
+                low = np.ceil((B_train["Line"]-step)/step)*step
                 under = norm.cdf(
                     high, prob_params_train["loc"], prob_params_train["scale"])
                 push = under - norm.cdf(
                     low, prob_params_train["loc"], prob_params_train["scale"])
                 y_proba_train = under - push/2
-                high = np.floor((X_test["Line"]+step)/step)*step
-                low = np.ceil((X_test["Line"]-step)/step)*step
+                high = np.floor((B_test["Line"]+step)/step)*step
+                low = np.ceil((B_test["Line"]-step)/step)*step
                 under = norm.cdf(
                     high, prob_params["loc"], prob_params["scale"])
                 push = under - norm.cdf(
@@ -422,33 +437,33 @@ def meditate(force, league):
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
             y_class = (y_train["Result"] >=
-                       X_train["Line"]).astype(int).to_numpy()
+                       B_train["Line"]).astype(int).to_numpy()
             train_ll = log_loss(y_class, y_proba_train)
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
-            X_train.loc[X_train["Odds"] == 0, "Odds"] = 0.5
-            X_test.loc[X_test["Odds"] == 0, "Odds"] = 0.5
-            filt = fit_model_weight(y_proba_train, X_train.Odds.to_numpy().reshape(-1,1), y_class)
+            B_train.loc[B_train["Odds"] == 0, "Odds"] = 0.5
+            B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
+            filt = fit_model_weight(y_proba_train, B_train.Odds.to_numpy().reshape(-1,1), y_class)
             y_proba_filt = filt.predict_proba(
-                np.concatenate([y_proba, X_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
+                np.concatenate([y_proba, B_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
 
             y_class = (y_test["Result"] >=
-                       X_test["Line"]).astype(int)
+                       B_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
             bs0 = brier_score_loss(
                 y_class, 0.5*np.ones_like(y_class), pos_label=1)
-            dev0 = mean_tweedie_deviance(y_test, X_test["Line"], power=p)
+            dev0 = mean_tweedie_deviance(y_test, B_test["Line"], power=p)
             ll0 = log_loss(y_class, 0.5*np.ones_like(y_class))
-            bal0 = (y_test["Result"] > X_test["Line"]).mean()
+            bal0 = (y_test["Result"] > B_test["Line"]).mean()
 
             if cv == 1:
                 entropy0 = np.mean(np.abs(poisson.cdf(
-                    y_test["Result"], X_test["Line"].apply(get_ev, args=(.5,)))-0.5))
+                    y_test["Result"], B_test["Line"].apply(get_ev, args=(.5,)))-0.5))
             else:
                 entropy0 = np.mean(np.abs(norm.cdf(
-                    y_test["Result"], X_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
+                    y_test["Result"], B_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
 
             prec = np.zeros(2)
             acc = np.zeros(2)
@@ -522,7 +537,7 @@ def meditate(force, league):
                 del model
 
             report()
-    # see_features()
+    see_features()
 
 
 def report():

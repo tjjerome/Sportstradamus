@@ -18,6 +18,7 @@ import statsapi as mlb
 import pandas as pd
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 from tqdm.contrib.logging import logging_redirect_tqdm
+import warnings
 
 
 # Load API key
@@ -50,6 +51,9 @@ with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
 
 with open((pkg_resources.files(data) / "goalies.json"), "r") as infile:
     nhl_goalies = json.load(infile)
+
+with open(pkg_resources.files(data) / "feature_filter.json", "r") as infile:
+    feature_filter = json.load(infile)
 
 with open(pkg_resources.files(data) / "banned_combos.json", "r") as infile:
     banned = json.load(infile)
@@ -313,17 +317,20 @@ def get_ev(line, under, cv=1, force_gauss=False):
     Returns:
         float: The expected value (EV).
     """
-    # Poisson dist
-    if cv == 1:
-        if force_gauss:
-            line = float(line)
-            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        # Poisson dist
+        if cv == 1:
+            if force_gauss:
+                line = float(line)
+                return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
+            else:
+                line = np.ceil(float(line) - 1)
+                return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
         else:
-            line = np.ceil(float(line) - 1)
-            return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
-    else:
-        line = float(line)
-        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
+            line = float(line)
+            return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
 
 def get_odds(line, ev, cv=1, force_gauss=False, step=1):
     high = np.floor((line+step)/step)*step

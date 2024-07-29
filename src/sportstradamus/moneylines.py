@@ -276,7 +276,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
 
                     odds.setdefault(market_name, {})
 
-                    outcomes = [o for o in market['outcomes'] if "description" in o and "name" in o]
+                    outcomes = [o for o in market['outcomes'] if "description" in o and "name" in o and o["price"] > 1]
                     outcomes = sorted(outcomes, key=itemgetter('description', 'name'))
                     
                     for player, lines in groupby(outcomes, itemgetter('description')):
@@ -295,7 +295,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                             lines = [[line for line in lines if line['name']=='Over'][0],[line for line in lines if line['name']=='Under'][0]]
                         if len(lines) == 1 and lines[0]['name'] == 'Under':
                             lines[0]['name'] = 'Over'
-                            lines[0]['price'] = 1/(1-1/lines[0]['price'])
+                            under = lines[0]['price']
+                            lines[0]['price'] = under/(under-1)
 
                         line = lines[0]['point'] if 'point' in lines[0] else 0.5
                         odds[market_name][player]["Lines"].append(line)

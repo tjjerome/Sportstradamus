@@ -14,7 +14,7 @@ from sportsdataverse import wnba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter
 import pandas as pd
 import warnings
 import requests
@@ -117,8 +117,8 @@ class Stats:
         
         self.profile_latest_date = date
 
-        self.playerProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain', 'position avg', 'position z'])
-        self.defenseProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']+self.positions)
+        self.playerProfile = pd.DataFrame(columns=['age', 'position', 'depth', 'z', 'position z', 'home', 'moneyline gain', 'totals gain'])
+        self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps']+self.positions)
 
         one_year_ago = date - timedelta(days=300)
         gameDates = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
@@ -182,31 +182,23 @@ class Stats:
         if np.isnan(leagueavg) or np.isnan(leaguestd):
             return
 
-        self.playerProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain', 'position avg', 'position z']] = 0.0
-        self.playerProfile['avg'] = playerGroups[market].mean().div(
-            leagueavg) - 1
+        self.playerProfile[['z', 'home', 'moneyline gain', 'totals gain', 'position z']] = 0.0
         self.playerProfile['z'] = (
             playerGroups[market].mean()-leagueavg).div(leaguestd)
         self.playerProfile['home'] = playerGroups.apply(
             lambda x: x.loc[x[self.log_strings["home"]], market].mean() / x[market].mean()) - 1
-        self.playerProfile['away'] = playerGroups.apply(
-            lambda x: x.loc[~x[self.log_strings["home"]].astype(bool), market].mean()/x[market].mean())-1
 
         defenseGroups = self.short_gamelog.groupby([self.log_strings["opponent"], self.log_strings["game"]])
         defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
         defenseGroups = defenseGames.groupby(self.log_strings["opponent"])
 
-        self.defenseProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0.0
+        self.defenseProfile[['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps']] = 0.0
         leagueavg = defenseGroups[market].mean().mean()
         leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
-        self.defenseProfile['z'] = (
-            defenseGroups[market].mean()-leagueavg).div(leaguestd)
         self.defenseProfile['home'] = defenseGroups.apply(
             lambda x: x.loc[x[self.log_strings["home"]], market].mean() / x[market].mean()) - 1
-        self.defenseProfile['away'] = defenseGroups.apply(
-            lambda x: x.loc[~x[self.log_strings["home"]], market].mean()/x[market].mean())-1
 
         for position in self.positions:
             positionLogs = self.short_gamelog.loc[self.short_gamelog[self.log_strings["position"]] == position]
@@ -217,7 +209,6 @@ class Stats:
                 continue
             idx = list(set(positionGroups.groups.keys()).intersection(
                 set(self.playerProfile.index)))
-            self.playerProfile.loc[idx, 'position avg'] = (positionGroups[market].mean().div(positionAvg) - 1).astype(float)
             self.playerProfile.loc[idx, 'position z'] = (positionGroups[market].mean() - positionAvg).div(positionStd).astype(float)
             positionGroups = positionLogs.groupby(
                 [self.log_strings["opponent"], self.log_strings["game"]])
@@ -256,37 +247,40 @@ class Stats:
         if self.league == "MLB":
             return
         
-        players = set()
-        for x in offers.values():
-            for player in x:
-                if isinstance(player, dict):
-                    player = player["Player"]
-                if " + " in player.replace(" vs. ", " + "):
-                    split_players = player.replace(" vs. ", " + ").split(" + ")
-                    players.add(split_players[0])
-                    players.add(split_players[1])
-                else:
-                    players.add(player)
+        if isinstance(offers, dict):
+            players = list(offers.keys())
+        else:
+            players = [x["Player"] for x in offers]
+
+        for player in players:
+            if " + " in player.replace(" vs. ", " + "):
+                split_players = player.replace(" vs. ", " + ").split(" + ")
+                players.append(split_players[0])
+                players.append(split_players[1])
+
+        players = set(players)
+
+        if self.league == "NBA":
+            player_df = []
+            for team, roster in self.players[self.season].items():
+                roster = [{self.log_strings["player"]: k, self.log_strings["team"]: team}|v for k, v in roster.items()]
+                player_df.extend(roster)
+
+            player_df = pd.DataFrame(player_df)
+        elif self.league == "NHL":
+            player_df = pd.DataFrame(self.players[self.season_start.year].values())
+        else:
+            player_df = self.players
 
         if date < datetime.today().date():
-            player_df = self.gamelog.loc[(self.gamelog[self.log_strings["date"]]==date.strftime("%Y-%m-%d")) & self.gamelog[self.log_strings["player"]].isin(list(players)), [self.log_strings["player"], self.log_strings["team"], self.log_strings["position"]]]
-            player_df.index = player_df[self.log_strings["player"]]
-            player_df.drop(columns=self.log_strings["player"], inplace=True)
-        else:
-            if self.league == "NBA":
-                player_df = {}
-                for team, roster in self.players[self.season].items():
-                    roster = {k: v|{self.log_strings["team"]: team} for k, v in roster.items()}
-                    player_df.update(roster)
+            old_player_df = self.gamelog.loc[(pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date == date) & self.gamelog[self.log_strings["player"]].isin(list(players)), [self.log_strings["player"], self.log_strings["team"], self.log_strings["position"]]]
+            player_df = old_player_df.merge(player_df, on=self.log_strings["player"], suffixes=[None, "_obs"])
+            player_df.drop(columns=[col for col in player_df.columns if "_obs" in col], inplace=True)
 
-                player_df = pd.DataFrame(player_df).T
-                player_df = player_df.loc[list(set(player_df.index) & players)]
-            elif self.league == "NHL":
-                player_df = pd.DataFrame(self.players[self.season_start.year].values())
-                player_df.index = player_df.name
-                player_df = player_df.loc[list(set(player_df.index) & players)]
-            else:
-                player_df = self.players.loc[list(set(self.players.index) & players)]
+        player_df.index = player_df[self.log_strings["player"]]
+        player_df.drop(columns=self.log_strings["player"], inplace=True)
+        player_df = player_df.loc[list(set(player_df.index) & players)]
+        player_df = player_df.loc[~player_df.index.duplicated()]
 
         self.profile_market(self.usage_stat, date=date)
         usage = pd.DataFrame(
@@ -295,22 +289,85 @@ class Stats:
         ranks = player_df.sort_values(self.tiebreaker_stat, ascending=False).groupby(
             [self.log_strings['team'], self.log_strings['position']]).rank(ascending=False, method='first')[self.usage_stat + " short"].astype(int)
 
-        self.depth = ranks.to_dict()
+        self.playerProfile['depth'] = ranks.to_dict()
+        self.playerProfile['position'] = player_df[self.log_strings['position']].apply(lambda x: self.positions.index(x)+1)
+        if self.log_strings.get('age', '') in player_df.columns:
+            self.playerProfile['age'] = player_df[self.log_strings['age']]
 
-    def get_stats(self, offer, game_date):
-        """
-        Retrieves statistics for a given offer and game date.
+        self.playerProfile.fillna(0, inplace=True)
 
-        Args:
-            offer (dict): A dictionary containing the offer details.
-            game_date (datetime.datetime): The date of the game.
+    def get_stats(self, market, offers, date=datetime.today().date()):
+        self.profile_market(market, date)
+        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
+        playergames = self.short_gamelog.groupby(self.log_strings["player"])
+        if isinstance(offers, dict):
+            players = list(offers.keys())
+        else:
+            players = [x["Player"] for x in offers]
 
-        Returns:
-            stats (pd.DataFrame): A DataFrame containing the retrieved statistics.
-        """
-        # Implementation details...
+        for player in players:
+            if " + " in player.replace(" vs. ", " + "):
+                split_players = player.replace(" vs. ", " + ").split(" + ")
+                players.append(split_players[0])
+                players.append(split_players[1])
 
-    def get_training_matrix(self, market):
+        players = set(players)
+
+        stats["Avg1"] = playergames[market].apply(lambda x: x.tail(1).median())
+        stats["Avg3"] = playergames[market].apply(lambda x: x.tail(3).median())
+        stats["Avg5"] = playergames[market].apply(lambda x: x.tail(5).median())
+        stats["Avg10"] = playergames[market].apply(lambda x: x.tail(10).median())
+        stats["AvgYr"] = playergames[market].median()
+        stats["Mean10"] = playergames[market].apply(lambda x: x.tail(10).mean())
+        stats["MeanYr"] = playergames[market].mean()
+        stats["STD10"] = playergames[market].apply(lambda x: x.tail(10).std())
+        stats["STDYr"] = playergames[market].std()
+        stats["DaysOff"] = (date-pd.to_datetime(playergames[self.log_strings["date"]].apply(lambda x: x.tail(1).item())).dt.date).astype('timedelta64[s]').dt.days
+        stats["DaysIntoSeason"] = (date-self.season_start).days
+        stats["GamesPlayed"] = playergames[market].count()
+        stats = stats.loc[list(players&set(stats.index))]
+        stats = stats.loc[~stats.index.duplicated()]
+
+        if date < datetime.today().date():
+            todays_games = self.gamelog.loc[pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date==date]
+            todays_games.index = todays_games[self.log_strings["player"]]
+            todays_games = todays_games.loc[~todays_games.index.duplicated()]
+            stats["Home"] = todays_games[self.log_strings["home"]]
+            stats["Moneyline"] = todays_games["moneyline"]
+            stats["Total"] = todays_games["totals"]
+
+            teams = todays_games[self.log_strings["team"]].to_dict()
+            opponents = todays_games[self.log_strings["opponent"]].to_dict()
+            h2hgames = self.short_gamelog.loc[self.short_gamelog[self.log_strings["opponent"]] == self.short_gamelog[self.log_strings["player"]].map(opponents)].groupby(self.log_strings["player"])
+            stats["AvgH2H"] = h2hgames[market].median()
+            stats["MeanH2H"] = h2hgames[market].mean()
+            stats["H2HPlayed"] = h2hgames[market].count()
+
+        else:
+
+            pass
+
+        stats = stats.join(self.playerProfile.add_prefix("Player "))
+        stats = stats.loc[stats["Player depth"] > 0]
+        teamstats = self.teamProfile.loc[stats.index.map(teams)].add_prefix("Team ")
+        teamstats.index = stats.index
+        stats = stats.join(teamstats)
+        defstats = self.defenseProfile.loc[stats.index.map(opponents)]
+        defstats["position"] = np.diag(defstats.iloc[:,stats["Player position"]+5])
+        defstats.drop(columns=self.positions, inplace=True)
+        defstats.index = stats.index
+        defenseVsLeague = self.short_gamelog.groupby(self.log_strings["opponent"])[market].mean().to_dict()
+        for player, row in stats.iterrows():
+            comps = self.comps[self.positions[int(row["Player position"]-1)]].get(player, [player])
+            defstats.loc[player, 'comps'] = self.short_gamelog.loc[(self.short_gamelog[self.log_strings["opponent"]] == opponents[player]) & (self.short_gamelog[self.log_strings["player"]].isin(comps)), market].mean()/defenseVsLeague[opponents[player]]-1
+
+        stats = stats.join(defstats.add_prefix("Defense "))
+
+        # missing submarket odds, need to fill in somewhere
+        # return stats[feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])].fillna(0)
+        return stats.fillna(0)
+
+    def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves the training data matrix and target labels for a specified market.
 
@@ -321,7 +378,59 @@ class Stats:
             X (pd.DataFrame): The training data matrix.
             y (pd.DataFrame): The target labels.
         """
-        # Implementation details...
+        archive.__init__(self.league)
+
+        matrix = []
+
+        if cutoff_date is None:
+            cutoff_date = (datetime.today()-timedelta(days=850)).date()
+
+        gamelog = self.gamelog.loc[pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date>cutoff_date]
+        gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
+
+        gamedays = gamelog.groupby(self.log_strings["date"])
+        offerKeys = {
+            self.log_strings["player"]: "Player",
+            self.log_strings["team"]: "Team",
+            self.log_strings["opponent"]: "Opponent",
+            self.log_strings["home"]: "Home",
+            market: "Result"
+        }
+        for gameDate, players in tqdm(gamedays, unit="gameday", desc="Gathering Training Data", total=len(gamedays)):
+
+            offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
+            offers = offers_df.to_dict('records')
+
+            self.get_depth(offers, gameDate)
+            
+            stats = self.get_stats(market, offers, gameDate)
+
+            date = gameDate.strftime("%Y-%m-%d")
+
+            evs = []
+            lines = []
+            for player in stats.index:
+                ev = archive.get_ev(self.league, market, date, player)
+                line = archive.get_line(self.league, market, date, player)
+                if np.isnan(ev) and line > 0:
+                    ev = get_ev(line, .5, stat_cv[self.league].get(market,1))
+                
+                lines.append(line)
+                evs.append(ev)
+
+            stats["Line"] = lines
+            stats["Odds"] = 0
+            stats["EV"] = evs
+            offers_df.index = offers_df["Player"]
+            stats = stats.join(offers_df[["Result", "Team"]])
+            stats["Date"] = date
+            stats["Archived"] = ~stats["EV"].isna()
+
+            matrix.extend(stats.to_dict('records'))
+
+        M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+
+        return M
 
 
 class StatsNBA(Stats):
@@ -400,7 +509,8 @@ class StatsNBA(Stats):
             "opponent": "OPP",
             "home": "HOME",
             "win": "WL",
-            "score": "PTS"
+            "score": "PTS",
+            "age": "AGE"
         }
         self.usage_stat = "MIN"
         self.tiebreaker_stat = "USG_PCT short"
@@ -449,6 +559,7 @@ class StatsNBA(Stats):
             players = positionProfile.index
             comps[position] = {players[j]: list(players[i[j]]) for j in range(len(i))}
 
+        self.comps = comps
         filepath = pkg_resources.files(data) / "nba_comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
@@ -1030,13 +1141,19 @@ class StatsNBA(Stats):
             return dvpoa
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
-        self.get_depth(offers, date)
-        self.profile_market("MIN", date)
+        market = "MIN"
+        flat_offers = {}
+        for players in offers.values():
+            flat_offers.update(players)
+        flat_offers.update(offers.get(market, {}))
+        self.profile_market(market, date)
+        self.get_depth(flat_offers, date)
+        stats = self.get_stats(market, flat_offers, date)
 
-        
+        pass
 
     @line_profiler.profile
-    def get_stats(self, offer, date=datetime.today()):
+    def obs_get_stats(self, offer, date=datetime.today()):
         """
         Generate a pandas DataFrame with a summary of relevant stats.
 
@@ -1223,7 +1340,7 @@ class StatsNBA(Stats):
 
         return data
 
-    def get_training_matrix(self, market, cutoff_date=None):
+    def obs_get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves training data in the form of a feature matrix (X) and a target vector (y) for a specified market.
 

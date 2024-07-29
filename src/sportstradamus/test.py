@@ -17,10 +17,9 @@ from time import time
 import requests
 
 pd.options.mode.chained_assignment = None
-archive.__init__("All")
+# archive.__init__("All")
 
-stats = StatsNHL()
-stats.season_start = datetime(2023, 9, 1).date()
+stats = StatsNBA()
 stats.load()
 stats.update()
 
@@ -29,13 +28,10 @@ stats.update()
 # offers = offers["NHL"]
 # offers = {stat_map["Underdog"].get(k): v for k, v in offers.items() if k in stat_map["Underdog"]}
 
-date = '2023-12-31'
-offers = {k: v.get(date) for k, v in archive["NHL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
+# date = '2023-12-31'
+# offers = {k: v.get(date) for k, v in archive["NBA"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
 
-stats.get_depth(offers)
-# stats.get_depth(offers, date=datetime.strptime(date, "%Y-%m-%d").date())
-
-stats.depth
+stats.get_training_matrix("MIN")
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
@@ -67,7 +63,7 @@ stats.depth
 #     col_df = pd.DataFrame(col_stats).T.sort_values("volume", ascending=False)
 #     pass
 
-
+# NBA=stats
 # markets = ["fantasy points prizepicks", "PTS", "REB", "AST", "TOV", "BLK", "STL"]
 
 # gamelog = NBA.gamelog.loc[pd.to_datetime(NBA.gamelog["GAME_DATE"]).dt.date > (datetime.today().date() - timedelta(days=300))]
