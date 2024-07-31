@@ -381,6 +381,49 @@ def merge_dict(a, b, path=None):
             a[key] = b[key]
     return a
 
+def clean_archive(a, cutoff_date=None):
+    if cutoff_date is None:
+        cutoff_date = (datetime.datetime.today()-datetime.timedelta(days=365*3)).date()
+    leagues = list(a.keys())
+    for league in leagues:
+        markets = list(a[league].keys())
+
+        for market in markets:
+            for date in list(a[league][market].keys()):
+                if date == '' or datetime.datetime.strptime(date, "%Y-%m-%d").date() < cutoff_date:
+                    a[league][market].pop(date)
+                    continue
+
+                if market not in ["Moneyline", "Totals", "1st 1 innings"]:
+                    players = list(a[league][market][date].keys())
+                    for player in players:
+                        if player not in a[league][market][date]:
+                            continue
+                        if " + " in player or " vs. " in player:
+                            a[league][market][date].pop(player)
+                            continue
+                        if "Line" in a[league][market][date][player]["EV"]:
+                            a[league][market][date][player]["EV"].pop("Line")
+
+                        player_name = remove_accents(player)
+                        if player_name != player:
+                            a[league][market][date][player_name] = merge_dict(a[league][market][date].get(player_name,{}), a[league][market][date].pop(player))
+
+                        a[league][market][date][player_name]["Lines"] = [line for line in a[league][market][date][player_name]["Lines"] if line]
+
+                        if not len(a[league][market][date][player_name]["EV"]) and not len(a[league][market][date][player_name]["Lines"]):
+                            a[league][market][date].pop(player_name)
+
+                if not len(a[league][market][date]):
+                    a[league][market].pop(date)
+
+            if not len(a[league][market]):
+                a[league].pop(market)
+
+        if not len(a[league]):
+            a.pop(league)
+
+    return a
 
 class Archive:
     """
@@ -621,16 +664,22 @@ class Archive:
                         full_archive = merge_dict(
                             full_archive, {l: self.archive[l]})
 
-                    pickle.dump(full_archive,
+                    pickle.dump(clean_archive(full_archive),
                                 outfile, protocol=-1)
                 else:
-                    pickle.dump(merge_dict(full_archive, {league: self.archive[league]}),
+                    if league in ["MLB", "NHL"]:
+                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*2)).date()
+                    elif league == "NFL":
+                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*4)).date()
+                    else:
+                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*2)).date()
+                    pickle.dump(clean_archive(merge_dict(full_archive, {league: self.archive[league]}), cutoff_date),
                                 outfile, protocol=-1)
-
+        
+        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=7)).date()
         filepath = pkg_resources.files(data) / "archive.dat"
-        self.clip()
         with open(filepath, "wb") as outfile:
-            pickle.dump(self.archive, outfile, protocol=-1)
+            pickle.dump(clean_archive(self.archive, cutoff_date), outfile, protocol=-1)
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
