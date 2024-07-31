@@ -11,7 +11,7 @@ import importlib.resources as pkg_resources
 from sportstradamus import creds, data
 from time import sleep
 from scipy.stats import poisson, skellam, norm, iqr
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, minimize
 from scipy.integrate import dblquad
 import numpy as np
 import statsapi as mlb
@@ -347,6 +347,18 @@ def get_odds(line, ev, cv=1, force_gauss=False, step=1):
         push = under - norm.cdf(low, ev, ev*cv)
         return under - push/2
 
+def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
+
+    def objective(w, m, s):
+        if s > 0:
+            v = w if w >= 1 else 1/w
+            return max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0)
+        else:
+            return max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0)
+        
+    res = minimize(objective, [1], args=(mean, std), bounds=[(.5, 2)], tol=1e-3, method='TNC')
+    return res.x[0]
+
 def merge_dict(a, b, path=None):
     "merges b into a"
     if path is None:
@@ -511,6 +523,9 @@ class Archive:
         arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
         if not arr:
             return .5
+        elif type(arr) is not dict:
+            self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).pop(team)
+            return .5
         for book, ev in arr.items():
             a.append(ev)
             w.append(book_weights.get(league, {}).get("Moneyline", {}).get(book, 1))
@@ -522,6 +537,9 @@ class Archive:
         w = []
         arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
         if not arr:
+            return self.default_totals.get(league, 1)
+        elif type(arr) is not dict:
+            self.archive.get(league, {}).get("Totals", {}).get(date, {}).pop(team)
             return self.default_totals.get(league, 1)
         for book, ev in arr.items():
             a.append(ev)
