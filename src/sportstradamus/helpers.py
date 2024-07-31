@@ -350,11 +350,11 @@ def get_odds(line, ev, cv=1, force_gauss=False, step=1):
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
 
     def objective(w, m, s):
+        v = w if w >= 1 else 1/w
         if s > 0:
-            v = w if w >= 1 else 1/w
-            return max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0)
+            return 100*max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0) + (1-v)^2
         else:
-            return max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0)
+            return 100*max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0) + (1-v)^2
         
     res = minimize(objective, [1], args=(mean, std), bounds=[(.5, 2)], tol=1e-3, method='TNC')
     return res.x[0]

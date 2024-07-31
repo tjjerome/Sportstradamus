@@ -279,7 +279,7 @@ def meditate(force, league):
 
             M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
-            X = M.drop(columns=['Result'])
+            X = M[stat_data.get_stat_columns(market)]
 
             categories = ["Home", "Player position"]
             if "Player position" not in X.columns:
