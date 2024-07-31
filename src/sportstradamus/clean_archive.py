@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 
 archive = Archive("All")
+archive.write(True)
 
 leagues = list(archive.archive.keys())
 for league in tqdm(leagues, unit="leagues", position=0):
