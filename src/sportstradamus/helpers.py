@@ -11,13 +11,14 @@ import importlib.resources as pkg_resources
 from sportstradamus import creds, data
 from time import sleep
 from scipy.stats import poisson, skellam, norm, iqr
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, minimize
 from scipy.integrate import dblquad
 import numpy as np
 import statsapi as mlb
 import pandas as pd
 from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
 from tqdm.contrib.logging import logging_redirect_tqdm
+import warnings
 
 
 # Load API key
@@ -38,6 +39,9 @@ with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
 
 with open((pkg_resources.files(data) / "stat_std.json"), "r") as infile:
     stat_std = json.load(infile)
+    
+with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
+    stat_map = json.load(infile)
 
 with open((pkg_resources.files(data) / "book_weights.json"), "r") as infile:
     book_weights = json.load(infile)
@@ -47,6 +51,9 @@ with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
 
 with open((pkg_resources.files(data) / "goalies.json"), "r") as infile:
     nhl_goalies = json.load(infile)
+
+with open(pkg_resources.files(data) / "feature_filter.json", "r") as infile:
+    feature_filter = json.load(infile)
 
 with open(pkg_resources.files(data) / "banned_combos.json", "r") as infile:
     banned = json.load(infile)
@@ -310,17 +317,20 @@ def get_ev(line, under, cv=1, force_gauss=False):
     Returns:
         float: The expected value (EV).
     """
-    # Poisson dist
-    if cv == 1:
-        if force_gauss:
-            line = float(line)
-            return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        # Poisson dist
+        if cv == 1:
+            if force_gauss:
+                line = float(line)
+                return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
+            else:
+                line = np.ceil(float(line) - 1)
+                return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
         else:
-            line = np.ceil(float(line) - 1)
-            return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
-    else:
-        line = float(line)
-        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
+            line = float(line)
+            return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
 
 def get_odds(line, ev, cv=1, force_gauss=False, step=1):
     high = np.floor((line+step)/step)*step
@@ -336,6 +346,18 @@ def get_odds(line, ev, cv=1, force_gauss=False, step=1):
         under = norm.cdf(high, ev, ev*cv)
         push = under - norm.cdf(low, ev, ev*cv)
         return under - push/2
+
+def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
+
+    def objective(w, m, s):
+        v = w if w >= 1 else 1/w
+        if s > 0:
+            return 100*max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0) + (1-v)^2
+        else:
+            return 100*max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0) + (1-v)^2
+        
+    res = minimize(objective, [1], args=(mean, std), bounds=[(.5, 2)], tol=1e-3, method='TNC')
+    return res.x[0]
 
 def merge_dict(a, b, path=None):
     "merges b into a"
@@ -359,6 +381,49 @@ def merge_dict(a, b, path=None):
             a[key] = b[key]
     return a
 
+def clean_archive(a, cutoff_date=None):
+    if cutoff_date is None:
+        cutoff_date = (datetime.datetime.today()-datetime.timedelta(days=365*3)).date()
+    leagues = list(a.keys())
+    for league in leagues:
+        markets = list(a[league].keys())
+
+        for market in markets:
+            for date in list(a[league][market].keys()):
+                if date == '' or datetime.datetime.strptime(date, "%Y-%m-%d").date() < cutoff_date:
+                    a[league][market].pop(date)
+                    continue
+
+                if market not in ["Moneyline", "Totals", "1st 1 innings"]:
+                    players = list(a[league][market][date].keys())
+                    for player in players:
+                        if player not in a[league][market][date]:
+                            continue
+                        if " + " in player or " vs. " in player:
+                            a[league][market][date].pop(player)
+                            continue
+                        if "Line" in a[league][market][date][player]["EV"]:
+                            a[league][market][date][player]["EV"].pop("Line")
+
+                        player_name = remove_accents(player)
+                        if player_name != player:
+                            a[league][market][date][player_name] = merge_dict(a[league][market][date].get(player_name,{}), a[league][market][date].pop(player))
+
+                        a[league][market][date][player_name]["Lines"] = [line for line in a[league][market][date][player_name]["Lines"] if line]
+
+                        if not len(a[league][market][date][player_name]["EV"]) and not len(a[league][market][date][player_name]["Lines"]):
+                            a[league][market][date].pop(player_name)
+
+                if not len(a[league][market][date]):
+                    a[league][market].pop(date)
+
+            if not len(a[league][market]):
+                a[league].pop(market)
+
+        if not len(a[league]):
+            a.pop(league)
+
+    return a
 
 class Archive:
     """
@@ -501,6 +566,9 @@ class Archive:
         arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
         if not arr:
             return .5
+        elif type(arr) is not dict:
+            self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).pop(team)
+            return .5
         for book, ev in arr.items():
             a.append(ev)
             w.append(book_weights.get(league, {}).get("Moneyline", {}).get(book, 1))
@@ -512,6 +580,9 @@ class Archive:
         w = []
         arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
         if not arr:
+            return self.default_totals.get(league, 1)
+        elif type(arr) is not dict:
+            self.archive.get(league, {}).get("Totals", {}).get(date, {}).pop(team)
             return self.default_totals.get(league, 1)
         for book, ev in arr.items():
             a.append(ev)
@@ -593,16 +664,22 @@ class Archive:
                         full_archive = merge_dict(
                             full_archive, {l: self.archive[l]})
 
-                    pickle.dump(full_archive,
+                    pickle.dump(clean_archive(full_archive),
                                 outfile, protocol=-1)
                 else:
-                    pickle.dump(merge_dict(full_archive, {league: self.archive[league]}),
+                    if league in ["MLB", "NHL"]:
+                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*2)).date()
+                    elif league == "NFL":
+                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*4)).date()
+                    else:
+                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*2)).date()
+                    pickle.dump(clean_archive(merge_dict(full_archive, {league: self.archive[league]}), cutoff_date),
                                 outfile, protocol=-1)
-
+        
+        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=7)).date()
         filepath = pkg_resources.files(data) / "archive.dat"
-        self.clip()
         with open(filepath, "wb") as outfile:
-            pickle.dump(self.archive, outfile, protocol=-1)
+            pickle.dump(clean_archive(self.archive, cutoff_date), outfile, protocol=-1)
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
