@@ -642,7 +642,8 @@ def see_features():
     with open(pkg_resources.files(data) / "most_important_features.json", "w") as outfile:
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
-    pd.DataFrame(feature_correlations, columns=features).to_csv(pkg_resources.files(data) / "feature_correlations.csv")
+    pd.DataFrame(feature_correlations, index=[
+                      market[:-4] for market in model_list]).T.to_csv(pkg_resources.files(data) / "feature_correlations.csv")
 
 def fit_book_weights(league, market):
     global book_weights
