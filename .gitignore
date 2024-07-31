@@ -182,3 +182,5 @@ src/sportstradamus/data/book_weights.json
 src/sportstradamus/data/goalies.json
 src/profile_output.lprof
 profile_output.lprof
+*.dat:Zone.Identifier
+*.dat:shield
