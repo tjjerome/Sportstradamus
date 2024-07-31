@@ -17,7 +17,7 @@ from time import time
 import requests
 
 pd.options.mode.chained_assignment = None
-# archive.__init__("All")
+archive.__init__("All")
 
 stats = StatsNBA()
 stats.load()
@@ -28,10 +28,10 @@ stats.update()
 # offers = offers["NHL"]
 # offers = {stat_map["Underdog"].get(k): v for k, v in offers.items() if k in stat_map["Underdog"]}
 
-# date = '2023-12-31'
-# offers = {k: v.get(date) for k, v in archive["NBA"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
+date = '2023-12-31'
+offers = {k: v.get(date) for k, v in archive["NBA"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
 
-stats.get_training_matrix("MIN")
+stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]

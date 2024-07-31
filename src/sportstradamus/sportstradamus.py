@@ -228,7 +228,7 @@ def main(progress):
         model = filedict["model"]
 
         playerStats, playerData = nfl.get_fantasy()
-        categories = ["Home", "Position"]
+        categories = ["Home", "Player position"]
         for c in categories:
             playerStats[c] = playerStats[c].astype('category')
 
@@ -407,7 +407,7 @@ def find_correlation(offers, stats, platform):
                 x, int) else [positions[league][i] for i in x])
             combo_df = league_df.loc[league_df.Player.str.contains("\+|vs.")]
             league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
-            player_df = league_df[["Player", "Team", "Position"]]
+            player_df = league_df[["Player", "Team", "Player position"]]
             for i, row in combo_df.iterrows():
                 players = row.Player.replace("vs.", "+").split(" + ")
                 teams = row.Team.split("/")
@@ -417,7 +417,7 @@ def find_correlation(offers, stats, platform):
                 entries = []
                 for j in np.arange(len(players)):
                     entries.append(
-                        {"Player": players[j], "Team": teams[j], "Position": pos[j]})
+                        {"Player": players[j], "Team": teams[j], "Player position": pos[j]})
 
                 player_df = pd.concat([player_df, pd.DataFrame(entries)])
 
@@ -430,7 +430,7 @@ def find_correlation(offers, stats, platform):
                 columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
             player_df = player_df.merge(usage, how='left').fillna(0)
             ranks = player_df.sort_values(tiebreaker_str[league], ascending=False).groupby(
-                ["Team", "Position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
+                ["Team", "Player position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
             player_df.Position = player_df.Position + ranks.astype(str)
             player_df.index = player_df.Player
             player_df = player_df.Position.to_dict()
@@ -452,8 +452,8 @@ def find_correlation(offers, stats, platform):
                 "Fantasy Points": "fantasy points prizepicks"
             })
 
-        league_df["cMarket"] = league_df.apply(lambda x: [x["Position"] + "." + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))] if isinstance(
-            x["Position"], str) else [p + "." + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", "")) for p in x["Position"]], axis=1)
+        league_df["cMarket"] = league_df.apply(lambda x: [x["Player position"] + "." + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))] if isinstance(
+            x["Player position"], str) else [p + "." + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", "")) for p in x["Player position"]], axis=1)
 
         league_df["Desc"] = league_df[[
             "Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
@@ -955,9 +955,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         step = filedict["step"]
         cv = filedict["cv"]
 
-        categories = ["Home", "Position"]
-        if "Position" not in playerStats.columns:
-            categories.remove("Position")
+        categories = ["Home", "Player position"]
+        if "Player position" not in playerStats.columns:
+            categories.remove("Player position")
         for c in categories:
             playerStats[c] = playerStats[c].astype('category')
 
@@ -1227,11 +1227,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             o["O/U"] = np.mean([s["Total"] for s in stats]) / \
                 totals_map.get(o["League"], 1)
             o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
-            if ("Position" in stats[0]) and ("Position" in stats[1]):
-                o["Position"] = (int(stats[0]["Position"]),
-                                    int(stats[1]["Position"]))
+            if ("Player position" in stats[0]) and ("Player position" in stats[1]):
+                o["Player position"] = (int(stats[0]["Player position"]),
+                                    int(stats[1]["Player position"]))
             else:
-                o["Position"] = (-1, -1)
+                o["Player position"] = (-1, -1)
         elif "vs." in o["Player"]:
             avg5 = stats[0]["Avg5"] - stats[1]["Avg5"]
             o["Avg 5"] = avg5 + o["Line"]
@@ -1243,11 +1243,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 totals_map.get(o["League"], 1)
             o["DVPOA"] = hmean(
                 [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
-            if ("Position" in stats[0]) and ("Position" in stats[1]):
-                o["Position"] = (int(stats[0]["Position"]),
-                                    int(stats[1]["Position"]))
+            if ("Player position" in stats[0]) and ("Player position" in stats[1]):
+                o["Player position"] = (int(stats[0]["Player position"]),
+                                    int(stats[1]["Player position"]))
             else:
-                o["Position"] = (-1, -1)
+                o["Player position"] = (-1, -1)
         else:
             o["Avg 5"] = stats["Avg5"] - \
                 o["Line"] if stats["Avg5"] != 0 else 0
@@ -1256,10 +1256,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             o["Moneyline"] = stats["Moneyline"]
             o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
             o["DVPOA"] = stats["DVPOA"]
-            if "Position" in stats:
-                o["Position"] = int(stats["Position"])
+            if "Player position" in stats:
+                o["Player position"] = int(stats["Player position"])
             else:
-                o["Position"] = -1
+                o["Player position"] = -1
 
         if 3 > o.get("Boost", 1) > .5:
             new_offers.append(o)

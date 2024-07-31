@@ -248,9 +248,7 @@ def meditate(force, league):
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0).dropna()
-                cutoff_date = pd.to_datetime(M.loc[M.Archived==1, "Date"]).max().date()
-                if pd.isnull(cutoff_date):
-                    cutoff_date = pd.to_datetime(M["Date"]).max().date()
+                cutoff_date = pd.to_datetime(M["Date"]).max().date()                    
                 start_date = (datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))).date()
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:
@@ -264,6 +262,7 @@ def meditate(force, league):
 
             M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
+            M.loc[M["Line"] == 0, "Line"] = M.loc[M["Line"] == 0, "Avg10"]
             step = M["Result"].drop_duplicates().sort_values().diff().min()
             for i, row in M.loc[M.Odds == 0].iterrows():
                 if np.isnan(row["EV"]):
@@ -282,9 +281,9 @@ def meditate(force, league):
             y = M[['Result']]
             X = M.drop(columns=['Result'])
 
-            categories = ["Home", "Position"]
-            if "Position" not in X.columns:
-                categories.remove("Position")
+            categories = ["Home", "Player position"]
+            if "Player position" not in X.columns:
+                categories.remove("Player position")
             for c in categories:
                 X[c] = X[c].astype('category')
 
@@ -584,6 +583,7 @@ def see_features():
     model_list = [f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name]
     model_list.sort()
     feature_importances = []
+    feature_correlations = []
     features_to_filter = {}
     most_important = {}
     for model_str in tqdm(model_list, desc="Analyzing feature importances...", unit="market"):
@@ -595,14 +595,17 @@ def see_features():
         M = pd.read_csv(filepath, index_col=0)
 
         y = M[['Result']]
+        C = M.corr()["Result"]
         X = M.drop(columns=['Result', 'EV', 'P'])
+        C = C.drop(['Result', 'EV', 'P'])
         if filedict["distribution"] == "Gaussian":
             X.drop(columns=["STD"], inplace=True)
+            C.drop(["STD"], inplace=True)
         features = X.columns
 
-        categories = ["Home", "Position"]
-        if "Position" not in features:
-            categories.remove("Position")
+        categories = ["Home", "Player position"]
+        if "Player position" not in features:
+            categories.remove("Player position")
         for c in categories:
             X[c] = X[c].astype('category')
 
@@ -619,6 +622,7 @@ def see_features():
         vals = vals/np.sum(vals)*100
         feature_importances.append(
             {k: v for k, v in list(zip(features, vals))})
+        feature_correlations.append(C.to_dict())
         
         features_to_filter[model_str[:-4]] = list(features[vals == 0])
         most_important[model_str[:-4]] = list(features[np.argpartition(vals, -10)[-10:]])
@@ -638,6 +642,7 @@ def see_features():
     with open(pkg_resources.files(data) / "most_important_features.json", "w") as outfile:
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
+    pd.DataFrame(feature_correlations, columns=features).to_csv(pkg_resources.files(data) / "feature_correlations.csv")
 
 def fit_book_weights(league, market):
     global book_weights
@@ -745,15 +750,15 @@ def trim_matrix(M):
         M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
     M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
 
-    if "Position" in M.columns:
-        for i in M.Position.unique():
+    if "Player position" in M.columns:
+        for i in M["Player position"].unique():
             target = M.loc[(M["Archived"] == 1) & (
-                M["Position"] == i), "Line"].median()
+                M["Player position"] == i), "Line"].median()
 
             less = M.loc[(M["Archived"] != 1) & (
-                M["Position"] == i) & (M["Line"] < target), "Line"]
+                M["Player position"] == i) & (M["Line"] < target), "Line"]
             more = M.loc[(M["Archived"] != 1) & (
-                M["Position"] == i) & (M["Line"] > target), "Line"]
+                M["Player position"] == i) & (M["Line"] > target), "Line"]
 
             n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
             if n > 0:
@@ -762,7 +767,7 @@ def trim_matrix(M):
                     counts, bins = np.histogram(less)
                     counts = counts/len(less)
                     actuals = M.loc[(M["Archived"] == 1) & (
-                        M["Position"] == i) & (M["Line"] < target), "Line"]
+                        M["Player position"] == i) & (M["Line"] < target), "Line"]
                     actual_counts, bins = np.histogram(
                         actuals, bins)
                     if len(actuals):
@@ -779,7 +784,7 @@ def trim_matrix(M):
                     counts, bins = np.histogram(more)
                     counts = counts/len(more)
                     actuals = M.loc[(M["Archived"] == 1) & (
-                        M["Position"] == i) & (M["Line"] > target), "Line"]
+                        M["Player position"] == i) & (M["Line"] > target), "Line"]
                     actual_counts, bins = np.histogram(
                         actuals, bins)
                     if len(actuals):

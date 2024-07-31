@@ -22,31 +22,11 @@ with open(filepath, "r") as infile:
 sport="MLB"
 key="baseball_mlb"
 
-Date = datetime(2024, 6, 21, 12)
+Date = datetime(2022, 5, 6, 12)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
 print(sport)
-while Date.astimezone(pytz.utc).date() < datetime(2024, 7, 29).date():
-    if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
-        Date = Date + timedelta(days=1)
-        continue
-
-    print(Date)
-
-    archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-    if Date.astimezone(pytz.utc).date() > datetime(2023, 5, 3).date():
-        archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
-
-    Date = Date + timedelta(days=1)
-
-sport="WNBA"
-key="basketball_wnba"
-
-Date = datetime(2024, 7, 22, 12)
-Date = pytz.timezone("America/Chicago").localize(Date)
-
-print(sport)
-while Date.astimezone(pytz.utc).date() < datetime(2024, 7, 29).date():
+while Date.astimezone(pytz.utc).date() < datetime(2022, 5, 7).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue

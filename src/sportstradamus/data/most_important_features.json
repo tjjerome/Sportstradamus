@@ -2,13 +2,13 @@
     "NBA_MIN": [
         "Player MIN",
         "DaysOff",
-        "Player z",
+        "Player MIN short",
         "Avg3",
+        "Player depth",
+        "Player z",
+        "AvgYr",
         "MeanYr",
         "STDYr",
-        "AvgYr",
-        "Player depth",
-        "Player MIN short",
         "Avg1"
     ],
     "NBA_ALL": [
@@ -16,11 +16,11 @@
         "Avg1",
         "STDYr",
         "AvgYr",
-        "Player depth",
-        "Player MIN short",
-        "Avg3",
-        "DaysOff",
         "Player z",
+        "Player depth",
+        "Avg3",
+        "Player MIN short",
+        "DaysOff",
         "Player MIN"
     ],
     "NFL_ALL": [
@@ -64,11 +64,11 @@
         "Avg1",
         "STDYr",
         "AvgYr",
-        "Player depth",
-        "Player MIN short",
-        "Avg3",
-        "DaysOff",
         "Player z",
+        "Player depth",
+        "Avg3",
+        "Player MIN short",
+        "DaysOff",
         "Player MIN"
     ]
 }

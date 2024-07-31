@@ -1,16 +1,6 @@
 {
     "NBA_MIN": [
-        "Home",
-        "Moneyline",
-        "Total",
-        "Player PCT_STL",
-        "Player PCT_FG3A short",
-        "Player TS_PCT growth",
-        "Player FG_PCT growth",
-        "Player PCT_DREB growth",
-        "Team REB_PCT",
-        "Defense PCT_AST_2PM",
-        "Defense OPP_BLKA",
-        "Defense OPP_PCT_AST_2PM"
+        "Player AST_48 short",
+        "Defense OPP_OFF_RATING"
     ]
 }

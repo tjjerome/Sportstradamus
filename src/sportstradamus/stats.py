@@ -14,7 +14,7 @@ from sportsdataverse import wnba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro
 import pandas as pd
 import warnings
 import requests
@@ -22,6 +22,8 @@ from time import time
 from io import StringIO
 import line_profiler
 
+# flag to clean up gamelogs
+clean_data=False
 
 class Stats:
     """
@@ -60,6 +62,7 @@ class Stats:
         self.bucket_market = ""
         self.profile_latest_date = datetime(year=1900, month=1, day=1).date()
         self.profiled_market = ""
+        self.volume_stats = []
         self.playerProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
         self.teamProfile = pd.DataFrame(columns=['avg', 'home', 'away'])
@@ -117,7 +120,7 @@ class Stats:
         
         self.profile_latest_date = date
 
-        self.playerProfile = pd.DataFrame(columns=['age', 'position', 'depth', 'z', 'position z', 'home', 'moneyline gain', 'totals gain'])
+        self.playerProfile = pd.DataFrame(columns=['team', 'age', 'position', 'depth', 'z', 'position z', 'home', 'moneyline gain', 'totals gain'])
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps']+self.positions)
 
         one_year_ago = date - timedelta(days=300)
@@ -291,6 +294,7 @@ class Stats:
 
         self.playerProfile['depth'] = ranks.to_dict()
         self.playerProfile['position'] = player_df[self.log_strings['position']].apply(lambda x: self.positions.index(x)+1)
+        self.playerProfile['team'] = player_df[self.log_strings['team']]
         if self.log_strings.get('age', '') in player_df.columns:
             self.playerProfile['age'] = player_df[self.log_strings['age']]
 
@@ -367,6 +371,22 @@ class Stats:
         # return stats[feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])].fillna(0)
         return stats.fillna(0)
 
+    def get_volume_stats(self, offers, date=datetime.today().date()):
+        return
+
+    def get_stat_columns(self, market):
+        cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])
+        profile_cols = set(["Player "+col.replace(" growth", "").replace(" short", "") for col in self.playerProfile.columns if " growth" in col or " short" in col])
+        
+        count = 1
+        for i, c in enumerate(cols.copy()):
+            if c in profile_cols:
+                cols.insert(i+count, c+" growth")
+                cols.insert(i+count, c+" short")
+                count = count + 2
+
+        return cols
+
     def get_training_matrix(self, market, cutoff_date=None):
         """
         Retrieves the training data matrix and target labels for a specified market.
@@ -401,7 +421,10 @@ class Stats:
             offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
             offers = offers_df.to_dict('records')
 
-            self.get_depth(offers, gameDate)
+            if market in self.volume_stats:
+                self.get_depth(offers, gameDate)
+            else:
+                self.get_volume_stats(offers, gameDate)
             
             stats = self.get_stats(market, offers, gameDate)
 
@@ -422,7 +445,7 @@ class Stats:
             stats["Odds"] = 0
             stats["EV"] = evs
             offers_df.index = offers_df["Player"]
-            stats = stats.join(offers_df[["Result", "Team"]])
+            stats = stats.join(offers_df["Result"])
             stats["Date"] = date
             stats["Archived"] = ~stats["EV"].isna()
 
@@ -497,6 +520,8 @@ class StatsNBA(Stats):
                                 'OPP_PCT_PTS_OFF_TOV', 'OPP_PCT_PTS_PAINT', 'OPP_PCT_AST_2PM', 'OPP_PCT_UAST_2PM', 'OPP_PCT_AST_3PM',
                                 'OPP_PCT_UAST_3PM', 'OPP_PCT_AST_FGM', 'OPP_PCT_UAST_FGM', 'OPP_OFF_RATING',
                                 'OPP_DEF_RATING', 'OPP_OREB_PCT', 'OPP_DREB_PCT', 'OPP_REB_PCT', 'OPP_TM_TOV_PCT', 'OPP_PIE']
+        
+        self.volume_stats = ["MIN"]
         self.default_total = 111.667
         self.log_strings = {
             "game": "GAME_ID",
@@ -906,9 +931,11 @@ class StatsNBA(Stats):
         self.teamlog.loc[self.teamlog[self.log_strings["opponent"]]
                          == 'SA', self.log_strings["opponent"]] = "SAS"
 
-        # self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
-        # self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
-        # self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+            self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
+            archive.__init__(self.league)
+            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+            self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
@@ -1148,9 +1175,55 @@ class StatsNBA(Stats):
         flat_offers.update(offers.get(market, {}))
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
-        stats = self.get_stats(market, flat_offers, date)
+        playerStats = self.get_stats(market, flat_offers, date)
+        # playerStats = playerStats[self.get_stat_columns(market)]
 
-        pass
+        filename = "_".join([self.league, market]).replace(" ", "-")
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                filedict = pickle.load(infile)
+            model = filedict["model"]
+            dist = filedict["distribution"]
+
+            categories = ["Home", "Player position"]
+            if "Player position" not in playerStats.columns:
+                categories.remove("Player position")
+            for c in categories:
+                playerStats[c] = playerStats[c].astype('category')
+
+            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+
+            model.start_values = sv
+            prob_params = pd.DataFrame()
+            preds = model.predict(
+                playerStats.drop(columns="Player team"), pred_type="parameters")
+            preds.index = playerStats.index
+            prob_params = pd.concat([prob_params, preds])
+
+            prob_params.sort_index(inplace=True)
+            playerStats.sort_index(inplace=True)
+
+        else:
+            logger.warning(f"{filename} missing")
+            return []
+
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std"}))
+
+        teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
+        for team, team_df in teams:
+            total = team_df[f"proj {market} mean"].sum()
+            std = team_df[f"proj {market} std"].sum()
+            count = len(team_df)
+
+            fit_factor = fit_distro(total, std, 20*count, 300)
+            self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"]*fit_factor
+            self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
+
+        self.playerProfile.fillna(0, inplace=True)
 
     @line_profiler.profile
     def obs_get_stats(self, offer, date=datetime.today()):
@@ -1659,8 +1732,11 @@ class StatsWNBA(StatsNBA):
                          == 'WSH', self.log_strings["opponent"]] = "WAS"
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
-        # self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
-        # self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+
+        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+            archive.__init__(self.league)
+            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+            self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
         player_df = stat_df.drop_duplicates("PLAYER_ID")[["PLAYER_NAME", "TEAM_ABBREVIATION", "POS"]]
         player_df.index = player_df.PLAYER_NAME
@@ -2368,9 +2444,11 @@ class StatsMLB(Stats):
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
 
-        # self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"][:10], x["team"]), axis=1)
-        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"][:10], x["team"]), axis=1)
+        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+            archive.__init__(self.league)
+            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"][:10], x["team"]), axis=1)
+            self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"][:10], x["team"]), axis=1)
 
         # Write to file
         with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
@@ -3292,9 +3370,11 @@ class StatsNFL(Stats):
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
 
-        self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
-        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1)
-        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1)
+        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+            self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
+            archive.__init__(self.league)
+            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1)
+            self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1)
 
         # Save the updated player data
         filepath = pkg_resources.files(data) / "nfl_data.dat"
@@ -4693,9 +4773,11 @@ class StatsNHL(Stats):
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
         self.teamlog.drop_duplicates(inplace=True)
 
-        self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-        self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
-        self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
+        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+            archive.__init__(self.league)
+            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
+            self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
 
         # Write to file
         with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
