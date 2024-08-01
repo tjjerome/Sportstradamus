@@ -184,3 +184,4 @@ src/profile_output.lprof
 profile_output.lprof
 *.dat:Zone.Identifier
 *.dat:shield
+archive/*
