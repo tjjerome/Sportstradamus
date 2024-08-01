@@ -86,26 +86,26 @@ def meditate(force, league):
     all_markets = {
         "NBA": [
             "MIN",
-            # "PTS",
-            # "REB",
-            # "AST",
-            # "PRA",
-            # "PR",
-            # "RA",
-            # "PA",
-            # "FG3M",
-            # "fantasy points prizepicks",
-            # "FG3A",
-            # "FTM",
-            # "FGM",
-            # "FGA",
-            # "STL",
-            # "BLK",
-            # "BLST",
-            # "TOV",
-            # "OREB",
-            # "DREB",
-            # "PF",
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
         ],
         # "NFL": [
         #     "passing yards",
@@ -232,6 +232,7 @@ def meditate(force, league):
 
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+            need_model = True
             if os.path.isfile(filepath):
                 with open(filepath, 'rb') as infile:
                     filedict = pickle.load(infile)
@@ -240,6 +241,8 @@ def meditate(force, league):
                     dist = filedict['distribution']
                     cv = filedict['cv']
                     step = filedict['step']
+                
+                need_model = False
             else:
                 filedict = {}
 
@@ -247,7 +250,7 @@ def meditate(force, league):
             cv = stat_cv[league].get(market, 1)
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
             if os.path.isfile(filepath):
-                M = pd.read_csv(filepath, index_col=0).dropna()
+                M = pd.read_csv(filepath, index_col=0)
                 cutoff_date = pd.to_datetime(M["Date"]).max().date()                    
                 start_date = (datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))).date()
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
@@ -257,16 +260,16 @@ def meditate(force, league):
 
             new_M = stat_data.get_training_matrix(market, cutoff_date)
 
-            if new_M.empty and not force:
+            if new_M.empty and not force and not need_model:
                 continue
 
             M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date)
-            M.loc[M["Line"] == 0, "Line"] = M.loc[M["Line"] == 0, "Avg10"]
             step = M["Result"].drop_duplicates().sort_values().diff().min()
-            for i, row in M.loc[M.Odds == 0].iterrows():
-                if np.isnan(row["EV"]):
+            for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
+                if np.isnan(row["EV"]) or row["EV"] == 0:
                     M.loc[i, "Odds"] = 0.5
+                    M.loc[i, "EV"] = M.loc[i, "Line"] if cv != 1 else get_ev(M.loc[i, "Line"], .5, cv)
                 else:
                     M.loc[i, "Odds"] = get_odds(row["Line"], row["EV"], cv=cv, step=step)
 
@@ -277,7 +280,6 @@ def meditate(force, league):
             M = trim_matrix(M)
             M.to_csv(filepath)
 
-            M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
             X = M[stat_data.get_stat_columns(market)]
 
@@ -293,13 +295,8 @@ def meditate(force, league):
                 X, y, test_size=0.2, random_state=42
             )
 
-            B_train = X_train[['Line', 'Odds', 'EV']]
-            B_test = X_test[['Line', 'Odds', 'EV']]
-            X_train.drop(columns=['Line', 'Odds', 'EV'], inplace=True)
-            X_test.drop(columns=['Line', 'Odds', 'EV'], inplace=True)
-
-            X_train.drop(columns=['Team'], inplace=True)
-            X_test.drop(columns=['Team'], inplace=True)
+            B_train = M.loc[X_train.index, ['Line', 'Odds', 'EV']]
+            B_test = M.loc[X_test.index, ['Line', 'Odds', 'EV']]
 
             y_train_labels = np.ravel(y_train.to_numpy())
 

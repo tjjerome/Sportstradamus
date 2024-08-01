@@ -375,15 +375,27 @@ class Stats:
         return
 
     def get_stat_columns(self, market):
-        cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])
-        profile_cols = set(["Player "+col.replace(" growth", "").replace(" short", "") for col in self.playerProfile.columns if " growth" in col or " short" in col])
+        if market in feature_filter.get(self.league,{}):
+            cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])
+            profile_cols = set(["Player "+col.replace(" growth", "").replace(" short", "") for col in self.playerProfile.columns if " growth" in col or " short" in col])
+            
+            count = 1
+            for i, c in enumerate(cols.copy()):
+                if c in profile_cols:
+                    cols.insert(i+count, c+" growth")
+                    cols.insert(i+count, c+" short")
+                    count = count + 2
         
-        count = 1
-        for i, c in enumerate(cols.copy()):
-            if c in profile_cols:
-                cols.insert(i+count, c+" growth")
-                cols.insert(i+count, c+" short")
-                count = count + 2
+        else:
+            cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])\
+                + list(self.playerProfile.add_prefix("Player ").columns)\
+                + list(self.teamProfile.add_prefix("Team ").columns)\
+                + list(self.defenseProfile.add_prefix("Defense ").columns)
+            cols.remove("Player team")
+            for pos in self.positions:
+                cols.remove(f"Defense {pos}")
+
+            cols = list(set(cols))
 
         return cols
 
@@ -432,14 +444,23 @@ class Stats:
 
             evs = []
             lines = []
+            archived = []
             for player in stats.index:
+                a = True
                 ev = archive.get_ev(self.league, market, date, player)
                 line = archive.get_line(self.league, market, date, player)
-                if np.isnan(ev) and line > 0:
+                if np.isnan(ev):
+                    ev = self.check_combo_markets(market, player, date)
+                if line == 0:
+                    a = False
+                    line = stats.loc[player, 'Avg10']
+                if ev == 0:
+                    a = False
                     ev = get_ev(line, .5, stat_cv[self.league].get(market,1))
                 
                 lines.append(line)
                 evs.append(ev)
+                archived.append(a)
 
             stats["Line"] = lines
             stats["Odds"] = 0
@@ -447,7 +468,7 @@ class Stats:
             offers_df.index = offers_df["Player"]
             stats = stats.join(offers_df["Result"])
             stats["Date"] = date
-            stats["Archived"] = ~stats["EV"].isna()
+            stats["Archived"] = archived
 
             matrix.extend(stats.to_dict('records'))
 
@@ -1170,13 +1191,17 @@ class StatsNBA(Stats):
     def get_volume_stats(self, offers, date=datetime.today().date()):
         market = "MIN"
         flat_offers = {}
-        for players in offers.values():
-            flat_offers.update(players)
-        flat_offers.update(offers.get(market, {}))
+        if isinstance(offers, dict):
+            for players in offers.values():
+                flat_offers.update(players)
+            flat_offers.update(offers.get(market, {}))
+        else:
+            flat_offers = offers
+
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
         playerStats = self.get_stats(market, flat_offers, date)
-        # playerStats = playerStats[self.get_stat_columns(market)]
+        playerStats = playerStats[self.get_stat_columns(market)]
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
@@ -1200,7 +1225,7 @@ class StatsNBA(Stats):
             model.start_values = sv
             prob_params = pd.DataFrame()
             preds = model.predict(
-                playerStats.drop(columns="Player team"), pred_type="parameters")
+                playerStats, pred_type="parameters")
             preds.index = playerStats.index
             prob_params = pd.concat([prob_params, preds])
 
@@ -1224,6 +1249,56 @@ class StatsNBA(Stats):
             self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
 
         self.playerProfile.fillna(0, inplace=True)
+
+    def check_combo_markets(self, market, player, date=datetime.today().date()):
+        player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
+        cv = stat_cv.get(self.league, {}).get(market, 1)
+        if isinstance(date, date):
+            date = date.strftime("%Y-%m-%d")
+        if market in combo_props:
+            ev = 0
+            for submarket in combo_props.get(market, []):
+                sub_cv = stat_cv[self.league].get(submarket, 1)
+                v = archive.get_ev(self.league, submarket, date, player)
+                subline = archive.get_line(self.league, submarket, date, player)
+                if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                if np.isnan(v) or v == 0:
+                    ev = 0
+                    break
+                else:
+                    ev += v
+
+        elif market in ["DREB", "OREB"]:
+            ev = (archive.get_ev(self.league, "REB", date, player)*player_games[market].sum()/player_games["REB"].sum()) if player_games["REB"].sum() else 0
+
+        elif "fantasy" in market:
+            ev = 0
+            book_odds = False
+            fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
+            for submarket, weight in fantasy_props:
+                sub_cv = stat_cv[self.league].get(submarket, 1)
+                v = archive.get_ev(self.league, submarket, date, player)
+                subline = archive.get_line(self.league, submarket, date, player)
+                if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                if np.isnan(v) or v == 0:
+                    if subline == 0 and not player_games.empty:
+                        subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
+
+                    if not subline == 0:
+                        under = (player_games[submarket]<subline).mean()
+                        ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                else:
+                    book_odds = True
+                    ev += v*weight
+
+            if not book_odds:
+                ev = 0
+        else:
+            ev = 0
+
+        return ev
 
     @line_profiler.profile
     def obs_get_stats(self, offer, date=datetime.today()):
