@@ -8,6 +8,7 @@ import random
 import unicodedata
 import datetime
 import importlib.resources as pkg_resources
+from klepto.archives import dir_archive
 from sportstradamus import creds, data
 from time import sleep
 from scipy.stats import poisson, skellam, norm, iqr
@@ -52,8 +53,8 @@ with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
 with open((pkg_resources.files(data) / "goalies.json"), "r") as infile:
     nhl_goalies = json.load(infile)
 
-with open(pkg_resources.files(data) / "feature_filter.json", "r") as infile:
-    feature_filter = json.load(infile)
+# with open(pkg_resources.files(data) / "feature_filter.json", "r") as infile:
+#     feature_filter = json.load(infile)
 
 with open(pkg_resources.files(data) / "banned_combos.json", "r") as infile:
     banned = json.load(infile)
@@ -352,9 +353,9 @@ def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001
     def objective(w, m, s):
         v = w if w >= 1 else 1/w
         if s > 0:
-            return 100*max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0) + np.power(1-v,2)
+            return 100*max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0) + (1-v)^2
         else:
-            return 100*max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0) + np.power(1-v,2)
+            return 100*max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0) + (1-v)^2
         
     res = minimize(objective, [1], args=(mean, std), bounds=[(.5, 2)], tol=1e-3, method='TNC')
     return res.x[0]
@@ -383,7 +384,7 @@ def merge_dict(a, b, path=None):
 
 def clean_archive(a, cutoff_date=None):
     if cutoff_date is None:
-        cutoff_date = (datetime.datetime.today()-datetime.timedelta(days=365*3)).date()
+        cutoff_date = (datetime.datetime.today()-datetime.timedelta(days=365*4)).date()
     leagues = list(a.keys())
     for league in leagues:
         markets = list(a[league].keys())
@@ -444,7 +445,9 @@ class Archive:
 
         Loads the archive data from a file if it exists.
         """
-        self.archive = {}
+        self.archive = dir_archive('archive', {})
+        self.archive.load()
+
         self.default_totals = {
             "MLB": 4.671,
             "NBA": 111.667,
@@ -452,30 +455,8 @@ class Archive:
             "NFL": 22.668,
             "NHL": 2.674
             }
-        filepath = pkg_resources.files(data) / "archive.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                self.archive = pickle.load(infile)
-
-        self.leagues = ["MLB", "NBA", "NHL", "NFL", "NCAAF", "NCAAB", "WNBA", "MISC"]
-        if league != "None" and league != "All":
-            self.leagues = [league]
-            filepath = pkg_resources.files(data) / f"archive_{league}.dat"
-            if os.path.isfile(filepath):
-                with open(filepath, 'rb') as infile:
-                    new_archive = pickle.load(infile)
-
-                if type(new_archive) is dict:
-                    self.archive = merge_dict(new_archive, self.archive)
-        elif league == "All":
-            for league in self.leagues:
-                filepath = pkg_resources.files(data) / f"archive_{league}.dat"
-                if os.path.isfile(filepath):
-                    with open(filepath, 'rb') as infile:
-                        new_archive = pickle.load(infile)
-
-                    if type(new_archive) is dict:
-                        self.archive = merge_dict(new_archive, self.archive)
+        
+        self.leagues = list(self.archive.keys())
 
     def __getitem__(self, item):
         """
@@ -639,47 +620,17 @@ class Archive:
 
         return pd.DataFrame(records).T
 
-    def write(self, overwrite=False):
+    def write(self, clean=False):
         """
         Write the archive data to a file.
 
         Returns:
             None
         """
-        for league in self.leagues:
-
-            filepath = pkg_resources.files(data) / f"archive_{league}.dat"
-            full_archive = {}
-            if os.path.isfile(filepath) and not overwrite:
-                with open(filepath, "rb") as infile:
-                    full_archive = pickle.load(infile)
-
-            with open(filepath, "wb") as outfile:
-                if league == "MISC":
-                    misc_leagues = list(self.archive.keys())
-                    for l in self.leagues:
-                        if l in misc_leagues:
-                            misc_leagues.remove(l)
-                    for l in misc_leagues:
-                        full_archive = merge_dict(
-                            full_archive, {l: self.archive[l]})
-
-                    pickle.dump(clean_archive(full_archive),
-                                outfile, protocol=-1)
-                else:
-                    if league in ["MLB", "NHL"]:
-                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*2)).date()
-                    elif league == "NFL":
-                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*4)).date()
-                    else:
-                        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365*2)).date()
-                    pickle.dump(clean_archive(merge_dict(full_archive, {league: self.archive[league]}), cutoff_date),
-                                outfile, protocol=-1)
-        
-        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=7)).date()
-        filepath = pkg_resources.files(data) / "archive.dat"
-        with open(filepath, "wb") as outfile:
-            pickle.dump(clean_archive(self.archive, cutoff_date), outfile, protocol=-1)
+        if clean:
+            self.archive = clean_archive(self.archive)
+            
+        self.archive.dump()
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
