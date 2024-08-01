@@ -630,7 +630,7 @@ class Archive:
         """
 
         if len(self.changed_leagues):
-            self.archive.dump(list(self.changed_leagues))
+            self.archive.dump(*list(self.changed_leagues))
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
