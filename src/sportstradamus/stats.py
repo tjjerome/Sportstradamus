@@ -1253,7 +1253,7 @@ class StatsNBA(Stats):
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
-        if isinstance(date, date):
+        if not isinstance(date, str):
             date = date.strftime("%Y-%m-%d")
         if market in combo_props:
             ev = 0

@@ -2,8 +2,7 @@ from sportstradamus.helpers import Archive, remove_accents, merge_dict
 import numpy as np
 from tqdm import tqdm
 
-archive = Archive("All")
-archive.write(True)
+archive = Archive()
 
 leagues = list(archive.archive.keys())
 for league in tqdm(leagues, unit="leagues", position=0):
@@ -68,4 +67,4 @@ for league in tqdm(leagues, unit="leagues", position=0):
             archive[league].pop(market)
 
 
-archive.write(True)
+archive.write()

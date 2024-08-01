@@ -6,7 +6,7 @@ import pytz
 import importlib.resources as pkg_resources
 from sportstradamus import data, creds
 
-archive = Archive("All")
+archive = Archive()
 
 # Load prop markets
 filepath = pkg_resources.files(data) / "stat_map.json"

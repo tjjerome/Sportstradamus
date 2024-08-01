@@ -72,7 +72,7 @@ stat_structs = {
     "WNBA": wnba
 }
 
-archive = Archive("All")
+archive = Archive()
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
