@@ -456,7 +456,7 @@ class Archive:
             "NHL": 2.674
             }
         
-        self.leagues = list(self.archive.keys())
+        self.changed_leagues = set()
 
     def __getitem__(self, item):
         """
@@ -482,6 +482,7 @@ class Archive:
         Returns:
             None
         """
+        self.changed_leagues.add(o["League"])
         market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
         cv = stat_cv.get(market, 1)
@@ -620,17 +621,16 @@ class Archive:
 
         return pd.DataFrame(records).T
 
-    def write(self, clean=False):
+    def write(self):
         """
         Write the archive data to a file.
 
         Returns:
             None
         """
-        if clean:
-            self.archive = clean_archive(self.archive)
-            
-        self.archive.dump()
+
+        if len(self.changed_leagues):
+            self.archive.dump(list(self.changed_leagues))
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
