@@ -30,6 +30,7 @@ lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
 torch = {version = "2.1.2", source = "pytorch_cpu"}
 sportsdataverse = "^0.0.39"
 line-profiler = "^4.1.3"
+klepto = {extras = ["crypto"], version = "^0.2.5"}
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.sportstradamus:main"
