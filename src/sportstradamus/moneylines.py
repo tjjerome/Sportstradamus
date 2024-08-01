@@ -111,6 +111,8 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
             if homeTeam is None or awayTeam is None:
                 continue
 
+            archive.changed_leagues.add(league)
+
             moneyline_home = {}
             moneyline_away = {}
             totals = {}
@@ -236,6 +238,8 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                 return archive
             elif res.status_code != 200:
                 continue
+
+            archive.changed_leagues.add(league)
 
             if historical:
                 game = res.json()['data']
