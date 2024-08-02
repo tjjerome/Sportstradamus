@@ -8,7 +8,7 @@ import random
 import unicodedata
 import datetime
 import importlib.resources as pkg_resources
-from klepto.archives import dir_archive
+from klepto.archives import hdfdir_archive, cache
 from sportstradamus import creds, data
 from time import sleep
 from scipy.stats import poisson, skellam, norm, iqr
@@ -445,23 +445,26 @@ class Archive:
 
         Loads the archive data from a file if it exists.
         """
-        filepath = pkg_resources.files(data) / "archive.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                self.archive = pickle.load(infile)
+        # filepath = pkg_resources.files(data) / "archive.dat"
+        # if os.path.isfile(filepath):
+        #     with open(filepath, "rb") as infile:
+        #         self.archive = pickle.load(infile)
 
-        self.leagues = ["MLB", "NBA", "NHL", "NFL", "NCAAF", "NCAAB", "WNBA", "MISC"]
-        for league in self.leagues:
-            filepath = pkg_resources.files(data) / f"archive_{league}.dat"
-            if os.path.isfile(filepath):
-                with open(filepath, 'rb') as infile:
-                    new_archive = pickle.load(infile)
+        # self.leagues = ["MLB", "NBA", "NHL", "NFL", "NCAAF", "NCAAB", "WNBA", "MISC"]
+        # for league in self.leagues:
+        #     filepath = pkg_resources.files(data) / f"archive_{league}.dat"
+        #     if os.path.isfile(filepath):
+        #         with open(filepath, 'rb') as infile:
+        #             new_archive = pickle.load(infile)
 
-                if type(new_archive) is dict:
-                    self.archive = merge_dict(new_archive, self.archive)
+        #         if type(new_archive) is dict:
+        #             self.archive = merge_dict(new_archive, self.archive)
 
-        self.archive = dir_archive('archive', self.archive)
-        # self.archive.load()
+        self.archive = {}
+        leagues = [f.name for f in os.scandir("archive") if f.is_dir()]
+        for league in leagues:
+            self.archive[league] = hdfdir_archive(f"archive/{league}", {}, protocol=-1)
+            self.archive[league].load()
                         
         self.default_totals = {
             "MLB": 4.671,
@@ -644,9 +647,11 @@ class Archive:
             None
         """
 
-        self.archive.sync()
-        # if len(self.changed_leagues):
-        #     self.archive.dump(*list(self.changed_leagues))
+        for league in list(self.changed_leagues):
+            if type(self.archive[league]) is not cache:
+                self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
+
+            self.archive[league].dump()
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
@@ -680,6 +685,7 @@ class Archive:
 
     def rename_market(self, league, old_name, new_name):
         """rename_market Rename a market in the archive"""
+        self.changed_leagues.add(league)
 
         if new_name in self.archive[league]:
             self.archive[league][new_name] = merge_dict(
