@@ -1178,8 +1178,6 @@ class StatsNBA(Stats):
         Returns:
             tuple: A tuple containing the feature matrix (X) and the target vector (y).
         """
-        archive.__init__(self.league)
-
         matrix = []
 
         if cutoff_date is None:
@@ -2733,8 +2731,6 @@ class StatsMLB(Stats):
         Returns:
             M (pd.DataFrame): The training data matrix.
         """
-        archive.__init__("MLB")
-
         # Initialize an empty list for the target labels
         matrix = []
 
@@ -4008,8 +4004,6 @@ class StatsNFL(Stats):
         Returns:
             tuple: A tuple containing the feature matrix (X) and the target vector (y).
         """
-        archive.__init__("NFL")
-
         # Initialize an empty list for the target labels
         matrix = []
 
@@ -5101,8 +5095,6 @@ class StatsNHL(Stats):
         """
 
         # Initialize variables
-        archive.__init__("NHL")
-
         matrix = []
 
         if cutoff_date is None:
