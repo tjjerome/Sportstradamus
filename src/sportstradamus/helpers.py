@@ -439,15 +439,30 @@ class Archive:
         write(): Write the archive data to a file.
     """
 
-    def __init__(self, league="None"):
+    def __init__(self):
         """
         Initialize the Archive class.
 
         Loads the archive data from a file if it exists.
         """
-        self.archive = dir_archive('archive', {}, memsize=250)
-        self.archive.load()
+        filepath = pkg_resources.files(data) / "archive.dat"
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                self.archive = pickle.load(infile)
 
+        self.leagues = ["MLB", "NBA", "NHL", "NFL", "NCAAF", "NCAAB", "WNBA", "MISC"]
+        for league in self.leagues:
+            filepath = pkg_resources.files(data) / f"archive_{league}.dat"
+            if os.path.isfile(filepath):
+                with open(filepath, 'rb') as infile:
+                    new_archive = pickle.load(infile)
+
+                if type(new_archive) is dict:
+                    self.archive = merge_dict(new_archive, self.archive)
+
+        self.archive = dir_archive('archive', self.archive)
+        # self.archive.load()
+                        
         self.default_totals = {
             "MLB": 4.671,
             "NBA": 111.667,
@@ -629,8 +644,9 @@ class Archive:
             None
         """
 
-        if len(self.changed_leagues):
-            self.archive.dump(*list(self.changed_leagues))
+        self.archive.sync()
+        # if len(self.changed_leagues):
+        #     self.archive.dump(*list(self.changed_leagues))
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
