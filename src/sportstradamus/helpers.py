@@ -445,7 +445,7 @@ class Archive:
 
         Loads the archive data from a file if it exists.
         """
-        self.archive = dir_archive('archive', {})
+        self.archive = dir_archive('archive', {}, memsize=250)
         self.archive.load()
 
         self.default_totals = {
