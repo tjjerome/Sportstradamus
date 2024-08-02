@@ -296,7 +296,7 @@ class StatsNBA(Stats):
         super().__init__()
         self.league = "NBA"
         self.positions = ['P', 'C', 'F', 'W', 'B']
-        self.season_start = datetime.strptime("2023-10-24", "%Y-%m-%d").date()
+        self.season_start = datetime(2024, 10, 22).date()
         self.season = "2023-24"
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
                 'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
@@ -1513,8 +1513,7 @@ class StatsMLB(Stats):
         Initialize the StatsMLB instance.
         """
         super().__init__()
-        self.season_start = datetime.strptime("2024-03-28", "%Y-%m-%d"
-                                              ).date()
+        self.season_start = datetime.strptime(2024, 3, 28).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
         self.gamelog = pd.DataFrame()
@@ -4149,7 +4148,7 @@ class StatsNHL(Stats):
 
     def __init__(self):
         super().__init__()
-        self.season_start = datetime(2023, 10, 10).date()
+        self.season_start = datetime(2024, 10, 4).date()
         self.skater_stats = ["GOE", "Fenwick", "TimeShare",
                              "ShotShare", "Shot60", "Blk60", "Hit60", "Ast60"]
         self.stat_types = {
