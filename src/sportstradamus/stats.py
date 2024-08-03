@@ -1513,7 +1513,7 @@ class StatsMLB(Stats):
         Initialize the StatsMLB instance.
         """
         super().__init__()
-        self.season_start = datetime.strptime(2024, 3, 28).date()
+        self.season_start = datetime(2024, 3, 28).date()
         self.pitchers = mlb_pitchers
         self.gameIds = []
         self.gamelog = pd.DataFrame()
