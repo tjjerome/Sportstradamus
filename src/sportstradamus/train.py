@@ -108,6 +108,9 @@ def meditate(force, league):
             "PF",
         ],
         # "NFL": [
+        #     "carries",
+        #     "attempts",
+        #     "targets",
         #     "passing yards",
         #     "rushing yards",
         #     "receiving yards",
@@ -121,11 +124,8 @@ def meditate(force, league):
         #     "receiving tds",
         #     "qb tds",
         #     "completions",
-        #     "carries",
         #     "receptions",
         #     "interceptions",
-        #     "attempts",
-        #     "targets",
         #     "longest completion",
         #     "longest rush",
         #     "longest reception",
@@ -136,9 +136,10 @@ def meditate(force, league):
         #     "completion percentage"
         # ],
         # "MLB": [
-        #     "pitcher strikeouts",
+        #     "plate appearances",
         #     "pitching outs",
         #     "pitches thrown",
+        #     "pitcher strikeouts",
         #     "hits allowed",
         #     "runs allowed",
         #     "walks allowed",
@@ -161,6 +162,8 @@ def meditate(force, league):
         #     "home runs"
         # ],
         # "NHL": [
+        #     "timeOnIce",
+        #     "shotsAgainst",
         #     "saves",
         #     "shots",
         #     "points",
@@ -175,9 +178,9 @@ def meditate(force, league):
         #     "goals",
         #     "assists",
         #     "faceOffWins",
-        #     "timeOnIce",
         # ],
         # "WNBA": [
+        #     "MIN",
         #     "AST",
         #     "FG3M",
         #     "PA",

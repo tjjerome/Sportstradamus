@@ -410,7 +410,6 @@ class Stats:
             X (pd.DataFrame): The training data matrix.
             y (pd.DataFrame): The target labels.
         """
-        archive.__init__(self.league)
 
         matrix = []
 
@@ -431,6 +430,8 @@ class Stats:
         for gameDate, players in tqdm(gamedays, unit="gameday", desc="Gathering Training Data", total=len(gamedays)):
 
             offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
+            offers_df.index = offers_df["Player"]
+            offers_df = offers_df.loc[~stats.index.duplicated()]
             offers = offers_df.to_dict('records')
 
             if market in self.volume_stats:
@@ -465,7 +466,6 @@ class Stats:
             stats["Line"] = lines
             stats["Odds"] = 0
             stats["EV"] = evs
-            offers_df.index = offers_df["Player"]
             stats = stats.join(offers_df["Result"])
             stats["Date"] = date
             stats["Archived"] = archived
@@ -954,7 +954,6 @@ class StatsNBA(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
-            archive.__init__(self.league)
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
@@ -1498,7 +1497,6 @@ class StatsNBA(Stats):
         Returns:
             tuple: A tuple containing the feature matrix (X) and the target vector (y).
         """
-        archive.__init__(self.league)
 
         matrix = []
 
@@ -1809,7 +1807,6 @@ class StatsWNBA(StatsNBA):
         self.teamlog.drop_duplicates(inplace=True)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
-            archive.__init__(self.league)
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
@@ -2521,7 +2518,6 @@ class StatsMLB(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            archive.__init__(self.league)
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"][:10], x["team"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"][:10], x["team"]), axis=1)
 
@@ -3064,7 +3060,6 @@ class StatsMLB(Stats):
         Returns:
             M (pd.DataFrame): The training data matrix.
         """
-        archive.__init__("MLB")
 
         # Initialize an empty list for the target labels
         matrix = []
@@ -3447,7 +3442,6 @@ class StatsNFL(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["player display name"] = self.gamelog["player display name"].apply(remove_accents)
-            archive.__init__(self.league)
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1)
 
@@ -4345,8 +4339,6 @@ class StatsNFL(Stats):
         Returns:
             tuple: A tuple containing the feature matrix (X) and the target vector (y).
         """
-        archive.__init__("NFL")
-
         # Initialize an empty list for the target labels
         matrix = []
 
@@ -4850,7 +4842,6 @@ class StatsNHL(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            archive.__init__(self.league)
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
 
@@ -5440,10 +5431,6 @@ class StatsNHL(Stats):
         Returns:
             tuple: A tuple containing the training matrix (X) and the corresponding results (y).
         """
-
-        # Initialize variables
-        archive.__init__("NHL")
-
         matrix = []
 
         if cutoff_date is None:
