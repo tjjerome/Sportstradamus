@@ -270,7 +270,7 @@ def meditate(force, league):
             M.Date = pd.to_datetime(M.Date)
             step = M["Result"].drop_duplicates().sort_values().diff().min()
             for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
-                if np.isnan(row["EV"]) or row["EV"] == 0:
+                if np.isnan(row["EV"]) or row["EV"] <= 0:
                     M.loc[i, "Odds"] = 0.5
                     M.loc[i, "EV"] = M.loc[i, "Line"] if cv != 1 else get_ev(M.loc[i, "Line"], .5, cv)
                 else:
