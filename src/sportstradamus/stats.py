@@ -431,7 +431,7 @@ class Stats:
 
             offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
             offers_df.index = offers_df["Player"]
-            offers_df = offers_df.loc[~stats.index.duplicated()]
+            offers_df = offers_df.loc[~offers_df.index.duplicated()]
             offers = offers_df.to_dict('records')
 
             if market in self.volume_stats:
@@ -445,6 +445,7 @@ class Stats:
 
             evs = []
             lines = []
+            odds = []
             archived = []
             for player in stats.index:
                 a = True
@@ -452,14 +453,15 @@ class Stats:
                 line = archive.get_line(self.league, market, date, player)
                 if np.isnan(ev):
                     ev = self.check_combo_markets(market, player, date)
-                if line == 0:
+                if line <= 0:
                     a = False
-                    line = stats.loc[player, 'Avg10']
-                if ev == 0:
+                    line = np.max([stats.loc[player, 'Avg10'], 0.5])
+                if ev <= 0:
                     a = False
                     ev = get_ev(line, .5, stat_cv[self.league].get(market,1))
                 
                 lines.append(line)
+                odds.append(get_odds(line, ev, stat_cv[self.league].get(market,1)))
                 evs.append(ev)
                 archived.append(a)
 
