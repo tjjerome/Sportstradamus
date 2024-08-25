@@ -10,7 +10,6 @@ from sportstradamus import data
 from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
-from sportsdataverse import wnba
 import nfl_data_py as nfl
 from scipy.stats import iqr, poisson, norm, zscore
 from time import sleep
@@ -23,7 +22,7 @@ from io import StringIO
 import line_profiler
 
 # flag to clean up gamelogs
-clean_data=False
+clean_data = True
 
 class Stats:
     """
@@ -261,16 +260,19 @@ class Stats:
                 players.append(split_players[1])
 
         players = set(players)
+        season = date.year if date.month >= 5 else date.year-1
+        if self.league == "NBA":
+            season = "-".join([str(season), str(season-1999)])
 
         if "NBA" in self.league:
             player_df = []
-            for team, roster in self.players[self.season].items():
+            for team, roster in self.players[season].items():
                 roster = [{self.log_strings["player"]: k, self.log_strings["team"]: team}|v for k, v in roster.items()]
                 player_df.extend(roster)
 
             player_df = pd.DataFrame(player_df)
         elif self.league == "NHL":
-            player_df = pd.DataFrame(self.players[self.season_start.year].values())
+            player_df = pd.DataFrame(self.players[season].values())
         elif self.league == "NFL":
             player_df = self.players.reset_index().rename(columns={"name": "player display name"})
         else:
@@ -304,11 +306,14 @@ class Stats:
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
         stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
-        playergames = self.short_gamelog.groupby(self.log_strings["player"])
         if isinstance(offers, dict):
             players = list(offers.keys())
+            teams = {k:v["Team"] for k, v in offers.items()}
+            opponents = {k:v["Opponent"] for k, v in offers.items()}
         else:
             players = [x["Player"] for x in offers]
+            teams = {x["Player"]: x["Team"] for x in offers}
+            opponents = {x["Player"]: x["Opponent"] for x in offers}
 
         for player in players:
             if " + " in player.replace(" vs. ", " + "):
@@ -317,6 +322,12 @@ class Stats:
                 players.append(split_players[1])
 
         players = set(players)
+        playergames = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]].isin(players)]
+
+        if playergames.empty:
+            return stats
+        
+        playergames = playergames.groupby(self.log_strings["player"])
 
         stats["Avg1"] = playergames[market].apply(lambda x: x.tail(1).median())
         stats["Avg3"] = playergames[market].apply(lambda x: x.tail(3).median())
@@ -330,7 +341,6 @@ class Stats:
         stats["DaysOff"] = (date-pd.to_datetime(playergames[self.log_strings["date"]].apply(lambda x: x.tail(1).item())).dt.date).astype('timedelta64[s]').dt.days
         stats["DaysIntoSeason"] = (date-self.season_start).days
         stats["GamesPlayed"] = playergames[market].count()
-        stats = stats.loc[list(players&set(stats.index))]
         stats = stats.loc[~stats.index.duplicated()]
 
         if date < datetime.today().date():
@@ -343,18 +353,24 @@ class Stats:
 
             teams = todays_games[self.log_strings["team"]].to_dict()
             opponents = todays_games[self.log_strings["opponent"]].to_dict()
-            if self.league == "MLB" and not any([string in market for string in ["allowed", "pitch"]]):
+            if self.league == "MLB":
                 pitchers = todays_games["opponent pitcher"].to_dict()
-                h2hgames = self.short_gamelog.loc[self.short_gamelog["opponent pitcher"] == self.short_gamelog[self.log_strings["player"]].map(pitchers)].groupby(self.log_strings["player"])
-            else:
-                h2hgames = self.short_gamelog.loc[self.short_gamelog[self.log_strings["opponent"]] == self.short_gamelog[self.log_strings["player"]].map(opponents)].groupby(self.log_strings["player"])
-            stats["AvgH2H"] = h2hgames[market].median()
-            stats["MeanH2H"] = h2hgames[market].mean()
-            stats["H2HPlayed"] = h2hgames[market].count()
 
         else:
+            if self.league == "MLB":
+                pitchers = {x:self.upcoming_games.get(teams[x]).get("Opponent Pitcher") for x in stats.index}
 
-            pass
+            stats["Home"] = [self.upcoming_games.get(teams[x]).get("Home") for x in stats.index]
+            stats["Moneyline"] = [archive.get_moneyline(self.league, date, teams[x]) for x in stats.index]
+            stats["Total"] = [archive.get_total(self.league, date, teams[x]) for x in stats.index]
+
+        if self.league == "MLB" and not any([string in market for string in ["allowed", "pitch"]]):
+            h2hgames = self.short_gamelog.loc[self.short_gamelog["opponent pitcher"] == self.short_gamelog[self.log_strings["player"]].map(pitchers)].groupby(self.log_strings["player"])
+        else:
+            h2hgames = self.short_gamelog.loc[self.short_gamelog[self.log_strings["opponent"]] == self.short_gamelog[self.log_strings["player"]].map(opponents)].groupby(self.log_strings["player"])
+        stats["AvgH2H"] = h2hgames[market].median()
+        stats["MeanH2H"] = h2hgames[market].mean()
+        stats["H2HPlayed"] = h2hgames[market].count()
 
         stats = stats.join(self.playerProfile.add_prefix("Player "))
         if self.league != "MLB":
@@ -413,8 +429,9 @@ class Stats:
 
         stats = stats.join(defstats.add_prefix("Defense "))
 
-        # missing submarket odds, need to fill in somewhere
-        # return stats[feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])].fillna(0)
+        if self.league == "MLB":
+            stats = stats.join(pd.DataFrame({x: {f"PF {k}": v for k, v in self.park_factors.get(teams.get(x), ()).items()} for x in stats.index}).T)
+
         return stats.fillna(0)
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
@@ -1292,7 +1309,14 @@ class StatsNBA(Stats):
             std = team_df[f"proj {market} std"].sum()
             count = len(team_df)
 
-            fit_factor = fit_distro(total, std, 20*count, 300)
+            if self.league == "NBA":
+                maxMinutes = 300
+                minMinutes = 20*count
+            elif self.league == "WNBA":
+                maxMinutes = 200
+                minMinutes = 15*count
+
+            fit_factor = fit_distro(total, std, minMinutes, maxMinutes)
             self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"]*fit_factor
             self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
 
@@ -1850,7 +1874,7 @@ class StatsWNBA(StatsNBA):
         team_df = pd.concat([home_teams, away_teams], ignore_index=True)
 
         stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
-        team_df["GAME_DATE"] = pd.to_datetime(team_df["GAME_DATE"])
+        team_df["GAME_DATE"] = pd.to_datetime(team_df["GAME_DATE"]).astype(str)
 
         if not stat_df.empty:
             stat_df.loc[:, "moneyline"] = stat_df.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]), axis=1)
@@ -1868,6 +1892,8 @@ class StatsWNBA(StatsNBA):
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+            self.gamelog["GAME_DATE"] = self.gamelog["GAME_DATE"].astype(str)
+            self.teamlog["GAME_DATE"] = self.teamlog["GAME_DATE"].astype(str)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "wnba_data.dat", "wb") as outfile:
@@ -2819,6 +2845,7 @@ class StatsMLB(Stats):
             dvpoa = np.nan_to_num(dvpoa, nan=0.0, posinf=0.0, neginf=0.0)
             self.dvp_index[market][team] = dvpoa
             return dvpoa
+        
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
