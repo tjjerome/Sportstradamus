@@ -639,7 +639,7 @@ class Archive:
 
         return pd.DataFrame(records).T
 
-    def write(self):
+    def write(self, all=False):
         """
         Write the archive data to a file.
 
@@ -647,7 +647,11 @@ class Archive:
             None
         """
 
-        for league in list(self.changed_leagues):
+        leagues = list(self.changed_leagues)
+        if all:
+            leagues = list(self.archive.keys())
+
+        for league in leagues:
             if type(self.archive[league]) is not cache:
                 self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
 

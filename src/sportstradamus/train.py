@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights, feature_filter
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -84,29 +84,29 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
-        "NBA": [
-            "MIN",
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-        ],
+        # "NBA": [
+        #     "MIN",
+        #     "PTS",
+        #     "REB",
+        #     "AST",
+        #     "PRA",
+        #     "PR",
+        #     "RA",
+        #     "PA",
+        #     "FG3M",
+        #     "fantasy points prizepicks",
+        #     "FG3A",
+        #     "FTM",
+        #     "FGM",
+        #     "FGA",
+        #     "STL",
+        #     "BLK",
+        #     "BLST",
+        #     "TOV",
+        #     "OREB",
+        #     "DREB",
+        #     "PF",
+        # ],
         # "NFL": [
         #     "carries",
         #     "attempts",
@@ -126,71 +126,67 @@ def meditate(force, league):
         #     "completions",
         #     "receptions",
         #     "interceptions",
-        #     "longest completion",
-        #     "longest rush",
-        #     "longest reception",
         #     "sacks taken",
         #     "passing first downs",
         #     "first downs",
-        #     "fumbles lost",
         #     "completion percentage"
         # ],
-        # "MLB": [
-        #     "plate appearances",
-        #     "pitching outs",
-        #     "pitches thrown",
-        #     "pitcher strikeouts",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "walks allowed",
-        #     # "1st inning runs allowed",
-        #     # "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "batter strikeouts",
-        #     "singles",
-        #     "doubles",
-        #     "home runs"
-        # ],
+        "MLB": [
+            "plateAppearances",
+            "pitches thrown",
+        # #     "pitching outs",
+        # #     "pitcher strikeouts",
+        # #     "hits allowed",
+        # #     "runs allowed",
+        # #     "walks allowed",
+        # #     # "1st inning runs allowed",
+        # #     # "1st inning hits allowed",
+        # #     "hitter fantasy score",
+        # #     "pitcher fantasy score",
+        # #     "hitter fantasy points underdog",
+        # #     "pitcher fantasy points underdog",
+        # #     "hits+runs+rbi",
+        # #     "total bases",
+        # #     "walks",
+        # #     "stolen bases",
+        # #     "hits",
+        # #     "runs",
+        # #     "rbi",
+        # #     "batter strikeouts",
+        # #     "singles",
+        # #     "doubles",
+        # #     "home runs"
+        ],
         # "NHL": [
         #     "timeOnIce",
-        #     "shotsAgainst",
-        #     "saves",
-        #     "shots",
-        #     "points",
-        #     "goalsAgainst",
-        #     "goalie fantasy points underdog",
-        #     "skater fantasy points underdog",
-        #     "blocked",
-        #     "powerPlayPoints",
-        #     "sogBS",
-        #     "fantasy points prizepicks",
-        #     "hits",
-        #     "goals",
-        #     "assists",
-        #     "faceOffWins",
+        #     # "shotsAgainst",
+        # #     "saves",
+        # #     "shots",
+        # #     "points",
+        # #     "goalsAgainst",
+        # #     "goalie fantasy points underdog",
+        # #     "skater fantasy points underdog",
+        # #     "blocked",
+        # #     "powerPlayPoints",
+        # #     "sogBS",
+        # #     "fantasy points prizepicks",
+        # #     "hits",
+        # #     "goals",
+        # #     "assists",
+        # #     "faceOffWins",
         # ],
-        # "WNBA": [
-        #     "MIN",
-        #     "AST",
-        #     "FG3M",
-        #     "PA",
-        #     "PR",
-        #     "PTS",
-        #     "RA",
-        #     "REB",
-        #     "PRA",
-        #     "fantasy points prizepicks"
-        # ]
+        "WNBA": [
+            "MIN",
+        # #     "AST",
+        # #     "FG3M",
+        # #     "PA",
+        # #     "PR",
+        # #     "PTS",
+        # #     "RA",
+        # #     "REB",
+        # #     "PRA",
+        # #     "fantasy points prizepicks"
+        ]
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -203,7 +199,7 @@ def meditate(force, league):
         book_weights.setdefault(league, {}).setdefault("Totals", {})
         book_weights[league]["Totals"] = fit_book_weights(league, "Totals")
 
-        if league=="MLB":
+        if league == "MLB":
             book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
             book_weights[league]["1st 1 innings"] = fit_book_weights(league, "1st 1 innings")
             book_weights.setdefault(league, {}).setdefault("pitcher win", {})
@@ -275,10 +271,6 @@ def meditate(force, league):
                     M.loc[i, "EV"] = M.loc[i, "Line"] if cv != 1 else get_ev(M.loc[i, "Line"], .5, cv)
                 else:
                     M.loc[i, "Odds"] = get_odds(row["Line"], row["EV"], cv=cv, step=step)
-
-            if len(M.loc[M["Archived"]!=0]) < 10:
-                M.to_csv(filepath)
-                continue
 
             M = trim_matrix(M)
             M.to_csv(filepath)
@@ -536,7 +528,6 @@ def meditate(force, league):
                 del model
 
             report()
-    see_features()
 
 
 def report():
@@ -630,7 +621,7 @@ def see_features():
     df = pd.DataFrame(feature_importances, index=[
                       market[:-4] for market in model_list]).fillna(0).transpose()
     
-    for league in ["NBA", "NFL", "NHL", "MLB"]:
+    for league in ["NBA", "WNBA", "NFL", "NHL", "MLB"]:
         df[league + "_ALL"] = df[[col for col in df.columns if league in col]].mean(axis=1)
         most_important[league + "_ALL"] = list(df[league + "_ALL"].sort_values(ascending=False).head(10).index)
 
@@ -644,6 +635,36 @@ def see_features():
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
     pd.DataFrame(feature_correlations, index=[
                       market[:-4] for market in model_list]).T.to_csv(pkg_resources.files(data) / "feature_correlations.csv")
+
+def filter_features():
+    shap_df = pd.read_csv(pkg_resources.files(data) / "feature_importances.csv", index_col=0)
+    shap_df.drop(columns=[col for col in shap_df.columns if "ALL" in col], inplace=True)
+    corr_df = pd.read_csv(pkg_resources.files(data) / "feature_correlations.csv", index_col=0)
+    shap_df[shap_df < .3] = 0
+    shap_df.fillna(0, inplace=True)
+    corr_df = np.abs(corr_df)
+    corr_df[corr_df < .1] = 0
+    corr_df.fillna(0, inplace=True)
+
+    leagues = list(set([col.split("_")[0] for col in shap_df.columns]))
+    for league in leagues:
+        feature_filter.setdefault(league, {})
+        importances = shap_df.drop(index=feature_filter[league]["Common"]).rank(ascending=False, method="max")
+        correlations = corr_df.drop(index=feature_filter[league]["Common"]).rank(ascending=False, method="max")
+        
+        markets = [col.split("_")[1] for col in shap_df.columns if col.split("_")[0] == league]
+        for market in markets:
+            if market not in feature_filter[league]:
+                stats = []
+                stats.extend([stat.replace(" short", "").replace(" growth", "") for stat in importances.loc[importances["_".join([league, market])] <= 30].index])
+                stats.extend([stat.replace(" short", "").replace(" growth", "") for stat in correlations.loc[correlations["_".join([league, market])] <= 20].index])
+                stats = list(set(stats))
+                stats.sort()
+
+                feature_filter[league][market] = stats
+
+    with open(pkg_resources.files(data) / "feature_filter.json", "w") as outfile:
+        json.dump(feature_filter, outfile, indent=4)
 
 def fit_book_weights(league, market):
     global book_weights
@@ -798,6 +819,9 @@ def trim_matrix(M):
                         p[more >= a] = diff[j]
                     p = p/np.sum(p)
 
+                if n > len(chopping_block):
+                    n = len(chopping_block)
+
                 cut = np.random.choice(
                     chopping_block, n, replace=False, p=p)
                 M.drop(cut, inplace=True)
@@ -845,15 +869,22 @@ def trim_matrix(M):
                     p[more >= a] = diff[j]
                 p = p/np.sum(p)
 
+            if n > len(chopping_block):
+                n = len(chopping_block)
+
             cut = np.random.choice(
                 chopping_block, n, replace=False, p=p)
             M.drop(cut, inplace=True)
+
+    if len(M.loc[(M["Archived"] == 1)]) < 10:
+           return M.sort_values("Date")
 
     pushes = M.loc[M["Result"]==M["Line"]]
     push_rate = pushes["Archived"].sum()/M["Archived"].sum()
     M = M.loc[M["Result"]!=M["Line"]]
     target = (M.loc[(M["Archived"] == 1), "Result"] >
                 M.loc[(M["Archived"] == 1), "Line"]).mean()
+    
     balance = (M["Result"] > M["Line"]).mean()
     n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
 
@@ -870,6 +901,9 @@ def trim_matrix(M):
             p = (M.loc[chopping_block, "MeanYr"].clip(
                 0.1)).to_numpy()
             p = p/np.sum(p)
+
+        if n > len(chopping_block):
+            n = len(chopping_block)
 
         cut = np.random.choice(chopping_block, n, replace=False, p=p)
         M.drop(cut, inplace=True)
@@ -1311,3 +1345,5 @@ def correlate(league, force=False):
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
     meditate()
+    see_features()
+    filter_features()
