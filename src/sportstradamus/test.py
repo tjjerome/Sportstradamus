@@ -17,21 +17,17 @@ from time import time
 import requests
 
 pd.options.mode.chained_assignment = None
-archive.__init__("All")
 
-stats = StatsNBA()
+stats = StatsMLB()
 stats.load()
 stats.update()
 
-# offers = get_ud()
+# date = '2023-12-31'
+# offers = {k: v.get(date) for k, v in archive["NFL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
 
-# offers = offers["NHL"]
-# offers = {stat_map["Underdog"].get(k): v for k, v in offers.items() if k in stat_map["Underdog"]}
+# stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
 
-date = '2023-12-31'
-offers = {k: v.get(date) for k, v in archive["NBA"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
-
-stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
+stats.get_training_matrix("pitches thrown")
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
@@ -156,14 +152,13 @@ stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
 # NBA.update()
 
 # NBA = StatsWNBA()
-# NBA.season = "2021-22"
-# NBA.season_start = datetime(2021, 10, 1).date()
+# NBA.season_start = datetime(2021, 5, 14).date()
 # NBA.update()
-# NBA.season = "2022-23"
-# NBA.season_start = datetime(2022, 10, 1).date()
+# NBA.season_start = datetime(2022, 5, 6).date()
 # NBA.update()
-# NBA.season = "2023-24"
-# NBA.season_start = datetime(2023, 10, 1).date()
+# NBA.season_start = datetime(2023, 5, 19).date()
+# NBA.update()
+# NBA.season_start = datetime(2024, 5, 14).date()
 # NBA.update()
 
 # NHL = StatsNHL()

@@ -8,15 +8,15 @@
             "Gardner Minshew",
             "Jared Goff",
             "Cj Stroud",
-            "Mac Jones",
             "Geno Smith",
-            "Baker Mayfield",
             "Matthew Stafford",
+            "Mac Jones",
+            "Baker Mayfield",
             "Mason Rudolph",
             "Justin Herbert",
             "Deshaun Watson",
-            "Jordan Love",
             "Jimmy Garoppolo",
+            "Jordan Love",
             "Zach Wilson"
         ],
         "Anthony Richardson": [
@@ -29,20 +29,20 @@
         ],
         "Baker Mayfield": [
             "Baker Mayfield",
-            "Cj Stroud",
             "Jordan Love",
+            "Cj Stroud",
             "Deshaun Watson",
             "Gardner Minshew",
             "Justin Herbert",
-            "Sam Howell",
             "Russell Wilson",
+            "Sam Howell",
             "Kyler Murray",
             "Geno Smith",
             "Dak Prescott",
             "Zach Wilson",
-            "Matthew Stafford",
             "Joe Burrow",
             "Jake Browning",
+            "Matthew Stafford",
             "Aidan O'Connell",
             "Ryan Tannehill",
             "Derek Carr",
@@ -94,7 +94,8 @@
             "Cj Stroud",
             "Kyler Murray",
             "Jordan Love",
-            "Brock Purdy"
+            "Brock Purdy",
+            "Deshaun Watson"
         ],
         "Daniel Jones": [
             "Daniel Jones"
@@ -123,7 +124,8 @@
             "Jimmy Garoppolo",
             "Russell Wilson",
             "Aidan O'Connell",
-            "Geno Smith"
+            "Geno Smith",
+            "Dak Prescott"
         ],
         "Desmond Ridder": [
             "Desmond Ridder"
@@ -146,10 +148,10 @@
         "Gardner Minshew": [
             "Gardner Minshew",
             "Baker Mayfield",
+            "Mac Jones",
             "Aidan O'Connell",
             "Jimmy Garoppolo",
             "Deshaun Watson",
-            "Mac Jones",
             "Easton Stick",
             "Zach Wilson",
             "Kyler Murray",
@@ -338,15 +340,15 @@
         ],
         "Matthew Stafford": [
             "Matthew Stafford",
-            "Geno Smith",
             "Joe Burrow",
-            "Cj Stroud",
+            "Geno Smith",
             "Derek Carr",
+            "Cj Stroud",
             "Jared Goff",
-            "Justin Herbert",
             "Jordan Love",
-            "Baker Mayfield",
-            "Aidan O'Connell"
+            "Justin Herbert",
+            "Aidan O'Connell",
+            "Baker Mayfield"
         ],
         "Nick Mullens": [
             "Nick Mullens"
@@ -381,9 +383,9 @@
             "Baker Mayfield",
             "Kyler Murray",
             "Easton Stick",
+            "Mac Jones",
             "Russell Wilson",
-            "Gardner Minshew",
-            "Mac Jones"
+            "Gardner Minshew"
         ],
         "Taylor Heinicke": [
             "Taylor Heinicke"
@@ -430,8 +432,8 @@
             "Kenny Pickett",
             "Baker Mayfield",
             "Kyler Murray",
-            "Tim Boyle",
             "Deshaun Watson",
+            "Tim Boyle",
             "Gardner Minshew",
             "Jimmy Garoppolo",
             "Aidan O'Connell",
@@ -441,73 +443,82 @@
     "RB": {
         "Aaron Jones": [
             "Aaron Jones",
+            "David Montgomery",
+            "Isiah Pacheco",
             "Raheem Mostert",
             "Jonathan Taylor",
-            "Zack Moss",
-            "David Montgomery",
+            "Najee Harris",
             "Rhamondre Stevenson",
-            "Khalil Herbert",
-            "Isiah Pacheco"
+            "D'Andre Swift",
+            "James Conner",
+            "Austin Ekeler",
+            "Tony Pollard"
         ],
         "Aj Dillon": [
             "Aj Dillon",
             "D'Onta Foreman",
             "Brian Robinson",
-            "Ezekiel Elliott",
+            "Gus Edwards",
             "Tyler Allgeier"
         ],
         "Alexander Mattison": [
             "Alexander Mattison",
             "Zack Moss",
-            "Rhamondre Stevenson",
-            "D'Onta Foreman",
             "D'Andre Swift",
+            "Rhamondre Stevenson",
             "Jerome Ford",
-            "Najee Harris"
+            "D'Onta Foreman",
+            "Kareem Hunt"
         ],
         "Alvin Kamara": [
-            "Alvin Kamara"
+            "Alvin Kamara",
+            "Ezekiel Elliott",
+            "Joe Mixon",
+            "Travis Etienne"
         ],
         "Antonio Gibson": [
             "Antonio Gibson",
             "Rico Dowdle",
-            "Roschon Johnson",
-            "Cam Akers",
-            "Justice Hill",
-            "Ezekiel Elliott"
+            "Roschon Johnson"
         ],
         "Austin Ekeler": [
             "Austin Ekeler",
-            "Josh Jacobs",
             "Joe Mixon",
             "Rachaad White",
-            "Rhamondre Stevenson"
+            "Rhamondre Stevenson",
+            "Ezekiel Elliott",
+            "Josh Jacobs",
+            "Javonte Williams",
+            "Aaron Jones",
+            "Jerome Ford"
         ],
         "Bijan Robinson": [
             "Bijan Robinson",
-            "Jerome Ford"
+            "James Cook",
+            "Jahmyr Gibbs",
+            "Rachaad White",
+            "Jerome Ford",
+            "Rhamondre Stevenson"
         ],
         "Breece Hall": [
             "Breece Hall"
         ],
         "Brian Robinson": [
             "Brian Robinson",
-            "Tyler Allgeier",
+            "Ty Chandler",
             "Aj Dillon",
-            "Kenneth Walker",
-            "Joe Mixon"
+            "Joe Mixon",
+            "Javonte Williams"
         ],
         "Cam Akers": [
             "Cam Akers",
             "Dameon Pierce",
-            "Rico Dowdle",
-            "Zamir White",
             "Tyler Allgeier",
             "Ty Johnson",
-            "Miles Sanders",
-            "Antonio Gibson",
+            "Rico Dowdle",
+            "Zamir White",
             "Kareem Hunt",
-            "Ty Chandler",
+            "Miles Sanders",
             "Roschon Johnson"
         ],
         "Chase Brown": [
@@ -517,19 +528,21 @@
             "Chase Edmonds",
             "Dalvin Cook",
             "Rico Dowdle",
-            "D'Ernest Johnson",
-            "Pierre Strong",
+            "Dameon Pierce",
             "Miles Sanders",
-            "Clyde Edwards-Helaire"
+            "D'Ernest Johnson",
+            "Pierre Strong"
         ],
         "Chris Rodriguez": [
             "Chris Rodriguez",
-            "Jordan Mason",
             "Elijah Mitchell",
-            "Keaontay Ingram",
-            "Rico Dowdle",
+            "Jordan Mason",
+            "Royce Freeman",
             "Pierre Strong",
-            "Royce Freeman"
+            "Rico Dowdle",
+            "Dameon Pierce",
+            "Zamir White",
+            "Emari Demercado"
         ],
         "Christian Mccaffrey": [
             "Christian Mccaffrey"
@@ -538,43 +551,42 @@
             "Chuba Hubbard",
             "Tony Pollard",
             "David Montgomery",
-            "Rhamondre Stevenson",
-            "James Cook",
-            "Najee Harris"
+            "Najee Harris",
+            "Rhamondre Stevenson"
         ],
         "Clyde Edwards-Helaire": [
             "Clyde Edwards-Helaire",
-            "Chase Edmonds"
+            "Rico Dowdle"
         ],
         "Cordarrelle Patterson": [
             "Cordarrelle Patterson",
             "Latavius Murray",
-            "Patrick Taylor"
+            "Patrick Taylor",
+            "Matt Breida"
         ],
         "Craig Reynolds": [
-            "Craig Reynolds",
-            "Jordan Mason",
-            "Ty Johnson",
-            "Ty Chandler",
-            "Ronnie Rivers"
+            "Craig Reynolds"
         ],
         "D'Andre Swift": [
             "D'Andre Swift",
             "Jerome Ford",
             "Zack Moss",
             "Najee Harris",
-            "Rhamondre Stevenson",
-            "Javonte Williams",
             "Josh Jacobs",
-            "Khalil Herbert",
             "David Montgomery",
             "Alexander Mattison",
-            "Jonathan Taylor"
+            "Rhamondre Stevenson",
+            "Jonathan Taylor",
+            "Javonte Williams",
+            "Saquon Barkley",
+            "Aaron Jones",
+            "Isiah Pacheco",
+            "Travis Etienne"
         ],
         "D'Ernest Johnson": [
             "D'Ernest Johnson",
-            "Pierre Strong",
             "Dalvin Cook",
+            "Pierre Strong",
             "Chase Edmonds",
             "Rico Dowdle"
         ],
@@ -582,26 +594,32 @@
             "D'Onta Foreman",
             "Kareem Hunt",
             "Aj Dillon",
-            "Ezekiel Elliott",
             "Alexander Mattison",
-            "David Montgomery"
+            "Gus Edwards"
         ],
         "Dalvin Cook": [
             "Dalvin Cook",
             "Chase Edmonds",
-            "Keaontay Ingram",
-            "Jamaal Williams",
             "D'Ernest Johnson",
-            "Rico Dowdle",
-            "Isaiah Spiller"
+            "Jamaal Williams",
+            "Keaontay Ingram",
+            "Miles Sanders",
+            "Dameon Pierce",
+            "Matt Breida",
+            "Isaiah Spiller",
+            "Rico Dowdle"
         ],
         "Dameon Pierce": [
             "Dameon Pierce",
-            "Cam Akers",
-            "Kareem Hunt",
-            "Zamir White",
             "Miles Sanders",
-            "Rico Dowdle"
+            "Cam Akers",
+            "Chase Edmonds",
+            "Rico Dowdle",
+            "Zamir White",
+            "Dalvin Cook",
+            "Chris Rodriguez",
+            "Elijah Mitchell",
+            "Isaiah Spiller"
         ],
         "Darrell Henderson": [
             "Darrell Henderson"
@@ -609,45 +627,51 @@
         "David Montgomery": [
             "David Montgomery",
             "Najee Harris",
-            "Jonathan Taylor",
-            "Isiah Pacheco",
-            "Chuba Hubbard",
             "D'Andre Swift",
+            "Jonathan Taylor",
+            "Aaron Jones",
+            "Chuba Hubbard",
             "Tony Pollard",
-            "Zack Moss",
             "Rhamondre Stevenson",
             "James Conner",
-            "Aaron Jones",
-            "Raheem Mostert",
-            "D'Onta Foreman"
+            "Isiah Pacheco",
+            "Zack Moss",
+            "Jerome Ford",
+            "Raheem Mostert"
         ],
         "Devon Achane": [
             "Devon Achane"
         ],
         "Elijah Mitchell": [
             "Elijah Mitchell",
-            "Keaontay Ingram",
             "Chris Rodriguez",
             "Isaiah Spiller",
             "Joshua Kelley",
+            "Matt Breida",
+            "Keaontay Ingram",
             "Patrick Taylor",
-            "Matt Breida"
+            "Kareem Hunt",
+            "Dameon Pierce",
+            "Rico Dowdle"
         ],
         "Emari Demercado": [
             "Emari Demercado",
-            "Jordan Mason"
+            "Jordan Mason",
+            "Chris Rodriguez"
         ],
         "Ezekiel Elliott": [
             "Ezekiel Elliott",
-            "D'Onta Foreman",
-            "Kareem Hunt",
+            "Alvin Kamara",
+            "Austin Ekeler",
             "Rhamondre Stevenson",
-            "Antonio Gibson",
-            "Aj Dillon"
+            "Joe Mixon"
         ],
         "Gus Edwards": [
             "Gus Edwards",
-            "Royce Freeman"
+            "Royce Freeman",
+            "Aj Dillon",
+            "D'Onta Foreman",
+            "Ty Chandler"
         ],
         "Isaiah Spiller": [
             "Isaiah Spiller",
@@ -655,25 +679,32 @@
             "Elijah Mitchell",
             "Rico Dowdle",
             "Patrick Taylor",
-            "Dalvin Cook"
+            "Dalvin Cook",
+            "Dameon Pierce"
         ],
         "Isiah Pacheco": [
             "Isiah Pacheco",
             "Jonathan Taylor",
             "Najee Harris",
-            "David Montgomery",
             "Travis Etienne",
-            "Joe Mixon",
-            "Saquon Barkley",
-            "James Conner",
-            "Tony Pollard",
             "Aaron Jones",
-            "Kenneth Walker"
+            "Saquon Barkley",
+            "Joe Mixon",
+            "Jahmyr Gibbs",
+            "Josh Jacobs",
+            "Javonte Williams",
+            "Tony Pollard",
+            "David Montgomery",
+            "D'Andre Swift",
+            "James Conner"
         ],
         "Jahmyr Gibbs": [
             "Jahmyr Gibbs",
+            "Jerome Ford",
+            "Bijan Robinson",
+            "Isiah Pacheco",
             "Kenneth Walker",
-            "Jerome Ford"
+            "Travis Etienne"
         ],
         "Jaleel Mclaughlin": [
             "Jaleel Mclaughlin"
@@ -681,122 +712,126 @@
         "Jamaal Williams": [
             "Jamaal Williams",
             "Dalvin Cook",
-            "Keaontay Ingram",
             "Patrick Taylor",
-            "Kareem Hunt"
+            "Roschon Johnson",
+            "Keaontay Ingram",
+            "Joshua Kelley"
         ],
         "James Conner": [
             "James Conner",
             "Najee Harris",
             "David Montgomery",
+            "Aaron Jones",
             "Isiah Pacheco"
         ],
         "James Cook": [
             "James Cook",
-            "Chuba Hubbard",
+            "Bijan Robinson",
             "Jerome Ford"
         ],
         "Javonte Williams": [
             "Javonte Williams",
-            "D'Andre Swift",
             "Najee Harris",
             "Josh Jacobs",
-            "Zack Moss",
-            "Saquon Barkley"
+            "Saquon Barkley",
+            "D'Andre Swift",
+            "Isiah Pacheco",
+            "Austin Ekeler",
+            "Brian Robinson"
         ],
         "Jaylen Warren": [
-            "Jaylen Warren"
+            "Jaylen Warren",
+            "Kenneth Walker"
         ],
         "Jerome Ford": [
             "Jerome Ford",
             "D'Andre Swift",
             "Zack Moss",
-            "Khalil Herbert",
             "Rhamondre Stevenson",
-            "Bijan Robinson",
             "Jahmyr Gibbs",
             "Alexander Mattison",
             "Najee Harris",
+            "Bijan Robinson",
+            "Austin Ekeler",
+            "David Montgomery",
             "James Cook"
         ],
         "Joe Mixon": [
             "Joe Mixon",
             "Rachaad White",
-            "Isiah Pacheco",
             "Austin Ekeler",
+            "Isiah Pacheco",
+            "Brian Robinson",
             "Travis Etienne",
-            "Najee Harris",
-            "Brian Robinson"
+            "Alvin Kamara",
+            "Ezekiel Elliott",
+            "Najee Harris"
         ],
         "Jonathan Taylor": [
             "Jonathan Taylor",
             "Isiah Pacheco",
-            "Najee Harris",
             "David Montgomery",
-            "Aaron Jones",
+            "Najee Harris",
             "D'Andre Swift",
-            "Kenneth Walker"
+            "Aaron Jones",
+            "Josh Jacobs"
         ],
         "Jordan Mason": [
             "Jordan Mason",
-            "Chris Rodriguez",
-            "Craig Reynolds",
+            "Emari Demercado",
             "Ty Johnson",
-            "Emari Demercado"
+            "Chris Rodriguez"
         ],
         "Josh Jacobs": [
             "Josh Jacobs",
-            "Saquon Barkley",
-            "Rhamondre Stevenson",
-            "Javonte Williams",
             "D'Andre Swift",
-            "Zack Moss",
-            "Austin Ekeler",
-            "Tony Pollard",
+            "Saquon Barkley",
+            "Javonte Williams",
+            "Rhamondre Stevenson",
             "Najee Harris",
-            "Travis Etienne"
+            "Isiah Pacheco",
+            "Austin Ekeler",
+            "Jonathan Taylor",
+            "Travis Etienne",
+            "Tony Pollard"
         ],
         "Joshua Kelley": [
             "Joshua Kelley",
             "Trey Sermon",
+            "Matt Breida",
             "Patrick Taylor",
             "Elijah Mitchell",
-            "Matt Breida",
-            "Keaontay Ingram"
+            "Keaontay Ingram",
+            "Jamaal Williams"
         ],
         "Justice Hill": [
             "Justice Hill",
             "Ty Chandler",
             "Roschon Johnson",
-            "Zach Charbonnet",
             "Rico Dowdle",
-            "Miles Sanders",
-            "Zamir White",
-            "Antonio Gibson",
-            "Ty Johnson"
+            "Ty Johnson",
+            "Zamir White"
         ],
         "Kareem Hunt": [
             "Kareem Hunt",
-            "Dameon Pierce",
             "D'Onta Foreman",
-            "Miles Sanders",
             "Zamir White",
-            "Ezekiel Elliott",
-            "Jamaal Williams",
-            "Cam Akers"
+            "Miles Sanders",
+            "Cam Akers",
+            "Alexander Mattison",
+            "Elijah Mitchell"
         ],
         "Keaontay Ingram": [
             "Keaontay Ingram",
             "Isaiah Spiller",
-            "Elijah Mitchell",
             "Patrick Taylor",
-            "Rico Dowdle",
             "Dalvin Cook",
-            "Chris Rodriguez",
+            "Rico Dowdle",
+            "Elijah Mitchell",
             "Jamaal Williams",
-            "Ronnie Rivers",
+            "Joshua Kelley",
             "Matt Breida",
-            "Joshua Kelley"
+            "Roschon Johnson"
         ],
         "Keaton Mitchell": [
             "Keaton Mitchell"
@@ -808,22 +843,16 @@
         ],
         "Kenneth Walker": [
             "Kenneth Walker",
+            "Jaylen Warren",
             "Jahmyr Gibbs",
-            "Travis Etienne",
-            "Jonathan Taylor",
-            "Brian Robinson",
-            "Isiah Pacheco"
+            "Travis Etienne"
         ],
         "Khalil Herbert": [
-            "Khalil Herbert",
-            "Jerome Ford",
-            "D'Andre Swift",
-            "Zack Moss",
-            "Aaron Jones",
-            "Najee Harris"
+            "Khalil Herbert"
         ],
         "Kyren Williams": [
-            "Kyren Williams"
+            "Kyren Williams",
+            "Tony Pollard"
         ],
         "Latavius Murray": [
             "Latavius Murray",
@@ -833,38 +862,39 @@
             "Matt Breida",
             "Joshua Kelley",
             "Elijah Mitchell",
+            "Dalvin Cook",
             "Patrick Taylor",
-            "Keaontay Ingram"
+            "Keaontay Ingram",
+            "Cordarrelle Patterson"
         ],
         "Miles Sanders": [
             "Miles Sanders",
-            "Zamir White",
             "Dameon Pierce",
-            "Kareem Hunt",
-            "Cam Akers",
-            "Justice Hill",
+            "Zamir White",
             "Rico Dowdle",
-            "Zach Charbonnet",
-            "Chase Edmonds"
+            "Chase Edmonds",
+            "Kareem Hunt",
+            "Dalvin Cook",
+            "Cam Akers"
         ],
         "Najee Harris": [
             "Najee Harris",
             "David Montgomery",
             "D'Andre Swift",
-            "Zack Moss",
             "Isiah Pacheco",
             "Jonathan Taylor",
             "Javonte Williams",
-            "Rhamondre Stevenson",
-            "Tony Pollard",
             "James Conner",
-            "Chuba Hubbard",
             "Saquon Barkley",
-            "Joe Mixon",
+            "Rhamondre Stevenson",
+            "Chuba Hubbard",
+            "Tony Pollard",
+            "Aaron Jones",
+            "Josh Jacobs",
+            "Zack Moss",
             "Jerome Ford",
-            "Khalil Herbert",
-            "Alexander Mattison",
-            "Josh Jacobs"
+            "Travis Etienne",
+            "Joe Mixon"
         ],
         "Patrick Taylor": [
             "Patrick Taylor",
@@ -872,22 +902,24 @@
             "Joshua Kelley",
             "Isaiah Spiller",
             "Cordarrelle Patterson",
-            "Elijah Mitchell",
             "Jamaal Williams",
-            "Matt Breida"
+            "Matt Breida",
+            "Elijah Mitchell"
         ],
         "Pierre Strong": [
             "Pierre Strong",
             "D'Ernest Johnson",
-            "Rico Dowdle",
             "Chris Rodriguez",
-            "Chase Edmonds"
+            "Rico Dowdle",
+            "Chase Edmonds",
+            "Royce Freeman"
         ],
         "Rachaad White": [
             "Rachaad White",
             "Joe Mixon",
             "Travis Etienne",
-            "Austin Ekeler"
+            "Austin Ekeler",
+            "Bijan Robinson"
         ],
         "Raheem Mostert": [
             "Raheem Mostert",
@@ -896,58 +928,63 @@
         ],
         "Rhamondre Stevenson": [
             "Rhamondre Stevenson",
-            "Tony Pollard",
+            "Jerome Ford",
             "Zack Moss",
+            "D'Andre Swift",
+            "Tony Pollard",
             "Alexander Mattison",
             "Josh Jacobs",
-            "D'Andre Swift",
             "Najee Harris",
-            "Jerome Ford",
-            "Chuba Hubbard",
-            "David Montgomery",
-            "Ezekiel Elliott",
+            "Austin Ekeler",
             "Aaron Jones",
-            "Austin Ekeler"
+            "Ezekiel Elliott",
+            "David Montgomery",
+            "Bijan Robinson",
+            "Chuba Hubbard"
         ],
         "Rico Dowdle": [
             "Rico Dowdle",
             "Ty Johnson",
             "Chase Edmonds",
             "Zamir White",
+            "Miles Sanders",
             "Isaiah Spiller",
             "Justice Hill",
-            "Keaontay Ingram",
             "Ronnie Rivers",
-            "Ty Chandler",
-            "Cam Akers",
+            "Dameon Pierce",
+            "Roschon Johnson",
             "Antonio Gibson",
+            "Cam Akers",
             "Pierre Strong",
             "Chris Rodriguez",
-            "Miles Sanders",
-            "Roschon Johnson",
-            "Dameon Pierce",
-            "Dalvin Cook",
+            "Keaontay Ingram",
             "Kendre Miller",
-            "D'Ernest Johnson"
+            "D'Ernest Johnson",
+            "Ty Chandler",
+            "Dalvin Cook",
+            "Elijah Mitchell",
+            "Clyde Edwards-Helaire"
         ],
         "Ronnie Rivers": [
             "Ronnie Rivers",
             "Ty Johnson",
-            "Rico Dowdle",
-            "Keaontay Ingram",
-            "Craig Reynolds"
+            "Rico Dowdle"
         ],
         "Roschon Johnson": [
             "Roschon Johnson",
             "Justice Hill",
-            "Antonio Gibson",
             "Rico Dowdle",
+            "Antonio Gibson",
+            "Jamaal Williams",
+            "Ty Johnson",
+            "Keaontay Ingram",
             "Cam Akers"
         ],
         "Royce Freeman": [
             "Royce Freeman",
             "Gus Edwards",
-            "Chris Rodriguez"
+            "Chris Rodriguez",
+            "Pierre Strong"
         ],
         "Samaje Perine": [
             "Samaje Perine"
@@ -957,30 +994,34 @@
             "Josh Jacobs",
             "Isiah Pacheco",
             "Najee Harris",
-            "Tony Pollard",
-            "Javonte Williams"
+            "Javonte Williams",
+            "D'Andre Swift"
         ],
         "Tank Bigsby": [
             "Tank Bigsby"
         ],
         "Tony Pollard": [
             "Tony Pollard",
-            "Rhamondre Stevenson",
             "Chuba Hubbard",
-            "Zack Moss",
+            "Rhamondre Stevenson",
             "Najee Harris",
             "David Montgomery",
-            "Josh Jacobs",
-            "Saquon Barkley",
-            "Isiah Pacheco"
+            "Kyren Williams",
+            "Isiah Pacheco",
+            "Aaron Jones",
+            "Josh Jacobs"
         ],
         "Travis Etienne": [
             "Travis Etienne",
             "Isiah Pacheco",
-            "Kenneth Walker",
             "Rachaad White",
+            "Jahmyr Gibbs",
             "Joe Mixon",
-            "Josh Jacobs"
+            "Kenneth Walker",
+            "Josh Jacobs",
+            "Alvin Kamara",
+            "Najee Harris",
+            "D'Andre Swift"
         ],
         "Trey Sermon": [
             "Trey Sermon",
@@ -990,21 +1031,18 @@
             "Ty Chandler",
             "Justice Hill",
             "Zamir White",
-            "Rico Dowdle",
-            "Ty Johnson",
-            "Tyler Allgeier",
-            "Craig Reynolds",
+            "Brian Robinson",
             "Zach Charbonnet",
-            "Cam Akers"
+            "Rico Dowdle",
+            "Gus Edwards"
         ],
         "Ty Johnson": [
             "Ty Johnson",
             "Ronnie Rivers",
             "Rico Dowdle",
-            "Cam Akers",
-            "Ty Chandler",
             "Jordan Mason",
-            "Craig Reynolds",
+            "Cam Akers",
+            "Roschon Johnson",
             "Justice Hill"
         ],
         "Tyjae Spears": [
@@ -1012,262 +1050,260 @@
         ],
         "Tyler Allgeier": [
             "Tyler Allgeier",
-            "Cam Akers",
             "Kendre Miller",
-            "Brian Robinson",
-            "Ty Chandler",
+            "Cam Akers",
             "Aj Dillon"
         ],
         "Zach Charbonnet": [
             "Zach Charbonnet",
             "Zamir White",
-            "Justice Hill",
-            "Ty Chandler",
-            "Miles Sanders"
+            "Ty Chandler"
         ],
         "Zack Moss": [
             "Zack Moss",
-            "Alexander Mattison",
             "D'Andre Swift",
+            "Alexander Mattison",
             "Jerome Ford",
             "Rhamondre Stevenson",
             "Najee Harris",
-            "Tony Pollard",
-            "Josh Jacobs",
-            "Khalil Herbert",
-            "David Montgomery",
-            "Aaron Jones",
-            "Javonte Williams"
+            "David Montgomery"
         ],
         "Zamir White": [
             "Zamir White",
             "Miles Sanders",
-            "Zach Charbonnet",
-            "Dameon Pierce",
             "Rico Dowdle",
             "Ty Chandler",
-            "Cam Akers",
             "Kareem Hunt",
+            "Zach Charbonnet",
+            "Dameon Pierce",
+            "Cam Akers",
+            "Chris Rodriguez",
             "Justice Hill"
         ]
     },
     "WR": {
         "Adam Thielen": [
-            "Adam Thielen"
+            "Adam Thielen",
+            "Cooper Kupp"
         ],
         "Amon-Ra St Brown": [
             "Amon-Ra St Brown",
             "Ceedee Lamb",
+            "Nico Collins",
             "Ja'Marr Chase",
-            "Justin Jefferson"
+            "Puka Nacua"
         ],
         "Ben Skowronek": [
-            "Ben Skowronek"
+            "Ben Skowronek",
+            "John Metchie",
+            "Skyy Moore",
+            "Kadarius Toney"
         ],
         "Bo Melton": [
             "Bo Melton",
             "Josh Palmer",
-            "Brandin Cooks",
-            "Romeo Doubs",
-            "Tutu Atwell",
             "Jakobi Meyers",
+            "Romeo Doubs",
+            "Brandin Cooks",
+            "Jordan Addison",
+            "Chris Godwin",
             "Dontayvion Wicks"
         ],
         "Brandin Cooks": [
             "Brandin Cooks",
             "Josh Palmer",
             "Jakobi Meyers",
-            "Rashid Shaheed",
-            "Tutu Atwell",
-            "Gabe Davis",
             "Elijah Moore",
             "Jordan Addison",
-            "Curtis Samuel",
-            "Jauan Jennings",
             "Chris Godwin",
+            "Greg Dortch",
+            "Marquise Brown",
+            "Jauan Jennings",
+            "Gabe Davis",
+            "Rashid Shaheed",
             "Bo Melton",
             "Rashod Bateman",
-            "Robert Woods",
-            "Greg Dortch",
-            "Demarcus Robinson",
-            "Jamal Agnew",
-            "Brandon Powell",
             "Romeo Doubs",
-            "Cedric Tillman"
+            "Curtis Samuel",
+            "Robert Woods",
+            "Demarcus Robinson",
+            "Cedric Tillman",
+            "Chris Moore",
+            "Xavier Gipson",
+            "Brandon Powell"
         ],
         "Brandon Powell": [
             "Brandon Powell",
             "Braxton Berrios",
-            "Skyy Moore",
-            "Rondale Moore",
             "Xavier Gipson",
+            "Rondale Moore",
+            "Skyy Moore",
+            "Robert Woods",
             "John Metchie",
             "Jamal Agnew",
-            "Curtis Samuel",
-            "Robert Woods",
-            "Elijah Moore",
             "Trey Palmer",
-            "Tutu Atwell",
-            "Ray-Ray Mccloud",
             "Calvin Austin",
+            "Elijah Moore",
+            "Cedric Tillman",
+            "Ray-Ray Mccloud",
             "Kalif Raymond",
+            "Van Jefferson",
+            "Khalil Shakir",
             "Brandin Cooks"
         ],
         "Braxton Berrios": [
             "Braxton Berrios",
             "Brandon Powell",
-            "Skyy Moore",
             "Jamal Agnew",
-            "Xavier Gipson",
+            "Skyy Moore",
             "Rondale Moore",
-            "Ray-Ray Mccloud",
-            "Cedric Tillman",
+            "Xavier Gipson",
             "Calvin Austin",
-            "Khalil Shakir"
+            "Cedric Tillman"
         ],
         "Calvin Austin": [
             "Calvin Austin",
-            "Trey Palmer",
             "Marvin Mims",
             "Xavier Gipson",
+            "Trey Palmer",
+            "Deven Thompkins",
             "Brandon Powell",
-            "Tyler Scott",
-            "Dyami Brown",
             "Xavier Hutchinson",
-            "Jameson Williams",
             "Skyy Moore",
-            "Jalen Reagor",
             "Braxton Berrios",
-            "Tyquan Thornton"
+            "Tyler Scott",
+            "Dyami Brown"
         ],
         "Calvin Ridley": [
             "Calvin Ridley",
-            "Marquise Brown",
-            "Jakobi Meyers",
             "Deandre Hopkins",
-            "Gabe Davis",
-            "Romeo Doubs",
-            "Josh Palmer"
+            "Josh Palmer",
+            "Marquise Brown",
+            "Jordan Addison"
         ],
         "Cedric Tillman": [
             "Cedric Tillman",
-            "Skyy Moore",
             "Trey Palmer",
             "Van Jefferson",
-            "Elijah Moore",
-            "Jauan Jennings",
-            "Rashod Bateman",
+            "Skyy Moore",
             "Xavier Gipson",
-            "Tyler Scott",
-            "Josh Palmer",
-            "Braxton Berrios",
-            "Gabe Davis",
+            "Elijah Moore",
+            "Jakobi Meyers",
+            "Jauan Jennings",
             "John Metchie",
+            "Tyler Scott",
             "Khadarel Hodge",
             "Robert Woods",
+            "Xavier Hutchinson",
+            "Rashod Bateman",
+            "Josh Palmer",
             "Tyquan Thornton",
+            "Brandon Powell",
+            "Braxton Berrios",
+            "Jalen Reagor",
             "Brandin Cooks"
         ],
         "Ceedee Lamb": [
             "Ceedee Lamb",
-            "Amon-Ra St Brown",
-            "Stefon Diggs",
-            "Keenan Allen",
-            "Justin Jefferson"
+            "Amon-Ra St Brown"
         ],
         "Chris Godwin": [
             "Chris Godwin",
             "Jakobi Meyers",
             "Romeo Doubs",
             "Demarcus Robinson",
-            "Josh Palmer",
+            "Brandin Cooks",
+            "Dontayvion Wicks",
+            "Jordan Addison",
             "Ja'Marr Chase",
+            "Josh Palmer",
             "Cooper Kupp",
             "Curtis Samuel",
-            "Jordan Addison",
-            "Brandin Cooks",
-            "Tank Dell",
-            "Dontayvion Wicks",
-            "Gabe Davis",
+            "Bo Melton",
+            "Demario Douglas",
+            "Elijah Moore",
             "Zay Flowers"
         ],
         "Chris Moore": [
-            "Chris Moore"
+            "Chris Moore",
+            "Brandin Cooks"
         ],
         "Christian Kirk": [
-            "Christian Kirk",
-            "Jayden Reed",
-            "Demario Douglas",
-            "Cooper Kupp"
+            "Christian Kirk"
         ],
         "Christian Watson": [
             "Christian Watson",
-            "Josh Palmer",
             "Quentin Johnston",
-            "Jordan Addison",
-            "Gabe Davis"
+            "Josh Palmer",
+            "Romeo Doubs",
+            "Rashod Bateman",
+            "Jameson Williams"
         ],
         "Cooper Kupp": [
             "Cooper Kupp",
             "Chris Godwin",
-            "Christian Kirk"
+            "Curtis Samuel",
+            "Adam Thielen",
+            "Elijah Moore"
         ],
         "Curtis Samuel": [
             "Curtis Samuel",
             "Tyler Boyd",
-            "Robert Woods",
-            "Jayden Reed",
-            "Khalil Shakir",
-            "Josh Palmer",
-            "Brandon Powell",
+            "Dontayvion Wicks",
             "Chris Godwin",
             "Jauan Jennings",
+            "Cooper Kupp",
             "Brandin Cooks",
+            "Jayden Reed",
+            "Robert Woods",
             "Elijah Moore",
-            "Dontayvion Wicks",
-            "Tutu Atwell",
-            "Wan'Dale Robinson",
-            "Jakobi Meyers"
+            "Khalil Shakir",
+            "Demario Douglas",
+            "Wan'Dale Robinson"
         ],
         "Darnell Mooney": [
             "Darnell Mooney",
-            "Trey Palmer",
-            "Elijah Moore",
-            "Van Jefferson",
-            "Tyler Boyd"
+            "Tyler Boyd",
+            "Elijah Moore"
         ],
         "Deandre Hopkins": [
             "Deandre Hopkins",
             "Calvin Ridley",
-            "Justin Jefferson",
-            "Marquise Brown"
+            "Justin Jefferson"
         ],
         "Deebo Samuel": [
             "Deebo Samuel",
-            "Ja'Marr Chase"
+            "Ja'Marr Chase",
+            "Rashee Rice",
+            "Nico Collins"
         ],
         "Demarcus Robinson": [
             "Demarcus Robinson",
             "Chris Godwin",
-            "Jakobi Meyers",
             "Romeo Doubs",
-            "Brandin Cooks"
+            "Brandin Cooks",
+            "Jakobi Meyers",
+            "Rashod Bateman"
         ],
         "Demario Douglas": [
             "Demario Douglas",
             "Jayden Reed",
-            "Christian Kirk",
+            "Zay Flowers",
+            "Chris Godwin",
+            "Elijah Moore",
+            "Curtis Samuel",
             "Wan'Dale Robinson"
         ],
         "Deonte Harty": [
             "Deonte Harty",
             "Tre Tucker",
-            "Mecole Hardman",
             "Ray-Ray Mccloud"
         ],
         "Deven Thompkins": [
             "Deven Thompkins",
-            "John Metchie"
+            "Calvin Austin",
+            "John Metchie",
+            "Kadarius Toney"
         ],
         "Dj Moore": [
             "Dj Moore",
@@ -1277,96 +1313,102 @@
         ],
         "Dontayvion Wicks": [
             "Dontayvion Wicks",
-            "Khalil Shakir",
-            "Jauan Jennings",
+            "Chris Godwin",
             "Noah Brown",
             "Curtis Samuel",
             "Elijah Moore",
-            "Chris Godwin",
             "Jakobi Meyers",
+            "Ja'Marr Chase",
+            "Kendrick Bourne",
+            "Rashee Rice",
+            "Jauan Jennings",
+            "Romeo Doubs",
             "Jordan Addison",
-            "Bo Melton"
+            "Zay Flowers",
+            "Bo Melton",
+            "Gabe Davis"
         ],
         "Dyami Brown": [
             "Dyami Brown",
-            "Jameson Williams",
             "Tre Tucker",
-            "Khadarel Hodge",
-            "Rashod Bateman",
-            "Marvin Mims",
-            "Tyquan Thornton",
-            "Van Jefferson",
-            "Calvin Austin",
-            "Jalen Reagor",
+            "Jameson Williams",
             "Tutu Atwell",
-            "John Metchie"
+            "Tyquan Thornton",
+            "Khadarel Hodge",
+            "Calvin Austin",
+            "Skyy Moore"
         ],
         "Elijah Moore": [
             "Elijah Moore",
-            "Tutu Atwell",
+            "Jordan Addison",
+            "Zay Flowers",
+            "Brandin Cooks",
             "Jakobi Meyers",
             "Cedric Tillman",
-            "Jordan Addison",
             "Skyy Moore",
-            "Brandin Cooks",
-            "Zay Flowers",
-            "Josh Palmer",
-            "Rashid Shaheed",
-            "Curtis Samuel",
-            "Brandon Powell",
-            "Gabe Davis",
-            "Dontayvion Wicks",
             "Rashod Bateman",
+            "Josh Palmer",
+            "Dontayvion Wicks",
+            "Xavier Gipson",
+            "Tutu Atwell",
+            "Gabe Davis",
+            "Brandon Powell",
+            "Cooper Kupp",
             "Darnell Mooney",
-            "Jayden Reed",
-            "Robert Woods",
-            "Trey Palmer"
+            "Trey Palmer",
+            "Curtis Samuel",
+            "Chris Godwin",
+            "Rashid Shaheed",
+            "Demario Douglas"
         ],
         "Gabe Davis": [
             "Gabe Davis",
-            "Josh Palmer",
             "Jordan Addison",
             "Rashod Bateman",
+            "Josh Palmer",
             "Romeo Doubs",
             "Jakobi Meyers",
             "Brandin Cooks",
-            "Calvin Ridley",
-            "Elijah Moore",
+            "George Pickens",
             "Noah Brown",
-            "Cedric Tillman",
             "Quentin Johnston",
-            "Christian Watson",
-            "Chris Godwin"
+            "Elijah Moore",
+            "Ja'Marr Chase",
+            "Dontayvion Wicks"
         ],
         "Garrett Wilson": [
             "Garrett Wilson",
-            "Ja'Marr Chase",
             "Stefon Diggs",
+            "Jordan Addison",
             "Marquise Brown"
         ],
         "George Pickens": [
             "George Pickens",
+            "Ja'Marr Chase",
             "Jordan Addison",
-            "Ja'Marr Chase"
+            "Gabe Davis"
         ],
         "Greg Dortch": [
             "Greg Dortch",
-            "Brandin Cooks"
+            "Brandin Cooks",
+            "Jordan Addison"
         ],
         "Ja'Marr Chase": [
             "Ja'Marr Chase",
-            "Dj Moore",
-            "Amon-Ra St Brown",
             "Nico Collins",
-            "Garrett Wilson",
-            "Justin Jefferson",
+            "Amon-Ra St Brown",
             "Stefon Diggs",
-            "Jaylen Waddle",
+            "George Pickens",
             "Chris Godwin",
+            "Dj Moore",
             "Puka Nacua",
+            "Jordan Addison",
             "Zay Flowers",
             "Deebo Samuel",
-            "George Pickens"
+            "Dontayvion Wicks",
+            "Gabe Davis",
+            "Rashee Rice",
+            "Justin Jefferson"
         ],
         "Jake Bobo": [
             "Jake Bobo"
@@ -1377,20 +1419,20 @@
             "Romeo Doubs",
             "Josh Palmer",
             "Jordan Addison",
-            "Elijah Moore",
             "Brandin Cooks",
-            "Calvin Ridley",
-            "Gabe Davis",
-            "Demarcus Robinson",
             "Rashod Bateman",
+            "Elijah Moore",
+            "Cedric Tillman",
+            "Jauan Jennings",
             "Robert Woods",
-            "Tutu Atwell",
-            "Zay Flowers",
-            "Dontayvion Wicks",
             "Bo Melton",
-            "Rashid Shaheed",
-            "Tank Dell",
-            "Curtis Samuel"
+            "Gabe Davis",
+            "Trey Palmer",
+            "Dontayvion Wicks",
+            "Zay Flowers",
+            "Demarcus Robinson",
+            "Khalil Shakir",
+            "Jameson Williams"
         ],
         "Jalen Reagor": [
             "Jalen Reagor",
@@ -1398,161 +1440,172 @@
             "Rashod Bateman",
             "Van Jefferson",
             "Treylon Burks",
-            "Quentin Johnston",
             "Xavier Hutchinson",
-            "Dyami Brown",
-            "Calvin Austin"
+            "Quentin Johnston",
+            "Trey Palmer",
+            "Jameson Williams",
+            "Cedric Tillman",
+            "Marvin Mims"
         ],
         "Jamal Agnew": [
             "Jamal Agnew",
             "Braxton Berrios",
             "Brandon Powell",
-            "Skyy Moore",
             "Ray-Ray Mccloud",
-            "Khalil Shakir",
-            "Brandin Cooks",
-            "Xavier Gipson"
+            "Khalil Shakir"
         ],
         "Jameson Williams": [
             "Jameson Williams",
             "Rashod Bateman",
-            "Dyami Brown",
             "Trey Palmer",
-            "Tutu Atwell",
+            "Dyami Brown",
+            "Van Jefferson",
             "Josh Palmer",
             "Quentin Johnston",
             "Marvin Mims",
-            "Van Jefferson",
-            "Calvin Austin",
-            "Rashid Shaheed"
+            "Jalen Reagor",
+            "Jakobi Meyers",
+            "Christian Watson"
         ],
         "Jauan Jennings": [
             "Jauan Jennings",
-            "Dontayvion Wicks",
+            "Jakobi Meyers",
             "Cedric Tillman",
-            "Curtis Samuel",
-            "Khalil Shakir",
             "Brandin Cooks",
+            "Curtis Samuel",
+            "Robert Woods",
+            "Khadarel Hodge",
+            "Khalil Shakir",
+            "Dontayvion Wicks",
             "Tyler Boyd",
-            "Tutu Atwell",
-            "Khadarel Hodge"
+            "Trey Palmer"
         ],
         "Jayden Reed": [
             "Jayden Reed",
             "Demario Douglas",
-            "Christian Kirk",
             "Curtis Samuel",
-            "Khalil Shakir",
-            "Elijah Moore"
+            "Kendrick Bourne"
         ],
         "Jaylen Waddle": [
             "Jaylen Waddle",
-            "Puka Nacua",
             "Tank Dell",
-            "Ja'Marr Chase",
-            "Justin Jefferson",
-            "Nico Collins"
+            "Justin Jefferson"
         ],
         "John Metchie": [
             "John Metchie",
             "Skyy Moore",
+            "Kadarius Toney",
+            "Ben Skowronek",
             "Brandon Powell",
             "Tyquan Thornton",
-            "Kadarius Toney",
             "Tyler Scott",
-            "Deven Thompkins",
             "Cedric Tillman",
-            "Dyami Brown"
+            "Deven Thompkins",
+            "Van Jefferson",
+            "Khadarel Hodge"
         ],
         "Jordan Addison": [
             "Jordan Addison",
-            "Gabe Davis",
             "Romeo Doubs",
-            "Josh Palmer",
             "Jakobi Meyers",
+            "Josh Palmer",
             "Elijah Moore",
+            "Gabe Davis",
+            "Rashod Bateman",
             "Brandin Cooks",
             "Chris Godwin",
-            "Tutu Atwell",
-            "Rashod Bateman",
-            "Christian Watson",
+            "Ja'Marr Chase",
+            "George Pickens",
+            "Bo Melton",
+            "Zay Flowers",
+            "Marquise Brown",
+            "Garrett Wilson",
             "Dontayvion Wicks",
-            "George Pickens"
+            "Quentin Johnston",
+            "Calvin Ridley",
+            "Greg Dortch"
         ],
         "Josh Palmer": [
             "Josh Palmer",
-            "Gabe Davis",
-            "Brandin Cooks",
             "Romeo Doubs",
+            "Brandin Cooks",
             "Jakobi Meyers",
             "Jordan Addison",
             "Rashod Bateman",
             "Bo Melton",
-            "Chris Godwin",
-            "Curtis Samuel",
-            "Elijah Moore",
-            "Quentin Johnston",
-            "Robert Woods",
-            "Tutu Atwell",
-            "Rashid Shaheed",
+            "Gabe Davis",
             "Christian Watson",
+            "Chris Godwin",
             "Trey Palmer",
+            "Quentin Johnston",
+            "Elijah Moore",
             "Jameson Williams",
+            "Calvin Ridley",
             "Cedric Tillman",
-            "Calvin Ridley"
+            "Xavier Gipson",
+            "Rashid Shaheed",
+            "Marquise Brown",
+            "Robert Woods"
         ],
         "Justin Jefferson": [
             "Justin Jefferson",
-            "Ja'Marr Chase",
             "Deandre Hopkins",
-            "Ceedee Lamb",
             "Jaylen Waddle",
-            "Amon-Ra St Brown",
-            "Dj Moore"
+            "Dj Moore",
+            "Ja'Marr Chase"
         ],
         "Kadarius Toney": [
             "Kadarius Toney",
-            "John Metchie"
+            "John Metchie",
+            "Ben Skowronek",
+            "Skyy Moore",
+            "Deven Thompkins"
         ],
         "Kalif Raymond": [
             "Kalif Raymond",
-            "Brandon Powell"
+            "Kendrick Bourne",
+            "Brandon Powell",
+            "Ray-Ray Mccloud",
+            "Skyy Moore"
         ],
         "Kavontae Turpin": [
             "Kavontae Turpin"
         ],
         "Keenan Allen": [
-            "Keenan Allen",
-            "Ceedee Lamb",
-            "Stefon Diggs"
+            "Keenan Allen"
         ],
         "Kendrick Bourne": [
             "Kendrick Bourne",
-            "Rashee Rice"
+            "Dontayvion Wicks",
+            "Kalif Raymond",
+            "Jayden Reed"
         ],
         "Khadarel Hodge": [
             "Khadarel Hodge",
-            "Dyami Brown",
             "Van Jefferson",
             "Cedric Tillman",
-            "Jauan Jennings"
+            "Jauan Jennings",
+            "Dyami Brown",
+            "Skyy Moore",
+            "John Metchie"
         ],
         "Khalil Shakir": [
             "Khalil Shakir",
-            "Dontayvion Wicks",
-            "Curtis Samuel",
             "Wan'Dale Robinson",
             "Jauan Jennings",
-            "Jayden Reed",
             "Tyler Boyd",
             "Jamal Agnew",
-            "Braxton Berrios"
+            "Jakobi Meyers",
+            "Curtis Samuel",
+            "Brandon Powell"
         ],
         "Marquise Brown": [
             "Marquise Brown",
+            "Brandin Cooks",
             "Calvin Ridley",
-            "Deandre Hopkins",
-            "Garrett Wilson"
+            "Jordan Addison",
+            "Garrett Wilson",
+            "Josh Palmer"
         ],
         "Marquise Goodwin": [
             "Marquise Goodwin"
@@ -1560,25 +1613,20 @@
         "Marvin Mims": [
             "Marvin Mims",
             "Calvin Austin",
-            "Tre Tucker",
-            "Dyami Brown",
             "Trey Palmer",
-            "Jameson Williams"
+            "Xavier Gipson",
+            "Jameson Williams",
+            "Jalen Reagor"
         ],
         "Mecole Hardman": [
-            "Mecole Hardman",
-            "Deonte Harty"
-        ],
-        "Mike Williams": [
-            "Mike Williams",
-            "Mike Williams",
-            "Mike Williams"
+            "Mecole Hardman"
         ],
         "Nico Collins": [
             "Nico Collins",
             "Ja'Marr Chase",
+            "Amon-Ra St Brown",
             "Puka Nacua",
-            "Jaylen Waddle"
+            "Deebo Samuel"
         ],
         "Noah Brown": [
             "Noah Brown",
@@ -1587,218 +1635,202 @@
         ],
         "Puka Nacua": [
             "Puka Nacua",
-            "Jaylen Waddle",
             "Nico Collins",
-            "Ja'Marr Chase"
+            "Ja'Marr Chase",
+            "Amon-Ra St Brown"
         ],
         "Quentin Johnston": [
             "Quentin Johnston",
             "Rashod Bateman",
-            "Jalen Reagor",
-            "Josh Palmer",
             "Christian Watson",
-            "Jameson Williams",
+            "Josh Palmer",
             "Romeo Doubs",
+            "Jalen Reagor",
             "Gabe Davis",
-            "Trey Palmer",
-            "Tyler Scott"
+            "Jameson Williams",
+            "Jordan Addison"
         ],
         "Rashee Rice": [
             "Rashee Rice",
-            "Kendrick Bourne"
+            "Deebo Samuel",
+            "Dontayvion Wicks",
+            "Ja'Marr Chase"
         ],
         "Rashid Shaheed": [
             "Rashid Shaheed",
-            "Tutu Atwell",
-            "Brandin Cooks",
             "Tre Tucker",
+            "Brandin Cooks",
             "Elijah Moore",
-            "Josh Palmer",
-            "Jameson Williams",
-            "Jakobi Meyers"
+            "Tutu Atwell",
+            "Josh Palmer"
         ],
         "Rashod Bateman": [
             "Rashod Bateman",
+            "Romeo Doubs",
             "Jameson Williams",
             "Jalen Reagor",
-            "Gabe Davis",
-            "Quentin Johnston",
-            "Romeo Doubs",
             "Josh Palmer",
-            "Tyler Scott",
-            "Van Jefferson",
-            "Jakobi Meyers",
-            "Cedric Tillman",
-            "Dyami Brown",
+            "Quentin Johnston",
             "Jordan Addison",
-            "Tyquan Thornton",
-            "Brandin Cooks",
-            "Trey Palmer",
+            "Jakobi Meyers",
+            "Gabe Davis",
+            "Van Jefferson",
             "Elijah Moore",
-            "Tutu Atwell"
+            "Brandin Cooks",
+            "Tyquan Thornton",
+            "Tyler Scott",
+            "Cedric Tillman",
+            "Trey Palmer",
+            "Christian Watson",
+            "Demarcus Robinson"
         ],
         "Ray-Ray Mccloud": [
             "Ray-Ray Mccloud",
             "Skyy Moore",
-            "Braxton Berrios",
-            "Brandon Powell",
             "Jamal Agnew",
-            "Deonte Harty"
+            "Brandon Powell",
+            "Deonte Harty",
+            "Kalif Raymond"
         ],
         "Robert Woods": [
             "Robert Woods",
-            "Curtis Samuel",
             "Trey Palmer",
             "Brandon Powell",
-            "Jakobi Meyers",
-            "Josh Palmer",
-            "Tyler Boyd",
-            "Brandin Cooks",
-            "Cedric Tillman",
             "Van Jefferson",
-            "Elijah Moore"
+            "Jakobi Meyers",
+            "Jauan Jennings",
+            "Cedric Tillman",
+            "Brandin Cooks",
+            "Curtis Samuel",
+            "Josh Palmer",
+            "Tyler Boyd"
         ],
         "Romeo Doubs": [
             "Romeo Doubs",
+            "Rashod Bateman",
             "Jakobi Meyers",
             "Josh Palmer",
             "Jordan Addison",
             "Chris Godwin",
-            "Rashod Bateman",
-            "Gabe Davis",
             "Demarcus Robinson",
-            "Calvin Ridley",
-            "Bo Melton",
+            "Christian Watson",
+            "Gabe Davis",
             "Quentin Johnston",
-            "Brandin Cooks"
+            "Bo Melton",
+            "Brandin Cooks",
+            "Dontayvion Wicks"
         ],
         "Rondale Moore": [
             "Rondale Moore",
-            "Brandon Powell",
             "Xavier Gipson",
-            "Skyy Moore",
-            "Braxton Berrios"
+            "Brandon Powell",
+            "Braxton Berrios",
+            "Skyy Moore"
         ],
         "Skyy Moore": [
             "Skyy Moore",
-            "Braxton Berrios",
-            "Cedric Tillman",
             "John Metchie",
             "Brandon Powell",
-            "Xavier Gipson",
+            "Cedric Tillman",
             "Ray-Ray Mccloud",
-            "Rondale Moore",
+            "Braxton Berrios",
+            "Xavier Gipson",
+            "Ben Skowronek",
             "Elijah Moore",
-            "Jamal Agnew",
-            "Tyler Scott",
-            "Trey Palmer",
-            "Calvin Austin",
+            "Rondale Moore",
             "Tyquan Thornton",
+            "Calvin Austin",
+            "Kadarius Toney",
+            "Tyler Scott",
+            "Khadarel Hodge",
             "Van Jefferson",
-            "Tutu Atwell",
-            "Tre Tucker"
+            "Trey Palmer",
+            "Dyami Brown",
+            "Kalif Raymond"
         ],
         "Stefon Diggs": [
             "Stefon Diggs",
             "Ja'Marr Chase",
-            "Ceedee Lamb",
-            "Garrett Wilson",
             "Dj Moore",
-            "Keenan Allen"
+            "Garrett Wilson"
         ],
         "Sterling Shepard": [
             "Sterling Shepard"
         ],
         "Tank Dell": [
             "Tank Dell",
-            "Jaylen Waddle",
-            "Chris Godwin",
-            "Jakobi Meyers"
+            "Jaylen Waddle"
         ],
         "Tre Tucker": [
             "Tre Tucker",
-            "Dyami Brown",
             "Rashid Shaheed",
+            "Dyami Brown",
             "Deonte Harty",
-            "Marvin Mims",
-            "Tutu Atwell",
-            "Skyy Moore"
+            "Tutu Atwell"
         ],
         "Trey Palmer": [
             "Trey Palmer",
-            "Calvin Austin",
-            "Cedric Tillman",
             "Xavier Gipson",
-            "Van Jefferson",
+            "Cedric Tillman",
             "Xavier Hutchinson",
-            "Tyler Scott",
-            "Jameson Williams",
             "Robert Woods",
-            "Brandon Powell",
-            "Darnell Mooney",
-            "Skyy Moore",
-            "Rashod Bateman",
+            "Van Jefferson",
+            "Jameson Williams",
             "Josh Palmer",
+            "Calvin Austin",
+            "Tyler Scott",
+            "Brandon Powell",
             "Marvin Mims",
-            "Quentin Johnston",
-            "Tutu Atwell",
-            "Elijah Moore"
+            "Jakobi Meyers",
+            "Rashod Bateman",
+            "Jalen Reagor",
+            "Elijah Moore",
+            "Jauan Jennings",
+            "Skyy Moore"
         ],
         "Treylon Burks": [
             "Treylon Burks",
             "Jalen Reagor",
-            "Van Jefferson"
+            "Van Jefferson",
+            "Tyler Scott"
         ],
         "Tutu Atwell": [
             "Tutu Atwell",
-            "Elijah Moore",
-            "Rashid Shaheed",
-            "Brandin Cooks",
-            "Jordan Addison",
-            "Brandon Powell",
-            "Josh Palmer",
-            "Jakobi Meyers",
-            "Tre Tucker",
-            "Jauan Jennings",
-            "Jameson Williams",
-            "Curtis Samuel",
             "Dyami Brown",
-            "Bo Melton",
-            "Rashod Bateman",
-            "Skyy Moore",
-            "Trey Palmer"
+            "Elijah Moore",
+            "Tre Tucker",
+            "Rashid Shaheed"
         ],
         "Tyler Boyd": [
             "Tyler Boyd",
             "Curtis Samuel",
+            "Darnell Mooney",
             "Khalil Shakir",
             "Jauan Jennings",
-            "Robert Woods",
-            "Darnell Mooney"
+            "Robert Woods"
         ],
         "Tyler Scott": [
             "Tyler Scott",
             "Jalen Reagor",
             "Van Jefferson",
-            "Rashod Bateman",
-            "Tyquan Thornton",
-            "John Metchie",
-            "Trey Palmer",
             "Xavier Hutchinson",
-            "Skyy Moore",
+            "Trey Palmer",
+            "John Metchie",
             "Cedric Tillman",
+            "Tyquan Thornton",
+            "Rashod Bateman",
+            "Treylon Burks",
             "Calvin Austin",
-            "Quentin Johnston"
+            "Skyy Moore"
         ],
         "Tyquan Thornton": [
             "Tyquan Thornton",
-            "Tyler Scott",
             "John Metchie",
+            "Skyy Moore",
+            "Van Jefferson",
+            "Tyler Scott",
             "Dyami Brown",
             "Rashod Bateman",
-            "Van Jefferson",
-            "Skyy Moore",
-            "Calvin Austin",
             "Cedric Tillman"
         ],
         "Tyreek Hill": [
@@ -1807,50 +1839,57 @@
         "Van Jefferson": [
             "Van Jefferson",
             "Tyler Scott",
-            "Trey Palmer",
             "Cedric Tillman",
             "Jalen Reagor",
+            "Trey Palmer",
+            "Robert Woods",
             "Rashod Bateman",
-            "Treylon Burks",
-            "Tyquan Thornton",
-            "Dyami Brown",
             "Khadarel Hodge",
             "Jameson Williams",
-            "Darnell Mooney",
-            "Skyy Moore",
-            "Robert Woods",
-            "Xavier Hutchinson"
+            "Tyquan Thornton",
+            "Treylon Burks",
+            "Xavier Hutchinson",
+            "John Metchie",
+            "Brandon Powell",
+            "Skyy Moore"
         ],
         "Wan'Dale Robinson": [
             "Wan'Dale Robinson",
             "Khalil Shakir",
-            "Curtis Samuel",
-            "Demario Douglas"
+            "Demario Douglas",
+            "Curtis Samuel"
         ],
         "Xavier Gipson": [
             "Xavier Gipson",
             "Rondale Moore",
             "Brandon Powell",
             "Trey Palmer",
-            "Calvin Austin",
-            "Skyy Moore",
-            "Braxton Berrios",
             "Cedric Tillman",
-            "Jamal Agnew"
+            "Skyy Moore",
+            "Calvin Austin",
+            "Braxton Berrios",
+            "Elijah Moore",
+            "Marvin Mims",
+            "Josh Palmer",
+            "Brandin Cooks"
         ],
         "Xavier Hutchinson": [
             "Xavier Hutchinson",
-            "Trey Palmer",
             "Tyler Scott",
+            "Trey Palmer",
             "Jalen Reagor",
+            "Van Jefferson",
             "Calvin Austin",
-            "Van Jefferson"
+            "Cedric Tillman"
         ],
         "Zay Flowers": [
             "Zay Flowers",
             "Elijah Moore",
             "Ja'Marr Chase",
             "Jakobi Meyers",
+            "Demario Douglas",
+            "Jordan Addison",
+            "Dontayvion Wicks",
             "Chris Godwin"
         ]
     },
@@ -1862,9 +1901,9 @@
         "Chigoziem Okonkwo": [
             "Chigoziem Okonkwo",
             "Kylen Granson",
-            "Logan Thomas",
             "Dallas Goedert",
             "Noah Gray",
+            "Logan Thomas",
             "Jonnu Smith",
             "Taysom Hill",
             "Gerald Everett",
@@ -1874,9 +1913,9 @@
             "Cole Kmet",
             "Sam LaPorta",
             "Dallas Goedert",
+            "Travis Kelce",
             "Gerald Everett",
-            "Chigoziem Okonkwo",
-            "Travis Kelce"
+            "Chigoziem Okonkwo"
         ],
         "Connor Heyward": [
             "Connor Heyward",
@@ -1887,11 +1926,11 @@
         ],
         "Dallas Goedert": [
             "Dallas Goedert",
-            "Jonnu Smith",
             "Gerald Everett",
-            "Cole Kmet",
             "Chigoziem Okonkwo",
-            "Logan Thomas"
+            "Cole Kmet",
+            "Logan Thomas",
+            "Jonnu Smith"
         ],
         "George Kittle": [
             "George Kittle"
@@ -1904,9 +1943,9 @@
             "Connor Heyward",
             "Logan Thomas",
             "Taysom Hill",
-            "Cole Kmet",
             "Chigoziem Okonkwo",
-            "Sam LaPorta"
+            "Sam LaPorta",
+            "Cole Kmet"
         ],
         "Harrison Bryant": [
             "Harrison Bryant",
@@ -1917,57 +1956,53 @@
         "Jonnu Smith": [
             "Jonnu Smith",
             "Gerald Everett",
-            "Dallas Goedert",
             "Chigoziem Okonkwo",
-            "Sam LaPorta",
+            "Dallas Goedert",
             "Noah Gray",
-            "Logan Thomas",
-            "Kylen Granson"
+            "Logan Thomas"
         ],
         "Kyle Pitts": [
             "Kyle Pitts"
         ],
         "Kylen Granson": [
             "Kylen Granson",
-            "Chigoziem Okonkwo",
             "Noah Gray",
+            "Chigoziem Okonkwo",
             "Connor Heyward",
-            "Logan Thomas",
             "Taysom Hill",
-            "Jonnu Smith",
-            "Tyler Conklin"
+            "Tyler Conklin",
+            "Logan Thomas"
         ],
         "Logan Thomas": [
             "Logan Thomas",
             "Taysom Hill",
             "Chigoziem Okonkwo",
-            "Kylen Granson",
             "Dallas Goedert",
-            "Gerald Everett",
+            "Kylen Granson",
             "Noah Gray",
+            "Gerald Everett",
+            "Tyler Conklin",
             "Jonnu Smith"
         ],
         "Mark Andrews": [
-            "Mark Andrews",
-            "Travis Kelce"
+            "Mark Andrews"
         ],
         "Noah Gray": [
             "Noah Gray",
-            "Kylen Granson",
             "Connor Heyward",
+            "Kylen Granson",
             "Gerald Everett",
-            "Taysom Hill",
             "Chigoziem Okonkwo",
-            "Harrison Bryant",
+            "Taysom Hill",
             "Tyler Conklin",
             "Logan Thomas",
+            "Harrison Bryant",
             "Jonnu Smith"
         ],
         "Sam LaPorta": [
             "Sam LaPorta",
             "Cole Kmet",
             "Travis Kelce",
-            "Jonnu Smith",
             "Gerald Everett"
         ],
         "Taysom Hill": [
@@ -1975,19 +2010,21 @@
             "Logan Thomas",
             "Noah Gray",
             "Kylen Granson",
-            "Gerald Everett",
-            "Chigoziem Okonkwo"
+            "Chigoziem Okonkwo",
+            "Tyler Conklin",
+            "Gerald Everett"
         ],
         "Travis Kelce": [
             "Travis Kelce",
             "Sam LaPorta",
-            "Mark Andrews",
             "Cole Kmet"
         ],
         "Tyler Conklin": [
             "Tyler Conklin",
             "Noah Gray",
-            "Kylen Granson"
+            "Kylen Granson",
+            "Taysom Hill",
+            "Logan Thomas"
         ]
     }
 }
