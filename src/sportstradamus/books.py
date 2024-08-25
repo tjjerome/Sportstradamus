@@ -833,8 +833,8 @@ def get_ud():
     match_ids = {}
     for i in api["games"]:
         match_ids[i["id"]] = {
-            "Home": team_ids[i["home_team_id"]],
-            "Away": team_ids[i["away_team_id"]],
+            "Home": team_ids.get(i["home_team_id"]),
+            "Away": team_ids.get(i["away_team_id"]),
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
                 datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
