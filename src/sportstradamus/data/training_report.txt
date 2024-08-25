@@ -1,3 +1,15 @@
+=================================== MLB pitches thrown ===================================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.597484   0.663394 -0.015572    0.013695     0.028235 -0.119206 0.484411      0.030624
+ 0.596685   0.662447 -0.014939    0.025316     0.036085 -0.119206 0.484411      0.022569
+
+================================== MLB plateAppearances ==================================
+ Distribution Model: Poisson
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.625623   0.942752 0.040635    0.060521     0.076920  0.566257 0.236341      0.071109
+ 0.882319   0.938361 0.418355    0.138117     0.186079  0.566257 0.236341      0.017324
+
 ======================================== NBA AST =========================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance   Entropy  Training Gap
@@ -255,4 +267,10 @@
  Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
  0.551251   0.539523 0.155573   -0.042555    -0.037307 -0.093822 0.497149      0.014669
  0.565388   0.557353 0.180945    0.014263     0.019271 -0.093822 0.497149     -0.024715
+
+======================================== WNBA MIN ========================================
+ Distribution Model: Gaussian
+ Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Entropy  Training Gap
+ 0.615955        0.6 -0.003170    0.038386     0.053192  0.091714 0.349868      0.078544
+ 0.615242        0.6 -0.002291    0.046519     0.061708  0.091714 0.349868      0.072906
 

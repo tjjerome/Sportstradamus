@@ -134,28 +134,28 @@ def meditate(force, league):
         "MLB": [
             "plateAppearances",
             "pitches thrown",
-        # #     "pitching outs",
-        # #     "pitcher strikeouts",
-        # #     "hits allowed",
-        # #     "runs allowed",
-        # #     "walks allowed",
-        # #     # "1st inning runs allowed",
-        # #     # "1st inning hits allowed",
-        # #     "hitter fantasy score",
-        # #     "pitcher fantasy score",
-        # #     "hitter fantasy points underdog",
-        # #     "pitcher fantasy points underdog",
-        # #     "hits+runs+rbi",
-        # #     "total bases",
-        # #     "walks",
-        # #     "stolen bases",
-        # #     "hits",
-        # #     "runs",
-        # #     "rbi",
-        # #     "batter strikeouts",
-        # #     "singles",
-        # #     "doubles",
-        # #     "home runs"
+        #     "pitching outs",
+        #     "pitcher strikeouts",
+        #     "hits allowed",
+        #     "runs allowed",
+        #     "walks allowed",
+        #     # "1st inning runs allowed",
+        #     # "1st inning hits allowed",
+        #     "hitter fantasy score",
+        #     "pitcher fantasy score",
+        #     "hitter fantasy points underdog",
+        #     "pitcher fantasy points underdog",
+        #     "hits+runs+rbi",
+        #     "total bases",
+        #     "walks",
+        #     "stolen bases",
+        #     "hits",
+        #     "runs",
+        #     "rbi",
+        #     "batter strikeouts",
+        #     "singles",
+        #     "doubles",
+        #     "home runs"
         ],
         # "NHL": [
         #     "timeOnIce",
@@ -177,15 +177,15 @@ def meditate(force, league):
         # ],
         "WNBA": [
             "MIN",
-        # #     "AST",
-        # #     "FG3M",
-        # #     "PA",
-        # #     "PR",
-        # #     "PTS",
-        # #     "RA",
-        # #     "REB",
-        # #     "PRA",
-        # #     "fantasy points prizepicks"
+            "AST",
+            "FG3M",
+            "PA",
+            "PR",
+            "PTS",
+            "RA",
+            "REB",
+            "PRA",
+            "fantasy points prizepicks"
         ]
     }
     if not league == "All":
@@ -1282,7 +1282,7 @@ def correlate(league, force=False):
     for gameId in tqdm(games):
         game_df = log.gamelog.loc[log.gamelog[log_str["game"]] == gameId]
         gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
-        if gameDate < latest_date:
+        if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != 2:
             continue
         home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
         away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
@@ -1344,6 +1344,6 @@ def correlate(league, force=False):
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
-    meditate()
+    # meditate()
     see_features()
     filter_features()
