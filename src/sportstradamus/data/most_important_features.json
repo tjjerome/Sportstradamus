@@ -1,21 +1,21 @@
 {
     "MLB_pitches-thrown": [
-        "Avg10",
-        "Moneyline",
+        "AvgYr",
+        "Avg5",
+        "Team FIP",
+        "STD10",
         "Avg1",
         "Mean10",
         "DaysIntoSeason",
-        "AvgYr",
         "DaysOff",
-        "STDYr",
         "MeanYr",
-        "STD10"
+        "STDYr"
     ],
     "MLB_plateAppearances": [
-        "STD10",
+        "Moneyline",
         "Avg1",
+        "STD10",
         "Player PASO",
-        "Team BABIP",
         "Mean10",
         "STDYr",
         "Total",
@@ -540,16 +540,16 @@
         "Player position z"
     ],
     "WNBA_MIN": [
-        "Player FG3_RATIO",
-        "Player PIE",
-        "AvgYr",
         "Team OPP_DEF_RATING",
-        "Player FT_PCT short",
-        "Avg3",
+        "Player FG3_RATIO short",
+        "Player z",
+        "Player MIN",
+        "Avg1",
         "Player position z",
+        "AvgYr",
+        "STD10",
         "STDYr",
-        "MeanYr",
-        "STD10"
+        "MeanYr"
     ],
     "NBA_ALL": [
         "Player proj MIN mean",
@@ -559,21 +559,21 @@
         "Avg1",
         "Player z",
         "Player position z",
-        "Avg3",
         "AvgYr",
+        "Avg3",
         "Mean10"
     ],
     "WNBA_ALL": [
+        "MeanYr",
         "STDYr",
         "Player position z",
-        "MeanYr",
-        "STD10",
-        "Avg3",
         "AvgYr",
-        "Team OPP_DEF_RATING",
-        "Player FT_PCT short",
-        "Player PIE",
-        "Player FG3_RATIO"
+        "STD10",
+        "Avg1",
+        "Player MIN",
+        "Player z",
+        "Player FG3_RATIO short",
+        "Team OPP_DEF_RATING"
     ],
     "NFL_ALL": [
         "Player position z",
@@ -588,39 +588,39 @@
         "AvgYr"
     ],
     "NHL_ALL": [
-        "Player BB9 short",
-        "Player FIP",
-        "Player PA9 short",
-        "Team BABIP",
-        "Defense PASO",
-        "Player ERA short",
-        "Player OBP",
-        "Avg5",
-        "Player PASO growth",
-        "DaysOff"
+        "STDYr",
+        "Player age",
+        "Defense IP",
+        "Player IP short",
+        "AvgYr",
+        "Defense OBP",
+        "PF OBP",
+        "Player ERA",
+        "Player SLG",
+        "Total"
     ],
     "MLB_ALL": [
         "MeanYr",
         "STDYr",
         "Player depth",
-        "DaysOff",
         "Home",
-        "Mean10",
-        "STD10",
         "Total",
+        "Mean10",
+        "DaysOff",
         "DaysIntoSeason",
-        "Avg1"
+        "Avg1",
+        "STD10"
     ],
     "ALL": [
         "MeanYr",
         "STDYr",
         "Player position z",
         "Mean10",
-        "Player depth",
-        "STD10",
-        "Player proj MIN mean",
         "Avg1",
         "AvgYr",
-        "DaysOff"
+        "Player depth",
+        "Player proj MIN mean",
+        "STD10",
+        "DaysIntoSeason"
     ]
 }

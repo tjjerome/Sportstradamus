@@ -260,7 +260,7 @@ class Stats:
                 players.append(split_players[1])
 
         players = set(players)
-        season = date.year if date.month >= 5 else date.year-1
+        season = date.year if ((date.month >= 8) or (self.league in ["WNBA", "MLB"])) else date.year-1
         if self.league == "NBA":
             season = "-".join([str(season), str(season-1999)])
 
@@ -358,9 +358,9 @@ class Stats:
 
         else:
             if self.league == "MLB":
-                pitchers = {x:self.upcoming_games.get(teams[x]).get("Opponent Pitcher") for x in stats.index}
+                pitchers = {x:self.upcoming_games.get(teams[x], {}).get("Opponent Pitcher") for x in stats.index}
 
-            stats["Home"] = [self.upcoming_games.get(teams[x]).get("Home") for x in stats.index]
+            stats["Home"] = [self.upcoming_games.get(teams[x], {}).get("Home") for x in stats.index]
             stats["Moneyline"] = [archive.get_moneyline(self.league, date, teams[x]) for x in stats.index]
             stats["Total"] = [archive.get_total(self.league, date, teams[x]) for x in stats.index]
 
@@ -440,7 +440,7 @@ class Stats:
     def get_stat_columns(self, market):
         if market in feature_filter.get(self.league,{}):
             cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])
-            profile_cols = set(["Player "+col.replace(" growth", "").replace(" short", "") for col in self.playerProfile.columns if " growth" in col or " short" in col])
+            profile_cols = [col for col in feature_filter.get(self.league,{}).get(market,[]) if "Player " in col and not any([string in col for string in [" age", " depth", " proj "]])]
             
             count = 1
             for i, c in enumerate(cols.copy()):
@@ -459,8 +459,10 @@ class Stats:
                 cols.remove("Player team")
             for pos in self.positions:
                 cols.remove(f"Defense {pos}")
+            if self.league == "MLB":
+                cols.extend(["PF R", "PF OBP", "PF H", "PF 1B", "PF 2B", "PF 3B", "PF HR", "PF BB", "PF K"])
 
-            cols = list(set(cols))
+            cols = sorted(list(set(cols)))
 
         return cols
 
@@ -494,7 +496,11 @@ class Stats:
         }
         for gameDate, players in tqdm(gamedays, unit="gameday", desc="Gathering Training Data", total=len(gamedays)):
 
-            offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
+            if market == "plateAppearances":
+                offers_df = players.loc[players[market]>=2, offerKeys.keys()].rename(columns=offerKeys)
+            else:
+                offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
+
             offers_df.index = offers_df["Player"]
             offers_df = offers_df.loc[~offers_df.index.duplicated()]
             offers = offers_df.to_dict('records')
@@ -502,7 +508,10 @@ class Stats:
             if market in self.volume_stats:
                 self.get_depth(offers, gameDate)
             else:
-                self.get_volume_stats(offers, gameDate)
+                if self.league == "MLB":
+                    self.get_volume_stats(offers, gameDate, pitcher=any([string in market for string in ["allowed", "pitch"]]))
+                else:
+                    self.get_volume_stats(offers, gameDate)
             
             stats = self.get_stats(market, offers, gameDate)
 
@@ -776,12 +785,12 @@ class StatsNBA(Stats):
                 if game["vtAbbreviation"] not in self.upcoming_games:
                     self.upcoming_games[game["vtAbbreviation"]] = {
                         "Opponent": game["htAbbreviation"],
-                        "Home": 0
+                        "Home": False
                     }
                 if game["htAbbreviation"] not in self.upcoming_games:
                     self.upcoming_games[game["htAbbreviation"]] = {
                         "Opponent": game["vtAbbreviation"],
-                        "Home": 1
+                        "Home": True
                     }
 
         except:
@@ -1266,7 +1275,16 @@ class StatsNBA(Stats):
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
         playerStats = self.get_stats(market, flat_offers, date)
-        playerStats = playerStats[self.get_stat_columns(market)]
+        cols = self.get_stat_columns(market)
+        if any([col not in playerStats.columns for col in cols]):
+            logger.warning(f"Gamelog missing - {date}")
+            return []
+
+        playerStats = playerStats[cols]
+
+        if playerStats.empty:
+            logger.warning(f"Gamelog missing - {date}")
+            return []
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
@@ -1754,12 +1772,12 @@ class StatsWNBA(StatsNBA):
                 if game["vtAbbreviation"] not in self.upcoming_games:
                     self.upcoming_games[game["vtAbbreviation"]] = {
                         "Opponent": game["htAbbreviation"],
-                        "Home": 0
+                        "Home": False
                     }
                 if game["htAbbreviation"] not in self.upcoming_games:
                     self.upcoming_games[game["htAbbreviation"]] = {
                         "Opponent": game["vtAbbreviation"],
-                        "Home": 1
+                        "Home": True
                     }
 
         except:
@@ -2571,26 +2589,26 @@ class StatsMLB(Stats):
                 if game["game_num"] == 1:
                     mlb_upcoming_games[awayTeam] = {
                         "Pitcher": remove_accents(game["away_probable_pitcher"]),
-                        "Home": 0,
+                        "Home": False,
                         "Opponent": homeTeam,
                         "Batting Order": [players[i] for i in game_bs['away']['battingOrder']]
                     }
                     mlb_upcoming_games[homeTeam] = {
                         "Pitcher": remove_accents(game["home_probable_pitcher"]),
-                        "Home": 1,
+                        "Home": True,
                         "Opponent": awayTeam,
                         "Batting Order": [players[i] for i in game_bs['home']['battingOrder']]
                     }
                 elif game["game_num"] > 1:
                     mlb_upcoming_games[awayTeam + str(game["game_num"])] = {
                         "Pitcher": remove_accents(game["away_probable_pitcher"]),
-                        "Home": 0,
+                        "Home": False,
                         "Opponent": homeTeam,
                         "Batting Order": [players[i] for i in game_bs['away']['battingOrder']]
                     }
                     mlb_upcoming_games[homeTeam + str(game["game_num"])] = {
                         "Pitcher": remove_accents(game["home_probable_pitcher"]),
-                        "Home": 1,
+                        "Home": True,
                         "Opponent": awayTeam,
                         "Batting Order": [players[i] for i in game_bs['home']['battingOrder']]
                     }
@@ -2846,6 +2864,61 @@ class StatsMLB(Stats):
             self.dvp_index[market][team] = dvpoa
             return dvpoa
         
+    def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
+        flat_offers = {}
+        if isinstance(offers, dict):
+            for players in offers.values():
+                flat_offers.update(players)
+        else:
+            flat_offers = offers
+
+        if pitcher:
+            market = "pitches thrown"
+        else:
+            market = "plateAppearances"
+
+        if isinstance(offers, dict):
+            flat_offers.update(offers.get(market, {}))
+        self.profile_market(market, date)
+        self.get_depth(flat_offers, date)
+        playerStats = self.get_stats(market, flat_offers, date)
+        playerStats = playerStats[self.get_stat_columns(market)]
+
+        filename = "_".join([self.league, market]).replace(" ", "-")
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                filedict = pickle.load(infile)
+            model = filedict["model"]
+            dist = filedict["distribution"]
+
+            categories = ["Home", "Player position"]
+            if "Player position" not in playerStats.columns:
+                categories.remove("Player position")
+            for c in categories:
+                playerStats[c] = playerStats[c].astype('category')
+
+            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+
+            model.start_values = sv
+            prob_params = pd.DataFrame()
+            preds = model.predict(
+                playerStats, pred_type="parameters")
+            preds.index = playerStats.index
+            prob_params = pd.concat([prob_params, preds])
+
+            prob_params.sort_index(inplace=True)
+            playerStats.sort_index(inplace=True)
+
+        else:
+            logger.warning(f"{filename} missing")
+            return
+
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}))
+    
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
@@ -3516,8 +3589,8 @@ class StatsNFL(Stats):
                 columns={'home_team': 'Team', 'away_team': 'Opponent'})
             df2 = upcoming_games.rename(
                 columns={'away_team': 'Team', 'home_team': 'Opponent'})
-            df1['Home'] = 1
-            df2['Home'] = 0
+            df1['Home'] = True
+            df2['Home'] = False
             upcoming_games = pd.concat([df1, df2]).sort_values('gameday')
             self.upcoming_games = upcoming_games.groupby("Team").apply(
                 lambda x: x.head(1)).droplevel(1)[['Opponent', 'Home', 'gameday', 'gametime']].to_dict(orient='index')
@@ -5115,7 +5188,7 @@ class StatsNHL(Stats):
                     continue
                 opp = abbreviations["NHL"][remove_accents(
                     game['opponentTeam']['name'])]
-                home = int(game['teamType'] == "HOME")
+                home = game['teamType'] == "HOME"
                 if home:
                     goalie = details.get('data', {}).get(
                         'predictedGoalies', {}).get('HOME', [])

@@ -17,8 +17,15 @@ from time import time
 import requests
 
 pd.options.mode.chained_assignment = None
+NHL = StatsNHL()
+NHL.season_start = datetime(2021, 10, 12).date()
+NHL.update()
+NHL.season_start = datetime(2022, 10, 7).date()
+NHL.update()
+NHL.season_start = datetime(2023, 10, 10).date()
+NHL.update()
 
-stats = StatsMLB()
+stats = StatsNHL()
 stats.load()
 stats.update()
 
@@ -27,7 +34,7 @@ stats.update()
 
 # stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
 
-stats.get_training_matrix("pitches thrown")
+stats.get_training_matrix("timeOnIce")
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
@@ -161,13 +168,6 @@ stats.get_training_matrix("pitches thrown")
 # NBA.season_start = datetime(2024, 5, 14).date()
 # NBA.update()
 
-# NHL = StatsNHL()
-# NHL.season_start = datetime(2021, 10, 12).date()
-# NHL.update()
-# NHL.season_start = datetime(2022, 10, 7).date()
-# NHL.update()
-# NHL.season_start = datetime(2023, 10, 10).date()
-# NHL.update()
 
 # MLB = StatsMLB()
 # MLB.load()

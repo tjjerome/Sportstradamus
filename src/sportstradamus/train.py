@@ -84,78 +84,78 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
-        # "NBA": [
-        #     "MIN",
-        #     "PTS",
-        #     "REB",
-        #     "AST",
-        #     "PRA",
-        #     "PR",
-        #     "RA",
-        #     "PA",
-        #     "FG3M",
-        #     "fantasy points prizepicks",
-        #     "FG3A",
-        #     "FTM",
-        #     "FGM",
-        #     "FGA",
-        #     "STL",
-        #     "BLK",
-        #     "BLST",
-        #     "TOV",
-        #     "OREB",
-        #     "DREB",
-        #     "PF",
-        # ],
-        # "NFL": [
-        #     "carries",
-        #     "attempts",
-        #     "targets",
-        #     "passing yards",
-        #     "rushing yards",
-        #     "receiving yards",
-        #     "yards",
-        #     "qb yards",
-        #     "fantasy points prizepicks",
-        #     "fantasy points underdog",
-        #     "passing tds",
-        #     "tds",
-        #     "rushing tds",
-        #     "receiving tds",
-        #     "qb tds",
-        #     "completions",
-        #     "receptions",
-        #     "interceptions",
-        #     "sacks taken",
-        #     "passing first downs",
-        #     "first downs",
-        #     "completion percentage"
-        # ],
+        "NBA": [
+            "MIN",
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
+        ],
+        "NFL": [
+            "carries",
+            "attempts",
+            "targets",
+            "passing yards",
+            "rushing yards",
+            "receiving yards",
+            "yards",
+            "qb yards",
+            "fantasy points prizepicks",
+            "fantasy points underdog",
+            "passing tds",
+            "tds",
+            "rushing tds",
+            "receiving tds",
+            "qb tds",
+            "completions",
+            "receptions",
+            "interceptions",
+            "sacks taken",
+            "passing first downs",
+            "first downs",
+            "completion percentage"
+        ],
         "MLB": [
             "plateAppearances",
             "pitches thrown",
-        #     "pitching outs",
-        #     "pitcher strikeouts",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "walks allowed",
-        #     # "1st inning runs allowed",
-        #     # "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "batter strikeouts",
-        #     "singles",
-        #     "doubles",
-        #     "home runs"
+            "pitching outs",
+            "pitcher strikeouts",
+            "hits allowed",
+            "runs allowed",
+            "walks allowed",
+            # "1st inning runs allowed",
+            # "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles",
+            "doubles",
+            "home runs"
         ],
         # "NHL": [
         #     "timeOnIce",
@@ -250,11 +250,21 @@ def meditate(force, league):
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0)
-                cutoff_date = pd.to_datetime(M["Date"]).max().date()                    
-                start_date = (datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))).date()
+                cutoff_date = pd.to_datetime(M["Date"]).max().date()
+                if league == "MLB":
+                    start_date = (datetime.today()-timedelta(days=700)).date()
+                elif league == "NFL":
+                    start_date = (datetime.today()-timedelta(days=1200)).date()
+                else:
+                    start_date = (datetime.today()-timedelta(days=850)).date()
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:
-                cutoff_date = None
+                if league == "MLB":
+                    cutoff_date = (datetime.today()-timedelta(days=700)).date()
+                elif league == "NFL":
+                    cutoff_date = (datetime.today()-timedelta(days=1200)).date()
+                else:
+                    cutoff_date = (datetime.today()-timedelta(days=850)).date()
                 M = pd.DataFrame()
 
             new_M = stat_data.get_training_matrix(market, cutoff_date)
@@ -263,7 +273,7 @@ def meditate(force, league):
                 continue
 
             M = pd.concat([M, new_M], ignore_index=True)
-            M.Date = pd.to_datetime(M.Date)
+            M.Date = pd.to_datetime(M.Date, format='mixed')
             step = M["Result"].drop_duplicates().sort_values().diff().min()
             for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
                 if np.isnan(row["EV"]) or row["EV"] <= 0:
@@ -586,7 +596,7 @@ def see_features():
         M = pd.read_csv(filepath, index_col=0)
 
         y = M[['Result']]
-        C = M.corr()["Result"]
+        C = M.corr(numeric_only=True)["Result"]
         X = M.drop(columns=['Result', 'EV', 'P'])
         C = C.drop(['Result', 'EV', 'P'])
         if filedict["distribution"] == "Gaussian":
@@ -661,7 +671,7 @@ def filter_features():
                 stats = list(set(stats))
                 stats.sort()
 
-                feature_filter[league][market] = stats
+                feature_filter[league][market.replace("-", " ")] = stats
 
     with open(pkg_resources.files(data) / "feature_filter.json", "w") as outfile:
         json.dump(feature_filter, outfile, indent=4)
@@ -1344,6 +1354,6 @@ def correlate(league, force=False):
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
-    # meditate()
+    meditate()
     see_features()
     filter_features()
