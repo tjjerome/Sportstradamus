@@ -123,6 +123,9 @@ class Stats:
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps']+self.positions)
 
         one_year_ago = date - timedelta(days=300)
+        if self.league == "WNBA":
+            one_year_ago = date - timedelta(days=335)
+            
         gameDates = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
         self.short_gamelog = self.gamelog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
