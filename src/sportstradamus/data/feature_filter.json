@@ -124,7 +124,7 @@
             "Team pressure_allowed_per_pass",
             "Team pass_success_rate_allowed"
         ],
-        "completion-percentage": [
+        "completion percentage": [
             "Defense cpoe_allowed",
             "Defense epa_allowed_per_pass",
             "Defense epa_per_blitz",
@@ -183,7 +183,7 @@
             "Team yards_allowed_per_pass",
             "Team yards_per_pass"
         ],
-        "fantasy-points-prizepicks": [
+        "fantasy points prizepicks": [
             "Defense completion_percentage_allowed",
             "Defense cpoe_allowed",
             "Defense epa_allowed_per_pass",
@@ -234,7 +234,7 @@
             "Team stuffs_allowed_per_rush",
             "Team yards_per_pass"
         ],
-        "fantasy-points-underdog": [
+        "fantasy points underdog": [
             "Defense completion_percentage_allowed",
             "Defense cpoe_allowed",
             "Defense epa_allowed_per_pass",
@@ -285,7 +285,7 @@
             "Team stuffs_allowed_per_rush",
             "Team yards_per_pass"
         ],
-        "first-downs": [
+        "first downs": [
             "Defense epa_allowed_per_blitz",
             "Defense exp_allowed_per_pass",
             "Defense first_read_epa",
@@ -346,7 +346,7 @@
             "Team pressure_allowed_per_pass",
             "Team redzone_epa"
         ],
-        "passing-first-downs": [
+        "passing first downs": [
             "Defense blitz_rate",
             "Defense completion_percentage_allowed",
             "Defense epa_allowed_per_pass",
@@ -372,7 +372,7 @@
             "Team redzone_success_rate",
             "Team yards_per_rush"
         ],
-        "passing-tds": [
+        "passing tds": [
             "Defense epa_allowed_per_pass",
             "Defense epa_allowed_per_rush",
             "Defense epa_allowed_per_blitz",
@@ -401,7 +401,7 @@
             "Team stuffs_allowed_per_rush",
             "Team yards_per_pass"
         ],
-        "passing-yards": [
+        "passing yards": [
             "Defense completion_percentage_allowed",
             "Defense cpoe_allowed",
             "Defense first_read_success_rate_allowed",
@@ -427,7 +427,7 @@
             "Team rush_success_rate",
             "Team stuffs_allowed_per_rush"
         ],
-        "qb-tds": [
+        "qb tds": [
             "Defense blitz_rate",
             "Defense completion_percentage_allowed",
             "Defense epa_allowed_per_blitz",
@@ -474,7 +474,7 @@
             "Team yards_per_pass",
             "Team yards_per_rush"
         ],
-        "qb-yards": [
+        "qb yards": [
             "Defense completion_percentage_allowed",
             "Defense cpoe_allowed",
             "Defense epa_allowed_per_rush",
@@ -516,7 +516,7 @@
             "Team stuffs_allowed_per_rush",
             "Team yards_per_pass"
         ],
-        "receiving-tds": [
+        "receiving tds": [
             "Defense blitz_rate",
             "Defense epa_allowed_per_pass",
             "Defense epa_allowed_per_blitz",
@@ -541,7 +541,7 @@
             "Team rush_success_rate",
             "Team time_per_play"
         ],
-        "receiving-yards": [
+        "receiving yards": [
             "Defense blitz_rate",
             "Defense epa_allowed_per_pass",
             "Defense exp_allowed_per_pass",
@@ -594,7 +594,7 @@
             "Team redzone_success_rate_allowed",
             "Team yards_per_pass"
         ],
-        "rushing-tds": [
+        "rushing tds": [
             "Defense blitz_rate",
             "Defense completion_percentage_allowed",
             "Defense epa_allowed_per_pass",
@@ -622,7 +622,7 @@
             "Team rush_success_rate",
             "Team yards_per_rush"
         ],
-        "rushing-yards": [
+        "rushing yards": [
             "Defense completion_percentage_allowed",
             "Defense epa_allowed_per_rush",
             "Defense exp_allowed_per_rush",
@@ -644,7 +644,7 @@
             "Team redzone_epa",
             "Team yards_per_pass"
         ],
-        "sacks-taken": [
+        "sacks taken": [
             "Defense blitz_rate",
             "Defense completion_percentage_allowed",
             "Defense epa_allowed_per_pass",
@@ -824,6 +824,65 @@
             "Defense moneyline gain",
             "Defense totals gain",
             "Defense comps"
+        ],
+        "pitches thrown": [
+            "Defense AVG",
+            "Defense BABIP",
+            "Defense PASO",
+            "Defense OBP",
+            "PF HR",
+            "PF K",
+            "PF R",
+            "Player BB9",
+            "Player ERA",
+            "Player FIP",
+            "Player IP",
+            "Player K9",
+            "Player PA9",
+            "Player WHIP",
+            "Team BABIP",
+            "Team BB9",
+            "Team DER",
+            "Team ERA",
+            "Team FIP",
+            "Team IP",
+            "Team K9",
+            "Team OBP",
+            "Team PASO",
+            "Team WHIP"
+        ],
+        "plateAppearances": [
+            "Defense AVG",
+            "Defense BABIP",
+            "Defense BB9",
+            "Defense DER",
+            "Defense ERA",
+            "Defense FIP",
+            "Defense IP",
+            "Defense K9",
+            "Defense OBP",
+            "Defense PA9",
+            "Defense PASO",
+            "Defense SLG",
+            "Defense WHIP",
+            "Player AVG",
+            "Player BABIP",
+            "Player OBP",
+            "Player PASO",
+            "Player SLG",
+            "Player depth",
+            "Team BABIP",
+            "Team BB9",
+            "Team DER",
+            "Team ERA",
+            "Team FIP",
+            "Team IP",
+            "Team K9",
+            "Team OBP",
+            "Team PA9",
+            "Team PASO",
+            "Team SLG",
+            "Team WHIP"
         ]
     },
     "WNBA": {
@@ -1486,7 +1545,7 @@
             "Team OPP_PIE",
             "Team PIE"
         ],
-        "fantasy-points-prizepicks": [
+        "fantasy points prizepicks": [
             "Defense DEF_RATING",
             "Defense OPP_FG3_PCT",
             "Defense OPP_PCT_UAST_FGM",
