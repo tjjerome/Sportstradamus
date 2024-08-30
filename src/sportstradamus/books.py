@@ -971,12 +971,12 @@ def get_ud():
         player2 = players[o["options"][1]["appearance_stat"]["appearance_id"]]
         game1 = matches[o["options"][0]["appearance_stat"]["appearance_id"]]
         game2 = matches[o["options"][1]["appearance_stat"]["appearance_id"]]
-        opponent1 = game1["Home"]
+        opponent1 = game1.get("Home", "NA")
         if opponent1 == player1["Team"]:
-            opponent1 = game1["Away"]
-        opponent2 = game2["Home"]
+            opponent1 = game1.get("Away", "NA")
+        opponent2 = game2.get("Home", "NA")
         if opponent2 == player2["Team"]:
-            opponent2 = game2["Away"]
+            opponent2 = game2.get("Away", "NA")
         bet = o["options"][0]["appearance_stat"]["display_stat"].replace(
             "Fewer ", "")
         n = {
