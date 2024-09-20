@@ -123,9 +123,7 @@ class Stats:
         self.defenseProfile = pd.DataFrame(columns=['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps']+self.positions)
 
         one_year_ago = date - timedelta(days=300)
-        if self.league == "WNBA":
-            one_year_ago = date - timedelta(days=335)
-            
+
         gameDates = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
         self.short_gamelog = self.gamelog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
@@ -318,11 +316,26 @@ class Stats:
             teams = {x["Player"]: x["Team"] for x in offers}
             opponents = {x["Player"]: x["Opponent"] for x in offers}
 
-        for player in players:
+        for player in players.copy():
             if " + " in player.replace(" vs. ", " + "):
                 split_players = player.replace(" vs. ", " + ").split(" + ")
+                players.remove(player)
                 players.append(split_players[0])
                 players.append(split_players[1])
+                
+                split_teams = teams.pop(player).split("/")
+                if len(split_teams) == 1:
+                    split_teams = split_teams*2
+
+                teams[split_players[0]] = split_teams[0]
+                teams[split_players[1]] = split_teams[1]
+
+                split_opponents = opponents.pop(player).split("/")
+                if len(split_opponents) == 1:
+                    split_opponents = split_opponents*2
+
+                opponents[split_players[0]] = split_opponents[0]
+                opponents[split_players[1]] = split_opponents[1]
 
         players = set(players)
         playergames = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]].isin(players)]
@@ -382,10 +395,13 @@ class Stats:
         teamstats.index = stats.index
         stats = stats.join(teamstats)
         defstats = self.defenseProfile.loc[stats.index.map(opponents)]
-        defstats["comps"] = defstats["comps"].astype(np.float64)
-        if self.league != "MLB":
+        if self.league == "MLB":
+            defstats.loc[[x in self.pitcherProfile.index for x in stats.index.map(pitchers)], self.pitcherProfile.columns] = self.pitcherProfile.loc[[x for x in stats.index.map(pitchers) if x in self.pitcherProfile.index]].values
+        else:
             defstats["position"] = np.diag(defstats.iloc[:,stats["Player position"]+5])
             defstats.drop(columns=self.positions, inplace=True)
+
+        defstats["comps"] = defstats["comps"].astype(np.float64)
 
         defstats.index = stats.index
         # defenseVsLeague = self.short_gamelog.groupby(self.log_strings["opponent"])[market].mean().to_dict()
@@ -548,7 +564,8 @@ class Stats:
             stats["Date"] = date
             stats["Archived"] = archived
 
-            matrix.extend(stats.loc[stats["Archived"] | (stats["Result"]>0)].to_dict('records'))
+            if stats["Home"].dtype == bool:
+                matrix.extend(stats.loc[stats["Archived"] | (stats["Result"]>0)].to_dict('records'))
 
         M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
 
@@ -1690,7 +1707,7 @@ class StatsWNBA(StatsNBA):
             "F-C": "C"
         }
 
-        player_df = nba.playerindex.PlayerIndex(season=self.season_start.year, league_id="10").get_normalized_dict()["PlayerIndex"]
+        player_df = nba.playerindex.PlayerIndex(season=self.season_start.year, league_id="10", historical_nullable=1).get_normalized_dict()["PlayerIndex"]
         player_df = pd.DataFrame(player_df).rename(columns={"POSITION":"POS", "PERSON_ID": "PLAYER_ID"})
         player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
         player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
@@ -2594,12 +2611,14 @@ class StatsMLB(Stats):
                         "Pitcher": remove_accents(game["away_probable_pitcher"]),
                         "Home": False,
                         "Opponent": homeTeam,
+                        "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
                         "Batting Order": [players[i] for i in game_bs['away']['battingOrder']]
                     }
                     mlb_upcoming_games[homeTeam] = {
                         "Pitcher": remove_accents(game["home_probable_pitcher"]),
                         "Home": True,
                         "Opponent": awayTeam,
+                        "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
                         "Batting Order": [players[i] for i in game_bs['home']['battingOrder']]
                     }
                 elif game["game_num"] > 1:
@@ -2607,12 +2626,14 @@ class StatsMLB(Stats):
                         "Pitcher": remove_accents(game["away_probable_pitcher"]),
                         "Home": False,
                         "Opponent": homeTeam,
+                        "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
                         "Batting Order": [players[i] for i in game_bs['away']['battingOrder']]
                     }
                     mlb_upcoming_games[homeTeam + str(game["game_num"])] = {
                         "Pitcher": remove_accents(game["home_probable_pitcher"]),
                         "Home": True,
                         "Opponent": awayTeam,
+                        "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
                         "Batting Order": [players[i] for i in game_bs['home']['battingOrder']]
                     }
 
@@ -3005,11 +3026,19 @@ class StatsMLB(Stats):
             players = [x["Player"] for x in offers]
             teams = {x["Player"]: x["Team"] for x in offers}
 
-        for player in players:
+        for player in players.copy():
             if " + " in player.replace(" vs. ", " + "):
                 split_players = player.replace(" vs. ", " + ").split(" + ")
                 players.append(split_players[0])
                 players.append(split_players[1])
+                players.remove(player)
+                
+                split_teams = teams.pop(player).split("/")
+                if len(split_teams) == 1:
+                    split_teams = split_teams*2
+
+                teams[split_players[0]] = split_teams[0]
+                teams[split_players[1]] = split_teams[1]
 
         players = set(players)
         self.base_profile(date)
@@ -3756,7 +3785,7 @@ class StatsNFL(Stats):
 
     def parse_pbp(self, week, team, year, playerName=""):
         if self.need_pbp:
-            self.pbp = nfl.import_pbp_data([year])
+            self.pbp = nfl.import_pbp_data([year], include_participation=False)
             self.pbp["play_time"] = self.pbp["game_seconds_remaining"].diff(
                 -1).fillna(0)
             self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
@@ -4016,8 +4045,7 @@ class StatsNFL(Stats):
                 playerName), 'yards_gained'].fillna(0).mean()
             ypc = pbp_off.loc[pbp_off['rusher_player_id'] ==
                               self.ids.get(playerName), 'yards_gained'].fillna(0).mean()
-            routes_run = len(pbp_off.loc[pbp_off.offense_players.str.contains(
-                self.ids.get(playerName)) & pbp_off['pass']])
+            routes_run = int(pbp_off['pass'].sum()*self.gamelog.loc[(self.gamelog.season == year) & (self.gamelog.week == week) & (self.gamelog['player display name'] == playerName), 'snap pct'].mean())
             targets = len(
                 pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(playerName)])
             fr_targets = len(pbp_off.loc[(pbp_off['receiver_player_id'] == self.ids.get(
@@ -4525,7 +4553,7 @@ class StatsNFL(Stats):
                 logger.warning(f"{filename} missing")
                 return
 
-            self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}))
+            self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
 
             if market != "attempts":
                 teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
@@ -4992,16 +5020,18 @@ class StatsNHL(Stats):
             json.dump(comps, outfile, indent=4)
 
     def parse_game(self, gameId, gameDate):
+        gamelog = []
+        teamlog = []
         game = scraper.get(
             f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
         season = game['season']
         res = requests.get(
             f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv")
+        if res.status_code != 200:
+            return gamelog, teamlog
         game_df = pd.read_csv(StringIO(res.text))
         pp_df = game_df.loc[game_df.situation == '5on4']
         game_df = game_df.loc[game_df.situation == 'all']
-        gamelog = []
-        teamlog = []
         if game and not game_df.empty:
             team_map = {
                 "SJS": "SJ",
@@ -5181,7 +5211,7 @@ class StatsNHL(Stats):
         self.upcoming_games = {}
         for team in res.get('data', {}).get('content', {}).get('weeklyGames', []):
             for game in team.get('games', []):
-                abbr = abbreviations["NHL"][remove_accents(team['teamName'])]
+                abbr = abbreviations["NHL"].get(remove_accents(team['teamName']), remove_accents(team['teamName']))
                 if abbr in self.upcoming_games:
                     continue
                 idx = game['gameId']
@@ -5189,8 +5219,7 @@ class StatsNHL(Stats):
                     f"https://core.api.dobbersports.com/v1/game/{idx}")
                 if datetime.strptime(details.get('data', {}).get('gameDate'), "%Y-%m-%dT%H:%M:%S%z").astimezone().date() < today:
                     continue
-                opp = abbreviations["NHL"][remove_accents(
-                    game['opponentTeam']['name'])]
+                opp = abbreviations["NHL"].get(remove_accents(game['opponentTeam']['name']), remove_accents(game['opponentTeam']['name']))
                 home = game['teamType'] == "HOME"
                 if home:
                     goalie = details.get('data', {}).get(
@@ -5210,15 +5239,17 @@ class StatsNHL(Stats):
 
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/playerBios/allPlayersLookup.csv")
         player_df = pd.read_csv(StringIO(res.text))
+        player_df.rename(columns={"name": "playerName"}, inplace=True)
         player_df.height = player_df.height.str[:-1].str.split("' ").apply(lambda x: 12*int(x[0]) + int(x[1]) if type(x) is list else 0)
         player_df["bmi"] = player_df["weight"]/player_df["height"]/player_df["height"]
         player_df['age'] = (datetime.now()-pd.to_datetime(player_df['birthDate'])).dt.days/365.25
-        player_df.name = player_df.name.apply(remove_accents)
+        player_df.playerName = player_df.playerName.apply(remove_accents)
         player_df.position.replace("R", "W", inplace=True)
         player_df.position.replace("L", "W", inplace=True)
 
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv")
         skater_df = pd.read_csv(StringIO(res.text))
+        skater_df.rename(columns={"name": "playerName"}, inplace=True)
         skater_df = skater_df.loc[skater_df['situation']=='all']
         skater_df["Fenwick"] = skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
         skater_df["timePerGame"] = skater_df['icetime'] / skater_df["games_played"] / 60
@@ -5238,13 +5269,14 @@ class StatsNHL(Stats):
         skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
         skater_df["penaltyMinutesDrawn"] = skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
         skater_df["blockedShots"] = skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
-        skater_df = skater_df[["playerId", "name", "team", "position", "Fenwick", "timePerGame", "timePerShift", "shotAttempts", "xGoals", "shotsOnGoal", "goals", "rebounds", "freeze", "oZoneStarts", "flyStarts", "hits", "takeaways", "giveaways", "assists", "penaltyMinutes", "penaltyMinutesDrawn", "blockedShots"]]
+        skater_df = skater_df[["playerId", "playerName", "team", "position", "Fenwick", "timePerGame", "timePerShift", "shotAttempts", "xGoals", "shotsOnGoal", "goals", "rebounds", "freeze", "oZoneStarts", "flyStarts", "hits", "takeaways", "giveaways", "assists", "penaltyMinutes", "penaltyMinutesDrawn", "blockedShots"]]
 
         # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
         # shot_df = pd.read_csv(StringIO(res.text))
 
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv")
         goalie_df = pd.read_csv(StringIO(res.text))
+        goalie_df.rename(columns={"name": "playerName"}, inplace=True)
         goalie_df = goalie_df.loc[goalie_df['situation']=='all']
         goalie_df["timePerGame"] = goalie_df['icetime'] / goalie_df["games_played"] / 60
         goalie_df["saves"] = goalie_df['ongoal'] - goalie_df['goals']
@@ -5252,16 +5284,16 @@ class StatsNHL(Stats):
         goalie_df["freezeAgainst"] = (goalie_df['freeze'] - goalie_df['xFreeze']) / goalie_df["saves"]
         goalie_df["reboundsAgainst"] = (goalie_df['rebounds'] - goalie_df['xRebounds']) / goalie_df["saves"]
         goalie_df["goalsAgainst"] = (goalie_df['goals'] - goalie_df['flurryAdjustedxGoals']) / goalie_df["ongoal"]
-        goalie_df = goalie_df[["playerId", "name", "team", "position", "timePerGame", "savePct", "freezeAgainst", "reboundsAgainst", "goalsAgainst"]]
+        goalie_df = goalie_df[["playerId", "playerName", "team", "position", "timePerGame", "savePct", "freezeAgainst", "reboundsAgainst", "goalsAgainst"]]
 
         skater_df = player_df.merge(skater_df, how='right', on="playerId", suffixes=[None, "_y"])
         skater_df.dropna(inplace=True)
         skater_df.index = skater_df.playerId
-        skater_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'name_y', 'team_y', 'position_y'], inplace=True)
+        skater_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'playerName_y', 'team_y', 'position_y'], inplace=True)
         goalie_df = player_df.merge(goalie_df, how='right', on="playerId", suffixes=[None, "_y"])
         goalie_df.dropna(inplace=True)
         goalie_df.index = goalie_df.playerId
-        goalie_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'name_y', 'team_y', 'position_y'], inplace=True)
+        goalie_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'playerName_y', 'team_y', 'position_y'], inplace=True)
 
         self.players[self.season_start.year] = skater_df.to_dict('index')|goalie_df.to_dict('index')
 
