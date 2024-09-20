@@ -14,7 +14,7 @@ google-auth-oauthlib = ">=1.0.0"
 gspread = ">=5.8.0"
 mlb-statsapi = ">=1.6.1"
 nba-api = ">=1.2"
-nfl-data-py = ">=0.3.0"
+nfl-data-py = ">=0.3.2"
 numpy = ">=1.24.3"
 pandas = ">=2.0.1"
 protobuf = ">=4.23.0"
@@ -28,7 +28,6 @@ scikit-learn = "==1.4.0"
 shap = ">=0.44.0,<0.45.0"
 lightgbmlss = {git = "https://github.com/StatMixedML/LightGBMLSS.git"}
 torch = {version = "2.1.2", source = "pytorch_cpu"}
-sportsdataverse = "^0.0.39"
 line-profiler = "^4.1.3"
 klepto = {extras = ["archives"], version = "^0.2.5"}
 

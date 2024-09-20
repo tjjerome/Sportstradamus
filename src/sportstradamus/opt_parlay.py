@@ -13,7 +13,7 @@ from scipy.stats import multivariate_normal, norm
 from sklearn.metrics import log_loss
 from scipy.optimize import minimize
 
-archive = Archive("All")
+archive = Archive()
 
 nba = StatsNBA()
 nba.load()
