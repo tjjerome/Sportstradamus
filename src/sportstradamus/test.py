@@ -17,13 +17,23 @@ from time import time
 import requests
 
 pd.options.mode.chained_assignment = None
-NHL = StatsNHL()
-NHL.season_start = datetime(2021, 10, 12).date()
-NHL.update()
-NHL.season_start = datetime(2022, 10, 7).date()
-NHL.update()
-NHL.season_start = datetime(2023, 10, 10).date()
-NHL.update()
+# NHL = StatsNHL()
+# NHL.season_start = datetime(2021, 10, 12).date()
+# NHL.update()
+# NHL.season_start = datetime(2022, 10, 7).date()
+# NHL.update()
+# NHL.season_start = datetime(2023, 10, 10).date()
+# NHL.update()
+
+# NBA = StatsWNBA()
+# NBA.season_start = datetime(2021, 5, 14).date()
+# NBA.update()
+# NBA.season_start = datetime(2022, 5, 6).date()
+# NBA.update()
+# NBA.season_start = datetime(2023, 5, 19).date()
+# NBA.update()
+# NBA.season_start = datetime(2024, 5, 14).date()
+# NBA.update()
 
 stats = StatsNHL()
 stats.load()
@@ -158,15 +168,6 @@ stats.get_training_matrix("timeOnIce")
 # NBA.season_start = datetime(2023, 10, 1).date()
 # NBA.update()
 
-# NBA = StatsWNBA()
-# NBA.season_start = datetime(2021, 5, 14).date()
-# NBA.update()
-# NBA.season_start = datetime(2022, 5, 6).date()
-# NBA.update()
-# NBA.season_start = datetime(2023, 5, 19).date()
-# NBA.update()
-# NBA.season_start = datetime(2024, 5, 14).date()
-# NBA.update()
 
 
 # MLB = StatsMLB()

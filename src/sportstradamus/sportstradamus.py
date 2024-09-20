@@ -241,7 +241,7 @@ def main(progress):
         prob_params = prob_params.loc[playerStats.index]
         prob_params['Player'] = playerStats.index
         positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
-        prob_params['Position'] = playerStats.Position.map(positions)
+        prob_params['Position'] = playerStats["Player position"].map(positions)
         prob_params = prob_params.join(playerData)
         prob_params['Projection'] = prob_params['loc'].round(1)
         prob_params['Floor'] = norm.ppf(.1395, loc=prob_params['loc'],
@@ -310,6 +310,15 @@ def process_offers(offer_dict, book, stats):
             for league, markets in offer_dict.items():
                 if league in stats:
                     stat_data = stats.get(league)
+                    all_offers = {}
+                    for offers in markets.values():
+                        all_offers.update({v["Player"]: v for v in offers})
+
+                    all_offers = list(all_offers.values())
+                    stat_data.get_depth(all_offers)
+                    stat_data.get_volume_stats(all_offers)
+                    if league == "MLB":
+                        stat_data.get_volume_stats(all_offers, pitcher=True)
                 else:
                     # Handle untapped markets where the league is not supported
                     for market, offers in markets.items():
@@ -340,10 +349,10 @@ def process_offers(offer_dict, book, stats):
                         # Add the matched offers to the new_offers list
                         new_offers.extend(modeled_offers)
 
-    new_offers, best_fives = find_correlation(new_offers, stats, book)
+    new_offers, parlays = find_correlation(new_offers, stats, book)
 
     logger.info(str(len(new_offers)) + " offers processed")
-    return new_offers, best_fives
+    return new_offers, parlays
 
 
 @line_profiler.profile
@@ -403,8 +412,8 @@ def find_correlation(offers, stats, platform):
         opp_mod_map = banned[platform][league]['opponent']
 
         if league != "MLB":
-            league_df.Position = league_df.Position.apply(lambda x: positions[league][x] if isinstance(
-                x, int) else [positions[league][i] for i in x])
+            league_df["Player position"] = league_df["Player position"].apply(lambda x: positions[league][x-1] if isinstance(
+                x, int) else [positions[league][i-1] for i in x])
             combo_df = league_df.loc[league_df.Player.str.contains("\+|vs.")]
             league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
             player_df = league_df[["Player", "Team", "Player position"]]
@@ -413,7 +422,7 @@ def find_correlation(offers, stats, platform):
                 teams = row.Team.split("/")
                 if len(teams) == 1:
                     teams = teams*len(players)
-                pos = row.Position
+                pos = row["Player position"]
                 entries = []
                 for j in np.arange(len(players)):
                     entries.append(
@@ -431,15 +440,15 @@ def find_correlation(offers, stats, platform):
             player_df = player_df.merge(usage, how='left').fillna(0)
             ranks = player_df.sort_values(tiebreaker_str[league], ascending=False).groupby(
                 ["Team", "Player position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
-            player_df.Position = player_df.Position + ranks.astype(str)
+            player_df["Player position"] = player_df["Player position"] + ranks.astype(str)
             player_df.index = player_df.Player
-            player_df = player_df.Position.to_dict()
-            league_df.Position = league_df.Player.map(player_df)
-            combo_df.Position = combo_df.Player.apply(
+            player_df = player_df["Player position"].to_dict()
+            league_df["Player position"] = league_df.Player.map(player_df)
+            combo_df["Player position"] = combo_df.Player.apply(
                 lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
             league_df = pd.concat([league_df, combo_df])
         else:
-            league_df.Position = league_df.Position.apply(lambda x: ("B"+str(x) if x>0 else "P") if isinstance(x, int) else ["B"+str(i) if i>0 else "P" for i in x])
+            league_df["Player position"] = league_df["Player position"].apply(lambda x: ("B"+str(x) if x>0 else "P") if isinstance(x, int) else ["B"+str(i) if i>0 else "P" for i in x])
 
         if league == "NHL":
             new_map.update({
@@ -506,8 +515,8 @@ def find_correlation(offers, stats, platform):
             idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(38).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(18).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(33).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -589,7 +598,7 @@ def find_correlation(offers, stats, platform):
                     "Platform": platform
                     }
             best_bets = []
-            if not (platform == "PrizePicks" and league in ["MLB", "NFL", "NHL"]) and not (platform in ["Chalkboard", "ParlayPlay"] and league == "MLB"):
+            if not (platform in ["Chalkboard", "ParlayPlay"] and league == "MLB"):
                 combos = []
                 for bet_size in np.arange(2, len(payout_table[platform]) + 2):
                     team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
@@ -615,9 +624,9 @@ def find_correlation(offers, stats, platform):
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
                     if chunk_size > 0:
-                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost) for i in range(0, len(combos), chunk_size)]
+                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost, i+4) for i in range(0, len(combos), chunk_size)]
 
-                        for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} {bet_size}-Leg Parlays", leave=False):
+                        for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} Parlays", leave=False):
                             best_bets.extend(result)
 
                 if len(best_bets) > 0:
@@ -647,18 +656,21 @@ def find_correlation(offers, stats, platform):
                         df5["Family"] = 1
 
                     parlay_df = pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
-                
-    # test_df=pd.concat([parlay_df.sort_values("Model EV", ascending=False).groupby(["Game", "Family"]).head(50),
-    #                    parlay_df.sort_values("Fun", ascending=False).groupby(["Game", "Family"]).head(50), 
-    #                    parlay_df.sort_values("Rec Bet", ascending=False).groupby(["Game", "Family"]).head(50)]).drop_duplicates()
-    # np.polyfit(np.arange(3,7),test_df.groupby("Bet Size")["P"].min(),1)
-    # np.polyfit(np.arange(3,7),test_df.groupby("Bet Size")["P"].min(),1)
-    return df.drop(columns='Position').dropna().sort_values("Model", ascending=False), parlay_df
+
+    return df.drop(columns='Player position').dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
-    combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost = args
+    combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost, pos = args
     results = []
-    for bet_id in tqdm(combos, leave=False):
+    pass_log = []
+    window = 5000
+    growth_rate = .005
+    forgetting_factor = .001
+    target = .1
+    book_thresh = .9
+    model_thresh = 1.8
+    d_model_thresh = 0
+    for bet_id in tqdm(combos, leave=False, position=pos):
         bet_size = len(bet_id)
         threshold = thresholds[bet_size-2]
         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
@@ -667,13 +679,20 @@ def compute_bets(args):
 
         pb = p_books[np.ix_(bet_id)]
         prev_pb = np.product(pb)*boost*threshold
-        if prev_pb < .9:
+        if prev_pb < book_thresh:
+            pass_log.append(0)
             continue
 
         p = p_model[np.ix_(bet_id)]
         prev_p = np.product(p)*boost*threshold
-        if prev_p < 1.15:
+        if prev_p < model_thresh + d_model_thresh:
+            pass_log.append(0)
             continue
+
+        pass_log.append(1)
+        if len(pass_log) > window:
+            e = np.mean(pass_log[-window:])-target
+            d_model_thresh += growth_rate*e - forgetting_factor*d_model_thresh
 
         SIG = C[np.ix_(bet_id, bet_id)]
         if any(np.linalg.eigvals(SIG)<0.0001):
@@ -687,7 +706,7 @@ def compute_bets(args):
         p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
         units = (p - 1)/(payout - 1)/0.05
         
-        if units < 0.9 or p < 1.5:
+        if units < 1 or p < 2:
             continue
         
         bet = itemgetter(*bet_id)(bet_df)
@@ -824,99 +843,12 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
     if market in stat_data.gamelog.columns:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            stat_data.profile_market(market)
+            playerStats = stat_data.get_stats(market, offers)
+            playerStats = playerStats[stat_data.get_stat_columns(market)]
+
+            return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0)
     else:
-        return []
-
-    playerStats = []
-    playerNames = []
-
-    for o in tqdm(offers, leave=False, disable=not pbar):
-        if o["Team"] == "":
-            continue
-
-        if "+" in o["Player"] or "vs." in o["Player"]:
-            players = o["Player"].replace("vs.", "+").split("+")
-            players = [player.strip() for player in players]
-            teams = o["Team"].replace(" VS ", "/").split("/")
-            teams = [i for i in teams if i]
-            if len(teams) < len(players):
-                teams = teams*len(players)
-            opponents = o["Opponent"].split("/")
-            if len(opponents[0]) > 3:
-                opponents = list(map(''.join, zip(*[iter(o["Opponent"])]*3)))
-            opponents = [i for i in opponents if i]
-            if len(opponents) < len(players):
-                opponents = opponents*len(players)
-            for i, player in enumerate(players):
-                # if len(player.split(" ")[0].replace(".", "")) <= 2:
-                #     if league == "NFL":
-                #         nameStr = 'player display name'
-                #         namePos = 1
-                #     elif league == "NBA":
-                #         nameStr = 'PLAYER_NAME'
-                #         namePos = 2
-                #     elif league == "MLB":
-                #         nameStr = "playerName"
-                #         namePos = 3
-                #     elif league == "NHL":
-                #         nameStr = "playerName"
-                #         namePos = 7
-                #     name_df = stat_data.gamelog.loc[stat_data.gamelog[nameStr].str.contains(player.split(
-                #         " ")[1]) & stat_data.gamelog[nameStr].str.startswith(player.split(" ")[0][0])]
-                #     if name_df.empty:
-                #         pass
-                #     else:
-                #         players[i] = name_df.iloc[0, namePos]
-                #         player = name_df.iloc[0, namePos]
-                #         if teams[i] == "":
-                #             continue  # TODO: finish this
-
-                lines = list(archive.archive.get(league, {}).get(
-                    market, {}).get(o["Date"], {}).get(player, {}).get("Lines", []))
-                if len(lines) > 0:
-                    line = lines[-1]
-                else:
-                    line = 0.5
-
-                this_o = o | {
-                    "Player": player,
-                    "Line": line,
-                    "Market": market,
-                    "Team": teams[i],
-                    "Opponent": opponents[i]
-                }
-
-                lines = []
-
-                archive.add_dfs([this_o], stat_map[platform])
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", category=RuntimeWarning)
-                    stats = stat_data.get_stats(this_o, date=o["Date"])
-
-                if type(stats) is int:
-                    logger.warning(f"{o['Player']}, {market} stat error")
-                    pbar.update()
-                    continue
-                playerStats.append(stats)
-                playerNames.append(player)
-
-        else:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=RuntimeWarning)
-                stats = stat_data.get_stats(
-                    o | {"Market": market}, date=o["Date"])
-            if type(stats) is int:
-                logger.warning(f"{o['Player']}, {market} stat error")
-                pbar.update()
-                continue
-            playerStats.append(stats)
-            playerNames.append(o["Player"])
-
-        pbar.update()
-
-    playerStats = pd.DataFrame(playerStats, index=playerNames)
-    return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0)
+        return pd.DataFrame()
 
 
 def model_prob(offers, league, market, platform, stat_data, playerStats):
@@ -936,6 +868,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     """
 
     totals_map = archive.default_totals
+    dateMap = {x["Player"]:x["Date"] for x in offers}
 
     market = stat_map[platform].get(market, market)
     if league == "NHL":
@@ -967,23 +900,39 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             sv.shape = (len(sv),1)
 
         model.start_values = sv
-        prob_params = pd.DataFrame()
-        preds = model.predict(
+        prob_params = model.predict(
             playerStats, pred_type="parameters")
-        preds.index = playerStats.index
-        prob_params = pd.concat([prob_params, preds])
+        prob_params.index = playerStats.index
 
         prob_params.sort_index(inplace=True)
         playerStats.sort_index(inplace=True)
 
-    elif market not in stat_data.gamelog.columns:
-        return []
+        evs = []
+        lines = []
+        odds = []
+        for player in playerStats.index:
+            ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ''), player)
+            line = archive.get_line(stat_data.league, market, dateMap.get(player, ''), player)
+            if np.isnan(ev):
+                ev = stat_data.check_combo_markets(market, player, dateMap.get(player, ''))
+            if line <= 0:
+                line = np.max([playerStats.loc[player, 'Avg10'], 0.5])
+            if ev <= 0:
+                ev = get_ev(line, .5, stat_cv[stat_data.league].get(market,1))
+            
+            lines.append(line)
+            odds.append(get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
+            evs.append(ev)
+
+        playerStats["Line"] = lines
+        playerStats["Odds"] = odds
+        playerStats["EV"] = evs
+
     else:
-        cv = stat_cv.get(league,{}).get(market,1)
         logger.warning(f"{filename} missing")
         return []
 
-    for o in tqdm(offers, leave=False):
+    for o in tqdm(offers, leave=False): # TODO try this with pd array funcs
         players = [o["Player"]]
         if "+" in o["Player"] or "vs." in o["Player"]:
             players = o["Player"].replace("vs.", "+").split("+")
@@ -1226,7 +1175,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             o["Moneyline"] = np.mean([s["Moneyline"] for s in stats])
             o["O/U"] = np.mean([s["Total"] for s in stats]) / \
                 totals_map.get(o["League"], 1)
-            o["DVPOA"] = hmean([s["DVPOA"]+1 for s in stats])-1
+            o["DVPOA"] = hmean([s["Defense position"]+1 for s in stats])-1
             if ("Player position" in stats[0]) and ("Player position" in stats[1]):
                 o["Player position"] = (int(stats[0]["Player position"]),
                                     int(stats[1]["Player position"]))
@@ -1242,7 +1191,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             o["O/U"] = np.mean([s["Total"] for s in stats]) / \
                 totals_map.get(o["League"], 1)
             o["DVPOA"] = hmean(
-                [stats[0]["DVPOA"]+1, 1-stats[1]["DVPOA"]])-1
+                [stats[0]["Defense position"]+1, 1-stats[1]["Defense position"]])-1
             if ("Player position" in stats[0]) and ("Player position" in stats[1]):
                 o["Player position"] = (int(stats[0]["Player position"]),
                                     int(stats[1]["Player position"]))
@@ -1255,13 +1204,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 o["Line"] if stats["AvgH2H"] != 0 else 0
             o["Moneyline"] = stats["Moneyline"]
             o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
-            o["DVPOA"] = stats["DVPOA"]
+            o["DVPOA"] = stats["Defense position"]
             if "Player position" in stats:
                 o["Player position"] = int(stats["Player position"])
             else:
                 o["Player position"] = -1
 
-        if 3 > o.get("Boost", 1) > .5:
+        if 2 > o.get("Boost", 1) > .5:
             new_offers.append(o)
 
     return new_offers
