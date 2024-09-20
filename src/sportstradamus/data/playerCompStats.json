@@ -27,6 +27,34 @@
         "BLKA_48": 1.5,
         "STL_48": 2.5
     },
+    "WNBA": {
+        "AGE": 1,
+        "PLAYER_HEIGHT_INCHES": 2,
+        "PLAYER_BMI": 2,
+
+        "MIN": 6,
+        "USG_PCT": 4,
+
+        "TS_PCT": 4,
+        "RA_PCT": 1,
+        "ITP_PCT": 1,
+        "MR_PCT": 1,
+        "C3_PCT": 1,
+        "B3_PCT": 1,
+        "FTR": 1.5,
+        "FT_PCT": 1.5,
+        "FGA_40": 3,
+
+        "E_OFF_RATING": 2,
+        "AST_40": 4,
+        "TOV_40": 1,
+        "PIE": 3,
+
+        "E_DEF_RATING": 2,
+        "REB_40": 4,
+        "BLKA_40": 1.5,
+        "STL_40": 2.5
+    },
     "NFL": {
         "QB": {
             "age": 1,

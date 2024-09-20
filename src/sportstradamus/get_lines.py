@@ -55,7 +55,7 @@ nfl = StatsNFL()
 nfl.load()
 nfl.update()
 
-archive = Archive("NFL")
+archive = Archive()
 with logging_redirect_tqdm():
     players = list(nfl.gamelog['player display name'].unique())
     for player in tqdm(players, unit="player", position=1):

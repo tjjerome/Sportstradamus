@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights, feature_filter
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -72,11 +72,11 @@ stat_structs = {
     "WNBA": wnba
 }
 
-archive = Archive("All")
+archive = Archive()
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
+@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="NFL",
               help="Select league to train on")
 def meditate(force, league):
     global book_weights
@@ -84,30 +84,33 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
-        "NBA": [
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-            "MIN",
-        ],
+        # "NBA": [
+        #     "MIN",
+        #     "PTS",
+        #     "REB",
+        #     "AST",
+        #     "PRA",
+        #     "PR",
+        #     "RA",
+        #     "PA",
+        #     "FG3M",
+        #     "fantasy points prizepicks",
+        #     "FG3A",
+        #     "FTM",
+        #     "FGM",
+        #     "FGA",
+        #     "STL",
+        #     "BLK",
+        #     "BLST",
+        #     "TOV",
+        #     "OREB",
+        #     "DREB",
+        #     "PF",
+        # ],
         "NFL": [
+            "carries",
+            "attempts",
+            "targets",
             "passing yards",
             "rushing yards",
             "receiving yards",
@@ -121,24 +124,18 @@ def meditate(force, league):
             "receiving tds",
             "qb tds",
             "completions",
-            "carries",
             "receptions",
             "interceptions",
-            "attempts",
-            "targets",
-            "longest completion",
-            "longest rush",
-            "longest reception",
             "sacks taken",
             "passing first downs",
             "first downs",
-            "fumbles lost",
             "completion percentage"
         ],
         "MLB": [
-            "pitcher strikeouts",
-            "pitching outs",
+            "plateAppearances",
             "pitches thrown",
+            "pitching outs",
+            "pitcher strikeouts",
             "hits allowed",
             "runs allowed",
             "walks allowed",
@@ -160,24 +157,26 @@ def meditate(force, league):
             "doubles",
             "home runs"
         ],
-        "NHL": [
-            "saves",
-            "shots",
-            "points",
-            "goalsAgainst",
-            "goalie fantasy points underdog",
-            "skater fantasy points underdog",
-            "blocked",
-            "powerPlayPoints",
-            "sogBS",
-            "fantasy points prizepicks",
-            "hits",
-            "goals",
-            "assists",
-            "faceOffWins",
-            "timeOnIce",
-        ],
+        # "NHL": [
+        #     "timeOnIce",
+        #     "shotsAgainst",
+        #     "saves",
+        #     "shots",
+        #     "points",
+        #     "goalsAgainst",
+        #     "goalie fantasy points underdog",
+        #     "skater fantasy points underdog",
+        #     "blocked",
+        #     "powerPlayPoints",
+        #     "sogBS",
+        #     "fantasy points prizepicks",
+        #     "hits",
+        #     "goals",
+        #     "assists",
+        #     "faceOffWins",
+        # ],
         "WNBA": [
+            "MIN",
             "AST",
             "FG3M",
             "PA",
@@ -200,7 +199,7 @@ def meditate(force, league):
         book_weights.setdefault(league, {}).setdefault("Totals", {})
         book_weights[league]["Totals"] = fit_book_weights(league, "Totals")
 
-        if league=="MLB":
+        if league == "MLB":
             book_weights.setdefault(league, {}).setdefault("1st 1 innings", {})
             book_weights[league]["1st 1 innings"] = fit_book_weights(league, "1st 1 innings")
             book_weights.setdefault(league, {}).setdefault("pitcher win", {})
@@ -232,6 +231,7 @@ def meditate(force, league):
 
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+            need_model = True
             if os.path.isfile(filepath):
                 with open(filepath, 'rb') as infile:
                     filedict = pickle.load(infile)
@@ -240,6 +240,8 @@ def meditate(force, league):
                     dist = filedict['distribution']
                     cv = filedict['cv']
                     step = filedict['step']
+                
+                need_model = False
             else:
                 filedict = {}
 
@@ -247,39 +249,48 @@ def meditate(force, league):
             cv = stat_cv[league].get(market, 1)
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
             if os.path.isfile(filepath):
-                M = pd.read_csv(filepath, index_col=0).dropna()
-                cutoff_date = pd.to_datetime(M.loc[M.Archived==1, "Date"]).max().date()
-                if pd.isnull(cutoff_date):
-                    cutoff_date = pd.to_datetime(M["Date"]).max().date()
-                start_date = (datetime.today()-timedelta(days=(1200 if league == "NFL" else 850))).date()
+                M = pd.read_csv(filepath, index_col=0)
+                cutoff_date = pd.to_datetime(M["Date"]).max().date()
+                if league == "MLB":
+                    start_date = (datetime.today()-timedelta(days=700)).date()
+                elif league == "NFL":
+                    start_date = (datetime.today()-timedelta(days=1200)).date()
+                else:
+                    start_date = (datetime.today()-timedelta(days=850)).date()
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > start_date)]
             else:
-                cutoff_date = None
+                if league == "MLB":
+                    cutoff_date = (datetime.today()-timedelta(days=700)).date()
+                elif league == "NFL":
+                    cutoff_date = (datetime.today()-timedelta(days=1200)).date()
+                else:
+                    cutoff_date = (datetime.today()-timedelta(days=850)).date()
                 M = pd.DataFrame()
 
             new_M = stat_data.get_training_matrix(market, cutoff_date)
 
-            if new_M.empty and not force:
+            if new_M.empty and not force and not need_model:
                 continue
 
             M = pd.concat([M, new_M], ignore_index=True)
-            M.Date = pd.to_datetime(M.Date)
-
-            if len(M.loc[M["Archived"]!=0]) < 10:
-                M.to_csv(filepath)
-                continue
+            M.Date = pd.to_datetime(M.Date, format='mixed')
+            step = M["Result"].drop_duplicates().sort_values().diff().min()
+            for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
+                if np.isnan(row["EV"]) or row["EV"] <= 0:
+                    M.loc[i, "Odds"] = 0.5
+                    M.loc[i, "EV"] = M.loc[i, "Line"] if cv != 1 else get_ev(M.loc[i, "Line"], .5, cv)
+                else:
+                    M.loc[i, "Odds"] = get_odds(row["Line"], row["EV"], cv=cv, step=step)
 
             M = trim_matrix(M)
             M.to_csv(filepath)
 
-            M.drop(columns=["Date", "Archived"], inplace=True)
             y = M[['Result']]
-            X = M.drop(columns=['Result'])
-            step = M["Result"].drop_duplicates().sort_values().diff().min()
+            X = M[stat_data.get_stat_columns(market)]
 
-            categories = ["Home", "Position"]
-            if "Position" not in X.columns:
-                categories.remove("Position")
+            categories = ["Home", "Player position"]
+            if "Player position" not in X.columns:
+                categories.remove("Player position")
             for c in categories:
                 X[c] = X[c].astype('category')
 
@@ -288,6 +299,9 @@ def meditate(force, league):
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
+
+            B_train = M.loc[X_train.index, ['Line', 'Odds', 'EV']]
+            B_test = M.loc[X_test.index, ['Line', 'Odds', 'EV']]
 
             y_train_labels = np.ravel(y_train.to_numpy())
 
@@ -376,35 +390,37 @@ def meditate(force, league):
             prob_params.sort_index(inplace=True)
             prob_params['result'] = y_test['Result']
             X_train.sort_index(inplace=True)
+            B_train.sort_index(inplace=True)
             y_train.sort_index(inplace=True)
             X_test.sort_index(inplace=True)
+            B_test.sort_index(inplace=True)
             y_test.sort_index(inplace=True)
             cv = 1
             if dist == "Poisson":
                 under = poisson.cdf(
-                    X_train["Line"], prob_params_train["rate"])
+                    B_train["Line"], prob_params_train["rate"])
                 push = poisson.pmf(
-                    X_train["Line"], prob_params_train["rate"])
+                    B_train["Line"], prob_params_train["rate"])
                 y_proba_train = under - push/2
                 under = poisson.cdf(
-                    X_test["Line"], prob_params["rate"])
+                    B_test["Line"], prob_params["rate"])
                 push = poisson.pmf(
-                    X_test["Line"], prob_params["rate"])
+                    B_test["Line"], prob_params["rate"])
                 y_proba = under - push/2
                 p = 1
                 ev = prob_params["rate"]
                 entropy = np.mean(
                     np.abs(poisson.cdf(y_test["Result"], prob_params["rate"])-.5))
             elif dist == "Gaussian":
-                high = np.floor((X_train["Line"]+step)/step)*step
-                low = np.ceil((X_train["Line"]-step)/step)*step
+                high = np.floor((B_train["Line"]+step)/step)*step
+                low = np.ceil((B_train["Line"]-step)/step)*step
                 under = norm.cdf(
                     high, prob_params_train["loc"], prob_params_train["scale"])
                 push = under - norm.cdf(
                     low, prob_params_train["loc"], prob_params_train["scale"])
                 y_proba_train = under - push/2
-                high = np.floor((X_test["Line"]+step)/step)*step
-                low = np.ceil((X_test["Line"]-step)/step)*step
+                high = np.floor((B_test["Line"]+step)/step)*step
+                low = np.ceil((B_test["Line"]-step)/step)*step
                 under = norm.cdf(
                     high, prob_params["loc"], prob_params["scale"])
                 push = under - norm.cdf(
@@ -422,33 +438,33 @@ def meditate(force, league):
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
             y_class = (y_train["Result"] >=
-                       X_train["Line"]).astype(int).to_numpy()
+                       B_train["Line"]).astype(int).to_numpy()
             train_ll = log_loss(y_class, y_proba_train)
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
-            X_train.loc[X_train["Odds"] == 0, "Odds"] = 0.5
-            X_test.loc[X_test["Odds"] == 0, "Odds"] = 0.5
-            filt = fit_model_weight(y_proba_train, X_train.Odds.to_numpy().reshape(-1,1), y_class)
+            B_train.loc[B_train["Odds"] == 0, "Odds"] = 0.5
+            B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
+            filt = fit_model_weight(y_proba_train, B_train.Odds.to_numpy().reshape(-1,1), y_class)
             y_proba_filt = filt.predict_proba(
-                np.concatenate([y_proba, X_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
+                np.concatenate([y_proba, B_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
 
             y_class = (y_test["Result"] >=
-                       X_test["Line"]).astype(int)
+                       B_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
             bs0 = brier_score_loss(
                 y_class, 0.5*np.ones_like(y_class), pos_label=1)
-            dev0 = mean_tweedie_deviance(y_test, X_test["Line"], power=p)
+            dev0 = mean_tweedie_deviance(y_test, B_test["Line"], power=p)
             ll0 = log_loss(y_class, 0.5*np.ones_like(y_class))
-            bal0 = (y_test["Result"] > X_test["Line"]).mean()
+            bal0 = (y_test["Result"] > B_test["Line"]).mean()
 
             if cv == 1:
                 entropy0 = np.mean(np.abs(poisson.cdf(
-                    y_test["Result"], X_test["Line"].apply(get_ev, args=(.5,)))-0.5))
+                    y_test["Result"], B_test["Line"].apply(get_ev, args=(.5,)))-0.5))
             else:
                 entropy0 = np.mean(np.abs(norm.cdf(
-                    y_test["Result"], X_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
+                    y_test["Result"], B_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
 
             prec = np.zeros(2)
             acc = np.zeros(2)
@@ -522,7 +538,6 @@ def meditate(force, league):
                 del model
 
             report()
-    # see_features()
 
 
 def report():
@@ -569,6 +584,7 @@ def see_features():
     model_list = [f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name]
     model_list.sort()
     feature_importances = []
+    feature_correlations = []
     features_to_filter = {}
     most_important = {}
     for model_str in tqdm(model_list, desc="Analyzing feature importances...", unit="market"):
@@ -580,14 +596,17 @@ def see_features():
         M = pd.read_csv(filepath, index_col=0)
 
         y = M[['Result']]
+        C = M.corr(numeric_only=True)["Result"]
         X = M.drop(columns=['Result', 'EV', 'P'])
+        C = C.drop(['Result', 'EV', 'P'])
         if filedict["distribution"] == "Gaussian":
             X.drop(columns=["STD"], inplace=True)
+            C.drop(["STD"], inplace=True)
         features = X.columns
 
-        categories = ["Home", "Position"]
-        if "Position" not in features:
-            categories.remove("Position")
+        categories = ["Home", "Player position"]
+        if "Player position" not in features:
+            categories.remove("Player position")
         for c in categories:
             X[c] = X[c].astype('category')
 
@@ -604,6 +623,7 @@ def see_features():
         vals = vals/np.sum(vals)*100
         feature_importances.append(
             {k: v for k, v in list(zip(features, vals))})
+        feature_correlations.append(C.to_dict())
         
         features_to_filter[model_str[:-4]] = list(features[vals == 0])
         most_important[model_str[:-4]] = list(features[np.argpartition(vals, -10)[-10:]])
@@ -611,7 +631,7 @@ def see_features():
     df = pd.DataFrame(feature_importances, index=[
                       market[:-4] for market in model_list]).fillna(0).transpose()
     
-    for league in ["NBA", "NFL", "NHL", "MLB"]:
+    for league in ["NBA", "WNBA", "NFL", "NHL", "MLB"]:
         df[league + "_ALL"] = df[[col for col in df.columns if league in col]].mean(axis=1)
         most_important[league + "_ALL"] = list(df[league + "_ALL"].sort_values(ascending=False).head(10).index)
 
@@ -623,6 +643,38 @@ def see_features():
     with open(pkg_resources.files(data) / "most_important_features.json", "w") as outfile:
         json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
+    pd.DataFrame(feature_correlations, index=[
+                      market[:-4] for market in model_list]).T.to_csv(pkg_resources.files(data) / "feature_correlations.csv")
+
+def filter_features():
+    shap_df = pd.read_csv(pkg_resources.files(data) / "feature_importances.csv", index_col=0)
+    shap_df.drop(columns=[col for col in shap_df.columns if "ALL" in col], inplace=True)
+    corr_df = pd.read_csv(pkg_resources.files(data) / "feature_correlations.csv", index_col=0)
+    shap_df[shap_df < .3] = 0
+    shap_df.fillna(0, inplace=True)
+    corr_df = np.abs(corr_df)
+    corr_df[corr_df < .1] = 0
+    corr_df.fillna(0, inplace=True)
+
+    leagues = list(set([col.split("_")[0] for col in shap_df.columns]))
+    for league in leagues:
+        feature_filter.setdefault(league, {})
+        importances = shap_df.drop(index=feature_filter[league]["Common"]).rank(ascending=False, method="max")
+        correlations = corr_df.drop(index=feature_filter[league]["Common"]).rank(ascending=False, method="max")
+        
+        markets = [col.split("_")[1] for col in shap_df.columns if col.split("_")[0] == league]
+        for market in markets:
+            if market not in feature_filter[league]:
+                stats = []
+                stats.extend([stat.replace(" short", "").replace(" growth", "") for stat in importances.loc[importances["_".join([league, market])] <= 30].index])
+                stats.extend([stat.replace(" short", "").replace(" growth", "") for stat in correlations.loc[correlations["_".join([league, market])] <= 20].index])
+                stats = list(set(stats))
+                stats.sort()
+
+                feature_filter[league][market.replace("-", " ")] = stats
+
+    with open(pkg_resources.files(data) / "feature_filter.json", "w") as outfile:
+        json.dump(feature_filter, outfile, indent=4)
 
 def fit_book_weights(league, market):
     global book_weights
@@ -730,15 +782,15 @@ def trim_matrix(M):
         M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
     M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
 
-    if "Position" in M.columns:
-        for i in M.Position.unique():
+    if "Player position" in M.columns:
+        for i in M["Player position"].unique():
             target = M.loc[(M["Archived"] == 1) & (
-                M["Position"] == i), "Line"].median()
+                M["Player position"] == i), "Line"].median()
 
             less = M.loc[(M["Archived"] != 1) & (
-                M["Position"] == i) & (M["Line"] < target), "Line"]
+                M["Player position"] == i) & (M["Line"] < target), "Line"]
             more = M.loc[(M["Archived"] != 1) & (
-                M["Position"] == i) & (M["Line"] > target), "Line"]
+                M["Player position"] == i) & (M["Line"] > target), "Line"]
 
             n = np.clip(np.abs(less.count() - more.count()), None, np.clip(len(M) - 2000, 0, None))
             if n > 0:
@@ -747,7 +799,7 @@ def trim_matrix(M):
                     counts, bins = np.histogram(less)
                     counts = counts/len(less)
                     actuals = M.loc[(M["Archived"] == 1) & (
-                        M["Position"] == i) & (M["Line"] < target), "Line"]
+                        M["Player position"] == i) & (M["Line"] < target), "Line"]
                     actual_counts, bins = np.histogram(
                         actuals, bins)
                     if len(actuals):
@@ -764,7 +816,7 @@ def trim_matrix(M):
                     counts, bins = np.histogram(more)
                     counts = counts/len(more)
                     actuals = M.loc[(M["Archived"] == 1) & (
-                        M["Position"] == i) & (M["Line"] > target), "Line"]
+                        M["Player position"] == i) & (M["Line"] > target), "Line"]
                     actual_counts, bins = np.histogram(
                         actuals, bins)
                     if len(actuals):
@@ -776,6 +828,9 @@ def trim_matrix(M):
                     for j, a in enumerate(bins[:-1]):
                         p[more >= a] = diff[j]
                     p = p/np.sum(p)
+
+                if n > len(chopping_block):
+                    n = len(chopping_block)
 
                 cut = np.random.choice(
                     chopping_block, n, replace=False, p=p)
@@ -824,15 +879,22 @@ def trim_matrix(M):
                     p[more >= a] = diff[j]
                 p = p/np.sum(p)
 
+            if n > len(chopping_block):
+                n = len(chopping_block)
+
             cut = np.random.choice(
                 chopping_block, n, replace=False, p=p)
             M.drop(cut, inplace=True)
+
+    if len(M.loc[(M["Archived"] == 1)]) < 10:
+           return M.sort_values("Date")
 
     pushes = M.loc[M["Result"]==M["Line"]]
     push_rate = pushes["Archived"].sum()/M["Archived"].sum()
     M = M.loc[M["Result"]!=M["Line"]]
     target = (M.loc[(M["Archived"] == 1), "Result"] >
                 M.loc[(M["Archived"] == 1), "Line"]).mean()
+    
     balance = (M["Result"] > M["Line"]).mean()
     n = np.clip(2*int(np.abs(target - balance) * len(M)), None, np.clip(len(M) - 1600, 0, None))
 
@@ -849,6 +911,9 @@ def trim_matrix(M):
             p = (M.loc[chopping_block, "MeanYr"].clip(
                 0.1)).to_numpy()
             p = p/np.sum(p)
+
+        if n > len(chopping_block):
+            n = len(chopping_block)
 
         cut = np.random.choice(chopping_block, n, replace=False, p=p)
         M.drop(cut, inplace=True)
@@ -1227,7 +1292,7 @@ def correlate(league, force=False):
     for gameId in tqdm(games):
         game_df = log.gamelog.loc[log.gamelog[log_str["game"]] == gameId]
         gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
-        if gameDate < latest_date:
+        if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != 2:
             continue
         home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
         away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
@@ -1290,3 +1355,5 @@ def correlate(league, force=False):
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
     meditate()
+    see_features()
+    filter_features()
