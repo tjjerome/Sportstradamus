@@ -1048,6 +1048,8 @@ def get_sleeper():
             if player is None:
                 continue
 
+            player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
+            player_team = player["team"]
             game_id = prop["game_id"].split("_")
             teams = [x for x in game_id if not x.isnumeric()]
             if len(teams) != 2:
@@ -1065,8 +1067,6 @@ def get_sleeper():
                         outcomes = outcomes + [{}]
                     else:
                         outcomes = [{}] + outcomes
-                player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
-                player_team = player["team"]
                 opp = [team for team in teams if team != player_team][0]
 
                 n = {
