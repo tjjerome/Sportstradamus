@@ -515,8 +515,8 @@ def find_correlation(offers, stats, platform):
             idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(18).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(33).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -624,7 +624,7 @@ def find_correlation(offers, stats, platform):
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
                     if chunk_size > 0:
-                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost, i+4) for i in range(0, len(combos), chunk_size)]
+                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost) for i in range(0, len(combos), chunk_size)]
 
                         for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} Parlays", leave=False):
                             best_bets.extend(result)
@@ -660,17 +660,17 @@ def find_correlation(offers, stats, platform):
     return df.drop(columns='Player position').dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
-    combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost, pos = args
+    combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost = args
     results = []
     pass_log = []
     window = 5000
-    growth_rate = .005
-    forgetting_factor = .001
+    growth_rate = .008
+    forgetting_factor = .003
     target = .1
     book_thresh = .9
     model_thresh = 1.8
     d_model_thresh = 0
-    for bet_id in tqdm(combos, leave=False, position=pos):
+    for bet_id in tqdm(combos, leave=False):
         bet_size = len(bet_id)
         threshold = thresholds[bet_size-2]
         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
@@ -906,6 +906,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         prob_params.sort_index(inplace=True)
         playerStats.sort_index(inplace=True)
+
+        if "Defense position" not in playerStats:
+            playerStats["Defense position"] = playerStats["Defense avg"]
 
         evs = []
         lines = []

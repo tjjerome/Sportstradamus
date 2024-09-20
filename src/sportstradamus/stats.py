@@ -105,7 +105,7 @@ class Stats:
         """
         # Implementation details...
 
-    def update_player_comps(self):
+    def update_player_comps(self, year=None):
         return
     
     @line_profiler.profile
@@ -376,9 +376,17 @@ class Stats:
             if self.league == "MLB":
                 pitchers = {x:self.upcoming_games.get(teams[x], {}).get("Opponent Pitcher") for x in stats.index}
 
+            dates = {x["Player"]: x["Date"] for x in offers}
+            for player in list(dates.keys()):
+                if " + " in player.replace(" vs. ", " + "):
+                    split_players = player.replace(" vs. ", " + ").split(" + ")
+                    dates[split_players[0]] = dates[player]
+                    dates[split_players[1]] = dates[player]
+                    dates.pop(player)
+                    
             stats["Home"] = [self.upcoming_games.get(teams[x], {}).get("Home") for x in stats.index]
-            stats["Moneyline"] = [archive.get_moneyline(self.league, date, teams[x]) for x in stats.index]
-            stats["Total"] = [archive.get_total(self.league, date, teams[x]) for x in stats.index]
+            stats["Moneyline"] = [archive.get_moneyline(self.league, dates[x], teams[x]) for x in stats.index]
+            stats["Total"] = [archive.get_total(self.league, dates[x], teams[x]) for x in stats.index]
 
         if self.league == "MLB" and not any([string in market for string in ["allowed", "pitch"]]):
             h2hgames = self.short_gamelog.loc[self.short_gamelog["opponent pitcher"] == self.short_gamelog[self.log_strings["player"]].map(pitchers)].groupby(self.log_strings["player"])
@@ -673,7 +681,9 @@ class StatsNBA(Stats):
             with open(filepath, "r") as infile:
                 self.comps = json.load(infile)
 
-    def update_player_comps(self):
+    def update_player_comps(self, year=None):
+        if year is None:
+            year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
     
@@ -722,7 +732,7 @@ class StatsNBA(Stats):
                 latest_date = self.season_start
         today = datetime.today().date()
         player_df = pd.read_csv(pkg_resources.files(
-            data) / f"nba_players_{self.season}.csv")
+            data) / f"player_data/NBA/nba_players_{self.season}.csv")
 
         player_df.Player = player_df.Player.apply(remove_accents)
         player_df.rename(columns={"Player":"PLAYER_NAME", "Team": "TEAM_ABBREVIATION", "Age": "AGE", "Pos": "POS"}, inplace=True)
@@ -1339,7 +1349,8 @@ class StatsNBA(Stats):
             logger.warning(f"{filename} missing")
             return []
 
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std"}))
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
+        self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
 
         teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
         for team, team_df in teams:
@@ -1408,7 +1419,7 @@ class StatsNBA(Stats):
         else:
             ev = 0
 
-        return ev
+        return 0 if np.isnan(ev) else ev
 
     @line_profiler.profile
     def obs_get_stats(self, offer, date=datetime.today()):
@@ -1939,7 +1950,9 @@ class StatsWNBA(StatsNBA):
                          "gamelog": self.gamelog,
                          "teamlog": self.teamlog}, outfile)
 
-    def update_player_comps(self):
+    def update_player_comps(self, year=None):
+        if year is None:
+            year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
     
@@ -2530,7 +2543,7 @@ class StatsMLB(Stats):
                 self.park_factors = json.load(infile)
 
         filepath = pkg_resources.files(
-            data) / "affinity_pitchersBySHV_matchScores.csv"
+            data) / "player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
             df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) &
@@ -2541,7 +2554,7 @@ class StatsMLB(Stats):
                 lambda x: x.key2.to_list()).to_dict()
 
         filepath = pkg_resources.files(
-            data) / "affinity_hittersByHittingProfile_matchScores.csv"
+            data) / "player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
             df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) &
@@ -2551,18 +2564,18 @@ class StatsMLB(Stats):
             self.comps['hitters'] = df.groupby('key1').apply(
                 lambda x: x.key2.to_list()).to_dict()
 
-    def update_player_comps(self):
+    def update_player_comps(self, year=None):
         url = "https://baseballsavant.mlb.com/app/affinity/affinity_hittersByHittingProfile_matchScores.csv"
         res = requests.get(url)
         filepath = pkg_resources.files(
-            data) / "affinity_hittersByHittingProfile_matchScores.csv"
+            data) / "player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
         with open(filepath, "w") as outfile:
             outfile.write(res.text)
             
         url = "https://baseballsavant.mlb.com/app/affinity/affinity_pitchersBySHV_matchScores.csv"
         res = requests.get(url)
         filepath = pkg_resources.files(
-            data) / "affinity_pitchersBySHV_matchScores.csv"
+            data) / "player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
         with open(filepath, "w") as outfile:
             outfile.write(res.text)
 
@@ -2742,7 +2755,7 @@ class StatsMLB(Stats):
         self.base_profile(date)
         self.profiled_market = market
 
-        self.pitcherProfile = pd.DataFrame(columns=['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain'])
+        self.pitcherProfile = pd.DataFrame(columns=['z', 'home', 'moneyline gain', 'totals gain'])
 
         # Filter non-starting pitchers or non-starting batters depending on the market
         if any([string in market for string in ["allowed", "pitch"]]):
@@ -2773,39 +2786,31 @@ class StatsMLB(Stats):
         # Compute playerProfile DataFrame
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self.playerProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0
-            self.playerProfile['avg'] = playerGroups[market].mean().div(
-                leagueavg) - 1
+            self.playerProfile[['z', 'home', 'moneyline gain', 'totals gain']] = 0
             self.playerProfile['z'] = (
                 playerGroups[market].mean()-leagueavg).div(leaguestd)
             self.playerProfile['home'] = playerGroups.apply(
                 lambda x: x.loc[x['home'], market].mean() / x[market].mean()) - 1
-            self.playerProfile['away'] = playerGroups.apply(
-                lambda x: x.loc[~x['home'], market].mean() / x[market].mean()) - 1
 
             leagueavg = defenseGroups[market].mean().mean()
             leaguestd = defenseGroups[market].mean().std()
-            self.defenseProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0
+            self.defenseProfile[['avg', 'z', 'home', 'moneyline gain', 'totals gain', 'comps']] = 0
             self.defenseProfile['avg'] = defenseGroups[market].mean().div(
                 leagueavg) - 1
             self.defenseProfile['z'] = (
                 defenseGroups[market].mean()-leagueavg).div(leaguestd)
             self.defenseProfile['home'] = defenseGroups.apply(
                 lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
-            self.defenseProfile['away'] = defenseGroups.apply(
-                lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
 
             leagueavg = pitcherGroups[market].mean().mean()
             leaguestd = pitcherGroups[market].mean().std()
-            self.pitcherProfile[['avg', 'z', 'home', 'away', 'moneyline gain', 'totals gain']] = 0
+            self.pitcherProfile[['avg', 'z', 'home', 'moneyline gain', 'totals gain']] = 0
             self.pitcherProfile['avg'] = pitcherGroups[market].mean().div(
                 leagueavg) - 1
             self.pitcherProfile['z'] = (
                 pitcherGroups[market].mean()-leagueavg).div(leaguestd)
             self.pitcherProfile['home'] = pitcherGroups.apply(
                 lambda x: x.loc[x['home'] == 1, market].mean() / x[market].mean()) - 1
-            self.pitcherProfile['away'] = pitcherGroups.apply(
-                lambda x: x.loc[x['home'] == 0, market].mean() / x[market].mean()) - 1
 
             self.playerProfile['moneyline gain'] = playerGroups.apply(
                 lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float) / 0.5 - x.moneyline.fillna(0.5).mean(),
@@ -2941,7 +2946,8 @@ class StatsMLB(Stats):
             logger.warning(f"{filename} missing")
             return
 
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}))
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
+        self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
     
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
@@ -3016,7 +3022,7 @@ class StatsMLB(Stats):
             if not book_odds:
                 ev = 0
 
-        return ev
+        return 0 if np.isnan(ev) else ev
     
     def get_depth(self, offers, date=datetime.today().date()):
         if isinstance(offers, dict):
@@ -4132,7 +4138,9 @@ class StatsNFL(Stats):
                 "first_downs": first_downs,
             }
 
-    def update_player_comps(self):
+    def update_player_comps(self, year=None):
+        if year is None:
+            year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
 
@@ -4145,8 +4153,16 @@ class StatsNFL(Stats):
 
         self.profile_market("snap pct")
         playerProfile = pd.DataFrame()
-        for year in range(self.season_start.year - 1, self.season_start.year + 1):
-            playerFolder = pkg_resources.files(data) / f"player_data/NFL/{year}"
+
+        filterStat = {
+            "QB": "dropbacks",
+            "RB": "attempts",
+            "WR": "routes",
+            "TE": "routes"
+        }
+
+        for y in reversed(range(year - 4, year + 1)):
+            playerFolder = pkg_resources.files(data) / f"player_data/NFL/{y}"
             if os.path.exists(playerFolder):
                 for file in os.listdir(playerFolder):
                     if file.endswith(".csv"):
@@ -4175,17 +4191,11 @@ class StatsNFL(Stats):
         playerProfile.index = playerProfile.player.apply(remove_accents)
         playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
         playerProfile = playerProfile.join(players)
-
-        filterStat = {
-            "QB": "dropbacks",
-            "RB": "attempts",
-            "WR": "routes",
-            "TE": "routes"
-        }
     
         comps = {}
         for position in ["QB", "RB", "WR", "TE"]:
             positionProfile = playerProfile.loc[playerProfile.position==position]
+            positionProfile[filterStat[position]] = positionProfile[filterStat[position]]/positionProfile["player_game_count"]
             positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].max()*.1]
             positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
@@ -4499,7 +4509,7 @@ class StatsNFL(Stats):
         else:
             ev = 0
 
-        return ev
+        return 0 if np.isnan(ev) else ev
     
     def get_volume_stats(self, offers, date=datetime.today().date()):
         flat_offers = {}
@@ -4554,6 +4564,7 @@ class StatsNFL(Stats):
                 return
 
             self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
+            self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
 
             if market != "attempts":
                 teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
@@ -4996,7 +5007,9 @@ class StatsNHL(Stats):
             with open(filepath, "r") as infile:
                 self.comps = json.load(infile)
 
-    def update_player_comps(self):
+    def update_player_comps(self, year=None):
+        if year is None:
+            year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
     

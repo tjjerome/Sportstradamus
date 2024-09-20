@@ -76,7 +76,7 @@ archive = Archive()
 
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
+@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="NFL",
               help="Select league to train on")
 def meditate(force, league):
     global book_weights
@@ -84,29 +84,29 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
-        "NBA": [
-            "MIN",
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-        ],
+        # "NBA": [
+        #     "MIN",
+        #     "PTS",
+        #     "REB",
+        #     "AST",
+        #     "PRA",
+        #     "PR",
+        #     "RA",
+        #     "PA",
+        #     "FG3M",
+        #     "fantasy points prizepicks",
+        #     "FG3A",
+        #     "FTM",
+        #     "FGM",
+        #     "FGA",
+        #     "STL",
+        #     "BLK",
+        #     "BLST",
+        #     "TOV",
+        #     "OREB",
+        #     "DREB",
+        #     "PF",
+        # ],
         "NFL": [
             "carries",
             "attempts",
