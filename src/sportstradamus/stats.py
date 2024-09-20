@@ -394,7 +394,7 @@ class Stats:
         teamstats = self.teamProfile.loc[stats.index.map(teams)].add_prefix("Team ")
         teamstats.index = stats.index
         stats = stats.join(teamstats)
-        defstats = self.defenseProfile.loc[stats.index.map(opponents)]
+        defstats = self.defenseProfile.loc[stats.index.map(opponents)].astype(float)
         if self.league == "MLB":
             defstats.loc[[x in self.pitcherProfile.index for x in stats.index.map(pitchers)], self.pitcherProfile.columns] = self.pitcherProfile.loc[[x for x in stats.index.map(pitchers) if x in self.pitcherProfile.index]].values
         else:
