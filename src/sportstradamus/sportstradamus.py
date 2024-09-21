@@ -506,7 +506,7 @@ def find_correlation(offers, stats, platform):
             opp_c.index = pd.MultiIndex.from_tuples([(f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", "")) for x, y in opp_c.index], names=("market", "correlation"))
             c_map = team_c["R"].add(opp_c["R"], fill_value=0).to_dict()
 
-            game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.65)
+            game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.625)
             game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
             game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
             game_df.reset_index(drop=True, inplace=True)
@@ -619,7 +619,7 @@ def find_correlation(offers, stats, platform):
                                     combos.extend(product(*[player_indices[player] for player in selected_players]))
 
                 thresholds = payout_table[platform]
-                max_boost = 60 if platform in ["Sleeper", "ParlayPlay", "Chalkboard"] else 3
+                max_boost = 60 if platform in ["Sleeper", "ParlayPlay", "Chalkboard"] else 2.5
 
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
@@ -662,15 +662,19 @@ def find_correlation(offers, stats, platform):
 def compute_bets(args):
     combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost = args
     results = []
-    pass_log = []
+    pass_log = np.zeros(len(combos))
     window = 5000
-    growth_rate = .005
-    forgetting_factor = .001
+    growth_rate = .01
+    forgetting_factor = .005
     target = .1
     book_thresh = .9
     model_thresh = 1.8
     d_model_thresh = 0
-    for bet_id in tqdm(combos, leave=False):
+    for i, bet_id in tqdm(enumerate(combos), total=len(combos), leave=False):
+        if i >= window and i % 100 == 0:
+            e = np.mean(pass_log[-window:])-target
+            d_model_thresh += growth_rate*e - forgetting_factor*d_model_thresh
+
         bet_size = len(bet_id)
         threshold = thresholds[bet_size-2]
         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
@@ -680,19 +684,14 @@ def compute_bets(args):
         pb = p_books[np.ix_(bet_id)]
         prev_pb = np.product(pb)*boost*threshold
         if prev_pb < book_thresh:
-            pass_log.append(0)
             continue
 
         p = p_model[np.ix_(bet_id)]
         prev_p = np.product(p)*boost*threshold
         if prev_p < model_thresh + d_model_thresh:
-            pass_log.append(0)
             continue
 
-        pass_log.append(1)
-        if len(pass_log) > window:
-            e = np.mean(pass_log[-window:])-target
-            d_model_thresh += growth_rate*e - forgetting_factor*d_model_thresh
+        pass_log[i] = 1
 
         SIG = C[np.ix_(bet_id, bet_id)]
         if any(np.linalg.eigvals(SIG)<0.0001):
