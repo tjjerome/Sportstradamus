@@ -54,9 +54,9 @@ mlb.update()
 nba = StatsNBA()
 nba.load()
 nba.update()
-nhl = StatsNHL()
-nhl.load()
-nhl.update()
+# nhl = StatsNHL()
+# nhl.load()
+# nhl.update()
 nfl = StatsNFL()
 nfl.load()
 nfl.update()
@@ -68,7 +68,7 @@ stat_structs = {
     "NBA": nba,
     "NFL": nfl,
     "MLB": mlb,
-    "NHL": nhl,
+    # "NHL": nhl,
     "WNBA": wnba
 }
 
@@ -84,29 +84,29 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
-        # "NBA": [
-        #     "MIN",
-        #     "PTS",
-        #     "REB",
-        #     "AST",
-        #     "PRA",
-        #     "PR",
-        #     "RA",
-        #     "PA",
-        #     "FG3M",
-        #     "fantasy points prizepicks",
-        #     "FG3A",
-        #     "FTM",
-        #     "FGM",
-        #     "FGA",
-        #     "STL",
-        #     "BLK",
-        #     "BLST",
-        #     "TOV",
-        #     "OREB",
-        #     "DREB",
-        #     "PF",
-        # ],
+        "NBA": [
+            "MIN",
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
+        ],
         "NFL": [
             "carries",
             "attempts",

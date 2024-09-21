@@ -4158,7 +4158,7 @@ class StatsNFL(Stats):
             "TE": "routes"
         }
 
-        for y in reversed(range(year - 4, year + 1)):
+        for y in reversed(range(year - 3, year + 1)):
             playerFolder = pkg_resources.files(data) / f"player_data/NFL/{y}"
             if os.path.exists(playerFolder):
                 for file in os.listdir(playerFolder):
@@ -4174,8 +4174,11 @@ class StatsNFL(Stats):
         playerProfile.loc[playerProfile.position=="FB", "position"] = "RB"
         playerProfile = playerProfile.loc[playerProfile.position.isin(["QB", "RB", "WR", "TE"])]
         playerProfile.loc[playerProfile.position=="QB", "dropbacks_per_game"] = playerProfile.loc[playerProfile.position=="QB", "dropbacks"] / playerProfile.loc[playerProfile.position=="QB", "player_game_count"]
-        playerProfile.loc[playerProfile.position=="QB", "less_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "less_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
         playerProfile.loc[playerProfile.position=="QB", "blitz_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "blitz_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position=="QB", "pa_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "pa_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position=="QB", "screen_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "screen_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position=="QB", "deep_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "deep_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position=="QB", "cm_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "center_medium_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
         playerProfile.loc[playerProfile.position=="QB", "scrambles_per_dropback"] = playerProfile.loc[playerProfile.position=="QB", "scrambles"] / playerProfile.loc[playerProfile.position=="QB", "dropbacks"]
         playerProfile.loc[playerProfile.position=="QB", "designed_yards_per_game"] = playerProfile.loc[playerProfile.position=="QB", "designed_yards"] / playerProfile.loc[playerProfile.position=="QB", "player_game_count"]
         playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
@@ -4193,14 +4196,14 @@ class StatsNFL(Stats):
         for position in ["QB", "RB", "WR", "TE"]:
             positionProfile = playerProfile.loc[playerProfile.position==position]
             positionProfile[filterStat[position]] = positionProfile[filterStat[position]]/positionProfile["player_game_count"]
-            positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].max()*.1]
+            positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].quantile(.25)]
             positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=6)
-            r = np.quantile(np.max(d,axis=1), .5)
-            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            d, i = knn.query(positionProfile.values, k=10)
+            # r = np.quantile(np.max(d,axis=1), .5)
+            # i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
             playerIds = positionProfile.index
             comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]] for j in range(len(i))}
 
