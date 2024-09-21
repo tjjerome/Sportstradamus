@@ -60,24 +60,25 @@
             "age": 1,
             "height": 1,
             "bmi": 2,
-            "dropbacks_per_game": 6,
+            "dropbacks_per_game": 2,
 
-            "designed_yards_per_game": 2,
-            "scrambles_per_dropback": 1.5,
-            "grades_run": 2.5,
-            "explosive": 4,
+            "designed_yards_per_game": 5,
+            "scrambles_per_dropback": 3,
+            "grades_run": 2,
+            "explosive": 1,
 
-            "center_medium_attempts_percent": 2,
-            "deep_attempts_percent": 4,
-            "pa_dropbacks_percent": 4,
+            "cm_grades_pass_diff": 2,
+            "deep_grades_pass_diff": 2,
+            "pa_grades_pass_diff": 3,
+            "screen_grades_pass_diff": 3,
 
             "grades_pass": 4,
-            "accuracy_percent": 3,
-            "twp_rate": 3,
+            "avg_depth_of_target": 2,
+            "accuracy_percent": 2,
+            "twp_rate": 2,
 
             "pressure_to_sack_rate": 2,
             "blitz_grades_pass_diff": 2,
-            "less_grades_pass_diff": 3,
             "more_btt_rate": 3
         },
         "WR": {

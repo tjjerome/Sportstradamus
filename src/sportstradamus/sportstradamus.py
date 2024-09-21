@@ -664,8 +664,8 @@ def compute_bets(args):
     results = []
     pass_log = []
     window = 5000
-    growth_rate = .008
-    forgetting_factor = .003
+    growth_rate = .005
+    forgetting_factor = .001
     target = .1
     book_thresh = .9
     model_thresh = 1.8
