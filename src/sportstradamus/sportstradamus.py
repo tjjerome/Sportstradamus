@@ -514,7 +514,7 @@ def find_correlation(offers, stats, platform):
 
             idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
-            idx = idx.groupby(['Player', 'Bet']).head(3)
+            idx = idx.groupby('Player').head(3)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20).sort_values(['Team', 'Player'])
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
             bet_df = idx.to_dict('index')
@@ -618,13 +618,13 @@ def find_correlation(offers, stats, platform):
                                 else:
                                     combos.extend(product(*[player_indices[player] for player in selected_players]))
 
-                thresholds = payout_table[platform]
+                payouts = payout_table[platform]
                 max_boost = 60 if platform in ["Sleeper", "ParlayPlay", "Chalkboard"] else 2.5
 
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
                     if chunk_size > 0:
-                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost) for i in range(0, len(combos), chunk_size)]
+                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, bet_df, info, payouts, max_boost) for i in range(0, len(combos), chunk_size)]
 
                         for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} Parlays", leave=False):
                             best_bets.extend(result)
@@ -660,35 +660,38 @@ def find_correlation(offers, stats, platform):
     return df.drop(columns='Player position').dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
-    combos, p_model, p_books, boosts, M, C, bet_df, info, thresholds, max_boost = args
+    combos, p_model, p_books, boosts, M, C, bet_df, info, payouts, max_boost = args
     results = []
-    pass_log = np.zeros(len(combos))
-    window = 5000
-    growth_rate = .01
-    forgetting_factor = .005
-    target = .1
+    n = len(combos)
+    pass_log = np.zeros(n)
+    thresh_log = np.zeros(n)
+    window = n//10
+    growth_rate = .1
+    forgetting_factor = .003
+    target = 3000/n
     book_thresh = .9
     model_thresh = 1.8
     d_model_thresh = 0
-    for i, bet_id in tqdm(enumerate(combos), total=len(combos), leave=False):
-        if i >= window and i % 100 == 0:
-            e = np.mean(pass_log[-window:])-target
+    for i, bet_id in tqdm(enumerate(combos), total=n, leave=False):
+        if i >= window and i % 10 == 0:
+            e = np.mean(pass_log[i-window:i])-target
             d_model_thresh += growth_rate*e - forgetting_factor*d_model_thresh
 
+        thresh_log[i] = model_thresh+d_model_thresh
         bet_size = len(bet_id)
-        threshold = thresholds[bet_size-2]
+        payout = payouts[bet_size-2]
         boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
         if boost <= 0.7 or boost > max_boost:
             continue
 
         pb = p_books[np.ix_(bet_id)]
-        prev_pb = np.product(pb)*boost*threshold
+        prev_pb = np.product(pb)*boost*payout
         if prev_pb < book_thresh:
             continue
 
         p = p_model[np.ix_(bet_id)]
-        prev_p = np.product(p)*boost*threshold
-        if prev_p < model_thresh + d_model_thresh:
+        prev_p = np.product(p)*boost*payout
+        if prev_p < (model_thresh + d_model_thresh):
             continue
 
         pass_log[i] = 1
@@ -697,15 +700,16 @@ def compute_bets(args):
         if any(np.linalg.eigvals(SIG)<0.0001):
             continue
         
-        payout = np.clip(threshold*boost, 1, 100)
-        pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
-        if pb < 1.01:
-            continue
+        payout = np.clip(payout*boost, 1, 100)
+        # pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
+        # if pb < 1.01:
+        #     continue
         
         p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+        pb = p/prev_p*prev_pb
         units = (p - 1)/(payout - 1)/0.05
         
-        if units < 1 or p < 2:
+        if units < 1 or p < 2 or pb < 1:
             continue
         
         bet = itemgetter(*bet_id)(bet_df)

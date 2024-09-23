@@ -510,8 +510,9 @@ class Stats:
         if cutoff_date is None:
             cutoff_date = (datetime.today()-timedelta(days=850)).date()
 
-        gamelog = self.gamelog.loc[pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date>cutoff_date]
+        gamelog = self.gamelog
         gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
+        gamelog = gamelog.loc[(gamelog[self.log_strings["date"]].dt.date>cutoff_date) & (gamelog[self.log_strings["date"]].dt.date<datetime.today().date())]
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
