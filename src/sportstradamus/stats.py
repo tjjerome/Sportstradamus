@@ -510,9 +510,9 @@ class Stats:
         if cutoff_date is None:
             cutoff_date = (datetime.today()-timedelta(days=850)).date()
 
-        gamelog = self.gamelog
+        gamelog = self.gamelog.copy()
         gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
-        gamelog = gamelog.loc[(gamelog[self.log_strings["date"]].dt.date>cutoff_date) & (gamelog[self.log_strings["date"]].dt.date<datetime.today().date())]
+        gamelog = gamelog.loc[(gamelog[self.log_strings["date"]]>cutoff_date) & (gamelog[self.log_strings["date"]]<datetime.today().date())]
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -4202,11 +4202,11 @@ class StatsNFL(Stats):
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=10)
-            # r = np.quantile(np.max(d,axis=1), .5)
-            # i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
+            d, i = knn.query(positionProfile.values, k=5)
+            r = np.quantile(np.max(d,axis=1),.9)
+            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
             playerIds = positionProfile.index
-            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]] for j in range(len(i))}
+            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]][:10] for j in range(len(i))}
 
         filepath = pkg_resources.files(data) / "nfl_comps.json"
         with open(filepath, "w") as outfile:
