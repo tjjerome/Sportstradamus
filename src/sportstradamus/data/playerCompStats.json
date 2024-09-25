@@ -57,14 +57,14 @@
     },
     "NFL": {
         "QB": {
-            "age": 1,
+            "age": 0.5,
             "height": 1,
             "bmi": 2,
             "dropbacks_per_game": 2,
 
-            "designed_yards_per_game": 5,
+            "designed_yards_per_game": 3,
             "scrambles_per_dropback": 3,
-            "grades_run": 2,
+            "grades_run": 3,
             "explosive": 1,
 
             "cm_grades_pass_diff": 2,
@@ -158,7 +158,6 @@
             "yards_after_catch_per_reception": 2,
             "yprr": 3,
             "elu_recv_mtf": 2
-
         }
     },
     "NHL": {
