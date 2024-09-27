@@ -134,7 +134,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers, ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         all_offers.append(ud_offers)
@@ -147,7 +147,7 @@ def main(progress):
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict, "Sleeper", stats)
-        save_data(sl_offers, sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+        save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         all_offers.append(sl_offers)
@@ -160,13 +160,22 @@ def main(progress):
         parp_dict = get_parp()
         parp_offers, parp5 = process_offers(
             parp_dict, "ParlayPlay", stats)
-        save_data(parp_offers, parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
+        save_data(parp_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
         parlay_df = pd.concat([parlay_df, parp5])
         parp_offers["Market"] = parp_offers["Market"].map(stat_map["ParlayPlay"])
         all_offers.append(parp_offers)
     except Exception as exc:
         logger.exception("Failed to get ParlayPlay")
 
+    if len(all_offers) > 0:
+        df = pd.concat(all_offers)
+        df = df[["League", "Date", "Team", "Opponent", "Player", "Market", "Model EV", "Model STD", "Line", "Boost", "Bet"]]
+        df = df.sort_values(["League", "Date", "Team", "Player"]).drop_duplicates(["Player", "League", "Date", "Market"],
+                                                                                    ignore_index=True, keep="last")
+        wks = gc.open("Sportstradamus").worksheet("Projections")
+        wks.batch_clear(["A:K"])
+        wks.update([df.columns.values.tolist()] + df.values.tolist())
+            
 
     if not parlay_df.empty:
         parlay_df.sort_values("Model EV", ascending=False, inplace=True)
@@ -219,66 +228,7 @@ def main(progress):
                    untapped_df.values.tolist())
         wks.set_basic_filter()
 
-    if "NFL" in sports:
-        logger.info("Getting NFL Fantasy Rankings")
-
-        filepath = pkg_resources.files(data) / "models/NFL_fantasy-points-underdog.mdl"
-        with open(filepath, "rb") as infile:
-            filedict = pickle.load(infile)
-        model = filedict["model"]
-
-        playerStats, playerData = nfl.get_fantasy()
-        categories = ["Home", "Player position"]
-        for c in categories:
-            playerStats[c] = playerStats[c].astype('category')
-
-        prob_params = pd.DataFrame()
-        preds = model.predict(
-            playerStats, pred_type="parameters")
-        preds.index = playerStats.index
-        prob_params = pd.concat([prob_params, preds])
-
-        prob_params = prob_params.loc[playerStats.index]
-        prob_params['Player'] = playerStats.index
-        positions = {0: "QB", 1: "WR", 2: "RB", 3: "TE"}
-        prob_params['Position'] = playerStats["Player position"].map(positions)
-        prob_params = prob_params.join(playerData)
-        prob_params['Projection'] = prob_params['loc'].round(1)
-        prob_params['Floor'] = norm.ppf(.1395, loc=prob_params['loc'],
-                                        scale=prob_params['scale'])
-        prob_params['Floor'] = prob_params['Floor'].clip(0).round(1)
-        prob_params['Ceiling'] = norm.ppf(.9561, loc=prob_params['loc'],
-                                        scale=prob_params['scale'])
-        prob_params['Ceiling'] = prob_params['Ceiling'].clip(0).round(1)
-        prob_params['Rank'] = prob_params.groupby('Position').rank(
-            ascending=False, method='dense')['Ceiling']
-        prob_params.loc[prob_params['Position'] == "QB", 'VORP12'] = prob_params.loc[prob_params['Position'] == "QB",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "QB") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "WR", 'VORP12'] = prob_params.loc[prob_params['Position'] == "WR",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "WR") & (prob_params["Rank"] == 31), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "RB", 'VORP12'] = prob_params.loc[prob_params['Position'] == "RB",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "RB") & (prob_params["Rank"] == 19), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "TE", 'VORP12'] = prob_params.loc[prob_params['Position'] == "TE",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 13), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "QB", 'VORP6'] = prob_params.loc[prob_params['Position'] == "QB",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "QB") & (prob_params["Rank"] == 7), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "WR", 'VORP6'] = prob_params.loc[prob_params['Position'] == "WR",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "WR") & (prob_params["Rank"] == 19), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "RB", 'VORP6'] = prob_params.loc[prob_params['Position'] == "RB",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "RB") & (prob_params["Rank"] == 10), 'Ceiling'].mean()
-        prob_params.loc[prob_params['Position'] == "TE", 'VORP6'] = prob_params.loc[prob_params['Position'] == "TE",
-                                                                                    'Ceiling'] - prob_params.loc[(prob_params['Position'] == "TE") & (prob_params["Rank"] == 7), 'Ceiling'].mean()
-
-        prob_params = prob_params[['Player', 'Team', 'Game', 'Position', 'Rank',
-                                'Projection', 'Floor', 'Ceiling',
-                                'VORP12', 'VORP6']].sort_values("VORP6", ascending=False)
-
-        if len(prob_params) > 0:
-            wks = gc.open("Sportstradamus").worksheet("Fantasy")
-            wks.clear()
-            wks.update([prob_params.columns.values.tolist()] +
-                    prob_params.values.tolist())
-            wks.set_basic_filter()
+    pass
 
     logger.info("Success!")
 
@@ -333,9 +283,9 @@ def process_offers(offer_dict, book, stats):
                     archive.add_dfs(offers, stat_map[book])
                     # Match the offers with player statistics
                     playerStats = match_offers(
-                        offers, league, market, book, stat_data, pbar
+                        offers, league, market, book, stat_data
                     )
-
+                    pbar.update(len(offers))
                     if len(playerStats) == 0:
                         # No matched offers found for the market
                         logger.info(f"{league}, {market} offers not matched")
@@ -821,7 +771,7 @@ def save_data(df, parlay_df, book, gc):
 
 
 @line_profiler.profile
-def match_offers(offers, league, market, platform, stat_data, pbar):
+def match_offers(offers, league, market, platform, stat_data):
     """
     Matches offers with statistical data and applies various calculations and transformations.
 
@@ -831,7 +781,6 @@ def match_offers(offers, league, market, platform, stat_data, pbar):
         market (str): Market name.
         platform (str): Platform name.
         stat_data (obj): Statistical data object.
-        pbar (obj): Progress bar object.
 
     Returns:
         list: List of matched offers.
@@ -881,13 +830,15 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         market = market.replace("underdog", "prizepicks")
     filename = "_".join([league, market]).replace(" ", "-")
     filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-    new_offers = []
+    offer_df = pd.DataFrame(offers)
+    offer_df.index = offer_df.Player
     if os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
         model = filedict["model"]
         dist = filedict["distribution"]
         filt = filedict["filter"]
+        model_weight = filedict["weight"]
         step = filedict["step"]
         cv = filedict["cv"]
 
@@ -930,9 +881,37 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             odds.append(get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
             evs.append(ev)
 
-        playerStats["Line"] = lines
-        playerStats["Odds"] = odds
-        playerStats["EV"] = evs
+        # playerStats["Line"] = lines
+        playerStats["Book EV"] = evs
+        playerStats["Books"] = odds
+        platform_modifier = 1 if platform == "Underdog" else 1.77
+
+        prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
+        if "Model STD" not in prob_params.columns:
+            prob_params["Model STD"] = 0
+        offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
+        offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Book EV"]*(1-model_weight)
+        offer_df["Model Over"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
+        offer_df["Model Under"] = (1-offer_df["Model Over"])*offer_df["Boost_Under"]/platform_modifier
+        offer_df["Model Over"] = offer_df["Model Over"]*offer_df["Boost_Over"]/platform_modifier
+        # TODO handle combo props here
+        offer_df["Model Over"] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)[:,1]*platform_modifier
+        offer_df["Model Under"] = filt.predict_proba((1-offer_df["Model Under"].fillna(.5)).to_numpy().reshape(-1,1)*2-1)[:,0]*platform_modifier
+        offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
+        offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
+        offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
+
+        offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
+        offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
+        offer_df["O/U"] = offer_df["Total"]/totals_map.get(league, 1)
+        offer_df["DVPOA"] = offer_df["Defense position"]
+        if "Player position" not in offer_df:
+            offer_df["Player position"] = -1
+            
+        offer_df["Player position"] = offer_df["Player position"].astype("category")
+        offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
+
+        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Book EV"]].to_dict('records')
 
     else:
         logger.warning(f"{filename} missing")

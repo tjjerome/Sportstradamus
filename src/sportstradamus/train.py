@@ -395,45 +395,53 @@ def meditate(force, league):
             X_test.sort_index(inplace=True)
             B_test.sort_index(inplace=True)
             y_test.sort_index(inplace=True)
+            B_train.loc[B_train["Odds"] == 0, "Odds"] = 0.5
+            B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
             cv = 1
             if dist == "Poisson":
+                p = 1
+                ev = prob_params["rate"].to_numpy()
+                ev_train = prob_params_train["rate"].to_numpy()
+            elif dist == "Gaussian":
+                p = 0
+                ev = prob_params["loc"].to_numpy()
+                cv = y.Result.std()/y.Result.mean()
+                ev_train = prob_params_train["loc"].to_numpy()
+
+            odds_ev = B_train["EV"].to_numpy()
+            model_weight = fit_model_weight(ev_train, odds_ev, y_train["Result"].to_numpy(), p)
+            weighted_ev_train = ev_train*model_weight + odds_ev*(1-model_weight)
+            weighted_ev = ev*model_weight + B_test["EV"].to_numpy()*(1-model_weight)
+
+            if dist == "Poisson":
                 under = poisson.cdf(
-                    B_train["Line"], prob_params_train["rate"])
+                    B_train["Line"], weighted_ev_train)
                 push = poisson.pmf(
-                    B_train["Line"], prob_params_train["rate"])
+                    B_train["Line"], weighted_ev_train)
                 y_proba_train = under - push/2
                 under = poisson.cdf(
-                    B_test["Line"], prob_params["rate"])
+                    B_test["Line"], weighted_ev)
                 push = poisson.pmf(
-                    B_test["Line"], prob_params["rate"])
+                    B_test["Line"], weighted_ev)
                 y_proba = under - push/2
-                p = 1
-                ev = prob_params["rate"]
-                entropy = np.mean(
-                    np.abs(poisson.cdf(y_test["Result"], prob_params["rate"])-.5))
             elif dist == "Gaussian":
                 high = np.floor((B_train["Line"]+step)/step)*step
                 low = np.ceil((B_train["Line"]-step)/step)*step
                 under = norm.cdf(
-                    high, prob_params_train["loc"], prob_params_train["scale"])
+                    high, weighted_ev_train, prob_params_train["scale"])
                 push = under - norm.cdf(
-                    low, prob_params_train["loc"], prob_params_train["scale"])
+                    low, weighted_ev_train, prob_params_train["scale"])
                 y_proba_train = under - push/2
                 high = np.floor((B_test["Line"]+step)/step)*step
                 low = np.ceil((B_test["Line"]-step)/step)*step
                 under = norm.cdf(
-                    high, prob_params["loc"], prob_params["scale"])
+                    high, weighted_ev, prob_params["scale"])
                 push = under - norm.cdf(
-                    low, prob_params["loc"], prob_params["scale"])
+                    low, weighted_ev, prob_params["scale"])
                 y_proba = under - push/2
-                p = 0
-                ev = prob_params["loc"]
-                entropy = np.mean(
-                    np.abs(norm.cdf(y_test["Result"], prob_params["loc"], prob_params["scale"])-.5))
-                cv = y.Result.std()/y.Result.mean()
 
             stat_std = y.Result.std()
-            dev = mean_tweedie_deviance(y_test, ev, power=p)
+            dev = [mean_tweedie_deviance(y_test, ev, power=p), mean_tweedie_deviance(y_test, weighted_ev, power=p)]
 
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
@@ -444,11 +452,9 @@ def meditate(force, league):
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
             y_proba = (1-y_proba).reshape(-1, 1)
-            B_train.loc[B_train["Odds"] == 0, "Odds"] = 0.5
-            B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
-            filt = fit_model_weight(y_proba_train, B_train.Odds.to_numpy().reshape(-1,1), y_class)
-            y_proba_filt = filt.predict_proba(
-                np.concatenate([y_proba, B_test.Odds.to_numpy().reshape(-1,1)], axis=1)*2-1)
+            filt = LogisticRegression(
+                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
+            y_proba_filt = filt.predict_proba(y_proba*2-1)
 
             y_class = (y_test["Result"] >=
                        B_test["Line"]).astype(int)
@@ -459,20 +465,12 @@ def meditate(force, league):
             ll0 = log_loss(y_class, 0.5*np.ones_like(y_class))
             bal0 = (y_test["Result"] > B_test["Line"]).mean()
 
-            if cv == 1:
-                entropy0 = np.mean(np.abs(poisson.cdf(
-                    y_test["Result"], B_test["Line"].apply(get_ev, args=(.5,)))-0.5))
-            else:
-                entropy0 = np.mean(np.abs(norm.cdf(
-                    y_test["Result"], B_test["Line"].apply(get_ev, args=(.5, cv)))-0.5))
-
             prec = np.zeros(2)
             acc = np.zeros(2)
             bs = np.zeros(2)
             d = np.zeros(2)
             ll = np.zeros(2)
             bal = np.zeros(2)
-            e = np.zeros(2)
             g = np.zeros(2)
 
             for i, y_proba in enumerate([y_proba_no_filt, y_proba_filt]):
@@ -489,8 +487,7 @@ def meditate(force, league):
                 g[i] = ll[i] - train_ll
                 ll[i] = 1 - ll[i]/ll0
 
-                d[i] = 1 - dev/dev0
-                e[i] = 1 - entropy/entropy0
+                d[i] = 1 - dev[i]/dev0
 
             filedict = {
                 "model": model,
@@ -503,13 +500,14 @@ def meditate(force, league):
                     "Likelihood": ll,
                     "Brier Score": bs,
                     "Deviance": d,
-                    "Entropy": e,
-                    "Training Gap": g
+                    "Training Gap": g,
+                    "Weight": [model_weight]*2
                 },
                 "params": opt_params,
                 "distribution": dist,
                 "cv": cv,
-                "std": stat_std
+                "std": stat_std,
+                "weight": model_weight
             }
 
             X_test['Result'] = y_test['Result']
@@ -751,21 +749,16 @@ def fit_book_weights(league, market):
     else:
         return {}
 
-def fit_model_weight(model_prob, odds_prob, y_class):
-    x = np.concatenate([model_prob, odds_prob], axis=1)*2-1
+def fit_model_weight(model_ev, odds_ev, result, p):
+    x = np.concatenate([[model_ev], [odds_ev]], axis=0)
+
+    res = minimize(lambda w: mean_tweedie_deviance(result, np.dot([w[0], 1-w[0]], x), power=p), 0.5, bounds=[(0,1)], tol=1e-8, method='TNC')
+    return res.x[0]
+
+def fit_filter(x, y_class):
     filt = LogisticRegression(
                 fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(x, y_class)
-    Cs = filt.coef_
-    guess = Cs/np.linalg.norm(Cs)*np.min([np.linalg.norm(Cs), 2])
-    guess = np.clip(guess[0], 0, 2)
 
-    def objective(w, x, y):
-        filt.coef_ = np.array([w])
-        proba = filt.predict_proba(x)
-        return log_loss(y, proba[:,1]) + 1/(1+np.exp(-350*(np.linalg.norm(w)-2)))
-
-    res = minimize(objective, guess, args=(x, y_class), bounds=[(0, 2)]*2, tol=1e-8, method='TNC')
-    filt.coef_ = np.array([res.x])
     return filt
 
 def trim_matrix(M):
