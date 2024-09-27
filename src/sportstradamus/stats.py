@@ -375,6 +375,8 @@ class Stats:
         else:
             if self.league == "MLB":
                 pitchers = {x:self.upcoming_games.get(teams[x], {}).get("Opponent Pitcher") for x in stats.index}
+                battingOrder = {x:self.upcoming_games.get(teams[x], {}).get("Batting Order").index(x) + 1 if x in self.upcoming_games.get(teams[x], {}).get("Batting Order", []) else 0 for x in stats.index}
+                self.playerProfile.depth = battingOrder
 
             dates = {x["Player"]: x["Date"] for x in offers}
             for player in list(dates.keys()):
@@ -458,6 +460,7 @@ class Stats:
 
         if self.league == "MLB":
             stats = stats.join(pd.DataFrame({x: {f"PF {k}": v for k, v in self.park_factors.get(teams.get(x), ()).items()} for x in stats.index}).T)
+            stats["Player depth"] = stats["Player position"]
 
         return stats.fillna(0)
 
