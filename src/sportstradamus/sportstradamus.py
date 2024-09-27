@@ -884,19 +884,17 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         # playerStats["Line"] = lines
         playerStats["Book EV"] = evs
         playerStats["Books"] = odds
-        platform_modifier = 1 if platform == "Underdog" else 1.77
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
         if "Model STD" not in prob_params.columns:
             prob_params["Model STD"] = 0
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
         offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Book EV"]*(1-model_weight)
-        offer_df["Model Over"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
-        offer_df["Model Under"] = (1-offer_df["Model Over"])*offer_df["Boost_Under"]/platform_modifier
-        offer_df["Model Over"] = offer_df["Model Over"]*offer_df["Boost_Over"]/platform_modifier
+        offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
+        offer_df["Model Over"] = (1-offer_df["Model Under"])
         # TODO handle combo props here
-        offer_df["Model Over"] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)[:,1]*platform_modifier
-        offer_df["Model Under"] = filt.predict_proba((1-offer_df["Model Under"].fillna(.5)).to_numpy().reshape(-1,1)*2-1)[:,0]*platform_modifier
+        offer_df["Model Over"] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)[:,1]*offer_df["Boost_Over"]
+        offer_df["Model Under"] = filt.predict_proba((1-offer_df["Model Under"].fillna(.5)).to_numpy().reshape(-1,1)*2-1)[:,0]*offer_df["Boost_Under"]
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
