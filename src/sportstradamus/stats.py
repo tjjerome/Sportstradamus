@@ -541,6 +541,8 @@ class Stats:
             else:
                 if self.league == "MLB":
                     self.get_volume_stats(offers, gameDate, pitcher=any([string in market for string in ["allowed", "pitch"]]))
+                elif self.league == "NHL":
+                    self.get_volume_stats(offers, gameDate, pitcher=any([string in market for string in ["Against", "saves", "goalie"]]))
                 else:
                     self.get_volume_stats(offers, gameDate)
             
@@ -4970,7 +4972,7 @@ class StatsNHL(Stats):
                             'PIM_Pct', 'Block_Pct', 'xGoals', 'xGoalsAgainst', 'goalsAgainst', 'GOE', 'SV', 'SOE', 'Freeze', 'Rebound', 'RG']
         self.volume_stats = ["timeOnIce", "shotsAgainst"]
         self.default_total = 2.674
-        self.positions = ["C", "W", "D"]
+        self.positions = ["C", "W", "D", "G"]
         self.league = "NHL"
         self.log_strings = {
             "game": "gameId",
@@ -5265,52 +5267,61 @@ class StatsNHL(Stats):
         player_df.position.replace("L", "W", inplace=True)
 
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv")
-        skater_df = pd.read_csv(StringIO(res.text))
-        skater_df.rename(columns={"name": "playerName"}, inplace=True)
-        skater_df = skater_df.loc[skater_df['situation']=='all']
-        skater_df["Fenwick"] = skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
-        skater_df["timePerGame"] = skater_df['icetime'] / skater_df["games_played"] / 60
-        skater_df["timePerShift"] = skater_df['icetime'] / skater_df["I_F_shifts"]
-        skater_df["xGoals"] = skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
-        skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
-        skater_df["goals"] = (skater_df["I_F_goals"] - skater_df["I_F_flurryScoreVenueAdjustedxGoals"]) / skater_df["I_F_shotAttempts"]
-        skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
-        skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
-        skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"])
-        skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
-        skater_df["shotAttempts"] = skater_df["I_F_shotAttempts"] / skater_df['icetime'] * 60 * 60
-        skater_df["hits"] = skater_df["I_F_hits"] / skater_df['icetime'] * 60 * 60
-        skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df['icetime'] * 60 * 60
-        skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df['icetime'] * 60 * 60
-        skater_df["assists"] = (skater_df["I_F_primaryAssists"] + skater_df["I_F_secondaryAssists"]) / skater_df['icetime'] * 60 * 60
-        skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
-        skater_df["penaltyMinutesDrawn"] = skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
-        skater_df["blockedShots"] = skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
-        skater_df = skater_df[["playerId", "playerName", "team", "position", "Fenwick", "timePerGame", "timePerShift", "shotAttempts", "xGoals", "shotsOnGoal", "goals", "rebounds", "freeze", "oZoneStarts", "flyStarts", "hits", "takeaways", "giveaways", "assists", "penaltyMinutes", "penaltyMinutesDrawn", "blockedShots"]]
+        if res.status_code == 200:
+            skater_df = pd.read_csv(StringIO(res.text))
+            skater_df.rename(columns={"name": "playerName"}, inplace=True)
+            skater_df = skater_df.loc[skater_df['situation']=='all']
+            skater_df["Fenwick"] = skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
+            skater_df["timePerGame"] = skater_df['icetime'] / skater_df["games_played"] / 60
+            skater_df["timePerShift"] = skater_df['icetime'] / skater_df["I_F_shifts"]
+            skater_df["xGoals"] = skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
+            skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
+            skater_df["goals"] = (skater_df["I_F_goals"] - skater_df["I_F_flurryScoreVenueAdjustedxGoals"]) / skater_df["I_F_shotAttempts"]
+            skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
+            skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
+            skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"])
+            skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
+            skater_df["shotAttempts"] = skater_df["I_F_shotAttempts"] / skater_df['icetime'] * 60 * 60
+            skater_df["hits"] = skater_df["I_F_hits"] / skater_df['icetime'] * 60 * 60
+            skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df['icetime'] * 60 * 60
+            skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df['icetime'] * 60 * 60
+            skater_df["assists"] = (skater_df["I_F_primaryAssists"] + skater_df["I_F_secondaryAssists"]) / skater_df['icetime'] * 60 * 60
+            skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
+            skater_df["penaltyMinutesDrawn"] = skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
+            skater_df["blockedShots"] = skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
+            skater_df = skater_df[["playerId", "playerName", "team", "position", "Fenwick", "timePerGame", "timePerShift", "shotAttempts", "xGoals", "shotsOnGoal", "goals", "rebounds", "freeze", "oZoneStarts", "flyStarts", "hits", "takeaways", "giveaways", "assists", "penaltyMinutes", "penaltyMinutesDrawn", "blockedShots"]]
+            
+            skater_df = player_df.merge(skater_df, how='right', on="playerId", suffixes=[None, "_y"])
+            skater_df.dropna(inplace=True)
+            skater_df.index = skater_df.playerId
+            skater_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'playerName_y', 'team_y', 'position_y'], inplace=True)
+
+        else:
+            skater_df = pd.DataFrame()
 
         # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
         # shot_df = pd.read_csv(StringIO(res.text))
 
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv")
-        goalie_df = pd.read_csv(StringIO(res.text))
-        goalie_df.rename(columns={"name": "playerName"}, inplace=True)
-        goalie_df = goalie_df.loc[goalie_df['situation']=='all']
-        goalie_df["timePerGame"] = goalie_df['icetime'] / goalie_df["games_played"] / 60
-        goalie_df["saves"] = goalie_df['ongoal'] - goalie_df['goals']
-        goalie_df["savePct"] = goalie_df['saves'] / goalie_df["ongoal"]
-        goalie_df["freezeAgainst"] = (goalie_df['freeze'] - goalie_df['xFreeze']) / goalie_df["saves"]
-        goalie_df["reboundsAgainst"] = (goalie_df['rebounds'] - goalie_df['xRebounds']) / goalie_df["saves"]
-        goalie_df["goalsAgainst"] = (goalie_df['goals'] - goalie_df['flurryAdjustedxGoals']) / goalie_df["ongoal"]
-        goalie_df = goalie_df[["playerId", "playerName", "team", "position", "timePerGame", "savePct", "freezeAgainst", "reboundsAgainst", "goalsAgainst"]]
+        if res.status_code == 200:
+            goalie_df = pd.read_csv(StringIO(res.text))
+            goalie_df.rename(columns={"name": "playerName"}, inplace=True)
+            goalie_df = goalie_df.loc[goalie_df['situation']=='all']
+            goalie_df["timePerGame"] = goalie_df['icetime'] / goalie_df["games_played"] / 60
+            goalie_df["saves"] = goalie_df['ongoal'] - goalie_df['goals']
+            goalie_df["savePct"] = goalie_df['saves'] / goalie_df["ongoal"]
+            goalie_df["freezeAgainst"] = (goalie_df['freeze'] - goalie_df['xFreeze']) / goalie_df["saves"]
+            goalie_df["reboundsAgainst"] = (goalie_df['rebounds'] - goalie_df['xRebounds']) / goalie_df["saves"]
+            goalie_df["goalsAgainst"] = (goalie_df['goals'] - goalie_df['flurryAdjustedxGoals']) / goalie_df["ongoal"]
+            goalie_df = goalie_df[["playerId", "playerName", "team", "position", "timePerGame", "savePct", "freezeAgainst", "reboundsAgainst", "goalsAgainst"]]
 
-        skater_df = player_df.merge(skater_df, how='right', on="playerId", suffixes=[None, "_y"])
-        skater_df.dropna(inplace=True)
-        skater_df.index = skater_df.playerId
-        skater_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'playerName_y', 'team_y', 'position_y'], inplace=True)
-        goalie_df = player_df.merge(goalie_df, how='right', on="playerId", suffixes=[None, "_y"])
-        goalie_df.dropna(inplace=True)
-        goalie_df.index = goalie_df.playerId
-        goalie_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'playerName_y', 'team_y', 'position_y'], inplace=True)
+            goalie_df = player_df.merge(goalie_df, how='right', on="playerId", suffixes=[None, "_y"])
+            goalie_df.dropna(inplace=True)
+            goalie_df.index = goalie_df.playerId
+            goalie_df.drop(columns=['playerId', 'birthDate', 'nationality', 'primaryNumber', 'primaryPosition', 'playerName_y', 'team_y', 'position_y'], inplace=True)
+
+        else:
+            goalie_df = pd.DataFrame()
 
         self.players[self.season_start.year] = skater_df.to_dict('index')|goalie_df.to_dict('index')
 
@@ -5339,6 +5350,156 @@ class StatsNHL(Stats):
         filepath = pkg_resources.files(data) / "goalies.json"
         with open(filepath, "w") as outfile:
             json.dump(list(self.gamelog.loc[self.gamelog.position == "G", "playerName"].unique()), outfile)
+
+    def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
+        flat_offers = {}
+        if isinstance(offers, dict):
+            for players in offers.values():
+                flat_offers.update(players)
+        else:
+            flat_offers = offers
+
+        if pitcher:
+            market = "shotsAgainst"
+        else:
+            market = "timeOnIce"
+
+        if isinstance(offers, dict):
+            flat_offers.update(offers.get(market, {}))
+        self.profile_market(market, date)
+        self.get_depth(flat_offers, date)
+        playerStats = self.get_stats(market, flat_offers, date)
+        playerStats = playerStats[self.get_stat_columns(market)]
+
+        filename = "_".join([self.league, market]).replace(" ", "-")
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if os.path.isfile(filepath):
+            with open(filepath, "rb") as infile:
+                filedict = pickle.load(infile)
+            model = filedict["model"]
+            dist = filedict["distribution"]
+
+            categories = ["Home", "Player position"]
+            if "Player position" not in playerStats.columns:
+                categories.remove("Player position")
+            for c in categories:
+                playerStats[c] = playerStats[c].astype('category')
+
+            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+
+            model.start_values = sv
+            prob_params = pd.DataFrame()
+            preds = model.predict(
+                playerStats, pred_type="parameters")
+            preds.index = playerStats.index
+            prob_params = pd.concat([prob_params, preds])
+
+            prob_params.sort_index(inplace=True)
+            playerStats.sort_index(inplace=True)
+
+        else:
+            logger.warning(f"{filename} missing")
+            return
+
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
+        self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
+        
+        if not pitcher:
+            teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
+            for team, team_df in teams:
+                total = team_df[f"proj {market} mean"].sum()
+                std = team_df[f"proj {market} std"].sum()
+                count = len(team_df)
+
+                maxMinutes = 300
+                minMinutes = 15*count
+
+                fit_factor = fit_distro(total, std, minMinutes, maxMinutes)
+                self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"]*fit_factor
+                self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
+
+        self.playerProfile.fillna(0, inplace=True)
+
+    def check_combo_markets(self, market, player, date=datetime.today().date()):
+        player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
+        cv = stat_cv.get(self.league, {}).get(market, 1)
+        if isinstance(date, str):
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+
+        if date < datetime.today().date():
+            todays_games = self.gamelog.loc[pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date==date]
+            player_game = todays_games.loc[todays_games[self.log_strings["player"]]==player]
+            if player_game.empty:
+                return 0
+
+            team = player_game[self.log_strings["team"]].iloc[0]
+            opponent = player_game[self.log_strings["opponent"]].iloc[0]
+
+        else:
+            team = player_games[self.log_strings["team"]].iloc[-1]
+            opponent = self.upcoming_games[team][self.log_strings["opponent"]]
+
+        date = date.strftime("%Y-%m-%d")
+        ev = 0
+        if market in combo_props:
+            for submarket in combo_props.get(market, []):
+                sub_cv = stat_cv["NHL"].get(submarket, 1)
+                v = archive.get_ev("NHL", submarket, date, player)
+                subline = archive.get_line("NHL", submarket, date, player)
+                if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                if np.isnan(v) or v == 0:
+                    ev = 0
+                    break
+
+                else:
+                    ev += v
+
+        elif market == "goalsAgainst":
+            ev = archive.get_total("NHL", date, opponent)
+                    
+        elif "fantasy" in market:
+            ev = 0
+            book_odds = False
+            if "prizepicks" in market:
+                fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
+            elif ("underdog" in market) and ("skater" in market):
+                fantasy_props = [("goals", 6), ("assists", 4), ("shots", 1), ("blocked", 1), ("hits", .5), ("powerPlayPoints", .5)]
+            else:
+                fantasy_props = [("saves", .6), ("goalsAgainst", -3), ("Moneyline", 6)]
+            for submarket, weight in fantasy_props:
+                sub_cv = stat_cv["NHL"].get(submarket, 1)
+                v = archive.get_ev("NHL", submarket, date, player)
+                subline = archive.get_line("NHL", submarket, date, player)
+                if sub_cv == 1 and cv != 1 and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                if np.isnan(v) or v == 0:
+                    if submarket == "Moneyline":
+                        p = archive.get_moneyline("NHL", date, team)
+                        ev += p*weight
+                    elif submarket == "goalsAgainst":
+                        v = archive.get_total("NHL", date, opponent)
+                        subline = np.floor(v) + 0.5
+                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        ev += v*weight
+                    else:
+                        if subline == 0 and not player_games.empty:
+                            subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
+
+                        if not subline == 0:
+                            under = (player_games[submarket]<subline).mean()
+                            ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                else:
+                    book_odds = True
+                    ev += v*weight
+
+            if not book_odds:
+                ev = 0
+
+        return 0 if np.isnan(ev) else ev
 
     def bucket_stats(self, market, date=datetime.today()):
         """
@@ -5661,7 +5822,7 @@ class StatsNHL(Stats):
             self.dvp_index[market][team][position] = dvpoa
             return dvpoa
 
-    def get_stats(self, offer, date=datetime.today()):
+    def obs_get_stats(self, offer, date=datetime.today()):
         """
         Calculate various statistics for a given offer.
 

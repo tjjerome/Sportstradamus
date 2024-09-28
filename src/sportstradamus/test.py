@@ -1,8 +1,8 @@
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
 # from sportstradamus.books import get_ud
-# from sportstradamus.helpers import scraper, archive, stat_cv, stat_map
+from sportstradamus.helpers import scraper, archive, stat_cv, stat_map
 # from urllib.parse import urlencode
-# from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 # import importlib.resources as pkg_resources
 # from sportstradamus import data
 # import pickle
@@ -18,17 +18,13 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-nfl = StatsNFL()
-nfl.load()
-nfl.update_player_comps()
-
-# NHL = StatsNHL()
-# NHL.season_start = datetime(2021, 10, 12).date()
-# NHL.update()
-# NHL.season_start = datetime(2022, 10, 7).date()
-# NHL.update()
-# NHL.season_start = datetime(2023, 10, 10).date()
-# NHL.update()
+NHL = StatsNHL()
+NHL.season_start = datetime(2021, 10, 12).date()
+NHL.update()
+NHL.season_start = datetime(2022, 10, 7).date()
+NHL.update()
+NHL.season_start = datetime(2023, 10, 10).date()
+NHL.update()
 
 # NBA = StatsWNBA()
 # NBA.season_start = datetime(2021, 5, 14).date()
@@ -40,16 +36,16 @@ nfl.update_player_comps()
 # NBA.season_start = datetime(2024, 5, 14).date()
 # NBA.update()
 
-# stats = StatsNHL()
-# stats.load()
-# stats.update()
+stats = StatsNHL()
+stats.load()
+stats.update()
 
-# date = '2023-12-31'
-# offers = {k: v.get(date) for k, v in archive["NFL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
+date = '2023-12-31'
+offers = {k: v.get(date) for k, v in archive["NHL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
 
-# stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
+stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
 
-# stats.get_training_matrix("timeOnIce")
+stats.get_training_matrix("timeOnIce")
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
