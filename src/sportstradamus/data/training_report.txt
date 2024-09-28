@@ -388,6 +388,18 @@
  0.614099   0.607778 0.149872    0.032613     0.043953 -0.009801      0.007053 0.503902
  0.611920   0.606157 0.148609    0.032808     0.044231  0.062870      0.006918 0.503902
 
+==================================== NHL shotsAgainst ====================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
+ 0.686282   0.693812 0.146940    0.122030     0.154182  0.307438      0.011551     1.0
+ 0.680302   0.688668 0.142551    0.119223     0.152012  0.307438      0.013497     1.0
+
+===================================== NHL timeOnIce ======================================
+ Distribution Model: Gaussian
+ Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
+ 0.660907   0.693743 0.121200    0.093690     0.119884  0.289686      0.021929     1.0
+ 0.656885   0.690856 0.115763    0.091199     0.116617  0.289686      0.023656     1.0
+
 ======================================== WNBA AST ========================================
  Distribution Model: Poisson
  Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
