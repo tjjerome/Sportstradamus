@@ -903,8 +903,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         # TODO handle combo props here
-        offer_df[["Model Over", "Model Under"]] = filt.predict_proba(offer_df["Model Over"].to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Over", "Boost_Under"]]
-        offer_df[["Model Over", "Model Under"]] = offer_df[["Model Over", "Model Under"]].fillna(.5)
+        offer_df[["Model Under", "Model Over"]] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
+        # offer_df[["Model Over", "Model Under"]] = offer_df[["Model Over", "Model Under"]].fillna(.5)
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
