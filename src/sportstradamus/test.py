@@ -18,13 +18,13 @@ import pandas as pd
 
 pd.options.mode.chained_assignment = None
 
-NHL = StatsNHL()
-NHL.season_start = datetime(2021, 10, 12).date()
-NHL.update()
-NHL.season_start = datetime(2022, 10, 7).date()
-NHL.update()
-NHL.season_start = datetime(2023, 10, 10).date()
-NHL.update()
+# NHL = StatsNHL()
+# NHL.season_start = datetime(2021, 10, 12).date()
+# NHL.update()
+# NHL.season_start = datetime(2022, 10, 7).date()
+# NHL.update()
+# NHL.season_start = datetime(2023, 10, 10).date()
+# NHL.update()
 
 # NBA = StatsWNBA()
 # NBA.season_start = datetime(2021, 5, 14).date()
@@ -40,12 +40,12 @@ stats = StatsNHL()
 stats.load()
 stats.update()
 
-date = '2023-12-31'
-offers = {k: v.get(date) for k, v in archive["NHL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
+# date = '2023-12-31'
+# offers = {k: v.get(date) for k, v in archive["NHL"].items() if k not in ["Moneyline", "Totals"] and v.get(date)}
 
-stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
+# stats.get_volume_stats(offers, datetime(2023, 12, 31).date())
 
-stats.get_training_matrix("timeOnIce")
+stats.get_training_matrix("shots")
 
 # players = {}
 # NHL.gamelog["season"] = NHL.gamelog.gameId.astype(str).str[:4]
