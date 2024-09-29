@@ -567,7 +567,7 @@ class Stats:
                     ev = get_ev(line, .5, stat_cv[self.league].get(market,1))
                 
                 lines.append(line)
-                odds.append(get_odds(line, ev, stat_cv[self.league].get(market,1)))
+                odds.append(1-get_odds(line, ev, stat_cv[self.league].get(market,1)))
                 evs.append(ev)
                 archived.append(a)
 
