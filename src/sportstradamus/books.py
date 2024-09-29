@@ -1025,7 +1025,6 @@ def get_sleeper():
     if alt.status_code == 200:
         res.extend(alt.json())
 
-
     abbr_map = {
         "WSH": "WAS",
         "GS": "GSW",
@@ -1033,6 +1032,27 @@ def get_sleeper():
         "NOP": "NO",
         "AZ": "ARI"
     }
+
+    url = "https://api.sleeper.app/scores/lines_game_picker"
+    game_res = requests.get(url)
+
+    if game_res.status_code != 200:
+        return offers
+    
+    games = {}
+    for game in game_res.json():
+        games.setdefault(game["sport"], {})
+        home_team = game.get("metadata", {}).get("home_team")
+        if isinstance(home_team, dict):
+            home_team = home_team.get("team")
+        away_team = game.get("metadata", {}).get("away_team")
+        if isinstance(away_team, dict):
+            away_team = away_team.get("team")
+        games[game["sport"]][game["game_id"]] = {
+            'teams': [abbr_map.get(home_team, home_team), abbr_map.get(away_team, away_team)],
+            'date': game.get("date")
+            }
+
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
         url = f"https://api.sleeper.app/players/{league}?exclude_injury=false"
         players = requests.get(url)
@@ -1050,12 +1070,11 @@ def get_sleeper():
 
             player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
             player_team = player["team"]
-            game_id = prop["game_id"].split("_")
-            teams = [x for x in game_id if not x.isnumeric()]
+            teams = games.get(league, {}).get(prop["game_id"], {}).get('teams')
             if len(teams) != 2:
                 continue
 
-            game_date = game_id[0]
+            game_date = games.get(league, {}).get(prop["game_id"], {}).get('date')
             game_date = game_date[:4]+'-'+game_date[4:6]+'-'+game_date[6:]
 
             all_outcomes = sorted(prop["options"], key=itemgetter('outcome', 'outcome_value'))
