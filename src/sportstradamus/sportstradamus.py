@@ -137,7 +137,7 @@ def main(progress):
         save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers[["Boost_Over", "Boost_Under"]] = ud_offers[["Boost_Over", "Boost_Under"]]*1.777
+        ud_offers["Boost"] = ud_offers["Boost"]*1.777
         all_offers.append(ud_offers)
     except Exception as exc:
         logger.exception("Failed to get Underdog")
@@ -797,6 +797,9 @@ def match_offers(offers, league, market, platform, stat_data):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             playerStats = stat_data.get_stats(market, offers)
+            if playerStats.empty:
+                return playerStats
+            
             playerStats = playerStats[stat_data.get_stat_columns(market)]
 
             return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0)
@@ -885,11 +888,15 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 ev = stat_data.check_combo_markets(market, player, dateMap.get(player, ''))
             if line <= 0:
                 line = np.max([playerStats.loc[player, 'Avg10'], 0.5])
-            if ev <= 0:
-                ev = get_ev(line, .5, stat_cv[stat_data.league].get(market,1))
+            if ev <= 0 or np.isnan(ev):
+                # ev = get_ev(line, .5, stat_cv[stat_data.league].get(market,1))
+                ev = np.nan
             
             # lines.append(line)
-            odds.append(1-get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
+            if np.isnan(ev):
+                odds.append(np.nan)
+            else:
+                odds.append(1-get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
             evs.append(ev)
 
         # playerStats["Line"] = lines
@@ -900,7 +907,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if "Model STD" not in prob_params.columns:
             prob_params["Model STD"] = 0
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
-        offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Book EV"]*(1-model_weight)
+        offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Book EV"].fillna(0)*(1-model_weight)
         offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:
@@ -912,7 +919,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
         offer_df.loc[offer_df["Bet"] == "Under", "Books"] = (1 - offer_df.loc[offer_df["Bet"] == "Under", "Books"])*offer_df.loc[offer_df["Bet"] == "Under", "Boost_Under"].fillna(0)
-        offer_df.loc[offer_df["Bet"] == "Over", "Books"] = offer_df.loc[offer_df["Bet"] == "Over", "Books"]*offer_df.loc[offer_df["Bet"] == "Under", "Boost_Over"].fillna(0)
+        offer_df.loc[offer_df["Bet"] == "Over", "Books"] = offer_df.loc[offer_df["Bet"] == "Over", "Books"]*offer_df.loc[offer_df["Bet"] == "Over", "Boost_Over"].fillna(0)
+        offer_df["Books"] = offer_df["Books"].fillna(.5)
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
