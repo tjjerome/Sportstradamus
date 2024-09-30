@@ -6,7 +6,7 @@ from sportstradamus import logs
 
 # create logger
 logger = logging.getLogger("log")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 
 # create file handler
 fh = logging.FileHandler(
@@ -17,7 +17,7 @@ fh.setLevel(logging.INFO)
 
 # create stream handler
 ch = logging.StreamHandler(stream=sys.stdout)
-ch.setLevel(logging.INFO)
+ch.setLevel(logging.WARNING)
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
