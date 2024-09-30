@@ -186,3 +186,4 @@ poetry.lock
 *.dat:Zone.Identifier
 *.dat:shield
 archive/*
+src/sportstradamus/data/training_data/.gitignore:Zone.Identifier
