@@ -905,7 +905,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
-        offer_df[["Model Under", "Model Over"]] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
+        # offer_df[["Model Under", "Model Over"]] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
+        offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
         # offer_df[["Model Over", "Model Under"]] = offer_df[["Model Over", "Model Under"]].fillna(.5)
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
