@@ -137,6 +137,7 @@ def main(progress):
         save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
+        ud_offers[["Boost_Over", "Boost_Under"]] = ud_offers[["Boost_Over", "Boost_Under"]]*1.777
         all_offers.append(ud_offers)
     except Exception as exc:
         logger.exception("Failed to get Underdog")
@@ -907,7 +908,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         # TODO handle combo props here
         # offer_df[["Model Under", "Model Over"]] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
         offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
-        # offer_df[["Model Over", "Model Under"]] = offer_df[["Model Over", "Model Under"]].fillna(.5)
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)

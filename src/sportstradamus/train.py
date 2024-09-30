@@ -84,29 +84,6 @@ def meditate(force, league):
     np.random.seed(69)
 
     all_markets = {
-        "NBA": [
-            "MIN",
-            "PTS",
-            "REB",
-            "AST",
-            "PRA",
-            "PR",
-            "RA",
-            "PA",
-            "FG3M",
-            "fantasy points prizepicks",
-            "FG3A",
-            "FTM",
-            "FGM",
-            "FGA",
-            "STL",
-            "BLK",
-            "BLST",
-            "TOV",
-            "OREB",
-            "DREB",
-            "PF",
-        ],
         "NFL": [
             "carries",
             "attempts",
@@ -130,6 +107,29 @@ def meditate(force, league):
             "passing first downs",
             "first downs",
             "completion percentage"
+        ],
+        "NBA": [
+            "MIN",
+            "PTS",
+            "REB",
+            "AST",
+            "PRA",
+            "PR",
+            "RA",
+            "PA",
+            "FG3M",
+            "fantasy points prizepicks",
+            "FG3A",
+            "FTM",
+            "FGM",
+            "FGA",
+            "STL",
+            "BLK",
+            "BLST",
+            "TOV",
+            "OREB",
+            "DREB",
+            "PF",
         ],
         "MLB": [
             "plateAppearances",
@@ -157,6 +157,18 @@ def meditate(force, league):
             "doubles",
             "home runs"
         ],
+        "WNBA": [
+            "MIN",
+            "AST",
+            "FG3M",
+            "PA",
+            "PR",
+            "PTS",
+            "RA",
+            "REB",
+            "PRA",
+            "fantasy points prizepicks"
+        ],
         "NHL": [
             "timeOnIce",
             "shotsAgainst",
@@ -174,18 +186,6 @@ def meditate(force, league):
             "goals",
             "assists",
             "faceOffWins",
-        ],
-        "WNBA": [
-            "MIN",
-            "AST",
-            "FG3M",
-            "PA",
-            "PR",
-            "PTS",
-            "RA",
-            "REB",
-            "PRA",
-            "fantasy points prizepicks"
         ]
     }
     if not league == "All":
