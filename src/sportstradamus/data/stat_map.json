@@ -177,7 +177,13 @@
         "turnovers": "TOV",
         "bat_strike_outs": "batter strikeouts",
         "points_and_assists": "PA",
-        "outs": "pitching outs"
+        "outs": "pitching outs",
+        "anytime_touchdowns": "tds",
+        "rushing_yards": "rush yds",
+        "passing_touchdowns": "pass tds",
+        "passing_yards": "pass yds",
+        "receiving_yards": "receiving yards",
+        "passing_and_rushing_yards": "qb tds"
     },
     "Thrive": {
         "GOLs + ASTs": "points",

@@ -93,6 +93,7 @@ def main(progress):
     """
     Start gathering player stats
     """
+    sports = ["NFL"]
     stats = {}
     if "NBA" in sports:
         nba.update()
@@ -300,10 +301,10 @@ def process_offers(offer_dict, book, stats):
                         # Add the matched offers to the new_offers list
                         new_offers.extend(modeled_offers)
 
-    new_offers, parlays = find_correlation(new_offers, stats, book)
+    offer_df, parlays = find_correlation(new_offers, stats, book)
 
-    logger.info(str(len(new_offers)) + " offers processed")
-    return new_offers, parlays
+    logger.info(str(len(offer_df)) + " offers processed")
+    return offer_df, parlays
 
 
 @line_profiler.profile
@@ -881,7 +882,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         evs = []
         # lines = []
         odds = []
+        archived = []
         for player in playerStats.index:
+            a = True
             ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ''), player)
             line = archive.get_line(stat_data.league, market, dateMap.get(player, ''), player)
             if np.isnan(ev):
@@ -889,19 +892,18 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if line <= 0:
                 line = np.max([playerStats.loc[player, 'Avg10'], 0.5])
             if ev <= 0 or np.isnan(ev):
-                # ev = get_ev(line, .5, stat_cv[stat_data.league].get(market,1))
-                ev = np.nan
+                a = False
+                ev = get_ev(line, .5, stat_cv[stat_data.league].get(market,1))
             
             # lines.append(line)
-            if np.isnan(ev):
-                odds.append(np.nan)
-            else:
-                odds.append(1-get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
+            odds.append(1-get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
             evs.append(ev)
+            archived.append(a)
 
         # playerStats["Line"] = lines
         playerStats["Book EV"] = evs
         playerStats["Books"] = odds
+        playerStats["Archived"] = archived
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
         if "Model STD" not in prob_params.columns:
@@ -918,9 +920,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
-        offer_df.loc[offer_df["Bet"] == "Under", "Books"] = (1 - offer_df.loc[offer_df["Bet"] == "Under", "Books"])*offer_df.loc[offer_df["Bet"] == "Under", "Boost_Under"].fillna(0)
-        offer_df.loc[offer_df["Bet"] == "Over", "Books"] = offer_df.loc[offer_df["Bet"] == "Over", "Books"]*offer_df.loc[offer_df["Bet"] == "Over", "Boost_Over"].fillna(0)
+        offer_df.loc[(offer_df["Bet"] == "Under") & offer_df["Archived"], "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under") & offer_df["Archived"], "Books"])*offer_df.loc[(offer_df["Bet"] == "Under") & offer_df["Archived"], "Boost_Under"].fillna(0)
+        offer_df.loc[(offer_df["Bet"] == "Over") & offer_df["Archived"], "Books"] = offer_df.loc[(offer_df["Bet"] == "Over") & offer_df["Archived"], "Books"]*offer_df.loc[(offer_df["Bet"] == "Over") & offer_df["Archived"], "Boost_Over"].fillna(0)
         offer_df["Books"] = offer_df["Books"].fillna(.5)
+        offer_df = offer_df.loc[offer_df["Boost"] <= 3]
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
