@@ -54,9 +54,9 @@ mlb.update()
 nba = StatsNBA()
 nba.load()
 nba.update()
-nhl = StatsNHL()
-nhl.load()
-nhl.update()
+# nhl = StatsNHL()
+# nhl.load()
+# nhl.update()
 nfl = StatsNFL()
 nfl.load()
 nfl.update()
@@ -68,7 +68,7 @@ stat_structs = {
     "NBA": nba,
     "NFL": nfl,
     "MLB": mlb,
-    "NHL": nhl,
+    # "NHL": nhl,
     "WNBA": wnba
 }
 
@@ -169,24 +169,24 @@ def meditate(force, league):
             "PRA",
             "fantasy points prizepicks"
         ],
-        "NHL": [
-            "timeOnIce",
-            "shotsAgainst",
-            "saves",
-            "shots",
-            "points",
-            "goalsAgainst",
-            "goalie fantasy points underdog",
-            "skater fantasy points underdog",
-            "blocked",
-            "powerPlayPoints",
-            "sogBS",
-            # "fantasy points prizepicks",
-            "hits",
-            "goals",
-            "assists",
-            "faceOffWins",
-        ]
+        # "NHL": [
+        #     "timeOnIce",
+        #     "shotsAgainst",
+        #     "saves",
+        #     "shots",
+        #     "points",
+        #     "goalsAgainst",
+        #     "goalie fantasy points underdog",
+        #     "skater fantasy points underdog",
+        #     "blocked",
+        #     "powerPlayPoints",
+        #     "sogBS",
+        #     # "fantasy points prizepicks",
+        #     "hits",
+        #     "goals",
+        #     "assists",
+        #     "faceOffWins",
+        # ]
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}

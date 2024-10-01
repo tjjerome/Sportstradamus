@@ -77,10 +77,10 @@ def main(progress):
     mlb.load()
     if datetime.datetime.today().date() > (mlb.season_start - datetime.timedelta(days=7)):
         sports.append("MLB")
-    nhl = StatsNHL()
-    nhl.load()
-    if datetime.datetime.today().date() > (nhl.season_start - datetime.timedelta(days=7)):
-        sports.append("NHL")
+    # nhl = StatsNHL()
+    # nhl.load()
+    # if datetime.datetime.today().date() > (nhl.season_start - datetime.timedelta(days=7)):
+    #     sports.append("NHL")
     nfl = StatsNFL()
     nfl.load()
     if datetime.datetime.today().date() > (nfl.season_start - datetime.timedelta(days=7)):
@@ -100,9 +100,9 @@ def main(progress):
     if "MLB" in sports:
         mlb.update()
         stats.update({"MLB": mlb})
-    if "NHL" in sports:
-        nhl.update()
-        stats.update({"NHL": nhl})
+    # if "NHL" in sports:
+    #     nhl.update()
+    #     stats.update({"NHL": nhl})
     if "NFL" in sports:
         nfl.update()
         stats.update({"NFL": nfl})
