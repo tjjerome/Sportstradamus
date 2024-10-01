@@ -1075,7 +1075,6 @@ def get_sleeper():
                 continue
 
             game_date = games.get(league, {}).get(prop["game_id"], {}).get('date')
-            game_date = game_date[:4]+'-'+game_date[4:6]+'-'+game_date[6:]
 
             all_outcomes = sorted(prop["options"], key=itemgetter('outcome', 'outcome_value'))
             lines = set([x["outcome_value"] for x in all_outcomes])
@@ -1249,7 +1248,7 @@ def get_parp():
     }
     try:
         api = scraper.get_proxy(
-            "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=&includeAlt=true",
+            "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=&includeAlt=true&version=2",
             headers=header
         )
     except:
