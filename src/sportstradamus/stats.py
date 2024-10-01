@@ -516,7 +516,8 @@ class Stats:
         gamelog = self.gamelog.copy()
         gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
         gamelog = gamelog.loc[(gamelog[self.log_strings["date"]]>cutoff_date) & (gamelog[self.log_strings["date"]]<datetime.today().date())]
-        usage_cutoff = gamelog[self.usage_stat].quantile(.33)
+        if self.league != "MLB":
+            usage_cutoff = gamelog[self.usage_stat].quantile(.33)
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -548,9 +549,10 @@ class Stats:
                     self.get_volume_stats(offers, gameDate)
             
             stats = self.get_stats(market, offers, gameDate)
-            usage = players[self.usage_stat]
-            usage.index = players[self.log_strings["player"]]
-            usage = usage.loc[stats.index]
+            if self.league != "MLB":
+                usage = players[self.usage_stat]
+                usage.index = players[self.log_strings["player"]]
+                usage = usage.loc[stats.index]
 
             date = gameDate.strftime("%Y-%m-%d")
 
@@ -583,7 +585,10 @@ class Stats:
             stats["Archived"] = archived
 
             if stats["Home"].dtype == bool:
-                matrix.extend(stats.loc[stats["Archived"] | (usage>usage_cutoff)].to_dict('records'))
+                if self.league == "MLB":
+                    matrix.extend(stats.loc[stats["Archived"]].to_dict('records'))
+                else:
+                    matrix.extend(stats.loc[stats["Archived"] | (usage>usage_cutoff)].to_dict('records'))
 
         M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
 

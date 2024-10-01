@@ -93,7 +93,6 @@ def main(progress):
     """
     Start gathering player stats
     """
-    sports = ["NFL"]
     stats = {}
     if "NBA" in sports:
         nba.update()
@@ -143,7 +142,7 @@ def main(progress):
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
-    # Sleeper
+    # # Sleeper
 
     try:
         sl_dict = get_sleeper()
@@ -824,6 +823,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         list: List of matched offers.
     """
 
+    def odds_from_boost(o):
+        p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
+                0.5/o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1-0.5/o.get("Boost_Under", 1)]
+        return p/np.sum(p)
+
     totals_map = archive.default_totals
     dateMap = {x["Player"]:x["Date"] for x in offers}
 
@@ -882,7 +886,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         evs = []
         # lines = []
         odds = []
-        archived = []
         for player in playerStats.index:
             a = True
             ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ''), player)
@@ -892,18 +895,18 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if line <= 0:
                 line = np.max([playerStats.loc[player, 'Avg10'], 0.5])
             if ev <= 0 or np.isnan(ev):
-                a = False
-                ev = get_ev(line, .5, stat_cv[stat_data.league].get(market,1))
+                o = offer_df.loc[player]
+                if isinstance(o, pd.DataFrame):
+                    o = o.iloc[0]
+                ev = get_ev(line, odds_from_boost(o.to_dict())[0], stat_cv[stat_data.league].get(market,1))
             
             # lines.append(line)
             odds.append(1-get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
             evs.append(ev)
-            archived.append(a)
 
         # playerStats["Line"] = lines
         playerStats["Book EV"] = evs
         playerStats["Books"] = odds
-        playerStats["Archived"] = archived
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
         if "Model STD" not in prob_params.columns:
@@ -920,8 +923,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
-        offer_df.loc[(offer_df["Bet"] == "Under") & offer_df["Archived"], "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under") & offer_df["Archived"], "Books"])*offer_df.loc[(offer_df["Bet"] == "Under") & offer_df["Archived"], "Boost_Under"].fillna(0)
-        offer_df.loc[(offer_df["Bet"] == "Over") & offer_df["Archived"], "Books"] = offer_df.loc[(offer_df["Bet"] == "Over") & offer_df["Archived"], "Books"]*offer_df.loc[(offer_df["Bet"] == "Over") & offer_df["Archived"], "Boost_Over"].fillna(0)
+        offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])*offer_df.loc[(offer_df["Bet"] == "Under"), "Boost_Under"].fillna(0)
+        offer_df.loc[(offer_df["Bet"] == "Over"), "Books"] = offer_df.loc[(offer_df["Bet"] == "Over"), "Books"]*offer_df.loc[(offer_df["Bet"] == "Over"), "Boost_Over"].fillna(0)
         offer_df["Books"] = offer_df["Books"].fillna(.5)
         offer_df = offer_df.loc[offer_df["Boost"] <= 3]
 
@@ -934,6 +937,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
         offer_df["Player position"] = offer_df["Player position"].astype("category")
         offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
+        offer_df["Books"] = offer_df["Books"]/offer_df["Boost"]
+        offer_df["Model"] = offer_df["Model"]/offer_df["Boost"]
 
         return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Book EV"]].to_dict('records')
 
