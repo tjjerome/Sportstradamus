@@ -368,18 +368,18 @@ def find_correlation(offers, stats, platform):
             combo_df = league_df.loc[league_df.Player.str.contains("\+|vs.")]
             league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
             player_df = league_df[["Player", "Team", "Player position"]]
-            for i, row in combo_df.iterrows():
-                players = row.Player.replace("vs.", "+").split(" + ")
-                teams = row.Team.split("/")
-                if len(teams) == 1:
-                    teams = teams*len(players)
-                pos = row["Player position"]
-                entries = []
-                for j in np.arange(len(players)):
-                    entries.append(
-                        {"Player": players[j], "Team": teams[j], "Player position": pos[j]})
+            # for i, row in combo_df.iterrows():
+            #     players = row.Player.replace("vs.", "+").split(" + ")
+            #     teams = row.Team.split("/")
+            #     if len(teams) == 1:
+            #         teams = teams*len(players)
+            #     pos = row["Player position"]
+            #     entries = []
+            #     for j in np.arange(len(players)):
+            #         entries.append(
+            #             {"Player": players[j], "Team": teams[j], "Player position": pos[j]})
 
-                player_df = pd.concat([player_df, pd.DataFrame(entries)])
+            #     player_df = pd.concat([player_df, pd.DataFrame(entries)])
 
             player_df.drop_duplicates(inplace=True)
             stat_data.profile_market(usage_str[league])
@@ -395,9 +395,9 @@ def find_correlation(offers, stats, platform):
             player_df.index = player_df.Player
             player_df = player_df["Player position"].to_dict()
             league_df["Player position"] = league_df.Player.map(player_df)
-            combo_df["Player position"] = combo_df.Player.apply(
-                lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
-            league_df = pd.concat([league_df, combo_df])
+            # combo_df["Player position"] = combo_df.Player.apply(
+            #     lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
+            # league_df = pd.concat([league_df, combo_df])
         else:
             league_df["Player position"] = league_df["Player position"].apply(lambda x: ("B"+str(x) if x>0 else "P") if isinstance(x, int) else ["B"+str(i) if i>0 else "P" for i in x])
 
