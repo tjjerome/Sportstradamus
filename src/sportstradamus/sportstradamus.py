@@ -137,7 +137,7 @@ def main(progress):
         save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers["Boost"] = ud_offers["Boost"]*1.777
+        ud_offers["Boost"] = ud_offers["Boost"]*1.81
         all_offers.append(ud_offers)
     except Exception as exc:
         logger.exception("Failed to get Underdog")
@@ -172,7 +172,7 @@ def main(progress):
         df = pd.concat(all_offers)
         df = df[["League", "Date", "Team", "Opponent", "Player", "Market", "Model EV", "Model STD", "Line", "Boost", "Bet"]]
         df = df.sort_values(["League", "Date", "Team", "Player"]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                                                    ignore_index=True, keep="last")
+                                                                                    ignore_index=True, keep="last").dropna()
         wks = gc.open("Sportstradamus").worksheet("Projections")
         wks.batch_clear(["A:K"])
         wks.update([df.columns.values.tolist()] + df.values.tolist())
@@ -608,6 +608,10 @@ def find_correlation(offers, stats, platform):
 
                     parlay_df = pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
 
+    if platform == "Underdog":
+        payouts = [0, 0, 3, 6, 6, 10, 25]
+        parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
+
     return df.drop(columns='Player position').dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
@@ -930,6 +934,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
+        offer_df.loc[offer_df["H2HPlayed"] == 0, "Avg H2H"] = 0
         offer_df["O/U"] = offer_df["Total"]/totals_map.get(league, 1)
         offer_df["DVPOA"] = offer_df["Defense position"]
         if "Player position" not in offer_df:
