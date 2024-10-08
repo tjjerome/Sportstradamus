@@ -4,11 +4,11 @@
             "team": {
                 "QB.completions & WR.receptions": [
                     0.73,
-                    1.37
+                    1.05
                 ],
                 "QB.completions & WR.receiving yards": [
                     0.83,
-                    1.2
+                    1.05
                 ],
                 "QB.completions & WR.yards": [
                     0.86,
@@ -20,15 +20,15 @@
                 ],
                 "QB.completions & WR.fantasy points underdog": [
                     0.83,
-                    1.2
+                    1.21
                 ],
                 "QB.completions & TE.receptions": [
                     0.73,
-                    1.37
+                    1.05
                 ],
                 "QB.completions & TE.receiving yards": [
                     0.78,
-                    1.28
+                    1.05
                 ],
                 "QB.completions & TE.targets": [
                     0.74,
@@ -36,19 +36,23 @@
                 ],
                 "QB.completions & RB.receptions": [
                     0.73,
-                    1.37
+                    1.05
                 ],
                 "QB.completions & RB.receiving yards": [
                     0.85,
-                    1.18
+                    1.05
+                ],
+                "QB.completions & RB.first downs": [
+                    0.00,
+                    0.00
                 ],
                 "QB.passing yards & WR.receptions": [
                     0.82,
-                    1.22
+                    1.05
                 ],
                 "QB.passing yards & WR.receiving yards": [
                     0.79,
-                    1.27
+                    1.05
                 ],
                 "QB.passing yards & WR.yards": [
                     0.79,
@@ -64,71 +68,95 @@
                 ],
                 "QB.passing yards & TE.receptions": [
                     0.82,
-                    1.22
+                    1.05
                 ],
                 "QB.passing yards & TE.receiving yards": [
                     0.77,
-                    1.3
+                    1.05
+                ],
+                "QB.passing yards & TE.targets": [
+                    0.8,
+                    1.25
                 ],
                 "QB.passing yards & TE.fantasy points underdog": [
-                    0.93,
-                    1.08
+                    0.86,
+                    1.16
                 ],
                 "QB.passing yards & RB.receptions": [
                     0.82,
-                    1.22
+                    1.05
+                ],
+                "QB.passing yards & RB.carries": [
+                    0.94,
+                    1.02
                 ],
                 "QB.passing yards & RB.receiving yards": [
                     0.83,
-                    1.2
+                    1.05
+                ],
+                "QB.passing yards & RB.rushing yards": [
+                    1.03,
+                    0.95
+                ],
+                "QB.passing yards & RB.first downs": [
+                    0.85,
+                    1.18
                 ],
                 "QB.attempts & WR.receptions": [
                     0.79,
-                    1.27
+                    1.05
                 ],
                 "QB.attempts & WR.receiving yards": [
                     0.84,
-                    1.19
+                    1.05
                 ],
                 "QB.attempts & WR.yards": [
                     0.87,
-                    1.15
+                    1.14
                 ],
                 "QB.attempts & WR.targets": [
-                    0.67,
-                    1.49
+                    0.66,
+                    1.2
                 ],
                 "QB.attempts & WR.fantasy points underdog": [
                     0.88,
-                    1.14
+                    1.13
                 ],
                 "QB.attempts & TE.receptions": [
                     0.79,
-                    1.27
+                    1.05
                 ],
                 "QB.attempts & TE.receiving yards": [
                     0.81,
-                    1.23
+                    1.05
                 ],
                 "QB.attempts & TE.targets": [
-                    0.67,
-                    1.49
+                    0.66,
+                    1.2
                 ],
                 "QB.attempts & RB.receptions": [
                     0.79,
-                    1.27
-                ],
-                "QB.attempts & RB.receiving yards": [
-                    0.9,
-                    1.11
+                    1.05
                 ],
                 "QB.attempts & RB.carries": [
                     1.15,
                     0.87
                 ],
+                "QB.attempts & RB.receiving yards": [
+                    0.9,
+                    1.05
+                ],
+                "QB.attempts & RB.rushing yards": [
+                    1.27,
+                    0.77
+                ],
+                "QB.attempts & RB.first downs": [
+                    0.85,
+                    1.18
+                ],
                 "QB.interceptions & WR.targets": [
                     0.76,
-                    1.32
+                    1.2
                 ],
                 "QB.passing first downs & WR.yards": [
                     0.82,
@@ -146,45 +174,53 @@
                     0.89,
                     1.12
                 ],
+                "QB.passing first downs & RB.first downs": [
+                    0.00,
+                    0.00
+                ],
                 "QB.completion percentage & WR.receptions": [
                     0.79,
-                    1.27
+                    1.05
                 ],
                 "QB.completion percentage & WR.receiving yards": [
                     0.83,
-                    1.2
+                    1.05
                 ],
                 "QB.completion percentage & TE.receptions": [
                     0.79,
-                    1.27
+                    1.05
                 ],
                 "QB.completion percentage & TE.receiving yards": [
                     0.78,
-                    1.28
+                    1.05
                 ],
                 "QB.completion percentage & RB.receptions": [
                     0.79,
-                    1.27
+                    1.05
                 ],
                 "QB.completion percentage & RB.receiving yards": [
+                    0.85,
+                    1.05
+                ],
+                "QB.completion percentage & RB.first downs": [
                     0.85,
                     1.18
                 ],
                 "QB.qb yards & WR.receptions": [
                     0.85,
-                    1.18
+                    1.05
                 ],
                 "QB.qb yards & WR.receiving yards": [
                     0.83,
-                    1.2
+                    1.05
                 ],
                 "QB.qb yards & WR.yards": [
                     0.79,
-                    1.27
+                    1.16
                 ],
                 "QB.qb yards & WR.targets": [
                     0.81,
-                    1.23
+                    1.09
                 ],
                 "QB.qb yards & WR.fantasy points underdog": [
                     0.86,
@@ -192,11 +228,11 @@
                 ],
                 "QB.qb yards & TE.receptions": [
                     0.85,
-                    1.18
+                    1.05
                 ],
                 "QB.qb yards & TE.receiving yards": [
                     0.83,
-                    1.2
+                    1.05
                 ],
                 "QB.qb yards & TE.targets": [
                     0.81,
@@ -208,19 +244,23 @@
                 ],
                 "QB.qb yards & RB.receptions": [
                     0.85,
-                    1.18
+                    1.05
                 ],
                 "QB.qb yards & RB.receiving yards": [
-                    0.83,
-                    1.2
+                    0.71,
+                    1.1
+                ],
+                "QB.qb yards & RB.first downs": [
+                    0.85,
+                    1.18
                 ],
                 "QB.fantasy points underdog & WR.receptions": [
                     0.88,
-                    1.14
+                    1.05
                 ],
                 "QB.fantasy points underdog & WR.receiving yards": [
                     0.86,
-                    1.16
+                    1.05
                 ],
                 "QB.fantasy points underdog & WR.yards": [
                     0.86,
@@ -228,7 +268,7 @@
                 ],
                 "QB.fantasy points underdog & WR.targets": [
                     0.91,
-                    1.1
+                    1.09
                 ],
                 "QB.fantasy points underdog & WR.fantasy points underdog": [
                     0.81,
@@ -236,259 +276,91 @@
                 ],
                 "QB.fantasy points underdog & TE.receptions": [
                     0.88,
-                    1.14
+                    1.05
                 ],
                 "QB.fantasy points underdog & TE.receiving yards": [
                     0.86,
-                    1.16
+                    1.05
+                ],
+                "QB.fantasy points underdog & TE.targets": [
+                    0.91,
+                    1.09
                 ],
                 "QB.fantasy points underdog & TE.fantasy points underdog": [
                     0.81,
                     1.23
                 ],
-                "WR.receptions & QB.completions": [
-                    0.73,
-                    1.37
-                ],
-                "WR.receptions & QB.passing yards": [
-                    0.82,
-                    1.22
-                ],
-                "WR.receptions & QB.attempts": [
-                    0.79,
-                    1.27
-                ],
-                "WR.receptions & QB.completion percentage": [
-                    0.79,
-                    1.27
-                ],
-                "WR.receptions & QB.qb yards": [
-                    0.85,
-                    1.18
-                ],
-                "WR.receptions & QB.fantasy points underdog": [
-                    0.88,
-                    1.14
-                ],
-                "WR.receiving yards & QB.completions": [
-                    0.83,
-                    1.2
-                ],
-                "WR.receiving yards & QB.passing yards": [
-                    0.79,
-                    1.27
-                ],
-                "WR.receiving yards & QB.attempts": [
-                    0.84,
-                    1.19
-                ],
-                "WR.receiving yards & QB.completion percentage": [
-                    0.83,
-                    1.2
-                ],
-                "WR.receiving yards & QB.qb yards": [
-                    0.83,
-                    1.2
-                ],
-                "WR.receiving yards & QB.fantasy points underdog": [
-                    0.86,
-                    1.16
-                ],
-                "WR.yards & QB.completions": [
-                    0.86,
-                    1.16
-                ],
-                "WR.yards & QB.passing yards": [
-                    0.79,
-                    1.27
-                ],
-                "WR.yards & QB.attempts": [
-                    0.87,
-                    1.15
-                ],
-                "WR.yards & QB.passing first downs": [
-                    0.82,
-                    1.22
-                ],
-                "WR.yards & QB.qb yards": [
-                    0.79,
-                    1.27
-                ],
-                "WR.yards & QB.fantasy points underdog": [
-                    0.86,
-                    1.16
-                ],
-                "WR.targets & QB.completions": [
-                    0.74,
-                    1.35
-                ],
-                "WR.targets & QB.passing yards": [
-                    0.8,
-                    1.25
-                ],
-                "WR.targets & QB.attempts": [
-                    0.67,
-                    1.49
-                ],
-                "WR.targets & QB.interceptions": [
-                    0.76,
-                    1.32
-                ],
-                "WR.targets & QB.passing first downs": [
-                    0.72,
-                    1.39
-                ],
-                "WR.targets & QB.qb yards": [
-                    0.81,
-                    1.23
-                ],
-                "WR.targets & QB.fantasy points underdog": [
-                    0.91,
-                    1.1
-                ],
-                "WR.fantasy points underdog & QB.completions": [
-                    0.83,
-                    1.2
-                ],
-                "WR.fantasy points underdog & QB.passing yards": [
-                    0.86,
-                    1.16
-                ],
-                "WR.fantasy points underdog & QB.attempts": [
-                    0.88,
-                    1.14
-                ],
-                "WR.fantasy points underdog & QB.passing first downs": [
-                    0.89,
-                    1.12
-                ],
-                "WR.fantasy points underdog & QB.qb yards": [
-                    0.86,
-                    1.16
-                ],
-                "WR.fantasy points underdog & QB.fantasy points underdog": [
-                    0.81,
-                    1.23
-                ],
-                "TE.receptions & QB.completions": [
-                    0.73,
-                    1.37
-                ],
-                "TE.receptions & QB.passing yards": [
-                    0.82,
-                    1.22
-                ],
-                "TE.receptions & QB.attempts": [
-                    0.79,
-                    1.27
-                ],
-                "TE.receptions & QB.completion percentage": [
-                    0.79,
-                    1.27
-                ],
-                "TE.receptions & QB.qb yards": [
-                    0.85,
-                    1.18
-                ],
-                "TE.receptions & QB.fantasy points underdog": [
-                    0.88,
-                    1.14
-                ],
-                "TE.receiving yards & QB.completions": [
-                    0.78,
-                    1.28
-                ],
-                "TE.receiving yards & QB.passing yards": [
-                    0.77,
-                    1.3
-                ],
-                "TE.receiving yards & QB.attempts": [
-                    0.81,
-                    1.23
-                ],
-                "TE.receiving yards & QB.completion percentage": [
-                    0.78,
-                    1.28
-                ],
-                "TE.receiving yards & QB.qb yards": [
-                    0.83,
-                    1.2
-                ],
-                "TE.receiving yards & QB.fantasy points underdog": [
-                    0.86,
-                    1.16
-                ],
-                "TE.targets & QB.completions": [
-                    0.74,
-                    1.35
-                ],
-                "TE.targets & QB.attempts": [
-                    0.67,
-                    1.49
-                ],
-                "TE.targets & QB.qb yards": [
-                    0.81,
-                    1.23
-                ],
-                "RB.receptions & QB.completions": [
-                    0.73,
-                    1.37
-                ],
-                "RB.receptions & QB.passing yards": [
-                    0.82,
-                    1.22
-                ],
-                "RB.receptions & QB.attempts": [
-                    0.79,
-                    1.27
-                ],
-                "RB.receptions & QB.completion percentage": [
-                    0.79,
-                    1.27
-                ],
-                "RB.receptions & QB.qb yards": [
-                    0.85,
-                    1.18
-                ],
-                "RB.receiving yards & QB.completions": [
-                    0.85,
-                    1.18
-                ],
-                "RB.receiving yards & QB.passing yards": [
-                    0.83,
-                    1.2
-                ],
-                "RB.receiving yards & QB.attempts": [
+                "QB.fantasy points underdog & RB.fantasy points underdog": [
                     0.9,
                     1.11
                 ],
-                "RB.receiving yards & QB.completion percentage": [
+                "QB.fantasy points underdog & RB.first downs": [
                     0.85,
                     1.18
                 ],
-                "RB.receiving yards & QB.qb yards": [
-                    0.83,
-                    1.2
+                "RB.carries & RB.carries": [
+                    0.94,
+                    1.05
                 ],
-                "TE.fantasy points underdog & QB.passing yards": [
-                    0.93,
-                    1.08
+                "RB.carries & RB.rushing yards": [
+                    0.91,
+                    1.07
                 ],
-                "TE.fantasy points underdog & QB.passing first downs": [
-                    0.89,
-                    1.12
+                "RB.rushing yards & RB.rushing yards": [
+                    0.9,
+                    1.07
                 ],
-                "TE.fantasy points underdog & QB.qb yards": [
-                    0.86,
-                    1.16
+                "RB.rushing yards & RB.yards": [
+                    0.91,
+                    1.04
                 ],
-                "TE.fantasy points underdog & QB.fantasy points underdog": [
-                    0.81,
-                    1.23
+                "QB.passing yards & WR.first downs": [
+                    0.85,
+                    1.18
                 ],
-                "RB.carries & QB.attempts": [
-                    1.15,
-                    0.87
+                "QB.attempts & WR.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.completion percentage & WR.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.qb yards & WR.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.fantasy points underdog & WR.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.completions & WR.first downs": [
+                    0.00,
+                    0.00
+                ],
+                "QB.passing yards & TE.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.attempts & TE.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.completion percentage & TE.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.qb yards & TE.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.fantasy points underdog & TE.first downs": [
+                    0.85,
+                    1.18
+                ],
+                "QB.completions & TE.first downs": [
+                    0.00,
+                    0.00
                 ],
                 "QB.passing first downs & WR.receptions": [
                     0.0,
