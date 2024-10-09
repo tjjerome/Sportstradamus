@@ -455,6 +455,26 @@
                 "QB.attempts & RB.yards": [
                     0.92,
                     1.05
+                ],
+                "RB.carries & RB.carries": [
+                    1.16,
+                    0.86
+                ],
+                "RB.carries & RB.rushing yards": [
+                    1.06,
+                    0.93
+                ],
+                "RB.carries & RB.yards": [
+                    1.08,
+                    0.90
+                ],
+                "RB.rushing yards & RB.rushing yards": [
+                    1.03,
+                    0.95
+                ],
+                "RB.yards & RB.yards": [
+                    1.06,
+                    0.89
                 ]
             }
         },
