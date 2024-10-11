@@ -193,7 +193,8 @@
         "interceptions": "interceptions",
         "passing_attempts": "attempts",
         "rushing_attempts": "carries",
-        "rushing_and_receiving_yards": "yards"
+        "rushing_and_receiving_yards": "yards",
+        "fantasy_points": "fantasy points prizepicks"
     },
     "Thrive": {
         "GOLs + ASTs": "points",
