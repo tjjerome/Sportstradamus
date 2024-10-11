@@ -895,34 +895,33 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             playerStats["Defense position"] = playerStats["Defense avg"]
 
         evs = []
-        # lines = []
         odds = []
         for player in playerStats.index:
-            a = True
             ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ''), player)
             line = archive.get_line(stat_data.league, market, dateMap.get(player, ''), player)
             if np.isnan(ev):
                 ev = stat_data.check_combo_markets(market, player, dateMap.get(player, ''))
             if line <= 0:
                 line = np.max([playerStats.loc[player, 'Avg10'], 0.5])
-            if ev <= 0 or np.isnan(ev):
+            if (ev <= 0 or np.isnan(ev)) and player in offer_df.index:
                 o = offer_df.loc[player]
                 if isinstance(o, pd.DataFrame):
                     o = o.iloc[0]
                 ev = get_ev(line, odds_from_boost(o.to_dict())[0], stat_cv[stat_data.league].get(market,1))
             
-            # lines.append(line)
-            odds.append(1-get_odds(line, ev, stat_cv[stat_data.league].get(market,1)))
             evs.append(ev)
 
         # playerStats["Line"] = lines
         playerStats["Book EV"] = evs
-        playerStats["Books"] = odds
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
         if "Model STD" not in prob_params.columns:
             prob_params["Model STD"] = 0
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
+        offer_df = offer_df.loc[~offer_df[["Book EV", "Model EV"]].isna().all(axis=1)]
+        if offer_df.empty:
+            return []
+        offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Book EV"], cv, step=step), axis=1)
         offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Book EV"].fillna(0)*(1-model_weight)
         offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
         offer_df["Model Over"] = (1-offer_df["Model Under"])
@@ -934,10 +933,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
-        offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])*offer_df.loc[(offer_df["Bet"] == "Under"), "Boost_Under"].fillna(0)
-        offer_df.loc[(offer_df["Bet"] == "Over"), "Books"] = offer_df.loc[(offer_df["Bet"] == "Over"), "Books"]*offer_df.loc[(offer_df["Bet"] == "Over"), "Boost_Over"].fillna(0)
+        offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
         offer_df["Books"] = offer_df["Books"].fillna(.5)
-        offer_df = offer_df.loc[offer_df["Boost"] <= 3]
+        offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("Model", ascending=False).groupby("Player").head(1)
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
@@ -949,7 +947,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
         offer_df["Player position"] = offer_df["Player position"].astype("category")
         offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
-        offer_df["Books"] = offer_df["Books"]/offer_df["Boost"]
         offer_df["Model"] = offer_df["Model"]/offer_df["Boost"]
 
         return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Book EV"]].to_dict('records')
