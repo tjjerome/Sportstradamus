@@ -637,14 +637,14 @@ def compute_bets(args):
         thresh_log[i] = ev_thresh+d_ev_thresh
         bet_size = len(bet_id)
 
-        total_ev = np.product(EV[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])**(1/np.sum(np.arange(1,bet_size)))
+        total_ev = np.product(EV[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])**(1/np.sum(np.arange(1,bet_size)))
         if total_ev < (ev_thresh + d_ev_thresh):
             continue
 
         pass_log[i] = 1
         
         payout = payouts[bet_size-2]
-        boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])
+        boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
         if boost <= 0.7 or boost > max_boost:
             continue
 
