@@ -895,7 +895,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             playerStats["Defense position"] = playerStats["Defense avg"]
 
         evs = []
-        odds = []
         for player in playerStats.index:
             ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ''), player)
             line = archive.get_line(stat_data.league, market, dateMap.get(player, ''), player)
@@ -911,7 +910,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
             evs.append(ev)
 
-        # playerStats["Line"] = lines
         playerStats["Book EV"] = evs
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
