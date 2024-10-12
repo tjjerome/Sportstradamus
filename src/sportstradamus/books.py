@@ -1251,13 +1251,26 @@ def get_parp():
             "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=&includeAlt=true&version=2",
             headers=header
         )
+        
+        if "players" not in api:
+            logger.error("Error getting ParlayPlay Offers")
+            return {}
+        
+        if datetime.today().month > 8 or datetime.today().month < 2:
+            nfl = scraper.get_proxy(
+                "https://parlayplay.io/api/v1/crossgame/search/?sport=Football&league=NFL&includeAlt=true&version=2",
+                headers=header
+            )
+
+            if "players" in nfl:
+                api["players"].extend(nfl["players"])
+
+            if "comboPackages" in nfl:
+                api["comboPackages"].extend(nfl["comboPackages"])
     except:
         logger.exception(id)
         return {}
 
-    if "players" not in api:
-        logger.error("Error getting ParlayPlay Offers")
-        return {}
     
     abbr_map = {
         "WSH": "WAS",
