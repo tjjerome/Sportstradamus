@@ -130,30 +130,30 @@ def main(progress):
 
     # Underdog
 
-    try:
-        ud_dict = get_ud()
-        ud_offers, ud5 = process_offers(
-            ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
-        parlay_df = pd.concat([parlay_df, ud5])
-        ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers["Boost"] = ud_offers["Boost"]*1.81
-        all_offers.append(ud_offers)
-    except Exception as exc:
-        logger.exception("Failed to get Underdog")
+    # try:
+    #     ud_dict = get_ud()
+    #     ud_offers, ud5 = process_offers(
+    #         ud_dict, "Underdog", stats)
+    #     save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+    #     parlay_df = pd.concat([parlay_df, ud5])
+    #     ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
+    #     ud_offers["Boost"] = ud_offers["Boost"]*1.81
+    #     all_offers.append(ud_offers)
+    # except Exception as exc:
+    #     logger.exception("Failed to get Underdog")
 
     # # Sleeper
 
-    try:
-        sl_dict = get_sleeper()
-        sl_offers, sl5 = process_offers(
-            sl_dict, "Sleeper", stats)
-        save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
-        parlay_df = pd.concat([parlay_df, sl5])
-        sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
-        all_offers.append(sl_offers)
-    except Exception as exc:
-        logger.exception("Failed to get Sleeper")
+    # try:
+    #     sl_dict = get_sleeper()
+    #     sl_offers, sl5 = process_offers(
+    #         sl_dict, "Sleeper", stats)
+    #     save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+    #     parlay_df = pd.concat([parlay_df, sl5])
+    #     sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
+    #     all_offers.append(sl_offers)
+    # except Exception as exc:
+    #     logger.exception("Failed to get Sleeper")
 
     # ParlayPlay
 

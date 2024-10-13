@@ -2975,7 +2975,312 @@
         }
     },
     "Sleeper": {
-        "NFL": {"team": {}, "opponent": {}},
+        "NFL": {"team": {
+            "QB.attempts & RB.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & RB.receptions": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & RB.carries": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & WR.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & WR.receptions": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & TE.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & TE.receptions": [
+                0.0,
+                0.0
+            ],
+            "QB.attempts & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & RB.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & RB.receptions": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & WR.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & WR.receptions": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & TE.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & TE.receptions": [
+                0.0,
+                0.0
+            ],
+            "QB.completions & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & RB.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & RB.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & WR.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & WR.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & TE.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & TE.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.passing yards & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & RB.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & RB.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & WR.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & WR.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & TE.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & TE.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.qb yards & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.rushing yards & RB.carries": [
+                0.0,
+                0.0
+            ],
+            "QB.carries & RB.carries": [
+                0.0,
+                0.0
+            ],
+            "QB.carries & RB.rushing yards": [
+                0.0,
+                0.0
+            ],
+            "QB.carries & RB.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.carries & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.carries & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.carries & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & RB.tds": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & RB.receiving tds": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & WR.tds": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & WR.receiving tds": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & TE.tds": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & TE.receiving tds": [
+                0.0,
+                0.0
+            ],
+            "QB.passing tds & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & WR.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & WR.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & WR.receiving tds": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & WR.tds": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & RB.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & RB.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & RB.receiving tds": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & RB.tds": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & TE.yards": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & TE.receiving yards": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & TE.receiving tds": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & TE.tds": [
+                0.0,
+                0.0
+            ],
+            "QB.fantasy points prizepicks & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & RB.carries": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & RB.rushing yards": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & RB.yards": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & RB.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & WR.yards": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & WR.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & TE.yards": [
+                0.0,
+                0.0
+            ],
+            "RB.carries & TE.fantasy points prizepicks": [
+                0.0,
+                0.0
+            ]
+        }, "opponent": {}},
         "NBA": {
             "team": {},
             "opponent": {
