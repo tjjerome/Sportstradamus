@@ -318,6 +318,8 @@ class Stats:
 
         for player in players.copy():
             if " + " in player.replace(" vs. ", " + "):
+                if player not in teams:
+                    continue
                 split_players = player.replace(" vs. ", " + ").split(" + ")
                 players.remove(player)
                 players.append(split_players[0])
