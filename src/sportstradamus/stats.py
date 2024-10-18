@@ -617,7 +617,7 @@ class StatsNBA(Stats):
         self.league = "NBA"
         self.positions = ['P', 'C', 'F', 'W', 'B']
         self.season_start = datetime(2024, 10, 22).date()
-        self.season = "2023-24"
+        self.season = "2024-25"
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
                 'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
                 'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
