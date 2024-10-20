@@ -316,6 +316,7 @@ class Stats:
             teams = {x["Player"]: x["Team"] for x in offers}
             opponents = {x["Player"]: x["Opponent"] for x in offers}
 
+        players = list(set(players))
         for player in players.copy():
             if " + " in player.replace(" vs. ", " + "):
                 if player not in teams:
@@ -338,8 +339,11 @@ class Stats:
 
                 opponents[split_players[0]] = split_opponents[0]
                 opponents[split_players[1]] = split_opponents[1]
+            elif teams[player] == '' or opponents[player] == '':
+                players.remove(player)
+                teams.pop(player)
+                opponents.pop(player)
 
-        players = set(players)
         playergames = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]].isin(players)]
 
         if playergames.empty:
