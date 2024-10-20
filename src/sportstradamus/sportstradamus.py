@@ -171,7 +171,8 @@ def main(progress):
     if len(all_offers) > 0:
         df = pd.concat(all_offers)
         df = df[["League", "Date", "Team", "Opponent", "Player", "Market", "Model EV", "Model STD", "Line", "Boost", "Bet"]]
-        df = df.sort_values(["League", "Date", "Team", "Player"]).drop_duplicates(["Player", "League", "Date", "Market"],
+        df["Bet"] = "Over"
+        df = df.sort_values(["League", "Date", "Team", "Player", "Market"]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                                                     ignore_index=True, keep="last").dropna()
         wks = gc.open("Sportstradamus").worksheet("Projections")
         wks.batch_clear(["A:K"])
