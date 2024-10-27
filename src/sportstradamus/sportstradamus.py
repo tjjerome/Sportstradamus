@@ -274,7 +274,7 @@ def process_offers(offer_dict, book, stats):
                 else:
                     # Handle untapped markets where the league is not supported
                     for market, offers in markets.items():
-                        archive.add_dfs(offers, stat_map[book])
+                        archive.add_dfs(offers, book, stat_map[book])
                         untapped_markets.append(
                             {"Platform": book, "League": league, "Market": market}
                         )
@@ -282,7 +282,7 @@ def process_offers(offer_dict, book, stats):
                     continue
 
                 for market, offers in markets.items():
-                    archive.add_dfs(offers, stat_map[book])
+                    archive.add_dfs(offers, book, stat_map[book])
                     # Match the offers with player statistics
                     playerStats = match_offers(
                         offers, league, market, book, stat_data
@@ -466,10 +466,10 @@ def find_correlation(offers, stats, platform):
 
             idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
-            idx = idx.groupby('Player').head(3)
-            # idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(20).sort_values(['Team', 'Player'])
-            # idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(30).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books', 'Team', 'Player'], ascending=False).head(50)
+            idx = idx.groupby(['Player', 'Bet']).head(3)
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(25).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(40).sort_values(['Team', 'Player'])
+            # idx = idx.sort_values(['Boosted Model', 'Boosted Books', 'Team', 'Player'], ascending=False).head(50)
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -623,7 +623,7 @@ def compute_bets(args):
     pass_log = np.zeros(n)
     thresh_log = np.zeros(n)
     window = n//10
-    growth_rate = .1
+    growth_rate = .12
     forgetting_factor = .003
     target = 3000/n
     book_thresh = .9

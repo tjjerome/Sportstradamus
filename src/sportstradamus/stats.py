@@ -905,7 +905,7 @@ class StatsNBA(Stats):
 
                 break
             except:
-                sleep(0.1)
+                sleep(0.2)
                 i += 1
 
         nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))

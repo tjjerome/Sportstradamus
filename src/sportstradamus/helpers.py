@@ -11,6 +11,7 @@ import importlib.resources as pkg_resources
 from klepto.archives import hdfdir_archive, cache
 from sportstradamus import creds, data
 from time import sleep
+from operator import itemgetter
 from scipy.stats import poisson, skellam, norm, iqr
 from scipy.optimize import fsolve, minimize
 from scipy.integrate import dblquad
@@ -293,7 +294,7 @@ def no_vig_odds(over, under=None):
         o = odds_to_prob(over)
     else:
         o = 1 / over
-    if under is None:
+    if under is None or under <= 0:
         juice = 1.0652
         u = juice - o
     else:
@@ -543,8 +544,13 @@ class Archive:
         self.archive[o["League"]][market][o["Date"]
                                           ][o["Player"]]["EV"] = evs
 
-    def add_dfs(self, offers, key):
-        for o in offers:
+    def add_dfs(self, offers, platform, key):
+        df = pd.DataFrame(offers)
+        if "Boost" in df.columns:
+            df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
+        df["Boost Factor"] = np.abs(df["Boost_Over"]-1)
+        idx = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])].index
+        for o in itemgetter(*idx)(offers):
             if not o["Line"]:
                 continue
             market = o["Market"].replace("H2H ", "")
@@ -561,6 +567,9 @@ class Archive:
 
             if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
                 self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
+
+            odds = no_vig_odds(o.get("Boost_Over", o.get("Boost", 1)), o.get("Boost_Under"))
+            self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(o["Line"], odds[1], cv)
 
     def get_moneyline(self, league, date, team):
         a = []
