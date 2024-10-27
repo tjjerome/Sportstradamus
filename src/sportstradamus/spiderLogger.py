@@ -6,7 +6,7 @@ from sportstradamus import logs
 
 # create logger
 logger = logging.getLogger("log")
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)
 
 # create file handler
 fh = logging.FileHandler(
