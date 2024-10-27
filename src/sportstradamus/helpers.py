@@ -568,7 +568,8 @@ class Archive:
             if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
                 self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
 
-            odds = no_vig_odds(o.get("Boost_Over", o.get("Boost", 1)), o.get("Boost_Under"))
+            over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
+            odds = no_vig_odds(over, o.get("Boost_Under"))
             self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(o["Line"], odds[1], cv)
 
     def get_moneyline(self, league, date, team):
