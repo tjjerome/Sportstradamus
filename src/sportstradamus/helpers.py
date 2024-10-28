@@ -545,12 +545,14 @@ class Archive:
                                           ][o["Player"]]["EV"] = evs
 
     def add_dfs(self, offers, platform, key):
-        df = pd.DataFrame(offers)
-        if "Boost" in df.columns:
-            df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
-        df["Boost Factor"] = np.abs(df["Boost_Over"]-1)
-        idx = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])].index
-        for o in itemgetter(*idx)(offers):
+        if len(offers) > 1:
+            df = pd.DataFrame(offers)
+            if "Boost" in df.columns:
+                df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
+            df["Boost Factor"] = np.abs(df["Boost_Over"]-1)
+            idx = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])].index
+            offers = itemgetter(*idx)(offers)
+        for o in offers:
             if not o["Line"]:
                 continue
             market = o["Market"].replace("H2H ", "")
