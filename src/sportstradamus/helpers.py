@@ -547,6 +547,8 @@ class Archive:
     def add_dfs(self, offers, platform, key):
         if len(offers) > 1:
             df = pd.DataFrame(offers)
+            if "Boost_Over" not in df.columns:
+                df["Boost_Over"] = np.nan
             if "Boost" in df.columns:
                 df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
             df["Boost Factor"] = np.abs(df["Boost_Over"]-1)
