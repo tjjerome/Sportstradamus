@@ -137,7 +137,8 @@ def main(progress):
         save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers["Boost"] = ud_offers["Boost"]*1.81
+        ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
+        ud_offers.loc[ud_offers["Bet"]=="Under", "Boost"] = 1.78/ud_offers.loc[ud_offers["Bet"]=="Under", "Boost"]
         all_offers.append(ud_offers)
     except Exception as exc:
         logger.exception("Failed to get Underdog")
