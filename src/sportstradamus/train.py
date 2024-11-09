@@ -105,8 +105,8 @@ def meditate(force, league):
             "interceptions",
             "sacks taken",
             "passing first downs",
-            "first downs",
-            "completion percentage"
+            # "first downs",
+            # "completion percentage"
         ],
         "NBA": [
             "MIN",
