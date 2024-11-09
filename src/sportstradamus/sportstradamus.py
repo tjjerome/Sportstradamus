@@ -152,6 +152,7 @@ def main(progress):
         save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
+        sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
         all_offers.append(sl_offers)
     except Exception as exc:
         logger.exception("Failed to get Sleeper")
