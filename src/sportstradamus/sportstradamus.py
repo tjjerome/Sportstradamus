@@ -855,6 +855,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
     offer_df = pd.DataFrame(offers)
     offer_df.index = offer_df.Player
+    if "yards" in market:
+        offer_df = offer_df.loc[(offer_df.Player.str.contains("vs.")) | (offer_df.Line > 8)]
     if os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
