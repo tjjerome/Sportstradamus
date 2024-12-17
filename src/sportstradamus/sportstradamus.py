@@ -326,7 +326,8 @@ def find_correlation(offers, stats, platform):
     df.loc[combo_mask, "Team"] = df.loc[combo_mask, "Team"].apply(lambda x: x.split("/")[0])
     df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(lambda x: x.split("/")[0])
 
-    df["Correlated Bets"] = ""
+    df["Team Correlation"] = ""
+    df["Opp Correlation"] = ""
     parlay_df = pd.DataFrame(columns=["Game", "Date", "League", "Platform", "Model EV", "Books EV", "Boost", "Rec Bet", "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6", "Legs", "P", "PB", "Fun", "Bet Size"])
     usage_str = {
         "NBA": "MIN",
@@ -539,8 +540,12 @@ def find_correlation(offers, stats, platform):
                 corr = game_df.loc[indices]
                 corr["P"] = EV[indices, i]
                 corr = corr.sort_values("P", ascending=False).groupby("Player").head(1)
-                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Correlated Bets'] = ", ".join(
-                    (corr["Desc"] + " (" + corr["P"].round(2).astype(str) + ")").to_list())
+                same = corr.loc[corr["Team"] == offer["Team"]]
+                other = corr.loc[corr["Team"] != offer["Team"]]
+                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Team Correlation'] = ", ".join(
+                    (same["Desc"] + " (" + same["P"].round(2).astype(str) + ")").to_list())
+                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Opp Correlation'] = ", ".join(
+                    (other["Desc"] + " (" + other["P"].round(2).astype(str) + ")").to_list())
             
             player_array = idx['Player'].to_numpy()
             index_array = idx.index.to_numpy()
@@ -749,7 +754,7 @@ def save_data(df, parlay_df, book, gc):
                     "type": "PERCENT", "pattern": "0.00%"}}
             )
             wks.update_cell(
-                1, 18,
+                1, 19,
                 "Last Updated: "
                 + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
             )
@@ -767,18 +772,19 @@ def save_data(df, parlay_df, book, gc):
             wks.update([sheet_df.columns.values.tolist()] +
                         sheet_df.values.tolist())
             
-            wks = gc.open("Sportstradamus").worksheet("Parlay Search")
-            wks.update_cell(1, 5, sheet_df.iloc[0]["Platform"])
-            wks.update_cell(2, 5, sheet_df.iloc[0]["League"])
-            wks.update_cell(3, 5, sheet_df.iloc[0]["Game"])
-            wks.update_cell(4, 5, "Highest EV")
-            wks.update_cell(7, 2, 1)
-            wks.update_cell(7, 5, 1)
-            wks.update_cell(7, 8, 1)
-            wks.update_cell(
-                1, 10, "Last Updated: "
-                + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
-            )
+            if not sheet_df.empty:
+                wks = gc.open("Sportstradamus").worksheet("Parlay Search")
+                wks.update_cell(1, 5, sheet_df.iloc[0]["Platform"])
+                wks.update_cell(2, 5, sheet_df.iloc[0]["League"])
+                wks.update_cell(3, 5, sheet_df.iloc[0]["Game"])
+                wks.update_cell(4, 5, "Highest EV")
+                wks.update_cell(7, 2, 1)
+                wks.update_cell(7, 5, 1)
+                wks.update_cell(7, 8, 1)
+                wks.update_cell(
+                    1, 10, "Last Updated: "
+                    + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+                )
             
         except Exception:
             # Log the exception if there is an error writing the offers to the worksheet
