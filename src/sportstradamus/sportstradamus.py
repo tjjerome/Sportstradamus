@@ -467,7 +467,7 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .49) & (game_df["Books"] >= .33) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .4)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
+            idx = game_df.loc[(game_df["Boosted Books"] > .45) & (game_df["Books"] >= .3) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .35)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
             idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(25).sort_values(['Team', 'Player'])
@@ -727,9 +727,9 @@ def save_data(df, parlay_df, book, gc):
             df["Model"] = df["Model"]*df["Boost"]
             df.sort_values("Model", ascending=False, inplace=True)
             if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
-                mask = (df.Books > .99) & (df.Model > 1.07) & (2.5 >= df.Boost)
+                mask = (df.Books > .98) & (df.Model > 1.06) & (2.5 >= df.Boost)
             else:
-                mask = (df.Books > .54) & (df.Model > .58) & (1.5 >= df.Boost) & (df.Boost >= .75)
+                mask = (df.Books > .52) & (df.Model > .56) & (1.5 >= df.Boost) & (df.Boost >= .75)
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
