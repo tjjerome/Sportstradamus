@@ -729,7 +729,7 @@ def save_data(df, parlay_df, book, gc):
             if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
                 mask = (df.Books > .98) & (df.Model > 1.06) & (2.5 >= df.Boost)
             else:
-                mask = (df.Books > .52) & (df.Model > .56) & (1.5 >= df.Boost) & (df.Boost >= .75)
+                mask = (df.Books > .52) & (df.Model > .6) & (1.5 >= df.Boost) & (df.Boost >= .75)
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
