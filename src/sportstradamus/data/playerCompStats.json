@@ -58,28 +58,30 @@
     "NFL": {
         "QB": {
             "age": 0.5,
-            "height": 1,
-            "bmi": 2,
-            "dropbacks_per_game": 2,
+            "height": 1.5,
+            "bmi": 1,
+            "dropbacks_per_game": 1,
 
             "designed_yards_per_game": 3,
             "scrambles_per_dropback": 3,
-            "grades_run": 3,
+            "grades_run": 1,
             "explosive": 1,
 
-            "cm_grades_pass_diff": 2,
-            "deep_grades_pass_diff": 2,
-            "pa_grades_pass_diff": 3,
-            "screen_grades_pass_diff": 3,
+            "cm_grades_pass_diff": 1,
+            "deep_grades_pass_diff": 1,
+            "pa_grades_pass_diff": 2,
+            "screen_grades_pass_diff": 2,
+
+            "avg_depth_of_target": 2.5,
+            "twp_rate": 2,
+            "more_btt_rate": 2.5,
+            "aggressiveness": 1,
 
             "grades_pass": 4,
-            "avg_depth_of_target": 2,
             "accuracy_percent": 2,
-            "twp_rate": 2,
 
             "pressure_to_sack_rate": 2,
-            "blitz_grades_pass_diff": 2,
-            "more_btt_rate": 3
+            "blitz_grades_pass_diff": 2
         },
         "WR": {
             "age": 1.5,
