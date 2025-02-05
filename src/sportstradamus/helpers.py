@@ -123,10 +123,11 @@ class Scrape:
             for i in range(1, max_attempts + 1):
                 if i > 1:
                     self._new_headers()
+                    headers.update(self.headers)
                     sleep(random.uniform(2, 3))
                 try:
                     response = requests.get(
-                        url, headers=self.header | headers, params=params
+                        url, headers=headers, params=params
                     )
                     if response.status_code == 200:
                         return response.json()
