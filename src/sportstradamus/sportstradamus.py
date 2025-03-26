@@ -73,11 +73,11 @@ def main(progress):
     nba.load()
     if datetime.datetime.today().date() > (nba.season_start - datetime.timedelta(days=7)):
         sports.append("NBA")
-    mlb = StatsMLB()
-    mlb.load()
-    if datetime.datetime.today().date() > (mlb.season_start - datetime.timedelta(days=7)):
-        sports.append("MLB")
-    # nhl = StatsNHL()
+    # mlb = StatsMLB()
+    # mlb.load()
+    # if datetime.datetime.today().date() > (mlb.season_start - datetime.timedelta(days=7)):
+    #     sports.append("MLB")
+    # # nhl = StatsNHL()
     # nhl.load()
     # if datetime.datetime.today().date() > (nhl.season_start - datetime.timedelta(days=7)):
     #     sports.append("NHL")
