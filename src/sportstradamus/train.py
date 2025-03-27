@@ -1287,8 +1287,7 @@ def correlate(league, force=False):
         gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
         if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != 2:
             continue
-        home_team = game_df.loc[game_df[log_str["home"]], log_str["team"]].iloc[0]
-        away_team = game_df.loc[~game_df[log_str["home"]].astype(bool), log_str["team"]].iloc[0]
+        [home_team, away_team] = tuple(game_df.sort_values(log_str["home"], ascending=False)[log_str["team"]].unique())
 
         if league == "MLB":
             bat_df = game_df.loc[game_df['starting batter']]
@@ -1314,9 +1313,9 @@ def correlate(league, force=False):
         homeStats = {}
         awayStats = {}
         for position in stats.keys():
-            homeStats.update(game_df.loc[game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+            homeStats.update(game_df.loc[(game_df[log_str["team"]] == home_team) & game_df[log_str["position"]].str.contains(
                 position), stats[position]].to_dict('index'))
-            awayStats.update(game_df.loc[~game_df[log_str["home"]] & game_df[log_str["position"]].str.contains(
+            awayStats.update(game_df.loc[(game_df[log_str["team"]] == away_team) & game_df[log_str["position"]].str.contains(
                 position), stats[position]].to_dict('index'))
 
         game_data.append({"TEAM": home_team} | {"DATE": gameDate.date()} |
