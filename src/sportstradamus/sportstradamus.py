@@ -97,9 +97,9 @@ def main(progress):
     if "NBA" in sports:
         nba.update()
         stats.update({"NBA": nba})
-    if "MLB" in sports:
-        mlb.update()
-        stats.update({"MLB": mlb})
+    # if "MLB" in sports:
+    #     mlb.update()
+    #     stats.update({"MLB": mlb})
     # if "NHL" in sports:
     #     nhl.update()
     #     stats.update({"NHL": nhl})
@@ -143,7 +143,7 @@ def main(progress):
     except Exception as exc:
         logger.exception("Failed to get Underdog")
 
-    # # Sleeper
+    # Sleeper
 
     try:
         sl_dict = get_sleeper()
