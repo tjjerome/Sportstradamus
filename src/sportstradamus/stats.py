@@ -559,6 +559,7 @@ class Stats:
                 usage = players[self.usage_stat]
                 usage.index = players[self.log_strings["player"]]
                 usage = usage.loc[stats.index]
+                usage = usage[~usage.index.duplicated(keep='first')]
 
             date = gameDate.strftime("%Y-%m-%d")
 
