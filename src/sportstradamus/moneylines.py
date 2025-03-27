@@ -181,7 +181,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
         sports = [
             (s["key"], s["title"])
             for s in res
-            if s["title"] in ["NBA", "MLB", "NHL", "NFL", "WNBA"] and s["active"]
+            if s["title"] in ["NBA", "NFL", "WNBA"] and s["active"]
         ]
     elif key is None:
         logger.warning("Key needed for sports other than All")
