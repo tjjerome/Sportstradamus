@@ -951,8 +951,9 @@ class StatsNBA(Stats):
 
         # Process each game
         nba_df = []
+        included_games = list(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
         for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
-            if game["MIN"] < 1:
+            if game["MIN"] < 1 or (game["PLAYER_ID"], game["GAME_ID"]) in included_games:
                 continue
 
             player_id = game["PLAYER_ID"]
