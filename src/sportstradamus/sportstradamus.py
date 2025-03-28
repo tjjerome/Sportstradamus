@@ -945,8 +945,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
         offer_df["Books"] = offer_df["Books"].fillna(.5)
         offer_df["Payout"] = offer_df["Boost"] * (1.78 if platform == "Underdog" else 1)
-        offer_df["Units"] = (offer_df["Model"]*offer_df["Payout"]-1)/(offer_df["Payout"]-1)
-        offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("Units", ascending=False).groupby("Player").head(1)
+        offer_df["Edge"] = offer_df["Model"]-1/offer_df["Payout"]
+        offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("Edge", ascending=False).groupby("Player").head(1)
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
