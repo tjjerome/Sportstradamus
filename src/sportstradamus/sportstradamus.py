@@ -937,7 +937,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
         offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
-        offer_df["Books"] = offer_df["Books"].fillna(.5)
+        offer_df["Books"] = offer_df["Books"].fillna(.5)*offer_df["Boost"]
         offer_df["K"] = (offer_df["Model"]-1)/(offer_df["Boost"]-1)
         offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("K", ascending=False).groupby("Player").head(1)
 
