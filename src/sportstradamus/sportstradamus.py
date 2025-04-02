@@ -134,7 +134,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Books EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
@@ -149,7 +149,7 @@ def main(progress):
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict, "Sleeper", stats)
-        save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+        save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Books EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
@@ -163,7 +163,7 @@ def main(progress):
     #     parp_dict = get_parp()
     #     parp_offers, parp5 = process_offers(
     #         parp_dict, "ParlayPlay", stats)
-    #     save_data(parp_offers.drop(columns=["Model EV", "Model STD", "Book EV"]), parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
+    #     save_data(parp_offers.drop(columns=["Model EV", "Model STD", "Books EV"]), parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
     #     parlay_df = pd.concat([parlay_df, parp5])
     #     parp_offers["Market"] = parp_offers["Market"].map(stat_map["ParlayPlay"])
     #     all_offers.append(parp_offers)
@@ -365,6 +365,8 @@ def find_correlation(offers, stats, platform):
         stat_data = stats.get(league)
         team_mod_map = banned[platform][league]['team']
         opp_mod_map = banned[platform][league]['opponent']
+        if platform == "Underdog":
+            league_df["Boost"] = league_df["Boost"] / 1.78
 
         if league != "MLB":
             league_df["Player position"] = league_df["Player position"].apply(lambda x: positions[league][x-1] if isinstance(
@@ -423,7 +425,7 @@ def find_correlation(offers, stats, platform):
             "Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
 
         league_df["Desc"] = league_df["Desc"] + " - " + \
-            league_df["Model"].multiply(100).round(1).astype(str) + "%, " + \
+            league_df["Model P"].multiply(100).round(1).astype(str) + "%, " + \
             league_df["Boost"].astype(str) + "x"
 
         checked_teams = []
@@ -461,18 +463,15 @@ def find_correlation(offers, stats, platform):
             opp_c.index = pd.MultiIndex.from_tuples([(f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", "")) for x, y in opp_c.index], names=("market", "correlation"))
             c_map = team_c["R"].add(opp_c["R"], fill_value=0).to_dict()
 
-            game_df.loc[:, 'Model'] = game_df['Model'].clip(upper=0.625)
-            game_df.loc[:, 'Boosted Model'] = game_df['Model'] * game_df["Boost"]
-            game_df.loc[:, 'Boosted Books'] = game_df['Books'] * game_df["Boost"]
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Boosted Books"] > .45) & (game_df["Books"] >= .3) & (game_df["Boosted Model"] > .54) & (game_df["Model"] >= .35)].sort_values(['Boosted Model', 'Boosted Books'], ascending=False)
+            idx = game_df.loc[(game_df["Books"] > .85) & (game_df["Books P"] >= .3) & (game_df["Model"] > 1) & (game_df["Model P"] >= .35)].sort_values(['Model', 'Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).groupby('Team').head(25).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Boosted Model', 'Boosted Books'], ascending=False).head(40).sort_values(['Team', 'Player'])
-            # idx = idx.sort_values(['Boosted Model', 'Boosted Books', 'Team', 'Player'], ascending=False).head(50)
+            idx = idx.sort_values(['Model', 'Books'], ascending=False).groupby('Team').head(25).sort_values(['Team', 'Player'])
+            idx = idx.sort_values(['Model', 'Books'], ascending=False).head(40).sort_values(['Team', 'Player'])
+            # idx = idx.sort_values(['Model', 'Books', 'Team', 'Player'], ascending=False).head(50)
             bet_df = idx.to_dict('index')
             team_players = idx.loc[idx.Team == team, 'Player'].unique()
             opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
@@ -480,9 +479,9 @@ def find_correlation(offers, stats, platform):
 
             C = np.eye(len(game_dict))
             M = np.zeros([len(game_dict), len(game_dict)])
-            p_model = game_df.Model.to_numpy()
-            p_books = game_df.Books.to_numpy()
-            boosts = game_df.Boost.to_numpy()
+            p_model = game_df["Model P"].to_numpy()
+            p_books = game_df["Books P"].to_numpy()
+            boosts = game_df["Boost"].to_numpy()
             V = p_model*(1-p_model)
             V = V.reshape(len(game_dict),1)*V
             V = np.sqrt(V)
@@ -579,7 +578,7 @@ def find_correlation(offers, stats, platform):
                                     combos.extend(product(*[player_indices[player] for player in selected_players]))
 
                 payouts = payout_table[platform]
-                max_boost = 60 if platform in ["Sleeper", "ParlayPlay", "Chalkboard"] else 2.5
+                max_boost = 2.5 if platform == "Underdog" else 60
 
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
@@ -621,7 +620,7 @@ def find_correlation(offers, stats, platform):
         payouts = [0, 0, 3, 6, 6, 10, 25]
         parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
 
-    return df.drop(columns='Player position').dropna().sort_values("Model", ascending=False), parlay_df
+    return df.drop(columns=["Player position", "Model P", "Books P"]).dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
     combos, p_model, p_books, boosts, M, C, EV, bet_df, info, payouts, max_boost = args
@@ -679,7 +678,7 @@ def compute_bets(args):
         pb = p/prev_p*prev_pb
         units = (p - 1)/(payout - 1)/0.05
         
-        if units < 1 or p < 2 or pb < 1:
+        if units < .5 or p < 2 or pb < .9:
             continue
         
         bet = itemgetter(*bet_id)(bet_df)
@@ -723,21 +722,15 @@ def save_data(df, parlay_df, book, gc):
     if len(df) > 0:
 
         try:
-            df["Books"] = df["Books"]*df["Boost"]
-            df["Model"] = df["Model"]*df["Boost"]
             df.sort_values("Model", ascending=False, inplace=True)
-            if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
-                mask = (df.Books > .98) & (df.Model > 1.06) & (2.5 >= df.Boost)
-            else:
-                mask = (df.Books > .52) & (df.Model > .6) & (1.5 >= df.Boost) & (df.Boost >= .75)
+            mask = (df.Books > .98) & (df.Model > 1.06) & (2.5 >= df.Boost)
+            if book == "Underdog":
+                df["Boost"] = df["Boost"]/1.78
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
             wks.update([df.columns.values.tolist()] + df.loc[mask].values.tolist() + df.loc[~mask].values.tolist())
             wks.set_basic_filter()
-            df["Books"] = df["Books"]/df["Boost"]
-            df["Model"] = df["Model"]/df["Boost"]
-
             # Apply number formatting to the relevant columns
             if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
                 wks.format(
@@ -921,32 +914,32 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
             evs.append(ev)
 
-        playerStats["Book EV"] = evs
+        playerStats["Books EV"] = evs
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
         if "Model STD" not in prob_params.columns:
             prob_params["Model STD"] = 0
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
-        offer_df = offer_df.loc[~offer_df[["Book EV", "Model EV"]].isna().all(axis=1)]
+        offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
         if offer_df.empty:
             return []
-        offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Book EV"], cv, step=step), axis=1)
-        offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Book EV"].fillna(0)*(1-model_weight)
+        offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], cv, step=step), axis=1)
+        offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Books EV"].fillna(0)*(1-model_weight)
         offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
         # offer_df[["Model Under", "Model Over"]] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
+        offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0) * (1.78 if platform == "Underdog" else 1)
         offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5).values*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).values
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
         offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
         offer_df["Books"] = offer_df["Books"].fillna(.5)
-        offer_df["Payout"] = offer_df["Boost"] * (1.78 if platform == "Underdog" else 1)
-        offer_df["Edge"] = offer_df["Model"]/offer_df["Boost"]-1/offer_df["Payout"]
-        offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("Edge", ascending=False).groupby("Player").head(1)
+        offer_df["K"] = (offer_df["Model"]-1)/(offer_df["Boost"]-1)
+        offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("K", ascending=False).groupby("Player").head(1)
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
@@ -958,9 +951,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
         offer_df["Player position"] = offer_df["Player position"].astype("category")
         offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
-        offer_df["Model"] = offer_df["Model"]/offer_df["Boost"]
+        offer_df["Model P"] = offer_df["Model"]/offer_df["Boost"]
+        offer_df["Books P"] = offer_df["Books"]/offer_df["Boost"]
 
-        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Book EV"]].to_dict('records')
+        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Model P", "Books EV", "Books P"]].to_dict('records')
 
     else:
         logger.warning(f"{filename} missing")
