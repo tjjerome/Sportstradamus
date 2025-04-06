@@ -348,8 +348,8 @@ def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1):
     else:
         if std is None:
             std = ev*cv
-        under = norm.cdf(high, ev, ev*cv)
-        push = under - norm.cdf(low, ev, ev*cv)
+        under = norm.cdf(high, ev, std)
+        push = under - norm.cdf(low, ev, std)
         return under - push/2
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
