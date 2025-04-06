@@ -10,6 +10,7 @@ import click
 import re
 from scipy.stats import poisson, skellam, norm, hmean, multivariate_normal
 from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.special import softmax
 from math import comb
 import numpy as np
 import pickle
@@ -466,7 +467,7 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Books"] > .85) & (game_df["Books P"] >= .3) & (game_df["Model"] > 1) & (game_df["Model P"] >= .35)].sort_values(['Model', 'Books'], ascending=False)
+            idx = game_df.loc[(game_df["Books"] > .85) & (game_df["Books P"] >= .25) & (game_df["Model"] > 1) & (game_df["Model P"] >= .3)].sort_values(['Model', 'Books'], ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
             idx = idx.groupby(['Player', 'Bet']).head(3)
             idx = idx.sort_values(['Model', 'Books'], ascending=False).groupby('Team').head(25).sort_values(['Team', 'Player'])
@@ -732,16 +733,10 @@ def save_data(df, parlay_df, book, gc):
             wks.update([df.columns.values.tolist()] + df.loc[mask].values.tolist() + df.loc[~mask].values.tolist())
             wks.set_basic_filter()
             # Apply number formatting to the relevant columns
-            if book in ["Sleeper", "ParlayPlay", "Chalkboard"]:
-                wks.format(
-                    "J:K", {"numberFormat": {
-                        "type": "NUMBER", "pattern": "0.00"}}
-                )
-            else:
-                wks.format(
-                    "J:K", {"numberFormat": {
-                        "type": "PERCENT", "pattern": "0.00%"}}
-                )
+            wks.format(
+                "J:K", {"numberFormat": {
+                    "type": "NUMBER", "pattern": "0.00"}}
+            )
             wks.format(
                 "N:P", {"numberFormat": {
                     "type": "PERCENT", "pattern": "0.00%"}}
@@ -861,8 +856,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             filedict = pickle.load(infile)
         cv = filedict["cv"]
         model_weight = filedict["weight"]
+        model_temp = filedict["temperature"]
         dist = filedict["distribution"]
-        filt = filedict["filter"]
         step = filedict["step"]
 
         if market in stat_data.volume_stats:
@@ -915,6 +910,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             evs.append(ev)
 
         playerStats["Books EV"] = evs
+        playerStats["Books STD"] = cv*np.array(evs)
 
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
         if "Model STD" not in prob_params.columns:
@@ -924,15 +920,21 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if offer_df.empty:
             return []
         offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], cv, step=step), axis=1)
-        offer_df["Model EV"] = offer_df["Model EV"]*model_weight + offer_df["Books EV"].fillna(0)*(1-model_weight)
+        
+        if dist == "Poisson":
+            offer_df["Model EV"] = np.exp(np.average(np.log(offer_df[["Model EV", "Books EV"]].to_numpy()), weights=[model_weight, 1-model_weight], axis=1))
+        else:
+            s = offer_df[["Model STD", "Books STD"]].fillna(1).to_numpy()
+            offer_df["Model STD"] = np.sqrt(1/np.average(np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1))
+            offer_df["Model EV"] = np.average(offer_df[["Model EV", "Books EV"]].fillna(0).to_numpy()*np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1)*np.power(offer_df["Model STD"].to_numpy(), 2)
+        
         offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
-        # offer_df[["Model Under", "Model Over"]] = filt.predict_proba(offer_df["Model Over"].fillna(.5).to_numpy().reshape(-1,1)*2-1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0)
         offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0) * (1.78 if platform == "Underdog" else 1)
-        offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5).values*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).values
+        offer_df[["Model Under", "Model Over"]] = softmax(np.log(offer_df[["Model Under", "Model Over"]].fillna(.5).values)*model_temp, axis=1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).values
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)

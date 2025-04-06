@@ -132,141 +132,141 @@
 
 ======================================== NBA AST =========================================
  Distribution Model: Poisson
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.559627   0.559568 0.037361   -0.009701    -0.007757  0.019877      0.038171 0.966904
- 0.559362   0.559223 0.037434   -0.004213    -0.003135  0.023287      0.034367 0.966904
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.574591   0.594350   0.083148 0.493574 0.685105 1.950577      0.008669 0.357763 0.706692
+ 0.579762   0.603829   0.059665 0.495422 0.684501 1.950577      0.008669 0.357763 0.706692
 
 ======================================== NBA BLK =========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.679181   0.561104 -0.227681    0.105094     0.138250  0.084309      0.020879     1.0
- 0.674331   0.557692 -0.219741    0.102832     0.135561  0.084309      0.022446     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight  Temp
+ 0.680951   0.567531   0.123001 0.371524 0.614872 0.930841      0.037816 0.711142   1.0
+ 0.680951   0.567531   0.123001 0.371524 0.614872 0.930841      0.037816 0.711142   1.0
 
 ======================================== NBA BLST ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.607997   0.601478 -0.124853    0.030580     0.042954  0.071317      0.016609     1.0
- 0.608017   0.600134 -0.124661    0.032082     0.044117  0.071317      0.015568     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight   Temp
+ 0.607414   0.594961   0.110772 0.465814 0.669912 1.543946      0.017792 0.660664 0.9027
+ 0.610660   0.597966   0.100832 0.468855 0.669741 1.543946      0.017792 0.660664 0.9027
 
 ======================================== NBA DREB ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.617699   0.635551 -0.082292    0.036070     0.051024  0.099566      0.036943     1.0
- 0.615504   0.634679 -0.078291    0.034068     0.048112  0.099566      0.038331     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.643525   0.672638   0.159604 0.466791 0.646256 2.014744      0.026571     0.9 0.983297
+ 0.643916   0.673213   0.157500 0.467267 0.646112 2.014744      0.026571     0.9 0.983297
 
 ======================================== NBA FG3A ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.657114   0.610450 -0.070671    0.103305     0.126614  0.130028      0.038225     1.0
- 0.651780   0.605518 -0.064161    0.092544     0.115594  0.130028      0.045684     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.672793   0.657639   0.179568 0.424394 0.610328 1.906741      0.043014     0.9 0.993071
+ 0.673154   0.658537   0.178784 0.424728 0.610320 1.906741      0.043014     0.9 0.993071
 
 ======================================== NBA FG3M ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.595254   0.583016 -0.053028    0.026404     0.035362  0.066134      0.039991     1.0
- 0.586462   0.574764 -0.047404    0.013571     0.020518  0.066134      0.048886     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.601140   0.581197   0.100849 0.477369 0.674222 1.587341       0.01152 0.521048 0.972204
+ 0.602019   0.583024   0.098338 0.477925 0.674152 1.587341       0.01152 0.521048 0.972204
 
 ======================================== NBA FGA =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.624721   0.611623 0.052301    0.049323     0.065368  0.088587      0.008324 0.862578
- 0.620821   0.608244 0.052294    0.048773     0.064752  0.095987      0.008704 0.862578
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.633584   0.636246   0.161948 0.502500 0.645704 2.763073      0.029091     0.9 0.939129
+ 0.637100   0.639825   0.154112 0.502391 0.645373 2.763073      0.029091     0.9 0.939129
 
 ======================================== NBA FGM =========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.627556   0.636964 -0.047142    0.050944     0.068513  0.129786      0.043704     1.0
- 0.623867   0.631929 -0.043495    0.042715     0.058996  0.129786      0.049408     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight  Temp
+ 0.655149   0.698525   0.168802 0.481784 0.629573 2.171783      0.037307     0.9   1.0
+ 0.655149   0.698525   0.168802 0.481784 0.629573 2.171783      0.037307     0.9   1.0
 
 ======================================== NBA FTM =========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.606954   0.479139 -0.111376    0.019702     0.032854  0.052363      0.025919     1.0
- 0.609443   0.481456 -0.115140    0.031893     0.044114  0.052363      0.017469     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.618402   0.492569   0.143633 0.438843 0.667259 1.808907      0.011697 0.848509 0.671286
+ 0.628062   0.510744   0.102657 0.456547 0.663809 1.808907      0.011697 0.848509 0.671286
 
 ======================================== NBA MIN =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.669278   0.706810 0.008540    0.122043     0.147866  0.317491      0.015333     1.0
- 0.665814   0.704913 0.007054    0.115627     0.143878  0.317491      0.019780     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.683843   0.721767   0.204321 0.530785 0.596739 3.192035     -0.000336     0.9 0.982412
+ 0.684693   0.722704   0.201978 0.530587 0.596788 3.192035     -0.000336     0.9 0.982412
 
 ======================================== NBA OREB ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.621826   0.534247 -0.146378    0.039791     0.056783  0.050882      0.030001     1.0
- 0.619968   0.532922 -0.139869    0.039663     0.055222  0.050882      0.030089     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight  Temp
+ 0.636515   0.568533   0.116976 0.436064 0.658525 1.254451      0.021509 0.859111   1.0
+ 0.636515   0.568533   0.116976 0.436064 0.658525 1.254451      0.021509 0.859111   1.0
 
 ========================================= NBA PA =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.537044   0.522936 0.062152   -0.000075     0.000600 -0.074482      0.006795 0.361896
- 0.538146   0.521412 0.056591    0.001524     0.002232  0.005649      0.005686 0.361896
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.520333   0.516240   0.109920 0.512711 0.711782 3.376168      0.012183 0.855076 0.131922
+ 0.567568   0.605263   0.015554 0.501671 0.692517 3.376168      0.012183 0.855076 0.131922
 
 ========================================= NBA PF =========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.599398   0.635678 -0.134459    0.024644     0.034952  0.071193      0.033714     1.0
- 0.596942   0.633588 -0.127581    0.020190     0.029170  0.071193      0.036801     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.623626   0.697589   0.128466 0.451268 0.663519 1.647978      0.027432     0.9 0.866218
+ 0.625568   0.698899   0.113355 0.457124 0.662875 1.647978      0.027432     0.9 0.866218
 
 ========================================= NBA PR =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.530408   0.523890 0.071118   -0.002163    -0.002735 -0.076554      0.006069 0.337968
- 0.529867   0.525266 0.068010   -0.001000    -0.001275 -0.001185      0.005263 0.337968
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.517403   0.522634   0.088389 0.500447 0.703687 3.480975      0.014092 0.634122 0.330718
+ 0.541426   0.577434   0.030848 0.499981 0.692912 3.480975      0.014092 0.634122 0.330718
 
 ======================================== NBA PRA =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.543354   0.540958 0.053051   -0.000867    -0.000714 -0.078136      0.006059 0.336823
- 0.548598   0.544917 0.052565    0.000367     0.000709  0.000589      0.005204 0.336823
+ Accuracy  Precision  Sharpness      PIT      NLL     KLD  Training Gap   Weight     Temp
+ 0.523318   0.529900   0.092581 0.500693 0.702541 3.49767     -0.015916 0.661039 0.181188
+ 0.513228   0.547619   0.017943 0.500041 0.692072 3.49767     -0.015916 0.661039 0.181188
 
 ======================================== NBA PTS =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.556517   0.553589 0.116858    0.004090     0.005765 -0.047154      0.001504 0.333607
- 0.555885   0.547575 0.117092    0.004588     0.006358  0.012065      0.001158 0.333607
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.533460   0.520767   0.109380 0.513969 0.705457 3.273407      0.010427     0.9 0.236701
+ 0.566703   0.555556   0.027821 0.503279 0.691226 3.273407      0.010427     0.9 0.236701
 
 ========================================= NBA RA =========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.557947   0.553542 0.132303    0.004663     0.006640 -0.050734      0.001455 0.341585
- 0.556825   0.552576 0.128353    0.005298     0.007353  0.010639      0.001015 0.341585
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.524477   0.528253   0.112688 0.511279 0.711688 2.686436      0.017513     0.9 0.310923
+ 0.528799   0.543075   0.037661 0.503421 0.692861 2.686436      0.017513     0.9 0.310923
 
 ======================================== NBA REB =========================================
  Distribution Model: Poisson
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.566092   0.575596 0.009845    0.002142     0.004150  0.005707      0.013326 0.708964
- 0.566354   0.574803 0.011285    0.005977     0.008536  0.028964      0.010668 0.708964
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.561935   0.566667   0.070279 0.493668 0.688570 2.295584       0.00643 0.409754 0.752036
+ 0.575152   0.571648   0.053468 0.495180 0.687805 2.295584       0.00643 0.409754 0.752036
 
 ======================================== NBA STL =========================================
  Distribution Model: Poisson
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.585829   0.566812 0.005225    0.016377     0.023203  0.090862      0.028332     1.0
- 0.582481   0.562948 0.006582    0.008760     0.014225  0.090862      0.033612     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight  Temp
+ 0.608552    0.57618   0.093564 0.498588 0.674988 1.213559      0.005535 0.521505   1.0
+ 0.608552    0.57618   0.093564 0.498588 0.674988 1.213559      0.005535 0.521505   1.0
 
 ======================================== NBA TOV =========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.601885   0.586936 -0.104926    0.025747     0.036346  0.070054      0.026825     1.0
- 0.601698   0.588643 -0.101680    0.024612     0.034537  0.070054      0.027612     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.609849   0.614046   0.105765 0.468836 0.671132 1.475323      0.013445 0.744172 0.917726
+ 0.611976   0.618125   0.097852 0.471156 0.671046 1.475323      0.013445 0.744172 0.917726
 
 ============================= NBA fantasy points prizepicks ==============================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score      Deviance  Training Gap   Weight
- 0.578936   0.560281 0.023941    0.010096     0.024248  2.532273e-02      0.019032 0.714539
- 0.579219   0.561171 0.025673    0.017414     0.024044 -6.702572e+07      0.013960 0.714539
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.625082   0.611289   0.154706 0.513915 0.656589 3.863325      0.032893     0.9 0.843351
+ 0.630819   0.616259   0.135350 0.512286 0.655291 3.863325      0.032893     0.9 0.843351
 
 ====================================== NFL attempts ======================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.526490   0.550000 -0.041800   -0.036530    -0.031809  0.042627      0.081783 0.892481
- 0.536332   0.552239 -0.041709   -0.007925    -0.009791  0.062076      0.061956 0.892481
+ Accuracy  Precision  Sharpness      PIT      NLL     KLD  Training Gap  Weight  Temp
+  0.52514   0.538462   0.144942 0.503662 0.757000 5.63496      0.186914     0.9   0.1
+  0.30000   0.333333   0.021151 0.500892 0.693624 5.63496      0.186914     0.9   0.1
 
 ====================================== NFL carries =======================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.591772   0.589474 0.132790    0.009947     0.013641 -0.085132      0.004098 0.210042
- 0.580645   0.570552 0.115754    0.009470     0.013025  0.029047      0.004429 0.210042
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.594828   0.580925   0.111314 0.509409 0.686117 2.318315      0.020906 0.755295 0.313107
+ 0.604278   0.595745   0.041767 0.502665 0.684299 2.318315      0.020906 0.755295 0.313107
 
 =============================== NFL completion percentage ================================
  Distribution Model: Gaussian
@@ -276,21 +276,21 @@
 
 ==================================== NFL completions =====================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.489655   0.484848 -0.012742   -0.108696    -0.120817 -0.141000      0.133988 0.917384
- 0.498195   0.512000 -0.016651   -0.067096    -0.083361 -0.113986      0.105153 0.917384
+ Accuracy  Precision  Sharpness      PIT     NLL      KLD  Training Gap  Weight  Temp
+ 0.637931        0.8    0.04556 0.500703 0.68044 3.272727     -0.449285    0.05   1.0
+ 0.637931        0.8    0.04556 0.500703 0.68044 3.272727     -0.449285    0.05   1.0
 
 ============================= NFL fantasy points prizepicks ==============================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.591036   0.572885 0.188069    0.013411     0.018591  0.059053      0.024561     1.0
- 0.590504   0.575693 0.196940    0.020442     0.027346  0.059053      0.019688     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.543938   0.530063   0.136869 0.553034 0.704631 3.396897      0.023226     0.9 0.337931
+ 0.592593   0.581662   0.057749 0.519337 0.684736 3.396897      0.023226     0.9 0.337931
 
 ============================== NFL fantasy points underdog ===============================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.563863   0.543779 0.194305    0.000863     0.004393  0.039347      0.037633     1.0
- 0.566188   0.547703 0.195326    0.009978     0.013654  0.039347      0.031314     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.540962   0.529297   0.143195 0.541532 0.784058 3.732175      0.120403     0.9 0.296708
+ 0.565868   0.550847   0.056791 0.512718 0.758821 3.732175      0.120403     0.9 0.296708
 
 ==================================== NFL first downs =====================================
  Distribution Model: Poisson
@@ -300,93 +300,93 @@
 
 =================================== NFL interceptions ====================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.592437   0.605634 -0.161358    0.015604     0.021449  0.047845      0.063558     1.0
- 0.596364   0.600000 -0.150587    0.010241     0.015801  0.047845      0.067275     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL     KLD  Training Gap   Weight  Temp
+ 0.540816   0.464286   0.069654 0.477894 0.706086 1.04264     -0.042325 0.227006   0.1
+ 0.000000   0.000000   0.008070 0.497577 0.693274 1.04264     -0.042325 0.227006   0.1
 
 ================================ NFL passing first downs =================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.825806   0.769231 -0.149048    0.494801     0.525153  0.738468      0.121361     1.0
- 0.827476   0.785714 -0.143462    0.445086     0.496069  0.738468      0.155821     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight  Temp
+ 0.856481   0.764706    0.22203 0.210384 0.309898 1.405506      0.023828     0.9   1.0
+ 0.856481   0.764706    0.22203 0.210384 0.309898 1.405506      0.023828     0.9   1.0
 
 ==================================== NFL passing tds =====================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.614618   0.613636 -0.099641    0.016799     0.026145   0.03596      0.043147     1.0
- 0.612795   0.611765 -0.105805    0.022003     0.031268   0.03596      0.039539     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.568182   0.720930   0.076496 0.480062 0.694631 1.449065      0.036918 0.257321 0.413842
+ 0.500000   0.619048   0.032379 0.491572 0.690629 1.449065      0.036918 0.257321 0.413842
 
 =================================== NFL passing yards ====================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.666667   0.716667  0.006323    0.030111     0.038412 -0.187595      0.001753  0.1664
- 0.700000   0.750000 -0.024339    0.022748     0.030538  0.058750      0.006856  0.1664
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight  Temp
+ 0.510101   0.481132   0.145741 0.516227 0.762885 5.988491      0.021958     0.9   0.1
+ 0.200000   0.200000   0.018160 0.502321 0.695046 5.988491      0.021958     0.9   0.1
 
 ======================================= NFL qb tds =======================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.700193   0.708661 -0.154973    0.176481     0.200871  0.198904      0.068582     1.0
- 0.679646   0.642384 -0.133364    0.157810     0.183547  0.198904      0.081524     1.0
+ Accuracy  Precision  Sharpness     PIT      NLL      KLD  Training Gap  Weight  Temp
+ 0.680233   0.785714   0.183573 0.37261 0.584103 1.099973      0.155418     0.9   1.0
+ 0.680233   0.785714   0.183573 0.37261 0.584103 1.099973      0.155418     0.9   1.0
 
 ====================================== NFL qb yards ======================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.591093   0.547872 0.286853    0.012931     0.029876  0.085126      0.004878 0.41977
- 0.596552   0.561247 0.299857    0.021627     0.029350  0.106625     -0.001149 0.41977
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight  Temp
+ 0.567362   0.553571   0.146778 0.540275 0.702083 7.147572     -0.228141     0.9   0.1
+ 0.785714   0.800000   0.027397 0.505563 0.686916 7.147572     -0.228141     0.9   0.1
 
 =================================== NFL receiving tds ====================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.724570        0.0 -0.275997    0.210744     0.253477  0.225982      0.031979     1.0
- 0.724003        0.0 -0.275997    0.199013     0.247822  0.225982      0.040111     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.738623        0.0   0.103934 0.240853 0.526880 0.580211      0.013648     0.9 0.920213
+ 0.739486        0.0   0.103111 0.255292 0.526859 0.580211      0.013648     0.9 0.920213
 
 ================================== NFL receiving yards ===================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.574785   0.554759 0.276809    0.012806     0.017887 -0.047774      0.009342 0.373466
- 0.568483   0.547826 0.273885    0.012850     0.017489  0.062078      0.009312 0.373466
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.518587   0.518430   0.104259 0.554669 0.713814 4.757375     -0.129922     0.9 0.129697
+ 0.666667   0.666667   0.014981 0.507365 0.692299 4.757375     -0.129922     0.9 0.129697
 
 ===================================== NFL receptions =====================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.518831   0.569187 -0.055691   -0.058933    -0.067353 -0.047769      0.099947     1.0
- 0.519544   0.569482 -0.051253   -0.070305    -0.082467 -0.047769      0.107829     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.556364   0.566845   0.077839 0.492232 0.693338 1.887403     -0.013914 0.252645 0.487245
+ 0.569270   0.632530   0.039531 0.495985 0.689994 1.887403     -0.013914 0.252645 0.487245
 
 ==================================== NFL rushing tds =====================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.733002   0.437500 -0.259401    0.306032     0.336549  0.344036      0.043219     1.0
- 0.722853   0.409091 -0.250279    0.279265     0.318975  0.344036      0.061772     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight  Temp
+ 0.744019        0.5   0.158992 0.244372 0.471226 0.562885      0.075599 0.882707   1.0
+ 0.744019        0.5   0.158992 0.244372 0.471226 0.562885      0.075599 0.882707   1.0
 
 =================================== NFL rushing yards ====================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.608286   0.606977 0.295617    0.024797     0.032410 -0.038008     -0.001524 0.234209
- 0.610586   0.609813 0.294897    0.023736     0.031431  0.060216     -0.000789 0.234209
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight  Temp
+ 0.521193   0.502242   0.135923 0.534364 0.753435 6.599437      0.060239     0.9   0.1
+ 0.571429   0.611111   0.028137 0.503207 0.692243 6.599437      0.060239     0.9   0.1
 
 ==================================== NFL sacks taken =====================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
-  0.84345   0.222222 -0.100477    0.580389     0.589087  0.707801      0.070870     1.0
-  0.84127   0.222222 -0.100659    0.515213     0.554488  0.707801      0.116047     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.847162        0.0   0.158710 0.130895 0.299576 0.904496      0.259511 0.859324 0.725987
+ 0.850220        0.0   0.171863 0.157724 0.296633 0.904496      0.259511 0.859324 0.725987
 
 ====================================== NFL targets =======================================
  Distribution Model: Poisson
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.592123   0.573446 0.038476    0.038539     0.049184  0.084066      0.054556     1.0
- 0.591758   0.573770 0.037192    0.031892     0.041203  0.084066      0.059164     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+ 0.594978   0.593458   0.153526 0.483909 0.664973 2.135022      0.036819     0.9 0.795117
+ 0.601390   0.606965   0.128921 0.485662 0.661963 2.135022      0.036819     0.9 0.795117
 
 ======================================== NFL tds =========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.783982   0.552632 -0.211201    0.287612     0.358602  0.240468      0.017994     1.0
- 0.782640   0.523810 -0.209844    0.283896     0.354806  0.240468      0.020570     1.0
+ Accuracy  Precision  Sharpness     PIT      NLL      KLD  Training Gap   Weight  Temp
+ 0.767131    0.53125   0.117818 0.23516 0.503936 0.601211      0.051842 0.653026   1.0
+ 0.767131    0.53125   0.117818 0.23516 0.503936 0.601211      0.051842 0.653026   1.0
 
 ======================================= NFL yards ========================================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.622081   0.619141 0.211257    0.034232     0.046769  0.040550      0.002782 0.48699
- 0.613325   0.610856 0.196551    0.035748     0.048368  0.090759      0.001732 0.48699
+ Accuracy  Precision  Sharpness      PIT      NLL       KLD  Training Gap  Weight     Temp
+ 0.591837   0.579014   0.125638 0.538252 0.681842 15.764204      0.167634     0.9 0.465692
+ 0.601874   0.596667   0.063258 0.518081 0.678368 15.764204      0.167634     0.9 0.465692
 
 ======================================= NHL points =======================================
  Distribution Model: Poisson
@@ -420,61 +420,61 @@
 
 ======================================== WNBA AST ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.561765   0.542553 -0.151131   -0.007208    -0.005247   0.01616      0.060331     1.0
- 0.560117   0.542553 -0.151942   -0.002678    -0.000924   0.01616      0.057191     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.539216   0.487179    0.09196 0.441598 0.708158 2.161661      0.037566 0.685159 0.328385
+ 0.540541   0.600000    0.03168 0.480051 0.692492 2.161661      0.037566 0.685159 0.328385
 
 ======================================= WNBA FG3M ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.594796   0.540541 -0.107493   -0.000199     0.004749  0.018518      0.053746     1.0
- 0.584615   0.535211 -0.109509    0.006523     0.011009  0.018518      0.049086     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.595745   0.448276   0.101087 0.456996 0.677466 1.673105      0.046619 0.809283 0.993902
+ 0.593583   0.448276   0.100526 0.457235 0.677412 1.673105      0.046619 0.809283 0.993902
 
 ======================================== WNBA MIN ========================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.751418   0.815009 -0.044296    0.250244     0.287268  0.545238      0.007657     1.0
- 0.745810   0.812392 -0.044916    0.234765     0.281027  0.545238      0.018387     1.0
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap  Weight     Temp
+  0.77459   0.829268   0.301044 0.539697 0.474903 3.379684      0.064963     0.9 0.989011
+  0.77459   0.829268   0.299597 0.539839 0.474893 3.379684      0.064963     0.9 0.989011
 
 ======================================== WNBA PA =========================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.536364   0.628099 -0.174808   -0.005277    -0.006685 -0.038644      0.037279 0.834508
- 0.530201   0.592593 -0.179059    0.003506     0.004684 -0.015734      0.031191 0.834508
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.533019   0.447368   0.115307 0.465667 0.703339 3.307079      0.023863 0.827971 0.495032
+ 0.591549   0.531915   0.060130 0.482118 0.690379 3.307079      0.023863 0.827971 0.495032
 
 ======================================== WNBA PR =========================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.547511   0.521053 -0.011458   -0.002677    -0.000036 -0.014804      0.037825 0.80256
- 0.548077   0.519337 -0.006226    0.006599     0.009580  0.011695      0.031396 0.80256
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.548936   0.510000   0.103707 0.478430 0.692244 3.282555      -0.00736 0.725662 0.836166
+ 0.554545   0.494505   0.088497 0.481422 0.689155 3.282555      -0.00736 0.725662 0.836166
 
 ======================================== WNBA PRA ========================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.619423   0.656805 -0.072559    0.023602     0.040943  0.045547      0.007910 0.716751
- 0.614458   0.664336 -0.085406    0.027953     0.038752  0.061661      0.004894 0.716751
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.539419   0.605505   0.123377 0.480810 0.752998 3.557534      0.047714 0.869496 0.347482
+ 0.551402   0.666667   0.054058 0.491318 0.704793 3.557534      0.047714 0.869496 0.347482
 
 ======================================== WNBA PTS ========================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.577778   0.515000  0.012965    0.011928     0.017607  0.035456      0.012312 0.730623
- 0.574742   0.490683 -0.016531    0.014374     0.019954  0.047139      0.010617 0.730623
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.549669     0.4600   0.048988 0.492836 0.702363 3.321388       0.02977 0.302458 0.921961
+ 0.546763     0.4375   0.046037 0.493450 0.701255 3.321388       0.02977 0.302458 0.921961
 
 ======================================== WNBA RA =========================================
  Distribution Model: Gaussian
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.595420   0.606838 -0.028654    0.023943     0.034018  0.077073      0.019778 0.992977
- 0.594937   0.600000 -0.053278    0.029513     0.040073  0.077609      0.015918 0.992977
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight  Temp
+ 0.571429      0.525   0.058838 0.487184 0.681689 2.762661      0.045885 0.331363   0.1
+      NaN      0.000   0.005983 0.498693 0.691332 2.762661      0.045885 0.331363   0.1
 
 ======================================== WNBA REB ========================================
  Distribution Model: Poisson
- Accuracy  Precision   Balance  Likelihood  Brier Score  Deviance  Training Gap  Weight
- 0.526432   0.592000 -0.204399   -0.033552    -0.037417  0.009214      0.054288 0.98391
- 0.529976   0.584071 -0.208747   -0.011444    -0.014242  0.010550      0.038964 0.98391
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.598039   0.641509   0.067151 0.472312 0.683794 2.461259      0.027226 0.294662 0.536678
+ 0.666667   0.750000   0.037264 0.484751 0.685372 2.461259      0.027226 0.294662 0.536678
 
 ============================= WNBA fantasy points prizepicks =============================
  Distribution Model: Gaussian
- Accuracy  Precision  Balance  Likelihood  Brier Score  Deviance  Training Gap   Weight
- 0.602881   0.582677 0.047634    0.008573     0.021660  0.080374      0.051644 0.930734
- 0.600832   0.580000 0.044751    0.023579     0.033558  0.086961      0.041243 0.930734
+ Accuracy  Precision  Sharpness      PIT      NLL      KLD  Training Gap   Weight     Temp
+ 0.568889   0.627907   0.125477 0.469197 0.698301 3.597348      0.014324 0.452321 0.688263
+ 0.561856   0.602740   0.091805 0.477463 0.688709 3.597348      0.014324 0.452321 0.688263
 

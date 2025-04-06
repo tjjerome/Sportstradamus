@@ -7,17 +7,17 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from scipy.optimize import minimize
+from scipy.stats import poisson, norm
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
-    brier_score_loss,
-    mean_tweedie_deviance,
     log_loss
 )
 from scipy.stats import (
     norm,
     poisson
 )
+from scipy.special import softmax
 import lightgbm as lgb
 import pandas as pd
 import click
@@ -48,9 +48,9 @@ distributions = {
 }
 
 
-mlb = StatsMLB()
-mlb.load()
-mlb.update()
+# mlb = StatsMLB()
+# mlb.load()
+# mlb.update()
 nba = StatsNBA()
 nba.load()
 nba.update()
@@ -67,7 +67,7 @@ wnba.update()
 stat_structs = {
     "NBA": nba,
     "NFL": nfl,
-    "MLB": mlb,
+    # "MLB": mlb,
     # "NHL": nhl,
     "WNBA": wnba
 }
@@ -75,7 +75,7 @@ stat_structs = {
 archive = Archive()
 
 @click.command()
-@click.option("--force/--no-force", default=False, help="Force update of all models")
+@click.option("--force/--no-force", default=True, help="Force update of all models")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
@@ -297,11 +297,16 @@ def meditate(force, league):
             categories = "name:"+",".join(categories)
 
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
+                X, y, test_size=0.3, random_state=42
+            )
+
+            X_test, X_validation, y_test, y_validation = train_test_split(
+                X_test, y_test, test_size=0.5, random_state=25
             )
 
             B_train = M.loc[X_train.index, ['Line', 'Odds', 'EV']]
             B_test = M.loc[X_test.index, ['Line', 'Odds', 'EV']]
+            B_validation = M.loc[X_validation.index, ['Line', 'Odds', 'EV']]
 
             y_train_labels = np.ravel(y_train.to_numpy())
 
@@ -333,11 +338,10 @@ def meditate(force, league):
                 params = {
                     "feature_pre_filter": ["none", [False]],
                     "num_threads": ["none", [8]],
-                    # "force_col_wise": ["none", [True]],
-                    "max_depth": ["int", {"low": 4, "high": 32, "log": False}],
+                    "max_depth": ["int", {"low": 4, "high": 16, "log": False}],
                     "max_bin": ["none", [63]],
                     "hist_pool_size": ["none", [9*1024]],
-                    "num_leaves": ["int", {"low": 23, "high": 1024, "log": False}],
+                    "num_leaves": ["int", {"low": 23, "high": 256, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
                     "min_child_samples": ["int", {"low": 30, "high": 100, "log": False}],
@@ -363,7 +367,9 @@ def meditate(force, league):
                         )
 
             prob_params_train = pd.DataFrame()
+            prob_params_validation = pd.DataFrame()
             prob_params = pd.DataFrame()
+
             idx = X_train.index
             sv = X_train[["MeanYr", "STDYr"]].to_numpy()
             if dist == "Poisson":
@@ -374,6 +380,18 @@ def meditate(force, league):
                 X_train, pred_type="parameters")
             preds.index = idx
             prob_params_train = pd.concat([prob_params_train, preds])
+
+            idx = X_validation.index
+            sv = X_validation[["MeanYr", "STDYr"]].to_numpy()
+            if dist == "Poisson":
+                sv = sv[:,0]
+                sv.shape = (len(sv),1)
+            model.start_values = sv
+            preds = model.predict(
+                X_validation, pred_type="parameters")
+            preds.index = idx
+            prob_params_validation = pd.concat([prob_params_validation, preds])
+
             idx = X_test.index
             sv = X_test[["MeanYr", "STDYr"]].to_numpy()
             if dist == "Poisson":
@@ -387,6 +405,8 @@ def meditate(force, league):
 
             prob_params_train.sort_index(inplace=True)
             prob_params_train['result'] = y_train['Result']
+            prob_params_validation.sort_index(inplace=True)
+            prob_params_validation['result'] = y_validation['Result']
             prob_params.sort_index(inplace=True)
             prob_params['result'] = y_test['Result']
             X_train.sort_index(inplace=True)
@@ -395,118 +415,118 @@ def meditate(force, league):
             X_test.sort_index(inplace=True)
             B_test.sort_index(inplace=True)
             y_test.sort_index(inplace=True)
+            X_validation.sort_index(inplace=True)
+            B_validation.sort_index(inplace=True)
+            y_validation.sort_index(inplace=True)
             B_train.loc[B_train["Odds"] == 0, "Odds"] = 0.5
             B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
+            B_validation.loc[B_validation["Odds"] == 0, "Odds"] = 0.5
             cv = 1
             if dist == "Poisson":
-                p = 1
                 ev = prob_params["rate"].to_numpy()
                 ev_train = prob_params_train["rate"].to_numpy()
+                std_train = None
+                ev_validation = prob_params_validation["rate"].to_numpy()
+                std_validation = None
             elif dist == "Gaussian":
-                p = 0
-                ev = prob_params["loc"].to_numpy()
+                ev = prob_params["loc"].clip(0.1).to_numpy()
                 cv = y.Result.std()/y.Result.mean()
                 ev_train = prob_params_train["loc"].to_numpy()
+                std_train = prob_params_train["scale"]
+                ev_validation = prob_params_validation["loc"].to_numpy()
+                std_validation = prob_params_validation["scale"]
 
             odds_ev = B_train["EV"].to_numpy()
-            model_weight = fit_model_weight(ev_train, odds_ev, y_train["Result"].to_numpy(), p)
-            weighted_ev_train = ev_train*model_weight + odds_ev*(1-model_weight)
-            weighted_ev = ev*model_weight + B_test["EV"].to_numpy()*(1-model_weight)
+
+            model_weight = fit_model_weight(ev_validation, B_validation["EV"].to_numpy(), y_validation["Result"].to_numpy(), cv, std_validation)
 
             if dist == "Poisson":
-                under = poisson.cdf(
-                    B_train["Line"], weighted_ev_train)
-                push = poisson.pmf(
-                    B_train["Line"], weighted_ev_train)
-                y_proba_train = under - push/2
-                under = poisson.cdf(
-                    B_test["Line"], weighted_ev)
-                push = poisson.pmf(
-                    B_test["Line"], weighted_ev)
-                y_proba = under - push/2
+                weighted_ev_train = np.exp(np.average(np.log(np.concatenate([[ev_train], [odds_ev]], axis=0)), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev_validation = np.exp(np.average(np.log(np.concatenate([[ev_validation], [B_validation["EV"].to_numpy()]], axis=0)), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev = np.exp(np.average(np.log(np.concatenate([[ev], [B_test["EV"].to_numpy()]], axis=0)), weights=[model_weight, 1-model_weight], axis=0))
+                
+                y_proba_train = get_odds(B_train["Line"].to_numpy(), weighted_ev_train)
+                y_proba_validation = get_odds(B_validation["Line"].to_numpy(), weighted_ev_validation)
+                y_proba = get_odds(B_test["Line"].to_numpy(), weighted_ev)
+                
+                kld = -np.mean(poisson.logpmf(y_test["Result"].astype(int).to_numpy(), weighted_ev))
+                kld_train = -np.mean(poisson.logpmf(y_train["Result"].astype(int).to_numpy(), weighted_ev_train))
             elif dist == "Gaussian":
-                high = np.floor((B_train["Line"]+step)/step)*step
-                low = np.ceil((B_train["Line"]-step)/step)*step
-                under = norm.cdf(
-                    high, weighted_ev_train, prob_params_train["scale"])
-                push = under - norm.cdf(
-                    low, weighted_ev_train, prob_params_train["scale"])
-                y_proba_train = under - push/2
-                high = np.floor((B_test["Line"]+step)/step)*step
-                low = np.ceil((B_test["Line"]-step)/step)*step
-                under = norm.cdf(
-                    high, weighted_ev, prob_params["scale"])
-                push = under - norm.cdf(
-                    low, weighted_ev, prob_params["scale"])
-                y_proba = under - push/2
+                s_train = np.concatenate([[prob_params_train["scale"]], [cv*odds_ev]], axis=0)
+                std_train = np.sqrt(1/np.average(np.power(s_train,-2), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev_train = np.average(np.concatenate([[ev_train], [odds_ev]], axis=0)*np.power(s_train,-2), weights=[model_weight, 1-model_weight], axis=0)*std_train*std_train
+
+                s_validation = np.concatenate([[prob_params_validation["scale"]], [cv*B_validation["EV"].to_numpy()]], axis=0)
+                std_validation = np.sqrt(1/np.average(np.power(s_validation,-2), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev_validation = np.average(np.concatenate([[ev_validation], [B_validation["EV"].to_numpy()]], axis=0)*np.power(s_validation,-2), weights=[model_weight, 1-model_weight], axis=0)*std_validation*std_validation
+
+                s = np.concatenate([[prob_params["scale"]], [cv*B_test["EV"].to_numpy()]], axis=0)
+                std = np.sqrt(1/np.average(np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev = np.average(np.concatenate([[ev], [B_test["EV"].to_numpy()]], axis=0)*np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0)*std*std
+
+                y_proba_train = get_odds(B_train["Line"].to_numpy(), weighted_ev_train, cv, std_train, step=step)
+                y_proba_validation = get_odds(B_validation["Line"].to_numpy(), weighted_ev_validation, cv, std_validation, step=step)
+                y_proba = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std, step=step)
+
+                kld = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std))
+                kld_train = -np.mean(norm.logpdf(y_train["Result"].to_numpy(), weighted_ev_train, std_train))
 
             stat_std = y.Result.std()
-            dev = [mean_tweedie_deviance(y_test, ev, power=p), mean_tweedie_deviance(y_test, weighted_ev, power=p)]
 
             y_proba_train = (1-y_proba_train).reshape(-1, 1)
 
-            y_class = (y_train["Result"] >=
-                       B_train["Line"]).astype(int).to_numpy()
-            train_ll = log_loss(y_class, y_proba_train)
+            y_class = (y_validation["Result"] >=
+                       B_validation["Line"]).astype(int)
+            y_proba_validation = np.array(
+                [y_proba_validation, 1-y_proba_validation]).transpose()
+            
+            res = minimize(lambda x: log_loss(y_class,softmax(np.log(y_proba_validation)*x,axis=1)[:,1]), x0=[1], bounds=[(0.1, 1)])
+            model_temp = res.x[0]
 
             y_proba_no_filt = np.array(
                 [y_proba, 1-y_proba]).transpose()
-            y_proba = (1-y_proba).reshape(-1, 1)
-            filt = LogisticRegression(
-                fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(y_proba_train*2-1, y_class)
-            y_proba_filt = filt.predict_proba(y_proba*2-1)
+            y_proba_filt = softmax(np.log(y_proba_no_filt)*model_temp,axis=1)
 
             y_class = (y_test["Result"] >=
                        B_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
-            bs0 = brier_score_loss(
-                y_class, 0.5*np.ones_like(y_class), pos_label=1)
-            dev0 = mean_tweedie_deviance(y_test, B_test["Line"], power=p)
-            ll0 = log_loss(y_class, 0.5*np.ones_like(y_class))
-            bal0 = (y_test["Result"] > B_test["Line"]).mean()
 
             prec = np.zeros(2)
             acc = np.zeros(2)
-            bs = np.zeros(2)
-            d = np.zeros(2)
+            sharp = np.zeros(2)
+            pit = np.zeros(2)
             ll = np.zeros(2)
-            bal = np.zeros(2)
-            g = np.zeros(2)
 
             for i, y_proba in enumerate([y_proba_no_filt, y_proba_filt]):
                 y_pred = (y_proba > .5).astype(int)[:, 1]
                 mask = np.max(y_proba, axis=1) > 0.54
                 prec[i] = precision_score(y_class[mask], y_pred[mask])
                 acc[i] = accuracy_score(y_class[mask], y_pred[mask])
-                bal[i] = np.mean(y_pred[mask]) - bal0
 
-                bs[i] = brier_score_loss(y_class, y_proba[:, 1], pos_label=1)
-                bs[i] = 1 - bs[i]/bs0
+                sharp[i] = np.std(y_proba[:, 1])
+                pit[i] = np.mean(y_proba[:, 1])
 
                 ll[i] = log_loss(y_class, y_proba[:, 1])
-                g[i] = ll[i] - train_ll
-                ll[i] = 1 - ll[i]/ll0
-
-                d[i] = 1 - dev[i]/dev0
 
             filedict = {
                 "model": model,
-                "filter": filt,
                 "step": step,
                 "stats": {
                     "Accuracy": acc,
                     "Precision": prec,
-                    "Balance": bal,
-                    "Likelihood": ll,
-                    "Brier Score": bs,
-                    "Deviance": d,
-                    "Training Gap": g,
-                    "Weight": [model_weight]*2
+                    "Sharpness": sharp,
+                    "PIT": pit,
+                    "NLL": ll,
+                    "KLD": [kld]*2,
+                    "Training Gap": [(kld-kld_train)/kld]*2,
+                    "Weight": [model_weight]*2,
+                    "Temp": [model_temp]*2
                 },
                 "params": opt_params,
                 "distribution": dist,
                 "cv": cv,
                 "std": stat_std,
+                "temperature": model_temp,
                 "weight": model_weight
             }
 
@@ -690,7 +710,7 @@ def fit_book_weights(league, market):
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["team"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[stat_data.log_strings["win"]]
         df.dropna(subset="Result", inplace=True)
-        result = df["Result"] == "W"
+        result = (df["Result"] == "W").astype(int)
         test_df = df.drop(columns='Result')
 
     elif market == "Totals":
@@ -698,7 +718,7 @@ def fit_book_weights(league, market):
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["team"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[stat_data.log_strings["score"]]
         df.dropna(subset="Result", inplace=True)
-        result = df["Result"]
+        result = df["Result"].astype(float)
         test_df = df.drop(columns='Result')
     
     elif market == "1st 1 innings":
@@ -706,32 +726,34 @@ def fit_book_weights(league, market):
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], "opponent"]).set_index([stat_data.log_strings["date"], "opponent"])["1st inning runs allowed"]
         df.dropna(subset="Result", inplace=True)
-        df["Over"] = df["Result"] > 0.5
-        result = df["Over"]
-        test_df = df[[col for col in df.columns if col not in ["Line", "Result", "Over"]]]
-        test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(np.ones(len(test_df))*0.5, x.to_numpy(), cv))
+        result = df["Result"].astype(float)
+        test_df = df.drop(columns='Result')
     
     else:
         log = stat_data.gamelog[[stat_data.log_strings["player"], stat_data.log_strings["date"], market]]
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["player"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["player"]])[market]
         df.dropna(subset="Result", inplace=True)
-        df["Over"] = df["Result"] > df["Line"]
-        result = df["Over"]
-        lines = df["Line"]
-        test_df = df[[col for col in df.columns if col not in ["Line", "Result", "Over"]]]
-        test_df = test_df.apply(lambda x: 1-np.vectorize(get_odds)(lines.to_numpy(), x.to_numpy(), cv))
+        result = df["Result"].astype(float)
+        test_df = df.drop(columns='Result')
         
 
-    if market in ["Totals"]:
+    if market == "Moneyline":
         def objective(w, x, y):
-            prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
-            return mean_tweedie_deviance(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)], power=1)
+            prob = np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1))
+            return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
 
+    elif cv == 1:
+        def objective(w, x, y):
+            proj = np.array(np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1)))
+            return -np.mean(poisson.logpmf(y.astype(int), proj))
+        
     else:
         def objective(w, x, y):
-            prob = np.ma.average(np.ma.MaskedArray(x, mask=np.isnan(x)), weights=w, axis=1)
-            return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
+            s = np.ma.MaskedArray(x*cv, mask=np.isnan(x))
+            std = np.sqrt(1/np.ma.average(np.power(s,-2), weights=w, axis=1))
+            proj = np.array(np.ma.average(np.ma.MaskedArray(x*np.power(s,-2), mask=np.isnan(x)), weights=w, axis=1)*std*std)
+            return -np.mean(norm.logpdf(y, proj, std))
     
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
     x[x<0] = np.nan
@@ -743,16 +765,31 @@ def fit_book_weights(league, market):
             guess.update({book: prev_weights.get(book,1)})
             
         guess = list(guess.values())
-        res = minimize(objective, guess, args=(x, y), bounds=[(1, 10)]*len(test_df.columns), tol=1e-8, method='TNC')
+        guess = np.clip(guess/np.sum(guess),0.005,.75)
+        res = minimize(objective, guess, args=(x, y), bounds=[(0.001, 1)]*len(test_df.columns), tol=1e-8, method='TNC')
     
         return {k:res.x[i] for i, k in enumerate(test_df.columns)}
     else:
         return {}
 
-def fit_model_weight(model_ev, odds_ev, result, p):
+def fit_model_weight(model_ev, odds_ev, result, cv, model_std=None):
+    if cv == 1:
+        def objective(w, x, y):
+            W = np.array([w, 1-w]).flatten()
+            proj = np.exp(np.average(np.log(x), weights=W, axis=0))
+            return -np.mean(poisson.logpmf(y.astype(int), proj))
+        
+    else:
+        s = np.concatenate([[model_std], [cv*odds_ev]], axis=0)
+        def objective(w, x, y):
+            W = np.array([w, 1-w]).flatten()
+            std = np.sqrt(1/np.average(np.power(s,-2), weights=W, axis=0))
+            proj = np.average(x*np.power(s,-2), weights=W, axis=0)*std*std
+            return -np.mean(norm.logpdf(y, proj, std))
+        
     x = np.concatenate([[model_ev], [odds_ev]], axis=0)
 
-    res = minimize(lambda w: mean_tweedie_deviance(result, np.dot([w[0], 1-w[0]], x), power=p), 0.5, bounds=[(0,1)], tol=1e-8, method='TNC')
+    res = res = minimize(objective, .1, args=(x, result), bounds=[(0.05, 0.9)], tol=1e-8, method='TNC')
     return res.x[0]
 
 def fit_filter(x, y_class):
