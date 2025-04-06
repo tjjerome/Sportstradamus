@@ -724,7 +724,7 @@ def save_data(df, parlay_df, book, gc):
 
         try:
             df.sort_values("Model", ascending=False, inplace=True)
-            mask = (df.Books > .98) & (df.Model > 1.06) & (2.5 >= df.Boost)
+            mask = (df.Books > .95) & (df.Model > 1.02) & (2.5 >= df.Boost)
             if book == "Underdog":
                 df["Boost"] = df["Boost"]/1.78
             # Access the Google Sheets worksheet and update its contents
