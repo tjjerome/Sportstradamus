@@ -928,13 +928,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             offer_df["Model STD"] = np.sqrt(1/np.average(np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1))
             offer_df["Model EV"] = np.average(offer_df[["Model EV", "Books EV"]].fillna(0).to_numpy()*np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1)*np.power(offer_df["Model STD"].to_numpy(), 2)
         
-        offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step), axis=1)
+        offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step, temp=model_temp), axis=1)
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
         offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0) * (1.78 if platform == "Underdog" else 1)
-        offer_df[["Model Under", "Model Over"]] = softmax(np.log(offer_df[["Model Under", "Model Over"]].fillna(.5).values)*model_temp, axis=1)*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).values
+        offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5).values*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).values
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
