@@ -335,21 +335,23 @@ def get_ev(line, under, cv=1, force_gauss=False):
             line = float(line)
             return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
 
-def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1):
+def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1):
     high = np.floor((line+step)/step)*step
     low = np.ceil((line-step)/step)*step
     if cv == 1:
         if force_gauss:
-            under = norm.cdf(high, ev, np.sqrt(ev))
-            push = under - norm.cdf(low, ev, np.sqrt(ev))
+            under = norm.cdf(high, ev, np.sqrt(ev)/temp)
+            push = under - norm.cdf(low, ev, np.sqrt(ev)/temp)
             return under - push/2
-        else:
+        elif temp==1:
             return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
+        else:
+            return skellam.cdf(line, (1/(2*temp)+.5)*ev, (1/(2*temp)-.5)*ev) - skellam.pmf(line, (1/(2*temp)+.5)*ev, (1/(2*temp)-.5)*ev)/2
     else:
         if std is None:
             std = ev*cv
-        under = norm.cdf(high, ev, std)
-        push = under - norm.cdf(low, ev, std)
+        under = norm.cdf(high, ev, std/temp)
+        push = under - norm.cdf(low, ev, std/temp)
         return under - push/2
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):

@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from scipy.optimize import minimize
-from scipy.stats import poisson, norm
+from scipy.stats import poisson, skellam, norm
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -85,9 +85,9 @@ def meditate(force, league):
 
     all_markets = {
         "NFL": [
+            "targets",
             "carries",
             "attempts",
-            "targets",
             "passing yards",
             "rushing yards",
             "receiving yards",
@@ -445,11 +445,20 @@ def meditate(force, league):
                 weighted_ev_validation = np.exp(np.average(np.log(np.concatenate([[ev_validation], [B_validation["EV"].to_numpy()]], axis=0)), weights=[model_weight, 1-model_weight], axis=0))
                 weighted_ev = np.exp(np.average(np.log(np.concatenate([[ev], [B_test["EV"].to_numpy()]], axis=0)), weights=[model_weight, 1-model_weight], axis=0))
                 
-                y_proba_train = get_odds(B_train["Line"].to_numpy(), weighted_ev_train)
-                y_proba_validation = get_odds(B_validation["Line"].to_numpy(), weighted_ev_validation)
-                y_proba = get_odds(B_test["Line"].to_numpy(), weighted_ev)
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev)
+                y_proba_no_filt = np.array(
+                    [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
+
+                res = minimize(lambda x: -np.mean(poisson.logpmf(y_validation["Result"].to_numpy(), weighted_ev_validation) if x == 1 else 
+                                                  skellam.logpmf(y_validation["Result"].to_numpy(), (1/(2*x)+.5)*weighted_ev_validation, (1/(2*x)-.5)*weighted_ev_validation)), x0=[1], bounds=[(.1, 1)])
+                model_temp = res.x[0]
                 
-                kld = -np.mean(poisson.logpmf(y_test["Result"].astype(int).to_numpy(), weighted_ev))
+                y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, temp=model_temp)
+                y_proba_filt = np.array(
+                    [y_proba_filt, 1-y_proba_filt]).transpose()
+                
+                kld_no_filt = -np.mean(poisson.logpmf(y_test["Result"].astype(int).to_numpy(), weighted_ev))
+                kld_filt = kld_no_filt if model_temp == 1 else -np.mean(skellam.logpmf(y_test["Result"].to_numpy(), (1/(2*model_temp)+.5)*weighted_ev, (1/(2*model_temp)-.5)*weighted_ev))
                 kld_train = -np.mean(poisson.logpmf(y_train["Result"].astype(int).to_numpy(), weighted_ev_train))
             elif dist == "Gaussian":
                 s_train = np.concatenate([[prob_params_train["scale"]], [cv*odds_ev]], axis=0)
@@ -464,28 +473,22 @@ def meditate(force, league):
                 std = np.sqrt(1/np.average(np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0))
                 weighted_ev = np.average(np.concatenate([[ev], [B_test["EV"].to_numpy()]], axis=0)*np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0)*std*std
 
-                y_proba_train = get_odds(B_train["Line"].to_numpy(), weighted_ev_train, cv, std_train, step=step)
-                y_proba_validation = get_odds(B_validation["Line"].to_numpy(), weighted_ev_validation, cv, std_validation, step=step)
-                y_proba = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std, step=step)
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std, step=step)
+                y_proba_no_filt = np.array(
+                    [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
-                kld = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std))
+                res = minimize(lambda x: -np.mean(norm.logpdf(y_validation["Result"].to_numpy(), weighted_ev_validation, std_validation/x)), x0=[1], bounds=[(.1, 1)])
+                model_temp = res.x[0]
+
+                y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std, step=step, temp=model_temp)
+                y_proba_filt = np.array(
+                    [y_proba_filt, 1-y_proba_filt]).transpose()
+
+                kld_no_filt = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std))
+                kld_filt = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std/model_temp))
                 kld_train = -np.mean(norm.logpdf(y_train["Result"].to_numpy(), weighted_ev_train, std_train))
 
             stat_std = y.Result.std()
-
-            y_proba_train = (1-y_proba_train).reshape(-1, 1)
-
-            y_class = (y_validation["Result"] >=
-                       B_validation["Line"]).astype(int)
-            y_proba_validation = np.array(
-                [y_proba_validation, 1-y_proba_validation]).transpose()
-            
-            res = minimize(lambda x: log_loss(y_class,softmax(np.log(y_proba_validation)*x,axis=1)[:,1]), x0=[1], bounds=[(0.1, 1)])
-            model_temp = res.x[0]
-
-            y_proba_no_filt = np.array(
-                [y_proba, 1-y_proba]).transpose()
-            y_proba_filt = softmax(np.log(y_proba_no_filt)*model_temp,axis=1)
 
             y_class = (y_test["Result"] >=
                        B_test["Line"]).astype(int)
@@ -517,10 +520,9 @@ def meditate(force, league):
                     "Sharpness": sharp,
                     "PIT": pit,
                     "NLL": ll,
-                    "KLD": [kld]*2,
-                    "Training Gap": [(kld-kld_train)/kld]*2,
-                    "Weight": [model_weight]*2,
-                    "Temp": [model_temp]*2
+                    "KLD": [kld_no_filt, kld_filt],
+                    "Training Gap": [(kld_no_filt-kld_train)/kld_train, (kld_filt-kld_train)/kld_train],
+                    "Weight/Temp": [model_weight, model_temp]
                 },
                 "params": opt_params,
                 "distribution": dist,
@@ -536,12 +538,6 @@ def meditate(force, league):
             elif dist == "Gaussian":
                 X_test['EV'] = prob_params['loc']
                 X_test['STD'] = prob_params['scale']
-            elif dist == "Gamma":
-                X_test['alpha'] = prob_params['concentration']
-                X_test['beta'] = prob_params['rate']
-            elif dist == "NegativeBinomial":
-                X_test['N'] = prob_params['total_count']
-                X_test['L'] = prob_params['probs']
 
             X_test['P'] = y_proba_filt[:, 1]
 
