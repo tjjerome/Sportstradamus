@@ -818,7 +818,7 @@ def get_ud():
         team_ids[i["id"]] = i["abbr"]
 
     api = scraper.get(
-        "https://api.underdogfantasy.com/beta/v5/over_under_lines")
+        "https://api.underdogfantasy.com/beta/v6/over_under_lines")
     if not api:
         logger.info("No offers found")
         return {}
@@ -925,6 +925,32 @@ def get_ud():
             offers[n["League"]][n["Market"]] = []
 
         offers[n["League"]][n["Market"]].append(n)
+
+        if player["League"] in ["NFL", "NBA", "WNBA"] and o["over_under"]["has_alternates"]:
+            id = o["over_under"].get("id", 0)
+            alts = scraper.get(f"https://api.underdogfantasy.com/v1/over_unders/{id}/alternate_projections")
+            if alts:
+                for a in alts["projections"]:
+                    if not a["is_main"]:
+                        boosts = [0, 0]
+                        for option in a["options"]:
+                            if option["choice"] == "higher":
+                                boosts[0] = float(option["payout_multiplier"])
+                            elif option["choice"] == "lower":
+                                boosts[1] = float(option["payout_multiplier"])
+                        n = {
+                            "Player": remove_accents(player["Name"]),
+                            "League": player["League"],
+                            "Team": abbr_map.get(player["Team"], player["Team"]),
+                            "Opponent": abbr_map.get(opponent, opponent),
+                            "Date": game["Date"],
+                            "Market": market,
+                            "Line": float(a["stat_value"]),
+                            "Boost_Over": boosts[0],
+                            "Boost_Under": boosts[1],
+                        }
+                        offers[n["League"]][n["Market"]].append(n)
+
 
     rivals = scraper.get("https://api.underdogfantasy.com/beta/v3/rival_lines")
 
@@ -1085,7 +1111,11 @@ def get_sleeper():
                         outcomes = outcomes + [{}]
                     else:
                         outcomes = [{}] + outcomes
-                opp = [team for team in teams if team != player_team][0]
+                
+                if player_team:
+                    opp = [team for team in teams if team != player_team][0]
+                else:
+                    opp = None
 
                 n = {
                     "Player": player_name,
