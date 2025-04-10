@@ -427,7 +427,7 @@ def find_correlation(offers, stats, platform):
 
         league_df["Desc"] = league_df["Desc"] + " - " + \
             league_df["Model P"].multiply(100).round(1).astype(str) + "%, " + \
-            league_df["Boost"].astype(str) + "x"
+            league_df["Boost"].round(2).astype(str) + "x"
 
         checked_teams = []
         teams = [team for team in league_df.Team.unique() if "/" not in team]
@@ -467,10 +467,10 @@ def find_correlation(offers, stats, platform):
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict('index')
 
-            idx = game_df.loc[(game_df["Books"] > .85) & (game_df["Books P"] >= .25) & (game_df["Model"] > 1) & (game_df["Model P"] >= .3)].sort_values(['Model', 'Books'], ascending=False)
-            idx = idx.drop_duplicates(subset=["Player", "Team", "Market"])
-            idx = idx.groupby(['Player', 'Bet']).head(3)
-            idx = idx.sort_values(['Model', 'Books'], ascending=False).groupby('Team').head(25).sort_values(['Team', 'Player'])
+            idx = game_df.loc[(game_df["Books"] > .85) & (game_df["Books P"] >= .25) & (game_df["Model"] > 1) & (game_df["Model P"] >= .3)].sort_values("K", ascending=False)
+            idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
+            idx = idx.groupby('Player').head(6)
+            idx = idx.sort_values(['Model', 'Books'], ascending=False).groupby('Team').head(30).sort_values(['Team', 'Player'])
             idx = idx.sort_values(['Model', 'Books'], ascending=False).head(40).sort_values(['Team', 'Player'])
             # idx = idx.sort_values(['Model', 'Books', 'Team', 'Player'], ascending=False).head(50)
             bet_df = idx.to_dict('index')
@@ -621,7 +621,7 @@ def find_correlation(offers, stats, platform):
         payouts = [0, 0, 3, 6, 6, 10, 25]
         parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
 
-    return df.drop(columns=["Player position", "Model P", "Books P"]).dropna().sort_values("Model", ascending=False), parlay_df
+    return df.sort_values("K", ascending=False).groupby(["Player", "Team", "Market"]).head(1).drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
     combos, p_model, p_books, boosts, M, C, EV, bet_df, info, payouts, max_boost = args
@@ -941,7 +941,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
         offer_df["Books"] = offer_df["Books"].fillna(.5)*offer_df["Boost"]
         offer_df["K"] = (offer_df["Model"]-1)/(offer_df["Boost"]-1)
-        offer_df = offer_df.loc[offer_df["Boost"] <= 3.6].sort_values("K", ascending=False).groupby("Player").head(1)
+        offer_df = offer_df.loc[offer_df["Boost"] <= 3.65].sort_values("K", ascending=False).groupby("Player").head(3)
 
         offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
         offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
@@ -956,7 +956,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Model P"] = offer_df["Model"]/offer_df["Boost"]
         offer_df["Books P"] = offer_df["Books"]/offer_df["Boost"]
 
-        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Model P", "Books EV", "Books P"]].to_dict('records')
+        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model STD", "Model P", "Books EV", "Books P", "K"]].to_dict('records')
 
     else:
         logger.warning(f"{filename} missing")
