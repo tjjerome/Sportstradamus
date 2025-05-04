@@ -267,7 +267,8 @@ class Stats:
 
         if "NBA" in self.league:
             player_df = []
-            for team, roster in self.players[season].items():
+            season_players = self.players.get(season) if self.players.get(season) else self.players.get(season-1)
+            for team, roster in season_players.items():
                 roster = [{self.log_strings["player"]: k, self.log_strings["team"]: team}|v for k, v in roster.items()]
                 player_df.extend(roster)
 
