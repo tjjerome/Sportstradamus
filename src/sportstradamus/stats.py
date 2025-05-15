@@ -243,6 +243,8 @@ class Stats:
                 apply(lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
                                            x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
             
+        if self.league == "WNBA" and "GSV" not in self.defenseProfile.index:
+            self.defenseProfile.loc["GSV"] = np.nan
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
