@@ -410,6 +410,10 @@ class Stats:
         stats = stats.join(self.playerProfile.add_prefix("Player "))
         if self.league != "MLB":
             stats = stats.loc[stats["Player depth"] > 0]
+            
+        if self.league == "WNBA" and "GSV" not in self.teamProfile.index:
+            self.teamProfile.loc["GSV"] = np.nan
+            
         teamstats = self.teamProfile.loc[stats.index.map(teams)].add_prefix("Team ")
         teamstats.index = stats.index
         stats = stats.join(teamstats)
