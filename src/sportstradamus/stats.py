@@ -1709,7 +1709,7 @@ class StatsWNBA(StatsNBA):
         super().__init__()
         self.league = "WNBA"
         self.positions = ['G', 'F', 'C']
-        self.season_start = datetime(2024, 5, 14).date()
+        self.season_start = datetime(2025, 5, 16).date()
         self.default_total = 81.667
 
         self.gamelog.columns = [stat.replace("_48", "_40") for stat in self.gamelog.columns]
