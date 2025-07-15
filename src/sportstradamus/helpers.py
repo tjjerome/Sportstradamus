@@ -226,6 +226,8 @@ def remove_accents(input_str):
     Returns:
         str: The input string without accents.
     """
+    if input_str is None:
+        return ""
     nfkd_form = unicodedata.normalize("NFKD", input_str)
     out_str = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
     out_str = out_str.replace(".", "")
