@@ -628,7 +628,7 @@ class StatsNBA(Stats):
         super().__init__()
         self.league = "NBA"
         self.positions = ['P', 'C', 'F', 'W', 'B']
-        self.season_start = datetime(2024, 10, 22).date()
+        self.season_start = datetime(2025, 10, 21).date()
         self.season = "2024-25"
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
                 'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
@@ -1751,7 +1751,7 @@ class StatsWNBA(StatsNBA):
         }
 
         player_df = nba.playerindex.PlayerIndex(season=self.season_start.year, league_id="10", historical_nullable=1).get_normalized_dict()["PlayerIndex"]
-        player_df = pd.DataFrame(player_df).rename(columns={"POSITION":"POS", "PERSON_ID": "PLAYER_ID"})
+        player_df = pd.DataFrame(player_df).rename(columns={"POSITION":"POS", "Position":"POS", "PERSON_ID": "PLAYER_ID"})
         player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
         player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
 
@@ -1902,6 +1902,7 @@ class StatsWNBA(StatsNBA):
         stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
         stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
         stat_df = stat_df.loc[stat_df["MIN"] > 1]
+        stat_df = stat_df.loc[~stat_df.TEAM_ABBREVIATION.isna()]
 
         stat_df["HOME"] = stat_df.MATCHUP.str.contains(" vs. ")
         stat_df = stat_df.merge(player_df[["PLAYER_ID", "POS"]], on="PLAYER_ID")
@@ -1936,6 +1937,7 @@ class StatsWNBA(StatsNBA):
 
         team_df = pd.DataFrame(teamlog).merge(pd.DataFrame(adv_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None,"_y"]).merge(pd.DataFrame(sco_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None,"_y"])
         team_df = team_df[[col for col in team_df.columns if "_y" not in col]]
+        team_df = team_df.loc[~team_df.TEAM_ABBREVIATION.isna()]
 
         team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
         team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" "):].strip())
@@ -3519,7 +3521,7 @@ class StatsNFL(Stats):
         Initialize the StatsNFL class.
         """
         super().__init__()
-        self.season_start = datetime(2024, 9, 5).date()
+        self.season_start = datetime(2025, 9, 4).date()
         cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
