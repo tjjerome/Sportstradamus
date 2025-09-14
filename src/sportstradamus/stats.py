@@ -11,6 +11,7 @@ from tqdm import tqdm
 import statsapi as mlb
 import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
+import nflreadpy as nflr
 from scipy.stats import iqr, poisson, norm, zscore
 from time import sleep
 from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro
@@ -3625,7 +3626,7 @@ class StatsNFL(Stats):
         # Fetch game logs
         self.need_pbp = True
         cols = ['player_id', 'player_display_name', 'position_group',
-                'recent_team', 'season', 'week', 'season_type',
+                'team', 'season', 'week', 'season_type',
                 'completions', 'attempts', 'passing_yards', 'passing_tds',
                 'interceptions', 'sacks', 'sack_fumbles', 'sack_fumbles_lost',
                 'passing_2pt_conversions', 'carries', 'rushing_yards', 'rushing_tds',
@@ -3634,12 +3635,15 @@ class StatsNFL(Stats):
                 'receiving_fumbles', 'receiving_fumbles_lost', 'receiving_2pt_conversions',
                 'target_share', 'air_yards_share', 'wopr']
         try:
-            nfl_data = nfl.import_weekly_data([self.season_start.year], cols)
+            nfl_data = nflr.load_player_stats().to_pandas()
+            nfl_data['interceptions'] = nfl_data['passing_interceptions'].fillna(0)
+            nfl_data['sacks'] = nfl_data['sacks_suffered'].fillna(0)
+            nfl_data = nfl_data[cols]
         except:
             nfl_data = pd.DataFrame(columns=cols)
 
         try:
-            snaps = nfl.import_snap_counts([self.season_start.year])
+            snaps = nflr.load_snap_counts().to_pandas()
         except:
             snaps = pd.DataFrame(columns=['game_id', 'pfr_game_id', 'season', 'game_type', 'week', 'player', 'pfr_player_id', 'position', 'team', 'opponent', 'offense_snaps', 'offense_pct', 'defense_snaps', 'defense_pct', 'st_snaps', 'st_pct'])
         
@@ -3714,7 +3718,8 @@ class StatsNFL(Stats):
 
         nfl_data.rename(
             columns=lambda x: x.replace("_", " "), inplace=True)
-        nfl_data.rename(columns={"recent team": "team", "position group": "position"}, inplace=True)
+        nfl_data.rename(columns={"position group": "position"}, inplace=True)
+        nfl_data.drop(columns=['recent team'], inplace=True)
         nfl_data[['target share', 'air yards share', 'wopr', 'yards per target']] = nfl_data[[
             'target share', 'air yards share', 'wopr', 'yards per target']].fillna(0.0)
 
@@ -3823,7 +3828,7 @@ class StatsNFL(Stats):
 
     def parse_pbp(self, week, team, year, playerName=""):
         if self.need_pbp:
-            self.pbp = nfl.import_pbp_data([year], include_participation=False)
+            self.pbp = nflr.load_pbp(year).to_pandas()
             self.pbp["play_time"] = self.pbp["game_seconds_remaining"].diff(
                 -1).fillna(0)
             self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
