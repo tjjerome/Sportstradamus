@@ -621,7 +621,7 @@ def find_correlation(offers, stats, platform):
         payouts = [0, 0, 3, 6, 6, 10, 25]
         parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
 
-    return df.sort_values("K", ascending=False).groupby(["Player", "Team", "Market"]).head(1).drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
+    return df.drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
 
 def compute_bets(args):
     combos, p_model, p_books, boosts, M, C, EV, bet_df, info, payouts, max_boost = args

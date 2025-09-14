@@ -22,11 +22,11 @@ with open(filepath, "r") as infile:
 sport="WNBA"
 key="basketball_wnba"
 
-Date = datetime(2025, 7, 23, 12)
+Date = datetime(2025, 8, 1, 12)
 Date = pytz.timezone("America/Chicago").localize(Date)
 
 print(sport)
-while Date.astimezone(pytz.utc).date() < datetime(2025, 7, 28).date():
+while Date.astimezone(pytz.utc).date() < datetime(2025, 8, 8).date():
     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
         Date = Date + timedelta(days=1)
         continue
