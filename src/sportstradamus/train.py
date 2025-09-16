@@ -75,7 +75,7 @@ stat_structs = {
 archive = Archive()
 
 @click.command()
-@click.option("--force/--no-force", default=True, help="Force update of all models")
+@click.option("--force/--no-force", default=False, help="Force update of all models")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
@@ -166,6 +166,14 @@ def meditate(force, league):
             "PTS",
             "RA",
             "REB",
+            "OREB",
+            "DREB",
+            "FGA",
+            "BLK",
+            "STL",
+            "BLST",
+            "TOV",
+            "FTM",
             "PRA",
             "fantasy points prizepicks"
         ],

@@ -571,7 +571,7 @@ class Archive:
                 market_swap = {"AST": "assists",
                             "PTS": "points", "BLK": "blocked"}
                 market = market_swap.get(market, market)
-            if o["League"] == "NBA":
+            if o["League"] == "NBA" or o["League"] == "WNBA":
                 market = market.replace("underdog", "prizepicks")
 
             self.archive.setdefault(o["League"], {}).setdefault(market, {}).setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": {}, "Lines": []})

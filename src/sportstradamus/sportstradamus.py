@@ -799,7 +799,7 @@ def match_offers(offers, league, market, platform, stat_data):
     if league == "NHL":
         market = {"AST": "assists", "PTS": "points",
                   "BLK": "blocked"}.get(market, market)
-    if league == "NBA":
+    if league == "NBA" or league == "WNBA":
         market = market.replace("underdog", "prizepicks")
     if market in stat_data.gamelog.columns:
         with warnings.catch_warnings():
@@ -843,7 +843,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     if league == "NHL":
         market = {"AST": "assists", "PTS": "points",
                   "BLK": "blocked"}.get(market, market)
-    if league == "NBA":
+    if league == "NBA" or league == "WNBA":
         market = market.replace("underdog", "prizepicks")
     filename = "_".join([league, market]).replace(" ", "-")
     filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
