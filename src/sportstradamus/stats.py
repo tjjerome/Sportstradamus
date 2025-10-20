@@ -630,7 +630,7 @@ class StatsNBA(Stats):
         self.league = "NBA"
         self.positions = ['P', 'C', 'F', 'W', 'B']
         self.season_start = datetime(2025, 10, 21).date()
-        self.season = "2024-25"
+        self.season = "2025-26"
         cols = ['SEASON_YEAR', 'PLAYER_ID', 'PLAYER_NAME', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE',
                 'WL', 'MIN', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
                 'REB', 'AST', 'TOV', 'STL', 'BLK', 'BLKA', 'PF', 'PFD', 'PTS', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
@@ -1751,10 +1751,19 @@ class StatsWNBA(StatsNBA):
             "F-C": "C"
         }
 
-        player_df = nba.playerindex.PlayerIndex(season=self.season_start.year, league_id="10", historical_nullable=1).get_normalized_dict()["PlayerIndex"]
-        player_df = pd.DataFrame(player_df).rename(columns={"POSITION":"POS", "Position":"POS", "PERSON_ID": "PLAYER_ID"})
-        player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
-        player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
+        i = 0
+        while (i < 10):
+            try:
+                player_df = nba.playerindex.PlayerIndex(season=self.season_start.year, league_id="10", historical_nullable=1).get_normalized_dict()["PlayerIndex"]
+                player_df = pd.DataFrame(player_df).rename(columns={"POSITION":"POS", "Position":"POS", "PERSON_ID": "PLAYER_ID"})
+                player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
+                player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
+                break
+            except:
+                player_df = pd.DataFrame(columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "POS"])
+            
+            sleep(.1)
+            i = i+1
 
         i = 0
         while (i < 10):
@@ -1806,12 +1815,12 @@ class StatsWNBA(StatsNBA):
         today = datetime.today().date()
         latest_date = self.season_start
         if not self.gamelog.empty:
-            nanlog = self.gamelog.loc[self.gamelog.isnull().values.any(axis=1)]
-            if not nanlog.empty:
-                latest_date = pd.to_datetime(nanlog[self.log_strings["date"]]).min().date()
+            # nanlog = self.gamelog.loc[self.gamelog.isnull().values.any(axis=1)]
+            # if not nanlog.empty:
+            #     latest_date = pd.to_datetime(nanlog[self.log_strings["date"]]).min().date()
 
-            else:
-                latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
+            # else:
+            latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
             if latest_date < self.season_start:
                 latest_date = self.season_start
 
@@ -1922,7 +1931,7 @@ class StatsWNBA(StatsNBA):
             stat_df["BLST"]*2 - stat_df["TOV"]
         stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
         stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-        stat_df["BLK_PCT"] = stat_df["BLK"] / stat_df["BLKA"]
+        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0)
         stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
         stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
         stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
