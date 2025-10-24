@@ -978,11 +978,19 @@ class StatsNBA(Stats):
                     if position is None:
                         position = self.players[season][game["TEAM_ABBREVIATION"]].get(
                             game["PLAYER_NAME"], {}).get("POS")
+                        
+                    if position is None:
+                        for team in self.players[season].keys():
+                            position = self.players[season][team].get(
+                                game["PLAYER_NAME"], {}).get("POS")
 
                 if position is None:
-                    position = nba.commonplayerinfo.CommonPlayerInfo(
-                        player_id=player_id
-                    ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
+                    try:
+                        position = nba.commonplayerinfo.CommonPlayerInfo(
+                            player_id=player_id
+                            ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
+                    except:
+                        position = "Forward-Guard"
                     position = position_map.get(position)
 
                 self.players[self.season][game["TEAM_ABBREVIATION"]
