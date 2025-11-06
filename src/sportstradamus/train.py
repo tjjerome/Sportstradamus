@@ -48,29 +48,45 @@ distributions = {
 }
 
 
-# mlb = StatsMLB()
-# mlb.load()
-# mlb.update()
+sports = []
 nba = StatsNBA()
 nba.load()
-nba.update()
-# nhl = StatsNHL()
+if datetime.today().date() > (nba.season_start - timedelta(days=7)):
+    sports.append("NBA")
+# mlb = StatsMLB()
+# mlb.load()
+# if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
+#     sports.append("MLB")
+# # nhl = StatsNHL()
 # nhl.load()
-# nhl.update()
+# if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
+#     sports.append("NHL")
 nfl = StatsNFL()
 nfl.load()
-nfl.update()
+if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
+    sports.append("NFL")
 wnba = StatsWNBA()
 wnba.load()
-wnba.update()
+if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
+    sports.append("WNBA")
 
-stat_structs = {
-    "NBA": nba,
-    "NFL": nfl,
-    # "MLB": mlb,
-    # "NHL": nhl,
-    "WNBA": wnba
-}
+
+stat_structs = {}
+if "NBA" in sports:
+    nba.update()
+    stat_structs.update({"NBA": nba})
+# if "MLB" in sports:
+#     mlb.update()
+#     stat_structs.update({"MLB": mlb})
+# if "NHL" in sports:
+#     nhl.update()
+#     stat_structs.update({"NHL": nhl})
+if "NFL" in sports:
+    nfl.update()
+    stat_structs.update({"NFL": nfl})
+if "WNBA" in sports:
+    wnba.update()
+    stat_structs.update({"WNBA": wnba})
 
 archive = Archive()
 
