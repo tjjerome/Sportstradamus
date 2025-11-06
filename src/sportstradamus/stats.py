@@ -23,7 +23,7 @@ from io import StringIO
 import line_profiler
 
 # flag to clean up gamelogs
-clean_data = True
+clean_data = False
 
 class Stats:
     """
@@ -1103,6 +1103,7 @@ class StatsNBA(Stats):
             self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
+            self.gamelog.loc[:, self.log_strings["position"]] = self.gamelog.apply(lambda x: self.players.get(x.SEASON_YEAR, {}).get(x.TEAM_ABBREVIATION, {}).get(x.PLAYER_NAME, {}).get("POS", x.POS), axis=1)
 
         # Save the updated player data
         with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
