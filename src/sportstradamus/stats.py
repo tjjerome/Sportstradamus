@@ -861,6 +861,7 @@ class StatsNBA(Stats):
 
         params = {
             "season_nullable": self.season,
+            "league_id_nullable": "00",
             "date_from_nullable": latest_date.strftime("%m/%d/%Y"),
             "date_to_nullable": today.strftime("%m/%d/%Y")
         }
