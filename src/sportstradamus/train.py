@@ -215,7 +215,9 @@ def meditate(force, league):
     if not league == "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
-        stat_data = stat_structs[league]
+        stat_data = stat_structs.get(league)
+        if stat_data is None:
+            continue
         
         book_weights.setdefault(league, {}).setdefault("Moneyline", {})
         book_weights[league]["Moneyline"] = fit_book_weights(league, "Moneyline")
