@@ -962,7 +962,7 @@ class StatsNBA(Stats):
         nba_df = []
         included_games = list(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
         for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
-            if game["MIN"] < 1 or (game["PLAYER_ID"], game["GAME_ID"]) in included_games:
+            if game["MIN"] < 1 or not game["TEAM_ABBREVIATION"] or (game["PLAYER_ID"], game["GAME_ID"]) in included_games:
                 continue
 
             player_id = game["PLAYER_ID"]
@@ -977,7 +977,7 @@ class StatsNBA(Stats):
                 position = None
                 for season in list(self.players.keys())[::-1]:
                     if position is None:
-                        position = self.players[season][game["TEAM_ABBREVIATION"]].get(
+                        position = self.players[season].get(game["TEAM_ABBREVIATION"], {}).get(
                             game["PLAYER_NAME"], {}).get("POS")
                         
                     if position is None:
@@ -3541,7 +3541,7 @@ class StatsNFL(Stats):
         Initialize the StatsNFL class.
         """
         super().__init__()
-        self.season_start = datetime(2025, 9, 4).date()
+        self.season_start = datetime(2026, 9, 10).date()
         cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
