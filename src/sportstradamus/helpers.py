@@ -123,8 +123,8 @@ class Scrape:
             for i in range(1, max_attempts + 1):
                 if i > 1:
                     self._new_headers()
-                    headers.update(self.headers)
-                    sleep(random.uniform(2, 3))
+                    headers.update(self.header)
+                    sleep(random.uniform(1, 3))
                 try:
                     response = requests.get(
                         url, headers=headers, params=params
