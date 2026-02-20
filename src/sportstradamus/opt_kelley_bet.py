@@ -28,7 +28,7 @@ def reflect():
                     (25, 2, 0.4, 0, 0, 0, 0)]
     }
     pt_simp = { # using equivalent payouts when insured picks are better
-        "Underdog": [0, 0, 3, 6, 10.9, 20.2],
+        "Underdog": [0, 0, 3.5, 6.5, 10.9, 20.2],
         "PrizePicks": [0, 0, 3, 5.3, 10, 20.8, 38.8]
     }
 
