@@ -349,7 +349,7 @@ def find_correlation(offers, stats, platform):
         "WNBA": ['G', 'F', 'C']
     }
     payout_table = { # using equivalent payouts when insured picks are better
-        "Underdog": [3, 6, 10.9, 20.2, 39.9],
+        "Underdog": [3.5, 6.5, 10.9, 20.2, 39.9],
         "PrizePicks": [3, 5.3, 10, 20.8, 38.8],
         "Sleeper": [1, 1, 1, 1, 1],
         "ParlayPlay": [1, 1, 1, 1, 1],
@@ -618,7 +618,7 @@ def find_correlation(offers, stats, platform):
                     parlay_df = pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
 
     if platform == "Underdog":
-        payouts = [0, 0, 3, 6, 6, 10, 25]
+        payouts = [0, 0, 3.5, 6.5, 6, 10, 25]
         parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
 
     return df.drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df

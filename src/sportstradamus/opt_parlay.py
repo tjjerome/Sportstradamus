@@ -39,7 +39,7 @@ parlays.dropna(inplace=True)
 parlays.sort_values("Rec Bet", ascending=False, inplace=True)
 
 payout_table = { # using equivalent payouts when insured picks are better
-    "Underdog": [3, 6, 10.9, 20.2],
+    "Underdog": [3.5, 6.5, 10.9, 20.2],
     "PrizePicks": [3, 5.3, 10, 20.8, 38.8]
 }
 
