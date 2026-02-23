@@ -1,7 +1,7 @@
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.books import get_pp, get_ud, get_sleeper, get_parp
-from sportstradamus.helpers import archive, get_ev, get_odds, stat_cv, stat_std, stat_map, accel_asc, banned
+from sportstradamus.helpers import archive, get_ev, get_odds, stat_cv, stat_std, stat_map, accel_asc, banned, set_model_start_values
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -30,6 +30,7 @@ from time import time
 import line_profiler
 
 pd.set_option('mode.chained_assignment', None)
+pd.set_option('future.no_silent_downcasting', True)
 os.environ["LINE_PROFILE"] = "0"
 
 @click.command()
@@ -395,7 +396,7 @@ def find_correlation(offers, stats, platform):
             usage.reset_index(inplace=True)
             usage.rename(
                 columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
-            player_df = player_df.merge(usage, how='left').fillna(0)
+            player_df = player_df.merge(usage, how='left').fillna(0).infer_objects(copy=False)
             ranks = player_df.sort_values(tiebreaker_str[league], ascending=False).groupby(
                 ["Team", "Player position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
             player_df["Player position"] = player_df["Player position"] + ranks.astype(str)
@@ -810,7 +811,7 @@ def match_offers(offers, league, market, platform, stat_data):
             
             playerStats = playerStats[stat_data.get_stat_columns(market)]
 
-            return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0)
+            return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0).infer_objects(copy=False)
     else:
         return pd.DataFrame()
 
@@ -877,12 +878,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype('category')
 
-            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
+            set_model_start_values(model, dist, playerStats)
 
-            model.start_values = sv
             prob_params = model.predict(
                 playerStats, pred_type="parameters")
             prob_params.index = playerStats.index
@@ -912,7 +909,40 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         playerStats["Books EV"] = evs
         playerStats["Books STD"] = cv*np.array(evs)
 
+        # Rename probability parameters based on distribution type
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
+        
+        # Handle Mixture2G parameters if present - preserve original mixture parameters for accurate probability
+        is_mixture = "mix_prob_1" in prob_params.columns and "loc_2" in prob_params.columns
+        if is_mixture:
+            # Store original mixture parameters (feature-dependent from LightGBMLSS Mixture)
+            # Parameters are: mix_prob_1, loc_1, scale_1, loc_2, scale_2
+            # mix_prob_2 = 1 - mix_prob_1 (implicit)
+            prob_params["weight1_val"] = prob_params["mix_prob_1"]
+            prob_params["mu1_val"] = prob_params["loc_1"]
+            prob_params["sigma1_val"] = prob_params["scale_1"]
+            prob_params["mu2_val"] = prob_params["loc_2"]
+            prob_params["sigma2_val"] = prob_params["scale_2"]
+            
+            # Also calculate effective EV and STD for weighting step
+            weight1 = prob_params["weight1_val"]
+            mu1 = prob_params["mu1_val"]
+            sigma1 = prob_params["sigma1_val"]
+            mu2 = prob_params["mu2_val"]
+            sigma2 = prob_params["sigma2_val"]
+            weight2 = 1 - weight1
+            
+            # Expected value is weighted average of means (per sample for feature-dependent)
+            model_ev = weight1 * mu1 + weight2 * mu2
+            
+            # Variance in mixture: Var(X) = E[Var(X|Z)] + Var(E[X|Z])
+            var_x = (weight1 * (sigma1**2 + (mu1 - model_ev)**2) + 
+                    weight2 * (sigma2**2 + (mu2 - model_ev)**2))
+            std_mixture = np.sqrt(var_x)
+            
+            prob_params["Model EV"] = model_ev
+            prob_params["Model STD"] = std_mixture
+        
         if "Model STD" not in prob_params.columns:
             prob_params["Model STD"] = 0
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
@@ -926,15 +956,40 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         else:
             s = offer_df[["Model STD", "Books STD"]].fillna(1).to_numpy()
             offer_df["Model STD"] = np.sqrt(1/np.average(np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1))
-            offer_df["Model EV"] = np.average(offer_df[["Model EV", "Books EV"]].fillna(0).to_numpy()*np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1)*np.power(offer_df["Model STD"].to_numpy(), 2)
+            offer_df["Model EV"] = np.average(offer_df[["Model EV", "Books EV"]].fillna(0).infer_objects(copy=False).to_numpy()*np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1)*np.power(offer_df["Model STD"].to_numpy(), 2)
         
-        offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step, temp=model_temp), axis=1)
+        # Calculate probabilities using distribution-specific methods
+        if dist == "Mixture2G":
+            # For Mixture2G, use exact mixture probability calculation via get_odds
+            def get_mixture_probability(row):
+                return get_odds(
+                    line=row["Line"],
+                    ev=None,  # not used for mixture
+                    cv=cv,
+                    std=None,  # not used for mixture
+                    step=step,
+                    temp=model_temp,
+                    weight1=row["weight1_val"],
+                    mu1=row["mu1_val"],
+                    sigma1=row["sigma1_val"],
+                    mu2=row["mu2_val"],
+                    sigma2=row["sigma2_val"]
+                )
+            
+            # Calculate probabilities directly from mixture, blended with bookmaker
+            offer_df["Model_prob_under"] = offer_df.apply(get_mixture_probability, axis=1)
+            offer_df["Books_prob_under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Books EV"], cv, x["Books STD"], step=step, temp=model_temp), axis=1)
+            offer_df["Model Under"] = model_weight * offer_df["Model_prob_under"] + (1 - model_weight) * offer_df["Books_prob_under"]
+        else:
+            # For Gaussian and Poisson, use standard get_odds
+            offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step, temp=model_temp), axis=1)
+        
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
-        offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0) * (1.78 if platform == "Underdog" else 1)
-        offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5).values*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).values
+        offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0).infer_objects(copy=False) * (1.78 if platform == "Underdog" else 1)
+        offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5).values*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).infer_objects(copy=False).values
         offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
         offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)

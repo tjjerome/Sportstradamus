@@ -14,7 +14,7 @@ import nfl_data_py as nfl
 import nflreadpy as nflr
 from scipy.stats import iqr, poisson, norm, zscore
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values, mixture_to_moments
 import pandas as pd
 import warnings
 import requests
@@ -24,6 +24,7 @@ import line_profiler
 
 # flag to clean up gamelogs
 clean_data = False
+pd.set_option('future.no_silent_downcasting', True)
 
 class Stats:
     """
@@ -145,24 +146,24 @@ class Stats:
             stat_types = self.stat_types["skater"] + self.stat_types["goalie"]
             team_stat_types = self.team_stat_types
 
-        playerlogs = self.short_gamelog.fillna(0.0).groupby(self.log_strings["player"])[
+        playerlogs = self.short_gamelog.fillna(0).infer_objects(copy=False).groupby(self.log_strings["player"])[
             stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
         playershortstats = playerlogs.apply(lambda x: np.mean(
-            x.tail(5), 0)).fillna(0.0).add_suffix(" short", 1)
-        playertrends = playerlogs.apply(get_trends).fillna(0.0).add_suffix(" growth", 1)
+            x.tail(5), 0)).fillna(0).infer_objects(copy=False).add_suffix(" short", 1)
+        playertrends = playerlogs.apply(get_trends).fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
         teamstats = self.short_teamlog.groupby(self.log_strings["team"]).apply(
             lambda x: np.mean(x.tail(10)[team_stat_types], 0))
         
-        self.defenseProfile = self.defenseProfile.join(teamstats, how='right').fillna(0.0)
+        self.defenseProfile = self.defenseProfile.join(teamstats, how='right').fillna(0).infer_objects(copy=False)
         self.defenseProfile.index.name = self.log_strings["opponent"]
 
         self.teamProfile = teamstats[team_stat_types]
 
-        self.playerProfile = self.playerProfile.join(playerstats, how='right').fillna(0.0)
+        self.playerProfile = self.playerProfile.join(playerstats, how='right').fillna(0).infer_objects(copy=False)
         self.playerProfile.drop_duplicates(inplace=True)
 
     @line_profiler.profile
@@ -296,7 +297,7 @@ class Stats:
         self.profile_market(self.usage_stat, date=date)
         usage = pd.DataFrame(
             self.playerProfile[[self.usage_stat + " short", self.tiebreaker_stat]])
-        player_df = player_df.join(usage, how='left').fillna(0.0)
+        player_df = player_df.join(usage, how='left').fillna(0).infer_objects(copy=False)
         ranks = player_df.sort_values(self.tiebreaker_stat, ascending=False).groupby(
             [self.log_strings['team'], self.log_strings['position']]).rank(ascending=False, method='first')[self.usage_stat + " short"].astype(int)
 
@@ -476,7 +477,7 @@ class Stats:
             stats = stats.join(pd.DataFrame({x: {f"PF {k}": v for k, v in self.park_factors.get(teams.get(x), ()).items()} for x in stats.index}).T)
             stats["Player depth"] = stats["Player position"]
 
-        return stats.fillna(0.0)
+        return stats.fillna(0).infer_objects(copy=False)
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
         return
@@ -605,7 +606,7 @@ class Stats:
                 else:
                     matrix.extend(stats.loc[stats["Archived"] | (usage>usage_cutoff)].to_dict('records'))
 
-        M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+        M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
         return M
 
@@ -1373,13 +1374,9 @@ class StatsNBA(Stats):
                 categories.remove("Player position")
             for c in categories:
                 playerStats[c] = playerStats[c].astype('category')
+            
+            set_model_start_values(model, dist, playerStats)
 
-            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
-
-            model.start_values = sv
             prob_params = pd.DataFrame()
             preds = model.predict(
                 playerStats, pred_type="parameters")
@@ -1710,7 +1707,7 @@ class StatsNBA(Stats):
 
                     matrix.append(new_get_stats)
 
-        M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+        M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
         return M
 
@@ -1941,7 +1938,7 @@ class StatsWNBA(StatsNBA):
             stat_df["BLST"]*2 - stat_df["TOV"]
         stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
         stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0.0)
+        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
         stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
         stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
         stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
@@ -1951,7 +1948,7 @@ class StatsWNBA(StatsNBA):
         stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
         stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
         stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
-        stat_df.fillna(0.0).replace([np.inf, -np.inf], 0)
+        stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
         stat_df.TEAM_ABBREVIATION = stat_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
         stat_df.OPP = stat_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
 
@@ -1963,7 +1960,7 @@ class StatsWNBA(StatsNBA):
         team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" "):].strip())
         team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
         team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
-        team_df.fillna(0.0).replace([np.inf, -np.inf], 0)
+        team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
         team_df.TEAM_ABBREVIATION = team_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
         team_df.OPP = team_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
         
@@ -2980,12 +2977,8 @@ class StatsMLB(Stats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype('category')
 
-            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
+            set_model_start_values(model, dist, playerStats)
 
-            model.start_values = sv
             prob_params = pd.DataFrame()
             preds = model.predict(
                 playerStats, pred_type="parameters")
@@ -3519,7 +3512,7 @@ class StatsMLB(Stats):
                     matrix.append(new_get_stats)
 
         # Create the target labels DataFrame
-        M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+        M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
         return M
 
@@ -3655,8 +3648,8 @@ class StatsNFL(Stats):
                 'target_share', 'air_yards_share', 'wopr']
         try:
             nfl_data = nflr.load_player_stats().to_pandas()
-            nfl_data['interceptions'] = nfl_data['passing_interceptions'].fillna(0.0)
-            nfl_data['sacks'] = nfl_data['sacks_suffered'].fillna(0.0)
+            nfl_data['interceptions'] = nfl_data['passing_interceptions'].fillna(0).infer_objects(copy=False)
+            nfl_data['sacks'] = nfl_data['sacks_suffered'].fillna(0).infer_objects(copy=False)
             nfl_data = nfl_data[cols]
         except:
             nfl_data = pd.DataFrame(columns=cols)
@@ -3740,7 +3733,7 @@ class StatsNFL(Stats):
         nfl_data.rename(columns={"position group": "position"}, inplace=True)
         nfl_data.drop(columns=['recent team'], inplace=True)
         nfl_data[['target share', 'air yards share', 'wopr', 'yards per target']] = nfl_data[[
-            'target share', 'air yards share', 'wopr', 'yards per target']].fillna(0.0)
+            'target share', 'air yards share', 'wopr', 'yards per target']].fillna(0).infer_objects(copy=False)
 
         nfl_data.loc[nfl_data['team']
                      == 'LA', 'team'] = "LAR"
@@ -3819,7 +3812,7 @@ class StatsNFL(Stats):
 
         self.teamlog = pd.concat(
             [self.teamlog, pd.DataFrame.from_records(teamDataList)], ignore_index=True)
-        self.teamlog = self.teamlog.sort_values('gameday').fillna(0.0)
+        self.teamlog = self.teamlog.sort_values('gameday').fillna(0).infer_objects(copy=False)
         self.gamelog = self.gamelog.sort_values('gameday')
 
         # Remove old games to prevent file bloat
@@ -3849,7 +3842,7 @@ class StatsNFL(Stats):
         if self.need_pbp:
             self.pbp = nflr.load_pbp(year).to_pandas()
             self.pbp["play_time"] = self.pbp["game_seconds_remaining"].diff(
-                -1).fillna(0.0)
+                -1).fillna(0).infer_objects(copy=False)
             self.pbp = self.pbp.loc[self.pbp['play_type'].isin(
                 ['run', 'pass']) | (self.pbp['desc'] == "END GAME")]
             if self.season_start.year > 2021:
@@ -4104,9 +4097,9 @@ class StatsNFL(Stats):
             pass_drop_pct = self.pfr.loc[(self.pfr['pfr_player_name'] == playerName) & (
                 self.pfr['week'] == pbp.week.max()), 'passing_drop_pct'].mean()
             pass_ypa = pbp_off.loc[pbp_off['passer_player_id'] == self.ids.get(
-                playerName), 'yards_gained'].fillna(0.0).mean()
+                playerName), 'yards_gained'].fillna(0).infer_objects(copy=False).mean()
             ypc = pbp_off.loc[pbp_off['rusher_player_id'] ==
-                              self.ids.get(playerName), 'yards_gained'].fillna(0.0).mean()
+                              self.ids.get(playerName), 'yards_gained'].fillna(0).infer_objects(copy=False).mean()
             routes_run = int(pbp_off['pass'].sum()*self.gamelog.loc[(self.gamelog.season == year) & (self.gamelog.week == week) & (self.gamelog['player display name'] == playerName), 'snap pct'].mean())
             targets = len(
                 pbp_off.loc[pbp_off['receiver_player_id'] == self.ids.get(playerName)])
@@ -4415,12 +4408,12 @@ class StatsNFL(Stats):
                 self.stat_types['receiving']
 
         playerlogs = gamelog.loc[gamelog['player display name'].isin(
-            self.playerProfile.index)].fillna(0.0).groupby('player display name')[stat_types]
+            self.playerProfile.index)].fillna(0).infer_objects(copy=False).groupby('player display name')[stat_types]
         playerstats = playerlogs.mean(numeric_only=True)
         playershortstats = playerlogs.apply(lambda x: np.mean(
-            x.tail(3), 0)).fillna(0.0).add_suffix(" short", 1)
+            x.tail(3), 0)).fillna(0).infer_objects(copy=False).add_suffix(" short", 1)
         playertrends = playerlogs.apply(
-            lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(3))), x.tail(3), 1)[0], index=x.columns)).fillna(0.0).add_suffix(" growth", 1)
+            lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(3))), x.tail(3), 1)[0], index=x.columns)).fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
         for position in positions:
@@ -4602,12 +4595,8 @@ class StatsNFL(Stats):
                 for c in categories:
                     playerStats[c] = playerStats[c].astype('category')
 
-                sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
-                if dist == "Poisson":
-                    sv = sv[:,0]
-                    sv.shape = (len(sv),1)
+                set_model_start_values(model, dist, playerStats)
 
-                model.start_values = sv
                 prob_params = pd.DataFrame()
                 preds = model.predict(
                     playerStats, pred_type="parameters")
@@ -4921,7 +4910,7 @@ class StatsNFL(Stats):
 
                     matrix.append(new_get_stats)
 
-        M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+        M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
         return M
 
@@ -5269,13 +5258,13 @@ class StatsNHL(Stats):
                 if type(teamlog) is list:
                     nhl_teamlog.extend(teamlog)
 
-        nhl_df = pd.DataFrame(nhl_gamelog).fillna(0.0)
+        nhl_df = pd.DataFrame(nhl_gamelog).fillna(0).infer_objects(copy=False)
         if not nhl_df.empty:
             nhl_df.loc[:, "moneyline"] = nhl_df.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
             nhl_df.loc[:, "totals"] = nhl_df.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
         self.gamelog = pd.concat([nhl_df, self.gamelog]).sort_values(
             "gameDate").reset_index(drop=True)
-        self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0.0), self.teamlog]).sort_values(
+        self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False), self.teamlog]).sort_values(
             "gameDate").reset_index(drop=True)
 
         res = scraper.get(
@@ -5438,12 +5427,8 @@ class StatsNHL(Stats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype('category')
 
-            sv = playerStats[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
+            set_model_start_values(model, dist, playerStats)
 
-            model.start_values = sv
             prob_params = pd.DataFrame()
             preds = model.predict(
                 playerStats, pred_type="parameters")
@@ -5775,12 +5760,12 @@ class StatsNHL(Stats):
 
         if any([string in market for string in ["Against", "saves", "goalie"]]):
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0.0).groupby('playerName')[self.goalie_stats]
+                self.playerProfile.index)].fillna(0).infer_objects(copy=False).groupby('playerName')[self.goalie_stats]
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
-                x.tail(5), 0)).fillna(0.0).add_suffix(" short", 1)
+                x.tail(5), 0)).fillna(0).infer_objects(copy=False).add_suffix(" short", 1)
             playertrends = playerlogs.apply(
-                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0.0).add_suffix(" growth", 1)
+                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
@@ -5788,19 +5773,19 @@ class StatsNHL(Stats):
                 playerstats, on='playerName')
         else:
             playerlogs = gamelog.loc[gamelog['playerName'].isin(
-                self.playerProfile.index)].fillna(0.0).groupby('playerName')[self.skater_stats]
+                self.playerProfile.index)].fillna(0).infer_objects(copy=False).groupby('playerName')[self.skater_stats]
             playerstats = playerlogs.mean(numeric_only=True)
             playershortstats = playerlogs.apply(lambda x: np.mean(
-                x.tail(5), 0)).fillna(0.0).add_suffix(" short", 1)
+                x.tail(5), 0)).fillna(0).infer_objects(copy=False).add_suffix(" short", 1)
             playertrends = playerlogs.apply(
-                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0.0).add_suffix(" growth", 1)
+                lambda x: pd.Series(np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0], index=x.columns)).fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
             playerstats = playerstats.join(playershortstats)
             playerstats = playerstats.join(playertrends)
 
             self.playerProfile = self.playerProfile.merge(
                 playerstats, on='playerName')
 
-            self.goalieProfile = gamelog2.fillna(0.0).groupby('playerName')[
+            self.goalieProfile = gamelog2.fillna(0).infer_objects(copy=False).groupby('playerName')[
                 self.goalie_stats].mean(numeric_only=True)
 
         i = self.defenseProfile.index
@@ -6176,6 +6161,6 @@ class StatsNHL(Stats):
 
                     matrix.append(new_get_stats)
 
-        M = pd.DataFrame(matrix).fillna(0.0).replace([np.inf, -np.inf], 0)
+        M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
         return M

@@ -255,7 +255,7 @@ for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
 
     for week in np.arange(1,18):
         df[f"player_points_{week}"] = df['player_name'].replace(".", "").map(
-            weekly[(int(df.iloc[0]['season']), week)]).fillna(0.0)
+            weekly[(int(df.iloc[0]['season']), week)]).fillna(0).infer_objects(copy=False)
 
     df['draft_capital_spent'] = np.round(fit[0]*np.log(df['overall_pick_number'])+fit[1], 2)
     df['projection_draft_capital'] = np.round(fit[0]*np.log(df['projection_adp'].replace(0, 216))+fit[1], 2)
