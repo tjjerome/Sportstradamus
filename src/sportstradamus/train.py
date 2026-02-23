@@ -1,21 +1,18 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights, feature_filter
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights, feature_filter, set_model_start_values
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from sklearn.mixture import GaussianMixture
 from scipy.optimize import minimize
 from scipy.stats import poisson, skellam, norm
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
     log_loss
-)
-from scipy.stats import (
-    norm,
-    poisson
 )
 from scipy.special import softmax
 import lightgbm as lgb
@@ -25,28 +22,31 @@ import os
 from datetime import datetime, timedelta
 from tqdm import tqdm
 from lightgbmlss.model import LightGBMLSS
-from lightgbmlss.distributions import (
-    Gaussian,
-    Poisson
-)
+from lightgbmlss.distributions.Gaussian import Gaussian
+from lightgbmlss.distributions.Poisson import Poisson
+from lightgbmlss.distributions.Mixture import Mixture
 from lightgbmlss.distributions.distribution_utils import DistributionClass
 import shap
 import json
 import warnings
 pd.options.mode.chained_assignment = None
+pd.set_option('future.no_silent_downcasting', True)
 np.seterr(divide='ignore', invalid='ignore')
 
-dist_params = {
+# ============================================================================
+# DISTRIBUTION CONFIGURATION
+# ============================================================================
+# Distribution parameters
+dist_params_default = {
     "stabilization": "None",
     "response_fn": "softplus",
     "loss_fn": "nll"
 }
 
-distributions = {
-    "Gaussian": Gaussian.Gaussian(**dist_params),
-    "Poisson": Poisson.Poisson(**dist_params)
-}
-
+# ============================================================================
+# LOAD SPORTS DATA
+# ============================================================================
+# Load and initialize active sports leagues based on season dates
 
 sports = []
 nba = StatsNBA()
@@ -90,8 +90,92 @@ if "WNBA" in sports:
 
 archive = Archive()
 
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def load_distribution_config():
+    """Load distribution configuration from stat_dist.json."""
+    filepath = pkg_resources.files(data) / "stat_dist.json"
+    if os.path.isfile(filepath):
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_distribution_config(config):
+    """Save distribution configuration to stat_dist.json."""
+    filepath = pkg_resources.files(data) / "stat_dist.json"
+    with open(filepath, 'w') as f:
+        json.dump(config, f, indent=4)
+
+def select_best_distribution(y_data):
+    """
+    Select the best distribution (Poisson, Gaussian, or Mixture2G) based on NLL.
+    
+    Uses scipy/sklearn for comparison, returns LightGBMLSS distribution object.
+    
+    Parameters:
+    -----------
+    y_data : np.ndarray
+        Training target values
+    
+    Returns:
+    --------
+    dist_name : str
+        Distribution name ("Poisson", "Gaussian", or "Mixture2G")
+    dist_obj : LightGBMLSS distribution object
+        Distribution object for training with LightGBMLSS
+    nll_scores : dict
+        NLL scores for each distribution (for logging)
+    """
+    nll_scores = {}
+    
+    # === POISSON ===
+    # Estimate rate parameter via MLE (sample mean for Poisson)
+    rate = np.mean(y_data)
+    nll_poisson = -np.mean(poisson.logpmf(y_data.astype(int), rate))
+    nll_scores["Poisson"] = nll_poisson
+    
+    # === GAUSSIAN ===
+    # Estimate mean and std via MLE
+    mu = np.mean(y_data)
+    std = np.std(y_data, ddof=1)
+    nll_gaussian = -np.mean(norm.logpdf(y_data, mu, std))
+    nll_scores["Gaussian"] = nll_gaussian
+    
+    # === MIXTURE OF 2 GAUSSIANS ===
+    # Use sklearn GaussianMixture for fitting
+    try:
+        mixture_model = GaussianMixture(n_components=2, random_state=42, n_init=10)
+        mixture_model.fit(y_data.reshape(-1, 1))
+        
+        # Calculate NLL: -1/n * sum(log(likelihood))
+        nll_mixture = -np.mean(mixture_model.score_samples(y_data.reshape(-1, 1)))
+        nll_scores["Mixture2G"] = nll_mixture
+    except Exception as e:
+        print(f"Warning: Failed to fit Mixture2G: {e}. Defaulting to Gaussian.")
+        nll_scores["Mixture2G"] = np.inf
+    
+    # === SELECT BEST ===
+    best_dist = min(nll_scores, key=nll_scores.get)
+    
+    # Map to LightGBMLSS distribution objects
+    if best_dist == "Poisson":
+        dist_obj = Poisson(**dist_params_default)
+    elif best_dist == "Gaussian":
+        dist_obj = Gaussian(**dist_params_default)
+    else:  # Mixture2G
+        dist_obj = Mixture(Gaussian(**dist_params_default), M=2)
+    
+    return best_dist, dist_obj, nll_scores
+
+
+# ============================================================================
+# MAIN TRAINING PIPELINE
+# ============================================================================
+
 @click.command()
-@click.option("--force/--no-force", default=False, help="Force update of all models")
+@click.option("--force/--no-force", default=True, help="Force update of all models")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
@@ -99,6 +183,8 @@ def meditate(force, league):
 
     np.random.seed(69)
 
+    # === MARKET DEFINITIONS ===
+    # Define all available betting markets for each league
     all_markets = {
         "NFL": [
             "targets",
@@ -336,29 +422,44 @@ def meditate(force, league):
 
             y_train_labels = np.ravel(y_train.to_numpy())
 
-            if stat_cv[league].get(market) == 1:
-                dist = "Poisson"
-            elif stat_cv[league].get(market) is not None:
-                dist = "Gaussian"
+            # === DISTRIBUTION SELECTION ===
+            # Choose between Poisson, Gaussian, or Mixture of 2 Gaussians
+            # Load from stat_dist.json or auto-select via NLL comparison
+            stat_dist = load_distribution_config()
+            stat_dist.setdefault(league, {})
+            
+            if market in stat_dist[league] and not force:
+                # Use previously selected distribution
+                dist = stat_dist[league][market]
+                if dist == "Poisson":
+                    dist_obj = Poisson()
+                elif dist == "Gaussian":
+                    dist_obj = Gaussian()
+                elif dist == "Mixture2G":
+                    dist_obj = Mixture(Gaussian(), M=2)
+                else:
+                    dist = "Gaussian"
+                    dist_obj = Gaussian()
             else:
-                lgblss_dist_class = DistributionClass()
-                candidate_distributions = [Gaussian, Poisson]
-
-                dist = lgblss_dist_class.dist_select(
-                    target=y_train_labels, candidate_distributions=candidate_distributions, max_iter=100)
-
-                dist = dist.loc[dist["nll"] > 0].iloc[0, 1]
+                # Auto-select via NLL comparison
+                dist, dist_obj, nll_scores = select_best_distribution(y_train_labels)
+                
+                # Save selected distribution for future runs
+                stat_dist[league][market] = dist
+                save_distribution_config(stat_dist)
+                
+                print(f"  Distribution scores - Poisson: {nll_scores.get('Poisson', np.inf):.4f}, Gaussian: {nll_scores.get('Gaussian', np.inf):.4f}, Mixture2G: {nll_scores.get('Mixture2G', np.inf):.4f}")
+                print(f"  Selected: {dist}")
+            
             
             opt_params = filedict.get("params")
             dtrain = lgb.Dataset(
                 X_train, label=y_train_labels)
-            model = LightGBMLSS(distributions[dist])
-
-            sv = X_train[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
-            model.start_values = sv
+            
+            # === MODEL TRAINING ===
+            # All distributions (Gaussian, Poisson, Mixture2G) use LightGBMLSS training
+            model = LightGBMLSS(dist_obj)
+            set_model_start_values(model, dist, X_train)
 
             if opt_params is None or opt_params.get("opt_rounds") is None or force:
                 params = {
@@ -392,40 +493,28 @@ def meditate(force, league):
                         num_boost_round=opt_params["opt_rounds"]
                         )
 
+            # === PREDICTIONS AND PARAMETER EXTRACTION ===
+            # Generate predictions on all datasets and extract distribution parameters
             prob_params_train = pd.DataFrame()
             prob_params_validation = pd.DataFrame()
             prob_params = pd.DataFrame()
 
+            # All distributions (Gaussian, Poisson, Mixture2G) use standard LightGBM prediction
             idx = X_train.index
-            sv = X_train[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
-            model.start_values = sv
-            preds = model.predict(
-                X_train, pred_type="parameters")
+            set_model_start_values(model, dist, X_train)
+            preds = model.predict(X_train, pred_type="parameters")
             preds.index = idx
             prob_params_train = pd.concat([prob_params_train, preds])
 
             idx = X_validation.index
-            sv = X_validation[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
-            model.start_values = sv
-            preds = model.predict(
-                X_validation, pred_type="parameters")
+            set_model_start_values(model, dist, X_validation)
+            preds = model.predict(X_validation, pred_type="parameters")
             preds.index = idx
             prob_params_validation = pd.concat([prob_params_validation, preds])
 
             idx = X_test.index
-            sv = X_test[["MeanYr", "STDYr"]].to_numpy()
-            if dist == "Poisson":
-                sv = sv[:,0]
-                sv.shape = (len(sv),1)
-            model.start_values = sv
-            preds = model.predict(
-                X_test, pred_type="parameters")
+            set_model_start_values(model, dist, X_test)
+            preds = model.predict(X_test, pred_type="parameters")
             preds.index = idx
             prob_params = pd.concat([prob_params, preds])
 
@@ -448,6 +537,8 @@ def meditate(force, league):
             B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
             B_validation.loc[B_validation["Odds"] == 0, "Odds"] = 0.5
             cv = 1
+            
+            # Extract appropriate parameters based on distribution
             if dist == "Poisson":
                 ev = prob_params["rate"].to_numpy()
                 ev_train = prob_params_train["rate"].to_numpy()
@@ -461,9 +552,56 @@ def meditate(force, league):
                 std_train = prob_params_train["scale"]
                 ev_validation = prob_params_validation["loc"].to_numpy()
                 std_validation = prob_params_validation["scale"]
+            elif dist == "Mixture2G":
+                # Mixture of 2 Gaussians - each sample has feature-dependent mixture parameters
+                # LightGBMLSS Mixture parameters: mix_prob_1, loc_1, scale_1, loc_2, scale_2
+                mix_prob_1 = prob_params["mix_prob_1"].to_numpy()
+                loc_1 = prob_params["loc_1"].to_numpy()
+                scale_1 = prob_params["scale_1"].to_numpy()
+                loc_2 = prob_params["loc_2"].to_numpy()
+                scale_2 = prob_params["scale_2"].to_numpy()
+                mix_prob_2 = 1.0 - mix_prob_1
+                
+                # Expected value is weighted average of means (per sample)
+                ev = mix_prob_1 * loc_1 + mix_prob_2 * loc_2
+                
+                # Standard deviation from mixture variance (per sample)
+                var_mixture = (mix_prob_1 * (scale_1**2 + (loc_1 - ev)**2) + 
+                              mix_prob_2 * (scale_2**2 + (loc_2 - ev)**2))
+                std_train_data = np.sqrt(var_mixture)
+                
+                # Do same for train and validation
+                mix_prob_1_train = prob_params_train["mix_prob_1"].to_numpy()
+                loc_1_train = prob_params_train["loc_1"].to_numpy()
+                scale_1_train = prob_params_train["scale_1"].to_numpy()
+                loc_2_train = prob_params_train["loc_2"].to_numpy()
+                scale_2_train = prob_params_train["scale_2"].to_numpy()
+                mix_prob_2_train = 1.0 - mix_prob_1_train
+                
+                ev_train = mix_prob_1_train * loc_1_train + mix_prob_2_train * loc_2_train
+                var_mixture_train = (mix_prob_1_train * (scale_1_train**2 + (loc_1_train - ev_train)**2) + 
+                                    mix_prob_2_train * (scale_2_train**2 + (loc_2_train - ev_train)**2))
+                std_train = np.sqrt(var_mixture_train)
+                
+                mix_prob_1_val = prob_params_validation["mix_prob_1"].to_numpy()
+                loc_1_val = prob_params_validation["loc_1"].to_numpy()
+                scale_1_val = prob_params_validation["scale_1"].to_numpy()
+                loc_2_val = prob_params_validation["loc_2"].to_numpy()
+                scale_2_val = prob_params_validation["scale_2"].to_numpy()
+                mix_prob_2_val = 1.0 - mix_prob_1_val
+                
+                ev_validation = mix_prob_1_val * loc_1_val + mix_prob_2_val * loc_2_val
+                var_mixture_val = (mix_prob_1_val * (scale_1_val**2 + (loc_1_val - ev_validation)**2) + 
+                                  mix_prob_2_val * (scale_2_val**2 + (loc_2_val - ev_validation)**2))
+                std_validation = np.sqrt(var_mixture_val)
+                
+                cv = y.Result.std()/y.Result.mean()
 
             odds_ev = B_train["EV"].to_numpy()
 
+            # === MODEL WEIGHTING AND PROBABILITY CALCULATION ===
+            # Fit optimal weight between model and bookmaker EV
+            # Calculate weighted predictions with temperature scaling for calibration
             model_weight = fit_model_weight(ev_validation, B_validation["EV"].to_numpy(), y_validation["Result"].to_numpy(), cv, std_validation)
 
             if dist == "Poisson":
@@ -486,36 +624,39 @@ def meditate(force, league):
                 kld_no_filt = -np.mean(poisson.logpmf(y_test["Result"].astype(int).to_numpy(), weighted_ev))
                 kld_filt = kld_no_filt if model_temp == 1 else -np.mean(skellam.logpmf(y_test["Result"].to_numpy(), (1/(2*model_temp)+.5)*weighted_ev, (1/(2*model_temp)-.5)*weighted_ev))
                 kld_train = -np.mean(poisson.logpmf(y_train["Result"].astype(int).to_numpy(), weighted_ev_train))
-            elif dist == "Gaussian":
-                s_train = np.concatenate([[prob_params_train["scale"]], [cv*odds_ev]], axis=0)
-                std_train = np.sqrt(1/np.average(np.power(s_train,-2), weights=[model_weight, 1-model_weight], axis=0))
-                weighted_ev_train = np.average(np.concatenate([[ev_train], [odds_ev]], axis=0)*np.power(s_train,-2), weights=[model_weight, 1-model_weight], axis=0)*std_train*std_train
+            elif dist in ["Gaussian", "Mixture2G"]:
+                # All location-scale distributions use similar weighting logic
+                s_train = np.concatenate([[std_train if std_train is not None else np.full_like(ev_train, 1.0)], [cv*odds_ev]], axis=0)
+                std_train_weighted = np.sqrt(1/np.average(np.power(s_train,-2), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev_train = np.average(np.concatenate([[ev_train], [odds_ev]], axis=0)*np.power(s_train,-2), weights=[model_weight, 1-model_weight], axis=0)*std_train_weighted*std_train_weighted
 
-                s_validation = np.concatenate([[prob_params_validation["scale"]], [cv*B_validation["EV"].to_numpy()]], axis=0)
-                std_validation = np.sqrt(1/np.average(np.power(s_validation,-2), weights=[model_weight, 1-model_weight], axis=0))
-                weighted_ev_validation = np.average(np.concatenate([[ev_validation], [B_validation["EV"].to_numpy()]], axis=0)*np.power(s_validation,-2), weights=[model_weight, 1-model_weight], axis=0)*std_validation*std_validation
+                s_validation = np.concatenate([[std_validation if std_validation is not None else np.full_like(ev_validation, 1.0)], [cv*B_validation["EV"].to_numpy()]], axis=0)
+                std_validation_weighted = np.sqrt(1/np.average(np.power(s_validation,-2), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev_validation = np.average(np.concatenate([[ev_validation], [B_validation["EV"].to_numpy()]], axis=0)*np.power(s_validation,-2), weights=[model_weight, 1-model_weight], axis=0)*std_validation_weighted*std_validation_weighted
 
-                s = np.concatenate([[prob_params["scale"]], [cv*B_test["EV"].to_numpy()]], axis=0)
-                std = np.sqrt(1/np.average(np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0))
-                weighted_ev = np.average(np.concatenate([[ev], [B_test["EV"].to_numpy()]], axis=0)*np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0)*std*std
+                s = np.concatenate([[prob_params["scale"] if "scale" in prob_params.columns else np.full(len(prob_params), y_test["Result"].std())], [cv*B_test["EV"].to_numpy()]], axis=0)
+                std_test = np.sqrt(1/np.average(np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0))
+                weighted_ev = np.average(np.concatenate([[ev], [B_test["EV"].to_numpy()]], axis=0)*np.power(s,-2), weights=[model_weight, 1-model_weight], axis=0)*std_test*std_test
 
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std, step=step)
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std_test, step=step)
                 y_proba_no_filt = np.array(
                     [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
-                res = minimize(lambda x: -np.mean(norm.logpdf(y_validation["Result"].to_numpy(), weighted_ev_validation, std_validation/x)), x0=[1], bounds=[(.1, 1)])
+                # Temperature optimization for Gaussian and Mixture2G (both use normal-based likelihood)
+                res = minimize(lambda x: -np.mean(norm.logpdf(y_validation["Result"].to_numpy(), weighted_ev_validation, std_validation_weighted/x)), x0=[1], bounds=[(.1, 1)])
                 model_temp = res.x[0]
+                kld_no_filt = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std_test))
+                kld_filt = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std_test/model_temp))
+                kld_train = -np.mean(norm.logpdf(y_train["Result"].to_numpy(), weighted_ev_train, std_train_weighted))
 
-                y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std, step=step, temp=model_temp)
+                y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_ev, cv, std_test, step=step, temp=model_temp)
                 y_proba_filt = np.array(
                     [y_proba_filt, 1-y_proba_filt]).transpose()
 
-                kld_no_filt = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std))
-                kld_filt = -np.mean(norm.logpdf(y_test["Result"].to_numpy(), weighted_ev, std/model_temp))
-                kld_train = -np.mean(norm.logpdf(y_train["Result"].to_numpy(), weighted_ev_train, std_train))
-
             stat_std = y.Result.std()
 
+            # === TEST SET STATISTICS ===
+            # Calculate model performance metrics on held-out test set
             y_class = (y_test["Result"] >=
                        B_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
@@ -564,6 +705,12 @@ def meditate(force, league):
             elif dist == "Gaussian":
                 X_test['EV'] = prob_params['loc']
                 X_test['STD'] = prob_params['scale']
+            elif dist == "Mixture2G":
+                X_test['PI'] = prob_params['mix_prob_1']
+                X_test['MU1'] = prob_params['loc_1']
+                X_test['SIG1'] = prob_params['scale_1']
+                X_test['MU2'] = prob_params['loc_2']
+                X_test['SIG2'] = prob_params['scale_2']
 
             X_test['P'] = y_proba_filt[:, 1]
 
@@ -577,10 +724,19 @@ def meditate(force, league):
                 del filedict
                 del model
 
+            # === SAVE TEST PREDICTIONS ===
+            # Store predictions on test set for later analysis
+
+            # === GENERATE TRAINING REPORT ===
             report()
 
 
+# ============================================================================
+# REPORTING AND ANALYSIS FUNCTIONS
+# ============================================================================
+
 def report():
+    """Generate training report summarizing all model performance metrics."""
     model_list = [f.name for f in (pkg_resources.files(
         data)/"models/").iterdir() if ".mdl" in f.name]
     model_list.sort()
@@ -588,6 +744,8 @@ def report():
         stat_cv = json.load(f)
     with open(pkg_resources.files(data) / "stat_std.json", "r") as f:
         stat_std = json.load(f)
+    stat_dist = load_distribution_config()
+    
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
             with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
@@ -605,6 +763,10 @@ def report():
 
             stat_std.setdefault(league, {})
             stat_std[league][market] = float(std)
+            
+            # Save distribution selection
+            stat_dist.setdefault(league, {})
+            stat_dist[league][market] = dist
 
             f.write(f" {league} {market} ".center(90, "="))
             f.write("\n")
@@ -618,9 +780,12 @@ def report():
 
     with open(pkg_resources.files(data) / "stat_std.json", "w") as f:
         json.dump(stat_std, f, indent=4)
+    
+    save_distribution_config(stat_dist)
 
 
 def see_features():
+    """Analyze feature importance and correlations across all models using SHAP."""
     model_list = [f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name]
     model_list.sort()
     feature_importances = []
@@ -639,9 +804,16 @@ def see_features():
         C = M.corr(numeric_only=True)["Result"]
         X = M.drop(columns=['Result', 'EV', 'P'])
         C = C.drop(['Result', 'EV', 'P'])
-        if filedict["distribution"] == "Gaussian":
-            X.drop(columns=["STD"], inplace=True)
-            C.drop(["STD"], inplace=True)
+        
+        # Drop distribution-specific parameters that aren't features
+        dist = filedict["distribution"]
+        if dist == "Gaussian":
+            X.drop(columns=["STD"], inplace=True, errors='ignore')
+            C.drop(["STD"], inplace=True, errors='ignore')
+        elif dist == "Mixture2G":
+            X.drop(columns=["STD"], inplace=True, errors='ignore')
+            C.drop(["STD"], inplace=True, errors='ignore')
+        
         features = X.columns
 
         categories = ["Home", "Player position"]
@@ -653,10 +825,18 @@ def see_features():
         model = filedict['model']
 
         vals = np.zeros(len(X.columns))
+        
         explainer = shap.TreeExplainer(model.booster)
         subvals = explainer.shap_values(X)
-        if filedict["distribution"] == "Gaussian":
+        
+        # Handle different output shapes for different distributions
+        if dist == "Gaussian":
             subvals = np.abs(subvals[0]) + np.abs(subvals[1])
+        elif dist == "Poisson":
+            # Poisson has 1 output, already correct shape
+            pass
+        else:
+            pass
 
         vals = vals + np.mean(np.abs(subvals), axis=0)
 
@@ -669,7 +849,7 @@ def see_features():
         most_important[model_str[:-4]] = list(features[np.argpartition(vals, -10)[-10:]])
 
     df = pd.DataFrame(feature_importances, index=[
-                      market[:-4] for market in model_list]).fillna(0).transpose()
+                      market[:-4] for market in model_list]).fillna(0).infer_objects(copy=False).transpose()
     
     for league in ["NBA", "WNBA", "NFL", "NHL", "MLB"]:
         df[league + "_ALL"] = df[[col for col in df.columns if league in col]].mean(axis=1)
@@ -687,6 +867,7 @@ def see_features():
                       market[:-4] for market in model_list]).T.to_csv(pkg_resources.files(data) / "feature_correlations.csv")
 
 def filter_features():
+    """Identify and filter low-importance features based on SHAP analysis."""
     shap_df = pd.read_csv(pkg_resources.files(data) / "feature_importances.csv", index_col=0)
     shap_df.drop(columns=[col for col in shap_df.columns if "ALL" in col], inplace=True)
     corr_df = pd.read_csv(pkg_resources.files(data) / "feature_correlations.csv", index_col=0)
@@ -716,7 +897,12 @@ def filter_features():
     with open(pkg_resources.files(data) / "feature_filter.json", "w") as outfile:
         json.dump(feature_filter, outfile, indent=4)
 
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
 def fit_book_weights(league, market):
+    """Fit optimal weights for multiple sportsbooks using historical accuracy."""
     global book_weights
     warnings.simplefilter('ignore', UserWarning)
     print(f"Fitting Book Weights - {league}, {market}")
@@ -795,6 +981,7 @@ def fit_book_weights(league, market):
         return {}
 
 def fit_model_weight(model_ev, odds_ev, result, cv, model_std=None):
+    """Optimize blend weight between model predictions and bookmaker lines."""
     if cv == 1:
         def objective(w, x, y):
             W = np.array([w, 1-w]).flatten()
@@ -815,12 +1002,14 @@ def fit_model_weight(model_ev, odds_ev, result, cv, model_std=None):
     return res.x[0]
 
 def fit_filter(x, y_class):
+    """Train logistic regression filter to identify high-confidence predictions."""
     filt = LogisticRegression(
                 fit_intercept=False, solver='newton-cholesky', tol=1e-8, max_iter=500, C=.1).fit(x, y_class)
 
     return filt
 
 def trim_matrix(M):
+    """Remove data quality issues and prepare matrix for modeling."""
     warnings.simplefilter('ignore', UserWarning)
     # Trim the fat
     while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
@@ -982,6 +1171,7 @@ def trim_matrix(M):
     return M
 
 def correlate(league, force=False):
+    """Calculate feature correlations with outcomes for feature engineering."""
     print(f"Correlating {league}...")
     tracked_stats = { 
         "NFL": {
@@ -1361,7 +1551,7 @@ def correlate(league, force=False):
             usage = pd.DataFrame(
                 log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
             usage.reset_index(inplace=True)
-            game_df = game_df.merge(usage, how="left").fillna(0)
+            game_df = game_df.merge(usage, how="left").fillna(0).infer_objects(copy=False)
             game_df = game_df.loc[game_df[log_str["position"]] != None]
             ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
                 [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)

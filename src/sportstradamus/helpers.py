@@ -337,9 +337,73 @@ def get_ev(line, under, cv=1, force_gauss=False):
             line = float(line)
             return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
 
-def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1):
+def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1, 
+             weight1=None, mu1=None, sigma1=None, mu2=None, sigma2=None):
+    """
+    Calculate odds for an outcome given expected value and distribution parameters.
+    
+    Parameters:
+    -----------
+    line : float
+        The line/cutoff value
+    ev : float
+        Expected value (mean)
+    cv : float
+        Coefficient of variation (default: 1 for Poisson)
+    std : float, optional
+        Standard deviation (for Gaussian)
+    force_gauss : bool
+        Force Gaussian calculation for Poisson data
+    step : float
+        Step size for binning (default: 1)
+    temp : float
+        Temperature parameter for scaling (default: 1)
+    weight1 : float, optional
+        Weight of first component for mixture model (0 to 1). If provided with mu1, sigma1, mu2, sigma2,
+        triggers mixture calculation instead of standard distribution.
+    mu1 : float, optional
+        Mean of first component for mixture model
+    sigma1 : float, optional
+        Standard deviation of first component for mixture model
+    mu2 : float, optional
+        Mean of second component for mixture model
+    sigma2 : float, optional
+        Standard deviation of second component for mixture model
+    
+    Returns:
+    --------
+    float : Probability of outcome being under the line
+    """
     high = np.floor((line+step)/step)*step
     low = np.ceil((line-step)/step)*step
+    
+    # Handle mixture of 2 Gaussians if mixture parameters provided
+    if weight1 is not None and mu1 is not None and sigma1 is not None and mu2 is not None and sigma2 is not None:
+        weight2 = 1.0 - weight1
+        
+        # Calculate CDF for each component at high and low boundaries
+        cdf_high_1 = norm.cdf(high, loc=mu1, scale=sigma1/temp)
+        cdf_low_1 = norm.cdf(low, loc=mu1, scale=sigma1/temp)
+        
+        cdf_high_2 = norm.cdf(high, loc=mu2, scale=sigma2/temp)
+        cdf_low_2 = norm.cdf(low, loc=mu2, scale=sigma2/temp)
+        
+        # Probability under the line for each component
+        under_1 = cdf_high_1
+        under_2 = cdf_high_2
+        
+        # Push probability (probability density at the line) for each component
+        push_1 = cdf_high_1 - cdf_low_1
+        push_2 = cdf_high_2 - cdf_low_2
+        
+        # Mixture probability: weighted sum
+        under_mixture = weight1 * under_1 + weight2 * under_2
+        push_mixture = weight1 * push_1 + weight2 * push_2
+        
+        # Adjust for push probability
+        return under_mixture - push_mixture/2
+    
+    # Standard distribution logic
     if cv == 1:
         if force_gauss:
             under = norm.cdf(high, ev, np.sqrt(ev)/temp)
@@ -352,6 +416,8 @@ def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1):
     else:
         if std is None:
             std = ev*cv
+        
+        # Default to Gaussian for Gaussian distribution
         under = norm.cdf(high, ev, std/temp)
         push = under - norm.cdf(low, ev, std/temp)
         return under - push/2
@@ -811,3 +877,67 @@ def accel_asc(n):
         a[k] = x + y
         y = x + y - 1
         yield a[:k + 1]
+
+def set_model_start_values(model, dist, X_data):
+    """
+    Set appropriate start values for different distribution types.
+    
+    Parameters:
+    -----------
+    model : LightGBMLSS model
+    dist : str
+        Distribution name ("Poisson", "Gaussian", "Mixture2G")
+    X_data : DataFrame with columns "MeanYr" and "STDYr"
+    """
+    sv = X_data[["MeanYr", "STDYr"]].to_numpy()
+    
+    if dist == "Poisson":
+        # Poisson only needs mean (1 parameter)
+        sv = sv[:, 0]
+        sv = sv.reshape(len(sv), 1)
+    elif dist == "Gaussian":
+        # Gaussian uses both MeanYr and STDYr (2 parameters)
+        pass  # Already has correct shape
+    elif dist == "Mixture2G":
+        # Split the mean and std into two components for the mixture (5 parameters total, 6th column needed as 1-mixture weight)
+        sv = np.hstack((sv[:,[0,0,1,1]],np.ones((sv.shape[0],1)),np.zeros((sv.shape[0],1))))
+    else:
+        # For other distributions, try to use mean and scale if available
+        pass
+    
+    model.start_values = sv
+
+def mixture_to_moments(pi, mu1, mu2, sigma1, sigma2):
+    """
+    Convert 2-component Gaussian mixture parameters to
+    interpretable moment-based parameters.
+    """
+    w = np.array([pi, 1 - pi])
+    mus = np.array([mu1, mu2])
+    sigs = np.array([sigma1, sigma2])
+
+    # Mean
+    mean = np.dot(w, mus)
+
+    # Deviations of component means from mixture mean
+    delta = mus - mean
+
+    # Variance (within + between)
+    variance = np.dot(w, sigs**2 + delta**2)
+    std = np.sqrt(variance)
+
+    # Third central moment
+    m3 = np.dot(w, 3 * sigs**2 * delta + delta**3)
+
+    # Fourth central moment
+    m4 = np.dot(w, 3 * sigs**4 + 6 * sigs**2 * delta**2 + delta**4)
+
+    skewness = m3 / std**3
+    excess_kurtosis = m4 / std**4 - 3
+
+    return {
+        "mean": mean,
+        "std": std,
+        "skewness": skewness,
+        "kurtosis": excess_kurtosis,
+    }

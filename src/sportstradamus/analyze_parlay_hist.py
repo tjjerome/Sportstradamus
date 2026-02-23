@@ -200,7 +200,7 @@ def reflect():
                 if not df.empty:
                     profits[f"{platform}, {league}"][tf] = df.sort_values("Model EV", ascending=False).groupby(["Game", "Date"]).apply(lambda x: x.Profit.mean()).sum()
 
-    profits = pd.DataFrame(profits).T.reset_index(names='Split').fillna(0.0)
+    profits = pd.DataFrame(profits).T.reset_index(names='Split').fillna(0).infer_objects(copy=False)
     wks = gc.open("Sportstradamus").worksheet("Parlay Profit")
     wks.clear()
     wks.update([profits.columns.values.tolist()] +
