@@ -14,7 +14,7 @@ import nfl_data_py as nfl
 import nflreadpy as nflr
 from scipy.stats import iqr, poisson, norm, zscore
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values, mixture_to_moments
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values
 import pandas as pd
 import warnings
 import requests
