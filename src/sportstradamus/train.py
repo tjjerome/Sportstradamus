@@ -6,7 +6,6 @@ from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-from sklearn.mixture import GaussianMixture
 from scipy.optimize import minimize
 from scipy.stats import poisson, skellam, norm
 from sklearn.metrics import (
@@ -24,8 +23,7 @@ from tqdm import tqdm
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions.Gaussian import Gaussian
 from lightgbmlss.distributions.Poisson import Poisson
-from lightgbmlss.distributions.Mixture import Mixture
-from lightgbmlss.distributions.distribution_utils import DistributionClass
+from sportstradamus.skew_normal import SkewNormal
 import shap
 import json
 import warnings

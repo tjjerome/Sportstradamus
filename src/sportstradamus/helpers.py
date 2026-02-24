@@ -906,38 +906,3 @@ def set_model_start_values(model, dist, X_data):
         pass
     
     model.start_values = sv
-
-def mixture_to_moments(pi, mu1, mu2, sigma1, sigma2):
-    """
-    Convert 2-component Gaussian mixture parameters to
-    interpretable moment-based parameters.
-    """
-    w = np.array([pi, 1 - pi])
-    mus = np.array([mu1, mu2])
-    sigs = np.array([sigma1, sigma2])
-
-    # Mean
-    mean = np.dot(w, mus)
-
-    # Deviations of component means from mixture mean
-    delta = mus - mean
-
-    # Variance (within + between)
-    variance = np.dot(w, sigs**2 + delta**2)
-    std = np.sqrt(variance)
-
-    # Third central moment
-    m3 = np.dot(w, 3 * sigs**2 * delta + delta**3)
-
-    # Fourth central moment
-    m4 = np.dot(w, 3 * sigs**4 + 6 * sigs**2 * delta**2 + delta**4)
-
-    skewness = m3 / std**3
-    excess_kurtosis = m4 / std**4 - 3
-
-    return {
-        "mean": mean,
-        "std": std,
-        "skewness": skewness,
-        "kurtosis": excess_kurtosis,
-    }
