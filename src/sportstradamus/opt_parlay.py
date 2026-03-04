@@ -133,7 +133,7 @@ for league in ["NBA"]:# parlays.League.unique():
         lines = [float(re.search(r'[\d,.]+(?!%)', leg).group(0)) for leg in legs]
 
         model_odds = [float(re.search(r'[\d,.]+(?=%)', leg).group(0))/100 for leg in legs]
-        book_odds = [get_odds(evs[i], lines[i], stat_cv[league][markets[i]]) for i in range(bet_size)]
+        book_odds = [get_odds(lines[i], evs[i], "Poisson" if stat_cv[league][markets[i]] == 1 else "Gaussian", cv=stat_cv[league][markets[i]]) for i in range(bet_size)]
 
         for i in range(bet_size):
             if np.isnan(book_odds[i]):

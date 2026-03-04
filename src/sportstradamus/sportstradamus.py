@@ -8,7 +8,7 @@ from google.auth.transport.requests import Request
 import gspread
 import click
 import re
-from scipy.stats import poisson, skellam, norm, hmean, multivariate_normal
+from scipy.stats import poisson, nbinom, skellam, norm, hmean, multivariate_normal
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.special import softmax
 from math import comb
@@ -857,7 +857,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             filedict = pickle.load(infile)
         cv = filedict["cv"]
         model_weight = filedict["weight"]
-        model_temp = filedict["temperature"]
+        pit_scores = filedict.get("pit_scores", None)
         dist = filedict["distribution"]
         step = filedict["step"]
 
@@ -866,8 +866,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} mean"])
             if f"proj {market} std" in stat_data.playerProfile.columns:
                 prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
+            if f"proj {market} alpha" in stat_data.playerProfile.columns:
+                prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} alpha"])
 
-            prob_params.rename(columns={f"proj {market} mean": "loc", f"proj {market} std": "scale"}, inplace=True)
+            prob_params.rename(columns={f"proj {market} mean": "loc", f"proj {market} std": "scale", f"proj {market} alpha": "alpha"}, inplace=True)
 
         else:
             model = filedict["model"]
@@ -911,37 +913,12 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         # Rename probability parameters based on distribution type
         prob_params.rename(columns={"rate": "Model EV", "loc": "Model EV", "scale": "Model STD"}, inplace=True)
-        
-        # Handle Mixture2G parameters if present - preserve original mixture parameters for accurate probability
-        is_mixture = "mix_prob_1" in prob_params.columns and "loc_2" in prob_params.columns
-        if is_mixture:
-            # Store original mixture parameters (feature-dependent from LightGBMLSS Mixture)
-            # Parameters are: mix_prob_1, loc_1, scale_1, loc_2, scale_2
-            # mix_prob_2 = 1 - mix_prob_1 (implicit)
-            prob_params["weight1_val"] = prob_params["mix_prob_1"]
-            prob_params["mu1_val"] = prob_params["loc_1"]
-            prob_params["sigma1_val"] = prob_params["scale_1"]
-            prob_params["mu2_val"] = prob_params["loc_2"]
-            prob_params["sigma2_val"] = prob_params["scale_2"]
-            
-            # Also calculate effective EV and STD for weighting step
-            weight1 = prob_params["weight1_val"]
-            mu1 = prob_params["mu1_val"]
-            sigma1 = prob_params["sigma1_val"]
-            mu2 = prob_params["mu2_val"]
-            sigma2 = prob_params["sigma2_val"]
-            weight2 = 1 - weight1
-            
-            # Expected value is weighted average of means (per sample for feature-dependent)
-            model_ev = weight1 * mu1 + weight2 * mu2
-            
-            # Variance in mixture: Var(X) = E[Var(X|Z)] + Var(E[X|Z])
-            var_x = (weight1 * (sigma1**2 + (mu1 - model_ev)**2) + 
-                    weight2 * (sigma2**2 + (mu2 - model_ev)**2))
-            std_mixture = np.sqrt(var_x)
-            
-            prob_params["Model EV"] = model_ev
-            prob_params["Model STD"] = std_mixture
+
+        # NegBin parameters need explicit mean/std computation from total_count and probs
+        # PyTorch NegBin: probs = success probability → mean = n*p/(1-p), std = sqrt(n*p/(1-p)^2)
+        if dist == "NegBin" and "total_count" in prob_params.columns:
+            prob_params["Model EV"] = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
+            prob_params["Model STD"] = np.sqrt(prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])**2)
         
         if "Model STD" not in prob_params.columns:
             prob_params["Model STD"] = 0
@@ -949,40 +926,34 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
         if offer_df.empty:
             return []
-        offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], cv, step=step), axis=1)
+        offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv, step=step), axis=1)
         
-        if dist == "Poisson":
+        # TODO change these to use fused_loc from train.py
+        if dist == "NegBin":
             offer_df["Model EV"] = np.exp(np.average(np.log(offer_df[["Model EV", "Books EV"]].to_numpy()), weights=[model_weight, 1-model_weight], axis=1))
+            # Recompute NegBin p to match blended EV, keep r (total_count) from model
+            offer_df["NB_N"] = offer_df["total_count"]
+            offer_df["NB_P"] = offer_df["NB_N"] / (offer_df["NB_N"] + offer_df["Model EV"])
+            offer_df["Model STD"] = np.sqrt(offer_df["NB_N"] * (1 - offer_df["NB_P"]) / offer_df["NB_P"]**2)
         else:
+            # For SkewNormal: blend true means (not raw locs), then convert back.
+            # True E[X] = loc + scale * delta * sqrt(2/pi); shifting loc by d shifts E[X] by d.
+            if dist == "SkewNormal" and "alpha" in offer_df.columns:
+                _delta = offer_df["alpha"] / np.sqrt(1 + offer_df["alpha"]**2)
+                offer_df["Model EV"] = offer_df["Model EV"] + _delta * offer_df["Model STD"] * np.sqrt(2 / np.pi)
             s = offer_df[["Model STD", "Books STD"]].fillna(1).to_numpy()
             offer_df["Model STD"] = np.sqrt(1/np.average(np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1))
             offer_df["Model EV"] = np.average(offer_df[["Model EV", "Books EV"]].fillna(0).infer_objects(copy=False).to_numpy()*np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1)*np.power(offer_df["Model STD"].to_numpy(), 2)
+            # Convert blended mean back to loc for SkewNormal (get_odds expects loc)
+            if dist == "SkewNormal" and "alpha" in offer_df.columns:
+                _delta = offer_df["alpha"] / np.sqrt(1 + offer_df["alpha"]**2)
+                offer_df["Model EV"] = offer_df["Model EV"] - _delta * offer_df["Model STD"] * np.sqrt(2 / np.pi)
         
-        # Calculate probabilities using distribution-specific methods
-        if dist == "Mixture2G":
-            # For Mixture2G, use exact mixture probability calculation via get_odds
-            def get_mixture_probability(row):
-                return get_odds(
-                    line=row["Line"],
-                    ev=None,  # not used for mixture
-                    cv=cv,
-                    std=None,  # not used for mixture
-                    step=step,
-                    temp=model_temp,
-                    weight1=row["weight1_val"],
-                    mu1=row["mu1_val"],
-                    sigma1=row["sigma1_val"],
-                    mu2=row["mu2_val"],
-                    sigma2=row["sigma2_val"]
-                )
-            
-            # Calculate probabilities directly from mixture, blended with bookmaker
-            offer_df["Model_prob_under"] = offer_df.apply(get_mixture_probability, axis=1)
-            offer_df["Books_prob_under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Books EV"], cv, x["Books STD"], step=step, temp=model_temp), axis=1)
-            offer_df["Model Under"] = model_weight * offer_df["Model_prob_under"] + (1 - model_weight) * offer_df["Books_prob_under"]
-        else:
-            # For Gaussian and Poisson, use standard get_odds
-            offer_df["Model Under"] = offer_df.apply(lambda x: get_odds(x["Line"], x["Model EV"], cv, x["Model STD"], step=step, temp=model_temp), axis=1)
+        # Use get_odds with PIT calibration
+        _model_alpha = offer_df["alpha"].to_numpy() if (dist == "SkewNormal" and "alpha" in offer_df.columns) else np.zeros(len(offer_df))
+        _nb_n = offer_df["NB_N"].to_numpy() if (dist == "NegBin" and "NB_N" in offer_df.columns) else None
+        _model_under = get_odds(offer_df["Line"].to_numpy(), offer_df["Model EV"].to_numpy(), dist, cv, offer_df["Model STD"].to_numpy(), alpha=_model_alpha, step=step, calib=pit_scores, nb_n=_nb_n)
+        offer_df["Model Under"] = _model_under
         
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:
@@ -1088,11 +1059,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 for player in players:
                     params.append(prob_params.loc[player])
 
-                if dist == "Poisson":
-                    under = poisson.cdf(
-                        o["Line"], params[1]["rate"] + params[0]["rate"])
-                    push = poisson.pmf(
-                        o["Line"], params[1]["rate"] + params[0]["rate"])
+                if dist == "NegBin":
+                    r1, p1 = params[0]["total_count"], params[0]["probs"]
+                    r2, p2 = params[1]["total_count"], params[1]["probs"]
+                    r_sum = r1 + r2
+                    p_sum = (r1 * p1 + r2 * p2) / (r1 + r2)  # weighted avg p
+                    under = nbinom.cdf(int(o["Line"]), r_sum, p_sum)
+                    push = nbinom.pmf(int(o["Line"]), r_sum, p_sum)
                     under -= push/2
                 elif dist == "Gaussian":
                     high = np.floor((o["Line"]+step)/step)*step
@@ -1131,11 +1104,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 for player in players:
                     params.append(prob_params.loc[player])
 
-                if dist == "Poisson":
-                    under = skellam.cdf(
-                        o["Line"], params[1]["rate"], params[0]["rate"])
-                    push = skellam.pmf(
-                        o["Line"], params[1]["rate"], params[0]["rate"])
+                if dist == "NegBin":
+                    mu1 = params[0]["total_count"] * (1 - params[0]["probs"]) / params[0]["probs"]
+                    mu2 = params[1]["total_count"] * (1 - params[1]["probs"]) / params[1]["probs"]
+                    under = skellam.cdf(o["Line"], mu2, mu1)
+                    push = skellam.pmf(o["Line"], mu2, mu1)
                     under -= push/2
                 elif dist == "Gaussian":
                     high = np.floor((-o["Line"]+step)/step)*step
@@ -1155,7 +1128,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 if stats["Line"] != o["Line"]:
                     ev = get_ev(stats["Line"], 1-stats["Odds"], cv)
-                    p = 1-get_odds(o["Line"], ev, cv, step=step)
+                    p = 1-get_odds(o["Line"], ev, dist, cv, step=step)
                     if np.isnan(p):
                         stats["Odds"] = 0
                     else:
@@ -1170,9 +1143,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     p = [1-stats["Odds"], stats["Odds"]]
 
                 params = prob_params.loc[o["Player"]]
-                if dist == "Poisson":
-                    under = poisson.cdf(o["Line"], params["rate"])
-                    push = poisson.pmf(o["Line"], params["rate"])
+                if dist == "NegBin":
+                    r = params["total_count"]
+                    p = params["probs"]
+                    under = nbinom.cdf(int(o["Line"]), r, p)
+                    push = nbinom.pmf(int(o["Line"]), r, p)
                     under -= push/2
                 elif dist == "Gaussian":
                     high = np.floor((o["Line"]+step)/step)*step
@@ -1228,7 +1203,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 if stats["Line"] != o["Line"]:
                     ev = get_ev(stats["Line"], 1-stats["Odds"], cv)
-                    stats["Odds"] = get_odds(o["Line"], ev, cv, step)
+                    stats["Odds"] = get_odds(o["Line"], ev, dist, cv, step)
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
                     p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
