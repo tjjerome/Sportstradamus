@@ -12,7 +12,7 @@ from klepto.archives import hdfdir_archive, cache
 from sportstradamus import creds, data
 from time import sleep
 from operator import itemgetter
-from scipy.stats import poisson, skellam, norm, iqr
+from scipy.stats import poisson, nbinom, skellam, norm, skewnorm, iqr
 from scipy.optimize import fsolve, minimize
 from scipy.integrate import dblquad
 import numpy as np
@@ -336,9 +336,38 @@ def get_ev(line, under, cv=1, force_gauss=False):
         else:
             line = float(line)
             return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
+        
+def apply_pit_calibration(p_raw, pit_scores):
+    """
+    Apply PIT-based calibration to a raw CDF probability.
+    
+    Maps p_raw through the empirical CDF of calibration PIT scores.
+    If U_i = F(y_i) are the PIT scores, the ECDF G(p) = P(U ≤ p)
+    gives the calibrated probability: G(F(x)) ≈ Uniform(0,1).
+    
+    Parameters:
+    -----------
+    p_raw : float or np.ndarray
+        Raw probability from the model's CDF (output of get_odds with temp=1)
+    pit_scores : np.ndarray
+        Sorted array of PIT scores from the calibration set, stored in model file
+    
+    Returns:
+    --------
+    float or np.ndarray : Calibrated probability
+    """
+    if pit_scores is None or len(pit_scores) == 0:
+        return p_raw
+    # Skip calibration if PIT scores are degenerate (too little spread)
+    if np.ptp(pit_scores) < 0.1:
+        return p_raw
+    # ECDF of PIT scores: maps model CDF probability → calibrated probability
+    # The sorted pit_scores are the x-axis; the uniform quantile grid is the y-axis.
+    n = len(pit_scores)
+    quantile_grid = np.linspace(0, 1, n)
+    return np.clip(np.interp(p_raw, pit_scores, quantile_grid), 0, 1)
 
-def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1, 
-             weight1=None, mu1=None, sigma1=None, mu2=None, sigma2=None):
+def get_odds(line, ev, dist, cv=1, std=None, alpha=0, nb_n=None, step=1, calib=None):
     """
     Calculate odds for an outcome given expected value and distribution parameters.
     
@@ -348,27 +377,22 @@ def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1,
         The line/cutoff value
     ev : float
         Expected value (mean)
+        For SkewNormal, this is the location parameter NOT the true mean
+    dist : str
+        Distribution type ("Poisson", "SkewNormal", "NegBin", "Gaussian")
     cv : float
-        Coefficient of variation (default: 1 for Poisson)
+        Coefficient of variation
     std : float, optional
         Standard deviation (for Gaussian)
-    force_gauss : bool
-        Force Gaussian calculation for Poisson data
-    step : float
+    alpha : float, optional
+        Skewness parameter for Skew Gaussian
+    step : float, optional
         Step size for binning (default: 1)
-    temp : float
-        Temperature parameter for scaling (default: 1)
-    weight1 : float, optional
-        Weight of first component for mixture model (0 to 1). If provided with mu1, sigma1, mu2, sigma2,
-        triggers mixture calculation instead of standard distribution.
-    mu1 : float, optional
-        Mean of first component for mixture model
-    sigma1 : float, optional
-        Standard deviation of first component for mixture model
-    mu2 : float, optional
-        Mean of second component for mixture model
-    sigma2 : float, optional
-        Standard deviation of second component for mixture model
+    calib : list of float, optional
+        Calibration array for scaling
+    nb_n : float or np.ndarray, optional
+        NegBin dispersion parameter (total_count / r). When provided with nb_p,
+        uses nbinom.cdf instead of poisson.cdf for proper overdispersion handling.
     
     Returns:
     --------
@@ -377,49 +401,28 @@ def get_odds(line, ev, cv=1, std=None, force_gauss=False, step=1, temp=1,
     high = np.floor((line+step)/step)*step
     low = np.ceil((line-step)/step)*step
     
-    # Handle mixture of 2 Gaussians if mixture parameters provided
-    if weight1 is not None and mu1 is not None and sigma1 is not None and mu2 is not None and sigma2 is not None:
-        weight2 = 1.0 - weight1
-        
-        # Calculate CDF for each component at high and low boundaries
-        cdf_high_1 = norm.cdf(high, loc=mu1, scale=sigma1/temp)
-        cdf_low_1 = norm.cdf(low, loc=mu1, scale=sigma1/temp)
-        
-        cdf_high_2 = norm.cdf(high, loc=mu2, scale=sigma2/temp)
-        cdf_low_2 = norm.cdf(low, loc=mu2, scale=sigma2/temp)
-        
-        # Probability under the line for each component
-        under_1 = cdf_high_1
-        under_2 = cdf_high_2
-        
-        # Push probability (probability density at the line) for each component
-        push_1 = cdf_high_1 - cdf_low_1
-        push_2 = cdf_high_2 - cdf_low_2
-        
-        # Mixture probability: weighted sum
-        under_mixture = weight1 * under_1 + weight2 * under_2
-        push_mixture = weight1 * push_1 + weight2 * push_2
-        
-        # Adjust for push probability
-        return under_mixture - push_mixture/2
+    # Poisson (discrete count data)
+    if dist == "Poisson" or (dist == "NegBin" and nb_n is None):
+        return apply_pit_calibration(poisson.cdf(line, ev), calib) - apply_pit_calibration(poisson.pmf(line, ev), calib)/2
     
-    # Standard distribution logic
-    if cv == 1:
-        if force_gauss:
-            under = norm.cdf(high, ev, np.sqrt(ev)/temp)
-            push = under - norm.cdf(low, ev, np.sqrt(ev)/temp)
-            return under - push/2
-        elif temp==1:
-            return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
-        else:
-            return skellam.cdf(line, (1/(2*temp)+.5)*ev, (1/(2*temp)-.5)*ev) - skellam.pmf(line, (1/(2*temp)+.5)*ev, (1/(2*temp)-.5)*ev)/2
+    elif dist == "NegBin":
+        # NegBin: use nbinom.cdf for overdispersed count data
+        nb_p = nb_n / (nb_n + ev)
+        return apply_pit_calibration(nbinom.cdf(line, nb_n, nb_p), calib) - apply_pit_calibration(nbinom.pmf(line, nb_n, nb_p), calib)/2
+    
     else:
         if std is None:
-            std = ev*cv
+            if cv == 1:
+                std = np.sqrt(ev)
+            else:
+                std = ev*cv
+
+        if dist == "Gaussian":
+            alpha = 0
         
-        # Default to Gaussian for Gaussian distribution
-        under = norm.cdf(high, ev, std/temp)
-        push = under - norm.cdf(low, ev, std/temp)
+        # Default to Skew Gaussian distribution
+        under = apply_pit_calibration(skewnorm.cdf(high, alpha, ev, std), calib)
+        push = under - apply_pit_calibration(skewnorm.cdf(low, alpha, ev, std), calib)
         return under - push/2
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
@@ -886,21 +889,27 @@ def set_model_start_values(model, dist, X_data):
     -----------
     model : LightGBMLSS model
     dist : str
-        Distribution name ("Poisson", "Gaussian", "Mixture2G")
+        Distribution name ("NegBin", "Gaussian", "Mixture2G", "SkewNormal", etc.)
     X_data : DataFrame with columns "MeanYr" and "STDYr"
     """
     sv = X_data[["MeanYr", "STDYr"]].to_numpy()
     
-    if dist == "Poisson":
-        # Poisson only needs mean (1 parameter)
-        sv = sv[:, 0]
-        sv = sv.reshape(len(sv), 1)
+    if dist == "NegBin":
+        # NegBin needs total_count (r) and probs (p), 2 parameters.
+        # PyTorch NegBin.probs is the SUCCESS probability → mean = r*p/(1-p)
+        # so p_pytorch = mu / (r + mu), NOT r/(r+mu) (which is scipy convention).
+        mu = sv[:, 0]
+        r_init = 3.0
+        sv = np.column_stack([np.full_like(mu, r_init), mu / (r_init + mu)])
     elif dist == "Gaussian":
         # Gaussian uses both MeanYr and STDYr (2 parameters)
         pass  # Already has correct shape
     elif dist == "Mixture2G":
         # Split the mean and std into two components for the mixture (5 parameters total, 6th column needed as 1-mixture weight)
         sv = np.hstack((sv[:,[0,0,1,1]],np.ones((sv.shape[0],1)),np.zeros((sv.shape[0],1))))
+    elif dist == "SkewNormal":
+        # SkewNormal uses mean, std, and skewness (3 parameters)
+        sv = np.hstack((sv, np.zeros((sv.shape[0], 1))))
     else:
         # For other distributions, try to use mean and scale if available
         pass

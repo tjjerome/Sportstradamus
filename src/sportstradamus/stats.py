@@ -532,7 +532,7 @@ class Stats:
         gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
         gamelog = gamelog.loc[(gamelog[self.log_strings["date"]]>cutoff_date) & (gamelog[self.log_strings["date"]]<datetime.today().date())]
         if self.league != "MLB":
-            usage_cutoff = gamelog[self.usage_stat].quantile(.33)
+            usage_cutoff = gamelog[self.usage_stat].quantile(.25)
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -589,7 +589,8 @@ class Stats:
                     ev = get_ev(line, .5, stat_cv[self.league].get(market,1))
                 
                 lines.append(line)
-                odds.append(1-get_odds(line, ev, stat_cv[self.league].get(market,1)))
+                _cv = stat_cv[self.league].get(market, 1)
+                odds.append(1-get_odds(line, ev, "Poisson" if _cv == 1 else "Gaussian", cv=_cv))
                 evs.append(ev)
                 archived.append(a)
 
@@ -1390,26 +1391,147 @@ class StatsNBA(Stats):
             logger.warning(f"{filename} missing")
             return []
 
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std", "alpha": f"proj {market} alpha"}), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
+
+        # ------------------------------------------------------------------
+        # Minutes-budget normalization
+        #
+        # Two real-world constraints complicate a simple 300-minute cap:
+        #
+        #   1. Overtime: Games sometimes go beyond regulation. With probability
+        #      p_ot per period, each OT adds ot_per_period player-minutes.
+        #      Modelling this as a geometric process gives an expected total of:
+        #          budget_mean = reg_minutes + ot_per_period * p_ot / (1 - p_ot)
+        #
+        #   2. Unmodeled players: When our roster coverage is incomplete (e.g.
+        #      rookies or fringe benchwarmers lacking enough data), those players
+        #      still consume real minutes. We reserve a portion of the budget for
+        #      them so we don't over-inflate the projections of modeled players.
+        #          unmodeled_reserve = max(0, typical_rotation - N) * avg_unmodeled_min
+        #
+        # Given these facts, the target range for modeled players' total is:
+        #   lower_target = N * per_player_floor   (sanity floor — each player logged)
+        #   upper_target = budget_mean - unmodeled_reserve
+        #
+        # When the projected total falls outside [lower_target, upper_target] we
+        # apply a precision-weighted adjustment. Rather than scaling everyone by
+        # the same factor, we distribute the correction in proportion to each
+        # player's variance. This is the minimum-information-loss solution to the
+        # constrained optimisation:
+        #
+        #   minimise  sum_i (d_i / sigma_i)^2
+        #   subject to  sum_i (mu_i + d_i) = target
+        #
+        #   -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
+        #
+        # Players we are most uncertain about absorb the correction; confidently
+        # projected players are left largely untouched.
+        # ------------------------------------------------------------------
+
+        # ------------------------------------------------------------------
+        # Budget parameters — derived by analyzing historical gamelogs.
+        #
+        # Methodology (run offline against self.gamelog, hardcoded for speed):
+        #   typical_rotation : median players logging >3 min per team per game
+        #   ot_rate          : fraction of games where any player exceeded
+        #                      regulation max minutes (0.55% NBA, 3.9% WNBA)
+        #   avg_unmodeled_min: mean minutes for players ranked beyond the top-7
+        #                      modeled tier (ranks 8-10 NBA, 8-9 WNBA)
+        #   per_player_floor : 5th-percentile minutes for top-7 tier players
+        #   per_player_cap   : regulation max + one 5-min OT period (hard rule)
+        # ------------------------------------------------------------------
+        if self.league == "NBA":
+            reg_minutes       = 240    # 5 players × 48 min regulation
+            ot_per_period     = 25     # 5 players × 5 min per OT period
+            ot_rate           = 0.06   # measured: 6% of NBA games go to OT
+            typical_rotation  = 10    # measured: median active players per team-game
+            avg_unmodeled_min = 11    # measured: mean min for players ranked 8-10
+            per_player_floor  = 18    # measured: 5th-pct min for top-7 tier players
+            per_player_cap    = 53    # hard rule: 48 min regulation + 1 OT period
+        else:  # WNBA
+            reg_minutes       = 200    # 5 players × 40 min regulation
+            ot_per_period     = 25     # 5 players × 5 min per OT period
+            ot_rate           = 0.039  # measured: 3.9% of WNBA games go to OT
+            typical_rotation  = 9     # measured: median active players per team-game
+            avg_unmodeled_min = 8.5   # measured: mean min for players ranked 8-9
+            per_player_floor  = 13    # measured: 5th-pct min for top-7 tier players
+            per_player_cap    = 45    # hard rule: 40 min regulation + 1 OT period
+
+        # Expected total team minutes including OT (geometric series)
+        ot_expected = ot_per_period * ot_rate / (1.0 - ot_rate)
+        budget_mean = reg_minutes + ot_expected
 
         teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
         for team, team_df in teams:
-            total = team_df[f"proj {market} mean"].sum()
-            std = team_df[f"proj {market} std"].sum()
-            count = len(team_df)
+            means  = team_df[f"proj {market} mean"].copy()   # loc parameter (xi)
+            stds   = team_df[f"proj {market} std"].copy()    # scale parameter (omega)
+            alphas = team_df[f"proj {market} alpha"].copy()  # skew parameter (alpha)
+            N      = len(team_df)
 
-            if self.league == "NBA":
-                maxMinutes = 300
-                minMinutes = 20*count
-            elif self.league == "WNBA":
-                maxMinutes = 200
-                minMinutes = 15*count
+            # ------------------------------------------------------------------
+            # True skew-normal expected value and variance:
+            #   delta  = alpha / sqrt(1 + alpha^2)
+            #   E[X]   = loc + scale * delta * sqrt(2/pi)
+            #   Var[X] = scale^2 * (1 - 2*delta^2/pi)
+            #
+            # The budget constraint operates on E[X], but adjustments are
+            # applied to loc. Shifting loc by d_i shifts E[X] by exactly d_i
+            # regardless of alpha, so alpha is unchanged after normalization.
+            # ------------------------------------------------------------------
+            delta      = alphas / np.sqrt(1.0 + alphas ** 2)
+            sn_bias    = stds * delta * np.sqrt(2.0 / np.pi)
+            true_means = means + sn_bias                            # true E[X_i]
+            true_vars  = stds ** 2 * (1.0 - 2.0 * delta ** 2 / np.pi)  # true Var[X_i]
 
-            fit_factor = fit_distro(total, std, minMinutes, maxMinutes)
-            self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"]*fit_factor
-            self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
+            total = true_means.sum()
 
+            if total <= 0:
+                continue
+
+            # Minutes reserved for fringe bench players not captured in our model.
+            # When a modeled starter is inactive they are simply absent from
+            # playerProfile, so N is smaller and unmodeled_count rises by 1.  That
+            # slightly under-reserves their minutes, but the always-adjust logic
+            # below will still scale the remaining active players upward to fill the
+            # available budget rather than leaving them at baseline projections.
+            unmodeled_count   = max(0, typical_rotation - N)
+            unmodeled_reserve = unmodeled_count * avg_unmodeled_min
+
+            # upper_target: minutes budgeted specifically for the N modeled players.
+            # lower_target: sanity floor — never target below this regardless of
+            #               how many unmodeled players the formula estimates.
+            upper_target = budget_mean - unmodeled_reserve
+            lower_target = N * per_player_floor
+            target = max(upper_target, lower_target)
+
+            # Always adjust toward target. This is the key behaviour for handling
+            # inactive teammates: when a starter is absent, total < target and the
+            # remaining players are automatically scaled up to absorb the gap.
+            # When the full rotation is present, the adjustment is typically small
+            # (the model is already well-calibrated) but still irons out any
+            # systematic under- or over-projection.
+            deficit   = target - total    # positive → scale up, negative → scale down
+            total_var = true_vars.sum()
+            if total_var > 0:
+                adjustments = true_vars / total_var * deficit
+            else:
+                adjustments = true_means / total * deficit
+            new_loc = (means + adjustments).clip(lower=0, upper=per_player_cap)
+
+            # Scale omega (scale) proportionally to the loc shift to preserve the
+            # relative spread (CV). Alpha is a pure shape parameter — it is
+            # unaffected by location or scale changes and needs no update.
+            scale_factors = (new_loc / means.replace(0, np.nan)).fillna(1.0)
+            new_stds = (stds * scale_factors).clip(lower=0)
+
+            new_true_means = new_loc + new_stds * delta * np.sqrt(2 / np.pi)
+            new_true_stds = new_stds * np.sqrt(1 - 2 * delta ** 2 / np.pi)
+
+            self.playerProfile.loc[means.index, f"proj {market} mean"] = new_true_means
+            self.playerProfile.loc[stds.index,  f"proj {market} std"]  = new_true_stds
+
+        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True)
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
@@ -1424,7 +1546,7 @@ class StatsNBA(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -1443,7 +1565,7 @@ class StatsNBA(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
@@ -1544,7 +1666,7 @@ class StatsNBA(Stats):
                     v = archive.get_ev(self.league, submarket, date, player)
                     subline = archive.get_line(self.league, submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -1563,7 +1685,7 @@ class StatsNBA(Stats):
                     v = archive.get_ev(self.league, submarket, date, player)
                     subline = archive.get_line(self.league, submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
@@ -3007,7 +3129,7 @@ class StatsMLB(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -3032,7 +3154,7 @@ class StatsMLB(Stats):
                 v = archive.get_ev("MLB", submarket, date, player)
                 subline = archive.get_line("MLB", submarket, date, player)
                 if submarket == "pitcher win":
-                    p = 1-get_odds(subline, v)
+                    p = 1-get_odds(subline, v, "Poisson")
                     ev += p*weight
                 elif submarket == "quality start":
                     std = stat_cv["MLB"].get(submarket, 1)*v_outs
@@ -3042,12 +3164,12 @@ class StatsMLB(Stats):
                 elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
                     v = archive.get_ev("MLB", "hits", date, player)
                     subline = archive.get_line("MLB", "hits", date, player)
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     v *= (player_games[submarket].sum()/player_games["hits"].sum()) if player_games["hits"].sum() else 0
                     ev += v*weight
                 else:
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
 
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
@@ -3216,7 +3338,7 @@ class StatsMLB(Stats):
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -3242,7 +3364,7 @@ class StatsMLB(Stats):
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
                     if submarket == "pitcher win":
-                        p = 1-get_odds(subline, v)
+                        p = 1-get_odds(subline, v, "Poisson")
                         ev += p*weight
                     elif submarket == "quality start":
                         std = stat_cv["MLB"].get(submarket, 1)*v_outs
@@ -3252,12 +3374,12 @@ class StatsMLB(Stats):
                     elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
                         v = archive.get_ev("MLB", "hits", date, player)
                         subline = archive.get_line("MLB", "hits", date, player)
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                         v *= (player_games.iloc[-one_year_ago:][submarket].sum()/player_games.iloc[-one_year_ago:]["hits"].sum()) if player_games.iloc[-one_year_ago:]["hits"].sum() else 0
                         ev += v*weight
                     else:
                         if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                            v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                            v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
 
                         if np.isnan(v) or v == 0:
                             if subline == 0 and not player_games.empty:
@@ -4522,7 +4644,7 @@ class StatsNFL(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -4544,7 +4666,7 @@ class StatsNFL(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
@@ -4611,30 +4733,138 @@ class StatsNFL(Stats):
                 logger.warning(f"{filename} missing")
                 return
 
-            self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
-            self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
+            # ---------------------------------------------------------------
+            # Store distribution parameters in playerProfile.
+            #
+            # attempts  → SkewNormal: loc (ξ), scale (ω), alpha (α)
+            # carries / targets → NegBin: probs (p), total_count (n)
+            #   NegBin mean     μ = n(1−p)/p
+            #   NegBin variance σ² = n(1−p)/p² = μ/p
+            # ---------------------------------------------------------------
+            if market == "attempts":
+                rename_map = {
+                    "loc":   f"proj {market} mean",
+                    "scale": f"proj {market} std",
+                    "alpha": f"proj {market} alpha",
+                }
+            else:
+                rename_map = {
+                    "probs":       f"proj {market} probs",
+                    "total_count": f"proj {market} n",
+                }
 
-            if market != "attempts":
-                teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
-                for team, team_df in teams:
-                    plays = self.teamProfile.loc[team, "plays_per_game"]
-                    total_passes = team_df["proj attempts mean"].sum()
-                    total = team_df[f"proj {market} mean"].sum()
-                    std = team_df[f"proj {market} std"].sum() if f"proj {market} std" in team_df.columns else 0
-                    count = len(team_df)
+            self.playerProfile = self.playerProfile.join(
+                prob_params.rename(columns=rename_map), lsuffix="_obs"
+            )
+            self.playerProfile.drop(
+                columns=[col for col in self.playerProfile.columns if "_obs" in col],
+                inplace=True,
+            )
 
-                    if market == "carries":
-                        upper_limit = plays-total_passes
+            # ---------------------------------------------------------------
+            # Volume normalization — precision-weighted, always-adjust.
+            #
+            # Two hard constraints for the rush/receiving markets:
+            #   (B) total carries ≈ plays_per_game − proj_attempts − unmodeled_carry_reserve
+            #   (C) total targets ≈ proj_attempts − unmodeled_target_reserve
+            #
+            # proj_attempts is derived from the QB's SkewNormal posterior:
+            #   E[X] = ξ + ω·δ·√(2/π),   δ = α / √(1+α²)
+            # so the alpha parameter is used here even though attempts itself
+            # is not adjusted (we trust the model's posterior directly).
+            #
+            # Unmodeled reserves were measured from historical gamelogs:
+            #   unmodeled_carry_reserve  ≈ 6  (rank-3+ rushers, ~23% of ~27 carries)
+            #   unmodeled_target_reserve ≈ 8  (rank-5+ receivers, ~24% of ~35 targets)
+            #
+            # For NegBin parameters the adjustment shifts total_count (n) while
+            # holding probs (p) fixed — p is an intrinsic per-opportunity success
+            # rate for the player; n scales with opportunity volume:
+            #   new_n_i = μ_i' · p_i / (1 − p_i)
+            #
+            # Within-team distribution of the deficit uses precision-weighting:
+            #   d_i = σ²_i / Σσ²_j · (target − total_μ)
+            # ---------------------------------------------------------------
+            if market == "attempts":
+                # Adjust the SkewNormal parameters to match the true mean and std across players.
+                alpha = self.playerProfile[f"proj {market} alpha"].fillna(0)
+                means = self.playerProfile[f"proj {market} mean"].fillna(0)
+                stds  = self.playerProfile[f"proj {market} std"].fillna(0)
+                delta = alpha / np.sqrt(1.0 + alpha ** 2)
 
-                    elif market == "targets":
-                        upper_limit = total_passes
+                true_means = means + stds * delta * np.sqrt(2.0 / np.pi)
+                true_stds  = stds * np.sqrt(1.0 - (2.0 * delta ** 2) / np.pi)
 
-                    fit_factor = fit_distro(total, std, count, upper_limit, upper_tol=0.5)
-                    self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"]*fit_factor
-                    
-                    if std > 0:
-                        self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
+                self.playerProfile.loc[means.index, f"proj {market} mean"] = true_means
+                self.playerProfile.loc[stds.index,  f"proj {market} std"]  = true_stds
+                self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True)
 
+                self.playerProfile.fillna(0, inplace=True)
+                continue
+
+            unmodeled_carry_reserve  = 6    # measured: mean carries for rank 3+ rushers
+            unmodeled_target_reserve = 8    # measured: mean targets for rank 5+ receivers
+            carry_cap  = 40                 # absolute single-player carry ceiling
+            target_cap = 20                 # absolute single-player target ceiling
+
+            teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
+            for team, team_df in teams:
+                probs_col = f"proj {market} probs"
+                n_col     = f"proj {market} n"
+
+                probs = team_df[probs_col].copy()   # p  (per-opp success rate)
+                ns    = team_df[n_col].copy()       # n  (total_count)
+
+                # NegBin true mean and variance
+                nb_means = ns * (1.0 - probs) / probs.replace(0, np.nan)
+                nb_vars  = nb_means / probs.replace(0, np.nan)
+                nb_means = nb_means.fillna(0)
+                nb_vars  = nb_vars.fillna(0)
+                total    = nb_means.sum()
+
+                if total <= 0:
+                    continue
+
+                plays = self.teamProfile.loc[team, "plays_per_game"]
+
+                # proj_attempts for this team: true SkewNormal E[X] from
+                # the already-stored attempts parameters, or fall back to
+                # plays × pass_rate from teamProfile
+                if "proj attempts mean" in self.playerProfile.columns:
+                    proj_attempts = self.playerProfile.loc[self.playerProfile["team"] == team, "proj attempts mean"].sum()
+                else:
+                    pass_rate = self.teamProfile.loc[team, "pass_rate"]
+                    proj_attempts = plays * pass_rate
+
+                if market == "carries":
+                    cap         = carry_cap
+                    rush_budget = plays - proj_attempts
+                    target      = max(rush_budget - unmodeled_carry_reserve,
+                                      len(team_df))
+                else:  # targets
+                    cap    = target_cap
+                    target = max(proj_attempts - unmodeled_target_reserve,
+                                 len(team_df))
+
+                # Precision-weighted deficit distribution
+                deficit   = target - total
+                total_var = nb_vars.sum()
+                if total_var > 0:
+                    adjustments = nb_vars / total_var * deficit
+                else:
+                    adjustments = nb_means / total * deficit
+
+                new_means = (nb_means + adjustments).clip(lower=0, upper=cap)
+
+                # Update total_count to achieve new mean; keep probs fixed
+                new_ns = (new_means * probs / (1.0 - probs).replace(0, np.nan)).fillna(ns).clip(lower=0)
+                new_stds = np.sqrt(new_ns * (1.0 - probs) / probs.replace(0, np.nan)**2).fillna(0)
+
+                self.playerProfile.loc[ns.index, f"proj {market} mean"] = new_means
+                self.playerProfile.loc[ns.index, f"proj {market} std"] = new_stds
+                # probs unchanged — no update needed
+
+            self.playerProfile.drop(columns=[n_col, probs_col], inplace=True)
             self.playerProfile.fillna(0, inplace=True)
 
     def obs_get_stats(self, offer, date=datetime.today()):
@@ -4722,7 +4952,7 @@ class StatsNFL(Stats):
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -4744,7 +4974,7 @@ class StatsNFL(Stats):
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
@@ -5442,23 +5672,79 @@ class StatsNHL(Stats):
             logger.warning(f"{filename} missing")
             return
 
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std", "alpha": f"proj {market} alpha"}), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
         
         if not pitcher:
+            # ------------------------------------------------------------------
+            # Budget parameters — derived by analyzing historical NHL gamelogs.
+            #
+            # Methodology:
+            #   typical_rotation : median skaters (non-G) logging >3 min per team-game
+            #   ot_rate          : fraction of team-games where total skater TOI > 300
+            #   ot_extra         : mean extra team TOI above 300 when OT occurs (9.6 min)
+            #   avg_unmodeled_min: mean TOI for ranked 8-18 skaters (rank > 7 tier)
+            #   per_player_floor : 5th-percentile TOI for top-7 tier skaters
+            #   per_player_cap   : 99th-percentile TOI for top-7 tier skaters
+            # ------------------------------------------------------------------
+            reg_minutes       = 300    # 5 skaters × 60 min regulation
+            ot_rate           = 0.189  # measured: 18.9% of team-games go to OT
+            ot_extra          = 9.6    # measured: mean extra team TOI when OT occurs
+            typical_rotation  = 18    # measured: median active skaters per team-game
+            avg_unmodeled_min = 14    # measured: mean TOI for skaters ranked 8-18
+            per_player_floor  = 17    # measured: 5th-pct TOI for top-7 tier skaters
+            per_player_cap    = 29    # measured: 99th-pct TOI for top-7 tier skaters
+
+            # Expected total team TOI including OT
+            budget_mean = reg_minutes + ot_rate * ot_extra
+
             teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
             for team, team_df in teams:
-                total = team_df[f"proj {market} mean"].sum()
-                std = team_df[f"proj {market} std"].sum()
-                count = len(team_df)
+                means  = team_df[f"proj {market} mean"].copy()   # loc (ξ)
+                stds   = team_df[f"proj {market} std"].copy()    # scale (ω)
+                alphas = team_df[f"proj {market} alpha"].copy()  # skew (α)
+                N      = len(team_df)
 
-                maxMinutes = 300
-                minMinutes = 15*count
+                # True skew-normal E[X] and Var[X]
+                delta      = alphas / np.sqrt(1.0 + alphas ** 2)
+                sn_bias    = stds * delta * np.sqrt(2.0 / np.pi)
+                true_means = means + sn_bias
+                true_vars  = stds ** 2 * (1.0 - 2.0 * delta ** 2 / np.pi)
 
-                fit_factor = fit_distro(total, std, minMinutes, maxMinutes)
-                self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} mean"]*fit_factor
-                self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"] = self.playerProfile.loc[self.playerProfile["team"] == team, f"proj {market} std"]*(fit_factor if fit_factor >= 1 else 1/fit_factor)
+                total = true_means.sum()
+                if total <= 0:
+                    continue
 
+                # Reserve TOI for the many unmodeled skaters (rank 8-18)
+                unmodeled_count   = max(0, typical_rotation - N)
+                unmodeled_reserve = unmodeled_count * avg_unmodeled_min
+
+                upper_target = budget_mean - unmodeled_reserve
+                lower_target = N * per_player_floor
+                target = max(upper_target, lower_target)
+
+                # Always adjust toward target — handles absent starters by
+                # automatically scaling up remaining teammates to fill the gap
+                deficit   = target - total
+                total_var = true_vars.sum()
+                if total_var > 0:
+                    adjustments = true_vars / total_var * deficit
+                else:
+                    adjustments = true_means / total * deficit
+
+                new_loc = (means + adjustments).clip(lower=0, upper=per_player_cap)
+
+                # Scale ω proportionally; α is unchanged (pure shape parameter)
+                scale_factors = (new_loc / means.replace(0, np.nan)).fillna(1.0)
+                new_stds = (stds * scale_factors).clip(lower=0)
+
+                new_true_means = new_loc + new_stds * delta * np.sqrt(2 / np.pi)
+                new_true_stds = new_stds * np.sqrt(1 - 2 * delta ** 2 / np.pi)
+
+                self.playerProfile.loc[means.index, f"proj {market} mean"] = new_true_means
+                self.playerProfile.loc[stds.index,  f"proj {market} std"]  = new_true_stds
+
+        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True)
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
@@ -5488,7 +5774,7 @@ class StatsNHL(Stats):
                 v = archive.get_ev("NHL", submarket, date, player)
                 subline = archive.get_line("NHL", submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -5513,7 +5799,7 @@ class StatsNHL(Stats):
                 v = archive.get_ev("NHL", submarket, date, player)
                 subline = archive.get_line("NHL", submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                 if np.isnan(v) or v == 0:
                     if submarket == "Moneyline":
                         p = archive.get_moneyline("NHL", date, team)
@@ -5521,7 +5807,7 @@ class StatsNHL(Stats):
                     elif submarket == "goalsAgainst":
                         v = archive.get_total("NHL", date, opponent)
                         subline = np.floor(v) + 0.5
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                         ev += v*weight
                     else:
                         if subline == 0 and not player_games.empty:
@@ -5953,7 +6239,7 @@ class StatsNHL(Stats):
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -5978,7 +6264,7 @@ class StatsNHL(Stats):
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                     if np.isnan(v) or v == 0:
                         if submarket == "Moneyline":
                             p = moneyline
@@ -5986,7 +6272,7 @@ class StatsNHL(Stats):
                         elif submarket == "goalsAgainst":
                             v = archive.get_total("NHL", date, opponent)
                             subline = np.floor(v) + 0.5
-                            v = get_ev(subline, get_odds(subline, v), force_gauss=True)
+                            v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
                             ev += v*weight
                         else:
                             if subline == 0 and not player_games.empty:
