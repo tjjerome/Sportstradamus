@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from scipy.optimize import minimize
-from scipy.stats import poisson, nbinom, skewnorm, norm
+from scipy.stats import poisson, nbinom, skewnorm, norm, fit
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -38,22 +38,22 @@ np.seterr(divide='ignore', invalid='ignore')
 sports = []
 nba = StatsNBA()
 nba.load()
-if datetime.today().date() > (nba.season_start - timedelta(days=7)):
-    sports.append("NBA")
-# mlb = StatsMLB()
-# mlb.load()
-# if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
-#     sports.append("MLB")
-# # nhl = StatsNHL()
-# nhl.load()
-# if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
-#     sports.append("NHL")
 nfl = StatsNFL()
 nfl.load()
-if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
-    sports.append("NFL")
 wnba = StatsWNBA()
 wnba.load()
+# mlb = StatsMLB()
+# mlb.load()
+# nhl = StatsNHL()
+# nhl.load()
+if datetime.today().date() > (nba.season_start - timedelta(days=7)):
+    sports.append("NBA")
+# if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
+#     sports.append("MLB")
+# if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
+#     sports.append("NHL")
+if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
+    sports.append("NFL")
 if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
     sports.append("WNBA")
 
@@ -62,18 +62,18 @@ stat_structs = {}
 if "NBA" in sports:
     nba.update()
     stat_structs.update({"NBA": nba})
-# if "MLB" in sports:
-#     mlb.update()
-#     stat_structs.update({"MLB": mlb})
-# if "NHL" in sports:
-#     nhl.update()
-#     stat_structs.update({"NHL": nhl})
 if "NFL" in sports:
     nfl.update()
     stat_structs.update({"NFL": nfl})
 if "WNBA" in sports:
     wnba.update()
     stat_structs.update({"WNBA": wnba})
+# if "MLB" in sports:
+#     mlb.update()
+#     stat_structs.update({"MLB": mlb})
+# if "NHL" in sports:
+#     nhl.update()
+#     stat_structs.update({"NHL": nhl})
 
 archive = Archive()
 
@@ -94,63 +94,6 @@ def save_distribution_config(config):
     filepath = pkg_resources.files(data) / "stat_dist.json"
     with open(filepath, 'w') as f:
         json.dump(config, f, indent=4)
-
-def select_best_distribution(y_data):
-    """
-    Select the best distribution (NegBin or SkewNormal) based on NLL.
-    
-    Uses scipy for comparison, returns LightGBMLSS distribution object.
-    NegBin generalizes Poisson by learning per-prediction overdispersion.
-    
-    Parameters:
-    -----------
-    y_data : np.ndarray
-        Training target values
-    
-    Returns:
-    --------
-    dist_name : str
-        Distribution name ("NegBin" or "SkewNormal")
-    dist_obj : LightGBMLSS distribution object
-        Distribution object for training with LightGBMLSS
-    nll_scores : dict
-        NLL scores for each distribution (for logging)
-    """
-    nll_scores = {}
-    
-    # === NEGATIVE BINOMIAL ===
-    # Method-of-moments warm start, then MLE
-    mu0 = np.mean(y_data)
-    var0 = np.var(y_data, ddof=1)
-    r0 = max(mu0**2 / (var0 - mu0), 0.5) if var0 > mu0 else 10.0
-    p0 = r0 / (r0 + mu0)
-    def negbin_neg_ll(params):
-        r, p = params
-        if r <= 0 or p <= 0 or p >= 1:
-            return 1e12
-        return -np.sum(nbinom.logpmf(y_data.astype(int), r, p))
-    res_nb = minimize(negbin_neg_ll, [r0, p0], bounds=[(1e-3, None), (1e-6, 1-1e-6)], method='L-BFGS-B')
-    nll_scores["NegBin"] = res_nb.fun / len(y_data)
-
-    # === SKEWNORMAL ===
-    # Estimate parameters via MLE
-    mu = np.mean(y_data)
-    std = np.std(y_data, ddof=1)
-    a, mu, std = skewnorm.fit(y_data, loc=mu, scale=std)
-    nll_SkewNormal = -np.mean(skewnorm.logpdf(y_data, a, mu, std))
-    nll_scores["SkewNormal"] = nll_SkewNormal
-    
-    # === SELECT BEST ===
-    best_dist = min(nll_scores, key=nll_scores.get)
-    
-    # Map to LightGBMLSS distribution objects
-    if best_dist == "NegBin":
-        dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
-    else:
-        dist_obj = SkewNormal(stabilization="None", response_fn="softplus", loss_fn="nll")
-    
-    return best_dist, dist_obj, nll_scores
-
 
 # ============================================================================
 # MAIN TRAINING PIPELINE
@@ -215,32 +158,6 @@ def meditate(force, league):
             "DREB",
             "PF",
         ],
-        # "MLB": [
-        #     "plateAppearances",
-        #     "pitches thrown",
-        #     "pitching outs",
-        #     "pitcher strikeouts",
-        #     "hits allowed",
-        #     "runs allowed",
-        #     "walks allowed",
-        #     # "1st inning runs allowed",
-        #     # "1st inning hits allowed",
-        #     "hitter fantasy score",
-        #     "pitcher fantasy score",
-        #     "hitter fantasy points underdog",
-        #     "pitcher fantasy points underdog",
-        #     "hits+runs+rbi",
-        #     "total bases",
-        #     "walks",
-        #     "stolen bases",
-        #     "hits",
-        #     "runs",
-        #     "rbi",
-        #     "batter strikeouts",
-        #     "singles",
-        #     "doubles",
-        #     "home runs"
-        # ],
         "WNBA": [
             "MIN",
             "AST",
@@ -261,24 +178,50 @@ def meditate(force, league):
             "PRA",
             "fantasy points prizepicks"
         ],
-        # "NHL": [
-        #     "timeOnIce",
-        #     "shotsAgainst",
-        #     "saves",
-        #     "shots",
-        #     "points",
-        #     "goalsAgainst",
-        #     "goalie fantasy points underdog",
-        #     "skater fantasy points underdog",
-        #     "blocked",
-        #     "powerPlayPoints",
-        #     "sogBS",
-        #     # "fantasy points prizepicks",
-        #     "hits",
-        #     "goals",
-        #     "assists",
-        #     "faceOffWins",
-        # ]
+        "MLB": [
+            "plateAppearances",
+            "pitches thrown",
+            "pitching outs",
+            "pitcher strikeouts",
+            "hits allowed",
+            "runs allowed",
+            "walks allowed",
+            # "1st inning runs allowed",
+            # "1st inning hits allowed",
+            "hitter fantasy score",
+            "pitcher fantasy score",
+            "hitter fantasy points underdog",
+            "pitcher fantasy points underdog",
+            "hits+runs+rbi",
+            "total bases",
+            "walks",
+            "stolen bases",
+            "hits",
+            "runs",
+            "rbi",
+            "batter strikeouts",
+            "singles",
+            "doubles",
+            "home runs"
+        ],
+        "NHL": [
+            "timeOnIce",
+            "shotsAgainst",
+            "saves",
+            "shots",
+            "points",
+            "goalsAgainst",
+            "goalie fantasy points underdog",
+            "skater fantasy points underdog",
+            "blocked",
+            "powerPlayPoints",
+            "sogBS",
+            # "fantasy points prizepicks",
+            "hits",
+            "goals",
+            "assists",
+            "faceOffWins",
+        ]
     }
     if not league == "All":
         all_markets = {league: all_markets[league]}
@@ -311,6 +254,9 @@ def meditate(force, league):
         correlate(league, force)
 
         for market in markets:
+            stat_dist = load_distribution_config()
+            stat_dist.setdefault(league, {})
+
             if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
                 with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
                     book_weights = json.load(infile)
@@ -319,9 +265,6 @@ def meditate(force, league):
 
             book_weights.setdefault(league, {}).setdefault(market, {})
             book_weights[league][market] = fit_book_weights(league, market)
-
-            stat_dist = load_distribution_config()
-            stat_dist.setdefault(league, {})
 
             with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
                 json.dump(book_weights, outfile, indent=4)
@@ -344,7 +287,6 @@ def meditate(force, league):
 
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
-            dist = stat_dist[league].get(market, "Poisson" if cv == 1 else "Gaussian")
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
             # TODO rework matrix to include player names and game IDs so we can more easily update with new data without needing to reload all historical data
             if os.path.isfile(filepath):
@@ -377,7 +319,7 @@ def meditate(force, league):
             for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
                 if np.isnan(row["EV"]) or row["EV"] <= 0:
                     M.loc[i, "Odds"] = 0.5
-                    M.loc[i, "EV"] = M.loc[i, "Line"] if cv != 1 else get_ev(M.loc[i, "Line"], .5, cv)
+                    M.loc[i, "EV"] = get_ev(M.loc[i, "Line"], .5, dist, cv)
                 else:
                     M.loc[i, "Odds"] = 1-get_odds(row["Line"], row["EV"], dist, cv=cv, step=step)
 
@@ -412,18 +354,30 @@ def meditate(force, league):
             # === DISTRIBUTION SELECTION ===
             # Choose between NegBin (count data) or SkewNormal (continuous-like data)
             # Load from stat_dist.json or auto-select via NLL comparison
+            # TODO Add Binomial dist for underdispersed markets like TDs?
             
+            threshold_dict = {
+                "NBA": 60,
+                "NFL": 10,
+                "NHL": 60,
+                "WNBA": 40,
+                "MLB": 60
+            }
+            threshold = threshold_dict.get(league, 60)
+            player_stats = stat_data.gamelog.groupby(stat_data.log_strings.get("player")).filter(lambda x: x[market].gt(0).sum() > threshold).groupby(stat_data.log_strings.get("player"))[market]
             if market in stat_dist[league] and not force:
                 # Use previously selected distribution
                 dist = stat_dist[league][market]
-                if dist == "NegBin":
-                    dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
-                else:
-                    dist = "SkewNormal"
-                    dist_obj = SkewNormal(stabilization="None", loss_fn="nll", response_fn="softplus")
             else:
+                nll_scores = {}
+                snorm_fit = player_stats.apply(lambda x: fit(skewnorm, x.astype(float), [(-10, 10), (-10, 100), (0, 100)]).params)
+                nll_scores["SkewNormal"] = snorm_fit.reset_index().apply(lambda params: -skewnorm.logpdf(player_stats.get_group(params.iloc[0]).astype(float), *params.iloc[1]).mean(), axis=1).median()
+
+                nb_fit = player_stats.apply(lambda x: fit(nbinom, x.astype(int), [(0, 50), (0, 1)]).params)
+                nll_scores["NegBin"] = nb_fit.reset_index().apply(lambda params: -nbinom.logpmf(player_stats.get_group(params.iloc[0]).astype(int), *params.iloc[1]).mean(), axis=1).median()
+
                 # Auto-select via NLL comparison
-                dist, dist_obj, nll_scores = select_best_distribution(y_train_labels)
+                dist = min(nll_scores, key=nll_scores.get)
                 
                 # Save selected distribution for future runs
                 stat_dist[league][market] = dist
@@ -432,6 +386,17 @@ def meditate(force, league):
                 print(f"  Distribution scores - NegBin: {nll_scores.get('NegBin', np.inf):.4f}, SkewNormal: {nll_scores.get('SkewNormal', np.inf):.4f}")
                 print(f"  Selected: {dist}")
             
+            if dist == "NegBin":
+                dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
+                cv = ((player_stats.var()-player_stats.mean())/player_stats.mean()**2*player_stats.count()/player_stats.count().sum()).sum()
+                cv = max(cv, 1/50)  # Avoid zero or negative cv
+            else:
+                dist_obj = SkewNormal(stabilization="None", loss_fn="nll", response_fn="softplus")
+                cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
+
+            stat_cv[league][market] = cv
+            with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
+                json.dump(stat_cv, f, indent=4)
             
             opt_params = filedict.get("params")
             dtrain = lgb.Dataset(
@@ -517,7 +482,7 @@ def meditate(force, league):
             B_train.loc[B_train["Odds"] == 0, "Odds"] = 0.5
             B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
             B_validation.loc[B_validation["Odds"] == 0, "Odds"] = 0.5
-            cv = 1
+            r_book = None  # NegBin market-level dispersion from historical data
             n_validation = None  # NegBin per-obs dispersion; None for SkewNormal
             alpha_test = 0  # per-observation alpha for get_odds; 0 = Gaussian/Poisson
             nb_n_test = None  # NegBin test-set dispersion for get_odds; None = use Poisson
@@ -531,33 +496,31 @@ def meditate(force, league):
                 n_validation = prob_params_validation["total_count"].to_numpy()
                 p_validation = prob_params_validation["probs"].to_numpy()
                 ev_validation = n_validation * p_validation / (1 - p_validation)
-                std_validation = None
+                sig_validation = None
                 alpha_validation = None
             elif dist == "SkewNormal":
-                cv = y.Result.std()/y.Result.mean()
-                std = prob_params["scale"].to_numpy()
+                sig = prob_params["scale"].to_numpy()
                 alpha = prob_params["alpha"].to_numpy()
                 _delta = alpha / np.sqrt(1 + alpha**2)
                 # Use true skew-normal mean E[X] = loc + scale*delta*sqrt(2/pi)
                 # for blending; fused_loc then converts back to a loc parameter.
-                ev = prob_params["loc"].to_numpy() + std * _delta * np.sqrt(2 / np.pi)
+                ev = prob_params["loc"].to_numpy() + sig * _delta * np.sqrt(2 / np.pi)
                 alpha_test = alpha
-                std_validation = prob_params_validation["scale"].to_numpy()
+                sig_validation = prob_params_validation["scale"].to_numpy()
                 alpha_validation = prob_params_validation["alpha"].to_numpy()
                 _delta_validation = alpha_validation / np.sqrt(1 + alpha_validation**2)
-                ev_validation = prob_params_validation["loc"].to_numpy() + std_validation * _delta_validation * np.sqrt(2 / np.pi)
+                ev_validation = prob_params_validation["loc"].to_numpy() + sig_validation * _delta_validation * np.sqrt(2 / np.pi)
 
             # === MODEL WEIGHTING AND PROBABILITY CALCULATION ===
-            # Fit optimal weight between model and bookmaker EV using CRPS
-            model_weight = fit_model_weight(ev_validation, B_validation["EV"].to_numpy(), y_validation["Result"].to_numpy(), dist, std_validation, alpha_validation, n_validation)
+            model_weight = fit_model_weight(ev_validation, B_validation["EV"].to_numpy(), y_validation["Result"].to_numpy(), dist, sig_validation, alpha_validation, n_validation, cv=cv)
 
             if dist == "NegBin":
-                _, p_test = fused_loc(model_weight, ev, B_test["EV"].to_numpy(), "NegBin", r=n)
-                weighted_mean = n * (1 - p_test) / p_test
-                nb_n_test = n
-                nb_p_test = p_test
-                r_val, p_val = fused_loc(model_weight, ev_validation, B_validation["EV"].to_numpy(), "NegBin", r=n_validation)
-                weighted_mean_validation = r_val * (1 - p_val) / p_val
+                # fused_loc blends both μ and r via geometric mean
+                r_blend_test, p_test = fused_loc(model_weight, ev, B_test["EV"].to_numpy(), cv, "NegBin", r=n)
+                weighted_mean = r_blend_test * (1 - p_test) / p_test
+                nb_n_test = r_blend_test
+
+                r_blend_val, p_val = fused_loc(model_weight, ev_validation, B_validation["EV"].to_numpy(), "NegBin", r=n_validation)
 
                 y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, nb_n=nb_n_test)
                 y_proba_no_filt = np.array(
@@ -565,30 +528,37 @@ def meditate(force, league):
 
                 # Randomized PIT for discrete distributions: u_i = F(y-1) + U*f(y)
                 y_int_val = y_validation["Result"].to_numpy().astype(int)
-                pit_scores = nbinom.cdf(y_int_val - 1, r_val, p_val) \
-                    + np.random.uniform(0, 1, size=len(y_validation)) * nbinom.pmf(y_int_val, r_val, p_val)
+                pit_scores = nbinom.cdf(y_int_val - 1, r_blend_val, p_val) \
+                    + np.random.uniform(0, 1, size=len(y_validation)) * nbinom.pmf(y_int_val, r_blend_val, p_val)
+
+                std = None
                 
             else:
-                # All location-scale distributions use similar weighting logic
-                weighted_mean = fused_loc(model_weight, ev, B_test["EV"].to_numpy(), "SkewNormal", alpha=alpha, sigma=std)
-                weighted_mean_validation = fused_loc(model_weight, ev_validation, B_validation["EV"].to_numpy(), "SkewNormal", alpha=alpha_validation, sigma=std_validation)
+                # SkewNormal — precision-weighted blend of means and scales
+                # w_disp = 1.0 (coupled with w_mean by design)
+                weighted_mean, blended_std, alpha = fused_loc(model_weight, ev, B_test["EV"].to_numpy(), cv, "SkewNormal", alpha=alpha, sigma=sig)
+                weighted_mean_validation, blended_sig_validation, alpha_validation = fused_loc(model_weight, ev_validation, B_validation["EV"].to_numpy(), cv, "SkewNormal", alpha=alpha_validation, sigma=sig_validation)
+                nb_n_test = None
 
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, cv, std, alpha=alpha_test, step=step)
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, std=blended_std, alpha=alpha_test, step=step)
                 y_proba_no_filt = np.array(
                     [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
-                # Temperature optimization for SkewNormal
+                # PIT scores for calibration (use blended scale)
                 pit_scores = skewnorm.cdf(
                     y_validation["Result"].to_numpy(),
                     alpha_validation,
                     weighted_mean_validation,
-                    std_validation
+                    blended_sig_validation
                 )
+
+                # Update std to blended std for downstream use
+                std = blended_std
 
             pit_scores = np.sort(pit_scores)
             model_calib = 1 - np.mean(((pit_scores - np.arange(1, len(pit_scores)+1))/len(pit_scores))**2)
 
-            y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, cv, std, alpha=alpha_test, step=step, calib=pit_scores, nb_n=nb_n_test)
+            y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, std=std, alpha=alpha_test, step=step, calib=pit_scores, nb_n=nb_n_test)
             y_proba_filt = np.array(
                 [y_proba_filt, 1-y_proba_filt]).transpose()
 
@@ -630,7 +600,8 @@ def meditate(force, league):
                 "cv": cv,
                 "std": stat_std,
                 "pit_scores": pit_scores,
-                "weight": model_weight
+                "weight": model_weight,
+                "r_book": r_book
             }
 
             X_test['Result'] = y_test['Result']
@@ -849,6 +820,8 @@ def fit_book_weights(league, market):
         return {}
     stat_data = stat_structs[league]
     cv = stat_cv[league].get(market, 1)
+    stat_dist = load_distribution_config()
+    dist = stat_dist[league].get(market, "Poisson")
     
     if market == "Moneyline":
         log = stat_data.teamlog[[stat_data.log_strings["team"], stat_data.log_strings["date"], stat_data.log_strings["win"]]]
@@ -888,7 +861,7 @@ def fit_book_weights(league, market):
             prob = np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1))
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
 
-    elif cv == 1:
+    elif dist in ["NegBin", "Poisson"]:
         def objective(w, x, y):
             proj = np.array(np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1)))
             return -np.mean(poisson.logpmf(y.astype(int), proj))
@@ -917,85 +890,100 @@ def fit_book_weights(league, market):
     else:
         return {}
     
-def fused_loc(w, ev_a, ev_b, dist, *, r=None, alpha=None, sigma=None):
+def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, sigma=None):
     """
     Compute blended distribution parameters for model weight w.
 
-    Blends between model prediction (ev_a) and bookmaker line (ev_b):
-    - NegBin: geometric blend of means; returns (r, p) ready for nbinom.
-    - SkewNormal: arithmetic blend of means; returns loc such that E[X] = blend.
+    Blends between model prediction (ev_a) and bookmaker line (ev_b)
+    using the logarithmic opinion pool (Genest & Zidek 1986):
+    - NegBin: geometric mean of both means and dispersion parameters.
+      The model provides per-observation r; the book's dispersion r_book
+      is estimated from historical data via MLE.  Both μ and r are
+      blended in log-space with the same weight w.
+    - SkewNormal: precision-weighted blend of means and scales; returns
+      (blended_loc, blended_std).  The model's scale comes from
+      LightGBMLSS; the book's scale is estimated as cv * book_ev
+      (constant coefficient-of-variation model).  When the model is
+      confident (small scale), it receives more effective weight.
 
     Parameters
     ----------
     w : float
         Weight on model prediction.
     ev_a, ev_b : float or np.ndarray
-        Model and bookmaker expected values.
+        Model and bookmaker expected values (true means).
     dist : str
         Distribution family: "NegBin" or "SkewNormal".
+    cv : float
+        Coefficient of variation for book values. std/mu for SkewNormal, 1/r for NegBin.
     r : float or np.ndarray, optional
-        NegBin dispersion parameter (required for NegBin).
+        NegBin per-observation dispersion from model (required for NegBin).
     alpha, sigma : float or np.ndarray, optional
         SkewNormal shape and scale (required for SkewNormal).
 
     Returns
     -------
-    NegBin     : tuple (r, p)
-    SkewNormal : loc (float or np.ndarray)
+    NegBin     : tuple (r_blend, p)
+    SkewNormal : tuple (blended_loc, blended_std)
     """
+
     if dist == "NegBin":
         mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
-        p = r / (r + mu)
-        return r, p
-    else:  # SkewNormal
-        mu = w * ev_a + (1 - w) * ev_b
+        r_blend = np.exp(w * np.log(r) + (1 - w) * np.log(1/cv))
+        p = r_blend / (r_blend + mu)
+        return r_blend, p
+    else:  # SkewNormal – precision-weighted blend
         delta = alpha / np.sqrt(1 + alpha**2)
-        return mu - sigma * delta * np.sqrt(2 / np.pi)
+        book_std = np.clip(cv * np.asarray(ev_b, dtype=float), 1e-9, None)
+        model_std = np.asarray(sigma*np.sqrt(1 - 2*delta**2/np.pi), dtype=float)
+        inv_var_m = 1 / model_std**2
+        inv_var_b = 1 / book_std**2
+        total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
+        blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
+        blended_std = 1 / np.sqrt(total_inv_var)
+        blended_loc = blended_mean - blended_std * delta * np.sqrt(2 / np.pi)
+        return blended_loc, blended_std, alpha
 
-def fit_model_weight(model_ev, odds_ev, result, dist, model_std=None, model_alpha=None, model_n=None, sample_size=1000):
+def fit_model_weight(model_ev, odds_ev, result, dist, model_std=None, model_alpha=None, model_n=None, cv=None):
     """
-    Optimize blend weight between model predictions and bookmaker lines
-    by minimizing mean CRPS (Continuous Ranked Probability Score).
-    
-    Uses pre-generated uniform samples + inverse CDF so the objective
-    is deterministic across optimizer iterations.
+    Optimize the single blend weight between model predictions and
+    bookmaker lines by maximizing log-likelihood on validation data.
+
+    Returns a single float w in [0.05, 0.9].
+
+    - NegBin: uses the logarithmic opinion pool — geometric mean of
+      both μ and r with a single weight w.  The book's dispersion
+      r_book is estimated from historical data via ``estimate_r_book``.
+    - SkewNormal: precision-weighted blend of means and scales using
+      model std and book std (cv * book_ev).
     """
     result = np.asarray(result, dtype=float)
     model_ev = np.asarray(model_ev, dtype=float)
     odds_ev = np.asarray(odds_ev, dtype=float)
-    n_obs = len(result)
-    
-    # Pre-generate uniform samples (n_obs x sample_size) — fixed across all w
-    U = np.random.default_rng(42).random((n_obs, sample_size))
-    # Precompute CRPS dispersion weights (constant)
-    crps_weights = (2 * np.arange(1, sample_size + 1) - sample_size - 1) / (sample_size ** 2)
     
     if dist == "NegBin":
         model_n_arr = np.asarray(model_n, dtype=float)
+        result_int = result.astype(int)
         
         def objective(w):
-            r_blend, p_blend = fused_loc(w, model_ev, odds_ev, "NegBin", r=model_n_arr)
-            # inverse CDF: transform uniforms to NegBin samples
-            samples = nbinom.ppf(U, r_blend[:, None], p_blend[:, None])
-            s = np.sort(samples, axis=1)
-            term1 = np.mean(np.abs(s - result[:, None]), axis=1)
-            term2 = s @ crps_weights
-            return np.mean(term1 - term2)
+            r_blend, p_blend = fused_loc(w, model_ev, odds_ev, cv, "NegBin",
+                                         r=model_n_arr)
+            return -np.mean(nbinom.logpmf(result_int, r_blend, p_blend))
+
+        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)],
+                       tol=1e-8, method='TNC')
+        return res.x[0]
     else:
         model_alpha_arr = np.asarray(model_alpha, dtype=float)
         model_std_arr = np.asarray(model_std, dtype=float)
         
         def objective(w):
-            loc_blend = fused_loc(w, model_ev, odds_ev, dist, alpha=model_alpha_arr, sigma=model_std_arr)
-            # inverse CDF: transform uniforms to SkewNormal samples
-            samples = skewnorm.ppf(U, model_alpha_arr[:, None], loc_blend[:, None], model_std_arr[:, None])
-            s = np.sort(samples, axis=1)
-            term1 = np.mean(np.abs(s - result[:, None]), axis=1)
-            term2 = s @ crps_weights
-            return np.mean(term1 - term2)
+            loc_blend, std_blend, alpha = fused_loc(w, model_ev, odds_ev, cv, "SkewNormal",
+                                             alpha=model_alpha_arr, sigma=model_std_arr)
+            return -np.mean(skewnorm.logpdf(result, alpha, loc_blend, std_blend))
 
-    res = minimize(objective, .1, bounds=[(0.05, 0.9)], tol=1e-8, method='TNC')
-    return res.x[0]
+        res = minimize(objective, .5, bounds=[(0.05, 0.9)], tol=1e-8, method='TNC')
+        return res.x[0]
 
 def trim_matrix(M):
     """Remove data quality issues and prepare matrix for modeling."""

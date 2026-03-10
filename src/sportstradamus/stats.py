@@ -14,7 +14,7 @@ import nfl_data_py as nfl
 import nflreadpy as nflr
 from scipy.stats import iqr, poisson, norm, zscore
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values
+from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, stat_dist, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values
 import pandas as pd
 import warnings
 import requests
@@ -311,7 +311,7 @@ class Stats:
 
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
-        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
+        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'SkewYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
         if isinstance(offers, dict):
             players = list(offers.keys())
             teams = {k:v["Team"] for k, v in offers.items()}
@@ -365,6 +365,7 @@ class Stats:
         stats["MeanYr"] = playergames[market].mean()
         stats["STD10"] = playergames[market].apply(lambda x: x.tail(10).std())
         stats["STDYr"] = playergames[market].std()
+        stats["SkewYr"] = playergames[market].skew()
         stats["DaysOff"] = (date-pd.to_datetime(playergames[self.log_strings["date"]].apply(lambda x: x.tail(1).item())).dt.date).astype('timedelta64[s]').dt.days
         stats["DaysIntoSeason"] = (date-self.season_start).days
         stats["GamesPlayed"] = playergames[market].count()
@@ -1546,7 +1547,7 @@ class StatsNBA(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -1565,14 +1566,14 @@ class StatsNBA(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                     if not subline == 0:
                         under = (player_games[submarket]<subline).mean()
-                        ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                        ev += get_ev(subline, under, sub_cv)*weight
                 else:
                     book_odds = True
                     ev += v*weight
@@ -1666,7 +1667,7 @@ class StatsNBA(Stats):
                     v = archive.get_ev(self.league, submarket, date, player)
                     subline = archive.get_line(self.league, submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -1685,14 +1686,14 @@ class StatsNBA(Stats):
                     v = archive.get_ev(self.league, submarket, date, player)
                     subline = archive.get_line(self.league, submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                         if not subline == 0:
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                            ev += get_ev(subline, under, sub_cv)*weight
                     else:
                         book_odds = True
                         ev += v*weight
@@ -3129,7 +3130,7 @@ class StatsMLB(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -3162,14 +3163,15 @@ class StatsMLB(Stats):
                     p *= poisson.cdf(3, v_runs)
                     ev += p*weight
                 elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
+                    _hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
                     v = archive.get_ev("MLB", "hits", date, player)
                     subline = archive.get_line("MLB", "hits", date, player)
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson" if _hits_cv == 1 else "Gaussian", cv=_hits_cv), cv=cv)
                     v *= (player_games[submarket].sum()/player_games["hits"].sum()) if player_games["hits"].sum() else 0
                     ev += v*weight
                 else:
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
 
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
@@ -3177,7 +3179,7 @@ class StatsMLB(Stats):
 
                         if not subline == 0:
                             under = (player_games[submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                            ev += get_ev(subline, under, sub_cv)*weight
                     else:
                         book_odds = True
                         ev += v*weight
@@ -3338,7 +3340,7 @@ class StatsMLB(Stats):
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -3372,14 +3374,15 @@ class StatsMLB(Stats):
                         p *= poisson.cdf(3, v_runs)
                         ev += p*weight
                     elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
+                        _hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
                         v = archive.get_ev("MLB", "hits", date, player)
                         subline = archive.get_line("MLB", "hits", date, player)
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson" if _hits_cv == 1 else "Gaussian", cv=_hits_cv), cv=cv)
                         v *= (player_games.iloc[-one_year_ago:][submarket].sum()/player_games.iloc[-one_year_ago:]["hits"].sum()) if player_games.iloc[-one_year_ago:]["hits"].sum() else 0
                         ev += v*weight
                     else:
                         if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                            v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                            v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
 
                         if np.isnan(v) or v == 0:
                             if subline == 0 and not player_games.empty:
@@ -3387,7 +3390,7 @@ class StatsMLB(Stats):
 
                             if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                                ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                                ev += get_ev(subline, under, sub_cv)*weight
                         else:
                             book_odds = True
                             ev += v*weight
@@ -4644,7 +4647,7 @@ class StatsNFL(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -4666,14 +4669,14 @@ class StatsNFL(Stats):
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                     if not subline == 0:
                         under = (player_games[submarket]<subline).mean()
-                        ev += get_ev(subline, under, sub_cv, force_gauss=True)
+                        ev += get_ev(subline, under, sub_cv)
                 else:
                     book_odds = True
                     ev += v*weight
@@ -4952,7 +4955,7 @@ class StatsNFL(Stats):
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -4974,14 +4977,14 @@ class StatsNFL(Stats):
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                         if not subline == 0:
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv, force_gauss=True)
+                            ev += get_ev(subline, under, sub_cv)
                     else:
                         book_odds = True
                         ev += v*weight
@@ -5774,7 +5777,7 @@ class StatsNHL(Stats):
                 v = archive.get_ev("NHL", submarket, date, player)
                 subline = archive.get_line("NHL", submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -5799,7 +5802,7 @@ class StatsNHL(Stats):
                 v = archive.get_ev("NHL", submarket, date, player)
                 subline = archive.get_line("NHL", submarket, date, player)
                 if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                 if np.isnan(v) or v == 0:
                     if submarket == "Moneyline":
                         p = archive.get_moneyline("NHL", date, team)
@@ -5807,7 +5810,7 @@ class StatsNHL(Stats):
                     elif submarket == "goalsAgainst":
                         v = archive.get_total("NHL", date, opponent)
                         subline = np.floor(v) + 0.5
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                         ev += v*weight
                     else:
                         if subline == 0 and not player_games.empty:
@@ -5815,7 +5818,7 @@ class StatsNHL(Stats):
 
                         if not subline == 0:
                             under = (player_games[submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                            ev += get_ev(subline, under, sub_cv)*weight
                 else:
                     book_odds = True
                     ev += v*weight
@@ -6239,7 +6242,7 @@ class StatsNHL(Stats):
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -6264,7 +6267,7 @@ class StatsNHL(Stats):
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
                     if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                     if np.isnan(v) or v == 0:
                         if submarket == "Moneyline":
                             p = moneyline
@@ -6272,7 +6275,7 @@ class StatsNHL(Stats):
                         elif submarket == "goalsAgainst":
                             v = archive.get_total("NHL", date, opponent)
                             subline = np.floor(v) + 0.5
-                            v = get_ev(subline, get_odds(subline, v, "Poisson"), force_gauss=True)
+                            v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
                             ev += v*weight
                         else:
                             if subline == 0 and not player_games.empty:
@@ -6280,7 +6283,7 @@ class StatsNHL(Stats):
 
                             if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                                ev += get_ev(subline, under, sub_cv, force_gauss=True)*weight
+                                ev += get_ev(subline, under, sub_cv)*weight
                     else:
                         book_odds = True
                         ev += v*weight

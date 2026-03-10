@@ -39,6 +39,9 @@ with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
 with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
     stat_cv = json.load(infile)
 
+with open((pkg_resources.files(data) / "stat_dist.json"), "r") as infile:
+    stat_dist = json.load(infile)
+
 with open((pkg_resources.files(data) / "stat_std.json"), "r") as infile:
     stat_std = json.load(infile)
     
@@ -311,7 +314,7 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
-def get_ev(line, under, cv=1, force_gauss=False):
+def get_ev(line, under, cv=1, dist="Gaussian"):
     """
     Calculate the expected value (EV) given a line and under probability.
 
@@ -325,17 +328,17 @@ def get_ev(line, under, cv=1, force_gauss=False):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        # Poisson dist
-        if cv == 1:
-            if force_gauss:
-                line = float(line)
-                return fsolve(lambda x: under - norm.cdf(line, x, np.sqrt(x)), (1-under)*2*line)[0]
-            else:
-                line = np.ceil(float(line) - 1)
-                return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
-        else:
-            line = float(line)
-            return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
+    dist = {
+        "NegBin": "Poisson",
+        "SkewNormal": "Gaussian"
+    }.get(dist, dist)
+
+    if cv == 1:
+        line = np.ceil(float(line) - 1)
+        return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
+    else:
+        line = float(line)
+        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
         
 def apply_pit_calibration(p_raw, pit_scores):
     """
@@ -384,6 +387,7 @@ def get_odds(line, ev, dist, cv=1, std=None, alpha=0, nb_n=None, step=1, calib=N
         Coefficient of variation
     std : float, optional
         Standard deviation (for Gaussian)
+        For SkewNormal, this is the scale parameter NOT the true std
     alpha : float, optional
         Skewness parameter for Skew Gaussian
     step : float, optional
@@ -402,7 +406,10 @@ def get_odds(line, ev, dist, cv=1, std=None, alpha=0, nb_n=None, step=1, calib=N
     low = np.ceil((line-step)/step)*step
     
     # Poisson (discrete count data)
-    if dist == "Poisson" or (dist == "NegBin" and nb_n is None):
+    # NegBin without model params falls back to Poisson only when cv==1 (old encoding);
+    # when cv!=1 the archive EV was Gaussian-encoded by get_ev, so fall through to the
+    # Gaussian/SkewNormal branch for a consistent round-trip.
+    if dist == "Poisson" or (dist == "NegBin" and nb_n is None and cv == 1):
         return apply_pit_calibration(poisson.cdf(line, ev), calib) - apply_pit_calibration(poisson.pmf(line, ev), calib)/2
     
     elif dist == "NegBin":
@@ -580,7 +587,7 @@ class Archive:
         self.changed_leagues.add(o["League"])
         market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
-        cv = stat_cv.get(market, 1)
+        cv = stat_cv.get(o["League"], {}).get(market, 1)
         if o["League"] == "NHL":
             market_swap = {"AST": "assists",
                            "PTS": "points", "BLK": "blocked"}
@@ -635,7 +642,7 @@ class Archive:
                 continue
             market = o["Market"].replace("H2H ", "")
             market = key.get(market, market)
-            cv = stat_cv.get(market, 1)
+            cv = stat_cv.get(o["League"], {}).get(market, 1)
             if o["League"] == "NHL":
                 market_swap = {"AST": "assists",
                             "PTS": "points", "BLK": "blocked"}
@@ -889,29 +896,30 @@ def set_model_start_values(model, dist, X_data):
     -----------
     model : LightGBMLSS model
     dist : str
-        Distribution name ("NegBin", "Gaussian", "Mixture2G", "SkewNormal", etc.)
-    X_data : DataFrame with columns "MeanYr" and "STDYr"
+        Distribution name ("NegBin", "Gaussian", "SkewNormal", etc.)
+    X_data : DataFrame with columns "MeanYr", "STDYr", and "SkewYr"
     """
-    sv = X_data[["MeanYr", "STDYr"]].to_numpy()
+    sv = X_data[["MeanYr", "STDYr", "SkewYr"]].to_numpy()
     
     if dist == "NegBin":
         # NegBin needs total_count (r) and probs (p), 2 parameters.
         # PyTorch NegBin.probs is the SUCCESS probability → mean = r*p/(1-p)
         # so p_pytorch = mu / (r + mu), NOT r/(r+mu) (which is scipy convention).
         mu = sv[:, 0]
-        r_init = 3.0
-        sv = np.column_stack([np.full_like(mu, r_init), mu / (r_init + mu)])
+        std = sv[:, 1]
+        r_init = np.where(std > mu, np.power(mu, 2) / (std**2 - mu), 10)  # Avoid r=0 when std <= mean
+        p_init = mu / std**2
+        sv = np.column_stack([r_init, p_init])
     elif dist == "Gaussian":
-        # Gaussian uses both MeanYr and STDYr (2 parameters)
-        pass  # Already has correct shape
-    elif dist == "Mixture2G":
-        # Split the mean and std into two components for the mixture (5 parameters total, 6th column needed as 1-mixture weight)
-        sv = np.hstack((sv[:,[0,0,1,1]],np.ones((sv.shape[0],1)),np.zeros((sv.shape[0],1))))
+        # Drop Skew
+        sv = sv[:, :2]
     elif dist == "SkewNormal":
-        # SkewNormal uses mean, std, and skewness (3 parameters)
-        sv = np.hstack((sv, np.zeros((sv.shape[0], 1))))
-    else:
-        # For other distributions, try to use mean and scale if available
-        pass
+        # SkewNormal uses loc, scale, and alpha (3 parameters)
+        skew = sv[:, 2]
+        delta = np.sign(skew) * np.sqrt(np.pi/2 * np.abs(skew)**(2/3) / (np.abs(skew)**(2/3) + ((4 - np.pi)/2)**(2/3)))
+        alpha = delta / np.sqrt(1 - delta**2)
+        scale = sv[:, 1] / np.sqrt(1 - 2*delta**2/np.pi)
+        loc = sv[:, 0] - scale*delta*np.sqrt(2/np.pi)
+        sv = np.column_stack([loc, scale, alpha])
     
     model.start_values = sv

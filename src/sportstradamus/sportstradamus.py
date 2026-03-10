@@ -857,6 +857,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             filedict = pickle.load(infile)
         cv = filedict["cv"]
         model_weight = filedict["weight"]
+        r_book = filedict.get("r_book", None)
         pit_scores = filedict.get("pit_scores", None)
         dist = filedict["distribution"]
         step = filedict["step"]
@@ -930,24 +931,46 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         
         # TODO change these to use fused_loc from train.py
         if dist == "NegBin":
-            offer_df["Model EV"] = np.exp(np.average(np.log(offer_df[["Model EV", "Books EV"]].to_numpy()), weights=[model_weight, 1-model_weight], axis=1))
-            # Recompute NegBin p to match blended EV, keep r (total_count) from model
-            offer_df["NB_N"] = offer_df["total_count"]
+            # Geometric mean blend of both μ and r (logarithmic opinion pool)
+            model_ev_arr = offer_df["Model EV"].to_numpy()
+            book_ev_arr = offer_df["Books EV"].fillna(0).to_numpy()
+            offer_df["Model EV"] = np.exp(model_weight * np.log(np.clip(model_ev_arr, 1e-9, None)) + (1 - model_weight) * np.log(np.clip(book_ev_arr, 1e-9, None)))
+            if r_book is not None:
+                offer_df["NB_N"] = np.exp(model_weight * np.log(offer_df["total_count"]) + (1 - model_weight) * np.log(r_book))
+            else:
+                offer_df["NB_N"] = offer_df["total_count"]
             offer_df["NB_P"] = offer_df["NB_N"] / (offer_df["NB_N"] + offer_df["Model EV"])
             offer_df["Model STD"] = np.sqrt(offer_df["NB_N"] * (1 - offer_df["NB_P"]) / offer_df["NB_P"]**2)
         else:
-            # For SkewNormal: blend true means (not raw locs), then convert back.
-            # True E[X] = loc + scale * delta * sqrt(2/pi); shifting loc by d shifts E[X] by d.
-            if dist == "SkewNormal" and "alpha" in offer_df.columns:
-                _delta = offer_df["alpha"] / np.sqrt(1 + offer_df["alpha"]**2)
-                offer_df["Model EV"] = offer_df["Model EV"] + _delta * offer_df["Model STD"] * np.sqrt(2 / np.pi)
-            s = offer_df[["Model STD", "Books STD"]].fillna(1).to_numpy()
-            offer_df["Model STD"] = np.sqrt(1/np.average(np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1))
-            offer_df["Model EV"] = np.average(offer_df[["Model EV", "Books EV"]].fillna(0).infer_objects(copy=False).to_numpy()*np.power(s, -2), weights=[model_weight, 1-model_weight], axis=1)*np.power(offer_df["Model STD"].to_numpy(), 2)
-            # Convert blended mean back to loc for SkewNormal (get_odds expects loc)
-            if dist == "SkewNormal" and "alpha" in offer_df.columns:
-                _delta = offer_df["alpha"] / np.sqrt(1 + offer_df["alpha"]**2)
-                offer_df["Model EV"] = offer_df["Model EV"] - _delta * offer_df["Model STD"] * np.sqrt(2 / np.pi)
+            # SkewNormal: precision-weighted blend of model and book predictions.
+            # The model's scale (from LightGBMLSS) and the book's estimated scale
+            # (cv * book_ev) are blended inversely proportional to their variances,
+            # giving more effective weight to whichever source is more confident.
+            model_ev_arr = offer_df["Model EV"].to_numpy()
+            model_std_arr = offer_df["Model STD"].to_numpy()
+            book_ev_arr = offer_df["Books EV"].fillna(0).to_numpy()
+            book_std_arr = np.clip(cv * book_ev_arr, 1e-9, None)
+            inv_var_m = 1 / model_std_arr**2
+            inv_var_b = 1 / book_std_arr**2
+            total_inv_var = model_weight * inv_var_m + (1 - model_weight) * inv_var_b
+            blended_mean = (model_weight * model_ev_arr * inv_var_m + (1 - model_weight) * book_ev_arr * inv_var_b) / total_inv_var
+            blended_std = 1 / np.sqrt(total_inv_var)
+
+            # For SkewNormal: model EV was the raw loc from the model.  We need to
+            # convert the blended true-mean back to a loc parameter for get_odds.
+            if "alpha" in offer_df.columns:
+                _alpha = offer_df["alpha"].to_numpy()
+                # model EV is loc; true mean = loc + scale*delta*sqrt(2/pi)
+                # We already precision-blended the true mean (using model_ev_arr which
+                # was loc, but for the blend we need true means).  Redo properly:
+                _delta = _alpha / np.sqrt(1 + _alpha**2)
+                model_true_mean = model_ev_arr + model_std_arr * _delta * np.sqrt(2 / np.pi)
+                blended_mean = (model_weight * model_true_mean * inv_var_m + (1 - model_weight) * book_ev_arr * inv_var_b) / total_inv_var
+                # Convert blended mean back to loc for get_odds
+                offer_df["Model EV"] = blended_mean - blended_std * _delta * np.sqrt(2 / np.pi)
+            else:
+                offer_df["Model EV"] = blended_mean
+            offer_df["Model STD"] = blended_std
         
         # Use get_odds with PIT calibration
         _model_alpha = offer_df["alpha"].to_numpy() if (dist == "SkewNormal" and "alpha" in offer_df.columns) else np.zeros(len(offer_df))
@@ -1060,10 +1083,19 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     params.append(prob_params.loc[player])
 
                 if dist == "NegBin":
-                    r1, p1 = params[0]["total_count"], params[0]["probs"]
-                    r2, p2 = params[1]["total_count"], params[1]["probs"]
+                    r1_raw, p1_raw = params[0]["total_count"], params[0]["probs"]
+                    r2_raw, p2_raw = params[1]["total_count"], params[1]["probs"]
+                    # Blend each player's r with r_book via geometric mean
+                    if r_book is not None:
+                        r1 = np.exp(model_weight * np.log(r1_raw) + (1 - model_weight) * np.log(r_book))
+                        r2 = np.exp(model_weight * np.log(r2_raw) + (1 - model_weight) * np.log(r_book))
+                    else:
+                        r1, r2 = r1_raw, r2_raw
                     r_sum = r1 + r2
-                    p_sum = (r1 * p1 + r2 * p2) / (r1 + r2)  # weighted avg p
+                    # Convert PyTorch probs to scipy convention (1 - probs) before averaging
+                    p1_scipy = 1 - p1_raw
+                    p2_scipy = 1 - p2_raw
+                    p_sum = (r1 * p1_scipy + r2 * p2_scipy) / (r1 + r2)
                     under = nbinom.cdf(int(o["Line"]), r_sum, p_sum)
                     push = nbinom.pmf(int(o["Line"]), r_sum, p_sum)
                     under -= push/2
@@ -1105,8 +1137,9 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     params.append(prob_params.loc[player])
 
                 if dist == "NegBin":
-                    mu1 = params[0]["total_count"] * (1 - params[0]["probs"]) / params[0]["probs"]
-                    mu2 = params[1]["total_count"] * (1 - params[1]["probs"]) / params[1]["probs"]
+                    # PyTorch NegBin: mean = r * probs / (1 - probs)
+                    mu1 = params[0]["total_count"] * params[0]["probs"] / (1 - params[0]["probs"])
+                    mu2 = params[1]["total_count"] * params[1]["probs"] / (1 - params[1]["probs"])
                     under = skellam.cdf(o["Line"], mu2, mu1)
                     push = skellam.pmf(o["Line"], mu2, mu1)
                     under -= push/2
