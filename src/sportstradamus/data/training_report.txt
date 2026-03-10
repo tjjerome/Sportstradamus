@@ -1,12 +1,120 @@
+========================= NBA AST ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.572221   0.561091   0.065033 0.686086      0.322596
+ 0.585815   0.576698   0.067530 0.683531      0.666690
+
+========================= NBA BLK ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.676744   0.507426   0.088904 0.650413      0.844367
+ 0.659704   0.492655   0.127311 0.635533      0.666681
+
+========================= NBA BLST =========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.601949   0.585179   0.101957 0.673758      0.710260
+ 0.611406   0.629305   0.100685 0.671295      0.666691
+
+========================= NBA DREB =========================
+ Distribution Model: NegBin
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.585792   0.624204   0.117847 0.684080      0.593122
+ 0.588764   0.581673   0.135875 0.683665      0.666820
+
+========================= NBA FG3A =========================
+ Distribution Model: NegBin
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.588648   0.652695   0.094693 0.672727      0.573779
+ 0.607038   0.644509   0.116087 0.670981      0.666766
+
+========================= NBA FG3M =========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.582975   0.561481   0.086724 0.683026      0.644746
+ 0.594694   0.585509   0.089286 0.678347      0.666689
+
+========================= NBA FGA ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.630165   0.617450   0.127609 0.658164      0.883769
+ 0.632353   0.620339   0.124036 0.657888      0.666799
+
+========================= NBA FGM ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.709624   0.749875   0.179078 0.583592       0.90000
+ 0.710972   0.760824   0.177100 0.584429       0.66669
+
+========================= NBA FTM ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.599424   0.518018   0.124589 0.669590      0.900000
+ 0.605245   0.551095   0.110938 0.666879      0.666749
+
 ========================= NBA MIN ==========================
  Distribution Model: SkewNormal
  Accuracy  Precision  Sharpness      NLL  Weight/Calib
  0.593254   0.697297   0.154935 0.672547      0.900000
  0.626204   0.703252   0.168785 0.660379      0.666915
 
+========================= NBA OREB =========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.599566   0.545733   0.106964 0.670338      0.880210
+ 0.616434   0.559553   0.135057 0.661493      0.666697
+
+========================== NBA PA ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.538088   0.520705   0.046757 0.692194      0.286574
+ 0.537441   0.518566   0.047036 0.692222      0.666693
+
+========================== NBA PR ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.563271   0.551116   0.038404 0.690153      0.229770
+ 0.565271   0.561300   0.039446 0.689934      0.666692
+
+========================= NBA PRA ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.543695   0.544385   0.038775 0.691135      0.233335
+ 0.552897   0.560538   0.038016 0.691059      0.666691
+
 ========================= NBA PTS ==========================
  Distribution Model: SkewNormal
  Accuracy  Precision  Sharpness      NLL  Weight/Calib
  0.547596   0.530130   0.041159 0.690922      0.255503
  0.540553   0.541133   0.041949 0.691029      0.666690
+
+========================== NBA RA ==========================
+ Distribution Model: NegBin
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.528061   0.547486   0.046016 0.693295      0.261110
+ 0.534741   0.542683   0.052358 0.693299      0.666693
+
+========================= NBA REB ==========================
+ Distribution Model: NegBin
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.565889   0.600467   0.048278 0.688619      0.218639
+ 0.562366   0.597496   0.053911 0.689793      0.666690
+
+========================= NBA STL ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.549897   0.529490   0.078306 0.687481      0.543067
+ 0.602467   0.584445   0.106405 0.675056      0.666686
+
+========================= NBA TOV ==========================
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.602023   0.593336   0.105085 0.673216      0.736738
+ 0.603359   0.619752   0.104076 0.673360      0.666695
+
+============== NBA fantasy points prizepicks ===============
+ Distribution Model: SkewNormal
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.618860   0.649205   0.114729 0.663611      0.522731
+ 0.619347   0.629167   0.116118 0.661273      0.666720
 
