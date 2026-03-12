@@ -12,8 +12,8 @@ from klepto.archives import hdfdir_archive, cache
 from sportstradamus import creds, data
 from time import sleep
 from operator import itemgetter
-from scipy.stats import poisson, nbinom, skellam, norm, skewnorm, iqr
-from scipy.optimize import fsolve, minimize
+from scipy.stats import poisson, nbinom, skellam, norm, gamma, iqr
+from scipy.optimize import brentq, fsolve, minimize
 from scipy.integrate import dblquad
 import numpy as np
 import statsapi as mlb
@@ -44,6 +44,13 @@ with open((pkg_resources.files(data) / "stat_dist.json"), "r") as infile:
 
 with open((pkg_resources.files(data) / "stat_std.json"), "r") as infile:
     stat_std = json.load(infile)
+
+_zi_path = pkg_resources.files(data) / "stat_zi.json"
+if os.path.isfile(_zi_path):
+    with open(_zi_path, "r") as infile:
+        stat_zi = json.load(infile)
+else:
+    stat_zi = {}
     
 with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
     stat_map = json.load(infile)
@@ -314,31 +321,64 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
-def get_ev(line, under, cv=1, dist="Gaussian"):
+def get_ev(line, under, cv=1, dist="Gamma", gate=None):
     """
     Calculate the expected value (EV) given a line and under probability.
+
+    For zero-inflated distributions (ZINB/ZAGamma), when gate is provided the
+    book's CDF is decomposed as gate + (1-gate)*base_CDF.  The function solves
+    for the base distribution mean so fused_loc receives comparable parameters.
 
     Args:
         line (float): The line value.
         under (float): The under probability.
+        cv (float): Coefficient of variation. 1/sqrt(alpha) for Gamma, 1/r for NegBin.
+        dist (str): Distribution type ("Gamma", "ZAGamma", "NegBin", "ZINB", "Poisson").
+        gate (float, optional): Historical zero-inflation probability for ZINB/ZAGamma.
 
     Returns:
-        float: The expected value (EV).
+        float: The base distribution mean (for ZI dists when gate given) or overall mean.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-    dist = {
-        "NegBin": "Poisson",
-        "SkewNormal": "Gaussian"
-    }.get(dist, dist)
+    under = np.clip(under, 1e-6, 1 - 1e-6)
 
-    if cv == 1:
+    # For ZI distributions, strip out the zero-inflation component so we solve
+    # for the base distribution mean: gate + (1-gate)*base_CDF = under
+    # ⇒ base_CDF = (under - gate) / (1 - gate)
+    if gate is not None and gate > 0 and dist in ("ZINB", "ZAGamma"):
+        under = np.clip((under - gate) / (1 - gate), 1e-6, 1 - 1e-6)
+
+    # CDF is monotonically decreasing in mean (1→0), so a bracket is always valid:
+    #   at lo≈0 the CDF≈1 > under, at hi→∞ the CDF→0 < under.
+    lo = 1e-6
+    hi = max(2 * line / max(1 - under, 0.01), 1.0)
+
+    if dist in ("NegBin", "ZINB", "Poisson"):
         line = np.ceil(float(line) - 1)
-        return fsolve(lambda x: under - poisson.cdf(line, x), (1-under)*2*line)[0]
+        if cv == 1:
+            def _pois_residual(mean):
+                return float(poisson.cdf(line, mean)) - under
+            while _pois_residual(hi) > 0:
+                hi *= 2
+            return float(brentq(_pois_residual, lo, hi, xtol=1e-8))
+        r = 1.0 / cv
+        def _nb_residual(mean):
+            p = r / (r + mean)
+            return float(nbinom.cdf(line, r, p)) - under
+        while _nb_residual(hi) > 0:
+            hi *= 2
+        return float(brentq(_nb_residual, lo, hi, xtol=1e-8))
     else:
+        # Gamma / ZAGamma (default for all continuous distributions)
         line = float(line)
-        return fsolve(lambda x: under - norm.cdf(line, x, x*cv), (1-under)*2*line)[0]
+        alpha = 1.0 / (cv ** 2)
+        def _gamma_residual(mean):
+            return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
+        while _gamma_residual(hi) > 0:
+            hi *= 2
+        return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
         
 def apply_pit_calibration(p_raw, pit_scores):
     """
@@ -370,7 +410,7 @@ def apply_pit_calibration(p_raw, pit_scores):
     quantile_grid = np.linspace(0, 1, n)
     return np.clip(np.interp(p_raw, pit_scores, quantile_grid), 0, 1)
 
-def get_odds(line, ev, dist, cv=1, std=None, alpha=0, nb_n=None, step=1, calib=None):
+def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, calib=None):
     """
     Calculate odds for an outcome given expected value and distribution parameters.
     
@@ -380,23 +420,21 @@ def get_odds(line, ev, dist, cv=1, std=None, alpha=0, nb_n=None, step=1, calib=N
         The line/cutoff value
     ev : float
         Expected value (mean)
-        For SkewNormal, this is the location parameter NOT the true mean
     dist : str
-        Distribution type ("Poisson", "SkewNormal", "NegBin", "Gaussian")
+        Distribution type ("Poisson", "Gamma", "ZAGamma", "NegBin", "ZINB")
     cv : float
-        Coefficient of variation
-    std : float, optional
-        Standard deviation (for Gaussian)
-        For SkewNormal, this is the scale parameter NOT the true std
-    alpha : float, optional
-        Skewness parameter for Skew Gaussian
+        Coefficient of variation. Used to derive alpha (Gamma) or r (NegBin)
+        when those aren't supplied directly.
+    alpha : float or np.ndarray, optional
+        Gamma shape parameter. If None, derived as 1/cv².
+    r : float or np.ndarray, optional
+        NegBin dispersion parameter. If None for NegBin, derived as 1/cv.
+    gate : float or np.ndarray, optional
+        Zero-inflation probability for ZINB/ZAGamma. If None, no zero-inflation.
     step : float, optional
         Step size for binning (default: 1)
     calib : list of float, optional
         Calibration array for scaling
-    nb_n : float or np.ndarray, optional
-        NegBin dispersion parameter (total_count / r). When provided with nb_p,
-        uses nbinom.cdf instead of poisson.cdf for proper overdispersion handling.
     
     Returns:
     --------
@@ -408,28 +446,36 @@ def get_odds(line, ev, dist, cv=1, std=None, alpha=0, nb_n=None, step=1, calib=N
     # Poisson (discrete count data)
     # NegBin without model params falls back to Poisson only when cv==1 (old encoding);
     # when cv!=1 the archive EV was Gaussian-encoded by get_ev, so fall through to the
-    # Gaussian/SkewNormal branch for a consistent round-trip.
-    if dist == "Poisson" or (dist == "NegBin" and nb_n is None and cv == 1):
+    # Gaussian/Gamma branch for a consistent round-trip.
+    if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
         return apply_pit_calibration(poisson.cdf(line, ev), calib) - apply_pit_calibration(poisson.pmf(line, ev), calib)/2
     
-    elif dist == "NegBin":
-        # NegBin: use nbinom.cdf for overdispersed count data
-        nb_p = nb_n / (nb_n + ev)
-        return apply_pit_calibration(nbinom.cdf(line, nb_n, nb_p), calib) - apply_pit_calibration(nbinom.pmf(line, nb_n, nb_p), calib)/2
+    elif dist in ("NegBin", "ZINB"):
+        # NegBin / ZINB: use nbinom.cdf for overdispersed count data
+        if r is None:
+            r = 1 / cv
+        p = r / (r + ev)
+        base_cdf = nbinom.cdf(line, r, p)
+        base_pmf = nbinom.pmf(line, r, p)
+        if gate is not None and dist == "ZINB":
+            # ZI-CDF: gate + (1 - gate) * base_CDF
+            base_cdf = gate + (1 - gate) * base_cdf
+            base_pmf = (1 - gate) * base_pmf
+        return apply_pit_calibration(base_cdf, calib) - apply_pit_calibration(base_pmf, calib)/2
     
     else:
-        if std is None:
-            if cv == 1:
-                std = np.sqrt(ev)
-            else:
-                std = ev*cv
+        if alpha is None:
+            alpha = 1 / cv**2
 
-        if dist == "Gaussian":
-            alpha = 0
-        
-        # Default to Skew Gaussian distribution
-        under = apply_pit_calibration(skewnorm.cdf(high, alpha, ev, std), calib)
-        push = under - apply_pit_calibration(skewnorm.cdf(low, alpha, ev, std), calib)
+        # Gamma / ZAGamma distribution CDF
+        cdf_high = gamma.cdf(high, alpha, scale=ev / alpha)
+        cdf_low = gamma.cdf(low, alpha, scale=ev / alpha)
+        if gate is not None and dist == "ZAGamma":
+            # ZA-CDF: gate + (1 - gate) * base_CDF
+            cdf_high = gate + (1 - gate) * cdf_high
+            cdf_low = gate + (1 - gate) * cdf_low
+        under = apply_pit_calibration(cdf_high, calib)
+        push = under - apply_pit_calibration(cdf_low, calib)
         return under - push/2
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
@@ -588,6 +634,8 @@ class Archive:
         market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
         cv = stat_cv.get(o["League"], {}).get(market, 1)
+        dist = stat_dist.get(o["League"], {}).get(market, "Gamma")
+        gate = stat_zi.get(o["League"], {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
         if o["League"] == "NHL":
             market_swap = {"AST": "assists",
                            "PTS": "points", "BLK": "blocked"}
@@ -612,7 +660,7 @@ class Archive:
         for i, line in enumerate(lines):
             if line:
                 ev = get_ev(float(line["Line"]),
-                            float(line["Under"]), cv)
+                            float(line["Under"]), cv, dist=dist, gate=gate or None)
             else:
                 ev = old_evs[i]
 
@@ -643,6 +691,8 @@ class Archive:
             market = o["Market"].replace("H2H ", "")
             market = key.get(market, market)
             cv = stat_cv.get(o["League"], {}).get(market, 1)
+            dist = stat_dist.get(o["League"], {}).get(market, "Gamma")
+            gate = stat_zi.get(o["League"], {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
             if o["League"] == "NHL":
                 market_swap = {"AST": "assists",
                             "PTS": "points", "BLK": "blocked"}
@@ -657,7 +707,7 @@ class Archive:
 
             over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
             odds = no_vig_odds(over, o.get("Boost_Under"))
-            self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(o["Line"], odds[1], cv)
+            self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(o["Line"], odds[1], cv, dist=dist, gate=gate or None)
 
     def get_moneyline(self, league, date, team):
         a = []
@@ -888,38 +938,57 @@ def accel_asc(n):
         y = x + y - 1
         yield a[:k + 1]
 
-def set_model_start_values(model, dist, X_data):
+def set_model_start_values(model, dist, X_data, hist_gate=0):
     """
     Set appropriate start values for different distribution types.
-    
-    Parameters:
-    -----------
+
+    Values are in LightGBMLSS raw space (pre-response-function).
+    Response functions per distribution:
+      NegBin/ZINB  : total_count → relu,     probs → sigmoid, gate → sigmoid
+      Gamma/ZAGamma: concentration → softplus, rate → softplus, gate → sigmoid
+
+    Parameters
+    ----------
     model : LightGBMLSS model
     dist : str
-        Distribution name ("NegBin", "Gaussian", "SkewNormal", etc.)
-    X_data : DataFrame with columns "MeanYr", "STDYr", and "SkewYr"
+        Distribution name ("NegBin", "ZINB", "Gamma", "ZAGamma", "Gaussian")
+    X_data : DataFrame
+        Must contain columns "MeanYr" and "STDYr".
+    hist_gate : float
+        Historical zero-inflation rate for ZINB/ZAGamma (default 0).
     """
-    sv = X_data[["MeanYr", "STDYr", "SkewYr"]].to_numpy()
-    
-    if dist == "NegBin":
-        # NegBin needs total_count (r) and probs (p), 2 parameters.
-        # PyTorch NegBin.probs is the SUCCESS probability → mean = r*p/(1-p)
-        # so p_pytorch = mu / (r + mu), NOT r/(r+mu) (which is scipy convention).
-        mu = sv[:, 0]
-        std = sv[:, 1]
-        r_init = np.where(std > mu, np.power(mu, 2) / (std**2 - mu), 10)  # Avoid r=0 when std <= mean
-        p_init = mu / std**2
-        sv = np.column_stack([r_init, p_init])
+    from scipy.special import logit
+
+    def _softplus_inv(x):
+        x = np.asarray(x, dtype=float)
+        return np.where(x > 20, x, np.log(np.expm1(np.clip(x, 1e-4, 20))))
+
+    sv = X_data[["MeanYr", "STDYr"]].to_numpy()
+    n = len(sv)
+
+    mu = np.clip(sv[:, 0], 1e-6, None)
+    std = np.clip(sv[:, 1], 1e-6, None)
+    if dist in ["ZINB", "ZAGamma"]:
+        mu = mu / (1 - hist_gate)
+
+    if dist in ["NegBin", "ZINB"]:
+        # r = mu² / (var - mu); relu response → raw = value (identity for r>0)
+        r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 1, 50)
+        # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs)
+        probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
+        sv = np.column_stack([r_init, logit(probs)])
     elif dist == "Gaussian":
-        # Drop Skew
-        sv = sv[:, :2]
-    elif dist == "SkewNormal":
-        # SkewNormal uses loc, scale, and alpha (3 parameters)
-        skew = sv[:, 2]
-        delta = np.sign(skew) * np.sqrt(np.pi/2 * np.abs(skew)**(2/3) / (np.abs(skew)**(2/3) + ((4 - np.pi)/2)**(2/3)))
-        alpha = delta / np.sqrt(1 - delta**2)
-        scale = sv[:, 1] / np.sqrt(1 - 2*delta**2/np.pi)
-        loc = sv[:, 0] - scale*delta*np.sqrt(2/np.pi)
-        sv = np.column_stack([loc, scale, alpha])
-    
+        pass
+    elif dist in ["Gamma", "ZAGamma"]:
+        # Clip alpha to [0.1, 100]: STDYr ≈ 0 → alpha explodes → log(Γ(α)) dominates NLL.
+        # Clip beta to [0.01, 50]: MeanYr ≈ 0 → beta = α/μ explodes → NLL for any y>0 huge.
+        alpha = np.clip((mu / std) ** 2, 0.1, 100)
+        beta = np.clip(alpha / np.clip(mu, 1e-6, None), 0.01, 50)
+        # softplus response → raw = softplus_inv(value)
+        sv = np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
+
+    if dist in ["ZINB", "ZAGamma"]:
+        gate_val = np.clip(hist_gate if hist_gate > 0 else 0.05, 0.01, 0.99)
+        sv = np.column_stack([sv, np.full(n, logit(gate_val))])
+
     model.start_values = sv

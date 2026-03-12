@@ -7,7 +7,7 @@ from tqdm import tqdm
 import importlib.resources as pkg_resources
 from sportstradamus import data
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL
-from sportstradamus.helpers import Archive, get_odds, stat_cv, remove_accents
+from sportstradamus.helpers import Archive, get_odds, stat_cv, stat_dist, remove_accents
 from itertools import combinations
 from scipy.stats import multivariate_normal, norm
 from sklearn.metrics import log_loss
@@ -133,7 +133,7 @@ for league in ["NBA"]:# parlays.League.unique():
         lines = [float(re.search(r'[\d,.]+(?!%)', leg).group(0)) for leg in legs]
 
         model_odds = [float(re.search(r'[\d,.]+(?=%)', leg).group(0))/100 for leg in legs]
-        book_odds = [get_odds(lines[i], evs[i], "Poisson" if stat_cv[league][markets[i]] == 1 else "Gaussian", cv=stat_cv[league][markets[i]]) for i in range(bet_size)]
+        book_odds = [get_odds(lines[i], evs[i], stat_dist.get(league, {}).get(markets[i], "Gamma"), cv=stat_cv[league][markets[i]]) for i in range(bet_size)]
 
         for i in range(bet_size):
             if np.isnan(book_odds[i]):

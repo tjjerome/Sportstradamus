@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, Archive, book_weights, feature_filter, set_model_start_values
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, stat_zi, Archive, book_weights, feature_filter, set_model_start_values
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from scipy.optimize import minimize
-from scipy.stats import poisson, nbinom, skewnorm, norm, fit
+from scipy.stats import poisson, nbinom, norm, gamma, fit
 from sklearn.metrics import (
     precision_score,
     accuracy_score,
@@ -22,7 +22,10 @@ from datetime import datetime, timedelta
 from tqdm import tqdm
 from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
-from sportstradamus.skew_normal import SkewNormal
+from lightgbmlss.distributions.ZINB import ZINB
+from lightgbmlss.distributions.Gamma import Gamma
+from lightgbmlss.distributions.ZAGamma import ZAGamma
+
 import shap
 import json
 import warnings
@@ -92,6 +95,20 @@ def load_distribution_config():
 def save_distribution_config(config):
     """Save distribution configuration to stat_dist.json."""
     filepath = pkg_resources.files(data) / "stat_dist.json"
+    with open(filepath, 'w') as f:
+        json.dump(config, f, indent=4)
+
+def load_zi_config():
+    """Load zero-inflation gate configuration from stat_zi.json."""
+    filepath = pkg_resources.files(data) / "stat_zi.json"
+    if os.path.isfile(filepath):
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_zi_config(config):
+    """Save zero-inflation gate configuration to stat_zi.json."""
+    filepath = pkg_resources.files(data) / "stat_zi.json"
     with open(filepath, 'w') as f:
         json.dump(config, f, indent=4)
 
@@ -256,6 +273,7 @@ def meditate(force, league):
         for market in markets:
             stat_dist = load_distribution_config()
             stat_dist.setdefault(league, {})
+            stat_zi.setdefault(league, {})
 
             if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
                 with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
@@ -284,6 +302,7 @@ def meditate(force, league):
                 need_model = False
             else:
                 filedict = {}
+                dist = None
 
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
@@ -316,12 +335,13 @@ def meditate(force, league):
             M = pd.concat([M, new_M], ignore_index=True)
             M.Date = pd.to_datetime(M.Date, format='mixed')
             step = M["Result"].drop_duplicates().sort_values().diff().min()
+            _prep_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
             for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
                 if np.isnan(row["EV"]) or row["EV"] <= 0:
                     M.loc[i, "Odds"] = 0.5
-                    M.loc[i, "EV"] = get_ev(M.loc[i, "Line"], .5, dist, cv)
+                    M.loc[i, "EV"] = get_ev(M.loc[i, "Line"], .5, cv=cv, dist=dist, gate=_prep_gate or None)
                 else:
-                    M.loc[i, "Odds"] = 1-get_odds(row["Line"], row["EV"], dist, cv=cv, step=step)
+                    M.loc[i, "Odds"] = 1-get_odds(row["Line"], row["EV"], dist, cv=cv, step=step, gate=_prep_gate or None)
 
             M = trim_matrix(M)
             M.to_csv(filepath)
@@ -352,7 +372,7 @@ def meditate(force, league):
             y_train_labels = np.ravel(y_train.to_numpy())
 
             # === DISTRIBUTION SELECTION ===
-            # Choose between NegBin (count data) or SkewNormal (continuous-like data)
+            # Choose between NegBin (count data) or Gamma (continuous-like data)
             # Load from stat_dist.json or auto-select via NLL comparison
             # TODO Add Binomial dist for underdispersed markets like TDs?
             
@@ -368,30 +388,37 @@ def meditate(force, league):
             if market in stat_dist[league] and not force:
                 # Use previously selected distribution
                 dist = stat_dist[league][market]
+                hist_gate = stat_zi.get(league, {}).get(market, 0)
             else:
-                nll_scores = {}
-                snorm_fit = player_stats.apply(lambda x: fit(skewnorm, x.astype(float), [(-10, 10), (-10, 100), (0, 100)]).params)
-                nll_scores["SkewNormal"] = snorm_fit.reset_index().apply(lambda params: -skewnorm.logpdf(player_stats.get_group(params.iloc[0]).astype(float), *params.iloc[1]).mean(), axis=1).median()
-
-                nb_fit = player_stats.apply(lambda x: fit(nbinom, x.astype(int), [(0, 50), (0, 1)]).params)
-                nll_scores["NegBin"] = nb_fit.reset_index().apply(lambda params: -nbinom.logpmf(player_stats.get_group(params.iloc[0]).astype(int), *params.iloc[1]).mean(), axis=1).median()
-
-                # Auto-select via NLL comparison
-                dist = min(nll_scores, key=nll_scores.get)
-                
+                dist, hist_gate = select_distribution(player_stats)
+    
                 # Save selected distribution for future runs
                 stat_dist[league][market] = dist
                 save_distribution_config(stat_dist)
-                
-                print(f"  Distribution scores - NegBin: {nll_scores.get('NegBin', np.inf):.4f}, SkewNormal: {nll_scores.get('SkewNormal', np.inf):.4f}")
-                print(f"  Selected: {dist}")
+
+                # Save historical gate for ZI distributions
+                if dist in ("ZINB", "ZAGamma"):
+                    stat_zi[league][market] = hist_gate
+                    save_zi_config(stat_zi)
             
-            if dist == "NegBin":
-                dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
+            player_stats = player_stats.apply(lambda x: x[x != 0])
+
+            if dist in ["NegBin", "ZINB"]:
+                if dist == "NegBin":
+                    dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
+                else:
+                    dist_obj = ZINB(stabilization="None", loss_fn="nll")
                 cv = ((player_stats.var()-player_stats.mean())/player_stats.mean()**2*player_stats.count()/player_stats.count().sum()).sum()
                 cv = max(cv, 1/50)  # Avoid zero or negative cv
             else:
-                dist_obj = SkewNormal(stabilization="None", loss_fn="nll", response_fn="softplus")
+                if dist == "Gamma":
+                    dist_obj = Gamma(stabilization="None", loss_fn="nll", response_fn="softplus")
+                    nonzero_mask = y_train_labels > 0
+                    X_train = X_train[nonzero_mask]
+                    y_train = y_train_labels[nonzero_mask]
+                else:
+                    dist_obj = ZAGamma(stabilization="None", loss_fn="nll", response_fn="softplus")
+
                 cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
 
             stat_cv[league][market] = cv
@@ -403,9 +430,9 @@ def meditate(force, league):
                 X_train, label=y_train_labels)
             
             # === MODEL TRAINING ===
-            # All distributions (NegBin, SkewNormal) use LightGBMLSS training
+            # All distributions (NegBin, Gamma) use LightGBMLSS training
             model = LightGBMLSS(dist_obj)
-            set_model_start_values(model, dist, X_train)
+            set_model_start_values(model, dist, X_train, hist_gate=hist_gate)
 
             if opt_params is None or opt_params.get("opt_rounds") is None or force:
                 params = {
@@ -447,19 +474,19 @@ def meditate(force, league):
 
             # Use standard LightGBM prediction
             idx = X_train.index
-            set_model_start_values(model, dist, X_train)
+            set_model_start_values(model, dist, X_train, hist_gate=hist_gate)
             preds = model.predict(X_train, pred_type="parameters")
             preds.index = idx
             prob_params_train = pd.concat([prob_params_train, preds])
 
             idx = X_validation.index
-            set_model_start_values(model, dist, X_validation)
+            set_model_start_values(model, dist, X_validation, hist_gate=hist_gate)
             preds = model.predict(X_validation, pred_type="parameters")
             preds.index = idx
             prob_params_validation = pd.concat([prob_params_validation, preds])
 
             idx = X_test.index
-            set_model_start_values(model, dist, X_test)
+            set_model_start_values(model, dist, X_test, hist_gate=hist_gate)
             preds = model.predict(X_test, pred_type="parameters")
             preds.index = idx
             prob_params = pd.concat([prob_params, preds])
@@ -483,82 +510,115 @@ def meditate(force, league):
             B_test.loc[B_test["Odds"] == 0, "Odds"] = 0.5
             B_validation.loc[B_validation["Odds"] == 0, "Odds"] = 0.5
             r_book = None  # NegBin market-level dispersion from historical data
-            n_validation = None  # NegBin per-obs dispersion; None for SkewNormal
-            alpha_test = 0  # per-observation alpha for get_odds; 0 = Gaussian/Poisson
-            nb_n_test = None  # NegBin test-set dispersion for get_odds; None = use Poisson
+            r_validation = None  # NegBin per-obs dispersion; None for Gamma
+            r_test = None  # NegBin test-set dispersion for get_odds; None = use Poisson
+            gate_test = None  # Zero-inflation gate for ZINB/ZAGamma; None for base dists
+            gate_validation = None
 
             # Extract appropriate parameters based on distribution
-            if dist == "NegBin":
-                n = prob_params["total_count"].to_numpy()
+            # ZINB inherits NegBin base params + gate; ZAGamma inherits Gamma + gate
+            # For ZI dists, ev/ev_validation are BASE means (not deflated by gate)
+            # so that fused_loc blends apples-to-apples with the book's base mean.
+            if dist in ("NegBin", "ZINB"):
+                r = prob_params["total_count"].to_numpy()
                 p = prob_params["probs"].to_numpy()
                 # PyTorch NegBin: probs = success probability → mean = n*p/(1-p)
-                ev = n * p / (1 - p)
-                n_validation = prob_params_validation["total_count"].to_numpy()
+                ev = r * p / (1 - p)
+                r_validation = prob_params_validation["total_count"].to_numpy()
                 p_validation = prob_params_validation["probs"].to_numpy()
-                ev_validation = n_validation * p_validation / (1 - p_validation)
-                sig_validation = None
+                ev_validation = r_validation * p_validation / (1 - p_validation)
                 alpha_validation = None
-            elif dist == "SkewNormal":
-                sig = prob_params["scale"].to_numpy()
-                alpha = prob_params["alpha"].to_numpy()
-                _delta = alpha / np.sqrt(1 + alpha**2)
-                # Use true skew-normal mean E[X] = loc + scale*delta*sqrt(2/pi)
-                # for blending; fused_loc then converts back to a loc parameter.
-                ev = prob_params["loc"].to_numpy() + sig * _delta * np.sqrt(2 / np.pi)
-                alpha_test = alpha
-                sig_validation = prob_params_validation["scale"].to_numpy()
-                alpha_validation = prob_params_validation["alpha"].to_numpy()
-                _delta_validation = alpha_validation / np.sqrt(1 + alpha_validation**2)
-                ev_validation = prob_params_validation["loc"].to_numpy() + sig_validation * _delta_validation * np.sqrt(2 / np.pi)
+                if dist == "ZINB":
+                    gate_test = prob_params["gate"].to_numpy()
+                    gate_validation = prob_params_validation["gate"].to_numpy()
+            elif dist in ("Gamma", "ZAGamma"):
+                alpha = prob_params["concentration"].to_numpy()
+                beta = prob_params["rate"].to_numpy()
+                ev = alpha / beta
+                alpha_validation = prob_params_validation["concentration"].to_numpy()
+                beta_validation = prob_params_validation["rate"].to_numpy()
+                ev_validation = alpha_validation / beta_validation
+                if dist == "ZAGamma":
+                    gate_test = prob_params["gate"].to_numpy()
+                    gate_validation = prob_params_validation["gate"].to_numpy()
 
             # === MODEL WEIGHTING AND PROBABILITY CALCULATION ===
-            model_weight = fit_model_weight(ev_validation, B_validation["EV"].to_numpy(), y_validation["Result"].to_numpy(), dist, sig_validation, alpha_validation, n_validation, cv=cv)
+            # fused_loc uses base distribution type (NegBin or Gamma) for blending
+            # For ZI distributions, pass gate_model + hist_gate so fused_loc can
+            # blend the gate alongside the base distribution parameters.
+            # Book EVs on disk are already base means (get_ev with gate stores base
+            # means), so no conversion is needed here.
+            base_dist = "NegBin" if dist in ("NegBin", "ZINB") else "Gamma"
+            book_ev_test = B_test["EV"].to_numpy()
+            book_ev_val = B_validation["EV"].to_numpy()
+            _zi_kwargs = {}
+            if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
+                _zi_kwargs = dict(gate_model=gate_validation, gate_book=hist_gate)
+            model_weight = fit_model_weight(ev_validation, book_ev_val, y_validation["Result"].to_numpy(), base_dist, model_alpha=alpha_validation, model_r=r_validation, cv=cv, **_zi_kwargs)
 
-            if dist == "NegBin":
+            if dist in ("NegBin", "ZINB"):
                 # fused_loc blends both μ and r via geometric mean
-                r_blend_test, p_test = fused_loc(model_weight, ev, B_test["EV"].to_numpy(), cv, "NegBin", r=n)
+                _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
+                _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZINB" else {}
+                r_blend_test, p_test, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "NegBin", r=r, **_zi_test)
                 weighted_mean = r_blend_test * (1 - p_test) / p_test
-                nb_n_test = r_blend_test
+                r_test = r_blend_test
 
-                r_blend_val, p_val = fused_loc(model_weight, ev_validation, B_validation["EV"].to_numpy(), "NegBin", r=n_validation)
+                r_blend_val, p_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "NegBin", r=r_validation, **_zi_val)
 
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, nb_n=nb_n_test)
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, r=r_test, gate=gate_blend_test)
                 y_proba_no_filt = np.array(
                     [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
                 # Randomized PIT for discrete distributions: u_i = F(y-1) + U*f(y)
                 y_int_val = y_validation["Result"].to_numpy().astype(int)
-                pit_scores = nbinom.cdf(y_int_val - 1, r_blend_val, p_val) \
-                    + np.random.uniform(0, 1, size=len(y_validation)) * nbinom.pmf(y_int_val, r_blend_val, p_val)
+                base_cdf_prev = nbinom.cdf(y_int_val - 1, r_blend_val, p_val)
+                base_pmf = nbinom.pmf(y_int_val, r_blend_val, p_val)
+                if dist == "ZINB":
+                    # ZINB-CDF: gate + (1-gate)*NB_CDF(k) for k >= 0; F(-1) = 0
+                    # ZINB-PMF: P(0) = gate + (1-gate)*NB(0); P(k) = (1-gate)*NB(k) for k > 0
+                    at_zero = y_int_val == 0
+                    base_cdf_prev = np.where(at_zero, 0, gate_blend_val + (1 - gate_blend_val) * base_cdf_prev)
+                    base_pmf = np.where(at_zero, gate_blend_val + (1 - gate_blend_val) * base_pmf, (1 - gate_blend_val) * base_pmf)
+                pit_scores = base_cdf_prev \
+                    + np.random.uniform(0, 1, size=len(y_validation)) * base_pmf
 
-                std = None
+                test_alpha = None
                 
             else:
-                # SkewNormal — precision-weighted blend of means and scales
-                # w_disp = 1.0 (coupled with w_mean by design)
-                weighted_mean, blended_std, alpha = fused_loc(model_weight, ev, B_test["EV"].to_numpy(), cv, "SkewNormal", alpha=alpha, sigma=sig)
-                weighted_mean_validation, blended_sig_validation, alpha_validation = fused_loc(model_weight, ev_validation, B_validation["EV"].to_numpy(), cv, "SkewNormal", alpha=alpha_validation, sigma=sig_validation)
-                nb_n_test = None
+                # Gamma / ZAGamma — precision-weighted blend
+                _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
+                _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZAGamma" else {}
+                alpha_blend, beta_blend, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "Gamma", alpha=alpha, **_zi_test)
+                weighted_mean = alpha_blend / beta_blend
 
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, std=blended_std, alpha=alpha_test, step=step)
+                alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "Gamma", alpha=alpha_validation, **_zi_val)
+                r_test = None
+
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=alpha_blend, step=step, gate=gate_blend_test)
                 y_proba_no_filt = np.array(
                     [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
-                # PIT scores for calibration (use blended scale)
-                pit_scores = skewnorm.cdf(
-                    y_validation["Result"].to_numpy(),
-                    alpha_validation,
-                    weighted_mean_validation,
-                    blended_sig_validation
-                )
+                # PIT scores for calibration (use blended params directly)
+                y_val = y_validation["Result"].to_numpy()
+                base_cdf = gamma.cdf(y_val, alpha_blend_val, scale=1 / beta_blend_val)
+                if dist == "ZAGamma":
+                    # ZA-CDF: gate_blend + (1 - gate_blend) * base_CDF for x > 0; gate for x == 0
+                    pit_scores = np.where(
+                        y_val == 0,
+                        np.random.uniform(0, 1, size=len(y_val)) * gate_blend_val,
+                        gate_blend_val + (1 - gate_blend_val) * base_cdf
+                    )
+                else:
+                    pit_scores = base_cdf
 
-                # Update std to blended std for downstream use
-                std = blended_std
+                # Store alpha for downstream use
+                test_alpha = alpha_blend
 
             pit_scores = np.sort(pit_scores)
             model_calib = 1 - np.mean(((pit_scores - np.arange(1, len(pit_scores)+1))/len(pit_scores))**2)
 
-            y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, std=std, alpha=alpha_test, step=step, calib=pit_scores, nb_n=nb_n_test)
+            y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=test_alpha, step=step, calib=pit_scores, r=r_test, gate=gate_blend_test)
             y_proba_filt = np.array(
                 [y_proba_filt, 1-y_proba_filt]).transpose()
 
@@ -601,21 +661,25 @@ def meditate(force, league):
                 "std": stat_std,
                 "pit_scores": pit_scores,
                 "weight": model_weight,
-                "r_book": r_book
+                "r_book": r_book,
+                "hist_gate": hist_gate
             }
 
             X_test['Result'] = y_test['Result']
-            if dist == "NegBin":
-                # Store true NegBin mean using PyTorch probs convention: mean = n*p/(1-p)
-                X_test['EV'] = prob_params['total_count'] * prob_params['probs'] / (1 - prob_params['probs'])
-                X_test['NB_N'] = prob_params['total_count']
+            if dist in ("NegBin", "ZINB"):
+                # Store base distribution mean: mean = r*p/(1-p)
+                base_ev = prob_params['total_count'] * prob_params['probs'] / (1 - prob_params['probs'])
+                X_test['EV'] = base_ev
+                if dist == "ZINB":
+                    X_test['Gate'] = prob_params['gate']
+                X_test['R'] = prob_params['total_count']
                 X_test['NB_P'] = prob_params['probs']
-            elif dist == "SkewNormal":
-                # Store the true expected value, not the raw loc parameter
-                _d = prob_params['alpha'] / np.sqrt(1 + prob_params['alpha']**2)
-                X_test['EV'] = prob_params['loc'] + prob_params['scale'] * _d * np.sqrt(2 / np.pi)
-                X_test['STD'] = prob_params['scale']
-                X_test['ALPHA'] = prob_params['alpha']
+            elif dist in ("Gamma", "ZAGamma"):
+                base_ev = prob_params['concentration'] / prob_params['rate']
+                X_test['EV'] = base_ev
+                if dist == "ZAGamma":
+                    X_test['Gate'] = prob_params['gate']
+                X_test['Alpha'] = prob_params['concentration']
 
             X_test['P'] = y_proba_filt[:, 1]
 
@@ -650,6 +714,7 @@ def report():
     with open(pkg_resources.files(data) / "stat_std.json", "r") as f:
         stat_std = json.load(f)
     stat_dist = load_distribution_config()
+    stat_zi_local = load_zi_config()
     
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         for model_str in model_list:
@@ -662,6 +727,7 @@ def report():
             league = name[0]
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
+            h_gate = model.get("hist_gate", 0)
 
             stat_cv.setdefault(league, {})
             stat_cv[league][market] = float(cv)
@@ -673,9 +739,16 @@ def report():
             stat_dist.setdefault(league, {})
             stat_dist[league][market] = dist
 
+            # Save historical gate for ZI distributions
+            if dist in ("ZINB", "ZAGamma") and h_gate:
+                stat_zi_local.setdefault(league, {})
+                stat_zi_local[league][market] = h_gate
+
             f.write(f" {league} {market} ".center(60, "="))
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
+            if dist in ("ZINB", "ZAGamma"):
+                f.write(f" Historical Gate: {h_gate:.4f}\n")
             f.write(pd.DataFrame(model['stats'], index=[
                     ['No Filter', 'Filter']]).to_string(index=False))
             f.write("\n\n")
@@ -687,6 +760,7 @@ def report():
         json.dump(stat_std, f, indent=4)
     
     save_distribution_config(stat_dist)
+    save_zi_config(stat_zi_local)
 
 
 def see_features():
@@ -712,15 +786,19 @@ def see_features():
         
         # Drop distribution-specific parameters that aren't features
         dist = filedict["distribution"]
-        if dist == "SkewNormal":
-            X.drop(columns=["STD", "ALPHA"], inplace=True, errors='ignore')
-            C.drop(["STD", "ALPHA"], inplace=True, errors='ignore')
-        elif dist == "NegBin":
-            X.drop(columns=["NB_N", "NB_P"], inplace=True, errors='ignore')
-            C.drop(["NB_N", "NB_P"], inplace=True, errors='ignore')
+        if dist in ("Gamma", "ZAGamma"):
+            X.drop(columns=["Alpha"], inplace=True, errors='ignore')
+            C.drop(["Alpha"], inplace=True, errors='ignore')
+        elif dist in ("NegBin", "ZINB"):
+            X.drop(columns=["R", "NB_P"], inplace=True, errors='ignore')
+            C.drop(["R", "NB_P"], inplace=True, errors='ignore')
         elif dist == "Mixture2G":
             X.drop(columns=["STD"], inplace=True, errors='ignore')
             C.drop(["STD"], inplace=True, errors='ignore')
+        # Drop gate column for zero-inflated distributions
+        if dist in ("ZINB", "ZAGamma"):
+            X.drop(columns=["Gate"], inplace=True, errors='ignore')
+            C.drop(["Gate"], inplace=True, errors='ignore')
         
         features = X.columns
 
@@ -738,11 +816,12 @@ def see_features():
         subvals = explainer.shap_values(X)
         
         # Handle different output shapes for different distributions
-        if dist == "SkewNormal":
-            subvals = np.abs(subvals[0]) + np.abs(subvals[1])
-        elif dist == "NegBin":
-            # NegBin has 2 outputs (total_count, probs); sum SHAP contributions
-            subvals = np.abs(subvals[0]) + np.abs(subvals[1])
+        if dist in ("Gamma", "ZAGamma"):
+            # Gamma has 2 outputs (alpha, beta); ZAGamma has 3 (alpha, beta, gate)
+            subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
+        elif dist in ("NegBin", "ZINB"):
+            # NegBin has 2 outputs (total_count, probs); ZINB has 3 (total_count, probs, gate)
+            subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
         else:
             pass
 
@@ -861,7 +940,7 @@ def fit_book_weights(league, market):
             prob = np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1))
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
 
-    elif dist in ["NegBin", "Poisson"]:
+    elif dist in ["NegBin", "ZINB", "Poisson"]:
         def objective(w, x, y):
             proj = np.array(np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1)))
             return -np.mean(poisson.logpmf(y.astype(int), proj))
@@ -890,61 +969,69 @@ def fit_book_weights(league, market):
     else:
         return {}
     
-def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, sigma=None):
+def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, gate_book=None):
     """
     Compute blended distribution parameters for model weight w.
 
     Blends between model prediction (ev_a) and bookmaker line (ev_b)
     using the logarithmic opinion pool (Genest & Zidek 1986):
     - NegBin: geometric mean of both means and dispersion parameters.
-      The model provides per-observation r; the book's dispersion r_book
-      is estimated from historical data via MLE.  Both μ and r are
-      blended in log-space with the same weight w.
-    - SkewNormal: precision-weighted blend of means and scales; returns
-      (blended_loc, blended_std).  The model's scale comes from
-      LightGBMLSS; the book's scale is estimated as cv * book_ev
-      (constant coefficient-of-variation model).  When the model is
-      confident (small scale), it receives more effective weight.
+      The model provides per-observation r; the book's r is derived as
+      1/cv.  Both μ and r are blended in log-space with the same weight w.
+    - Gamma: precision-weighted blend.  The model provides per-observation
+      alpha; the book's alpha is derived as 1/cv².  Returns (alpha, beta).
+
+    When gate_model and gate_book are supplied (zero-inflated distributions),
+    the gate is blended linearly and returned as a third element.  ev_a and
+    ev_b should be *base* distribution means (before gate deflation).
 
     Parameters
     ----------
     w : float
         Weight on model prediction.
     ev_a, ev_b : float or np.ndarray
-        Model and bookmaker expected values (true means).
-    dist : str
-        Distribution family: "NegBin" or "SkewNormal".
+        Model and bookmaker base distribution means.
     cv : float
-        Coefficient of variation for book values. std/mu for SkewNormal, 1/r for NegBin.
+        Coefficient of variation for book values. std/mu for Gamma, 1/r for NegBin.
+    dist : str
+        Distribution family: "NegBin" or "Gamma".
     r : float or np.ndarray, optional
         NegBin per-observation dispersion from model (required for NegBin).
-    alpha, sigma : float or np.ndarray, optional
-        SkewNormal shape and scale (required for SkewNormal).
+    alpha : float or np.ndarray, optional
+        Gamma shape parameter from model (required for Gamma).
+    gate_model : float or np.ndarray, optional
+        Model's per-observation zero-inflation gate.
+    gate_book : float, optional
+        Historical zero-inflation gate for the book side.
 
     Returns
     -------
-    NegBin     : tuple (r_blend, p)
-    SkewNormal : tuple (blended_loc, blended_std)
+    NegBin : tuple (r_blend, p, gate_blend)
+    Gamma  : tuple (alpha, beta, gate_blend)
+    gate_blend is None when no gate parameters are supplied.
     """
+    gate_blend = None
+    if gate_model is not None and gate_book is not None:
+        gate_blend = w * np.asarray(gate_model, dtype=float) + (1 - w) * gate_book
 
     if dist == "NegBin":
         mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
         r_blend = np.exp(w * np.log(r) + (1 - w) * np.log(1/cv))
         p = r_blend / (r_blend + mu)
-        return r_blend, p
-    else:  # SkewNormal – precision-weighted blend
-        delta = alpha / np.sqrt(1 + alpha**2)
-        book_std = np.clip(cv * np.asarray(ev_b, dtype=float), 1e-9, None)
-        model_std = np.asarray(sigma*np.sqrt(1 - 2*delta**2/np.pi), dtype=float)
-        inv_var_m = 1 / model_std**2
-        inv_var_b = 1 / book_std**2
+        return r_blend, p, gate_blend
+    else:  # Gamma – precision-weighted blend
+        model_alpha = np.asarray(alpha, dtype=float)
+        book_alpha = 1 / cv**2
+        inv_var_m = model_alpha / np.asarray(ev_a, dtype=float)**2
+        inv_var_b = book_alpha / np.asarray(ev_b, dtype=float)**2
         total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
         blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
-        blended_std = 1 / np.sqrt(total_inv_var)
-        blended_loc = blended_mean - blended_std * delta * np.sqrt(2 / np.pi)
-        return blended_loc, blended_std, alpha
+        blended_alpha = blended_mean**2 * total_inv_var
+        blended_beta = blended_mean * total_inv_var
+        return blended_alpha, blended_beta, gate_blend
 
-def fit_model_weight(model_ev, odds_ev, result, dist, model_std=None, model_alpha=None, model_n=None, cv=None):
+def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=None, cv=None,
+                     gate_model=None, gate_book=None):
     """
     Optimize the single blend weight between model predictions and
     bookmaker lines by maximizing log-likelihood on validation data.
@@ -952,38 +1039,92 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_std=None, model_alph
     Returns a single float w in [0.05, 0.9].
 
     - NegBin: uses the logarithmic opinion pool — geometric mean of
-      both μ and r with a single weight w.  The book's dispersion
-      r_book is estimated from historical data via ``estimate_r_book``.
-    - SkewNormal: precision-weighted blend of means and scales using
-      model std and book std (cv * book_ev).
+      both μ and r with a single weight w.  The book's r is 1/cv.
+    - Gamma: precision-weighted blend using model alpha and book
+      alpha (1/cv²).
+
+    When gate_model/gate_book are provided, the likelihood accounts for
+    zero-inflation: P(y) = gate*I(y=0) + (1-gate)*base_pdf(y).
     """
     result = np.asarray(result, dtype=float)
     model_ev = np.asarray(model_ev, dtype=float)
     odds_ev = np.asarray(odds_ev, dtype=float)
+    has_gate = gate_model is not None and gate_book is not None
     
     if dist == "NegBin":
-        model_n_arr = np.asarray(model_n, dtype=float)
+        model_r_arr = np.asarray(model_r, dtype=float)
         result_int = result.astype(int)
         
         def objective(w):
-            r_blend, p_blend = fused_loc(w, model_ev, odds_ev, cv, "NegBin",
-                                         r=model_n_arr)
-            return -np.mean(nbinom.logpmf(result_int, r_blend, p_blend))
+            r_blend, p_blend, g_blend = fused_loc(w, model_ev, odds_ev, cv, "NegBin",
+                                         r=model_r_arr, gate_model=gate_model, gate_book=gate_book)
+            base_logpmf = nbinom.logpmf(result_int, r_blend, p_blend)
+            if has_gate:
+                # ZI likelihood: P(y=0) = g + (1-g)*NB(0), P(y>0) = (1-g)*NB(y)
+                loglik = np.where(
+                    result_int == 0,
+                    np.log(g_blend + (1 - g_blend) * np.exp(base_logpmf)),
+                    np.log(1 - g_blend) + base_logpmf
+                )
+                return -np.mean(loglik)
+            return -np.mean(base_logpmf)
 
         res = minimize(objective, 0.5, bounds=[(0.05, 0.9)],
                        tol=1e-8, method='TNC')
         return res.x[0]
     else:
         model_alpha_arr = np.asarray(model_alpha, dtype=float)
-        model_std_arr = np.asarray(model_std, dtype=float)
         
         def objective(w):
-            loc_blend, std_blend, alpha = fused_loc(w, model_ev, odds_ev, cv, "SkewNormal",
-                                             alpha=model_alpha_arr, sigma=model_std_arr)
-            return -np.mean(skewnorm.logpdf(result, alpha, loc_blend, std_blend))
+            alpha, beta, g_blend = fused_loc(w, model_ev, odds_ev, cv, "Gamma",
+                                   alpha=model_alpha_arr, gate_model=gate_model, gate_book=gate_book)
+            base_logpdf = gamma.logpdf(result, alpha, scale=1 / beta)
+            if has_gate:
+                # ZA likelihood: P(y=0) = g, P(y>0) = (1-g)*Gamma(y)
+                loglik = np.where(
+                    result == 0,
+                    np.log(np.clip(g_blend, 1e-12, None)),
+                    np.log(1 - g_blend) + base_logpdf
+                )
+                return -np.mean(loglik)
+            return -np.mean(base_logpdf)
 
         res = minimize(objective, .5, bounds=[(0.05, 0.9)], tol=1e-8, method='TNC')
         return res.x[0]
+
+def select_distribution(player_stats):
+    nll_scores = {}
+
+    no_zeros = player_stats.apply(lambda x: x[x != 0])
+    gam_fit = player_stats.apply(lambda x: fit(gamma, x[x>0].astype(float), {"a":(0, 50), "scale":(0, 500)}).params)
+    nll_scores["Gamma"] = gam_fit.reset_index().apply(lambda params: -gamma.logpdf(no_zeros[params.iloc[0]].astype(float), *params.iloc[1]).mean(), axis=1).median()
+
+    nb_fit = player_stats.apply(lambda x: fit(nbinom, x[x>0].astype(int), [(0, 50), (0, 1)]).params)
+    nll_scores["NegBin"] = nb_fit.reset_index().apply(lambda params: -nbinom.logpmf(no_zeros[params.iloc[0]].astype(int), *params.iloc[1]).mean(), axis=1).median()
+
+    # Auto-select via NLL comparison
+    dist = min(nll_scores, key=nll_scores.get)
+
+    # Check for zero inflation and compute historical gate
+    observed_zeros = player_stats.agg(lambda x: x.eq(0).mean())
+    if dist == "NegBin":
+        base_zero_prob = nb_fit.apply(lambda row: nbinom.pmf(0, row[0], row[1]))
+        # gate = (obs_zero - base_zero) / (1 - base_zero), averaged across players
+        p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
+        if p_zero > 0.1:
+            dist = "ZINB"
+    else:
+        base_zero_prob = gam_fit.apply(lambda row: gamma.cdf(0.99, row[0], scale=row[2]))
+        # gate = (obs_zero - base_zero) / (1 - base_zero), averaged across players
+        p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
+        if p_zero > 0.05:
+            dist = "ZAGamma"
+    
+    print(f"  Distribution scores - NegBin: {nll_scores.get('NegBin', np.inf):.4f}, Gamma: {nll_scores.get('Gamma', np.inf):.4f}")
+    print(f"  Zero inflation - {p_zero:.4f}")
+    print(f"  Selected: {dist}")
+
+    return dist, p_zero
 
 def trim_matrix(M):
     """Remove data quality issues and prepare matrix for modeling."""
