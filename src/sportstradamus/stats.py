@@ -311,7 +311,7 @@ class Stats:
 
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
-        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'SkewYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
+        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
         if isinstance(offers, dict):
             players = list(offers.keys())
             teams = {k:v["Team"] for k, v in offers.items()}
@@ -365,7 +365,6 @@ class Stats:
         stats["MeanYr"] = playergames[market].mean()
         stats["STD10"] = playergames[market].apply(lambda x: x.tail(10).std())
         stats["STDYr"] = playergames[market].std()
-        stats["SkewYr"] = playergames[market].skew()
         stats["DaysOff"] = (date-pd.to_datetime(playergames[self.log_strings["date"]].apply(lambda x: x.tail(1).item())).dt.date).astype('timedelta64[s]').dt.days
         stats["DaysIntoSeason"] = (date-self.season_start).days
         stats["GamesPlayed"] = playergames[market].count()
@@ -545,10 +544,8 @@ class Stats:
         }
         for gameDate, players in tqdm(gamedays, unit="gameday", desc="Gathering Training Data", total=len(gamedays)):
 
-            if market == "plateAppearances":
-                offers_df = players.loc[players[market]>=2, offerKeys.keys()].rename(columns=offerKeys)
-            else:
-                offers_df = players.loc[players[market]>=0, offerKeys.keys()].rename(columns=offerKeys)
+            offers_df = players.loc[:, offerKeys.keys()].rename(columns=offerKeys)
+            offers_df["Result"] = offers_df["Result"].clip(0, None)
 
             offers_df.index = offers_df["Player"]
             offers_df = offers_df.loc[~offers_df.index.duplicated()]
@@ -587,11 +584,12 @@ class Stats:
                     a = False
                     line = np.max([stats.loc[player, 'Avg10'], 0.5])
                 if ev <= 0:
-                    ev = get_ev(line, .5, stat_cv[self.league].get(market,1))
+                    ev = get_ev(line, .5, stat_cv[self.league].get(market,1), dist=stat_dist.get(self.league, {}).get(market, "Gamma"))
                 
                 lines.append(line)
                 _cv = stat_cv[self.league].get(market, 1)
-                odds.append(1-get_odds(line, ev, "Poisson" if _cv == 1 else "Gaussian", cv=_cv))
+                _dist = stat_dist.get(self.league, {}).get(market, "Gamma")
+                odds.append(1-get_odds(line, ev, _dist, cv=_cv))
                 evs.append(ev)
                 archived.append(a)
 
@@ -1392,7 +1390,9 @@ class StatsNBA(Stats):
             logger.warning(f"{filename} missing")
             return []
 
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std", "alpha": f"proj {market} alpha"}), lsuffix="_obs")
+        # Drop gate column for ZI distributions — not needed for budget normalization
+        prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"concentration": f"proj {market} alpha", "rate": f"proj {market} beta"}), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
 
         # ------------------------------------------------------------------
@@ -1465,25 +1465,13 @@ class StatsNBA(Stats):
 
         teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
         for team, team_df in teams:
-            means  = team_df[f"proj {market} mean"].copy()   # loc parameter (xi)
-            stds   = team_df[f"proj {market} std"].copy()    # scale parameter (omega)
-            alphas = team_df[f"proj {market} alpha"].copy()  # skew parameter (alpha)
+            alphas = team_df[f"proj {market} alpha"].copy()
+            betas  = team_df[f"proj {market} beta"].copy()
             N      = len(team_df)
 
-            # ------------------------------------------------------------------
-            # True skew-normal expected value and variance:
-            #   delta  = alpha / sqrt(1 + alpha^2)
-            #   E[X]   = loc + scale * delta * sqrt(2/pi)
-            #   Var[X] = scale^2 * (1 - 2*delta^2/pi)
-            #
-            # The budget constraint operates on E[X], but adjustments are
-            # applied to loc. Shifting loc by d_i shifts E[X] by exactly d_i
-            # regardless of alpha, so alpha is unchanged after normalization.
-            # ------------------------------------------------------------------
-            delta      = alphas / np.sqrt(1.0 + alphas ** 2)
-            sn_bias    = stds * delta * np.sqrt(2.0 / np.pi)
-            true_means = means + sn_bias                            # true E[X_i]
-            true_vars  = stds ** 2 * (1.0 - 2.0 * delta ** 2 / np.pi)  # true Var[X_i]
+            # Gamma E[X] = alpha/beta, Var[X] = alpha/beta²
+            true_means = alphas / betas
+            true_vars  = alphas / (betas ** 2)
 
             total = true_means.sum()
 
@@ -1491,63 +1479,47 @@ class StatsNBA(Stats):
                 continue
 
             # Minutes reserved for fringe bench players not captured in our model.
-            # When a modeled starter is inactive they are simply absent from
-            # playerProfile, so N is smaller and unmodeled_count rises by 1.  That
-            # slightly under-reserves their minutes, but the always-adjust logic
-            # below will still scale the remaining active players upward to fill the
-            # available budget rather than leaving them at baseline projections.
             unmodeled_count   = max(0, typical_rotation - N)
             unmodeled_reserve = unmodeled_count * avg_unmodeled_min
 
-            # upper_target: minutes budgeted specifically for the N modeled players.
-            # lower_target: sanity floor — never target below this regardless of
-            #               how many unmodeled players the formula estimates.
             upper_target = budget_mean - unmodeled_reserve
             lower_target = N * per_player_floor
             target = max(upper_target, lower_target)
 
-            # Always adjust toward target. This is the key behaviour for handling
-            # inactive teammates: when a starter is absent, total < target and the
-            # remaining players are automatically scaled up to absorb the gap.
-            # When the full rotation is present, the adjustment is typically small
-            # (the model is already well-calibrated) but still irons out any
-            # systematic under- or over-projection.
-            deficit   = target - total    # positive → scale up, negative → scale down
+            # Precision-weighted deficit distribution
+            deficit   = target - total
             total_var = true_vars.sum()
             if total_var > 0:
                 adjustments = true_vars / total_var * deficit
             else:
                 adjustments = true_means / total * deficit
-            new_loc = (means + adjustments).clip(lower=0, upper=per_player_cap)
+            new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
 
-            # Scale omega (scale) proportionally to the loc shift to preserve the
-            # relative spread (CV). Alpha is a pure shape parameter — it is
-            # unaffected by location or scale changes and needs no update.
-            scale_factors = (new_loc / means.replace(0, np.nan)).fillna(1.0)
-            new_stds = (stds * scale_factors).clip(lower=0)
+            # Update beta to achieve new mean; alpha (shape) is unchanged
+            new_betas = (alphas / new_means.replace(0, np.nan)).fillna(betas).clip(lower=0)
+            new_stds = np.sqrt(alphas) / new_betas
 
-            new_true_means = new_loc + new_stds * delta * np.sqrt(2 / np.pi)
-            new_true_stds = new_stds * np.sqrt(1 - 2 * delta ** 2 / np.pi)
+            self.playerProfile.loc[alphas.index, f"proj {market} mean"] = new_means
+            self.playerProfile.loc[betas.index, f"proj {market} std"]  = new_stds
 
-            self.playerProfile.loc[means.index, f"proj {market} mean"] = new_true_means
-            self.playerProfile.loc[stds.index,  f"proj {market} std"]  = new_true_stds
-
-        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True)
+        self.playerProfile.drop(columns=[f"proj {market} alpha", f"proj {market} beta"], inplace=True)
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         if not isinstance(date, str):
             date = date.strftime("%Y-%m-%d")
         if market in combo_props:
             ev = 0
             for submarket in combo_props.get(market, []):
                 sub_cv = stat_cv[self.league].get(submarket, 1)
+                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -1563,17 +1535,18 @@ class StatsNBA(Stats):
             fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
             for submarket, weight in fantasy_props:
                 sub_cv = stat_cv[self.league].get(submarket, 1)
+                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                     if not subline == 0:
                         under = (player_games[submarket]<subline).mean()
-                        ev += get_ev(subline, under, sub_cv)*weight
+                        ev += get_ev(subline, under, sub_cv, dist=sub_dist)*weight
                 else:
                     book_odds = True
                     ev += v*weight
@@ -1606,6 +1579,7 @@ class StatsNBA(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
         cv = stat_cv.get(self.league, {}).get(market, 1)
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         # if self.defenseProfile.empty:
         #     logger.exception(f"{market} not profiled")
         #     return 0
@@ -1664,10 +1638,11 @@ class StatsNBA(Stats):
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv[self.league].get(submarket, 1)
+                    sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                     v = archive.get_ev(self.league, submarket, date, player)
                     subline = archive.get_line(self.league, submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -1683,17 +1658,18 @@ class StatsNBA(Stats):
                 fantasy_props = [("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv[self.league].get(submarket, 1)
+                    sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                     v = archive.get_ev(self.league, submarket, date, player)
                     subline = archive.get_line(self.league, submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                         if not subline == 0:
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv)*weight
+                            ev += get_ev(subline, under, sub_cv, dist=sub_dist)*weight
                     else:
                         book_odds = True
                         ev += v*weight
@@ -1704,10 +1680,7 @@ class StatsNBA(Stats):
         if np.isnan(ev) or (ev <= 0):
             odds = 0
         else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
+            odds = 1 - get_odds(line, ev, dist, cv=cv)
 
         data = {
             "DVPOA": dvpoa,
@@ -3115,22 +3088,26 @@ class StatsMLB(Stats):
             logger.warning(f"{filename} missing")
             return
 
+        # Drop gate column for ZI distributions — not needed for downstream use
+        prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
         self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "rate": f"proj {market} mean", "scale": f"proj {market} std"}), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
     
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         if not isinstance(date, str):
             date = date.strftime("%Y-%m-%d")
         ev = 0
         if market in combo_props:
             for submarket in combo_props.get(market, []):
                 sub_cv = stat_cv[self.league].get(submarket, 1)
+                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -3152,10 +3129,11 @@ class StatsMLB(Stats):
 
             for submarket, weight in fantasy_props:
                 sub_cv = stat_cv["MLB"].get(submarket, 1)
+                sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
                 v = archive.get_ev("MLB", submarket, date, player)
                 subline = archive.get_line("MLB", submarket, date, player)
                 if submarket == "pitcher win":
-                    p = 1-get_odds(subline, v, "Poisson")
+                    p = 1-get_odds(subline, v, sub_dist, cv=sub_cv)
                     ev += p*weight
                 elif submarket == "quality start":
                     std = stat_cv["MLB"].get(submarket, 1)*v_outs
@@ -3164,14 +3142,15 @@ class StatsMLB(Stats):
                     ev += p*weight
                 elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
                     _hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
+                    _hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
                     v = archive.get_ev("MLB", "hits", date, player)
                     subline = archive.get_line("MLB", "hits", date, player)
-                    v = get_ev(subline, get_odds(subline, v, "Poisson" if _hits_cv == 1 else "Gaussian", cv=_hits_cv), cv=cv)
+                    v = get_ev(subline, get_odds(subline, v, _hits_dist, cv=_hits_cv), cv=cv, dist=dist)
                     v *= (player_games[submarket].sum()/player_games["hits"].sum()) if player_games["hits"].sum() else 0
                     ev += v*weight
                 else:
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
 
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
@@ -3179,7 +3158,7 @@ class StatsMLB(Stats):
 
                         if not subline == 0:
                             under = (player_games[submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv)*weight
+                            ev += get_ev(subline, under, sub_cv, dist=sub_dist)*weight
                     else:
                         book_odds = True
                         ev += v*weight
@@ -3260,6 +3239,7 @@ class StatsMLB(Stats):
         team = offer["Team"].replace("AZ", "ARI")
         market = offer["Market"]
         cv = stat_cv.get("MLB", {}).get(market, 1)
+        dist = stat_dist.get("MLB", {}).get(market, "Gamma")
         # if self.defenseProfile.empty:
         #     logger.exception(f"{market} not profiled")
         #     return 0
@@ -3337,10 +3317,11 @@ class StatsMLB(Stats):
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
+                    sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -3363,10 +3344,11 @@ class StatsMLB(Stats):
 
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
+                    sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
                     v = archive.get_ev("MLB", submarket, date, player)
                     subline = archive.get_line("MLB", submarket, date, player)
                     if submarket == "pitcher win":
-                        p = 1-get_odds(subline, v, "Poisson")
+                        p = 1-get_odds(subline, v, sub_dist, cv=sub_cv)
                         ev += p*weight
                     elif submarket == "quality start":
                         std = stat_cv["MLB"].get(submarket, 1)*v_outs
@@ -3375,14 +3357,15 @@ class StatsMLB(Stats):
                         ev += p*weight
                     elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
                         _hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
+                        _hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
                         v = archive.get_ev("MLB", "hits", date, player)
                         subline = archive.get_line("MLB", "hits", date, player)
-                        v = get_ev(subline, get_odds(subline, v, "Poisson" if _hits_cv == 1 else "Gaussian", cv=_hits_cv), cv=cv)
+                        v = get_ev(subline, get_odds(subline, v, _hits_dist, cv=_hits_cv), cv=cv, dist=dist)
                         v *= (player_games.iloc[-one_year_ago:][submarket].sum()/player_games.iloc[-one_year_ago:]["hits"].sum()) if player_games.iloc[-one_year_ago:]["hits"].sum() else 0
                         ev += v*weight
                     else:
-                        if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                            v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                        if sub_dist != dist and not np.isnan(v):
+                            v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
 
                         if np.isnan(v) or v == 0:
                             if subline == 0 and not player_games.empty:
@@ -3390,7 +3373,7 @@ class StatsMLB(Stats):
 
                             if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                                ev += get_ev(subline, under, sub_cv)*weight
+                                ev += get_ev(subline, under, sub_cv, dist=sub_dist)*weight
                         else:
                             book_odds = True
                             ev += v*weight
@@ -3409,10 +3392,7 @@ class StatsMLB(Stats):
         if np.isnan(ev) or (ev <= 0):
             odds = 0
         else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
+            odds = 1 - get_odds(line, ev, dist, cv=cv)
 
         data = {
             "DVPOA": 0,
@@ -4638,16 +4618,18 @@ class StatsNFL(Stats):
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         if not isinstance(date, str):
             date = date.strftime("%Y-%m-%d")
         if market in combo_props:
             ev = 0
             for submarket in combo_props.get(market, []):
                 sub_cv = stat_cv[self.league].get(submarket, 1)
+                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -4666,17 +4648,18 @@ class StatsNFL(Stats):
                 fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
             for submarket, weight in fantasy_props:
                 sub_cv = stat_cv[self.league].get(submarket, 1)
+                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
                 v = archive.get_ev(self.league, submarket, date, player)
                 subline = archive.get_line(self.league, submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                     if not subline == 0:
                         under = (player_games[submarket]<subline).mean()
-                        ev += get_ev(subline, under, sub_cv)
+                        ev += get_ev(subline, under, sub_cv, dist=sub_dist)
                 else:
                     book_odds = True
                     ev += v*weight
@@ -4739,16 +4722,17 @@ class StatsNFL(Stats):
             # ---------------------------------------------------------------
             # Store distribution parameters in playerProfile.
             #
-            # attempts  → SkewNormal: loc (ξ), scale (ω), alpha (α)
-            # carries / targets → NegBin: probs (p), total_count (n)
+            # attempts  → Gamma/ZAGamma: concentration (α), rate (β)
+            # carries / targets → NegBin/ZINB: probs (p), total_count (n)
             #   NegBin mean     μ = n(1−p)/p
             #   NegBin variance σ² = n(1−p)/p² = μ/p
             # ---------------------------------------------------------------
+            # Drop gate column for ZI distributions — not needed for budget normalization
+            prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
             if market == "attempts":
                 rename_map = {
-                    "loc":   f"proj {market} mean",
-                    "scale": f"proj {market} std",
-                    "alpha": f"proj {market} alpha",
+                    "concentration": f"proj {market} alpha",
+                    "rate":          f"proj {market} beta",
                 }
             else:
                 rename_map = {
@@ -4771,36 +4755,20 @@ class StatsNFL(Stats):
             #   (B) total carries ≈ plays_per_game − proj_attempts − unmodeled_carry_reserve
             #   (C) total targets ≈ proj_attempts − unmodeled_target_reserve
             #
-            # proj_attempts is derived from the QB's SkewNormal posterior:
-            #   E[X] = ξ + ω·δ·√(2/π),   δ = α / √(1+α²)
-            # so the alpha parameter is used here even though attempts itself
-            # is not adjusted (we trust the model's posterior directly).
-            #
-            # Unmodeled reserves were measured from historical gamelogs:
-            #   unmodeled_carry_reserve  ≈ 6  (rank-3+ rushers, ~23% of ~27 carries)
-            #   unmodeled_target_reserve ≈ 8  (rank-5+ receivers, ~24% of ~35 targets)
-            #
-            # For NegBin parameters the adjustment shifts total_count (n) while
-            # holding probs (p) fixed — p is an intrinsic per-opportunity success
-            # rate for the player; n scales with opportunity volume:
-            #   new_n_i = μ_i' · p_i / (1 − p_i)
-            #
-            # Within-team distribution of the deficit uses precision-weighting:
-            #   d_i = σ²_i / Σσ²_j · (target − total_μ)
+            # proj_attempts is derived from the QB's Gamma posterior:
+            #   E[X] = concentration / rate
             # ---------------------------------------------------------------
             if market == "attempts":
-                # Adjust the SkewNormal parameters to match the true mean and std across players.
-                alpha = self.playerProfile[f"proj {market} alpha"].fillna(0)
-                means = self.playerProfile[f"proj {market} mean"].fillna(0)
-                stds  = self.playerProfile[f"proj {market} std"].fillna(0)
-                delta = alpha / np.sqrt(1.0 + alpha ** 2)
+                # Convert Gamma params to true mean and std for downstream use
+                alphas = self.playerProfile[f"proj {market} alpha"].fillna(0)
+                betas  = self.playerProfile[f"proj {market} beta"].fillna(0)
 
-                true_means = means + stds * delta * np.sqrt(2.0 / np.pi)
-                true_stds  = stds * np.sqrt(1.0 - (2.0 * delta ** 2) / np.pi)
+                true_means = (alphas / betas.replace(0, np.nan)).fillna(0)
+                true_stds  = (np.sqrt(alphas) / betas.replace(0, np.nan)).fillna(0)
 
-                self.playerProfile.loc[means.index, f"proj {market} mean"] = true_means
-                self.playerProfile.loc[stds.index,  f"proj {market} std"]  = true_stds
-                self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True)
+                self.playerProfile.loc[alphas.index, f"proj {market} mean"] = true_means
+                self.playerProfile.loc[betas.index, f"proj {market} std"]  = true_stds
+                self.playerProfile.drop(columns=[f"proj {market} alpha", f"proj {market} beta"], inplace=True)
 
                 self.playerProfile.fillna(0, inplace=True)
                 continue
@@ -4830,7 +4798,7 @@ class StatsNFL(Stats):
 
                 plays = self.teamProfile.loc[team, "plays_per_game"]
 
-                # proj_attempts for this team: true SkewNormal E[X] from
+                # proj_attempts for this team: Gamma E[X] from
                 # the already-stored attempts parameters, or fall back to
                 # plays × pass_rate from teamProfile
                 if "proj attempts mean" in self.playerProfile.columns:
@@ -4890,6 +4858,7 @@ class StatsNFL(Stats):
         line = offer["Line"]
         opponent = offer["Opponent"]
         cv = stat_cv.get("NFL", {}).get(market, 1)
+        dist = stat_dist.get("NFL", {}).get(market, "Gamma")
         # if self.defenseProfile.empty:
         #     logger.exception(f"{market} not profiled")
         #     return 0
@@ -4952,10 +4921,11 @@ class StatsNFL(Stats):
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
+                    sub_dist = stat_dist.get("NFL", {}).get(submarket, "Gamma")
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -4974,17 +4944,18 @@ class StatsNFL(Stats):
                     fantasy_props = [("passing yards", 1/25), ("passing tds", 4), ("interceptions", -1), ("rushing yards", .1), ("receiving yards", .1), ("tds", 6), ("receptions", .5)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NFL"].get(submarket, 1)
+                    sub_dist = stat_dist.get("NFL", {}).get(submarket, "Gamma")
                     v = archive.get_ev("NFL", submarket, date, player)
                     subline = archive.get_line("NFL", submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         if subline == 0 and not player_games.empty:
                             subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
                         if not subline == 0:
                             under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv)
+                            ev += get_ev(subline, under, sub_cv, dist=sub_dist)
                     else:
                         book_odds = True
                         ev += v*weight
@@ -4995,10 +4966,7 @@ class StatsNFL(Stats):
         if np.isnan(ev) or (ev <= 0):
             odds = 0
         else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
+            odds = 1 - get_odds(line, ev, dist, cv=cv)
 
         data = {
             "DVPOA": dvpoa,
@@ -5675,7 +5643,9 @@ class StatsNHL(Stats):
             logger.warning(f"{filename} missing")
             return
 
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"loc": f"proj {market} mean", "scale": f"proj {market} std", "alpha": f"proj {market} alpha"}), lsuffix="_obs")
+        # Drop gate column for ZI distributions — not needed for budget normalization
+        prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"concentration": f"proj {market} alpha", "rate": f"proj {market} beta"}), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
         
         if not pitcher:
@@ -5703,16 +5673,13 @@ class StatsNHL(Stats):
 
             teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
             for team, team_df in teams:
-                means  = team_df[f"proj {market} mean"].copy()   # loc (ξ)
-                stds   = team_df[f"proj {market} std"].copy()    # scale (ω)
-                alphas = team_df[f"proj {market} alpha"].copy()  # skew (α)
+                alphas = team_df[f"proj {market} alpha"].copy()
+                betas  = team_df[f"proj {market} beta"].copy()
                 N      = len(team_df)
 
-                # True skew-normal E[X] and Var[X]
-                delta      = alphas / np.sqrt(1.0 + alphas ** 2)
-                sn_bias    = stds * delta * np.sqrt(2.0 / np.pi)
-                true_means = means + sn_bias
-                true_vars  = stds ** 2 * (1.0 - 2.0 * delta ** 2 / np.pi)
+                # Gamma E[X] = alpha/beta, Var[X] = alpha/beta²
+                true_means = alphas / betas
+                true_vars  = alphas / (betas ** 2)
 
                 total = true_means.sum()
                 if total <= 0:
@@ -5726,8 +5693,7 @@ class StatsNHL(Stats):
                 lower_target = N * per_player_floor
                 target = max(upper_target, lower_target)
 
-                # Always adjust toward target — handles absent starters by
-                # automatically scaling up remaining teammates to fill the gap
+                # Precision-weighted deficit distribution
                 deficit   = target - total
                 total_var = true_vars.sum()
                 if total_var > 0:
@@ -5735,24 +5701,22 @@ class StatsNHL(Stats):
                 else:
                     adjustments = true_means / total * deficit
 
-                new_loc = (means + adjustments).clip(lower=0, upper=per_player_cap)
+                new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
 
-                # Scale ω proportionally; α is unchanged (pure shape parameter)
-                scale_factors = (new_loc / means.replace(0, np.nan)).fillna(1.0)
-                new_stds = (stds * scale_factors).clip(lower=0)
+                # Update beta to achieve new mean; alpha (shape) is unchanged
+                new_betas = (alphas / new_means.replace(0, np.nan)).fillna(betas).clip(lower=0)
+                new_stds = np.sqrt(alphas) / new_betas
 
-                new_true_means = new_loc + new_stds * delta * np.sqrt(2 / np.pi)
-                new_true_stds = new_stds * np.sqrt(1 - 2 * delta ** 2 / np.pi)
+                self.playerProfile.loc[alphas.index, f"proj {market} mean"] = new_means
+                self.playerProfile.loc[betas.index, f"proj {market} std"]  = new_stds
 
-                self.playerProfile.loc[means.index, f"proj {market} mean"] = new_true_means
-                self.playerProfile.loc[stds.index,  f"proj {market} std"]  = new_true_stds
-
-        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True)
+        self.playerProfile.drop(columns=[f"proj {market} alpha", f"proj {market} beta"], inplace=True)
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
 
@@ -5774,10 +5738,11 @@ class StatsNHL(Stats):
         if market in combo_props:
             for submarket in combo_props.get(market, []):
                 sub_cv = stat_cv["NHL"].get(submarket, 1)
+                sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
                 v = archive.get_ev("NHL", submarket, date, player)
                 subline = archive.get_line("NHL", submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
@@ -5799,10 +5764,11 @@ class StatsNHL(Stats):
                 fantasy_props = [("saves", .6), ("goalsAgainst", -3), ("Moneyline", 6)]
             for submarket, weight in fantasy_props:
                 sub_cv = stat_cv["NHL"].get(submarket, 1)
+                sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
                 v = archive.get_ev("NHL", submarket, date, player)
                 subline = archive.get_line("NHL", submarket, date, player)
-                if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                if sub_dist != dist and not np.isnan(v):
+                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                 if np.isnan(v) or v == 0:
                     if submarket == "Moneyline":
                         p = archive.get_moneyline("NHL", date, team)
@@ -5810,7 +5776,7 @@ class StatsNHL(Stats):
                     elif submarket == "goalsAgainst":
                         v = archive.get_total("NHL", date, opponent)
                         subline = np.floor(v) + 0.5
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                         ev += v*weight
                     else:
                         if subline == 0 and not player_games.empty:
@@ -5818,7 +5784,7 @@ class StatsNHL(Stats):
 
                         if not subline == 0:
                             under = (player_games[submarket]<subline).mean()
-                            ev += get_ev(subline, under, sub_cv)*weight
+                            ev += get_ev(subline, under, sub_cv, dist=sub_dist)*weight
                 else:
                     book_odds = True
                     ev += v*weight
@@ -6175,6 +6141,7 @@ class StatsNHL(Stats):
         market = offer["Market"]
         market = stat_map.get(market, market)
         cv = stat_cv.get("NHL", {}).get(market, 1)
+        dist = stat_dist.get("NHL", {}).get(market, "Gamma")
         # if self.defenseProfile.empty:
         #     logger.exception(f"{market} not profiled")
         #     return 0
@@ -6239,10 +6206,11 @@ class StatsNHL(Stats):
                 ev = 0
                 for submarket in combo_props.get(market, []):
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
+                    sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         ev = 0
                         break
@@ -6264,10 +6232,11 @@ class StatsNHL(Stats):
                     fantasy_props = [("saves", .6), ("goalsAgainst", -3), ("Moneyline", 6)]
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["NHL"].get(submarket, 1)
+                    sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
                     v = archive.get_ev("NHL", submarket, date, player)
                     subline = archive.get_line("NHL", submarket, date, player)
-                    if sub_cv == 1 and cv != 1 and not np.isnan(v):
-                        v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                    if sub_dist != dist and not np.isnan(v):
+                        v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                     if np.isnan(v) or v == 0:
                         if submarket == "Moneyline":
                             p = moneyline
@@ -6275,7 +6244,7 @@ class StatsNHL(Stats):
                         elif submarket == "goalsAgainst":
                             v = archive.get_total("NHL", date, opponent)
                             subline = np.floor(v) + 0.5
-                            v = get_ev(subline, get_odds(subline, v, "Poisson"), cv=cv)
+                            v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
                             ev += v*weight
                         else:
                             if subline == 0 and not player_games.empty:
@@ -6283,7 +6252,7 @@ class StatsNHL(Stats):
 
                             if not subline == 0:
                                 under = (player_games.iloc[-one_year_ago:][submarket]<subline).mean()
-                                ev += get_ev(subline, under, sub_cv)*weight
+                                ev += get_ev(subline, under, sub_cv, dist=sub_dist)*weight
                     else:
                         book_odds = True
                         ev += v*weight
@@ -6294,10 +6263,7 @@ class StatsNHL(Stats):
         if np.isnan(ev) or (ev <= 0):
             odds = 0
         else:
-            if cv == 1:
-                odds = poisson.sf(line, ev) + poisson.pmf(line, ev)/2
-            else:
-                odds = norm.sf(line, ev, ev*cv)
+            odds = 1 - get_odds(line, ev, dist, cv=cv)
 
         data = {
             "DVPOA": 0,

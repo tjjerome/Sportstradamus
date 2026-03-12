@@ -8,7 +8,7 @@ Old system:
 
 New system:
   - NegBin (cv = 1/r): EV is the NegBin mean matching get_odds's nbinom.cdf
-  - SkewNormal / Gaussian (cv = std/mean): same Normal CDF encoding as before
+  - Gamma (cv = 1/sqrt(alpha)): EV is the Gamma mean matching gamma.cdf
 
 Process for each stored EV:
   1. Decode: recover the implied under‑probability using the OLD cv
@@ -21,8 +21,7 @@ import json
 import os
 import numpy as np
 import importlib.resources as pkg_resources
-from scipy.stats import poisson, norm, nbinom
-from scipy.optimize import brentq
+from scipy.stats import poisson, norm
 from tqdm import tqdm
 
 from sportstradamus import data
@@ -39,6 +38,13 @@ with open(pkg_resources.files(data) / "stat_cv.json") as f:
 
 with open(pkg_resources.files(data) / "stat_dist.json") as f:
     stat_dist = json.load(f)
+
+_zi_path = pkg_resources.files(data) / "stat_zi.json"
+if os.path.isfile(_zi_path):
+    with open(_zi_path) as f:
+        stat_zi = json.load(f)
+else:
+    stat_zi = {}
 
 # Leagues that borrow another league's CV / distribution settings
 LEAGUE_ALIASES = {
@@ -76,54 +82,6 @@ def decode_old_ev(line, ev, old_cv):
         return float(norm.cdf(float(line), ev, ev * old_cv))
 
 
-def encode_new_ev_negbin(line, under_prob, r):
-    """
-    Find the NegBin mean such that:
-        nbinom.cdf(line, r, r/(r+mean)) - nbinom.pmf(line, r, r/(r+mean))/2 == under_prob
-
-    This mirrors the NegBin branch of get_odds.
-    """
-    line = float(line)
-
-    def _negbin_under(mean):
-        if mean <= 0:
-            return 1.0
-        p = r / (r + mean)
-        return float(nbinom.cdf(line, r, p) - nbinom.pmf(line, r, p) / 2)
-
-    # Bracket search: mean in (eps, upper)
-    lo, hi = 1e-6, max(2 * line / max(1 - under_prob, 0.01), 1.0)
-    # Expand upper bracket if needed
-    while _negbin_under(hi) > under_prob and hi < 1e6:
-        hi *= 2
-
-    if _negbin_under(lo) < under_prob and _negbin_under(hi) > under_prob:
-        # Monotonicity goes the wrong way — shouldn't happen, fall back
-        return np.nan
-
-    try:
-        return float(brentq(lambda m: _negbin_under(m) - under_prob, lo, hi, xtol=1e-8))
-    except ValueError:
-        return np.nan
-
-
-def encode_new_ev(line, under_prob, new_cv, new_dist):
-    """
-    Re-encode an under probability into an EV using the *new* cv / distribution.
-
-    NegBin  → custom solver (matches get_odds NegBin branch)
-    Other   → reuse get_ev's Gaussian branch (norm.cdf with std = ev*cv)
-    """
-    if np.isnan(under_prob) or under_prob <= 0 or under_prob >= 1:
-        return np.nan
-
-    if new_dist == "NegBin":
-        r = 1.0 / new_cv
-        return encode_new_ev_negbin(line, under_prob, r)
-    else:
-        # SkewNormal / Gaussian — get_ev's Gaussian branch (cv != 1)
-        return get_ev(float(line), under_prob, new_cv)
-
 
 # ---------------------------------------------------------------------------
 # Main conversion
@@ -140,6 +98,7 @@ def remap_archive():
         old_cvs = old_stat_cv.get(canon, {})
         new_cvs = new_stat_cv.get(canon, {})
         dists = stat_dist.get(canon, {})
+        zi_gates = stat_zi.get(canon, {})
 
         # If this league has no CV/dist data at all, nothing to remap
         if not old_cvs and not new_cvs and not dists:
@@ -153,6 +112,7 @@ def remap_archive():
             old_cv = old_cvs.get(market, 1)
             new_cv = new_cvs.get(market, None)
             new_dist = dists.get(market, None)
+            gate = zi_gates.get(market, 0) if new_dist in ("ZINB", "ZAGamma") else 0
 
             # No new config for this market — nothing prescribed, skip
             if new_cv is None and new_dist is None:
@@ -161,7 +121,7 @@ def remap_archive():
             if new_cv is None:
                 new_cv = 1
             if new_dist is None:
-                new_dist = "Poisson" if new_cv == 1 else "SkewNormal"
+                new_dist = "Poisson" if new_cv == 1 else "Gamma"
 
             # Determine whether the encoding actually changes
             old_is_poisson = (old_cv == 1)
@@ -212,7 +172,7 @@ def remap_archive():
                                 stats["skipped_bad_data"] += 1
                                 continue
 
-                            new_ev = encode_new_ev(line, under_prob, new_cv, new_dist)
+                            new_ev = get_ev(line, under_prob, cv=new_cv, dist=new_dist, gate=gate or None)
 
                             if new_ev is None or np.isnan(new_ev) or new_ev <= 0:
                                 new_ev_dict[book] = old_ev
