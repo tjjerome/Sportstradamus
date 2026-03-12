@@ -311,7 +311,7 @@ class Stats:
 
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
-        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
+        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'ZeroYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
         if isinstance(offers, dict):
             players = list(offers.keys())
             teams = {k:v["Team"] for k, v in offers.items()}
@@ -368,6 +368,7 @@ class Stats:
         stats["DaysOff"] = (date-pd.to_datetime(playergames[self.log_strings["date"]].apply(lambda x: x.tail(1).item())).dt.date).astype('timedelta64[s]').dt.days
         stats["DaysIntoSeason"] = (date-self.season_start).days
         stats["GamesPlayed"] = playergames[market].count()
+        stats["ZeroYr"] = (playergames[market] == 0).sum() / stats["GamesPlayed"]
         stats = stats.loc[~stats.index.duplicated()]
 
         if date < datetime.today().date():
