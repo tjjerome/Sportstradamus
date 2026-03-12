@@ -963,23 +963,28 @@ def set_model_start_values(model, dist, X_data, hist_gate=0):
         x = np.asarray(x, dtype=float)
         return np.where(x > 20, x, np.log(np.expm1(np.clip(x, 1e-4, 20))))
 
-    sv = X_data[["MeanYr", "STDYr"]].to_numpy()
+    sv = X_data[["MeanYr", "STDYr", "ZeroYr"]].to_numpy()
     n = len(sv)
 
     mu = np.clip(sv[:, 0], 1e-6, None)
     std = np.clip(sv[:, 1], 1e-6, None)
-    if dist in ["ZINB", "ZAGamma"]:
-        mu = mu / (1 - hist_gate)
+    hist_gate = np.clip(sv[:, 2], 0, 0.99)
 
     if dist in ["NegBin", "ZINB"]:
         # r = mu² / (var - mu); relu response → raw = value (identity for r>0)
         r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 1, 50)
         # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs)
         probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
+        if dist == "ZINB":
+            nb_zeros = nbinom.pmf(0, r_init, probs)
+            hist_gate = np.clip(hist_gate - nb_zeros, 0, 0.99)
+            mu = mu / (1 - hist_gate)
+            r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 1, 50)
+            probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
         sv = np.column_stack([r_init, logit(probs)])
-    elif dist == "Gaussian":
-        pass
     elif dist in ["Gamma", "ZAGamma"]:
+        if dist == "ZAGamma":
+            mu = mu / (1 - hist_gate)
         # Clip alpha to [0.1, 100]: STDYr ≈ 0 → alpha explodes → log(Γ(α)) dominates NLL.
         # Clip beta to [0.01, 50]: MeanYr ≈ 0 → beta = α/μ explodes → NLL for any y>0 huge.
         alpha = np.clip((mu / std) ** 2, 0.1, 100)

@@ -38,47 +38,49 @@ np.seterr(divide='ignore', invalid='ignore')
 # ============================================================================
 # Load and initialize active sports leagues based on season dates
 
-sports = []
-nba = StatsNBA()
-nba.load()
-nfl = StatsNFL()
-nfl.load()
-wnba = StatsWNBA()
-wnba.load()
-# mlb = StatsMLB()
-# mlb.load()
-# nhl = StatsNHL()
-# nhl.load()
-if datetime.today().date() > (nba.season_start - timedelta(days=7)):
-    sports.append("NBA")
-# if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
-#     sports.append("MLB")
-# if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
-#     sports.append("NHL")
-if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
-    sports.append("NFL")
-if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
-    sports.append("WNBA")
+def load_data():
+    global archive, stat_structs
+    sports = []
+    nba = StatsNBA()
+    nba.load()
+    nfl = StatsNFL()
+    nfl.load()
+    wnba = StatsWNBA()
+    wnba.load()
+    # mlb = StatsMLB()
+    # mlb.load()
+    # nhl = StatsNHL()
+    # nhl.load()
+    if datetime.today().date() > (nba.season_start - timedelta(days=7)):
+        sports.append("NBA")
+    # if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
+    #     sports.append("MLB")
+    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
+    #     sports.append("NHL")
+    if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
+        sports.append("NFL")
+    if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
+        sports.append("WNBA")
 
 
-stat_structs = {}
-if "NBA" in sports:
-    nba.update()
-    stat_structs.update({"NBA": nba})
-if "NFL" in sports:
-    nfl.update()
-    stat_structs.update({"NFL": nfl})
-if "WNBA" in sports:
-    wnba.update()
-    stat_structs.update({"WNBA": wnba})
-# if "MLB" in sports:
-#     mlb.update()
-#     stat_structs.update({"MLB": mlb})
-# if "NHL" in sports:
-#     nhl.update()
-#     stat_structs.update({"NHL": nhl})
+    stat_structs = {}
+    if "NBA" in sports:
+        nba.update()
+        stat_structs.update({"NBA": nba})
+    if "NFL" in sports:
+        nfl.update()
+        stat_structs.update({"NFL": nfl})
+    if "WNBA" in sports:
+        wnba.update()
+        stat_structs.update({"WNBA": wnba})
+    # if "MLB" in sports:
+    #     mlb.update()
+    #     stat_structs.update({"MLB": mlb})
+    # if "NHL" in sports:
+    #     nhl.update()
+    #     stat_structs.update({"NHL": nhl})
 
-archive = Archive()
+    archive = Archive()
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -121,7 +123,7 @@ def save_zi_config(config):
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
-    global book_weights
+    global book_weights, archive, stat_structs
 
     np.random.seed(69)
 
@@ -396,10 +398,9 @@ def meditate(force, league):
                 stat_dist[league][market] = dist
                 save_distribution_config(stat_dist)
 
-                # Save historical gate for ZI distributions
-                if dist in ("ZINB", "ZAGamma"):
-                    stat_zi[league][market] = hist_gate
-                    save_zi_config(stat_zi)
+                # Save historical zero rate for all distributions
+                stat_zi[league][market] = hist_gate
+                save_zi_config(stat_zi)
             
             player_stats = player_stats.apply(lambda x: x[x != 0])
 
@@ -739,16 +740,14 @@ def report():
             stat_dist.setdefault(league, {})
             stat_dist[league][market] = dist
 
-            # Save historical gate for ZI distributions
-            if dist in ("ZINB", "ZAGamma") and h_gate:
-                stat_zi_local.setdefault(league, {})
-                stat_zi_local[league][market] = h_gate
+            # Save historical zero rate for all distributions
+            stat_zi_local.setdefault(league, {})
+            stat_zi_local[league][market] = h_gate
 
             f.write(f" {league} {market} ".center(60, "="))
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
-            if dist in ("ZINB", "ZAGamma"):
-                f.write(f" Historical Gate: {h_gate:.4f}\n")
+            f.write(f" Historical Zero Rate: {h_gate:.4f}\n")
             f.write(pd.DataFrame(model['stats'], index=[
                     ['No Filter', 'Filter']]).to_string(index=False))
             f.write("\n\n")
@@ -889,6 +888,7 @@ def filter_features():
 # ============================================================================
 
 def fit_book_weights(league, market):
+    global archive, stat_structs
     """Fit optimal weights for multiple sportsbooks using historical accuracy."""
     global book_weights
     warnings.simplefilter('ignore', UserWarning)
@@ -1093,34 +1093,57 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
         return res.x[0]
 
 def select_distribution(player_stats):
-    nll_scores = {}
+    import warnings
+    warnings.filterwarnings('ignore', 'overflow', RuntimeWarning)
 
-    no_zeros = player_stats.apply(lambda x: x[x != 0])
-    gam_fit = player_stats.apply(lambda x: fit(gamma, x[x>0].astype(float), {"a":(0, 50), "scale":(0, 500)}).params)
-    nll_scores["Gamma"] = gam_fit.reset_index().apply(lambda params: -gamma.logpdf(no_zeros[params.iloc[0]].astype(float), *params.iloc[1]).mean(), axis=1).median()
+    # Check data type properties (market-level, not per-player)
+    sample = player_stats.first()
+    is_integer = all(v == int(v) for v in sample)
+    if is_integer:
+        uniques = player_stats.apply(lambda x: x.unique().tolist()).explode().drop_duplicates().sort_values()
+        step = uniques.diff().dropna().min() if len(uniques) > 1 else 1
+    else:
+        step = 0
 
-    nb_fit = player_stats.apply(lambda x: fit(nbinom, x[x>0].astype(int), [(0, 50), (0, 1)]).params)
-    nll_scores["NegBin"] = nb_fit.reset_index().apply(lambda params: -nbinom.logpmf(no_zeros[params.iloc[0]].astype(int), *params.iloc[1]).mean(), axis=1).median()
-
-    # Auto-select via NLL comparison
-    dist = min(nll_scores, key=nll_scores.get)
+    if not is_integer or step != 1:
+        # Non-integer or non-unit-step data → Gamma family
+        dist = "Gamma"
+    else:
+        # Per-player resolution = step / mean_of_nonzeros
+        # High resolution (>0.2) → counting few discrete events → NegBin
+        # Low resolution (≤0.2) → accumulating many events → quasi-continuous → Gamma
+        def _player_resolution(x):
+            nz = x[x > 0]
+            return step / nz.mean() if len(nz) > 0 else np.nan
+        resolutions = player_stats.apply(_player_resolution).dropna()
+        resolution = resolutions.median()
+        dist = "NegBin" if resolution > 0.2 else "Gamma"
+        print(f"  Resolution: {resolution:.4f} ({'NegBin' if resolution > 0.2 else 'Gamma'})")
 
     # Check for zero inflation and compute historical gate
     observed_zeros = player_stats.agg(lambda x: x.eq(0).mean())
-    if dist == "NegBin":
+
+    if dist in ["NegBin", "ZINB"]:
+        def _nb_mom(x):
+            mu, var = x.mean(), x.var()
+            if var <= mu:
+                var = mu + 1e-6
+            p = np.clip(mu / var, 1e-3, 1 - 1e-3)
+            n = np.clip(mu * p / (1 - p), 0.1, 50)
+            return (n, p)
+        nb_fit = player_stats.apply(_nb_mom)
         base_zero_prob = nb_fit.apply(lambda row: nbinom.pmf(0, row[0], row[1]))
-        # gate = (obs_zero - base_zero) / (1 - base_zero), averaged across players
         p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
         if p_zero > 0.1:
             dist = "ZINB"
     else:
+        gam_fit = player_stats.apply(lambda x: fit(gamma, x[x>0].astype(float), {"a":(0, 50), "scale":(0, 500)}).params)
         base_zero_prob = gam_fit.apply(lambda row: gamma.cdf(0.99, row[0], scale=row[2]))
-        # gate = (obs_zero - base_zero) / (1 - base_zero), averaged across players
         p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
         if p_zero > 0.05:
             dist = "ZAGamma"
-    
-    print(f"  Distribution scores - NegBin: {nll_scores.get('NegBin', np.inf):.4f}, Gamma: {nll_scores.get('Gamma', np.inf):.4f}")
+
+    print(f"  Data type: {'integer (step={})'.format(int(step)) if is_integer else 'continuous'}")
     print(f"  Zero inflation - {p_zero:.4f}")
     print(f"  Selected: {dist}")
 
@@ -1289,6 +1312,7 @@ def trim_matrix(M):
     return M
 
 def correlate(league, force=False):
+    global archive, stat_structs
     """Calculate feature correlations with outcomes for feature engineering."""
     print(f"Correlating {league}...")
     tracked_stats = { 
@@ -1713,6 +1737,7 @@ def correlate(league, force=False):
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
+    load_data()
     meditate()
     see_features()
     filter_features()
