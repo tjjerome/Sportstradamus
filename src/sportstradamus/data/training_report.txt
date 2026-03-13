@@ -1,19 +1,147 @@
+========================= NBA AST ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0126
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.565044   0.606831   0.081885 0.687776      0.569449
+ 0.570093   0.589655   0.087225 0.687176      0.666693
+
+========================= NBA BLK ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0072
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.683122   0.596405   0.115101 0.616284      0.503656
+ 0.683447   0.603806   0.117165 0.616085      0.666689
+
+========================= NBA BLST =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0121
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.609915   0.622305   0.106593 0.670843      0.746697
+ 0.613608   0.615932   0.104616 0.670357      0.666698
+
+========================= NBA DREB =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0119
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.585938   0.590909   0.124066 0.673802      0.900000
+ 0.591304   0.577855   0.148359 0.673633      0.666817
+
+========================= NBA FG3A =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0123
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.634488   0.669903   0.110283 0.659055      0.900000
+ 0.620167   0.660494   0.131815 0.662162      0.666754
+
+========================= NBA FG3M =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0149
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.605856   0.601568   0.095751 0.672505      0.521516
+ 0.608655   0.602810   0.092437 0.672074      0.666693
+
+========================= NBA FGA ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0222
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.612219    0.68000   0.128564 0.657102      0.900000
+ 0.629540    0.61465   0.161449 0.647828      0.666852
+
+========================= NBA FGM ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0190
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.703531   0.789457   0.159001 0.603424      0.900000
+ 0.698632   0.766531   0.175968 0.599195      0.666691
+
+========================= NBA FTM ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0785
+ Accuracy  Precision  Sharpness     NLL  Weight/Calib
+ 0.626797   0.700599   0.106982 0.65404      0.888060
+ 0.636626   0.681416   0.109946 0.65129      0.666757
+
 ========================= NBA MIN ==========================
  Distribution Model: Gamma
+ Historical Zero Rate: 0.0000
  Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.554622   0.701923   0.126782 0.694860      0.900000
- 0.629490   0.665552   0.200051 0.687306      0.666938
+ 0.648876   0.691275   0.164703 0.645646      0.900000
+ 0.648501   0.689873   0.222626 0.660422      0.666968
+
+========================= NBA OREB =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0102
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.625396   0.596817   0.113503 0.657695      0.740613
+ 0.622899   0.586984   0.111411 0.657576      0.666709
+
+========================== NBA PA ==========================
+ Distribution Model: ZAGamma
+ Historical Zero Rate: 0.0553
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.524944   0.564000   0.096754 0.708215      0.803588
+ 0.530533   0.541102   0.107835 0.704476      0.666696
+
+========================== NBA PF ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0125
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.603833   0.672986   0.113828 0.669271      0.884947
+ 0.612061   0.658793   0.116689 0.666964      0.666708
+
+========================== NBA PR ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0357
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.517305   0.542986   0.072956 0.706701      0.500000
+ 0.523195   0.529965   0.088486 0.702765      0.666694
+
+========================= NBA PRA ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0260
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.513414   0.566731   0.074362 0.705381      0.500000
+ 0.536630   0.543005   0.091278 0.699830      0.666693
 
 ========================= NBA PTS ==========================
  Distribution Model: ZAGamma
- Historical Gate: 0.0983
+ Historical Zero Rate: 0.0983
  Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.521986   0.575851   0.074057 0.707480      0.531604
- 0.538822   0.535330   0.087135 0.698588      0.666696
+ 0.520425   0.534460   0.086891 0.704629      0.746199
+ 0.540410   0.532903   0.095420 0.698031      0.666695
+
+========================== NBA RA ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0349
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.555974   0.544466   0.079067 0.692278      0.705204
+ 0.554068   0.541149   0.086858 0.693386      0.666694
 
 ========================= NBA REB ==========================
  Distribution Model: NegBin
+ Historical Zero Rate: 0.0000
  Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.571289   0.581152   0.074493 0.686773      0.665081
- 0.565405   0.570800   0.081907 0.688260      0.666691
+ 0.567587   0.580065   0.076184 0.687919      0.678534
+ 0.561918   0.567568   0.083707 0.689308      0.666691
+
+========================= NBA STL ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0077
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.574790   0.570093   0.092369 0.681966      0.641167
+ 0.583775   0.569504   0.090988 0.681571      0.666694
+
+========================= NBA TOV ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0082
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.596999   0.622481   0.105071 0.676270      0.743536
+ 0.599467   0.612492   0.109687 0.674636      0.666700
+
+============== NBA fantasy points prizepicks ===============
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0197
+ Accuracy  Precision  Sharpness      NLL  Weight/Calib
+ 0.576011   0.678505   0.097865 0.681681       0.50000
+ 0.609223   0.625257   0.131309 0.668263       0.66672
 

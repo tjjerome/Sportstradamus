@@ -70,6 +70,7 @@ class Stats:
         self.upcoming_games = {}
         self.usage_stat = ""
         self.tiebreaker_stat = ""
+        self.comps = {}
 
     def parse_game(self, game):
         """
@@ -107,9 +108,82 @@ class Stats:
         """
         # Implementation details...
 
+    @staticmethod
+    def _build_comps(knn, profile_df, min_comps=5, max_comps=20):
+        """
+        Build comp lists with distances using a hybrid k-NN + radius approach.
+        Guarantees at least min_comps and caps at max_comps per player.
+        Results are sorted by distance (closest first).
+        """
+        n_players = len(profile_df)
+        # +1 to k-NN query to account for self being excluded
+        k_floor = min(min_comps + 1, n_players)
+        k_ceil = min(max_comps, n_players - 1)
+
+        # Step 1: k-NN to get guaranteed minimum comps (includes self at distance 0)
+        d_knn, i_knn = knn.query(profile_df.values, k=k_floor)
+        # Step 2: radius from median of k-NN max distances
+        r = np.quantile(np.max(d_knn, axis=1), 0.5)
+        i_rad, d_rad = knn.query_radius(profile_df.values, r, sort_results=True, return_distance=True)
+
+        players = profile_df.index
+        comps = {}
+        for j in range(n_players):
+            # Merge k-NN and radius results, deduplicate, exclude self
+            seen = {}
+            for idx, dist in zip(i_knn[j], d_knn[j]):
+                if idx != j:
+                    seen[idx] = dist
+            for idx, dist in zip(i_rad[j], d_rad[j]):
+                if idx != j and (idx not in seen or dist < seen[idx]):
+                    seen[idx] = dist
+            sorted_pairs = sorted(seen.items(), key=lambda x: x[1])[:k_ceil]
+            comps[players[j]] = {
+                "comps": [str(players[idx]) for idx, _ in sorted_pairs],
+                "distances": [round(float(dist), 4) for _, dist in sorted_pairs]
+            }
+        return comps
+
+    @staticmethod
+    def _load_comps(filepath):
+        """Load comps JSON, handling both old (list) and new (dict with distances) formats."""
+        if not os.path.isfile(filepath):
+            return {}
+        with open(filepath, "r") as infile:
+            raw = json.load(infile)
+        # Detect old format: values are lists of player names, not dicts
+        for position, player_comps in raw.items():
+            sample = next(iter(player_comps.values()), None)
+            if isinstance(sample, list):
+                # Convert old format to new format (distances unknown, use index-based proxy)
+                for player, comp_list in player_comps.items():
+                    player_comps[player] = {
+                        "comps": comp_list,
+                        "distances": [round(i * 0.5, 4) for i in range(len(comp_list))]
+                    }
+        return raw
+
     def update_player_comps(self, year=None):
         return
-    
+
+    def _compute_comps(self):
+        """Build comps from loaded data. Override in subclass."""
+        pass
+
+    def _ensure_comps(self):
+        """Build comps lazily on first access."""
+        if not self.comps:
+            self._compute_comps()
+
+    def save_comps(self):
+        """Write current comps to the league's JSON file for inspection."""
+        if not self.comps:
+            return
+        filename = f"{self.league.lower()}_comps.json"
+        filepath = pkg_resources.files(data) / filename
+        with open(filepath, "w") as f:
+            json.dump(self.comps, f, indent=4)
+
     @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
         if isinstance(date, str):
@@ -146,17 +220,40 @@ class Stats:
             stat_types = self.stat_types["skater"] + self.stat_types["goalie"]
             team_stat_types = self.team_stat_types
 
-        playerlogs = self.short_gamelog.fillna(0).infer_objects(copy=False).groupby(self.log_strings["player"])[
-            stat_types]
-        playerstats = playerlogs.mean(numeric_only=True)
-        playershortstats = playerlogs.apply(lambda x: np.mean(
-            x.tail(5), 0)).fillna(0).infer_objects(copy=False).add_suffix(" short", 1)
-        playertrends = playerlogs.apply(get_trends).fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
+        _filled_gl = self.short_gamelog.fillna(0).infer_objects(copy=False)
+        _player_col = self.log_strings["player"]
+        playerstats = _filled_gl.groupby(_player_col)[stat_types].mean(numeric_only=True)
+
+        # Vectorized tail(5).mean() — avoids per-group .apply()
+        _last5 = _filled_gl.groupby(_player_col).tail(5)
+        playershortstats = _last5.groupby(_last5[_player_col])[stat_types].mean().fillna(0).infer_objects(copy=False).add_suffix(" short", 1)
+
+        # Vectorized trend (slope of last 5 games) — replaces per-group polyfit
+        # slope = (N*Σ(rank*y) - Σrank*Σy) / (N*Σrank² - (Σrank)²)
+        _last5t = _last5.copy()
+        _last5t['_rank'] = _last5t.groupby(_player_col).cumcount()
+        _grp_t = _last5t.groupby(_player_col)
+        _n_t = _grp_t.size()
+        _sum_r = _grp_t['_rank'].sum()
+        _sum_r2 = (_last5t['_rank'] ** 2).groupby(_last5t[_player_col]).sum()
+        _denom_t = (_n_t * _sum_r2 - _sum_r ** 2).replace(0, np.nan)
+        _valid_stats = [s for s in stat_types if s in _last5t.columns]
+        _sum_y = _grp_t[_valid_stats].sum()
+        _iy = _last5t[_valid_stats].multiply(_last5t['_rank'], axis=0)
+        _sum_iy = _iy.groupby(_last5t[_player_col]).sum()
+        playertrends = (_sum_iy.multiply(_n_t, axis=0) - _sum_y.multiply(_sum_r, axis=0)).div(_denom_t, axis=0)
+        # Original get_trends returns zeros for players with < 3 total games
+        _total_games = _filled_gl.groupby(_player_col).size()
+        playertrends.loc[_total_games < 3] = 0.0
+        playertrends = playertrends.fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
+
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
-        teamstats = self.short_teamlog.groupby(self.log_strings["team"]).apply(
-            lambda x: np.mean(x.tail(10)[team_stat_types], 0))
+        # Vectorized tail(10).mean() for team stats
+        _team_col = self.log_strings["team"]
+        _team_last10 = self.short_teamlog.groupby(_team_col).tail(10)
+        teamstats = _team_last10.groupby(_team_last10[_team_col])[team_stat_types].mean()
         
         self.defenseProfile = self.defenseProfile.join(teamstats, how='right').fillna(0).infer_objects(copy=False)
         self.defenseProfile.index.name = self.log_strings["opponent"]
@@ -178,10 +275,13 @@ class Stats:
         self.base_profile(date)
         self.profiled_market = market
 
-        playerGroups = self.short_gamelog.\
-            groupby(self.log_strings["player"]).\
-            filter(lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1)).\
-            groupby(self.log_strings["player"])
+        # Replace slow .filter(lambda) with aggregation-based pre-filtering
+        _pc = self.log_strings["player"]
+        _grp_pre = self.short_gamelog.groupby(_pc)[market]
+        _agg = _grp_pre.agg(count='count', clipped_mean=lambda x: x.clip(0, 1).mean())
+        _valid_players = _agg[(_agg['clipped_mean'] > 0.1) & (_agg['count'] > 1)].index
+        _filtered = self.short_gamelog[self.short_gamelog[_pc].isin(_valid_players)]
+        playerGroups = _filtered.groupby(_pc)
 
         leagueavg = playerGroups[market].mean().mean()
         leaguestd = playerGroups[market].mean().std()
@@ -191,8 +291,13 @@ class Stats:
         self.playerProfile[['z', 'home', 'moneyline gain', 'totals gain', 'position z']] = 0.0
         self.playerProfile['z'] = (
             playerGroups[market].mean()-leagueavg).div(leaguestd)
-        self.playerProfile['home'] = playerGroups.apply(
-            lambda x: x.loc[x[self.log_strings["home"]], market].mean() / x[market].mean()) - 1
+
+        # Vectorized home split — avoids per-group .apply()
+        _home_col = self.log_strings["home"]
+        _home_mask = _filtered[_home_col].astype(bool)
+        _home_mean = _filtered.loc[_home_mask].groupby(_pc)[market].mean()
+        _all_mean = playerGroups[market].mean()
+        self.playerProfile['home'] = _home_mean / _all_mean - 1
 
         defenseGroups = self.short_gamelog.groupby([self.log_strings["opponent"], self.log_strings["game"]])
         defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
@@ -203,8 +308,12 @@ class Stats:
         leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
             leagueavg) - 1
-        self.defenseProfile['home'] = defenseGroups.apply(
-            lambda x: x.loc[x[self.log_strings["home"]], market].mean() / x[market].mean()) - 1
+
+        # Vectorized defense home split
+        _def_home_mask = defenseGames[self.log_strings["home"]].astype(bool)
+        _def_home_mean = defenseGames.loc[_def_home_mask].groupby(self.log_strings["opponent"])[market].mean()
+        _def_all_mean = defenseGroups[market].mean()
+        self.defenseProfile['home'] = _def_home_mean / _def_all_mean - 1
 
         for position in self.positions:
             positionLogs = self.short_gamelog.loc[self.short_gamelog[self.log_strings["position"]] == position]
@@ -227,23 +336,62 @@ class Stats:
                 self.defenseProfile[position] = positionGroups.mean().div(
                     leagueavg) - 1
 
+        # Vectorized polyfit — replaces per-group np.polyfit with batch
+        # slope = (N*Σ(X*Y) - ΣX*ΣY) / (N*ΣX² - (ΣX)²)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self.playerProfile['moneyline gain'] = playerGroups.\
-                apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float) / 0.5 - x.moneyline.fillna(0.5).mean(),
-                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
 
-            self.playerProfile['totals gain'] = playerGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
-                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+            # --- Player moneyline gain ---
+            _ml_filled = _filtered['moneyline'].fillna(0.5).astype(float)
+            _ml_mean_p = _ml_filled.groupby(_filtered[_pc]).transform('mean')
+            _mkt_vals = _filtered[market].astype(float)
+            _mkt_mean_p = _mkt_vals.groupby(_filtered[_pc]).transform('mean')
+            _X_ml = _ml_filled / 0.5 - _ml_mean_p
+            _Y_p = _mkt_vals / _mkt_mean_p.replace(0, np.nan) - 1
+            _n_p = _filtered.groupby(_pc).size()
+            _SXY = (_X_ml * _Y_p).groupby(_filtered[_pc]).sum()
+            _SX = _X_ml.groupby(_filtered[_pc]).sum()
+            _SY = _Y_p.groupby(_filtered[_pc]).sum()
+            _SX2 = (_X_ml ** 2).groupby(_filtered[_pc]).sum()
+            _denom = (_n_p * _SX2 - _SX ** 2).replace(0, np.nan)
+            self.playerProfile['moneyline gain'] = (_n_p * _SXY - _SX * _SY) / _denom
 
-            self.defenseProfile['moneyline gain'] = defenseGroups.\
-                apply(lambda x: np.polyfit(x.moneyline.fillna(0.5).values.astype(float) / 0.5 - x.moneyline.fillna(0.5).mean(),
-                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+            # --- Player totals gain ---
+            _tot_filled = _filtered['totals'].fillna(self.default_total).astype(float)
+            _tot_mean_p = _tot_filled.groupby(_filtered[_pc]).transform('mean')
+            _X_tot = _tot_filled / self.default_total - _tot_mean_p
+            _SXY_t = (_X_tot * _Y_p).groupby(_filtered[_pc]).sum()
+            _SX_t = _X_tot.groupby(_filtered[_pc]).sum()
+            _SX2_t = (_X_tot ** 2).groupby(_filtered[_pc]).sum()
+            _denom_t = (_n_p * _SX2_t - _SX_t ** 2).replace(0, np.nan)
+            self.playerProfile['totals gain'] = (_n_p * _SXY_t - _SX_t * _SY) / _denom_t
 
-            self.defenseProfile['totals gain'] = defenseGroups.\
-                apply(lambda x: np.polyfit(x.totals.fillna(self.default_total).values.astype(float) / self.default_total - x.totals.fillna(self.default_total).mean(),
-                                           x[market].values.astype(float)/x[market].mean() - 1, 1)[0])
+            # --- Defense moneyline gain ---
+            _opp_col = self.log_strings["opponent"]
+            _dg = defenseGames.reset_index()
+            _def_ml = _dg['moneyline'].fillna(0.5).astype(float)
+            _def_ml_mean = _def_ml.groupby(_dg[_opp_col]).transform('mean')
+            _def_mkt = _dg[market].astype(float)
+            _def_mkt_mean = _def_mkt.groupby(_dg[_opp_col]).transform('mean')
+            _X_def_ml = _def_ml / 0.5 - _def_ml_mean
+            _Y_def = _def_mkt / _def_mkt_mean.replace(0, np.nan) - 1
+            _n_def = _dg.groupby(_opp_col).size()
+            _SXY_def = (_X_def_ml * _Y_def).groupby(_dg[_opp_col]).sum()
+            _SX_def = _X_def_ml.groupby(_dg[_opp_col]).sum()
+            _SY_def = _Y_def.groupby(_dg[_opp_col]).sum()
+            _SX2_def = (_X_def_ml ** 2).groupby(_dg[_opp_col]).sum()
+            _denom_def = (_n_def * _SX2_def - _SX_def ** 2).replace(0, np.nan)
+            self.defenseProfile['moneyline gain'] = (_n_def * _SXY_def - _SX_def * _SY_def) / _denom_def
+
+            # --- Defense totals gain ---
+            _def_tot = _dg['totals'].fillna(self.default_total).astype(float)
+            _def_tot_mean = _def_tot.groupby(_dg[_opp_col]).transform('mean')
+            _X_def_tot = _def_tot / self.default_total - _def_tot_mean
+            _SXY_dt = (_X_def_tot * _Y_def).groupby(_dg[_opp_col]).sum()
+            _SX_dt = _X_def_tot.groupby(_dg[_opp_col]).sum()
+            _SX2_dt = (_X_def_tot ** 2).groupby(_dg[_opp_col]).sum()
+            _denom_dt = (_n_def * _SX2_dt - _SX_dt ** 2).replace(0, np.nan)
+            self.defenseProfile['totals gain'] = (_n_def * _SXY_dt - _SX_dt * _SY_def) / _denom_dt
             
         if self.league == "WNBA" and "GSV" not in self.defenseProfile.index:
             self.defenseProfile.loc["GSV"] = np.nan
@@ -311,6 +459,7 @@ class Stats:
 
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
+        self._ensure_comps()
         stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'ZeroYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
         if isinstance(offers, dict):
             players = list(offers.keys())
@@ -354,21 +503,29 @@ class Stats:
         if playergames.empty:
             return stats
         
-        playergames = playergames.groupby(self.log_strings["player"])
+        _player_col = self.log_strings["player"]
 
-        stats["Avg1"] = playergames[market].apply(lambda x: x.tail(1).median())
-        stats["Avg3"] = playergames[market].apply(lambda x: x.tail(3).median())
-        stats["Avg5"] = playergames[market].apply(lambda x: x.tail(5).median())
-        stats["Avg10"] = playergames[market].apply(lambda x: x.tail(10).median())
-        stats["AvgYr"] = playergames[market].median()
-        stats["Mean10"] = playergames[market].apply(lambda x: x.tail(10).mean())
-        stats["MeanYr"] = playergames[market].mean()
-        stats["STD10"] = playergames[market].apply(lambda x: x.tail(10).std())
-        stats["STDYr"] = playergames[market].std()
-        stats["DaysOff"] = (date-pd.to_datetime(playergames[self.log_strings["date"]].apply(lambda x: x.tail(1).item())).dt.date).astype('timedelta64[s]').dt.days
+        # Vectorized tail-based stats — avoids per-group .apply(lambda)
+        _pg_last10 = playergames.groupby(_player_col).tail(10)
+        _pg_last5 = playergames.groupby(_player_col).tail(5)
+        _pg_last3 = playergames.groupby(_player_col).tail(3)
+        _pg_last1 = playergames.groupby(_player_col).tail(1)
+
+        stats["Avg1"] = _pg_last1.groupby(_player_col)[market].median()
+        stats["Avg3"] = _pg_last3.groupby(_player_col)[market].median()
+        stats["Avg5"] = _pg_last5.groupby(_player_col)[market].median()
+        stats["Avg10"] = _pg_last10.groupby(_player_col)[market].median()
+        stats["AvgYr"] = playergames.groupby(_player_col)[market].median()
+        stats["Mean10"] = _pg_last10.groupby(_player_col)[market].mean()
+        stats["MeanYr"] = playergames.groupby(_player_col)[market].mean()
+        stats["STD10"] = _pg_last10.groupby(_player_col)[market].std()
+        stats["STDYr"] = playergames.groupby(_player_col)[market].std()
+        _last_date = pd.to_datetime(playergames.groupby(_player_col)[self.log_strings["date"]].last())
+        stats["DaysOff"] = (pd.Timestamp(date) - _last_date).dt.days
         stats["DaysIntoSeason"] = (date-self.season_start).days
-        stats["GamesPlayed"] = playergames[market].count()
-        stats["ZeroYr"] = (playergames[market] == 0).sum() / stats["GamesPlayed"]
+        stats["GamesPlayed"] = playergames.groupby(_player_col)[market].count()
+        _zero_counts = playergames.loc[playergames[market] == 0].groupby(_player_col).size()
+        stats["ZeroYr"] = _zero_counts.reindex(stats.index, fill_value=0) / stats["GamesPlayed"]
         stats = stats.loc[~stats.index.duplicated()]
 
         if date < datetime.today().date():
@@ -430,14 +587,22 @@ class Stats:
         defstats["comps"] = defstats["comps"].astype(np.float64)
 
         defstats.index = stats.index
-        # defenseVsLeague = self.short_gamelog.groupby(self.log_strings["opponent"])[market].mean().to_dict()
-        for player, row in stats.iterrows():
-            if self.league == "MLB":
-                playerGames = self.short_gamelog.loc[self.short_gamelog[self.log_strings['player']] == player]
+
+        # Pre-compute per-player zscore of market column for comps lookups
+        _opp_col = self.log_strings["opponent"]
+        _player_col = self.log_strings["player"]
+        _gl_z = self.short_gamelog[[_player_col, _opp_col, market]].copy()
+        _gl_z['_mkt_zscore'] = _gl_z.groupby(_player_col)[market].transform(
+            lambda x: zscore(x.astype(float)))
+
+        if self.league == "MLB":
+            _is_pitch_market = any(s in market for s in ["allowed", "pitch"])
+            for player, row in stats.iterrows():
+                playerGames = self.short_gamelog.loc[self.short_gamelog[_player_col] == player]
                 if playerGames.empty:
                     continue
                 pid = playerGames["playerId"].mode()[0]
-                if any([string in market for string in ["allowed", "pitch"]]):
+                if _is_pitch_market:
                     comps = self.comps['pitchers'].get(pid, [pid])
                     compGames = self.short_gamelog.loc[self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting pitcher"]]
                     if compGames.empty:
@@ -448,7 +613,7 @@ class Stats:
                     if compGames.empty:
                         continue
 
-                    pitch_id = self.short_gamelog.loc[self.short_gamelog[self.log_strings['player']]==player, "opponent pitcher id"]
+                    pitch_id = self.short_gamelog.loc[self.short_gamelog[_player_col]==player, "opponent pitcher id"]
                     if pitch_id.empty:
                         continue
 
@@ -459,18 +624,39 @@ class Stats:
                         stats.loc[player, 'Pitcher comps'] = 0
                     else:
                         stats.loc[player, 'Pitcher comps'] = playerGames[market].mean()/pitchGames[market].mean()
-            
-            else:
-                comps = self.comps[self.positions[int(row["Player position"]-1)]].get(player, [player])
-                compGames = self.short_gamelog.loc[(self.short_gamelog[self.log_strings["player"]].isin(comps))]
-            
-            compGames[market] = compGames[market].astype(float)
-            scores = compGames.groupby(self.log_strings['player'])[market].apply(zscore)
-            scores.index = scores.index.droplevel(0)
-            compGames[market] = scores
-            defstats.loc[player, 'comps'] = compGames.loc[compGames[self.log_strings["opponent"]] == opponents[player], market].mean()
-            # compsVsDefense = self.short_gamelog.loc[(self.short_gamelog[self.log_strings["opponent"]] == opponents[player]) & (self.short_gamelog[self.log_strings["player"]].isin(comps)), market].mean()
-            # defstats.loc[player, 'comps'] = compsVsDefense/defenseVsLeague[opponents[player]]-1 if defenseVsLeague[opponents[player]] > 0 else 0
+
+                compGames[market] = compGames[market].astype(float)
+                scores = compGames.groupby(_player_col)[market].apply(zscore)
+                scores.index = scores.index.droplevel(0)
+                compGames[market] = scores
+                defstats.loc[player, 'comps'] = compGames.loc[compGames[_opp_col] == opponents[player], market].mean()
+        else:
+            # Vectorized comps lookup for non-MLB leagues with distance weighting
+            _comp_records = []
+            for player, row in stats.iterrows():
+                pos_idx = int(row.get("Player position", 1)) - 1
+                if pos_idx < 0 or pos_idx >= len(self.positions):
+                    continue
+                comp_data = self.comps.get(self.positions[pos_idx], {}).get(player, {"comps": [player], "distances": [0.0]})
+                opp = opponents.get(player, "")
+                for comp, dist in zip(comp_data["comps"], comp_data["distances"]):
+                    if comp == player:
+                        continue
+                    _comp_records.append((player, comp, opp, 1.0 / (1.0 + dist)))
+
+            if _comp_records:
+                _cp_df = pd.DataFrame(_comp_records, columns=['target', 'comp', 'opp', 'weight'])
+                _merged = _cp_df.merge(
+                    _gl_z[[_player_col, _opp_col, '_mkt_zscore']],
+                    left_on=['comp', 'opp'],
+                    right_on=[_player_col, _opp_col],
+                    how='inner'
+                )
+                _merged['weighted_z'] = _merged['_mkt_zscore'] * _merged['weight']
+                _comp_wsum = _merged.groupby('target')['weighted_z'].sum()
+                _comp_wcount = _merged.groupby('target')['weight'].sum()
+                _comp_means = _comp_wsum / _comp_wcount
+                defstats['comps'] = _comp_means.reindex(defstats.index)
 
         stats = stats.join(defstats.add_prefix("Defense "))
 
@@ -695,6 +881,7 @@ class StatsNBA(Stats):
         }
         self.usage_stat = "MIN"
         self.tiebreaker_stat = "USG_PCT short"
+        self._volume_model_cache = None
 
     def load(self):
         """
@@ -708,44 +895,95 @@ class StatsNBA(Stats):
                 self.gamelog = nba_data['gamelog']
                 self.teamlog = nba_data['teamlog']
 
-        filepath = pkg_resources.files(data) / "nba_comps.json"
-        if os.path.isfile(filepath):
-            with open(filepath, "r") as infile:
-                self.comps = json.load(infile)
+    def build_comp_profile(self, playerList=None):
+        """Build merged player profile DataFrame for comp computation.
+
+        Args:
+            playerList: Optional dict of {team: {player_name: stats_dict}}.
+                If None, uses all seasons from self.players.
+
+        Returns:
+            (playerProfile, playerDict) where playerProfile is indexed by
+            PLAYER_NAME, and playerDict maps player_name to stats_dict.
+        """
+        if self.playerProfile.empty:
+            self.profile_market("MIN")
+
+        if playerList is None:
+            playerList = {}
+            for season_key in self.players:
+                playerList.update(self.players[season_key])
+
+        players = []
+        for team in playerList.keys():
+            players.extend([v | {"PLAYER_NAME": k, "TEAM_ABBREVIATION": team}
+                           for k, v in playerList[team].items()])
+
+        playerProfile = (self.playerProfile
+            .merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"),
+                   on="PLAYER_NAME", how='left', suffixes=('_x', None))
+            .set_index("PLAYER_NAME"))
+
+        playerDict = {}
+        for team in playerList.values():
+            playerDict.update(team)
+
+        return playerProfile, playerDict
 
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
-    
-        self.profile_market("MIN")
+
         playerList = self.players.get('-'.join([str(int(n)-1) for n in self.season.split("-")]), {})
         playerList.update(self.players.get(self.season, {}))
-        players = []
-        for team in playerList.keys():
-            players.extend([v|{"PLAYER_NAME":k, "TEAM_ABBREVIATION":team} for k, v in playerList[team].items()])
-        playerProfile = self.playerProfile.merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"), on="PLAYER_NAME", how='left', suffixes=('_x', None)).set_index("PLAYER_NAME")[list(stats["NBA"].keys())].dropna()
+        playerProfile, playerDict = self.build_comp_profile(playerList)
+        first_pos = next(iter(stats["NBA"].values()))
+        features = list(first_pos.keys())
+        playerProfile = playerProfile[features].dropna()
+
         comps = {}
-        playerList = playerList.values()
-        playerDict = {}
-        for team in playerList:
-            playerDict.update(team)
         for position in self.positions:
-            positionProfile = playerProfile.loc[[player for player, value in playerDict.items() if value["POS"] == position and player in playerProfile.index]]
+            pos_weights = stats["NBA"][position]
+            pos_players = [p for p, v in playerDict.items()
+                          if v["POS"] == position and p in playerProfile.index]
+            positionProfile = playerProfile.loc[pos_players]
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
-            positionProfile = positionProfile.mul(np.sqrt(list(stats["NBA"].values())))
+            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=11)
-            r = np.quantile(np.max(d,axis=1), .5)
-            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
-            players = positionProfile.index
-            comps[position] = {players[j]: list(players[i[j]]) for j in range(len(i))}
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
 
         self.comps = comps
         filepath = pkg_resources.files(data) / "nba_comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
+
+    def _compute_comps(self):
+        """Build comps from loaded data at runtime (no JSON I/O)."""
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
+            stats = json.load(f)
+
+        first_pos = next(iter(stats["NBA"].values()))
+        features = list(first_pos.keys())
+
+        playerProfile, playerDict = self.build_comp_profile()
+        playerProfile = playerProfile[features].dropna()
+
+        comps = {}
+        for position in self.positions:
+            pos_weights = stats["NBA"][position]
+            pos_players = [p for p, v in playerDict.items()
+                          if v["POS"] == position and p in playerProfile.index]
+            if len(pos_players) < 7:
+                continue
+            positionProfile = playerProfile.loc[pos_players]
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
+            knn = BallTree(positionProfile)
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
+
+        self.comps = comps
 
     def update(self):
         """
@@ -1364,32 +1602,34 @@ class StatsNBA(Stats):
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                filedict = pickle.load(infile)
-            model = filedict["model"]
-            dist = filedict["distribution"]
+        # Cache model loading — avoid re-reading pickle on every call
+        if not hasattr(self, '_volume_model_cache') or self._volume_model_cache is None:
+            if os.path.isfile(filepath):
+                with open(filepath, "rb") as infile:
+                    self._volume_model_cache = pickle.load(infile)
+            else:
+                logger.warning(f"{filename} missing")
+                return []
 
-            categories = ["Home", "Player position"]
-            if "Player position" not in playerStats.columns:
-                categories.remove("Player position")
-            for c in categories:
-                playerStats[c] = playerStats[c].astype('category')
-            
-            set_model_start_values(model, dist, playerStats)
+        model = self._volume_model_cache["model"]
+        dist = self._volume_model_cache["distribution"]
 
-            prob_params = pd.DataFrame()
-            preds = model.predict(
-                playerStats, pred_type="parameters")
-            preds.index = playerStats.index
-            prob_params = pd.concat([prob_params, preds])
+        categories = ["Home", "Player position"]
+        if "Player position" not in playerStats.columns:
+            categories.remove("Player position")
+        for c in categories:
+            playerStats[c] = playerStats[c].astype('category')
+        
+        set_model_start_values(model, dist, playerStats)
 
-            prob_params.sort_index(inplace=True)
-            playerStats.sort_index(inplace=True)
+        prob_params = pd.DataFrame()
+        preds = model.predict(
+            playerStats, pred_type="parameters")
+        preds.index = playerStats.index
+        prob_params = pd.concat([prob_params, preds])
 
-        else:
-            logger.warning(f"{filename} missing")
-            return []
+        prob_params.sort_index(inplace=True)
+        playerStats.sort_index(inplace=True)
 
         # Drop gate column for ZI distributions — not needed for budget normalization
         prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
@@ -1834,11 +2074,6 @@ class StatsWNBA(StatsNBA):
                 self.gamelog = wnba_data['gamelog']
                 self.teamlog = wnba_data['teamlog']
 
-        filepath = pkg_resources.files(data) / "wnba_comps.json"
-        if os.path.isfile(filepath):
-            with open(filepath, "r") as infile:
-                self.comps = json.load(infile)
-
     def update(self):
         team_abbr_map = {
             "CONN": "CON",
@@ -2098,39 +2333,96 @@ class StatsWNBA(StatsNBA):
                          "gamelog": self.gamelog,
                          "teamlog": self.teamlog}, outfile)
 
+    def build_comp_profile(self, playerList=None):
+        """Build merged player profile DataFrame for comp computation.
+
+        Args:
+            playerList: Optional dict of {team: {player_name: stats_dict}}.
+                If None, uses all seasons from self.players.
+
+        Returns:
+            (playerProfile, playerDict) where playerProfile is indexed by
+            PLAYER_NAME, and playerDict maps player_name to stats_dict.
+        """
+        if self.playerProfile.empty:
+            self.profile_market("MIN")
+
+        if playerList is None:
+            playerList = {}
+            for season_key in self.players:
+                playerList.update(self.players[season_key])
+
+        players = []
+        for team in playerList.keys():
+            players.extend([v | {"PLAYER_NAME": k, "TEAM_ABBREVIATION": team}
+                           for k, v in playerList[team].items()])
+
+        playerProfile = (self.playerProfile
+            .merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"),
+                   on="PLAYER_NAME", how='left', suffixes=('_x', None))
+            .set_index("PLAYER_NAME"))
+
+        playerDict = {}
+        for team in playerList.values():
+            playerDict.update(team)
+
+        return playerProfile, playerDict
+
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
-    
-        self.profile_market("MIN")
+
         playerList = self.players.get(self.season_start.year-1, {})
         playerList.update(self.players.get(self.season_start.year, {}))
-        players = []
-        for team in playerList.keys():
-            players.extend([v|{"PLAYER_NAME":k, "TEAM_ABBREVIATION":team} for k, v in playerList[team].items()])
-        playerProfile = self.playerProfile.merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"), on="PLAYER_NAME", how='left', suffixes=('_x', None)).set_index("PLAYER_NAME")[list(stats["WNBA"].keys())].replace([np.nan, np.inf, -np.inf], 0)
+        playerProfile, playerDict = self.build_comp_profile(playerList)
+        first_pos = next(iter(stats["WNBA"].values()))
+        features = list(first_pos.keys())
+        playerProfile = playerProfile[features].replace([np.nan, np.inf, -np.inf], 0)
+
         comps = {}
-        playerList = playerList.values()
-        playerDict = {}
-        for team in playerList:
-            playerDict.update(team)
         for position in self.positions:
-            positionProfile = playerProfile.loc[[player for player, value in playerDict.items() if value["POS"] == position and player in playerProfile.index]]
+            pos_weights = stats["WNBA"][position]
+            pos_players = [p for p, v in playerDict.items()
+                          if v["POS"] == position and p in playerProfile.index]
+            positionProfile = playerProfile.loc[pos_players]
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
-            positionProfile = positionProfile.mul(np.sqrt(list(stats["NBA"].values())))
+            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=11)
-            r = np.quantile(np.max(d,axis=1), .5)
-            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
-            players = positionProfile.index
-            comps[position] = {players[j]: list(players[i[j]]) for j in range(len(i))}
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
 
         self.comps = comps
         filepath = pkg_resources.files(data) / "wnba_comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
+
+    def _compute_comps(self):
+        """Build comps from loaded data at runtime (no JSON I/O)."""
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
+            stats = json.load(f)
+
+        first_pos = next(iter(stats["WNBA"].values()))
+        features = list(first_pos.keys())
+
+        playerProfile, playerDict = self.build_comp_profile()
+        playerProfile = playerProfile[features].replace([np.nan, np.inf, -np.inf], 0)
+
+        comps = {}
+        for position in self.positions:
+            pos_weights = stats["WNBA"][position]
+            pos_players = [p for p, v in playerDict.items()
+                          if v["POS"] == position and p in playerProfile.index]
+            if len(pos_players) < 7:
+                continue
+            positionProfile = playerProfile.loc[pos_players]
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
+            knn = BallTree(positionProfile)
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
+
+        self.comps = comps
+
 class StatsMLB(Stats):
     """
     A class for handling and analyzing MLB statistics.
@@ -2176,6 +2468,7 @@ class StatsMLB(Stats):
             "win": "WL",
             "score": "runs"
         }
+        self._volume_model_cache = None
 
     def parse_game(self, gameId):
         """
@@ -3062,9 +3355,18 @@ class StatsMLB(Stats):
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                filedict = pickle.load(infile)
+        if self._volume_model_cache is None:
+            self._volume_model_cache = {}
+        if filename not in self._volume_model_cache:
+            if os.path.isfile(filepath):
+                with open(filepath, "rb") as infile:
+                    self._volume_model_cache[filename] = pickle.load(infile)
+            else:
+                logger.warning(f"{filename} missing")
+                return
+
+        if filename in self._volume_model_cache:
+            filedict = self._volume_model_cache[filename]
             model = filedict["model"]
             dist = filedict["distribution"]
 
@@ -3717,6 +4019,7 @@ class StatsNFL(Stats):
         }
         self.usage_stat = "snap pct"
         self.tiebreaker_stat = "route participation short"
+        self._volume_model_cache = None
 
     def load(self):
         """
@@ -3729,13 +4032,10 @@ class StatsNFL(Stats):
                 if type(pdata) is dict:
                     self.gamelog = pdata["gamelog"]
                     self.teamlog = pdata["teamlog"]
+                    if "players" in pdata:
+                        self.players = pdata["players"]
                 else:
                     self.gamelog = pdata
-
-        filepath = pkg_resources.files(data) / "nfl_comps.json"
-        if os.path.isfile(filepath):
-            with open(filepath, "r") as infile:
-                self.comps = json.load(infile)
 
     def update(self):
         """
@@ -4293,21 +4593,72 @@ class StatsNFL(Stats):
                 "first_downs": first_downs,
             }
 
+    def build_comp_profile(self):
+        """Build the full NFL player comp profile with all derived features.
+
+        Loads PFF CSV data, derives rate/differential features, and joins
+        with nfl.import_ids() for age/height/bmi.
+
+        Returns:
+            playerProfile DataFrame indexed by player name, or empty DataFrame on failure.
+            Call load() before this method.
+        """
+        if self.playerProfile.empty:
+            self.profile_market("snap pct")
+
+        try:
+            nfl_players = nfl.import_ids()
+            nfl_players = nfl_players.loc[nfl_players['position'].isin(['QB', 'RB', 'WR', 'TE'])]
+            nfl_players.index = nfl_players.name.apply(remove_accents)
+            nfl_players["bmi"] = nfl_players["weight"] / nfl_players["height"] / nfl_players["height"]
+            nfl_players = nfl_players[['age', 'height', 'bmi']].dropna()
+        except Exception:
+            nfl_players = pd.DataFrame()
+
+        year = self.season_start.year
+        playerProfile = pd.DataFrame()
+        for y in reversed(range(year - 3, year + 1)):
+            playerFolder = pkg_resources.files(data) / f"player_data/NFL/{y}"
+            if os.path.exists(playerFolder):
+                for file in os.listdir(playerFolder):
+                    if file.endswith(".csv"):
+                        df = pd.read_csv(playerFolder / file)
+                        df.index = df.player_id
+                        playerProfile = playerProfile.combine_first(df)
+
+        if playerProfile.empty:
+            return playerProfile
+
+        playerProfile.loc[playerProfile.position == "HB", "position"] = "RB"
+        playerProfile.loc[playerProfile.position == "FB", "position"] = "RB"
+        playerProfile = playerProfile.loc[playerProfile.position.isin(["QB", "RB", "WR", "TE"])]
+        playerProfile.loc[playerProfile.position == "QB", "dropbacks_per_game"] = playerProfile.loc[playerProfile.position == "QB", "dropbacks"] / playerProfile.loc[playerProfile.position == "QB", "player_game_count"]
+        playerProfile.loc[playerProfile.position == "QB", "blitz_grades_pass_diff"] = playerProfile.loc[playerProfile.position == "QB", "blitz_grades_pass"] - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position == "QB", "pa_grades_pass_diff"] = playerProfile.loc[playerProfile.position == "QB", "pa_grades_pass"] - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position == "QB", "screen_grades_pass_diff"] = playerProfile.loc[playerProfile.position == "QB", "screen_grades_pass"] - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position == "QB", "deep_grades_pass_diff"] = playerProfile.loc[playerProfile.position == "QB", "deep_grades_pass"] - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position == "QB", "cm_grades_pass_diff"] = playerProfile.loc[playerProfile.position == "QB", "center_medium_grades_pass"] - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
+        playerProfile.loc[playerProfile.position == "QB", "scrambles_per_dropback"] = playerProfile.loc[playerProfile.position == "QB", "scrambles"] / playerProfile.loc[playerProfile.position == "QB", "dropbacks"]
+        playerProfile.loc[playerProfile.position == "QB", "designed_yards_per_game"] = playerProfile.loc[playerProfile.position == "QB", "designed_yards"] / playerProfile.loc[playerProfile.position == "QB", "player_game_count"]
+        playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position != "QB", "grades_pass_route"]
+        playerProfile.loc[playerProfile.position == "RB", "breakaway_yards_per_game"] = playerProfile.loc[playerProfile.position == "RB", "breakaway_yards"] / playerProfile.loc[playerProfile.position == "RB", "player_game_count"]
+        playerProfile.loc[playerProfile.position == "RB", "total_touches_per_game"] = playerProfile.loc[playerProfile.position == "RB", "total_touches"] / playerProfile.loc[playerProfile.position == "RB", "player_game_count"]
+        playerProfile.loc[playerProfile.position != "QB", "contested_target_rate"] = playerProfile.loc[playerProfile.position != "QB", "contested_targets"] / playerProfile.loc[playerProfile.position != "QB", "targets"]
+        playerProfile.loc[playerProfile.position != "QB", "deep_contested_target_rate"] = playerProfile.loc[playerProfile.position != "QB", "deep_contested_targets"] / playerProfile.loc[playerProfile.position != "QB", "targets"]
+        playerProfile.loc[playerProfile.position != "QB", "zone_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position != "QB", "zone_grades_pass_route"] - playerProfile.loc[playerProfile.position != "QB", "grades_pass_route"]
+        playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position != "QB", "grades_pass_route"]
+        playerProfile.index = playerProfile.player.apply(remove_accents)
+        playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
+        if not nfl_players.empty:
+            playerProfile = playerProfile.join(nfl_players)
+
+        return playerProfile
+
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
-
-        players = nfl.import_ids()
-        players = players.loc[players['position'].isin([
-            'QB', 'RB', 'WR', 'TE'])]
-        players.index = players.name.apply(remove_accents)
-        players["bmi"] = players["weight"]/players["height"]/players["height"]
-        players = players[['age', 'height', 'bmi']].dropna()
-
-        self.profile_market("snap pct")
-        playerProfile = pd.DataFrame()
 
         filterStat = {
             "QB": "dropbacks",
@@ -4316,58 +4667,55 @@ class StatsNFL(Stats):
             "TE": "routes"
         }
 
-        for y in reversed(range(year - 3, year + 1)):
-            playerFolder = pkg_resources.files(data) / f"player_data/NFL/{y}"
-            if os.path.exists(playerFolder):
-                for file in os.listdir(playerFolder):
-                    if file.endswith(".csv"):
-                        df = pd.read_csv(playerFolder/file)
-                        df.index = df.player_id
-                        playerProfile = playerProfile.combine_first(df)
-
+        playerProfile = self.build_comp_profile()
         if playerProfile.empty:
             return
-        
-        playerProfile.loc[playerProfile.position=="HB", "position"] = "RB"
-        playerProfile.loc[playerProfile.position=="FB", "position"] = "RB"
-        playerProfile = playerProfile.loc[playerProfile.position.isin(["QB", "RB", "WR", "TE"])]
-        playerProfile.loc[playerProfile.position=="QB", "dropbacks_per_game"] = playerProfile.loc[playerProfile.position=="QB", "dropbacks"] / playerProfile.loc[playerProfile.position=="QB", "player_game_count"]
-        playerProfile.loc[playerProfile.position=="QB", "blitz_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "blitz_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
-        playerProfile.loc[playerProfile.position=="QB", "pa_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "pa_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
-        playerProfile.loc[playerProfile.position=="QB", "screen_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "screen_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
-        playerProfile.loc[playerProfile.position=="QB", "deep_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "deep_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
-        playerProfile.loc[playerProfile.position=="QB", "cm_grades_pass_diff"] = playerProfile.loc[playerProfile.position=="QB", "center_medium_grades_pass"] - playerProfile.loc[playerProfile.position=="QB", "grades_pass"]
-        playerProfile.loc[playerProfile.position=="QB", "scrambles_per_dropback"] = playerProfile.loc[playerProfile.position=="QB", "scrambles"] / playerProfile.loc[playerProfile.position=="QB", "dropbacks"]
-        playerProfile.loc[playerProfile.position=="QB", "designed_yards_per_game"] = playerProfile.loc[playerProfile.position=="QB", "designed_yards"] / playerProfile.loc[playerProfile.position=="QB", "player_game_count"]
-        playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
-        playerProfile.loc[playerProfile.position=="RB", "breakaway_yards_per_game"] = playerProfile.loc[playerProfile.position=="RB", "breakaway_yards"] / playerProfile.loc[playerProfile.position=="RB", "player_game_count"]
-        playerProfile.loc[playerProfile.position=="RB", "total_touches_per_game"] = playerProfile.loc[playerProfile.position=="RB", "total_touches"] / playerProfile.loc[playerProfile.position=="RB", "player_game_count"]
-        playerProfile.loc[playerProfile.position!="QB", "contested_target_rate"] = playerProfile.loc[playerProfile.position!="QB", "contested_targets"] / playerProfile.loc[playerProfile.position!="QB", "targets"]
-        playerProfile.loc[playerProfile.position!="QB", "deep_contested_target_rate"] = playerProfile.loc[playerProfile.position!="QB", "deep_contested_targets"] / playerProfile.loc[playerProfile.position!="QB", "targets"]
-        playerProfile.loc[playerProfile.position!="QB", "zone_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "zone_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
-        playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route_diff"] = playerProfile.loc[playerProfile.position!="QB", "man_grades_pass_route"] - playerProfile.loc[playerProfile.position!="QB", "grades_pass_route"]
-        playerProfile.index = playerProfile.player.apply(remove_accents)
-        playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
-        playerProfile = playerProfile.join(players)
-    
+
         comps = {}
         for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position==position]
-            positionProfile[filterStat[position]] = positionProfile[filterStat[position]]/positionProfile["player_game_count"]
+            positionProfile = playerProfile.loc[playerProfile.position == position]
+            positionProfile[filterStat[position]] = positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].quantile(.25)]
             positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=5)
-            r = np.quantile(np.max(d,axis=1),.9)
-            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
-            playerIds = positionProfile.index
-            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]][:10] for j in range(len(i))}
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
 
         filepath = pkg_resources.files(data) / "nfl_comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
+
+    def _compute_comps(self):
+        """Build comps from loaded data at runtime (no JSON I/O)."""
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
+            stats = json.load(f)
+
+        filterStat = {
+            "QB": "dropbacks",
+            "RB": "attempts",
+            "WR": "routes",
+            "TE": "routes"
+        }
+
+        playerProfile = self.build_comp_profile()
+        if playerProfile.empty:
+            return
+
+        comps = {}
+        for position in ["QB", "RB", "WR", "TE"]:
+            positionProfile = playerProfile.loc[playerProfile.position == position]
+            positionProfile[filterStat[position]] = positionProfile[filterStat[position]] / positionProfile["player_game_count"]
+            positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].quantile(.25)]
+            positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
+            if len(positionProfile) < 7:
+                continue
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
+            knn = BallTree(positionProfile)
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
+
+        self.comps = comps
 
 
     def bucket_stats(self, market, buckets=20, date=datetime.today()):
@@ -4692,9 +5040,18 @@ class StatsNFL(Stats):
 
             filename = "_".join([self.league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-            if os.path.isfile(filepath):
-                with open(filepath, "rb") as infile:
-                    filedict = pickle.load(infile)
+            if self._volume_model_cache is None:
+                self._volume_model_cache = {}
+            if filename not in self._volume_model_cache:
+                if os.path.isfile(filepath):
+                    with open(filepath, "rb") as infile:
+                        self._volume_model_cache[filename] = pickle.load(infile)
+                else:
+                    logger.warning(f"{filename} missing")
+                    return
+
+            if filename in self._volume_model_cache:
+                filedict = self._volume_model_cache[filename]
                 model = filedict["model"]
                 dist = filedict["distribution"]
 
@@ -5233,6 +5590,7 @@ class StatsNHL(Stats):
         }
         self.usage_stat = "TimeShare"
         self.tiebreaker_stat = "Fenwick short"
+        self._volume_model_cache = None
 
     def load(self):
         """
@@ -5252,35 +5610,83 @@ class StatsNHL(Stats):
                 self.gamelog = nhl_data.get("gamelog",{})
                 self.teamlog = nhl_data.get("teamlog",{})
 
-        filepath = pkg_resources.files(data) / "nhl_comps.json"
-        if os.path.isfile(filepath):
-            with open(filepath, "r") as infile:
-                self.comps = json.load(infile)
+    def build_comp_profile(self, playerDict=None):
+        """Build NHL player comp profile from loaded player data.
+
+        Args:
+            playerDict: Optional flat dict of {player_id: stats_dict}.
+                If None, uses all seasons from self.players.
+
+        Returns:
+            (playerProfile, all_players, id_to_name) where playerProfile is
+            a DataFrame indexed by player IDs, all_players is the flat dict,
+            and id_to_name maps integer IDs to string player names.
+        """
+        if playerDict is None:
+            playerDict = {}
+            for season_key in self.players:
+                playerDict.update(self.players[season_key])
+
+        if not playerDict:
+            return pd.DataFrame(), {}, {}
+
+        playerProfile = pd.DataFrame(playerDict).T
+        id_to_name = {pid: v.get("playerName", pid) for pid, v in playerDict.items()}
+
+        return playerProfile, playerDict, id_to_name
 
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as infile:
             stats = json.load(infile)
-    
+
         players = self.players.get(self.season_start.year - 1, {})
         players.update(self.players.get(self.season_start.year, {}))
-        playerProfile = pd.DataFrame(players).T
+        playerProfile, all_players, id_to_name = self.build_comp_profile(players)
+
         comps = {}
         for position in ["C", "W", "D", "G"]:
-            positionProfile = playerProfile.loc[[player for player, value in players.items() if value["position"] == position and player in playerProfile.index], list(stats["NHL"][position].keys())].dropna()
+            pos_players = [p for p, v in all_players.items()
+                          if v.get("position") == position and p in playerProfile.index]
+            positionProfile = playerProfile.loc[pos_players, list(stats["NHL"][position].keys())].dropna()
+            positionProfile.index = positionProfile.index.map(lambda x: id_to_name.get(x, x))
+            positionProfile = positionProfile[~positionProfile.index.duplicated(keep='first')]
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
             knn = BallTree(positionProfile)
-            d, i = knn.query(positionProfile.values, k=(6 if position=="G" else 11))
-            r = np.quantile(np.max(d,axis=1), .5)
-            i, d = knn.query_radius(positionProfile.values, r, sort_results=True, return_distance=True)
-            playerIds = positionProfile.index
-            comps[position] = {str(playerIds[j]): [str(idx) for idx in playerIds[i[j]]] for j in range(len(i))}
+            min_k = 4 if position == "G" else 5
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=min_k, max_comps=20)
 
         filepath = pkg_resources.files(data) / "nhl_comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
+
+    def _compute_comps(self):
+        """Build comps from loaded data at runtime (no JSON I/O)."""
+        with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
+            stats = json.load(f)
+
+        playerProfile, all_players, id_to_name = self.build_comp_profile()
+        if playerProfile.empty:
+            return
+
+        comps = {}
+        for position in ["C", "W", "D", "G"]:
+            pos_players = [p for p, v in all_players.items()
+                          if v.get("position") == position and p in playerProfile.index]
+            if len(pos_players) < 7:
+                continue
+            positionProfile = playerProfile.loc[pos_players, list(stats["NHL"][position].keys())].dropna()
+            positionProfile.index = positionProfile.index.map(lambda x: id_to_name.get(x, x))
+            positionProfile = positionProfile[~positionProfile.index.duplicated(keep='first')]
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
+            knn = BallTree(positionProfile)
+            min_k = 4 if position == "G" else 5
+            comps[position] = self._build_comps(knn, positionProfile, min_comps=min_k, max_comps=20)
+
+        self.comps = comps
 
     def parse_game(self, gameId, gameDate):
         gamelog = []
@@ -5309,8 +5715,8 @@ class StatsNHL(Stats):
             awayTeam = team_map.get(awayTeam, awayTeam)
             homeTeam = team_map.get(homeTeam, homeTeam)
             game_df.team = game_df.team.apply(lambda x: team_map.get(x, x))
-            game_df.position.replace("L", "W", inplace=True)
-            game_df.position.replace("R", "W", inplace=True)
+            game_df["position"] = game_df["position"].replace("L", "W")
+            game_df["position"] = game_df["position"].replace("R", "W")
 
             for i, player in game_df.iterrows():
                 team = player['team']
@@ -5507,8 +5913,8 @@ class StatsNHL(Stats):
         player_df["bmi"] = player_df["weight"]/player_df["height"]/player_df["height"]
         player_df['age'] = (datetime.now()-pd.to_datetime(player_df['birthDate'])).dt.days/365.25
         player_df.playerName = player_df.playerName.apply(remove_accents)
-        player_df.position.replace("R", "W", inplace=True)
-        player_df.position.replace("L", "W", inplace=True)
+        player_df["position"] = player_df["position"].replace("R", "W")
+        player_df["position"] = player_df["position"].replace("L", "W")
 
         res = requests.get(f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv")
         if res.status_code == 200:
@@ -5617,9 +6023,18 @@ class StatsNHL(Stats):
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                filedict = pickle.load(infile)
+        if self._volume_model_cache is None:
+            self._volume_model_cache = {}
+        if filename not in self._volume_model_cache:
+            if os.path.isfile(filepath):
+                with open(filepath, "rb") as infile:
+                    self._volume_model_cache[filename] = pickle.load(infile)
+            else:
+                logger.warning(f"{filename} missing")
+                return
+
+        if filename in self._volume_model_cache:
+            filedict = self._volume_model_cache[filename]
             model = filedict["model"]
             dist = filedict["distribution"]
 

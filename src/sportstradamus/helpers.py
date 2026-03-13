@@ -380,39 +380,12 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None):
             hi *= 2
         return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
         
-def apply_pit_calibration(p_raw, pit_scores):
+def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1):
     """
-    Apply PIT-based calibration to a raw CDF probability.
+    Calculate raw probability of outcome being under the line.
     
-    Maps p_raw through the empirical CDF of calibration PIT scores.
-    If U_i = F(y_i) are the PIT scores, the ECDF G(p) = P(U ≤ p)
-    gives the calibrated probability: G(F(x)) ≈ Uniform(0,1).
-    
-    Parameters:
-    -----------
-    p_raw : float or np.ndarray
-        Raw probability from the model's CDF (output of get_odds with temp=1)
-    pit_scores : np.ndarray
-        Sorted array of PIT scores from the calibration set, stored in model file
-    
-    Returns:
-    --------
-    float or np.ndarray : Calibrated probability
-    """
-    if pit_scores is None or len(pit_scores) == 0:
-        return p_raw
-    # Skip calibration if PIT scores are degenerate (too little spread)
-    if np.ptp(pit_scores) < 0.1:
-        return p_raw
-    # ECDF of PIT scores: maps model CDF probability → calibrated probability
-    # The sorted pit_scores are the x-axis; the uniform quantile grid is the y-axis.
-    n = len(pit_scores)
-    quantile_grid = np.linspace(0, 1, n)
-    return np.clip(np.interp(p_raw, pit_scores, quantile_grid), 0, 1)
-
-def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, calib=None):
-    """
-    Calculate odds for an outcome given expected value and distribution parameters.
+    Returns the raw distributional probability. Calibration (isotonic
+    regression) is applied separately at the over/under decision level.
     
     Parameters:
     -----------
@@ -433,8 +406,6 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, calib=
         Zero-inflation probability for ZINB/ZAGamma. If None, no zero-inflation.
     step : float, optional
         Step size for binning (default: 1)
-    calib : list of float, optional
-        Calibration array for scaling
     
     Returns:
     --------
@@ -448,7 +419,7 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, calib=
     # when cv!=1 the archive EV was Gaussian-encoded by get_ev, so fall through to the
     # Gaussian/Gamma branch for a consistent round-trip.
     if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
-        return apply_pit_calibration(poisson.cdf(line, ev), calib) - apply_pit_calibration(poisson.pmf(line, ev), calib)/2
+        return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
     
     elif dist in ("NegBin", "ZINB"):
         # NegBin / ZINB: use nbinom.cdf for overdispersed count data
@@ -461,7 +432,7 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, calib=
             # ZI-CDF: gate + (1 - gate) * base_CDF
             base_cdf = gate + (1 - gate) * base_cdf
             base_pmf = (1 - gate) * base_pmf
-        return apply_pit_calibration(base_cdf, calib) - apply_pit_calibration(base_pmf, calib)/2
+        return base_cdf - base_pmf/2
     
     else:
         if alpha is None:
@@ -474,9 +445,8 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, calib=
             # ZA-CDF: gate + (1 - gate) * base_CDF
             cdf_high = gate + (1 - gate) * cdf_high
             cdf_low = gate + (1 - gate) * cdf_low
-        under = apply_pit_calibration(cdf_high, calib)
-        push = under - apply_pit_calibration(cdf_low, calib)
-        return under - push/2
+        push = cdf_high - cdf_low
+        return cdf_high - push/2
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
 
@@ -938,7 +908,7 @@ def accel_asc(n):
         y = x + y - 1
         yield a[:k + 1]
 
-def set_model_start_values(model, dist, X_data, hist_gate=0):
+def set_model_start_values(model, dist, X_data):
     """
     Set appropriate start values for different distribution types.
 
@@ -993,7 +963,7 @@ def set_model_start_values(model, dist, X_data, hist_gate=0):
         sv = np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
 
     if dist in ["ZINB", "ZAGamma"]:
-        gate_val = np.clip(hist_gate if hist_gate > 0 else 0.05, 0.01, 0.99)
+        gate_val = np.clip(hist_gate, 0.01, 0.99)
         sv = np.column_stack([sv, np.full(n, logit(gate_val))])
 
     model.start_values = sv

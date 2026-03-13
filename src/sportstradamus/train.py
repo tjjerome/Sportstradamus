@@ -6,6 +6,7 @@ from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
 from scipy.optimize import minimize
 from scipy.stats import poisson, nbinom, norm, gamma, fit
 from sklearn.metrics import (
@@ -38,49 +39,35 @@ np.seterr(divide='ignore', invalid='ignore')
 # ============================================================================
 # Load and initialize active sports leagues based on season dates
 
-def load_data():
-    global archive, stat_structs
-    sports = []
-    nba = StatsNBA()
+nba = StatsNBA()
+nfl = StatsNFL()
+wnba = StatsWNBA()
+mlb = StatsMLB()
+nhl = StatsNHL()
+
+stat_structs = {}
+archive = Archive()
+
+if datetime.today().date() > (nba.season_start - timedelta(days=7)):
     nba.load()
-    nfl = StatsNFL()
+    nba.update()
+    stat_structs.update({"NBA": nba})
+if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
     nfl.load()
-    wnba = StatsWNBA()
+    nfl.update()
+    stat_structs.update({"NFL": nfl})
+if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
     wnba.load()
-    # mlb = StatsMLB()
-    # mlb.load()
-    # nhl = StatsNHL()
-    # nhl.load()
-    if datetime.today().date() > (nba.season_start - timedelta(days=7)):
-        sports.append("NBA")
-    # if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
-    #     sports.append("MLB")
-    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
-    #     sports.append("NHL")
-    if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
-        sports.append("NFL")
-    if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
-        sports.append("WNBA")
-
-
-    stat_structs = {}
-    if "NBA" in sports:
-        nba.update()
-        stat_structs.update({"NBA": nba})
-    if "NFL" in sports:
-        nfl.update()
-        stat_structs.update({"NFL": nfl})
-    if "WNBA" in sports:
-        wnba.update()
-        stat_structs.update({"WNBA": wnba})
-    # if "MLB" in sports:
-    #     mlb.update()
-    #     stat_structs.update({"MLB": mlb})
-    # if "NHL" in sports:
-    #     nhl.update()
-    #     stat_structs.update({"NHL": nhl})
-
-    archive = Archive()
+    wnba.update()
+    stat_structs.update({"WNBA": wnba})
+# if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
+#     mlb.load()
+#     mlb.update()
+#     stat_structs.update({"MLB": mlb})
+# if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
+#     nhl.load()
+#     nhl.update()
+#     stat_structs.update({"NHL": nhl})
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -123,7 +110,7 @@ def save_zi_config(config):
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
-    global book_weights, archive, stat_structs
+    global book_weights
 
     np.random.seed(69)
 
@@ -349,6 +336,7 @@ def meditate(force, league):
             M.to_csv(filepath)
 
             y = M[['Result']]
+
             X = M[stat_data.get_stat_columns(market)]
 
             categories = ["Home", "Player position"]
@@ -359,10 +347,20 @@ def meditate(force, league):
 
             categories = "name:"+",".join(categories)
 
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.3, random_state=42
-            )
+            # === TEMPORAL SPLIT: earliest 70% of games (by date) to train, latest 30% to test ===
+            # Sort by date, then split
+            M_sorted = M.sort_values("Date")
+            n = len(M_sorted)
+            n_train = int(n * 0.7)
+            train_idx = M_sorted.index[:n_train]
+            test_idx = M_sorted.index[n_train:]
 
+            X_train = X.loc[train_idx]
+            y_train = y.loc[train_idx]
+            X_test = X.loc[test_idx]
+            y_test = y.loc[test_idx]
+
+            # Keep test/validation split random as before
             X_test, X_validation, y_test, y_validation = train_test_split(
                 X_test, y_test, test_size=0.5, random_state=25
             )
@@ -416,7 +414,8 @@ def meditate(force, league):
                     dist_obj = Gamma(stabilization="None", loss_fn="nll", response_fn="softplus")
                     nonzero_mask = y_train_labels > 0
                     X_train = X_train[nonzero_mask]
-                    y_train = y_train_labels[nonzero_mask]
+                    y_train = y_train[nonzero_mask]
+                    y_train_labels = y_train_labels[nonzero_mask]
                 else:
                     dist_obj = ZAGamma(stabilization="None", loss_fn="nll", response_fn="softplus")
 
@@ -433,7 +432,7 @@ def meditate(force, league):
             # === MODEL TRAINING ===
             # All distributions (NegBin, Gamma) use LightGBMLSS training
             model = LightGBMLSS(dist_obj)
-            set_model_start_values(model, dist, X_train, hist_gate=hist_gate)
+            set_model_start_values(model, dist, X_train)
 
             if opt_params is None or opt_params.get("opt_rounds") is None or force:
                 params = {
@@ -456,8 +455,8 @@ def meditate(force, league):
                                             dtrain,
                                             num_boost_round=999,
                                             nfold=4,
-                                            early_stopping_rounds=100,
-                                            max_minutes=60,
+                                            early_stopping_rounds=50,
+                                            max_minutes=30,
                                             n_trials=300,
                                             silence=True,
                                             )
@@ -475,19 +474,19 @@ def meditate(force, league):
 
             # Use standard LightGBM prediction
             idx = X_train.index
-            set_model_start_values(model, dist, X_train, hist_gate=hist_gate)
+            set_model_start_values(model, dist, X_train)
             preds = model.predict(X_train, pred_type="parameters")
             preds.index = idx
             prob_params_train = pd.concat([prob_params_train, preds])
 
             idx = X_validation.index
-            set_model_start_values(model, dist, X_validation, hist_gate=hist_gate)
+            set_model_start_values(model, dist, X_validation)
             preds = model.predict(X_validation, pred_type="parameters")
             preds.index = idx
             prob_params_validation = pd.concat([prob_params_validation, preds])
 
             idx = X_test.index
-            set_model_start_values(model, dist, X_test, hist_gate=hist_gate)
+            set_model_start_values(model, dist, X_test)
             preds = model.predict(X_test, pred_type="parameters")
             preds.index = idx
             prob_params = pd.concat([prob_params, preds])
@@ -571,19 +570,6 @@ def meditate(force, league):
                 y_proba_no_filt = np.array(
                     [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
-                # Randomized PIT for discrete distributions: u_i = F(y-1) + U*f(y)
-                y_int_val = y_validation["Result"].to_numpy().astype(int)
-                base_cdf_prev = nbinom.cdf(y_int_val - 1, r_blend_val, p_val)
-                base_pmf = nbinom.pmf(y_int_val, r_blend_val, p_val)
-                if dist == "ZINB":
-                    # ZINB-CDF: gate + (1-gate)*NB_CDF(k) for k >= 0; F(-1) = 0
-                    # ZINB-PMF: P(0) = gate + (1-gate)*NB(0); P(k) = (1-gate)*NB(k) for k > 0
-                    at_zero = y_int_val == 0
-                    base_cdf_prev = np.where(at_zero, 0, gate_blend_val + (1 - gate_blend_val) * base_cdf_prev)
-                    base_pmf = np.where(at_zero, gate_blend_val + (1 - gate_blend_val) * base_pmf, (1 - gate_blend_val) * base_pmf)
-                pit_scores = base_cdf_prev \
-                    + np.random.uniform(0, 1, size=len(y_validation)) * base_pmf
-
                 test_alpha = None
                 
             else:
@@ -600,28 +586,31 @@ def meditate(force, league):
                 y_proba_no_filt = np.array(
                     [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
-                # PIT scores for calibration (use blended params directly)
-                y_val = y_validation["Result"].to_numpy()
-                base_cdf = gamma.cdf(y_val, alpha_blend_val, scale=1 / beta_blend_val)
-                if dist == "ZAGamma":
-                    # ZA-CDF: gate_blend + (1 - gate_blend) * base_CDF for x > 0; gate for x == 0
-                    pit_scores = np.where(
-                        y_val == 0,
-                        np.random.uniform(0, 1, size=len(y_val)) * gate_blend_val,
-                        gate_blend_val + (1 - gate_blend_val) * base_cdf
-                    )
-                else:
-                    pit_scores = base_cdf
-
                 # Store alpha for downstream use
                 test_alpha = alpha_blend
 
-            pit_scores = np.sort(pit_scores)
-            model_calib = 1 - np.mean(((pit_scores - np.arange(1, len(pit_scores)+1))/len(pit_scores))**2)
+            # === ISOTONIC CALIBRATION ===
+            # Fit isotonic regression on validation set: maps raw P(over) → calibrated P(over)
+            _r_val = r_blend_val if dist in ("NegBin", "ZINB") else None
+            _alpha_val = alpha_blend_val if dist in ("Gamma", "ZAGamma") else None
+            _gate_val = gate_blend_val if dist in ("ZINB", "ZAGamma") else None
+            val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
+            val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist, alpha=_alpha_val, step=step, r=_r_val, gate=_gate_val)
+            val_raw_over = 1 - val_raw_under
+            y_class_val = (y_validation["Result"] >= B_validation["Line"]).astype(int).to_numpy()
 
-            y_proba_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=test_alpha, step=step, calib=pit_scores, r=r_test, gate=gate_blend_test)
+            iso_reg = IsotonicRegression(y_min=0, y_max=1, out_of_bounds='clip')
+            iso_reg.fit(val_raw_over, y_class_val)
+
+            # Evaluate calibration quality
+            val_calibrated = iso_reg.predict(val_raw_over)
+            model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
+
+            # Apply isotonic calibration to test set
+            test_raw_over = y_proba_no_filt[:, 1]
+            test_calibrated_over = iso_reg.predict(test_raw_over)
             y_proba_filt = np.array(
-                [y_proba_filt, 1-y_proba_filt]).transpose()
+                [1 - test_calibrated_over, test_calibrated_over]).transpose()
 
             stat_std = y.Result.std()
 
@@ -660,7 +649,7 @@ def meditate(force, league):
                 "distribution": dist,
                 "cv": cv,
                 "std": stat_std,
-                "pit_scores": pit_scores,
+                "isotonic_model": iso_reg,
                 "weight": model_weight,
                 "r_book": r_book,
                 "hist_gate": hist_gate
@@ -684,6 +673,9 @@ def meditate(force, league):
 
             X_test['P'] = y_proba_filt[:, 1]
 
+            # === SAVE TEST PREDICTIONS ===
+            # Store predictions on test set for later analysis
+
             filepath = pkg_resources.files(data) / f"test_sets/{filename}.csv"
             with open(filepath, "w") as outfile:
                 X_test.to_csv(filepath)
@@ -694,11 +686,11 @@ def meditate(force, league):
                 del filedict
                 del model
 
-            # === SAVE TEST PREDICTIONS ===
-            # Store predictions on test set for later analysis
-
             # === GENERATE TRAINING REPORT ===
             report()
+
+            # Write latest runtime comps to JSON for inspection
+            stat_data.save_comps()
 
 
 # ============================================================================
@@ -888,7 +880,6 @@ def filter_features():
 # ============================================================================
 
 def fit_book_weights(league, market):
-    global archive, stat_structs
     """Fit optimal weights for multiple sportsbooks using historical accuracy."""
     global book_weights
     warnings.simplefilter('ignore', UserWarning)
@@ -1162,7 +1153,7 @@ def trim_matrix(M):
 
     M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
         M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
-    M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max(), inplace=True)
+    M["Line"] = M["Line"].clip(M.loc[(M["Archived"] == 1), "Line"].min(), M.loc[(M["Archived"] == 1), "Line"].max())
 
     if "Player position" in M.columns:
         for i in M["Player position"].unique():
@@ -1312,7 +1303,6 @@ def trim_matrix(M):
     return M
 
 def correlate(league, force=False):
-    global archive, stat_structs
     """Calculate feature correlations with outcomes for feature engineering."""
     print(f"Correlating {league}...")
     tracked_stats = { 
@@ -1737,7 +1727,6 @@ def correlate(league, force=False):
 
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
-    load_data()
     meditate()
     see_features()
     filter_features()

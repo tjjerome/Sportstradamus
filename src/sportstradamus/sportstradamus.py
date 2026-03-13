@@ -137,7 +137,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model STD", "Books EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
@@ -152,7 +152,7 @@ def main(progress):
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict, "Sleeper", stats)
-        save_data(sl_offers.drop(columns=["Model EV", "Model STD", "Books EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+        save_data(sl_offers.drop(columns=["Model EV", "Model Param", "Books EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
@@ -166,7 +166,7 @@ def main(progress):
     #     parp_dict = get_parp()
     #     parp_offers, parp5 = process_offers(
     #         parp_dict, "ParlayPlay", stats)
-    #     save_data(parp_offers.drop(columns=["Model EV", "Model STD", "Books EV"]), parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
+    #     save_data(parp_offers.drop(columns=["Model EV", "Model Param", "Books EV"]), parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
     #     parlay_df = pd.concat([parlay_df, parp5])
     #     parp_offers["Market"] = parp_offers["Market"].map(stat_map["ParlayPlay"])
     #     all_offers.append(parp_offers)
@@ -175,7 +175,7 @@ def main(progress):
 
     if len(all_offers) > 0:
         df = pd.concat(all_offers)
-        df = df[["League", "Date", "Team", "Opponent", "Player", "Market", "Model EV", "Model STD", "Line", "Boost", "Bet"]]
+        df = df[["League", "Date", "Team", "Opponent", "Player", "Market", "Model EV", "Model Param", "Line", "Boost", "Bet"]]
         df["Bet"] = "Over"
         df = df.sort_values(["League", "Date", "Team", "Player", "Market"]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                                                     ignore_index=True, keep="last").dropna()
@@ -859,7 +859,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         cv = filedict["cv"]
         model_weight = filedict["weight"]
         r_book = filedict.get("r_book", None)
-        pit_scores = filedict.get("pit_scores", None)
+        iso_model = filedict.get("isotonic_model", None)
         dist = filedict["distribution"]
         step = filedict["step"]
         hist_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
@@ -870,7 +870,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if f"proj {market} std" in stat_data.playerProfile.columns:
                 prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
 
-            prob_params.rename(columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model STD"}, inplace=True)
+            prob_params.rename(columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model Param"}, inplace=True)
 
         else:
             model = filedict["model"]
@@ -881,7 +881,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype('category')
 
-            set_model_start_values(model, dist, playerStats, hist_gate=hist_gate)
+            set_model_start_values(model, dist, playerStats)
 
             prob_params = model.predict(
                 playerStats, pred_type="parameters")
@@ -983,14 +983,18 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if hist_gate and dist in ("ZINB", "ZAGamma"):
             offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
         
-        # Use get_odds with PIT calibration
-        # For model odds, pass blended base_mean and blended gate
+        # Raw distributional probability, then isotonic calibration
         _r = offer_df["Model R"].to_numpy() if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns) else None
         _alpha = offer_df["Model Alpha"].to_numpy() if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns) else None
         _gate = offer_df["Model Gate"].to_numpy() if (dist in ("ZINB", "ZAGamma") and "Model Gate" in offer_df.columns) else None
         _model_ev = blended_base_mean  # pass base mean to get_odds (gate handled separately)
-        _model_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv, alpha=_alpha, step=step, calib=pit_scores, r=_r, gate=_gate)
-        offer_df["Model Under"] = _model_under
+        _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv, alpha=_alpha, step=step, r=_r, gate=_gate)
+        _raw_over = 1 - _raw_under
+        if iso_model is not None:
+            _cal_over = iso_model.predict(_raw_over)
+            offer_df["Model Under"] = 1 - _cal_over
+        else:
+            offer_df["Model Under"] = _raw_under
         
         offer_df["Model Over"] = (1-offer_df["Model Under"])
         if "Boost" in offer_df.columns:

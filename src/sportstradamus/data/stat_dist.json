@@ -7,7 +7,25 @@
     "NBA": {
         "MIN": "Gamma",
         "PTS": "ZAGamma",
-        "REB": "NegBin"
+        "REB": "NegBin",
+        "AST": "NegBin",
+        "PRA": "Gamma",
+        "PR": "Gamma",
+        "RA": "NegBin",
+        "PA": "ZAGamma",
+        "FG3M": "NegBin",
+        "fantasy points prizepicks": "Gamma",
+        "FG3A": "NegBin",
+        "FTM": "NegBin",
+        "FGM": "NegBin",
+        "FGA": "Gamma",
+        "STL": "NegBin",
+        "BLK": "NegBin",
+        "BLST": "NegBin",
+        "TOV": "NegBin",
+        "OREB": "NegBin",
+        "DREB": "NegBin",
+        "PF": "NegBin"
     },
     "WNBA": {
         "MIN": "Gamma"
