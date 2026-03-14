@@ -306,56 +306,58 @@ def run_per_feature_diagnostic(z_profile, player_opp_z, player_games, player_pos
 def prepare_nba(stats_obj, features_by_pos, target_markets):
     """Load and prepare NBA data, returning per-position optimization inputs."""
     stats_obj.load()
-    
+
     playerProfile, playerDict = stats_obj.build_comp_profile()
-    all_features = list(next(iter(features_by_pos.values())))
-    playerProfile = playerProfile[all_features].dropna()
-    
     gamelog = stats_obj.gamelog.copy()
-    
+
     position_data = {}
     for position in stats_obj.positions:
+        if position not in features_by_pos:
+            continue
+        features = features_by_pos[position]
         pos_players = [p for p, v in playerDict.items()
                       if v["POS"] == position and p in playerProfile.index]
         if len(pos_players) < 10:
             continue
-        z_profile = playerProfile.loc[pos_players].apply(lambda x: (x - x.mean()) / x.std(), axis=0)
-        pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(pos_players)]
-        
+        pos_profile = playerProfile.loc[pos_players, features].dropna()
+        z_profile = pos_profile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+        pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(pos_profile.index)]
+
         lookups = precompute_market_lookups(
             pos_gamelog, "PLAYER_NAME", "OPP", "GAME_DATE",
             target_markets, "POS", min_games=10)
-        
+
         position_data[position] = (z_profile, lookups)
-    
+
     return position_data
 
 
 def prepare_wnba(stats_obj, features_by_pos, target_markets):
     """Load and prepare WNBA data."""
     stats_obj.load()
-    
+
     playerProfile, playerDict = stats_obj.build_comp_profile()
-    all_features = list(next(iter(features_by_pos.values())))
-    playerProfile = playerProfile[all_features].replace([np.nan, np.inf, -np.inf], 0)
-    
     gamelog = stats_obj.gamelog.copy()
-    
+
     position_data = {}
     for position in stats_obj.positions:
+        if position not in features_by_pos:
+            continue
+        features = features_by_pos[position]
         pos_players = [p for p, v in playerDict.items()
                       if v["POS"] == position and p in playerProfile.index]
         if len(pos_players) < 10:
             continue
-        z_profile = playerProfile.loc[pos_players].apply(lambda x: (x - x.mean()) / x.std(), axis=0)
-        pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(pos_players)]
-        
+        pos_profile = playerProfile.loc[pos_players, features].replace([np.nan, np.inf, -np.inf], 0)
+        z_profile = pos_profile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+        pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(pos_profile.index)]
+
         lookups = precompute_market_lookups(
             pos_gamelog, "PLAYER_NAME", "OPP", "GAME_DATE",
             target_markets, "POS", min_games=8)
-        
+
         position_data[position] = (z_profile, lookups)
-    
+
     return position_data
 
 

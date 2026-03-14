@@ -31,7 +31,11 @@
             "Defense moneyline gain",
             "Defense totals gain",
             "Defense position",
-            "Defense comps"
+            "Defense comps",
+            "Player comps mean",
+            "Player comps z",
+            "Defense comp n",
+            "Defense comp distance"
         ],
         "attempts": [
             "Defense blitz_rate",
@@ -794,7 +798,11 @@
             "Defense moneyline gain",
             "Defense totals gain",
             "Defense position",
-            "Defense comps"
+            "Defense comps",
+            "Player comps mean",
+            "Player comps z",
+            "Defense comp n",
+            "Defense comp distance"
         ],
         "shotsAgainst": [
             "Defense Block_Pct",
@@ -883,7 +891,11 @@
             "Defense home",
             "Defense moneyline gain",
             "Defense totals gain",
-            "Defense comps"
+            "Defense comps",
+            "Player comps mean",
+            "Player comps z",
+            "Defense comp n",
+            "Defense comp distance"
         ],
         "pitches thrown": [
             "Defense AVG",
@@ -1373,7 +1385,11 @@
             "Defense moneyline gain",
             "Defense totals gain",
             "Defense position",
-            "Defense comps"
+            "Defense comps",
+            "Player comps mean",
+            "Player comps z",
+            "Defense comp n",
+            "Defense comp distance"
         ],
         "MIN": [
             "Defense OPP_FG_PCT",
@@ -1776,7 +1792,11 @@
             "Defense moneyline gain",
             "Defense totals gain",
             "Defense position",
-            "Defense comps"
+            "Defense comps",
+            "Player comps mean",
+            "Player comps z",
+            "Defense comp n",
+            "Defense comp distance"
         ],
         "MIN": [
             "Defense BLKA",

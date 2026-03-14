@@ -288,7 +288,7 @@ class Stats:
         if np.isnan(leagueavg) or np.isnan(leaguestd):
             return
 
-        self.playerProfile[['z', 'home', 'moneyline gain', 'totals gain', 'position z']] = 0.0
+        self.playerProfile[['z', 'home', 'moneyline gain', 'totals gain', 'position z', 'comps mean', 'comps z']] = 0.0
         self.playerProfile['z'] = (
             playerGroups[market].mean()-leagueavg).div(leaguestd)
 
@@ -303,7 +303,7 @@ class Stats:
         defenseGames = defenseGroups[[market, self.log_strings["home"], "moneyline", "totals"]].agg({market: "sum", self.log_strings["home"]: lambda x: np.mean(x)>.5, "moneyline": "mean", "totals": "mean"})
         defenseGroups = defenseGames.groupby(self.log_strings["opponent"])
 
-        self.defenseProfile[['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps']] = 0.0
+        self.defenseProfile[['avg', 'home', 'moneyline gain', 'totals gain', 'position', 'comps', 'comp n', 'comp distance']] = 0.0
         leagueavg = defenseGroups[market].mean().mean()
         leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile['avg'] = defenseGroups[market].mean().div(
@@ -393,6 +393,34 @@ class Stats:
             _denom_dt = (_n_def * _SX2_dt - _SX_dt ** 2).replace(0, np.nan)
             self.defenseProfile['totals gain'] = (_n_def * _SXY_dt - _SX_dt * _SY_def) / _denom_dt
             
+        # Player comps mean: distance-weighted average of comps' market means
+        # Player comps z: how the player performs vs their comp peer group
+        self._ensure_comps()
+        if self.comps:
+            _comp_records_p = []
+            for pos_comps in self.comps.values():
+                for player, comp_data in pos_comps.items():
+                    if player not in _all_mean.index:
+                        continue
+                    for comp, dist in zip(comp_data["comps"], comp_data["distances"]):
+                        if comp != player and comp in _all_mean.index:
+                            _comp_records_p.append((player, comp, 1.0 / (1.0 + dist)))
+            if _comp_records_p:
+                _cp_df_p = pd.DataFrame(_comp_records_p, columns=['player', 'comp', 'weight'])
+                _cp_df_p['comp_mean'] = _cp_df_p['comp'].map(_all_mean)
+                _cp_df_p = _cp_df_p.dropna(subset=['comp_mean'])
+                _wsum_p  = (_cp_df_p['comp_mean'] * _cp_df_p['weight']).groupby(_cp_df_p['player']).sum()
+                _wcnt_p  = _cp_df_p['weight'].groupby(_cp_df_p['player']).sum()
+                _comp_wmean = (_wsum_p / _wcnt_p).reindex(self.playerProfile.index)
+                self.playerProfile['comps mean'] = _comp_wmean
+                _cp_df_p['wtd_sq'] = _cp_df_p['weight'] * (
+                    _cp_df_p['comp_mean'] - _cp_df_p['player'].map(_comp_wmean.fillna(0))) ** 2
+                _comp_wstd = np.sqrt(
+                    (_cp_df_p['wtd_sq'].groupby(_cp_df_p['player']).sum() / _wcnt_p)
+                ).replace(0, np.nan).reindex(self.playerProfile.index)
+                self.playerProfile['comps z'] = (
+                    _all_mean.reindex(self.playerProfile.index) - _comp_wmean) / _comp_wstd
+
         if self.league == "WNBA" and "GSV" not in self.defenseProfile.index:
             self.defenseProfile.loc["GSV"] = np.nan
         self.defenseProfile.fillna(0.0, inplace=True)
@@ -629,7 +657,9 @@ class Stats:
                 scores = compGames.groupby(_player_col)[market].apply(zscore)
                 scores.index = scores.index.droplevel(0)
                 compGames[market] = scores
-                defstats.loc[player, 'comps'] = compGames.loc[compGames[_opp_col] == opponents[player], market].mean()
+                opp_comp_games = compGames.loc[compGames[_opp_col] == opponents[player], market]
+                defstats.loc[player, 'comps'] = opp_comp_games.mean()
+                defstats.loc[player, 'comp n'] = opp_comp_games.count()
         else:
             # Vectorized comps lookup for non-MLB leagues with distance weighting
             _comp_records = []
@@ -642,10 +672,12 @@ class Stats:
                 for comp, dist in zip(comp_data["comps"], comp_data["distances"]):
                     if comp == player:
                         continue
-                    _comp_records.append((player, comp, opp, 1.0 / (1.0 + dist)))
+                    _comp_records.append((player, comp, opp, 1.0 / (1.0 + dist), dist))
 
             if _comp_records:
-                _cp_df = pd.DataFrame(_comp_records, columns=['target', 'comp', 'opp', 'weight'])
+                _cp_df = pd.DataFrame(_comp_records, columns=['target', 'comp', 'opp', 'weight', 'dist'])
+                # Defense comp distance: mean distance to player's comps (uniqueness signal)
+                defstats['comp distance'] = _cp_df.groupby('target')['dist'].mean().reindex(defstats.index)
                 _merged = _cp_df.merge(
                     _gl_z[[_player_col, _opp_col, '_mkt_zscore']],
                     left_on=['comp', 'opp'],
@@ -657,6 +689,8 @@ class Stats:
                 _comp_wcount = _merged.groupby('target')['weight'].sum()
                 _comp_means = _comp_wsum / _comp_wcount
                 defstats['comps'] = _comp_means.reindex(defstats.index)
+                # Defense comp n: number of comp-opponent game observations in this estimate
+                defstats['comp n'] = _merged.groupby('target').size().reindex(defstats.index)
 
         stats = stats.join(defstats.add_prefix("Defense "))
 
@@ -715,7 +749,9 @@ class Stats:
         if cutoff_date is None:
             cutoff_date = (datetime.today()-timedelta(days=850)).date()
 
-        gamelog = self.gamelog.copy()
+        gamelog = self.gamelog.drop_duplicates(
+            subset=[self.log_strings["game"], self.log_strings["player"]], keep="last"
+        ).copy()
         gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
         gamelog = gamelog.loc[(gamelog[self.log_strings["date"]]>cutoff_date) & (gamelog[self.log_strings["date"]]<datetime.today().date())]
         if self.league != "MLB":
@@ -784,6 +820,7 @@ class Stats:
             stats["Odds"] = odds
             stats["EV"] = evs
             stats = stats.join(offers_df["Result"])
+            stats["Player"] = stats.index
             stats["Date"] = date
             stats["Archived"] = archived
 
@@ -1200,10 +1237,12 @@ class StatsNBA(Stats):
 
         # Process each game
         nba_df = []
-        included_games = list(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
+        included_games = set(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
         for i, game in enumerate(tqdm(nba_gamelog, desc="Getting NBA stats", unit='player')):
             if game["MIN"] < 1 or not game["TEAM_ABBREVIATION"] or (game["PLAYER_ID"], game["GAME_ID"]) in included_games:
                 continue
+
+            included_games.add((game["PLAYER_ID"], game["GAME_ID"]))
 
             player_id = game["PLAYER_ID"]
             game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
@@ -1293,10 +1332,10 @@ class StatsNBA(Stats):
         four_years_ago = today - timedelta(days=1461)
         self.gamelog = self.gamelog[pd.to_datetime(
             self.gamelog[self.log_strings["date"]]).dt.date >= four_years_ago]
-        self.gamelog.drop_duplicates(inplace=True)
+        self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
         self.teamlog = self.teamlog[pd.to_datetime(
             self.teamlog[self.log_strings["date"]]).dt.date >= four_years_ago]
-        self.teamlog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
         self.gamelog.loc[self.gamelog[self.log_strings["team"]]
                          == 'UTAH', self.log_strings["team"]] = "UTA"
@@ -2249,9 +2288,14 @@ class StatsWNBA(StatsNBA):
 
         stat_df = pd.DataFrame(nba_gamelog).merge(pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None,"_y"]).merge(pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None,"_y"])
         stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
+        stat_df.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
         stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
         stat_df = stat_df.loc[stat_df["MIN"] > 1]
         stat_df = stat_df.loc[~stat_df.TEAM_ABBREVIATION.isna()]
+        # Filter out games already in the gamelog
+        if not self.gamelog.empty:
+            existing = set(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
+            stat_df = stat_df[~stat_df.apply(lambda x: (x["PLAYER_ID"], x["GAME_ID"]) in existing, axis=1)]
 
         stat_df["HOME"] = stat_df.MATCHUP.str.contains(" vs. ")
         stat_df = stat_df.merge(player_df[["PLAYER_ID", "POS"]], on="PLAYER_ID")
@@ -2318,8 +2362,8 @@ class StatsWNBA(StatsNBA):
             self.teamlog = pd.concat(
                 [team_df[self.teamlog.columns], self.teamlog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
 
-        self.gamelog.drop_duplicates(inplace=True)
-        self.teamlog.drop_duplicates(inplace=True)
+        self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
+        self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
@@ -3118,8 +3162,8 @@ class StatsMLB(Stats):
                                                                    "AL", "NL"])]
         self.teamlog = self.teamlog[self.teamlog["gameDate"].apply(
             lambda x: four_years_ago <= datetime.strptime(x, '%Y-%m-%d').date() <= today)]
-        self.gamelog.drop_duplicates(inplace=True)
-        self.teamlog.drop_duplicates(inplace=True)
+        self.gamelog.drop_duplicates(subset=["gameId", "playerId"], keep="last", inplace=True)
+        self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
@@ -5868,11 +5912,18 @@ class StatsNHL(Stats):
 
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0).infer_objects(copy=False)
         if not nhl_df.empty:
+            nhl_df.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
+            if not self.gamelog.empty:
+                existing = set(self.gamelog[["gameId", "playerName"]].itertuples(index=False, name=None))
+                nhl_df = nhl_df[~nhl_df.apply(lambda x: (x["gameId"], x["playerName"]) in existing, axis=1)]
             nhl_df.loc[:, "moneyline"] = nhl_df.apply(lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1)
             nhl_df.loc[:, "totals"] = nhl_df.apply(lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1)
+        nhl_teamlog_df = pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False)
+        if not nhl_teamlog_df.empty:
+            nhl_teamlog_df.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
         self.gamelog = pd.concat([nhl_df, self.gamelog]).sort_values(
             "gameDate").reset_index(drop=True)
-        self.teamlog = pd.concat([pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False), self.teamlog]).sort_values(
+        self.teamlog = pd.concat([nhl_teamlog_df, self.teamlog]).sort_values(
             "gameDate").reset_index(drop=True)
 
         res = scraper.get(
@@ -5979,10 +6030,10 @@ class StatsNHL(Stats):
         four_years_ago = today - timedelta(days=1431)
         self.gamelog = self.gamelog[pd.to_datetime(
             self.gamelog["gameDate"]).dt.date >= four_years_ago]
-        self.gamelog.drop_duplicates(inplace=True)
+        self.gamelog.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
         self.teamlog = self.teamlog[pd.to_datetime(
             self.teamlog["gameDate"]).dt.date >= four_years_ago]
-        self.teamlog.drop_duplicates(inplace=True)
+        self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)

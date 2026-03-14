@@ -11,17 +11,23 @@ For each target position group, this script:
 6. Optionally optimizes weights for the best feature set found
 
 Usage:
-    poetry run python3 evaluate_features.py --league NFL --position WR
-    poetry run python3 evaluate_features.py --league NHL --position C W
-    poetry run python3 evaluate_features.py --league NHL --position C W --optimize
+    poetry run python3 evaluate_comp_features.py --league NFL --position WR
+    poetry run python3 evaluate_comp_features.py --league NHL --position C W
+    poetry run python3 evaluate_comp_features.py --league NHL --position C W --optimize
+    poetry run python3 evaluate_comp_features.py --league NBA --position P C F
+    poetry run python3 evaluate_comp_features.py --league WNBA --position G F C
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import pandas as pd
 import json
 import importlib.resources as pkg_resources
 from sportstradamus import data
-from sportstradamus.stats import StatsNFL, StatsNHL
+from sportstradamus.stats import StatsNFL, StatsNHL, StatsNBA, StatsWNBA
 from tqdm import tqdm
 import argparse
 import warnings
@@ -79,6 +85,8 @@ def discover_numeric_features(profile, min_coverage=0.5, min_unique=3):
     """Find all numeric features with adequate coverage."""
     features = []
     for col in profile.columns:
+        if col.endswith("growth") or col.endswith("short"):
+            continue
         try:
             vals = pd.to_numeric(profile[col], errors='coerce')
             coverage = vals.notna().mean()
@@ -108,6 +116,13 @@ NFL_EXCLUDE = {
 NHL_EXCLUDE = {
     "playerName", "position", "team",
 }
+
+NBA_EXCLUDE = {
+    "TEAM_ABBREVIATION", "PLAYER_ID", "GAME_ID", "SEASON_YEAR", "POS",
+    "HOME", "OPP", "WL",
+}
+
+WNBA_EXCLUDE = NBA_EXCLUDE.copy()
 
 
 def get_nfl_position_data(playerProfile, stats_obj, position):
@@ -162,6 +177,40 @@ def get_nhl_position_data(playerProfile, all_players, id_to_name, stats_obj, pos
     lookups = precompute_market_lookups(
         pos_gamelog, "playerName", "opponent", "gameDate",
         target_markets[position], "position", min_games=5)
+
+    return posProfile, lookups
+
+
+# ─── NBA / WNBA data loading ───────────────────────────────────────────────────
+
+def get_nba_position_data(playerProfile, playerDict, stats_obj, position):
+    """Get position-filtered profile and pre-computed lookups for NBA."""
+    pos_players = [p for p, v in playerDict.items()
+                   if v.get("POS") == position and p in playerProfile.index]
+    posProfile = playerProfile.loc[pos_players].copy()
+
+    gamelog = stats_obj.gamelog.copy()
+    pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(posProfile.index)]
+
+    lookups = precompute_market_lookups(
+        pos_gamelog, "PLAYER_NAME", "OPP", "GAME_DATE",
+        ["fantasy points prizepicks"], "POS", min_games=10)
+
+    return posProfile, lookups
+
+
+def get_wnba_position_data(playerProfile, playerDict, stats_obj, position):
+    """Get position-filtered profile and pre-computed lookups for WNBA."""
+    pos_players = [p for p, v in playerDict.items()
+                   if v.get("POS") == position and p in playerProfile.index]
+    posProfile = playerProfile.loc[pos_players].copy()
+
+    gamelog = stats_obj.gamelog.copy()
+    pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(posProfile.index)]
+
+    lookups = precompute_market_lookups(
+        pos_gamelog, "PLAYER_NAME", "OPP", "GAME_DATE",
+        ["fantasy points prizepicks"], "POS", min_games=8)
 
     return posProfile, lookups
 
@@ -280,10 +329,10 @@ def greedy_backward_elimination(current_features, full_profile, position, lookup
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate feature sets for player comps")
-    parser.add_argument("--league", required=True, choices=["NFL", "NHL"],
+    parser.add_argument("--league", required=True, choices=["NFL", "NHL", "NBA", "WNBA"],
                         help="League to evaluate")
-    parser.add_argument("--position", nargs="+", required=True,
-                        help="Position(s) to evaluate (e.g., WR, C W)")
+    parser.add_argument("--position", nargs="+", default=None,
+                        help="Position(s) to evaluate (e.g., WR, C W); defaults to all")
     parser.add_argument("--optimize", action="store_true",
                         help="Run weight optimization on the best feature set")
     parser.add_argument("--maxiter", type=int, default=20,
@@ -308,15 +357,29 @@ def main():
         if full_profile.empty:
             print("ERROR: Could not load NFL data")
             return
+        exclude = NFL_EXCLUDE
     elif args.league == "NHL":
         print("Loading NHL data...")
         stats_obj = StatsNHL()
         stats_obj.load()
         full_profile, all_players, id_to_name = stats_obj.build_comp_profile()
+        exclude = NHL_EXCLUDE
+    elif args.league == "NBA":
+        print("Loading NBA data...")
+        stats_obj = StatsNBA()
+        stats_obj.load()
+        full_profile, player_dict = stats_obj.build_comp_profile()
+        exclude = NBA_EXCLUDE
+    elif args.league == "WNBA":
+        print("Loading WNBA data...")
+        stats_obj = StatsWNBA()
+        stats_obj.load()
+        full_profile, player_dict = stats_obj.build_comp_profile()
+        exclude = WNBA_EXCLUDE
 
-    exclude = NFL_EXCLUDE if args.league == "NFL" else NHL_EXCLUDE
+    positions = args.position or list(current_weights.get(args.league, {}).keys())
 
-    for position in args.position:
+    for position in positions:
         print(f"\n{'='*60}")
         print(f"{args.league} {position}")
         print(f"{'='*60}")
@@ -340,6 +403,14 @@ def main():
             pos_profile, lookups = get_nhl_position_data(
                 full_profile, all_players, id_to_name, stats_obj, position)
             min_comps = 4 if position == "G" else 5
+        elif args.league == "NBA":
+            pos_profile, lookups = get_nba_position_data(
+                full_profile, player_dict, stats_obj, position)
+            min_comps = 5
+        elif args.league == "WNBA":
+            pos_profile, lookups = get_wnba_position_data(
+                full_profile, player_dict, stats_obj, position)
+            min_comps = 5
 
         player_opp_z, player_games, player_positions = lookups
         if not player_opp_z:
