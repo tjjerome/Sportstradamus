@@ -187,3 +187,4 @@ poetry.lock
 *.dat:shield
 archive/*
 src/sportstradamus/data/training_data/.gitignore:Zone.Identifier
+CLAUDE.md

@@ -976,16 +976,19 @@ class StatsNBA(Stats):
         playerList = self.players.get('-'.join([str(int(n)-1) for n in self.season.split("-")]), {})
         playerList.update(self.players.get(self.season, {}))
         playerProfile, playerDict = self.build_comp_profile(playerList)
-        first_pos = next(iter(stats["NBA"].values()))
-        features = list(first_pos.keys())
-        playerProfile = playerProfile[features].dropna()
+        all_features = set()
+        for pos_weights in stats["NBA"].values():
+            all_features.update(pos_weights.keys())
+        all_features = list(all_features)
+        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].dropna()
 
         comps = {}
         for position in self.positions:
             pos_weights = stats["NBA"][position]
+            pos_features = list(pos_weights.keys())
             pos_players = [p for p, v in playerDict.items()
                           if v["POS"] == position and p in playerProfile.index]
-            positionProfile = playerProfile.loc[pos_players]
+            positionProfile = playerProfile.loc[pos_players, pos_features]
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
@@ -1001,20 +1004,23 @@ class StatsNBA(Stats):
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
             stats = json.load(f)
 
-        first_pos = next(iter(stats["NBA"].values()))
-        features = list(first_pos.keys())
+        all_features = set()
+        for pos_weights in stats["NBA"].values():
+            all_features.update(pos_weights.keys())
+        all_features = list(all_features)
 
         playerProfile, playerDict = self.build_comp_profile()
-        playerProfile = playerProfile[features].dropna()
+        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].dropna()
 
         comps = {}
         for position in self.positions:
             pos_weights = stats["NBA"][position]
+            pos_features = list(pos_weights.keys())
             pos_players = [p for p, v in playerDict.items()
                           if v["POS"] == position and p in playerProfile.index]
             if len(pos_players) < 7:
                 continue
-            positionProfile = playerProfile.loc[pos_players]
+            positionProfile = playerProfile.loc[pos_players, pos_features]
             positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
@@ -2421,16 +2427,19 @@ class StatsWNBA(StatsNBA):
         playerList = self.players.get(self.season_start.year-1, {})
         playerList.update(self.players.get(self.season_start.year, {}))
         playerProfile, playerDict = self.build_comp_profile(playerList)
-        first_pos = next(iter(stats["WNBA"].values()))
-        features = list(first_pos.keys())
-        playerProfile = playerProfile[features].replace([np.nan, np.inf, -np.inf], 0)
+        all_features = set()
+        for pos_weights in stats["WNBA"].values():
+            all_features.update(pos_weights.keys())
+        all_features = list(all_features)
+        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].replace([np.nan, np.inf, -np.inf], 0)
 
         comps = {}
         for position in self.positions:
             pos_weights = stats["WNBA"][position]
+            pos_features = list(pos_weights.keys())
             pos_players = [p for p, v in playerDict.items()
                           if v["POS"] == position and p in playerProfile.index]
-            positionProfile = playerProfile.loc[pos_players]
+            positionProfile = playerProfile.loc[pos_players, pos_features]
             positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
@@ -2446,20 +2455,23 @@ class StatsWNBA(StatsNBA):
         with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
             stats = json.load(f)
 
-        first_pos = next(iter(stats["WNBA"].values()))
-        features = list(first_pos.keys())
+        all_features = set()
+        for pos_weights in stats["WNBA"].values():
+            all_features.update(pos_weights.keys())
+        all_features = list(all_features)
 
         playerProfile, playerDict = self.build_comp_profile()
-        playerProfile = playerProfile[features].replace([np.nan, np.inf, -np.inf], 0)
+        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].replace([np.nan, np.inf, -np.inf], 0)
 
         comps = {}
         for position in self.positions:
             pos_weights = stats["WNBA"][position]
+            pos_features = list(pos_weights.keys())
             pos_players = [p for p, v in playerDict.items()
                           if v["POS"] == position and p in playerProfile.index]
             if len(pos_players) < 7:
                 continue
-            positionProfile = playerProfile.loc[pos_players]
+            positionProfile = playerProfile.loc[pos_players, pos_features]
             positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
