@@ -258,25 +258,7 @@ def meditate(force, league):
 
         stat_data.update_player_comps()
         correlate(league, force)
-
-        # === SHARED TRAINING WINDOW ===
-        # Determine start_date once for the entire league so all markets train
-        # on the same date range. Start from the default tight window and expand
-        # in 30-day increments until every market in the league would produce at
-        # least MIN_TOTAL_ROWS rows (2500 training rows at a 70/15/15 split).
-        MIN_TOTAL_ROWS = 7500
-        default_days = 300
-        needed_days = default_days
-        for market in markets:
-            days = default_days
-            while days <= 1800:
-                candidate_start = (datetime.today() - timedelta(days=days)).date()
-                if count_training_rows(stat_data, market, candidate_start) >= MIN_TOTAL_ROWS:
-                    break
-                days += 30
-            needed_days = max(needed_days, days)
-        league_start_date = (datetime.today() - timedelta(days=needed_days)).date()
-        print(f"{league} training window: {league_start_date} ({needed_days} days)")
+        league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
             stat_dist = load_distribution_config()
@@ -315,13 +297,13 @@ def meditate(force, league):
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
-            # TODO rework matrix to include player names and game IDs so we can more easily update with new data without needing to reload all historical data
+            
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0)
                 cutoff_date = pd.to_datetime(M["Date"]).max().date()
                 M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > league_start_date)]
             else:
-                cutoff_date = None
+                cutoff_date = league_start_date
                 M = pd.DataFrame()
 
             new_M = stat_data.get_training_matrix(market, cutoff_date)
@@ -342,10 +324,11 @@ def meditate(force, league):
                 else:
                     M.loc[i, "Odds"] = 1-get_odds(row["Line"], row["EV"], dist, cv=cv, step=step, gate=_prep_gate or None)
 
-            M = trim_matrix(M, MIN_TOTAL_ROWS)
-            if len(M) < MIN_TOTAL_ROWS:
-                print(f"WARNING: {league} {market} has only {len(M)} rows after trimming (need {MIN_TOTAL_ROWS} for 5000 training rows)")
+            M = trim_matrix(M, 15000)
             M.to_csv(filepath)
+
+            # Write latest runtime comps to JSON for inspection
+            stat_data.save_comps()
 
             y = M[['Result']]
 
@@ -450,15 +433,16 @@ def meditate(force, league):
                 params = {
                     "feature_pre_filter": ["none", [False]],
                     "num_threads": ["none", [8]],
-                    "max_depth": ["int", {"low": 4, "high": 16, "log": False}],
-                    "max_bin": ["none", [63]],
+                    "max_depth": ["none", [-1]],
+                    "max_bin": ["none", [127]],
                     "hist_pool_size": ["none", [9*1024]],
-                    "num_leaves": ["int", {"low": 23, "high": 256, "log": False}],
+                    "path_smooth": ["float", {"low": 0, "high": 20, "log": False}],
+                    "num_leaves": ["int", {"low": 8, "high": 127, "log": False}],
                     "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
                     "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 30, "high": 100, "log": False}],
+                    "min_child_samples": ["int", {"low": 30, "high": 150, "log": False}],
                     "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
-                    "learning_rate": ["float", {"low": 0.001, "high": 0.1, "log": True}],
+                    "learning_rate": ["float", {"low": 0.001, "high": 0.15, "log": True}],
                     "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                     "bagging_freq": ["none", [1]]
@@ -468,7 +452,7 @@ def meditate(force, league):
                                             num_boost_round=999,
                                             nfold=4,
                                             early_stopping_rounds=50,
-                                            max_minutes=30,
+                                            max_minutes=60,
                                             n_trials=300,
                                             silence=True,
                                             )
@@ -701,8 +685,6 @@ def meditate(force, league):
             # === GENERATE TRAINING REPORT ===
             report()
 
-            # Write latest runtime comps to JSON for inspection
-            stat_data.save_comps()
 
 
 # ============================================================================
@@ -772,8 +754,6 @@ def see_features():
     model_list.sort()
     feature_importances = []
     feature_correlations = []
-    features_to_filter = {}
-    most_important = {}
     for model_str in tqdm(model_list, desc="Analyzing feature importances...", unit="market"):
         with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
             filedict = pickle.load(infile)
@@ -783,9 +763,8 @@ def see_features():
         M = pd.read_csv(filepath, index_col=0)
 
         y = M[['Result']]
-        C = M.corr(numeric_only=True)["Result"]
         X = M.drop(columns=['Result', 'EV', 'P'])
-        C = C.drop(['Result', 'EV', 'P'])
+        C = X.corrwith(M["Result"])
         
         # Drop distribution-specific parameters that aren't features
         dist = filedict["distribution"]
@@ -818,40 +797,24 @@ def see_features():
         explainer = shap.TreeExplainer(model.booster)
         subvals = explainer.shap_values(X)
         
-        # Handle different output shapes for different distributions
-        if dist in ("Gamma", "ZAGamma"):
-            # Gamma has 2 outputs (alpha, beta); ZAGamma has 3 (alpha, beta, gate)
+        # Aggregate |SHAP| across distribution outputs for multi-output models
+        if isinstance(subvals, list):
             subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
-        elif dist in ("NegBin", "ZINB"):
-            # NegBin has 2 outputs (total_count, probs); ZINB has 3 (total_count, probs, gate)
-            subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
-        else:
-            pass
 
-        vals = vals + np.mean(np.abs(subvals), axis=0)
+        vals += np.mean(np.abs(subvals), axis=0)
 
         vals = vals/np.sum(vals)*100
         feature_importances.append(
             {k: v for k, v in list(zip(features, vals))})
         feature_correlations.append(C.to_dict())
-        
-        features_to_filter[model_str[:-4]] = list(features[vals == 0])
-        most_important[model_str[:-4]] = list(features[np.argpartition(vals, -10)[-10:]])
 
     df = pd.DataFrame(feature_importances, index=[
                       market[:-4] for market in model_list]).fillna(0).infer_objects(copy=False).transpose()
     
     for league in ["NBA", "WNBA", "NFL", "NHL", "MLB"]:
         df[league + "_ALL"] = df[[col for col in df.columns if league in col]].mean(axis=1)
-        most_important[league + "_ALL"] = list(df[league + "_ALL"].sort_values(ascending=False).head(10).index)
 
     df["ALL"] = df[[col for col in df.columns if "ALL" in col]].mean(axis=1)
-    most_important["ALL"] = list(df["ALL"].sort_values(ascending=False).head(10).index)
-
-    with open(pkg_resources.files(data) / "features_to_filter.json", "w") as outfile:
-        json.dump(features_to_filter, outfile, indent=4)
-    with open(pkg_resources.files(data) / "most_important_features.json", "w") as outfile:
-        json.dump(most_important, outfile, indent=4)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
     pd.DataFrame(feature_correlations, index=[
                       market[:-4] for market in model_list]).T.to_csv(pkg_resources.files(data) / "feature_correlations.csv")
@@ -1738,8 +1701,9 @@ def correlate(league, force=False):
             usage = pd.DataFrame(
                 log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
             usage.reset_index(inplace=True)
-            game_df = game_df.merge(usage, how="left").fillna(0).infer_objects(copy=False)
-            game_df = game_df.loc[game_df[log_str["position"]] != None]
+            game_df = game_df.merge(usage, how="left")
+            game_df = game_df.loc[game_df[log_str["position"]].apply(lambda x: isinstance(x, str))]
+            game_df = game_df.fillna(0).infer_objects(copy=False)
             ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
                 [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
             game_df[log_str["position"]] = game_df[log_str["position"]] + \

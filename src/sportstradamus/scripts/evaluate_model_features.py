@@ -57,7 +57,7 @@ warnings.filterwarnings("ignore")
 
 # ─── Constants ─────────────────────────────────────────────────────────────────
 
-META_COLS = {"Date", "Player", "Player team", "Result", "Line", "Odds", "EV"}
+META_COLS = {"Date", "Player", "Player team", "Result", "Line", "Odds", "EV", "Archived"}
 
 # Weights for composite scoring
 W_MODEL   = dict(shap=0.35, corr=0.25, mi=0.20, stability=0.20)

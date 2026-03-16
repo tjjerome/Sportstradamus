@@ -12,7 +12,7 @@ import statsapi as mlb
 import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 import nflreadpy as nflr
-from scipy.stats import iqr, poisson, norm, zscore
+from scipy.stats import iqr, poisson, norm
 from time import sleep
 from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, stat_dist, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values
 import pandas as pd
@@ -203,6 +203,8 @@ class Stats:
         gameDates = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
         self.short_gamelog = self.gamelog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
+        _pc = self.log_strings["player"]
+        self.short_gamelog[_pc] = self.short_gamelog[_pc].apply(remove_accents)
         gameDates = pd.to_datetime(self.teamlog[self.log_strings["date"]]).dt.date
         self.short_teamlog = self.teamlog[(one_year_ago <= gameDates)
                                & (gameDates < date)].copy()
@@ -416,7 +418,7 @@ class Stats:
                 _cp_df_p['wtd_sq'] = _cp_df_p['weight'] * (
                     _cp_df_p['comp_mean'] - _cp_df_p['player'].map(_comp_wmean.fillna(0))) ** 2
                 _comp_wstd = np.sqrt(
-                    (_cp_df_p['wtd_sq'].groupby(_cp_df_p['player']).sum() / _wcnt_p)
+                    (_cp_df_p['wtd_sq'].groupby(_cp_df_p['player']).sum() / _wcnt_p).astype(float)
                 ).replace(0, np.nan).reindex(self.playerProfile.index)
                 self.playerProfile['comps z'] = (
                     _all_mean.reindex(self.playerProfile.index) - _comp_wmean) / _comp_wstd
@@ -620,8 +622,10 @@ class Stats:
         _opp_col = self.log_strings["opponent"]
         _player_col = self.log_strings["player"]
         _gl_z = self.short_gamelog[[_player_col, _opp_col, market]].copy()
-        _gl_z['_mkt_zscore'] = _gl_z.groupby(_player_col)[market].transform(
-            lambda x: zscore(x.astype(float)))
+        _gl_z[market] = _gl_z[market].astype(float)
+        _gl_groups = _gl_z.groupby(_player_col)[market]
+        _std = _gl_groups.transform('std').replace(0, np.nan)
+        _gl_z['_mkt_zscore'] = ((_gl_z[market] - _gl_groups.transform('mean')) / _std).fillna(0)
 
         if self.league == "MLB":
             _is_pitch_market = any(s in market for s in ["allowed", "pitch"])
@@ -654,7 +658,13 @@ class Stats:
                         stats.loc[player, 'Pitcher comps'] = playerGames[market].mean()/pitchGames[market].mean()
 
                 compGames[market] = compGames[market].astype(float)
-                scores = compGames.groupby(_player_col)[market].apply(zscore)
+                _comp_groups = compGames.groupby(_player_col)[market]
+                _comp_std = _comp_groups.transform('std').replace(0, np.nan)
+                scores = ((compGames[market] - _comp_groups.transform('mean')) / _comp_std).fillna(0)
+
+                _gl_groups = _gl_z.groupby(_player_col)[market]
+                _gl_std = _gl_groups.transform('std').replace(0, np.nan)
+                _gl_z['_mkt_zscore'] = ((_gl_z[market] - _gl_groups.transform('mean')) / _gl_std).fillna(0)
                 scores.index = scores.index.droplevel(0)
                 compGames[market] = scores
                 opp_comp_games = compGames.loc[compGames[_opp_col] == opponents[player], market]
@@ -833,6 +843,21 @@ class Stats:
         M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
         return M
+    
+    def trim_gamelog(self):
+        """
+        Trims the gamelog to the most recent 21500 rows of data plus one year.
+        """
+        if self.league == "NFL":
+            ROWS = 50000
+        else:
+            ROWS = 21500
+
+        last_training_day = pd.to_datetime(self.gamelog[self.gamelog[self.log_strings["usage"]] >= self.gamelog[self.log_strings["usage"]].quantile(.2)].iloc[-ROWS][self.log_strings['date']]).date()
+        cutoff_date = last_training_day - timedelta(days=300)
+        self.gamelog = self.gamelog.loc[pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date > cutoff_date].copy()
+
+        return last_training_day
 
 
 class StatsNBA(Stats):
@@ -958,8 +983,17 @@ class StatsNBA(Stats):
 
         playerProfile = (self.playerProfile
             .merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"),
-                   on="PLAYER_NAME", how='left', suffixes=('_x', None))
+                   on="PLAYER_NAME", how='outer', suffixes=('_x', None))
             .set_index("PLAYER_NAME"))
+
+        # Coalesce _x columns (gamelog values shadowed by roster values during merge)
+        _x_cols = [c for c in playerProfile.columns if c.endswith('_x')]
+        for col in _x_cols:
+            base = col[:-2]
+            if base in playerProfile.columns:
+                playerProfile[base] = playerProfile[base].fillna(playerProfile[col])
+        playerProfile.drop(columns=_x_cols, inplace=True, errors='ignore')
+        playerProfile.fillna(0, inplace=True)
 
         playerDict = {}
         for team in playerList.values():
@@ -980,7 +1014,7 @@ class StatsNBA(Stats):
         for pos_weights in stats["NBA"].values():
             all_features.update(pos_weights.keys())
         all_features = list(all_features)
-        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].dropna()
+        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].replace([np.nan, np.inf, -np.inf], 0)
 
         comps = {}
         for position in self.positions:
@@ -989,7 +1023,7 @@ class StatsNBA(Stats):
             pos_players = [p for p, v in playerDict.items()
                           if v["POS"] == position and p in playerProfile.index]
             positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
@@ -1010,7 +1044,7 @@ class StatsNBA(Stats):
         all_features = list(all_features)
 
         playerProfile, playerDict = self.build_comp_profile()
-        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].dropna()
+        playerProfile = playerProfile[[f for f in all_features if f in playerProfile.columns]].replace([np.nan, np.inf, -np.inf], 0)
 
         comps = {}
         for position in self.positions:
@@ -1021,7 +1055,7 @@ class StatsNBA(Stats):
             if len(pos_players) < 7:
                 continue
             positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
@@ -1032,6 +1066,33 @@ class StatsNBA(Stats):
         """
         Update data from the web API.
         """
+        # Fix corrupted POS values (integer 0 or None) from prior fillna(0) bug
+        # Step 1: Clean self.players — try to resolve from other seasons/teams
+        for season in self.players:
+            for team in self.players[season]:
+                for player, info in self.players[season][team].items():
+                    if not isinstance(info.get("POS"), str):
+                        resolved = None
+                        for s in reversed(list(self.players.keys())):
+                            for roster in self.players[s].values():
+                                pos = roster.get(player, {}).get("POS")
+                                if isinstance(pos, str) and pos in self.positions:
+                                    resolved = pos
+                                    break
+                            if resolved:
+                                break
+                        info["POS"] = resolved
+
+        # Step 2: Clean gamelog POS from self.players
+        if not self.gamelog.empty:
+            pos_col = self.log_strings["position"]
+            bad_pos = ~self.gamelog[pos_col].apply(lambda x: isinstance(x, str))
+            if bad_pos.any():
+                self.gamelog.loc[bad_pos, pos_col] = self.gamelog.loc[bad_pos].apply(
+                    lambda x: self.players.get(x.SEASON_YEAR, {}).get(
+                        x.TEAM_ABBREVIATION, {}).get(x.PLAYER_NAME, {}).get("POS"),
+                    axis=1)
+
         # Fetch regular season game logs
         latest_date = self.season_start
         if not self.gamelog.empty:
@@ -1054,41 +1115,92 @@ class StatsNBA(Stats):
             try:
                 playerBios = nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats(season=self.season).get_normalized_dict()["LeagueDashPlayerBioStats"]
 
-                shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(**{"season": self.season, "season_type_all_star": "Regular Season", "distance_range": "By Zone", "per_mode_detailed": "Per48"}).get_dict()['resultSets']
+                shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(**{"season": self.season, "season_type_all_star": "Regular Season", "distance_range": "By Zone", "per_mode_detailed": "PerGame"}).get_dict()['resultSets']
+                postup = nba.synergyplaytypes.SynergyPlayTypes(**{"league_id": "00", "season": self.season, "season_type_all_star": "Regular Season", "per_mode_simple": "PerGame", "player_or_team_abbreviation": "P", "type_grouping_nullable": "offensive", "play_type_nullable": "Postup"}).get_dict()['resultSets'][0]
+                handoff = nba.synergyplaytypes.SynergyPlayTypes(**{"league_id": "00", "season": self.season, "season_type_all_star": "Regular Season", "per_mode_simple": "PerGame", "player_or_team_abbreviation": "P", "type_grouping_nullable": "offensive", "play_type_nullable": "Handoff"}).get_dict()['resultSets'][0]
+                isolation = nba.synergyplaytypes.SynergyPlayTypes(**{"league_id": "00", "season": self.season, "season_type_all_star": "Regular Season", "per_mode_simple": "PerGame", "player_or_team_abbreviation": "P", "type_grouping_nullable": "offensive", "play_type_nullable": "Isolation"}).get_dict()['resultSets'][0]
+                picknroll = nba.synergyplaytypes.SynergyPlayTypes(**{"league_id": "00", "season": self.season, "season_type_all_star": "Regular Season", "per_mode_simple": "PerGame", "player_or_team_abbreviation": "P", "type_grouping_nullable": "offensive", "play_type_nullable": "PRBallHandler"}).get_dict()['resultSets'][0]
+                spotup = nba.synergyplaytypes.SynergyPlayTypes(**{"league_id": "00", "season": self.season, "season_type_all_star": "Regular Season", "per_mode_simple": "PerGame", "player_or_team_abbreviation": "P", "type_grouping_nullable": "offensive", "play_type_nullable": "Spotup"}).get_dict()['resultSets'][0]
+                putback = nba.synergyplaytypes.SynergyPlayTypes(**{"league_id": "00", "season": self.season, "season_type_all_star": "Regular Season", "per_mode_simple": "PerGame", "player_or_team_abbreviation": "P", "type_grouping_nullable": "offensive", "play_type_nullable": "OffRebound"}).get_dict()['resultSets'][0]
                 break
             except:
                 playerBios = []
-                shotData = {'rowSet':[]}
+                shotData = {'rowSet':[], 'headers':[{},{'columnNames':[]}]}
+                postup = {'rowSet':[], 'headers':[]}
+                handoff = {'rowSet':[], 'headers':[]}
+                isolation = {'rowSet':[], 'headers':[]}
+                picknroll = {'rowSet':[], 'headers':[]}
+                spotup = {'rowSet':[], 'headers':[]}
+                putback = {'rowSet':[], 'headers':[]}
                 sleep(.1)
                 i = i+1
 
         playerBios = pd.DataFrame(playerBios)
+        shotData = pd.DataFrame(shotData["rowSet"], columns=shotData["headers"][1]['columnNames'])
+        postup = pd.DataFrame(postup["rowSet"], columns=postup["headers"])
+        handoff = pd.DataFrame(handoff["rowSet"], columns=handoff["headers"])
+        isolation = pd.DataFrame(isolation["rowSet"], columns=isolation["headers"])
+        picknroll = pd.DataFrame(picknroll["rowSet"], columns=picknroll["headers"])
+        spotup = pd.DataFrame(spotup["rowSet"], columns=spotup["headers"])
+        putback = pd.DataFrame(putback["rowSet"], columns=putback["headers"])
+
         if playerBios.empty:
             self.players[self.season] = self.players.get('-'.join([str(int(x)-1) for x in self.season.split('-')]), {})
         else:
-            playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
-            shotMap = []
-            for row in shotData['rowSet']:
-                fga = np.nansum(np.array(row[7:-6:3],dtype=float))
-                if fga>0:
-                    record = {
-                        "PLAYER_NAME": remove_accents(row[1]),
-                        "TEAM_ABBREVIATION": row[3],
-                        "RA_PCT": (row[7] if row[7] else 0)/fga,
-                        "ITP_PCT": (row[10] if row[10] else 0)/fga,
-                        "MR_PCT": (row[13] if row[13] else 0)/fga,
-                        "C3_PCT": (row[28] if row[28] else 0)/fga,
-                        "B3_PCT": (row[22] if row[22] else 0)/fga
-                    }
-                    shotMap.append(record)
+            shotData = shotData.merge(postup[["PLAYER_ID", "POSS_PCT", "PPP"]].rename(columns={"POSS_PCT": "POST_PCT", "PPP": "POST_PPP"}),on="PLAYER_ID", how='outer')
+            shotData = shotData.merge(handoff[["PLAYER_ID", "POSS_PCT", "PPP"]].rename(columns={"POSS_PCT": "HANDOFF_PCT", "PPP": "HANDOFF_PPP"}),on="PLAYER_ID", how='outer')
+            shotData = shotData.merge(isolation[["PLAYER_ID", "POSS_PCT", "PPP"]].rename(columns={"POSS_PCT": "ISO_PCT", "PPP": "ISO_PPP"}),on="PLAYER_ID", how='outer')
+            shotData = shotData.merge(picknroll[["PLAYER_ID", "POSS_PCT", "PPP"]].rename(columns={"POSS_PCT": "PR_PCT", "PPP": "PR_PPP"}),on="PLAYER_ID", how='outer')
+            shotData = shotData.merge(spotup[["PLAYER_ID", "POSS_PCT", "PPP"]].rename(columns={"POSS_PCT": "SPOT_PCT", "PPP": "SPOT_PPP"}),on="PLAYER_ID", how='outer')
+            shotData = shotData.merge(putback[["PLAYER_ID", "POSS_PCT", "PPP"]].rename(columns={"POSS_PCT": "PUTBACK_PCT", "PPP": "PUTBACK_PPP"}),on="PLAYER_ID", how='outer')
+            shotData = shotData.fillna(0)
+            fga = shotData["FGA"].iloc[:,:3].sum(axis=1)+shotData["FGA"].iloc[:,5::2].sum(axis=1)
+            shotData["ITP_PCT"] = shotData["FGA"].iloc[:,:2].sum(axis=1)/fga
+            shotData["ITP_PPP"] = shotData["FGM"].iloc[:,:2].sum(axis=1)/shotData["FGA"].iloc[:,:2].sum(axis=1)*2
+            shotData.loc[shotData["FGA"].iloc[:,:2].sum(axis=1)<0.5, "ITP_PPP"] = 0
+            shotData["MR_PCT"] = shotData["FGA"].iloc[:,2]/fga
+            shotData["MR_PPP"] = shotData["FGM"].iloc[:,2]/shotData["FGA"].iloc[:,2]*2
+            shotData.loc[shotData["FGA"].iloc[:,7]<0.5, "MR_PPP"] = 0
+            shotData["C3_PCT"] = shotData["FGA"].iloc[:,5]/fga
+            shotData["C3_PPP"] = shotData["FGM"].iloc[:,5]/shotData["FGA"].iloc[:,5]*3
+            shotData.loc[shotData["FGA"].iloc[:,7]<0.5, "C3_PPP"] = 0
+            shotData["B3_PCT"] = shotData["FGA"].iloc[:,7]/fga
+            shotData["B3_PPP"] = shotData["FGM"].iloc[:,7]/shotData["FGA"].iloc[:,7]*3
+            shotData.loc[shotData["FGA"].iloc[:,7]<0.5, "B3_PPP"] = 0
+            shotData = shotData.fillna(0)
 
-            player_df = player_df.merge(playerBios,on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y")).merge(pd.DataFrame(shotMap),on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y"))
-            # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
+            playerBios = playerBios.merge(shotData,on="PLAYER_ID",suffixes=(None,"_y"), how="outer").fillna(0)
+            playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
+            player_df = player_df.merge(playerBios, on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_x"), how="outer")
+            # For traded players, the CSV has the old team and playerBios has the new team,
+            # producing two incomplete rows. Combine them by taking the first non-NaN value
+            # per column, with playerBios rows (non-NaN PLAYER_ID) sorted first so their
+            # TEAM_ABBREVIATION (current team) is preferred.
+            player_df = (player_df
+                .sort_values("PLAYER_ID", na_position="last")
+                .groupby("PLAYER_NAME", sort=False)
+                .first()
+                .reset_index())
             player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
             player_df.POS = player_df.POS.str[0]
             player_df.index = player_df.PLAYER_NAME
+            # Fill NaN POS from prior-season data
+            nan_pos = player_df.POS.isna()
+            if nan_pos.any():
+                for player_name in player_df.loc[nan_pos].index:
+                    for season in reversed(list(self.players.keys())):
+                        for roster in self.players[season].values():
+                            pos = roster.get(player_name, {}).get("POS")
+                            if isinstance(pos, str) and pos in self.positions:
+                                player_df.loc[player_name, "POS"] = pos
+                                break
+                        if pd.notna(player_df.loc[player_name, "POS"]):
+                            break
+                player_df.POS = player_df.POS.fillna("W")
             player_df["PLAYER_BMI"] = player_df["PLAYER_WEIGHT"]/player_df["PLAYER_HEIGHT_INCHES"]/player_df["PLAYER_HEIGHT_INCHES"]
-            player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS", "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]].apply(lambda x: x).replace(np.nan, 0)
+            numeric_cols = ["AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "ITP_PCT", "ITP_PPP", "MR_PCT", "MR_PPP", "C3_PCT", "C3_PPP", "B3_PCT", "B3_PPP", "POST_PCT", "POST_PPP", "HANDOFF_PCT", "HANDOFF_PPP", "ISO_PCT", "ISO_PPP", "PR_PCT", "PR_PPP", "SPOT_PCT", "SPOT_PPP", "PUTBACK_PCT", "PUTBACK_PPP"]
+            player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS"] + numeric_cols].apply(lambda x: x)
+            player_df[numeric_cols] = player_df[numeric_cols].fillna(0)
 
             player_df = {level: player_df.xs(level).T.to_dict()
                         for level in player_df.index.levels[0]}
@@ -1105,7 +1217,9 @@ class StatsNBA(Stats):
             "Guard-Forward": "W",
             "Center": "B",
             "Forward-Center": "B",
-            "Center-Forward": "B"
+            "Center-Forward": "B",
+            "Center-Guard": "B",
+            "Guard-Center": "W",
         }
 
         self.upcoming_games = {}
@@ -1201,20 +1315,19 @@ class StatsNBA(Stats):
                 sleep(0.2)
                 i += 1
 
-        nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
-        adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
-        usg_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
-        teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
-        sco_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
-        adv_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+        adv_teamlog_idx = {(g["TEAM_ID"], g["GAME_ID"]): g for g in adv_teamlog}
+        sco_teamlog_idx = {(g["TEAM_ID"], g["GAME_ID"]): g for g in sco_teamlog}
+        adv_gamelog_idx = {(g["PLAYER_ID"], g["GAME_ID"]): g for g in adv_gamelog}
+        usg_gamelog_idx = {(g["PLAYER_ID"], g["GAME_ID"]): g for g in usg_gamelog}
 
-        for i in np.arange(len(teamlog)):
-            adv_game = [g for g in adv_teamlog if g["TEAM_ID"] == teamlog[i]["TEAM_ID"] and g["GAME_ID"] == teamlog[i]["GAME_ID"]]
-            sco_game = [g for g in sco_teamlog if g["TEAM_ID"] == teamlog[i]["TEAM_ID"] and g["GAME_ID"] == teamlog[i]["GAME_ID"]]
-            if len(adv_game):
-                teamlog[i] = teamlog[i] | adv_game[0]
-            if len(sco_game):
-                teamlog[i] = teamlog[i] | sco_game[0]
+        for i in range(len(teamlog)):
+            key = (teamlog[i]["TEAM_ID"], teamlog[i]["GAME_ID"])
+            adv_game = adv_teamlog_idx.get(key)
+            sco_game = sco_teamlog_idx.get(key)
+            if adv_game:
+                teamlog[i] = teamlog[i] | adv_game
+            if sco_game:
+                teamlog[i] = teamlog[i] | sco_game
 
         team_df = []
         for team1, team2 in zip(*[iter(teamlog)]*2):
@@ -1253,22 +1366,27 @@ class StatsNBA(Stats):
             player_id = game["PLAYER_ID"]
             game["PLAYER_NAME"] = remove_accents(game["PLAYER_NAME"])
 
-            adv_game = [g for g in adv_gamelog if g["PLAYER_ID"] == player_id and g["GAME_ID"] == game["GAME_ID"]]
-            usg_game = [g for g in usg_gamelog if g["PLAYER_ID"] == player_id and g["GAME_ID"] == game["GAME_ID"]]
+            adv_game = adv_gamelog_idx.get((player_id, game["GAME_ID"]))
+            usg_game = usg_gamelog_idx.get((player_id, game["GAME_ID"]))
 
             self.players[self.season].setdefault(game["TEAM_ABBREVIATION"], {})
-            if game["PLAYER_NAME"] not in self.players[self.season][game["TEAM_ABBREVIATION"]]:
+            existing_pos = self.players[self.season][game["TEAM_ABBREVIATION"]].get(
+                game["PLAYER_NAME"], {}).get("POS")
+            if game["PLAYER_NAME"] not in self.players[self.season][game["TEAM_ABBREVIATION"]] or not isinstance(existing_pos, str):
                 # Fetch player information if not already present
                 position = None
                 for season in list(self.players.keys())[::-1]:
-                    if position is None:
+                    if not isinstance(position, str):
                         position = self.players[season].get(game["TEAM_ABBREVIATION"], {}).get(
                             game["PLAYER_NAME"], {}).get("POS")
-                        
-                    if position is None:
+
+                    if not isinstance(position, str):
                         for team in self.players[season].keys():
                             position = self.players[season][team].get(
                                 game["PLAYER_NAME"], {}).get("POS")
+
+                if not isinstance(position, str):
+                    position = None
 
                 if position is None:
                     try:
@@ -1277,7 +1395,7 @@ class StatsNBA(Stats):
                             ).get_normalized_dict()["CommonPlayerInfo"][0].get("POSITION")
                     except:
                         position = "Forward-Guard"
-                    position = position_map.get(position)
+                    position = position_map.get(position, "W")
 
                 self.players[self.season][game["TEAM_ABBREVIATION"]
                                           ].setdefault(game["PLAYER_NAME"], {})["POS"] = position
@@ -1316,11 +1434,11 @@ class StatsNBA(Stats):
             game["BLKA_48"] = game["BLKA"] / game["MIN"] * 48
             game["STL_48"] = game["STL"] / game["MIN"] * 48
 
-            if len(adv_game):
-                game.update(adv_game[0])
+            if adv_game:
+                game.update(adv_game)
 
-            if len(usg_game):
-                game.update(usg_game[0])
+            if usg_game:
+                game.update(usg_game)
 
             nba_df.append(game)
 
@@ -2185,7 +2303,9 @@ class StatsWNBA(StatsNBA):
         player_df.POS = player_df.POS.str[0]
         player_df.index = player_df.PLAYER_NAME
         player_df["PLAYER_BMI"] = player_df["PLAYER_WEIGHT"]/player_df["PLAYER_HEIGHT_INCHES"]/player_df["PLAYER_HEIGHT_INCHES"]
-        player_dict = player_df.groupby("TEAM_ABBREVIATION")[["POS", "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]].apply(lambda x: x).replace([np.nan, np.inf, -np.inf], 0)
+        wnba_numeric_cols = ["AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]
+        player_dict = player_df.groupby("TEAM_ABBREVIATION")[["POS"] + wnba_numeric_cols].apply(lambda x: x)
+        player_dict[wnba_numeric_cols] = player_dict[wnba_numeric_cols].replace([np.nan, np.inf, -np.inf], 0)
 
         player_dict = {level: player_dict.xs(level).T.to_dict()
                      for level in player_dict.index.levels[0]}
@@ -2409,8 +2529,17 @@ class StatsWNBA(StatsNBA):
 
         playerProfile = (self.playerProfile
             .merge(pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"),
-                   on="PLAYER_NAME", how='left', suffixes=('_x', None))
+                   on="PLAYER_NAME", how='outer', suffixes=('_x', None))
             .set_index("PLAYER_NAME"))
+
+        # Coalesce _x columns (gamelog values shadowed by roster values during merge)
+        _x_cols = [c for c in playerProfile.columns if c.endswith('_x')]
+        for col in _x_cols:
+            base = col[:-2]
+            if base in playerProfile.columns:
+                playerProfile[base] = playerProfile[base].fillna(playerProfile[col])
+        playerProfile.drop(columns=_x_cols, inplace=True, errors='ignore')
+        playerProfile.fillna(0, inplace=True)
 
         playerDict = {}
         for team in playerList.values():
@@ -2440,7 +2569,7 @@ class StatsWNBA(StatsNBA):
             pos_players = [p for p, v in playerDict.items()
                           if v["POS"] == position and p in playerProfile.index]
             positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
@@ -2472,7 +2601,7 @@ class StatsWNBA(StatsNBA):
             if len(pos_players) < 7:
                 continue
             positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
@@ -4732,8 +4861,8 @@ class StatsNFL(Stats):
             positionProfile = playerProfile.loc[playerProfile.position == position]
             positionProfile[filterStat[position]] = positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].quantile(.25)]
-            positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
-            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace([np.nan, np.inf, -np.inf], 0)
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
@@ -4763,10 +4892,10 @@ class StatsNFL(Stats):
             positionProfile = playerProfile.loc[playerProfile.position == position]
             positionProfile[filterStat[position]] = positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             positionProfile = positionProfile.loc[positionProfile[filterStat[position]] >= positionProfile[filterStat[position]].quantile(.25)]
-            positionProfile = positionProfile[list(stats["NFL"][position].keys())].dropna()
+            positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace([np.nan, np.inf, -np.inf], 0)
             if len(positionProfile) < 7:
                 continue
-            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
@@ -5705,10 +5834,10 @@ class StatsNHL(Stats):
         for position in ["C", "W", "D", "G"]:
             pos_players = [p for p, v in all_players.items()
                           if v.get("position") == position and p in playerProfile.index]
-            positionProfile = playerProfile.loc[pos_players, list(stats["NHL"][position].keys())].dropna()
+            positionProfile = playerProfile.loc[pos_players, list(stats["NHL"][position].keys())].replace([np.nan, np.inf, -np.inf], 0)
             positionProfile.index = positionProfile.index.map(lambda x: id_to_name.get(x, x))
             positionProfile = positionProfile[~positionProfile.index.duplicated(keep='first')]
-            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x-x.mean())/x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
             knn = BallTree(positionProfile)
             min_k = 4 if position == "G" else 5
@@ -5733,10 +5862,10 @@ class StatsNHL(Stats):
                           if v.get("position") == position and p in playerProfile.index]
             if len(pos_players) < 7:
                 continue
-            positionProfile = playerProfile.loc[pos_players, list(stats["NHL"][position].keys())].dropna()
+            positionProfile = playerProfile.loc[pos_players, list(stats["NHL"][position].keys())].replace([np.nan, np.inf, -np.inf], 0)
             positionProfile.index = positionProfile.index.map(lambda x: id_to_name.get(x, x))
             positionProfile = positionProfile[~positionProfile.index.duplicated(keep='first')]
-            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+            positionProfile = positionProfile.apply(lambda x: (x - x.mean()) / x.std(), axis=0).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
             knn = BallTree(positionProfile)
             min_k = 4 if position == "G" else 5
