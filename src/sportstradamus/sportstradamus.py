@@ -35,6 +35,10 @@ pd.set_option('mode.chained_assignment', None)
 pd.set_option('future.no_silent_downcasting', True)
 os.environ["LINE_PROFILE"] = "0"
 
+# Shared state for multiprocessing workers. Populated before Pool creation
+# so forked workers inherit it via copy-on-write instead of pickling.
+_pool_shared = {}
+
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
 @line_profiler.profile
@@ -584,13 +588,21 @@ def find_correlation(offers, stats, platform):
                 payouts = payout_table[platform]
                 max_boost = 2.5 if platform == "Underdog" else 60
 
+                _pool_shared.update({
+                    'p_model': p_model, 'p_books': p_books, 'boosts': boosts,
+                    'M': M, 'C': C, 'EV': EV, 'bet_df': bet_df,
+                    'info': info, 'payouts': payouts, 'max_boost': max_boost,
+                })
                 with Pool(processes=4) as p:
                     chunk_size = len(combos) // 4
                     if chunk_size > 0:
-                        combos_chunks = [(combos[i:i + chunk_size], p_model, p_books, boosts, M, C, EV, bet_df, info, payouts, max_boost) for i in range(0, len(combos), chunk_size)]
+                        combos_chunks = [combos[i:i + chunk_size] for i in range(0, len(combos), chunk_size)]
+                        del combos
 
                         for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} Parlays", leave=False):
                             best_bets.extend(result)
+                        del combos_chunks
+                _pool_shared.clear()
 
                 if len(best_bets) > 0:
                     bets = pd.DataFrame(best_bets)
@@ -626,8 +638,17 @@ def find_correlation(offers, stats, platform):
 
     return df.drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
 
-def compute_bets(args):
-    combos, p_model, p_books, boosts, M, C, EV, bet_df, info, payouts, max_boost = args
+def compute_bets(combos):
+    p_model = _pool_shared['p_model']
+    p_books = _pool_shared['p_books']
+    boosts = _pool_shared['boosts']
+    M = _pool_shared['M']
+    C = _pool_shared['C']
+    EV = _pool_shared['EV']
+    bet_df = _pool_shared['bet_df']
+    info = _pool_shared['info']
+    payouts = _pool_shared['payouts']
+    max_boost = _pool_shared['max_boost']
     results = []
     n = len(combos)
     pass_log = np.zeros(n)
