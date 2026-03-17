@@ -66,6 +66,81 @@ def save_zi_config(config):
     with open(filepath, 'w') as f:
         json.dump(config, f, indent=4)
 
+def warm_start_hyper_opt(model, hp_dict, train_set, initial_params,
+                         num_boost_round=999, nfold=4,
+                         early_stopping_rounds=50, max_minutes=15,
+                         n_trials=100, silence=True):
+    """Run a shortened hyper_opt seeded with previous best parameters."""
+    import optuna
+    from optuna.samplers import TPESampler
+    from optuna.integration import LightGBMPruningCallback
+
+    tunable_params = {k for k, v in hp_dict.items() if v[0] != "none"}
+
+    def objective(trial):
+        hyper_params = {}
+        for param_name, param_value in hp_dict.items():
+            param_type = param_value[0]
+            if param_type == "categorical" or param_type == "none":
+                hyper_params[param_name] = trial.suggest_categorical(param_name, param_value[1])
+            elif param_type == "float":
+                c = param_value[1]
+                hyper_params[param_name] = trial.suggest_float(
+                    param_name, low=c["low"], high=c["high"], log=c["log"])
+            elif param_type == "int":
+                c = param_value[1]
+                hyper_params[param_name] = trial.suggest_int(
+                    param_name, low=c["low"], high=c["high"], log=c["log"])
+
+        if "boosting" not in hyper_params:
+            hyper_params["boosting"] = trial.suggest_categorical("boosting", ["gbdt"])
+
+        pruning_callback = LightGBMPruningCallback(trial, model.dist.loss_fn)
+        early_stopping_callback = lgb.early_stopping(
+            stopping_rounds=early_stopping_rounds, verbose=False)
+
+        cv_result = model.cv(hyper_params, train_set,
+                             num_boost_round=num_boost_round,
+                             nfold=nfold,
+                             callbacks=[pruning_callback, early_stopping_callback],
+                             seed=None)
+
+        opt_rounds = np.argmin(
+            np.array(cv_result[f"valid {model.dist.loss_fn}-mean"])) + 1
+        trial.set_user_attr("opt_round", int(opt_rounds))
+        return np.min(np.array(cv_result[f"valid {model.dist.loss_fn}-mean"]))
+
+    if silence:
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    sampler = TPESampler()
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20)
+    study = optuna.create_study(sampler=sampler, pruner=pruner, direction="minimize",
+                                study_name="LightGBMLSS Warm-Start Optimization")
+
+    # Enqueue previous best params as the first trial
+    seed_params = {k: v for k, v in initial_params.items() if k in tunable_params}
+    seed_params["boosting"] = "gbdt"
+    study.enqueue_trial(seed_params)
+
+    study.optimize(objective, n_trials=n_trials, timeout=60 * max_minutes,
+                   show_progress_bar=True)
+
+    print("\nWarm-Start Hyper-Parameter Optimization finished.")
+    print("  Number of finished trials: ", len(study.trials))
+    print("  Best trial:")
+    opt_param = study.best_trial
+    opt_param.params["opt_rounds"] = int(
+        study.trials_dataframe()["user_attrs_opt_round"][
+            study.trials_dataframe()["value"].idxmin()])
+
+    print("    Value: {}".format(opt_param.value))
+    print("    Params: ")
+    for key, value in opt_param.params.items():
+        print("    {}: {}".format(key, value))
+
+    return opt_param.params
+
 # ============================================================================
 # MAIN TRAINING PIPELINE
 # ============================================================================
@@ -425,25 +500,26 @@ def meditate(force, league):
             model = LightGBMLSS(dist_obj)
             set_model_start_values(model, dist, X_train)
 
+            hp_search_space = {
+                "feature_pre_filter": ["none", [False]],
+                "num_threads": ["none", [8]],
+                "max_depth": ["none", [-1]],
+                "max_bin": ["none", [127]],
+                "hist_pool_size": ["none", [9*1024]],
+                "path_smooth": ["float", {"low": 0, "high": 20, "log": False}],
+                "num_leaves": ["int", {"low": 8, "high": 127, "log": False}],
+                "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
+                "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
+                "min_child_samples": ["int", {"low": 30, "high": 150, "log": False}],
+                "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
+                "learning_rate": ["float", {"low": 0.001, "high": 0.15, "log": True}],
+                "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
+                "bagging_freq": ["none", [1]]
+            }
+
             if opt_params is None or opt_params.get("opt_rounds") is None or force:
-                params = {
-                    "feature_pre_filter": ["none", [False]],
-                    "num_threads": ["none", [8]],
-                    "max_depth": ["none", [-1]],
-                    "max_bin": ["none", [127]],
-                    "hist_pool_size": ["none", [9*1024]],
-                    "path_smooth": ["float", {"low": 0, "high": 20, "log": False}],
-                    "num_leaves": ["int", {"low": 8, "high": 127, "log": False}],
-                    "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
-                    "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
-                    "min_child_samples": ["int", {"low": 30, "high": 150, "log": False}],
-                    "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
-                    "learning_rate": ["float", {"low": 0.001, "high": 0.15, "log": True}],
-                    "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                    "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                    "bagging_freq": ["none", [1]]
-                }
-                opt_params = model.hyper_opt(params,
+                opt_params = model.hyper_opt(hp_search_space,
                                             dtrain,
                                             num_boost_round=999,
                                             nfold=4,
@@ -452,6 +528,11 @@ def meditate(force, league):
                                             n_trials=300,
                                             silence=True,
                                             )
+            else:
+                opt_params = warm_start_hyper_opt(model, hp_search_space, dtrain,
+                                                  opt_params,
+                                                  n_trials=100,
+                                                  max_minutes=15)
 
             model.train(opt_params,
                         dtrain,
@@ -1668,11 +1749,8 @@ def correlate(league, force=False):
         team_matrix = matrix.loc[matrix.TEAM == team].drop(columns="TEAM")
         team_matrix = team_matrix.loc[:,((team_matrix==0).mean() < .5)]
         team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
-        c = team_matrix.corr(min_periods=int(len(team_matrix)*.75)).unstack()
-        # c = c.iloc[:int(len(c)/2)]
-        # l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-        # l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-        # c = c.loc[[x != y for x, y in zip(l1, l2)]]
+        c_spearman = team_matrix.corr(method='spearman', min_periods=int(len(team_matrix)*.75)).unstack()
+        c = 2 * np.sin(np.pi / 6 * c_spearman)
         c = c.reindex(c.abs().sort_values(ascending=False).index).dropna()
         c = c.loc[c.abs()>0.05]
         big_c.update({team: c})
