@@ -1,4 +1,6 @@
-from sportstradamus.helpers import scraper, Archive, no_vig_odds
+from sportstradamus.helpers import Scrape, Archive, no_vig_odds
+
+scraper = Scrape()
 from sportstradamus.stats import StatsNFL
 from datetime import datetime, timedelta
 from tqdm import tqdm

@@ -1,8 +1,9 @@
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.books import get_pp, get_ud, get_sleeper, get_parp
-from sportstradamus.helpers import archive, get_ev, get_odds, stat_cv, stat_std, stat_zi, stat_map, accel_asc, banned, set_model_start_values
-from sportstradamus.train import fused_loc
+from sportstradamus.helpers import Archive, fused_loc, get_ev, get_odds, stat_cv, stat_std, stat_zi, stat_map, accel_asc, banned, set_model_start_values
+
+archive = Archive()
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request

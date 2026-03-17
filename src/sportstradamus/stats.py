@@ -14,7 +14,10 @@ import nfl_data_py as nfl
 import nflreadpy as nflr
 from scipy.stats import iqr, poisson, norm
 from time import sleep
-from sportstradamus.helpers import scraper, mlb_pitchers, archive, abbreviations, combo_props, stat_cv, stat_dist, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values
+from sportstradamus.helpers import Archive, Scrape, get_mlb_pitchers, abbreviations, combo_props, stat_cv, stat_dist, remove_accents, get_ev, get_odds, get_trends, feature_filter, fit_distro, set_model_start_values
+
+archive = Archive()
+scraper = Scrape()
 import pandas as pd
 import warnings
 import requests
@@ -2627,7 +2630,7 @@ class StatsMLB(Stats):
         """
         super().__init__()
         self.season_start = datetime(2024, 3, 28).date()
-        self.pitchers = mlb_pitchers
+        self.pitchers = get_mlb_pitchers()
         self.gameIds = []
         self.gamelog = pd.DataFrame()
         self.teamlog = pd.DataFrame()
