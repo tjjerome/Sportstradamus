@@ -27,8 +27,6 @@ import warnings
 with open((pkg_resources.files(creds) / "keys.json"), "r") as infile:
     keys = json.load(infile)
     odds_api = keys["odds_api"]
-    scrapeops = keys["scrapeops"]
-    apikey = keys["scrapingfish"]
 
 with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
     abbreviations = json.load(infile)
@@ -88,30 +86,62 @@ def get_active_sports():
     return sports
 
 class Scrape:
-    def __init__(self, apikey):
+    def __init__(self):
         """
-        Initialize the Scrape object with the provided API key.
+        Initialize the Scrape object. Loads API keys from credentials.
+        Browser headers are fetched lazily on first use.
+        """
+        with open(pkg_resources.files(creds) / "keys.json", "r") as f:
+            _keys = json.load(f)
+        self.apikey = _keys["scrapingfish"]
+        self._scrapeops_key = _keys["scrapeops"]
+        self._headers = None
+        self._header = None
+        self._weights = None
 
-        Args:
-            apikey (str): API key for fetching browser headers.
-        """
-        self.headers = requests.get(
-            f"http://headers.scrapeops.io/v1/browser-headers?api_key={scrapeops}"
-        ).json()["result"]
-        self.header = random.choice(self.headers)
-        self.weights = np.ones([len(self.headers)])
+    def _ensure_headers(self):
+        if self._headers is None:
+            self._headers = requests.get(
+                f"http://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}"
+            ).json()["result"]
+            self._header = random.choice(self._headers)
+            self._weights = np.ones([len(self._headers)])
+
+    @property
+    def headers(self):
+        self._ensure_headers()
+        return self._headers
+
+    @property
+    def header(self):
+        self._ensure_headers()
+        return self._header
+
+    @header.setter
+    def header(self, value):
+        self._header = value
+
+    @property
+    def weights(self):
+        self._ensure_headers()
+        return self._weights
+
+    @weights.setter
+    def weights(self, value):
+        self._weights = value
 
     def _new_headers(self):
         """
         Update the weights of the headers and choose a new header based on the weights.
         """
-        for i in range(len(self.headers)):
-            if self.headers[i] == self.header:
-                self.weights[i] = 0
+        self._ensure_headers()
+        for i in range(len(self._headers)):
+            if self._headers[i] == self._header:
+                self._weights[i] = 0
             else:
-                self.weights[i] += 1
+                self._weights[i] += 1
 
-        self.header = random.choices(self.headers, weights=self.weights)[0]
+        self._header = random.choices(self._headers, weights=self._weights)[0]
 
     def get(self, url, max_attempts=3, headers={}, params={}):
         """
@@ -154,7 +184,7 @@ class Scrape:
 
     def get_proxy(self, url, headers={}):
         params = {
-            "api_key": apikey,
+            "api_key": self.apikey,
             "url": url
         }
 
@@ -185,7 +215,7 @@ class Scrape:
 
     def post(self, url, max_attempts=3, headers={}, params={}):
         """
-        Perform a GET request to the specified URL with the provided headers and parameters.
+        Perform a POST request to the specified URL with the provided headers and parameters.
 
         Args:
             url (str): The URL to fetch.
@@ -528,7 +558,8 @@ def clean_archive(a, cutoff_date=None):
 
 class Archive:
     """
-    A class to manage the archive of sports data.
+    A class to manage the archive of sports data. Uses singleton pattern
+    so all consumers share one instance and one copy of loaded data.
 
     Attributes:
         archive (dict): The archive data.
@@ -539,12 +570,24 @@ class Archive:
         write(): Write the archive data to a file.
     """
 
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self):
         """
         Initialize the Archive class.
 
         Loads the archive data from a file if it exists.
         """
+        if self._initialized:
+            return
+        self._initialized = True
+
         # filepath = pkg_resources.files(data) / "archive.dat"
         # if os.path.isfile(filepath):
         #     with open(filepath, "rb") as infile:
@@ -561,11 +604,11 @@ class Archive:
         #             self.archive = merge_dict(new_archive, self.archive)
 
         self.archive = {}
+        self._loaded = set()
         leagues = [f.name for f in os.scandir("archive") if f.is_dir()]
         for league in leagues:
             self.archive[league] = hdfdir_archive(f"archive/{league}", {}, protocol=-1)
-            self.archive[league].load()
-                        
+
         self.default_totals = {
             "MLB": 4.671,
             "NBA": 111.667,
@@ -574,7 +617,16 @@ class Archive:
             "NHL": 2.674
             }
         
-        self.changed_leagues = set()
+        self._changed_keys = {}
+
+    def _mark_changed(self, league, market):
+        self._changed_keys.setdefault(league, set()).add(market)
+
+    def _ensure_loaded(self, league):
+        if league not in self._loaded and league in self.archive:
+            if isinstance(self.archive[league], cache):
+                self.archive[league].load()
+            self._loaded.add(league)
 
     def __getitem__(self, item):
         """
@@ -586,6 +638,7 @@ class Archive:
         Returns:
             The value associated with the given key in the archive.
         """
+        self._ensure_loaded(item)
         return self.archive[item]
 
     def add(self, o, lines, key):
@@ -600,7 +653,7 @@ class Archive:
         Returns:
             None
         """
-        self.changed_leagues.add(o["League"])
+        self._ensure_loaded(o["League"])
         market = o["Market"].replace("H2H ", "")
         market = key.get(market, market)
         cv = stat_cv.get(o["League"], {}).get(market, 1)
@@ -612,6 +665,8 @@ class Archive:
             market = market_swap.get(market, market)
         if o["League"] == "NBA":
             market = market.replace("underdog", "prizepicks")
+
+        self._mark_changed(o["League"], market)
 
         if len(lines) < 4:
             lines = [None]*4
@@ -658,6 +713,7 @@ class Archive:
         for o in offers:
             if not o["Line"]:
                 continue
+            self._ensure_loaded(o["League"])
             market = o["Market"].replace("H2H ", "")
             market = key.get(market, market)
             cv = stat_cv.get(o["League"], {}).get(market, 1)
@@ -670,6 +726,7 @@ class Archive:
             if o["League"] == "NBA" or o["League"] == "WNBA":
                 market = market.replace("underdog", "prizepicks")
 
+            self._mark_changed(o["League"], market)
             self.archive.setdefault(o["League"], {}).setdefault(market, {}).setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": {}, "Lines": []})
 
             if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
@@ -680,6 +737,7 @@ class Archive:
             self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(o["Line"], odds[1], cv, dist=dist, gate=gate or None)
 
     def get_moneyline(self, league, date, team):
+        self._ensure_loaded(league)
         a = []
         w = []
         arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
@@ -695,6 +753,7 @@ class Archive:
         return np.average(a, weights=w)
 
     def get_total(self, league, date, team):
+        self._ensure_loaded(league)
         a = []
         w = []
         arr = self.archive.get(league, {}).get("Totals", {}).get(date, {}).get(team, {})
@@ -710,6 +769,7 @@ class Archive:
         return np.average(a, weights=w)
 
     def get_ev(self, league, market, date, player):
+        self._ensure_loaded(league)
         a = []
         w = []
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
@@ -722,6 +782,7 @@ class Archive:
         return np.average(a, weights=w)
 
     def get_team_market(self, league, market, date, team):
+        self._ensure_loaded(league)
         a = []
         w = []
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(team, {})
@@ -734,6 +795,7 @@ class Archive:
         return np.average(a, weights=w)
 
     def get_line(self, league, market, date, player):
+        self._ensure_loaded(league)
         arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("Lines", [np.nan])
 
         line = np.floor(2*np.median(arr))/2
@@ -741,6 +803,7 @@ class Archive:
         return 0 if np.isnan(line) else line
     
     def to_pandas(self, league, market):
+        self._ensure_loaded(league)
         records = {}
         if market not in self.archive[league]:
             return pd.DataFrame()
@@ -762,19 +825,28 @@ class Archive:
         """
         Write the archive data to a file.
 
+        Uses incremental dump (per-market) when possible to avoid
+        rewriting unchanged market files.
+
         Returns:
             None
         """
-
-        leagues = list(self.changed_leagues)
         if all:
-            leagues = list(self.archive.keys())
+            for league in list(self.archive.keys()):
+                if type(self.archive[league]) is not cache:
+                    self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
+                self.archive[league].dump()
+        else:
+            for league, markets in self._changed_keys.items():
+                if type(self.archive[league]) is not cache:
+                    # New league from plain dict — must dump everything
+                    self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
+                    self.archive[league].dump()
+                else:
+                    for market in markets:
+                        self.archive[league].dump(market)
 
-        for league in leagues:
-            if type(self.archive[league]) is not cache:
-                self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
-
-            self.archive[league].dump()
+        self._changed_keys.clear()
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
@@ -782,21 +854,26 @@ class Archive:
                            datetime.timedelta(days=7))
 
         for league in list(self.archive.keys()):
+            self._ensure_loaded(league)
             for market in list(self.archive[league].keys()):
                 if market not in ['Moneyline', 'Totals']:
                     for date in list(self.archive[league][market].keys()):
                         try:
                             if datetime.datetime.strptime(date, "%Y-%m-%d") < cutoff_date:
                                 self.archive[league][market].pop(date)
+                                self._mark_changed(league, market)
                         except:
                             self.archive[league][market].pop(date)
+                            self._mark_changed(league, market)
                 else:
                     for date in list(self.archive[league][market].keys()):
                         try:
                             if datetime.datetime.strptime(date, "%Y-%m-%d") < (datetime.datetime.today() - datetime.timedelta(days=300)):
                                 self.archive[league][market].pop(date)
+                                self._mark_changed(league, market)
                         except:
                             self.archive[league][market].pop(date)
+                            self._mark_changed(league, market)
 
     def merge(self, filepath):
         if os.path.isfile(filepath):
@@ -808,7 +885,8 @@ class Archive:
 
     def rename_market(self, league, old_name, new_name):
         """rename_market Rename a market in the archive"""
-        self.changed_leagues.add(league)
+        self._ensure_loaded(league)
+        self._mark_changed(league, new_name)
 
         if new_name in self.archive[league]:
             self.archive[league][new_name] = merge_dict(
@@ -817,44 +895,111 @@ class Archive:
             self.archive[league][new_name] = self.archive[league].pop(old_name)
 
 
-scraper = Scrape(apikey)
+_mlb_pitchers_cache = None
 
-archive = Archive()
+def get_mlb_pitchers():
+    global _mlb_pitchers_cache
+    if _mlb_pitchers_cache is not None:
+        return _mlb_pitchers_cache
 
-mlb_games = mlb.schedule(
-    start_date=datetime.date.today(), end_date=(datetime.date.today() + datetime.timedelta(days=7))
-)
-mlb_teams = mlb.get("teams", {"sportId": 1})
-mlb_pitchers = {}
-for game in mlb_games:
-    if game["status"] in ["Pre-Game", "Scheduled"]:
-        awayTeam = [
-            team["abbreviation"]
-            for team in mlb_teams["teams"]
-            if team["id"] == game["away_id"]
-        ]
-        homeTeam = [
-            team["abbreviation"]
-            for team in mlb_teams["teams"]
-            if team["id"] == game["home_id"]
-        ]
-        if len(awayTeam) == 1 and len(homeTeam) == 1:
-            awayTeam = awayTeam[0]
-            homeTeam = homeTeam[0]
-        else:
-            continue
-        if game["game_num"] == 1:
-            if "away_probable_pitcher" in game and awayTeam not in mlb_pitchers:
-                mlb_pitchers[awayTeam] = remove_accents(
-                    game["away_probable_pitcher"])
-            if "home_probable_pitcher" in game and homeTeam not in mlb_pitchers:
-                mlb_pitchers[homeTeam] = remove_accents(
-                    game["home_probable_pitcher"])
+    mlb_games = mlb.schedule(
+        start_date=datetime.date.today(), end_date=(datetime.date.today() + datetime.timedelta(days=7))
+    )
+    mlb_teams = mlb.get("teams", {"sportId": 1})
+    pitchers = {}
+    for game in mlb_games:
+        if game["status"] in ["Pre-Game", "Scheduled"]:
+            awayTeam = [
+                team["abbreviation"]
+                for team in mlb_teams["teams"]
+                if team["id"] == game["away_id"]
+            ]
+            homeTeam = [
+                team["abbreviation"]
+                for team in mlb_teams["teams"]
+                if team["id"] == game["home_id"]
+            ]
+            if len(awayTeam) == 1 and len(homeTeam) == 1:
+                awayTeam = awayTeam[0]
+                homeTeam = homeTeam[0]
+            else:
+                continue
+            if game["game_num"] == 1:
+                if "away_probable_pitcher" in game and awayTeam not in pitchers:
+                    pitchers[awayTeam] = remove_accents(
+                        game["away_probable_pitcher"])
+                if "home_probable_pitcher" in game and homeTeam not in pitchers:
+                    pitchers[homeTeam] = remove_accents(
+                        game["home_probable_pitcher"])
 
-mlb_pitchers["LA"] = mlb_pitchers.get("LAD", "")
-mlb_pitchers["ANA"] = mlb_pitchers.get("LAA", "")
-mlb_pitchers["ARI"] = mlb_pitchers.get("AZ", "")
-mlb_pitchers["WAS"] = mlb_pitchers.get("WSH", "")
+    pitchers["LA"] = pitchers.get("LAD", "")
+    pitchers["ANA"] = pitchers.get("LAA", "")
+    pitchers["ARI"] = pitchers.get("AZ", "")
+    pitchers["WAS"] = pitchers.get("WSH", "")
+    _mlb_pitchers_cache = pitchers
+    return pitchers
+
+
+def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, gate_book=None):
+    """
+    Compute blended distribution parameters for model weight w.
+
+    Blends between model prediction (ev_a) and bookmaker line (ev_b)
+    using the logarithmic opinion pool (Genest & Zidek 1986):
+    - NegBin: geometric mean of both means and dispersion parameters.
+      The model provides per-observation r; the book's r is derived as
+      1/cv.  Both μ and r are blended in log-space with the same weight w.
+    - Gamma: precision-weighted blend.  The model provides per-observation
+      alpha; the book's alpha is derived as 1/cv².  Returns (alpha, beta).
+
+    When gate_model and gate_book are supplied (zero-inflated distributions),
+    the gate is blended linearly and returned as a third element.  ev_a and
+    ev_b should be *base* distribution means (before gate deflation).
+
+    Parameters
+    ----------
+    w : float
+        Weight on model prediction.
+    ev_a, ev_b : float or np.ndarray
+        Model and bookmaker base distribution means.
+    cv : float
+        Coefficient of variation for book values. std/mu for Gamma, 1/r for NegBin.
+    dist : str
+        Distribution family: "NegBin" or "Gamma".
+    r : float or np.ndarray, optional
+        NegBin per-observation dispersion from model (required for NegBin).
+    alpha : float or np.ndarray, optional
+        Gamma shape parameter from model (required for Gamma).
+    gate_model : float or np.ndarray, optional
+        Model's per-observation zero-inflation gate.
+    gate_book : float, optional
+        Historical zero-inflation gate for the book side.
+
+    Returns
+    -------
+    NegBin : tuple (r_blend, p, gate_blend)
+    Gamma  : tuple (alpha, beta, gate_blend)
+    gate_blend is None when no gate parameters are supplied.
+    """
+    gate_blend = None
+    if gate_model is not None and gate_book is not None:
+        gate_blend = w * np.asarray(gate_model, dtype=float) + (1 - w) * gate_book
+
+    if dist == "NegBin":
+        mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
+        r_blend = np.exp(w * np.log(r) + (1 - w) * np.log(1/cv))
+        p = r_blend / (r_blend + mu)
+        return r_blend, p, gate_blend
+    else:  # Gamma – precision-weighted blend
+        model_alpha = np.asarray(alpha, dtype=float)
+        book_alpha = 1 / cv**2
+        inv_var_m = model_alpha / np.asarray(ev_a, dtype=float)**2
+        inv_var_b = book_alpha / np.asarray(ev_b, dtype=float)**2
+        total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
+        blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
+        blended_alpha = blended_mean**2 * total_inv_var
+        blended_beta = blended_mean * total_inv_var
+        return blended_alpha, blended_beta, gate_blend
 
 
 def prob_diff(X, Y, line):

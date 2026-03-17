@@ -1,5 +1,5 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, stat_zi, Archive, book_weights, feature_filter, set_model_start_values
+from sportstradamus.helpers import get_ev, get_odds, stat_cv, stat_zi, Archive, book_weights, feature_filter, set_model_start_values, fused_loc
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -33,41 +33,6 @@ import warnings
 pd.options.mode.chained_assignment = None
 pd.set_option('future.no_silent_downcasting', True)
 np.seterr(divide='ignore', invalid='ignore')
-
-# ============================================================================
-# LOAD SPORTS DATA
-# ============================================================================
-# Load and initialize active sports leagues based on season dates
-
-nba = StatsNBA()
-nfl = StatsNFL()
-wnba = StatsWNBA()
-mlb = StatsMLB()
-nhl = StatsNHL()
-
-stat_structs = {}
-archive = Archive()
-
-if datetime.today().date() > (nba.season_start - timedelta(days=7)):
-    nba.load()
-    nba.update()
-    stat_structs.update({"NBA": nba})
-if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
-    nfl.load()
-    nfl.update()
-    stat_structs.update({"NFL": nfl})
-if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
-    wnba.load()
-    wnba.update()
-    stat_structs.update({"WNBA": wnba})
-# if datetime.today().date() > (mlb.season_start - timedelta(days=7)):
-#     mlb.load()
-#     mlb.update()
-#     stat_structs.update({"MLB": mlb})
-# if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
-#     nhl.load()
-#     nhl.update()
-#     stat_structs.update({"NHL": nhl})
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -110,9 +75,40 @@ def save_zi_config(config):
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
 def meditate(force, league):
-    global book_weights
+    global book_weights, archive, stat_structs
 
     np.random.seed(69)
+
+    # Initialize stats and archive
+    nba = StatsNBA()
+    nfl = StatsNFL()
+    wnba = StatsWNBA()
+    mlb_stats = StatsMLB()
+    nhl = StatsNHL()
+
+    stat_structs = {}
+    archive = Archive()
+
+    if datetime.today().date() > (nba.season_start - timedelta(days=7)):
+        nba.load()
+        nba.update()
+        stat_structs.update({"NBA": nba})
+    if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
+        nfl.load()
+        nfl.update()
+        stat_structs.update({"NFL": nfl})
+    if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
+        wnba.load()
+        wnba.update()
+        stat_structs.update({"WNBA": wnba})
+    # if datetime.today().date() > (mlb_stats.season_start - timedelta(days=7)):
+    #     mlb_stats.load()
+    #     mlb_stats.update()
+    #     stat_structs.update({"MLB": mlb_stats})
+    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
+    #     nhl.load()
+    #     nhl.update()
+    #     stat_structs.update({"NHL": nhl})
 
     # === MARKET DEFINITIONS ===
     # Define all available betting markets for each league
@@ -380,7 +376,7 @@ def meditate(force, league):
             }
             threshold = threshold_dict.get(league, 60)
             player_stats = stat_data.gamelog.groupby(stat_data.log_strings.get("player")).filter(lambda x: x[market].gt(0).sum() > threshold).groupby(stat_data.log_strings.get("player"))[market]
-            if market in stat_dist[league] and not force:
+            if market in stat_dist[league]:
                 # Use previously selected distribution
                 dist = stat_dist[league][market]
                 hist_gate = stat_zi.get(league, {}).get(market, 0)
@@ -935,67 +931,6 @@ def fit_book_weights(league, market):
     else:
         return {}
     
-def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, gate_book=None):
-    """
-    Compute blended distribution parameters for model weight w.
-
-    Blends between model prediction (ev_a) and bookmaker line (ev_b)
-    using the logarithmic opinion pool (Genest & Zidek 1986):
-    - NegBin: geometric mean of both means and dispersion parameters.
-      The model provides per-observation r; the book's r is derived as
-      1/cv.  Both μ and r are blended in log-space with the same weight w.
-    - Gamma: precision-weighted blend.  The model provides per-observation
-      alpha; the book's alpha is derived as 1/cv².  Returns (alpha, beta).
-
-    When gate_model and gate_book are supplied (zero-inflated distributions),
-    the gate is blended linearly and returned as a third element.  ev_a and
-    ev_b should be *base* distribution means (before gate deflation).
-
-    Parameters
-    ----------
-    w : float
-        Weight on model prediction.
-    ev_a, ev_b : float or np.ndarray
-        Model and bookmaker base distribution means.
-    cv : float
-        Coefficient of variation for book values. std/mu for Gamma, 1/r for NegBin.
-    dist : str
-        Distribution family: "NegBin" or "Gamma".
-    r : float or np.ndarray, optional
-        NegBin per-observation dispersion from model (required for NegBin).
-    alpha : float or np.ndarray, optional
-        Gamma shape parameter from model (required for Gamma).
-    gate_model : float or np.ndarray, optional
-        Model's per-observation zero-inflation gate.
-    gate_book : float, optional
-        Historical zero-inflation gate for the book side.
-
-    Returns
-    -------
-    NegBin : tuple (r_blend, p, gate_blend)
-    Gamma  : tuple (alpha, beta, gate_blend)
-    gate_blend is None when no gate parameters are supplied.
-    """
-    gate_blend = None
-    if gate_model is not None and gate_book is not None:
-        gate_blend = w * np.asarray(gate_model, dtype=float) + (1 - w) * gate_book
-
-    if dist == "NegBin":
-        mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
-        r_blend = np.exp(w * np.log(r) + (1 - w) * np.log(1/cv))
-        p = r_blend / (r_blend + mu)
-        return r_blend, p, gate_blend
-    else:  # Gamma – precision-weighted blend
-        model_alpha = np.asarray(alpha, dtype=float)
-        book_alpha = 1 / cv**2
-        inv_var_m = model_alpha / np.asarray(ev_a, dtype=float)**2
-        inv_var_b = book_alpha / np.asarray(ev_b, dtype=float)**2
-        total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
-        blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
-        blended_alpha = blended_mean**2 * total_inv_var
-        blended_beta = blended_mean * total_inv_var
-        return blended_alpha, blended_beta, gate_blend
-
 def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=None, cv=None,
                      gate_model=None, gate_book=None):
     """

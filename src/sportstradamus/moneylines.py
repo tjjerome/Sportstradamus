@@ -111,8 +111,6 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
             if homeTeam is None or awayTeam is None:
                 continue
 
-            archive.changed_leagues.add(league)
-
             moneyline_home = {}
             moneyline_away = {}
             totals = {}
@@ -146,6 +144,8 @@ def get_moneylines(archive, apikey, date=datetime.now().astimezone(pytz.timezone
                             spread_away[book["key"]] = spread
 
             # Update archive data with the processed odds
+            archive._mark_changed(league, "Moneyline")
+            archive._mark_changed(league, "Totals")
             archive[league].setdefault("Moneyline", {}).setdefault(gameDate, {})
             archive[league].setdefault("Totals", {}).setdefault(gameDate, {})
 
@@ -239,8 +239,6 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
             elif res.status_code != 200:
                 continue
 
-            archive.changed_leagues.add(league)
-
             if historical:
                 game = res.json()['data']
             else:
@@ -312,6 +310,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
 
             # Update archive data with the processed odds
             for market in odds.keys():
+                archive._mark_changed(league, market)
                 archive[league].setdefault(market, {}).setdefault(gameDate, {})
                 for player in odds[market].keys():
                     archive[league][market][gameDate].setdefault(player, {"EV": {}, "Lines": []})
@@ -322,6 +321,7 @@ def get_props(archive, apikey, props, date=datetime.now().astimezone(pytz.timezo
                         archive[league][market][gameDate][player]["Lines"].append(line)
 
             for market in totals.keys():
+                archive._mark_changed(league, market)
                 archive[league].setdefault(market, {}).setdefault(gameDate, {})
                 
                 archive[league][market][gameDate][abbreviations[league][remove_accents(game["home_team"])]] = {k:(v+spread_home.get(k,0))/2 for k, v in totals[market].items()}

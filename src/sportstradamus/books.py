@@ -8,15 +8,16 @@ import statsapi as mlb
 from time import sleep
 from operator import itemgetter
 from sportstradamus.helpers import (
-    apikey,
+    Scrape,
     requests,
-    scraper,
+    get_mlb_pitchers,
     remove_accents,
     no_vig_odds,
     get_ev,
-    mlb_pitchers,
     nhl_goalies
 )
+
+scraper = Scrape()
 
 
 def get_dk(events, categories, league):
@@ -300,11 +301,11 @@ def get_fd(sport, tabs):
                             .replace(" (", ")")
                             .split(")")
                         )
-                        pitcher1 = mlb_pitchers.get(
+                        pitcher1 = get_mlb_pitchers().get(
                             mlb.lookup_team(teams[0].strip())[
                                 0]["fileCode"].upper(), ""
                         )
-                        pitcher2 = mlb_pitchers.get(
+                        pitcher2 = get_mlb_pitchers().get(
                             mlb.lookup_team(teams[3].strip())[
                                 0]["fileCode"].upper(), ""
                         )
@@ -472,7 +473,7 @@ def get_pinnacle(league):
                         if game_num > 1:
                             team_abbr = team_abbr + str(game_num)
 
-                        pitchers.append(mlb_pitchers.get(team_abbr))
+                        pitchers.append(get_mlb_pitchers().get(team_abbr))
 
                     player = " + ".join(pitchers)
                     bet = "1st Inning Runs Allowed"
@@ -517,7 +518,7 @@ def get_caesars(sport, league):
     caesars = f"https://api.americanwagering.com/regions/us/locations/mi/brands/czr/sb/v3/sports/{sport}/events/schedule/?competitionIds={league}&content-type=json"
 
     # Set request parameters
-    params = {"api_key": apikey, "url": caesars, "optimize_request": True}
+    params = {"api_key": scraper.apikey, "url": caesars, "optimize_request": True}
 
     # Mapping to swap certain market display names
     marketSwap = {
@@ -604,7 +605,7 @@ def get_caesars(sport, league):
                 line = 0.5
                 player = " + ".join(
                     [
-                        mlb_pitchers.get(
+                        get_mlb_pitchers().get(
                             team["teamData"].get("teamAbbreviation", ""), ""
                         )
                         for team in api["markets"][0]["selections"]
@@ -909,7 +910,7 @@ def get_ud():
             "Boost_Under": boosts[1],
         }
         if "Fantasy" in market and n["League"] == "MLB":
-            if n["Player"] in list(mlb_pitchers.values()):
+            if n["Player"] in list(get_mlb_pitchers().values()):
                 n["Market"] = "Pitcher Fantasy Points"
             else:
                 n["Market"] = "Hitter Fantasy Points"
@@ -1018,7 +1019,7 @@ def get_ud():
             "Boost": 1
         }
         if "Fantasy" in market and n["League"] == "MLB":
-            if n["Player"] in list(mlb_pitchers.values()):
+            if n["Player"] in list(get_mlb_pitchers().values()):
                 n["Market"] = "H2H Pitcher Fantasy Points"
             else:
                 n["Market"] = "H2H Hitter Fantasy Points"
@@ -1160,7 +1161,7 @@ def get_thrive():
               }
     """
     params = {
-        "api_key": apikey,
+        "api_key": scraper.apikey,
         "url": "https://api.thrivefantasy.com/houseProp/upcomingHouseProps",
         "optimize_request": True,
         "keep_headers": True,
