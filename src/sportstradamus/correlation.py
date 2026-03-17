@@ -420,11 +420,8 @@ for league in ["NHL", "NBA", "MLB", "NFL"]:
         team_matrix = matrix.loc[matrix.TEAM == team].drop(columns="TEAM")
         team_matrix = team_matrix.loc[:,((team_matrix==0).mean() < .5)]
         team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
-        c = team_matrix.corr(min_periods=int(len(team_matrix)*.75)).unstack()
-        # c = c.iloc[:int(len(c)/2)]
-        # l1 = [i.split(".")[0] for i in c.index.get_level_values(0).to_list()]
-        # l2 = [i.split(".")[0] for i in c.index.get_level_values(1).to_list()]
-        # c = c.loc[[x != y for x, y in zip(l1, l2)]]
+        c_spearman = team_matrix.corr(method='spearman', min_periods=int(len(team_matrix)*.75)).unstack()
+        c = 2 * np.sin(np.pi / 6 * c_spearman)
         c = c.reindex(c.abs().sort_values(ascending=False).index).dropna()
         c = c.loc[c>0.001]
         big_c.update({team: c})

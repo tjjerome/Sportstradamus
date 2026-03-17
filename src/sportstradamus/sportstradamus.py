@@ -1,7 +1,7 @@
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.books import get_pp, get_ud, get_sleeper, get_parp
-from sportstradamus.helpers import Archive, fused_loc, get_ev, get_odds, stat_cv, stat_std, stat_zi, stat_map, accel_asc, banned, set_model_start_values
+from sportstradamus.helpers import Archive, fused_loc, get_ev, get_odds, stat_cv, stat_std, stat_zi, stat_map, banned, set_model_start_values
 
 archive = Archive()
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -25,8 +25,7 @@ import os.path
 import datetime
 import importlib.resources as pkg_resources
 import warnings
-from itertools import combinations, permutations, product
-from multiprocessing import Pool, cpu_count
+from itertools import combinations
 from operator import itemgetter
 from time import time
 import line_profiler
@@ -35,9 +34,6 @@ pd.set_option('mode.chained_assignment', None)
 pd.set_option('future.no_silent_downcasting', True)
 os.environ["LINE_PROFILE"] = "0"
 
-# Shared state for multiprocessing workers. Populated before Pool creation
-# so forked workers inherit it via copy-on-write instead of pickling.
-_pool_shared = {}
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
@@ -481,9 +477,6 @@ def find_correlation(offers, stats, platform):
             idx = idx.sort_values(['Model', 'Books'], ascending=False).head(40).sort_values(['Team', 'Player'])
             # idx = idx.sort_values(['Model', 'Books', 'Team', 'Player'], ascending=False).head(50)
             bet_df = idx.to_dict('index')
-            team_players = idx.loc[idx.Team == team, 'Player'].unique()
-            opp_players = idx.loc[idx.Team == opp, 'Player'].unique()
-            combo_players = idx.loc[idx.Team.str.contains("/"), 'Player'].unique()
 
             C = np.eye(len(game_dict))
             M = np.zeros([len(game_dict), len(game_dict)])
@@ -518,9 +511,10 @@ def find_correlation(offers, stats, platform):
                 boost = 0 if (n1 in n2 or n2 in n1) else 1
                 for xi, x in enumerate(cm1):
                     for yi, y in enumerate(cm2):
-                        rho += c_map.get((x, y), c_map.get((y, x), 0))
+                        increment = c_map.get((x, y), c_map.get((y, x), 0))
                         if b1[xi] != b2[yi]:
-                            rho -= 2*rho
+                            increment = -increment
+                        rho += increment
                             
                         # Modify boost based on conditions
                         if ("_OPP_" in x) == ("_OPP_" in y):
@@ -543,21 +537,17 @@ def find_correlation(offers, stats, platform):
             EVb = np.multiply(np.multiply(np.exp(np.multiply(C,Vb)),Pb),boosts.reshape(len(boosts),1)*M*boosts)*payout_table[platform][0]
 
             for i, offer in game_df.iterrows():
-                indices = np.logical_and(EV[:,i]>.95, C[:,i]>.05, EVb[:,i]>.9)
-                corr = game_df.loc[indices]
-                corr["P"] = EV[indices, i]
-                corr = corr.sort_values("P", ascending=False).groupby("Player").head(1)
+                indices = (EV[:,i] > .95) & (C[:,i] > .05) & (EVb[:,i] > .9)
+                corr = game_df.loc[indices].copy()
+                corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
+                corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
                 same = corr.loc[corr["Team"] == offer["Team"]]
                 other = corr.loc[corr["Team"] != offer["Team"]]
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Team Correlation'] = ", ".join(
-                    (same["Desc"] + " (" + same["P"].round(2).astype(str) + ")").to_list())
+                    (same["Desc"] + " (" + same["Corr Mult"].round(2).astype(str) + "x)").to_list())
                 df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Opp Correlation'] = ", ".join(
-                    (other["Desc"] + " (" + other["P"].round(2).astype(str) + ")").to_list())
+                    (other["Desc"] + " (" + other["Corr Mult"].round(2).astype(str) + "x)").to_list())
             
-            player_array = idx['Player'].to_numpy()
-            index_array = idx.index.to_numpy()
-            player_indices = {player: index_array[player_array == player] for player in set(player_array)}
-
             info = {
                     "Game": "/".join(sorted([team, opp])),
                     "Date": date,
@@ -566,43 +556,12 @@ def find_correlation(offers, stats, platform):
                     }
             best_bets = []
             if not (platform in ["Chalkboard", "ParlayPlay"] and league == "MLB"):
-                combos = []
-                for bet_size in np.arange(2, len(payout_table[platform]) + 2):
-                    team_splits = [x if len(x)==3 else x+[0] for x in accel_asc(bet_size) if 2 <= len(x) <= 3]
-                    team_splits = set.union(*[set(permutations(x)) for x in team_splits])
-                    for split in team_splits:
-                        if split[2] > len(combo_players):
-                            continue
-                        
-                        for i in combinations(team_players, split[0]):
-                            for j in combinations(opp_players, split[1]):
-                                selected_players = i + j
-                                if split[2] != 0:
-                                    for k in combinations(combo_players, split[2]):
-                                        if len(set([item for row in [l.replace(" vs. ", " + ").split(" + ") for l in k] for item in row]).union(selected_players)) != bet_size+split[2]:
-                                            continue
-                                        combos.extend(product(*[player_indices[player] for player in selected_players+k]))
-                                else:
-                                    combos.extend(product(*[player_indices[player] for player in selected_players]))
-
                 payouts = payout_table[platform]
                 max_boost = 2.5 if platform == "Underdog" else 60
-
-                _pool_shared.update({
-                    'p_model': p_model, 'p_books': p_books, 'boosts': boosts,
-                    'M': M, 'C': C, 'EV': EV, 'bet_df': bet_df,
-                    'info': info, 'payouts': payouts, 'max_boost': max_boost,
-                })
-                with Pool(processes=4) as p:
-                    chunk_size = len(combos) // 4
-                    if chunk_size > 0:
-                        combos_chunks = [combos[i:i + chunk_size] for i in range(0, len(combos), chunk_size)]
-                        del combos
-
-                        for result in tqdm(p.imap_unordered(compute_bets, combos_chunks), total=len(combos_chunks), desc=f"{league}, {team}/{opp} Parlays", leave=False):
-                            best_bets.extend(result)
-                        del combos_chunks
-                _pool_shared.clear()
+                best_bets = beam_search_parlays(
+                    idx, EV, C, M, p_model, p_books, boosts,
+                    payouts, max_boost, bet_df, info, team, opp
+                )
 
                 if len(best_bets) > 0:
                     bets = pd.DataFrame(best_bets)
@@ -638,99 +597,111 @@ def find_correlation(offers, stats, platform):
 
     return df.drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
 
-def compute_bets(combos):
-    p_model = _pool_shared['p_model']
-    p_books = _pool_shared['p_books']
-    boosts = _pool_shared['boosts']
-    M = _pool_shared['M']
-    C = _pool_shared['C']
-    EV = _pool_shared['EV']
-    bet_df = _pool_shared['bet_df']
-    info = _pool_shared['info']
-    payouts = _pool_shared['payouts']
-    max_boost = _pool_shared['max_boost']
-    results = []
-    n = len(combos)
-    pass_log = np.zeros(n)
-    thresh_log = np.zeros(n)
-    window = n//10
-    growth_rate = .12
-    forgetting_factor = .003
-    target = 3000/n
-    book_thresh = .9
-    model_thresh = 1.5
-    ev_thresh = 1.1
-    d_ev_thresh = 0
-    for i, bet_id in tqdm(enumerate(combos), total=n, leave=False):
-        if i >= window and i % 10 == 0:
-            e = np.mean(pass_log[i-window:i])-target
-            d_ev_thresh += growth_rate*e - forgetting_factor*d_ev_thresh
+def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_boost, bet_df, info, team, opp):
+    K = 1000
+    max_bet_size = len(payouts) + 1
+    leg_indices = sorted(idx.index.to_numpy())
+    leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
+    leg_teams = {i: bet_df[i]["Team"] for i in leg_indices}
 
-        thresh_log[i] = ev_thresh+d_ev_thresh
-        bet_size = len(bet_id)
+    # Seed: each individual leg as a 1-element tuple
+    candidates = [(i,) for i in leg_indices]
+    all_results = []
 
-        total_ev = np.product(EV[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])**(1/np.sum(np.arange(1,bet_size)))
-        if total_ev < (ev_thresh + d_ev_thresh):
-            continue
+    for target_size in tqdm(range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False):
+        next_candidates = []
 
-        pass_log[i] = 1
-        
-        payout = payouts[bet_size-2]
-        boost = np.product(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size,1)])*np.product(boosts[np.ix_(bet_id)])
-        if boost <= 0.7 or boost > max_boost:
-            continue
+        for parlay in candidates:
+            used_players = {leg_players[i] for i in parlay}
+            last_idx = parlay[-1]
 
-        pb = p_books[np.ix_(bet_id)]
-        prev_pb = np.product(pb)*boost*payout
-        if prev_pb < book_thresh:
-            continue
+            for new_leg in leg_indices:
+                if new_leg <= last_idx:
+                    continue
+                new_player = leg_players[new_leg]
+                if new_player in used_players:
+                    continue
+                if any(new_player in p or p in new_player for p in used_players):
+                    continue
 
-        p = p_model[np.ix_(bet_id)]
-        prev_p = np.product(p)*boost*payout
-        if prev_p < model_thresh:
-            continue
+                extended = parlay + (new_leg,)
 
-        SIG = C[np.ix_(bet_id, bet_id)]
-        if any(np.linalg.eigvals(SIG)<0.0001):
-            continue
-        
-        payout = np.clip(payout*boost, 1, 100)
-        # pb = payout*multivariate_normal.cdf(norm.ppf(pb), np.zeros(bet_size), SIG)
-        # if pb < 1.01:
-        #     continue
-        
-        p = payout*multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
-        pb = p/prev_p*prev_pb
-        units = (p - 1)/(payout - 1)/0.05
-        
-        if units < .5 or p < 2 or pb < .9:
-            continue
-        
-        bet = itemgetter(*bet_id)(bet_df)
-        parlay = info | {
-            "Model EV": p,
-            "Books EV": pb,
-            "Boost": boost,
-            "Rec Bet": units,
-            "Leg 1": "",
-            "Leg 2": "",
-            "Leg 3": "",
-            "Leg 4": "",
-            "Leg 5": "",
-            "Leg 6": "",
-            "Legs": ", ".join([leg["Desc"] for leg in bet]),
-            "Bet ID": bet_id,
-            "P": prev_p,
-            "PB": prev_pb,
-            "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
-            "Bet Size": bet_size
-        }
-        for i in np.arange(bet_size):
-            parlay["Leg " + str(i+1)] = bet[i]["Desc"]
-        
-        results.append(parlay)
+                # Fast screening: geometric mean of pairwise EVs
+                n_pairs = target_size * (target_size - 1) // 2
+                ev_prod = np.prod(EV[np.ix_(extended, extended)][np.triu_indices(target_size, 1)])
+                geo_mean = ev_prod ** (1 / n_pairs)
+                if geo_mean < 1.05:
+                    continue
 
-    return results
+                next_candidates.append((extended, geo_mean))
+
+        # Sort and keep top K
+        next_candidates.sort(key=lambda x: x[1], reverse=True)
+        top_candidates = next_candidates[:K]
+
+        # Full evaluation on candidates at this bet size
+        payout_base = payouts[target_size - 2]
+
+        for parlay, _ in top_candidates:
+            bet_id = parlay
+            bet_size = target_size
+
+            # Must cover both teams
+            covers_team = any(team in leg_teams[i] for i in bet_id)
+            covers_opp = any(opp in leg_teams[i] for i in bet_id)
+            if not (covers_team and covers_opp):
+                continue
+
+            boost = np.prod(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]) * np.prod(boosts[np.ix_(bet_id)])
+            if boost <= 0.7 or boost > max_boost:
+                continue
+
+            pb = p_books[np.ix_(bet_id)]
+            prev_pb = np.prod(pb) * boost * payout_base
+            if prev_pb < 0.9:
+                continue
+
+            p = p_model[np.ix_(bet_id)]
+            prev_p = np.prod(p) * boost * payout_base
+            if prev_p < 1.5:
+                continue
+
+            SIG = C[np.ix_(bet_id, bet_id)]
+            if any(np.linalg.eigvalsh(SIG) < 0.0001):
+                continue
+
+            payout = np.clip(payout_base * boost, 1, 100)
+            p = payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+            pb = p / prev_p * prev_pb
+            units = (p - 1) / (payout - 1) / 0.05
+
+            if units < 0.5 or p < 2 or pb < 0.9:
+                continue
+
+            bet = itemgetter(*bet_id)(bet_df)
+            parlay_dict = info | {
+                "Model EV": p,
+                "Books EV": pb,
+                "Boost": boost,
+                "Rec Bet": units,
+                "Leg 1": "", "Leg 2": "", "Leg 3": "",
+                "Leg 4": "", "Leg 5": "", "Leg 6": "",
+                "Legs": ", ".join([leg["Desc"] for leg in bet]),
+                "Bet ID": bet_id,
+                "P": prev_p,
+                "PB": prev_pb,
+                "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
+                "Bet Size": bet_size
+            }
+            for j in range(bet_size):
+                parlay_dict["Leg " + str(j + 1)] = bet[j]["Desc"]
+
+            all_results.append(parlay_dict)
+
+        # Carry forward for next extension round
+        candidates = [p for p, _ in top_candidates]
+
+    return all_results
 
 def save_data(df, parlay_df, book, gc):
     """
