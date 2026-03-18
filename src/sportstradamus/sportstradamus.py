@@ -39,7 +39,6 @@ os.environ["LINE_PROFILE"] = "0"
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
 @line_profiler.profile
 def main(progress):
-    global untapped_markets
     # Initialize tqdm based on the value of 'progress' flag
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -114,8 +113,6 @@ def main(progress):
         wnba.update()
         stats.update({"WNBA": wnba})
 
-    untapped_markets = []
-
     all_offers = []
     parlay_df = pd.DataFrame()
 
@@ -143,6 +140,7 @@ def main(progress):
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
         ud_offers.loc[ud_offers["Bet"]=="Under", "Boost"] = 1.78/ud_offers.loc[ud_offers["Bet"]=="Under", "Boost"]
+        ud_offers["Platform"] = "Underdog"
         all_offers.append(ud_offers)
     except Exception as exc:
         logger.exception("Failed to get Underdog")
@@ -157,6 +155,7 @@ def main(progress):
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
+        sl_offers["Platform"] = "Sleeper"
         all_offers.append(sl_offers)
     except Exception as exc:
         logger.exception("Failed to get Sleeper")
@@ -208,10 +207,10 @@ def main(progress):
         history = pd.read_pickle(filepath)
     else:
         history = pd.DataFrame(
-            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Result"])
+            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Platform", "Model EV", "Books EV", "Model P", "Books P", "Result"])
 
     df = pd.concat(all_offers).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model"]]
+                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Platform", "Model EV", "Books EV", "Model P", "Books P"]]
     df.loc[(df['Market'] == 'AST') & (
         df['League'] == 'NHL'), 'Market'] = "assists"
     df.loc[(df['Market'] == 'PTS') & (
@@ -225,18 +224,8 @@ def main(progress):
         history["Result"] = np.nan
     gameDates = pd.to_datetime(history.Date).dt.date
     history = history.loc[(datetime.datetime.today(
-    ).date() - datetime.timedelta(days=28)) <= gameDates]
+    ).date() - datetime.timedelta(days=365)) <= gameDates]
     history.to_pickle(filepath)
-
-    if len(untapped_markets) > 0:
-        untapped_df = pd.DataFrame(untapped_markets).drop_duplicates()
-        wks = gc.open("Sportstradamus").worksheet("Untapped Markets")
-        wks.clear()
-        wks.update([untapped_df.columns.values.tolist()] +
-                   untapped_df.values.tolist())
-        wks.set_basic_filter()
-
-    pass
 
     logger.info("Success!")
 
@@ -255,7 +244,6 @@ def process_offers(offer_dict, book, stats):
         list: List of processed offers.
 
     """
-    global untapped_markets
     new_offers = []
     logger.info(f"Processing {book} offers")
     if len(offer_dict) > 0:
@@ -281,9 +269,6 @@ def process_offers(offer_dict, book, stats):
                     # Handle untapped markets where the league is not supported
                     for market, offers in markets.items():
                         archive.add_dfs(offers, book, stat_map[book])
-                        untapped_markets.append(
-                            {"Platform": book, "League": league, "Market": market}
-                        )
                         pbar.update(len(offers))
                     continue
 
@@ -297,9 +282,6 @@ def process_offers(offer_dict, book, stats):
                     if len(playerStats) == 0:
                         # No matched offers found for the market
                         logger.info(f"{league}, {market} offers not matched")
-                        untapped_markets.append(
-                            {"Platform": book, "League": league, "Market": market}
-                        )
                     else:
                         modeled_offers = model_prob(
                             offers, league, market, book, stat_data, playerStats
@@ -691,7 +673,8 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
                 "P": prev_p,
                 "PB": prev_pb,
                 "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
-                "Bet Size": bet_size
+                "Bet Size": bet_size,
+                "Leg Probs": [bet_df[i]["Model P"] for i in bet_id]
             }
             for j in range(bet_size):
                 parlay_dict["Leg " + str(j + 1)] = bet[j]["Desc"]
