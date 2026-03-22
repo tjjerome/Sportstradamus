@@ -135,7 +135,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
@@ -151,7 +151,7 @@ def main(progress):
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict, "Sleeper", stats)
-        save_data(sl_offers.drop(columns=["Model EV", "Model Param", "Books EV"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+        save_data(sl_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
@@ -577,7 +577,7 @@ def find_correlation(offers, stats, platform):
         payouts = [0, 0, 3.5, 6.5, 6, 10, 25]
         parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
 
-    return df.drop(columns=["Player position", "Model P", "Books P", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
+    return df.drop(columns=["Player position", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
 
 def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_boost, bet_df, info, team, opp):
     K = 1000
@@ -735,6 +735,8 @@ def save_data(df, parlay_df, book, gc):
                 sheet_df = pd.concat([sheet_df,parlay_df]).sort_values("Model EV", ascending=False)
                 
             wks.clear()
+            sheet_df = sheet_df.drop(columns=["Leg Probs"], errors="ignore")
+            sheet_df = sheet_df.replace([np.inf, -np.inf], np.nan).fillna("")
             wks.update([sheet_df.columns.values.tolist()] +
                         sheet_df.values.tolist())
             
