@@ -447,7 +447,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
                 row["Predicted P"] = round(size_df["P"].mean(), 4)
             if "Leg Probs" in parlays.columns and size_df["Leg Probs"].notna().any():
                 indep = size_df["Leg Probs"].apply(
-                    lambda lp: np.prod(lp) if isinstance(lp, list) and len(lp) > 0 else np.nan
+                    lambda lp: np.prod(lp) if isinstance(lp, (list, tuple)) and len(lp) > 0 else np.nan
                 )
                 row["Independent Rate"] = round(indep.mean(), 4)
             size_rows.append(row)

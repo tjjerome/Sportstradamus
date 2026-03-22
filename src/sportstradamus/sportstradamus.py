@@ -674,7 +674,7 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
                 "PB": prev_pb,
                 "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
                 "Bet Size": bet_size,
-                "Leg Probs": [bet_df[i]["Model P"] for i in bet_id]
+                "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id)
             }
             for j in range(bet_size):
                 parlay_dict["Leg " + str(j + 1)] = bet[j]["Desc"]
