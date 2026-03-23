@@ -12,7 +12,7 @@ import click
 import re
 from scipy.stats import poisson, nbinom, skellam, norm, gamma, hmean, multivariate_normal
 from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.special import softmax
+from scipy.special import softmax, logit, expit
 from math import comb
 import numpy as np
 import pickle
@@ -837,7 +837,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         cv = filedict["cv"]
         model_weight = filedict["weight"]
         r_book = filedict.get("r_book", None)
-        iso_model = filedict.get("isotonic_model", None)
+        temperature = filedict.get("temperature", None)
         dist = filedict["distribution"]
         step = filedict["step"]
         hist_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
@@ -961,31 +961,44 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if hist_gate and dist in ("ZINB", "ZAGamma"):
             offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
         
-        # Raw distributional probability, then isotonic calibration
+        # Raw distributional probability, then temperature scaling calibration
         _r = offer_df["Model R"].to_numpy() if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns) else None
         _alpha = offer_df["Model Alpha"].to_numpy() if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns) else None
         _gate = offer_df["Model Gate"].to_numpy() if (dist in ("ZINB", "ZAGamma") and "Model Gate" in offer_df.columns) else None
         _model_ev = blended_base_mean  # pass base mean to get_odds (gate handled separately)
         _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv, alpha=_alpha, step=step, r=_r, gate=_gate)
         _raw_over = 1 - _raw_under
-        if iso_model is not None:
-            _cal_over = iso_model.predict(_raw_over)
+        if temperature is not None:
+            _raw_over_clipped = np.clip(_raw_over, 1e-6, 1 - 1e-6)
+            _cal_over = expit(logit(_raw_over_clipped) / temperature)
             offer_df["Model Under"] = 1 - _cal_over
         else:
             offer_df["Model Under"] = _raw_under
-        
-        offer_df["Model Over"] = (1-offer_df["Model Under"])
+
+        offer_df["Model Over"] = (1 - offer_df["Model Under"])
+
+        # Hard cap on confidence before boost
+        MAX_CONFIDENCE = 0.90
+        offer_df["Model Over"] = offer_df["Model Over"].clip(upper=MAX_CONFIDENCE)
+        offer_df["Model Under"] = offer_df["Model Under"].clip(upper=MAX_CONFIDENCE)
+
+        # Keep Model Over/Under as pure probabilities; boost only for Kelly
+        offer_df["Model P"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
+        offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
+
+        # Resolve per-direction boost
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
         offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0).infer_objects(copy=False) * (1.78 if platform == "Underdog" else 1)
-        offer_df[["Model Under", "Model Over"]] = offer_df[["Model Under", "Model Over"]].fillna(.5).values*offer_df[["Boost_Under", "Boost_Over"]].fillna(0).infer_objects(copy=False).values
-        offer_df["Model"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
-        offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
         offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
+
+        # Boosted values only for Kelly criterion
+        offer_df["Model"] = offer_df["Model P"] * offer_df["Boost"]
         offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
-        offer_df["Books"] = offer_df["Books"].fillna(.5)*offer_df["Boost"]
-        offer_df["K"] = (offer_df["Model"]-1)/(offer_df["Boost"]-1)
+        offer_df["Books P"] = offer_df["Books"].fillna(.5)
+        offer_df["Books"] = offer_df["Books P"] * offer_df["Boost"]
+        offer_df["K"] = (offer_df["Model"] - 1) / (offer_df["Boost"] - 1)
         offer_df["Distance"] = offer_df["Boost"]/1.78
         offer_df.loc[offer_df["Distance"] < 1, "Distance"] = 1/offer_df.loc[offer_df["Distance"] < 1, "Distance"]
         offer_df = offer_df.loc[offer_df["Boost"] <= 3.65].sort_values("Distance", ascending=True).groupby("Player").head(3)
@@ -1000,9 +1013,6 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             
         offer_df["Player position"] = offer_df["Player position"].astype("category")
         offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
-        offer_df["Model P"] = offer_df["Model"]/offer_df["Boost"]
-        offer_df["Books P"] = offer_df["Books"]/offer_df["Boost"]
-
         if dist in ("NegBin", "ZINB"):
             offer_df["Model Param"] = offer_df["Model R"]
         else:

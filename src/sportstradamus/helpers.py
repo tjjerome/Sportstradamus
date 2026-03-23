@@ -414,8 +414,8 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1):
     """
     Calculate raw probability of outcome being under the line.
     
-    Returns the raw distributional probability. Calibration (isotonic
-    regression) is applied separately at the over/under decision level.
+    Returns the raw distributional probability. Calibration (temperature
+    scaling) is applied separately at the over/under decision level.
     
     Parameters:
     -----------
