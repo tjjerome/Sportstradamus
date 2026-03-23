@@ -6,8 +6,8 @@ from sportstradamus import data
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-from sklearn.isotonic import IsotonicRegression
-from scipy.optimize import minimize
+from scipy.optimize import minimize, minimize_scalar
+from scipy.special import logit, expit
 from scipy.stats import poisson, nbinom, norm, gamma, fit
 from sklearn.metrics import (
     precision_score,
@@ -662,8 +662,9 @@ def meditate(force, league):
                 # Store alpha for downstream use
                 test_alpha = alpha_blend
 
-            # === ISOTONIC CALIBRATION ===
-            # Fit isotonic regression on validation set: maps raw P(over) → calibrated P(over)
+            # === TEMPERATURE SCALING CALIBRATION ===
+            # Fit temperature T on validation set: p_cal = sigmoid(logit(p_raw) / T)
+            # T ≥ 1 ensures calibration only reduces confidence (pulls toward 0.5)
             _r_val = r_blend_val if dist in ("NegBin", "ZINB") else None
             _alpha_val = alpha_blend_val if dist in ("Gamma", "ZAGamma") else None
             _gate_val = gate_blend_val if dist in ("ZINB", "ZAGamma") else None
@@ -672,16 +673,24 @@ def meditate(force, league):
             val_raw_over = 1 - val_raw_under
             y_class_val = (y_validation["Result"] >= B_validation["Line"]).astype(int).to_numpy()
 
-            iso_reg = IsotonicRegression(y_min=0, y_max=1, out_of_bounds='clip')
-            iso_reg.fit(val_raw_over, y_class_val)
+            val_raw_over_clipped = np.clip(val_raw_over, 1e-6, 1 - 1e-6)
+            val_logits = logit(val_raw_over_clipped)
+
+            def brier_loss(T):
+                cal = expit(val_logits / T)
+                return np.mean((cal - y_class_val) ** 2)
+
+            result = minimize_scalar(brier_loss, bounds=(1.0, 10.0), method='bounded')
+            T_opt = result.x
 
             # Evaluate calibration quality
-            val_calibrated = iso_reg.predict(val_raw_over)
+            val_calibrated = expit(val_logits / T_opt)
             model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
 
-            # Apply isotonic calibration to test set
+            # Apply temperature scaling to test set
             test_raw_over = y_proba_no_filt[:, 1]
-            test_calibrated_over = iso_reg.predict(test_raw_over)
+            test_raw_over_clipped = np.clip(test_raw_over, 1e-6, 1 - 1e-6)
+            test_calibrated_over = expit(logit(test_raw_over_clipped) / T_opt)
             y_proba_filt = np.array(
                 [1 - test_calibrated_over, test_calibrated_over]).transpose()
 
@@ -722,7 +731,7 @@ def meditate(force, league):
                 "distribution": dist,
                 "cv": cv,
                 "std": stat_std,
-                "isotonic_model": iso_reg,
+                "temperature": T_opt,
                 "weight": model_weight,
                 "r_book": r_book,
                 "hist_gate": hist_gate
