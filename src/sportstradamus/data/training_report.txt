@@ -1,147 +1,351 @@
 ========================= NBA AST ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0126
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.587366   0.629423   0.092502 0.682427      0.623997
- 0.595863   0.638826   0.068600 0.681604      0.755135
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.583732   0.601869    0.573276 0.365687   0.098931 0.681696      0.662613
+ 0.592271   0.621924    0.576127 0.352524   0.076960 0.680518      0.755469
+ DIAG start_r=19.934 model_r=22.629 empirical_r=2.767
+ DIAG start_mean=2.97 model_ev=3.18 mean_line=3.00 result_mean=3.18 ev_minus_line=+0.184
 
 ========================= NBA BLK ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0072
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.703015   0.544776   0.104745 0.609552      0.689588
- 0.703015   0.544776   0.104745 0.609552      0.786453
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.692431   0.496403    0.708117 0.074094   0.108451 0.621778      0.745756
+ 0.692431   0.496403    0.708117 0.074094   0.108451 0.621778      0.791656
+ DIAG start_r=50.000 model_r=27.900 empirical_r=1.275
+ DIAG start_mean=0.48 model_ev=0.55 mean_line=0.59 result_mean=0.51 ev_minus_line=-0.041
 
 ========================= NBA BLST =========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0121
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.612587   0.678426   0.128033 0.667702      0.849953
- 0.615477   0.679433   0.112495 0.666917      0.762940
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.604984   0.668524    0.553551 0.447352   0.122659 0.671805      0.811386
+ 0.607097   0.666667    0.560046 0.441290   0.112509 0.671077      0.763521
+ DIAG start_r=18.128 model_r=22.879 empirical_r=10.856
+ DIAG start_mean=1.32 model_ev=1.34 mean_line=1.25 result_mean=1.37 ev_minus_line=+0.098
 
 ========================= NBA DREB =========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0119
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.674594   0.760897   0.151095 0.630199       0.90000
- 0.674594   0.760897   0.151095 0.630199       0.77876
+ Accuracy  Precision  Under Prec   Over%  Sharpness     NLL  Weight/Calib
+ 0.662362    0.74574    0.588644 0.46925   0.149174 0.63854      0.900000
+ 0.662362    0.74574    0.588644 0.46925   0.149173 0.63854      0.776352
+ DIAG start_r=16.224 model_r=23.384 empirical_r=20.412
+ DIAG start_mean=3.09 model_ev=3.17 mean_line=3.00 result_mean=3.06 ev_minus_line=+0.169
 
 ========================= NBA FG3A =========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0123
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.673210   0.754213   0.178849 0.614882      0.900000
- 0.673517   0.753957   0.172858 0.615186      0.782428
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.637546   0.737201    0.580739 0.363073   0.174353 0.635663      0.900000
+ 0.637546   0.737201    0.580739 0.363073   0.174352 0.635662      0.787565
+ DIAG start_r=50.000 model_r=29.249 empirical_r=8.616
+ DIAG start_mean=3.61 model_ev=3.60 mean_line=3.58 result_mean=3.69 ev_minus_line=+0.019
 
 ========================= NBA FG3M =========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0149
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.631363   0.620748   0.134449 0.650862      0.567246
- 0.633634   0.622807   0.126824 0.650880      0.768857
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.619019   0.608939    0.623878 0.325257   0.138274 0.656165      0.639942
+ 0.624608   0.622000    0.625801 0.313873   0.125574 0.655156      0.768175
+ DIAG start_r=50.000 model_r=23.238 empirical_r=3.076
+ DIAG start_mean=1.47 model_ev=1.51 mean_line=1.44 result_mean=1.57 ev_minus_line=+0.074
 
 ========================= NBA FGA ==========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0222
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.710023   0.768872   0.217109 0.580141      0.900000
- 0.710317   0.769447   0.210716 0.580369      0.802094
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.709594   0.763453    0.636914 0.574372   0.227162 0.580708      0.900000
+ 0.710220   0.763187    0.638168 0.576326   0.219665 0.580655      0.801931
+ DIAG start_alpha=6.150 model_alpha=11.161 empirical_alpha=6.741
+ DIAG start_mean=8.69 model_ev=9.45 mean_line=8.93 result_mean=9.66 ev_minus_line=+0.524
 
 ========================= NBA FGM ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0190
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.673607   0.805353   0.161488 0.624128      0.900000
- 0.673607   0.805353   0.161488 0.624128      0.784183
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+   0.6725   0.786755    0.570414 0.471875   0.177717 0.614665      0.900000
+   0.6725   0.786755    0.570414 0.471875   0.177717 0.614665      0.789637
+ DIAG start_r=19.329 model_r=25.172 empirical_r=nan
+ DIAG start_mean=3.96 model_ev=4.16 mean_line=3.98 result_mean=4.23 ev_minus_line=+0.176
 
 ========================= NBA FTM ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0785
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.612984   0.587079   0.130547 0.667990      0.864953
- 0.619174   0.590323   0.105546 0.664011      0.765532
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.625577   0.621993    0.626427 0.191826   0.125844 0.672824      0.894173
+ 0.638060   0.636792    0.638298 0.158209   0.085856 0.667214      0.762786
+ DIAG start_r=2.608 model_r=2.764 empirical_r=1.802
+ DIAG start_mean=1.73 model_ev=1.43 mean_line=1.48 result_mean=1.46 ev_minus_line=-0.044
 
 ========================= NBA MIN ==========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0000
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.730371   0.799353   0.263881 0.565032      0.900000
- 0.730673   0.800443   0.241028 0.549535      0.821493
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.760190    0.83250    0.674107 0.543478   0.281867 0.508489      0.900000
+ 0.762133    0.83208    0.678195 0.545455   0.268577 0.508812      0.829792
+ DIAG start_alpha=14.720 model_alpha=45.169 empirical_alpha=36.268
+ DIAG start_mean=23.93 model_ev=26.12 mean_line=25.02 result_mean=26.38 ev_minus_line=+1.098
 
 ========================= NBA OREB =========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0102
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.579202   0.618644   0.110271 0.681306      0.646995
- 0.599845   0.632911   0.063679 0.677701      0.755421
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.567394   0.622478    0.551610 0.222721   0.112290 0.685217      0.635836
+ 0.593128   0.643519    0.580899 0.195298   0.060096 0.679996      0.754504
+ DIAG start_r=21.722 model_r=22.120 empirical_r=273.961
+ DIAG start_mean=1.02 model_ev=0.98 mean_line=0.95 result_mean=0.92 ev_minus_line=+0.029
 
 ========================== NBA PA ==========================
  Distribution Model: ZAGamma
  Historical Zero Rate: 0.0553
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.592930   0.654795   0.147597 0.684641      0.900000
- 0.603093   0.676471   0.082690 0.676330      0.756615
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.584352   0.673469    0.527528 0.389364   0.146712 0.688332      0.900000
+ 0.600907   0.703030    0.539855 0.374150   0.089721 0.678339      0.757416
+ DIAG start_alpha=5.405 model_alpha=6.669 empirical_alpha=3.543
+ DIAG start_mean=15.51 model_ev=16.57 mean_line=16.05 result_mean=16.82 ev_minus_line=+0.521
 
 ========================== NBA PF ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0125
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.639619   0.763043   0.138814 0.655326      0.900000
- 0.639619   0.763043   0.138814 0.655326      0.774038
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.638387   0.781013    0.509174 0.475331   0.132056 0.655542      0.875584
+ 0.638387   0.781013    0.509174 0.475331   0.132056 0.655542      0.769143
+ DIAG start_r=50.000 model_r=39.183 empirical_r=nan
+ DIAG start_mean=1.97 model_ev=1.98 mean_line=1.82 result_mean=2.05 ev_minus_line=+0.159
 
 ========================== NBA PR ==========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0357
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.546795   0.670455   0.096888 0.721683      0.500000
- 0.537107   0.730435   0.045990 0.698180      0.751716
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.568989   0.700831    0.525839 0.246585   0.093713 0.699420      0.500000
+ 0.300000   0.000000    0.333333 0.100000   0.010380 0.691554      0.750123
+ DIAG start_alpha=5.634 model_alpha=6.695 empirical_alpha=3.895
+ DIAG start_mean=16.96 model_ev=17.91 mean_line=17.65 result_mean=18.14 ev_minus_line=+0.261
 
 ========================= NBA PRA ==========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0260
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.547559   0.640227   0.093131 0.703618       0.50000
- 0.544653   0.672414   0.044023 0.691504       0.75265
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.549704   0.657895    0.522634 0.200132   0.091627 0.702669      0.500000
+ 0.544218   0.621359    0.534018 0.116780   0.044817 0.691128      0.752362
+ DIAG start_alpha=6.558 model_alpha=7.532 empirical_alpha=4.122
+ DIAG start_mean=20.19 model_ev=20.95 mean_line=20.97 result_mean=21.64 ev_minus_line=-0.015
 
 ========================= NBA PTS ==========================
  Distribution Model: ZAGamma
  Historical Zero Rate: 0.0983
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.520784   0.575472   0.094360 0.715255      0.624475
- 0.538314   0.473684   0.026839 0.692477      0.751248
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.518730   0.588785    0.507715 0.135873   0.097182 0.716346      0.610429
+ 0.537356   0.571429    0.536657 0.020115   0.023741 0.692254      0.750823
+ DIAG start_alpha=4.264 model_alpha=5.167 empirical_alpha=2.684
+ DIAG start_mean=12.51 model_ev=13.00 mean_line=12.82 result_mean=13.47 ev_minus_line=+0.180
 
 ========================== NBA RA ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0349
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.595387   0.641320   0.116503 0.671014      0.804545
- 0.609551   0.668852   0.092298 0.670991      0.759318
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.600134   0.625714    0.577554 0.468855   0.117814 0.672734      0.810627
+ 0.606083   0.632558    0.582880 0.467053   0.100412 0.672072      0.760240
+ DIAG start_r=13.099 model_r=19.475 empirical_r=6.861
+ DIAG start_mean=7.50 model_ev=8.14 mean_line=7.76 result_mean=8.02 ev_minus_line=+0.382
 
 ========================= NBA REB ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0000
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.591275   0.607204   0.090505 0.682463      0.681793
- 0.596685   0.614919   0.069796 0.681845      0.755201
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.580830   0.602113    0.566265 0.406295   0.089286 0.681120      0.668428
+ 0.594086   0.612472    0.581709 0.402330   0.064439 0.681139      0.754427
+ DIAG start_r=15.497 model_r=23.885 empirical_r=3.858
+ DIAG start_mean=4.60 model_ev=4.90 mean_line=4.66 result_mean=4.87 ev_minus_line=+0.238
 
 ========================= NBA STL ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0077
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.584864   0.591065   0.090106 0.682136      0.546401
- 0.596021   0.607843   0.065576 0.680514      0.755715
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.625111   0.611429    0.627637 0.155833   0.083398 0.670209      0.410797
+ 0.641569   0.610000    0.645314 0.106045   0.058601 0.672803      0.754948
+ DIAG start_r=31.199 model_r=24.555 empirical_r=12.427
+ DIAG start_mean=0.85 model_ev=0.88 mean_line=0.86 result_mean=0.87 ev_minus_line=+0.028
 
 ========================= NBA TOV ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0082
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.573867   0.688940   0.113885 0.689522      0.861013
- 0.578911   0.701531   0.097852 0.685575      0.760117
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.609364   0.657005    0.588667 0.302853   0.108334 0.672375      0.838825
+ 0.618930   0.677515    0.596351 0.278189   0.085681 0.671944      0.757822
+ DIAG start_r=50.000 model_r=29.476 empirical_r=11.704
+ DIAG start_mean=1.41 model_ev=1.34 mean_line=1.31 result_mean=1.35 ev_minus_line=+0.022
 
 ============== NBA fantasy points prizepicks ===============
  Distribution Model: Gamma
  Historical Zero Rate: 0.0197
- Accuracy  Precision  Sharpness      NLL  Weight/Calib
- 0.711516   0.760128   0.275992 0.586562      0.900000
- 0.715422   0.762431   0.229901 0.566669      0.805396
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.739554   0.811096    0.659794 0.527159   0.299231 0.563702      0.900000
+ 0.749820   0.821526    0.669219 0.529200   0.246779 0.549000      0.810522
+ DIAG start_alpha=5.414 model_alpha=15.668 empirical_alpha=11.957
+ DIAG start_mean=22.80 model_ev=24.48 mean_line=23.42 result_mean=25.79 ev_minus_line=+1.056
+
+========================= WNBA AST =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0139
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.620531   0.607930    0.622429 0.130911   0.128912 0.656500      0.835463
+ 0.621382   0.607656    0.623315 0.123449   0.120005 0.654373      0.774651
+ DIAG start_r=50.000 model_r=27.861 empirical_r=2.276
+ DIAG start_mean=2.26 model_ev=2.33 mean_line=2.52 result_mean=2.46 ev_minus_line=-0.190
+
+========================= WNBA BLK =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0113
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.724826   0.777778    0.724154 0.012529   0.098218 0.567826      0.804887
+ 0.724826   0.777778    0.724154 0.012529   0.097525 0.567904      0.804760
+ DIAG start_r=50.000 model_r=27.503 empirical_r=9.996
+ DIAG start_mean=0.44 model_ev=0.41 mean_line=0.58 result_mean=0.37 ev_minus_line=-0.171
+
+======================== WNBA BLST =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0092
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.553320   0.712195    0.527994 0.137492   0.092062 0.687675      0.807061
+ 0.576923   0.836538    0.550296 0.093023   0.056148 0.682938      0.754921
+ DIAG start_r=34.387 model_r=26.153 empirical_r=nan
+ DIAG start_mean=1.25 model_ev=1.09 mean_line=1.12 result_mean=1.08 ev_minus_line=-0.032
+
+======================== WNBA DREB =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0131
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.633681   0.702771    0.574946 0.459491   0.142948 0.659649      0.900000
+ 0.636577   0.706786    0.577297 0.457796   0.136668 0.659258      0.768513
+ DIAG start_r=21.077 model_r=23.819 empirical_r=6.714
+ DIAG start_mean=2.86 model_ev=2.78 mean_line=2.68 result_mean=2.70 ev_minus_line=+0.096
+
+======================== WNBA FG3M =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0141
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.652322   0.566372    0.658197 0.063986   0.131820 0.615954      0.702531
+ 0.653912   0.554545    0.660573 0.062821   0.128993 0.615926      0.785812
+ DIAG start_r=50.000 model_r=23.280 empirical_r=1.833
+ DIAG start_mean=0.94 model_ev=0.93 mean_line=1.01 result_mean=0.94 ev_minus_line=-0.088
+
+========================= WNBA FGA =========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0213
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.637209   0.750361    0.560857 0.402907   0.158022 0.668421      0.743794
+ 0.642772   0.756315    0.566434 0.402031   0.141892 0.662189      0.768279
+ DIAG start_alpha=6.038 model_alpha=8.436 empirical_alpha=4.483
+ DIAG start_mean=7.61 model_ev=7.52 mean_line=7.58 result_mean=7.85 ev_minus_line=-0.061
+
+========================= WNBA FTM =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0827
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.626233   0.599338    0.631949 0.175276   0.120133 0.660987       0.90000
+ 0.641042   0.623077    0.644597 0.165184   0.089569 0.660323       0.76245
+ DIAG start_r=2.829 model_r=5.144 empirical_r=1.785
+ DIAG start_mean=1.56 model_ev=1.34 mean_line=1.34 result_mean=1.31 ev_minus_line=-0.004
+
+========================= WNBA MIN =========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0000
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.694512   0.791938    0.608496 0.468902   0.222248 0.640655       0.90000
+ 0.694512   0.791938    0.608496 0.468902   0.222247 0.617033       0.80026
+ DIAG start_alpha=15.404 model_alpha=27.092 empirical_alpha=15.318
+ DIAG start_mean=23.25 model_ev=24.49 mean_line=23.96 result_mean=24.80 ev_minus_line=+0.538
+
+======================== WNBA OREB =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0135
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.607553   0.649746    0.602454 0.107827   0.100191 0.666385      0.765661
+ 0.610307   0.632258    0.608142 0.089751   0.079427 0.664671      0.763130
+ DIAG start_r=50.000 model_r=25.023 empirical_r=12.082
+ DIAG start_mean=0.92 model_ev=0.84 mean_line=0.88 result_mean=0.78 ev_minus_line=-0.038
+
+========================= WNBA PA ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0495
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.607942   0.545732    0.621918 0.183445   0.173440 0.738747       0.90000
+ 0.634339   0.572193    0.643983 0.134339   0.093382 0.672340       0.76266
+ DIAG start_alpha=4.349 model_alpha=6.345 empirical_alpha=3.078
+ DIAG start_mean=11.98 model_ev=12.23 mean_line=13.37 result_mean=12.89 ev_minus_line=-1.145
+
+========================= WNBA PR ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0380
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.559558   0.577617    0.550985 0.321906   0.180164 0.759003      0.900000
+ 0.567747   0.626344    0.545639 0.273932   0.095374 0.691349      0.758496
+ DIAG start_alpha=4.775 model_alpha=7.070 empirical_alpha=3.536
+ DIAG start_mean=13.93 model_ev=14.10 mean_line=14.68 result_mean=15.04 ev_minus_line=-0.577
+
+========================= WNBA PRA =========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0236
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.579812   0.605042    0.566276 0.349178   0.179196 0.724249      0.900000
+ 0.608434   0.680672    0.576398 0.307229   0.075990 0.682077      0.754632
+ DIAG start_alpha=5.789 model_alpha=8.246 empirical_alpha=3.840
+ DIAG start_mean=16.50 model_ev=17.07 mean_line=17.33 result_mean=17.65 ev_minus_line=-0.261
+
+========================= WNBA PTS =========================
+ Distribution Model: ZAGamma
+ Historical Zero Rate: 0.1075
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.569533   0.626719    0.545752 0.293710   0.143863 0.715653      0.900000
+ 0.583578   0.690377    0.551020 0.233627   0.065033 0.686458      0.754369
+ DIAG start_alpha=3.504 model_alpha=4.758 empirical_alpha=2.097
+ DIAG start_mean=9.73 model_ev=10.05 mean_line=9.72 result_mean=10.33 ev_minus_line=+0.327
+
+========================= WNBA RA ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0314
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.607445   0.585586    0.612500 0.187817   0.158253 0.713680      0.900000
+ 0.623149   0.594714    0.628276 0.152759   0.098058 0.671784      0.763685
+ DIAG start_alpha=4.487 model_alpha=5.489 empirical_alpha=2.701
+ DIAG start_mean=6.22 model_ev=6.18 mean_line=6.71 result_mean=6.49 ev_minus_line=-0.527
+
+========================= WNBA REB =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0126
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.581525   0.635478    0.556364 0.318041   0.114528 0.683475      0.764832
+ 0.592766   0.645788    0.568932 0.310114   0.092055 0.680165      0.758638
+ DIAG start_r=15.325 model_r=21.294 empirical_r=3.107
+ DIAG start_mean=4.02 model_ev=4.06 mean_line=4.00 result_mean=4.16 ev_minus_line=+0.060
+
+========================= WNBA STL =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0090
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.541739   0.593220    0.539928 0.033967   0.067190 0.691641      0.750982
+ 0.575435   0.857143    0.573515 0.006770   0.032771 0.686406      0.752933
+ DIAG start_r=50.000 model_r=27.513 empirical_r=nan
+ DIAG start_mean=0.85 model_ev=0.82 mean_line=0.84 result_mean=0.82 ev_minus_line=-0.017
+
+========================= WNBA TOV =========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0082
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.579961   0.714885    0.520370 0.306358   0.095731 0.681153      0.780849
+ 0.597461   0.727941    0.554753 0.246600   0.056779 0.680685      0.753978
+ DIAG start_r=50.000 model_r=28.174 empirical_r=nan
+ DIAG start_mean=1.46 model_ev=1.37 mean_line=1.34 result_mean=1.37 ev_minus_line=+0.036
+
+============== WNBA fantasy points prizepicks ==============
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0137
+ Accuracy  Precision  Under Prec    Over%  Sharpness      NLL  Weight/Calib
+ 0.668622   0.732519    0.597015 0.528446   0.231343 0.656062      0.900000
+ 0.672727   0.737385    0.600257 0.528485   0.189405 0.624057      0.780851
+ DIAG start_alpha=5.057 model_alpha=8.183 empirical_alpha=5.464
+ DIAG start_mean=19.59 model_ev=20.55 mean_line=19.43 result_mean=20.76 ev_minus_line=+1.124
 

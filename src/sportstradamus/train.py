@@ -158,29 +158,29 @@ def meditate(force, league):
     nba = StatsNBA()
     nfl = StatsNFL()
     wnba = StatsWNBA()
-    mlb_stats = StatsMLB()
-    nhl = StatsNHL()
+    # mlb = StatsMLB()
+    # nhl = StatsNHL()
 
     stat_structs = {}
     archive = Archive()
 
-    if datetime.today().date() > (nba.season_start - timedelta(days=7)):
+    if datetime.today().date() > (nba.season_start - timedelta(days=7)) or league == "NBA":
         nba.load()
         nba.update()
         stat_structs.update({"NBA": nba})
-    if datetime.today().date() > (nfl.season_start - timedelta(days=7)):
+    if datetime.today().date() > (nfl.season_start - timedelta(days=7)) or league == "NFL":
         nfl.load()
         nfl.update()
         stat_structs.update({"NFL": nfl})
-    if datetime.today().date() > (wnba.season_start - timedelta(days=7)):
+    if datetime.today().date() > (wnba.season_start - timedelta(days=7)) or league == "WNBA":
         wnba.load()
         wnba.update()
         stat_structs.update({"WNBA": wnba})
-    # if datetime.today().date() > (mlb_stats.season_start - timedelta(days=7)):
-    #     mlb_stats.load()
-    #     mlb_stats.update()
-    #     stat_structs.update({"MLB": mlb_stats})
-    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)):
+    # if datetime.today().date() > (mlb.season_start - timedelta(days=7)) or league == "MLB":
+    #     mlb.load()
+    #     mlb.update()
+    #     stat_structs.update({"MLB": mlb})
+    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)) or league == "NHL":
     #     nhl.load()
     #     nhl.update()
     #     stat_structs.update({"NHL": nhl})
@@ -518,7 +518,7 @@ def meditate(force, league):
                 "bagging_freq": ["none", [1]]
             }
 
-            if opt_params is None or opt_params.get("opt_rounds") is None or force:
+            if opt_params is None or opt_params.get("opt_rounds") is None:
                 opt_params = model.hyper_opt(hp_search_space,
                                             dtrain,
                                             num_boost_round=999,
@@ -706,6 +706,8 @@ def meditate(force, league):
             acc = np.zeros(2)
             sharp = np.zeros(2)
             ll = np.zeros(2)
+            over_pct = np.zeros(2)
+            under_prec = np.zeros(2)
 
             for i, y_proba in enumerate([y_proba_no_filt, y_proba_filt]):
                 y_pred = (y_proba > .5).astype(int)[:, 1]
@@ -717,15 +719,60 @@ def meditate(force, league):
 
                 ll[i] = log_loss(y_class, y_proba[:, 1])
 
+                # Directional diagnostics
+                over_pct[i] = y_pred[mask].mean() if mask.sum() > 0 else np.nan
+                under_mask = mask & (y_pred == 0)
+                under_prec[i] = (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
+
+            # --- Shape parameter diagnostics ---
+            # Three-way comparison: start values (method of moments) vs model vs empirical
+            test_mean_yr = X_test['MeanYr'].mean()
+            test_std_yr = X_test['STDYr'].mean()
+
+            if dist in ("Gamma", "ZAGamma"):
+                diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
+                diag_model_shape = float(prob_params['concentration'].mean())
+                test_mu = y_test['Result'].mean()
+                test_std = y_test['Result'].std()
+                diag_empirical_shape = float((test_mu / test_std) ** 2) if test_std > 0 else float('nan')
+                diag_shape_label = "alpha"
+            elif dist in ("NegBin", "ZINB"):
+                diag_start_shape = float(np.clip(test_mean_yr ** 2 / max(test_std_yr ** 2 - test_mean_yr, 1e-6), 1, 50))
+                diag_model_shape = float(prob_params['total_count'].mean())
+                test_mu = y_test['Result'].mean()
+                test_var = y_test['Result'].var()
+                diag_empirical_shape = float(test_mu ** 2 / max(test_var - test_mu, 1e-6)) if test_var > test_mu else float('nan')
+                diag_shape_label = "r"
+
+            # EV diagnostics: start mean vs blended model EV vs line vs actual results
+            diag_start_mean = float(test_mean_yr)
+            diag_model_ev = float(weighted_mean.mean())
+            diag_mean_line = float(B_test['Line'].mean())
+            diag_ev_minus_line = float((weighted_mean - B_test['Line'].to_numpy()).mean())
+            diag_result_mean = float(y_test['Result'].mean())
+
             filedict = {
                 "model": model,
                 "step": step,
                 "stats": {
                     "Accuracy": acc,
                     "Precision": prec,
+                    "Under Prec": under_prec,
+                    "Over%": over_pct,
                     "Sharpness": sharp,
                     "NLL": ll,
                     "Weight/Calib": [model_weight, model_calib]
+                },
+                "diagnostics": {
+                    "shape_label": diag_shape_label,
+                    "start_shape": diag_start_shape,
+                    "model_shape": diag_model_shape,
+                    "empirical_shape": diag_empirical_shape,
+                    "start_mean": diag_start_mean,
+                    "model_ev": diag_model_ev,
+                    "mean_line": diag_mean_line,
+                    "ev_minus_line": diag_ev_minus_line,
+                    "result_mean": diag_result_mean,
                 },
                 "params": opt_params,
                 "distribution": dist,
@@ -822,7 +869,21 @@ def report():
             f.write(f" Historical Zero Rate: {h_gate:.4f}\n")
             f.write(pd.DataFrame(model['stats'], index=[
                     ['No Filter', 'Filter']]).to_string(index=False))
-            f.write("\n\n")
+            f.write("\n")
+
+            if "diagnostics" in model:
+                d = model["diagnostics"]
+                sl = d["shape_label"]
+                f.write(f" DIAG start_{sl}={d['start_shape']:.3f}"
+                        f" model_{sl}={d['model_shape']:.3f}"
+                        f" empirical_{sl}={d['empirical_shape']:.3f}\n")
+                f.write(f" DIAG start_mean={d['start_mean']:.2f}"
+                        f" model_ev={d['model_ev']:.2f}"
+                        f" mean_line={d['mean_line']:.2f}"
+                        f" result_mean={d['result_mean']:.2f}"
+                        f" ev_minus_line={d['ev_minus_line']:+.3f}\n")
+
+            f.write("\n")
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
         json.dump(stat_cv, f, indent=4)
@@ -1003,7 +1064,10 @@ def fit_book_weights(league, market):
             std = np.sqrt(1/np.ma.average(np.power(s,-2), weights=w, axis=1))
             proj = np.array(np.ma.average(np.ma.MaskedArray(x*np.power(s,-2), mask=np.isnan(x)), weights=w, axis=1)*std*std)
             return -np.mean(norm.logpdf(y, proj, std))
-    
+        
+    if "Line" in test_df.columns:
+        test_df.drop(columns=["Line"], inplace=True)
+
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
     x[x<0] = np.nan
     y = result.loc[~test_df.isna().all(axis=1)].to_numpy()

@@ -28,7 +28,24 @@
         "PF": "NegBin"
     },
     "WNBA": {
-        "MIN": "Gamma"
+        "MIN": "Gamma",
+        "AST": "NegBin",
+        "FG3M": "NegBin",
+        "PA": "Gamma",
+        "PR": "Gamma",
+        "PTS": "ZAGamma",
+        "RA": "Gamma",
+        "REB": "NegBin",
+        "OREB": "NegBin",
+        "DREB": "NegBin",
+        "FGA": "Gamma",
+        "BLK": "NegBin",
+        "STL": "NegBin",
+        "BLST": "NegBin",
+        "TOV": "NegBin",
+        "FTM": "NegBin",
+        "PRA": "Gamma",
+        "fantasy points prizepicks": "Gamma"
     },
     "NHL": {
         "timeOnIce": "Gamma"
