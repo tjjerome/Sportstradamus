@@ -768,7 +768,7 @@ class Stats:
         gamelog[self.log_strings["date"]] = pd.to_datetime(gamelog[self.log_strings["date"]]).dt.date
         gamelog = gamelog.loc[(gamelog[self.log_strings["date"]]>cutoff_date) & (gamelog[self.log_strings["date"]]<datetime.today().date())]
         if self.league != "MLB":
-            usage_cutoff = gamelog[self.usage_stat].quantile(.25)
+            usage_cutoff = gamelog[self.usage_stat].quantile(.15)
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -856,7 +856,12 @@ class Stats:
         else:
             ROWS = 21500
 
-        last_training_day = pd.to_datetime(self.gamelog[self.gamelog[self.log_strings["usage"]] >= self.gamelog[self.log_strings["usage"]].quantile(.2)].iloc[-ROWS][self.log_strings['date']]).date()
+        usable_gamelog = self.gamelog[self.gamelog[self.log_strings["usage"]] >= self.gamelog[self.log_strings["usage"]].quantile(.15)]
+        cutoff_date = pd.to_datetime(usable_gamelog[self.log_strings["date"]]).iloc[0].date() + timedelta(days=200)
+        usable_gamelog = usable_gamelog.loc[pd.to_datetime(usable_gamelog[self.log_strings["date"]]).dt.date > cutoff_date]
+        ROWS = min(ROWS, len(usable_gamelog))
+
+        last_training_day = pd.to_datetime(usable_gamelog.iloc[-ROWS][self.log_strings['date']]).date()
         cutoff_date = last_training_day - timedelta(days=300)
         self.gamelog = self.gamelog.loc[pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date > cutoff_date].copy()
 
@@ -2278,45 +2283,46 @@ class StatsWNBA(StatsNBA):
                 shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(**{"season": self.season_start.year, "league_id_nullable": "10", "season_type_all_star": "Regular Season", "distance_range": "By Zone", "per_mode_detailed": "Per40"}).get_dict()['resultSets']
                 break
             except:
-                playerBios = []
+                playerBios = {"PLAYER_NAME": [], "PLAYER_ID": [], "PLAYER_HEIGHT_INCHES": [], "PLAYER_WEIGHT": [], "TEAM_ABBREVIATION": []}
                 shotData = {'rowSet':[]}
                 sleep(.1)
                 i = i+1
 
         playerBios = pd.DataFrame(playerBios)
-        playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
-        shotMap = []
-        for row in shotData['rowSet']:
-            fga = np.nansum(np.array(row[7:-6:3],dtype=float))
-            if fga>0:
-                record = {
-                    "PLAYER_NAME": remove_accents(row[1]),
-                    "TEAM_ABBREVIATION": row[3],
-                    "RA_PCT": (row[7] if row[7] else 0)/fga,
-                    "ITP_PCT": (row[10] if row[10] else 0)/fga,
-                    "MR_PCT": (row[13] if row[13] else 0)/fga,
-                    "C3_PCT": (row[28] if row[28] else 0)/fga,
-                    "B3_PCT": (row[22] if row[22] else 0)/fga
-                }
-                shotMap.append(record)
+        if not playerBios.empty:
+            playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
+            shotMap = []
+            for row in shotData['rowSet']:
+                fga = np.nansum(np.array(row[7:-6:3],dtype=float))
+                if fga>0:
+                    record = {
+                        "PLAYER_NAME": remove_accents(row[1]),
+                        "TEAM_ABBREVIATION": row[3],
+                        "RA_PCT": (row[7] if row[7] else 0)/fga,
+                        "ITP_PCT": (row[10] if row[10] else 0)/fga,
+                        "MR_PCT": (row[13] if row[13] else 0)/fga,
+                        "C3_PCT": (row[28] if row[28] else 0)/fga,
+                        "B3_PCT": (row[22] if row[22] else 0)/fga
+                    }
+                    shotMap.append(record)
 
-        player_df = player_df.merge(playerBios,on="PLAYER_ID",suffixes=(None,"_y")).merge(pd.DataFrame(shotMap),on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y"))
-        # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
-        player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
-        player_df.POS = player_df.POS.str[0]
-        player_df.index = player_df.PLAYER_NAME
-        player_df["PLAYER_BMI"] = player_df["PLAYER_WEIGHT"]/player_df["PLAYER_HEIGHT_INCHES"]/player_df["PLAYER_HEIGHT_INCHES"]
-        wnba_numeric_cols = ["AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]
-        player_dict = player_df.groupby("TEAM_ABBREVIATION")[["POS"] + wnba_numeric_cols].apply(lambda x: x)
-        player_dict[wnba_numeric_cols] = player_dict[wnba_numeric_cols].replace([np.nan, np.inf, -np.inf], 0)
+            player_df = player_df.merge(playerBios,on="PLAYER_ID",suffixes=(None,"_y")).merge(pd.DataFrame(shotMap),on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_y"))
+            # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
+            player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
+            player_df.POS = player_df.POS.str[0]
+            player_df.index = player_df.PLAYER_NAME
+            player_df["PLAYER_BMI"] = player_df["PLAYER_WEIGHT"]/player_df["PLAYER_HEIGHT_INCHES"]/player_df["PLAYER_HEIGHT_INCHES"]
+            wnba_numeric_cols = ["AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT", "RA_PCT", "ITP_PCT", "MR_PCT", "C3_PCT", "B3_PCT"]
+            player_dict = player_df.groupby("TEAM_ABBREVIATION")[["POS"] + wnba_numeric_cols].apply(lambda x: x)
+            player_dict[wnba_numeric_cols] = player_dict[wnba_numeric_cols].replace([np.nan, np.inf, -np.inf], 0)
 
-        player_dict = {level: player_dict.xs(level).T.to_dict()
-                     for level in player_dict.index.levels[0]}
-        if self.season_start.year in self.players:
-            self.players[self.season_start.year] = {team: players | player_dict.get(
-                team, {}) for team, players in self.players[self.season_start.year].items()}
-        else:
-            self.players[self.season_start.year] = player_dict
+            player_dict = {level: player_dict.xs(level).T.to_dict()
+                        for level in player_dict.index.levels[0]}
+            if self.season_start.year in self.players:
+                self.players[self.season_start.year] = {team: players | player_dict.get(
+                    team, {}) for team, players in self.players[self.season_start.year].items()}
+            else:
+                self.players[self.season_start.year] = player_dict
 
         self.upcoming_games = {}
         today = datetime.today().date()
@@ -2408,88 +2414,92 @@ class StatsWNBA(StatsNBA):
                 sleep(0.1)
                 i += 1
 
-        nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
-        adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
-        usg_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
-        teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
-        sco_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
-        adv_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+        if nba_gamelog and adv_gamelog and usg_gamelog:
+            nba_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
+            adv_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
+            usg_gamelog.sort(key=lambda x: (x['GAME_ID'], x['PLAYER_ID']))
 
-        stat_df = pd.DataFrame(nba_gamelog).merge(pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None,"_y"]).merge(pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None,"_y"])
-        stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
-        stat_df.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
-        stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
-        stat_df = stat_df.loc[stat_df["MIN"] > 1]
-        stat_df = stat_df.loc[~stat_df.TEAM_ABBREVIATION.isna()]
-        # Filter out games already in the gamelog
-        if not self.gamelog.empty:
-            existing = set(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
-            stat_df = stat_df[~stat_df.apply(lambda x: (x["PLAYER_ID"], x["GAME_ID"]) in existing, axis=1)]
+            stat_df = pd.DataFrame(nba_gamelog).merge(pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None,"_y"]).merge(pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None,"_y"])
+            stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
+            stat_df.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
+            stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
+            stat_df = stat_df.loc[stat_df["MIN"] > 1]
+            stat_df = stat_df.loc[~stat_df.TEAM_ABBREVIATION.isna()]
+            # Filter out games already in the gamelog
+            if not self.gamelog.empty:
+                existing = set(self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None))
+                stat_df = stat_df[~stat_df.apply(lambda x: (x["PLAYER_ID"], x["GAME_ID"]) in existing, axis=1)]
 
-        stat_df["HOME"] = stat_df.MATCHUP.str.contains(" vs. ")
-        stat_df = stat_df.merge(player_df[["PLAYER_ID", "POS"]], on="PLAYER_ID")
-        stat_df["OPP"] = stat_df.MATCHUP.apply(lambda x: x[x.rfind(" "):].strip())
+            stat_df["HOME"] = stat_df.MATCHUP.str.contains(" vs. ")
+            stat_df = stat_df.merge(player_df[["PLAYER_ID", "POS"]], on="PLAYER_ID")
+            stat_df["OPP"] = stat_df.MATCHUP.apply(lambda x: x[x.rfind(" "):].strip())
 
-        stat_df["PRA"] = stat_df["PTS"] + stat_df["REB"] + stat_df["AST"]
-        stat_df["PR"] = stat_df["PTS"] + stat_df["REB"]
-        stat_df["PA"] = stat_df["PTS"] + stat_df["AST"]
-        stat_df["RA"] = stat_df["REB"] + stat_df["AST"]
-        stat_df["BLST"] = stat_df["BLK"] + stat_df["STL"]
-        stat_df["fantasy points prizepicks"] = stat_df["PTS"] + stat_df["REB"] * \
-            1.2 + stat_df["AST"]*1.5 + stat_df["BLST"]*3 - stat_df["TOV"]
-        stat_df["fantasy points underdog"] = stat_df["PTS"] + stat_df["REB"] * \
-            1.2 + stat_df["AST"]*1.5 + stat_df["BLST"]*3 - stat_df["TOV"]
-        stat_df["fantasy points parlay"] = stat_df["PRA"] + \
-            stat_df["BLST"]*2 - stat_df["TOV"]
-        stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
-        stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
-        stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
-        stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
-        stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
-        stat_df["OREB_40"] = stat_df["OREB"] / stat_df["MIN"] * 40
-        stat_df["DREB_40"] = stat_df["DREB"] / stat_df["MIN"] * 40
-        stat_df["AST_40"] = stat_df["AST"] / stat_df["MIN"] * 40
-        stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
-        stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
-        stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
-        stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
-        stat_df.TEAM_ABBREVIATION = stat_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
-        stat_df.OPP = stat_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
+            stat_df["PRA"] = stat_df["PTS"] + stat_df["REB"] + stat_df["AST"]
+            stat_df["PR"] = stat_df["PTS"] + stat_df["REB"]
+            stat_df["PA"] = stat_df["PTS"] + stat_df["AST"]
+            stat_df["RA"] = stat_df["REB"] + stat_df["AST"]
+            stat_df["BLST"] = stat_df["BLK"] + stat_df["STL"]
+            stat_df["fantasy points prizepicks"] = stat_df["PTS"] + stat_df["REB"] * \
+                1.2 + stat_df["AST"]*1.5 + stat_df["BLST"]*3 - stat_df["TOV"]
+            stat_df["fantasy points underdog"] = stat_df["PTS"] + stat_df["REB"] * \
+                1.2 + stat_df["AST"]*1.5 + stat_df["BLST"]*3 - stat_df["TOV"]
+            stat_df["fantasy points parlay"] = stat_df["PRA"] + \
+                stat_df["BLST"]*2 - stat_df["TOV"]
+            stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
+            stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
+            stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
+            stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
+            stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
+            stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
+            stat_df["OREB_40"] = stat_df["OREB"] / stat_df["MIN"] * 40
+            stat_df["DREB_40"] = stat_df["DREB"] / stat_df["MIN"] * 40
+            stat_df["AST_40"] = stat_df["AST"] / stat_df["MIN"] * 40
+            stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
+            stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
+            stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
+            stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+            stat_df.TEAM_ABBREVIATION = stat_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
+            stat_df.OPP = stat_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
 
-        team_df = pd.DataFrame(teamlog).merge(pd.DataFrame(adv_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None,"_y"]).merge(pd.DataFrame(sco_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None,"_y"])
-        team_df = team_df[[col for col in team_df.columns if "_y" not in col]]
-        team_df = team_df.loc[~team_df.TEAM_ABBREVIATION.isna()]
+            stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
 
-        team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
-        team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" "):].strip())
-        team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
-        team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
-        team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
-        team_df.TEAM_ABBREVIATION = team_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
-        team_df.OPP = team_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
-        
-        stats = [stat for stat in self.teamlog.columns if "OPP_" in stat]
-        home_teams = team_df.loc[team_df.HOME]
-        home_teams.index = home_teams.GAME_ID
-        away_teams = team_df.loc[~team_df.HOME]
-        away_teams.index = away_teams.GAME_ID
-        home_teams = home_teams.join(away_teams.add_prefix("OPP_")[stats])
-        away_teams = away_teams.join(home_teams.add_prefix("OPP_")[stats])
-        team_df = pd.concat([home_teams, away_teams], ignore_index=True)
+            if not stat_df.empty:
+                stat_df.loc[:, "moneyline"] = stat_df.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]), axis=1)
+                stat_df.loc[:, "totals"] = stat_df.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]), axis=1)
+                self.gamelog = pd.concat(
+                    [stat_df[self.gamelog.columns], self.gamelog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
 
-        stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
-        team_df["GAME_DATE"] = pd.to_datetime(team_df["GAME_DATE"]).astype(str)
+        if teamlog and sco_teamlog and adv_teamlog:
+            teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+            sco_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
+            adv_teamlog.sort(key=lambda x: (x['GAME_ID'], x['TEAM_ID']))
 
-        if not stat_df.empty:
-            stat_df.loc[:, "moneyline"] = stat_df.apply(lambda x: archive.get_moneyline(self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]), axis=1)
-            stat_df.loc[:, "totals"] = stat_df.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]), axis=1)
-            self.gamelog = pd.concat(
-                [stat_df[self.gamelog.columns], self.gamelog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
+            team_df = pd.DataFrame(teamlog).merge(pd.DataFrame(adv_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None,"_y"]).merge(pd.DataFrame(sco_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None,"_y"])
+            team_df = team_df[[col for col in team_df.columns if "_y" not in col]]
+            team_df = team_df.loc[~team_df.TEAM_ABBREVIATION.isna()]
+
+            team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
+            team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" "):].strip())
+            team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
+            team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
+            team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+            team_df.TEAM_ABBREVIATION = team_df.TEAM_ABBREVIATION.apply(lambda x: team_abbr_map.get(x, x))
+            team_df.OPP = team_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
             
-        if not team_df.empty:
-            self.teamlog = pd.concat(
-                [team_df[self.teamlog.columns], self.teamlog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
+            stats = [stat for stat in self.teamlog.columns if "OPP_" in stat]
+            home_teams = team_df.loc[team_df.HOME]
+            home_teams.index = home_teams.GAME_ID
+            away_teams = team_df.loc[~team_df.HOME]
+            away_teams.index = away_teams.GAME_ID
+            home_teams = home_teams.join(away_teams.add_prefix("OPP_")[stats])
+            away_teams = away_teams.join(home_teams.add_prefix("OPP_")[stats])
+            team_df = pd.concat([home_teams, away_teams], ignore_index=True)
+
+            team_df["GAME_DATE"] = pd.to_datetime(team_df["GAME_DATE"]).astype(str)
+                
+            if not team_df.empty:
+                self.teamlog = pd.concat(
+                    [team_df[self.teamlog.columns], self.teamlog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
 
         self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
