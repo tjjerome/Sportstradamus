@@ -838,6 +838,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         model_weight = filedict["weight"]
         r_book = filedict.get("r_book", None)
         temperature = filedict.get("temperature", None)
+        dispersion_cal = filedict.get("dispersion_cal", 1.0)
+        shape_ceiling = filedict.get("shape_ceiling")
         dist = filedict["distribution"]
         step = filedict["step"]
         hist_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
@@ -919,6 +921,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             return []
         offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None), axis=1)
         
+        # Clamp model shape to training-time ceiling (safety net)
+        if shape_ceiling is not None:
+            if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+                offer_df["Model R"] = np.minimum(offer_df["Model R"], shape_ceiling)
+            elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
+                offer_df["Model Alpha"] = np.minimum(offer_df["Model Alpha"], shape_ceiling)
+
         # Blend model and book predictions via fused_loc (uses base dist type)
         # For ZI dists, pass gate_model + hist_gate so fused_loc blends the gate.
         if dist in ("NegBin", "ZINB"):
@@ -961,6 +970,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if hist_gate and dist in ("ZINB", "ZAGamma"):
             offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
         
+        # Apply dispersion calibration (keeps mean fixed, adjusts concentration)
+        if dispersion_cal != 1.0:
+            if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+                offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
+            elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
+                offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
+
         # Raw distributional probability, then temperature scaling calibration
         _r = offer_df["Model R"].to_numpy() if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns) else None
         _alpha = offer_df["Model Alpha"].to_numpy() if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns) else None
