@@ -1053,7 +1053,7 @@ def accel_asc(n):
         y = x + y - 1
         yield a[:k + 1]
 
-def set_model_start_values(model, dist, X_data):
+def set_model_start_values(model, dist, X_data, shape_ceiling=None):
     """
     Set appropriate start values for different distribution types.
 
@@ -1085,24 +1085,25 @@ def set_model_start_values(model, dist, X_data):
     std = np.clip(sv[:, 1], 1e-6, None)
     hist_gate = np.clip(sv[:, 2], 0, 0.99)
 
+    _r_upper = shape_ceiling if shape_ceiling is not None else 50
+    _a_upper = shape_ceiling if shape_ceiling is not None else 100
+
     if dist in ["NegBin", "ZINB"]:
         # r = mu² / (var - mu); relu response → raw = value (identity for r>0)
-        r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 1, 50)
+        r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 0.5, _r_upper)
         # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs)
         probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
         if dist == "ZINB":
             nb_zeros = nbinom.pmf(0, r_init, probs)
             hist_gate = np.clip(hist_gate - nb_zeros, 0, 0.99)
             mu = mu / (1 - hist_gate)
-            r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 1, 50)
+            r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 0.5, _r_upper)
             probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
         sv = np.column_stack([r_init, logit(probs)])
     elif dist in ["Gamma", "ZAGamma"]:
         if dist == "ZAGamma":
             mu = mu / (1 - hist_gate)
-        # Clip alpha to [0.1, 100]: STDYr ≈ 0 → alpha explodes → log(Γ(α)) dominates NLL.
-        # Clip beta to [0.01, 50]: MeanYr ≈ 0 → beta = α/μ explodes → NLL for any y>0 huge.
-        alpha = np.clip((mu / std) ** 2, 0.1, 100)
+        alpha = np.clip((mu / std) ** 2, 0.1, _a_upper)
         beta = np.clip(alpha / np.clip(mu, 1e-6, None), 0.01, 50)
         # softplus response → raw = softplus_inv(value)
         sv = np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])

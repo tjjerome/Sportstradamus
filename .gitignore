@@ -171,6 +171,7 @@ docs/build
 *test.py
 *.txt
 *.prof
+*.pdf
 src/sportstradamus/data/training_report.txt
 src/sportstradamus/data/~$feature_importances.xlsx
 src/sportstradamus/data/feature_importances.xlsx

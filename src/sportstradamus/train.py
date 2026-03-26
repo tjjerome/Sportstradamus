@@ -27,7 +27,18 @@ from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.distributions.Gamma import Gamma
 from lightgbmlss.distributions.ZAGamma import ZAGamma
 
+import torch
 import shap
+
+
+class _BoundedResponseFn:
+    """Picklable callable that clamps a response function's output."""
+    def __init__(self, orig_fn, ceiling):
+        self.orig_fn = orig_fn
+        self.ceiling = float(ceiling)
+
+    def __call__(self, predt):
+        return torch.clamp(self.orig_fn(predt), max=self.ceiling)
 import json
 import warnings
 pd.options.mode.chained_assignment = None
@@ -473,8 +484,17 @@ def meditate(force, league):
                     dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
                 else:
                     dist_obj = ZINB(stabilization="None", loss_fn="nll")
+
+                # Marginal shape from training targets (full between+within-player variance)
+                _nz = y_train_labels > 0
+                _vy = y_train_labels[_nz] if _nz.sum() > 30 else y_train_labels
+                _mu_m, _var_m = float(np.mean(_vy)), float(np.var(_vy))
+                marginal_shape = max(_mu_m**2 / max(_var_m - _mu_m, 0.01), 0.5)
+                K_SHAPE = 2.0
+                shape_ceiling = marginal_shape * K_SHAPE
+
                 cv = ((player_stats.var()-player_stats.mean())/player_stats.mean()**2*player_stats.count()/player_stats.count().sum()).sum()
-                cv = max(cv, 1/50)  # Avoid zero or negative cv
+                cv = max(cv, 1/shape_ceiling)
             else:
                 if dist == "Gamma":
                     dist_obj = Gamma(stabilization="None", loss_fn="nll", response_fn="softplus")
@@ -485,7 +505,16 @@ def meditate(force, league):
                 else:
                     dist_obj = ZAGamma(stabilization="None", loss_fn="nll", response_fn="softplus")
 
+                # Marginal shape from training targets (full between+within-player variance)
+                _nz = y_train_labels > 0
+                _vy = y_train_labels[_nz] if _nz.sum() > 30 else y_train_labels
+                _mu_m, _var_m = float(np.mean(_vy)), float(np.var(_vy))
+                marginal_shape = max((_mu_m / max(np.sqrt(_var_m), 0.01))**2, 0.5)
+                K_SHAPE = 2.0
+                shape_ceiling = marginal_shape * K_SHAPE
+
                 cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
+                cv = max(cv, 1/np.sqrt(shape_ceiling))
 
             stat_cv[league][market] = cv
             with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
@@ -495,10 +524,16 @@ def meditate(force, league):
             dtrain = lgb.Dataset(
                 X_train, label=y_train_labels)
             
+            # === BOUND SHAPE RESPONSE FUNCTION (safety net) ===
+            if dist in ("NegBin", "ZINB"):
+                dist_obj.param_dict["total_count"] = _BoundedResponseFn(dist_obj.param_dict["total_count"], shape_ceiling)
+            elif dist in ("Gamma", "ZAGamma"):
+                dist_obj.param_dict["concentration"] = _BoundedResponseFn(dist_obj.param_dict["concentration"], shape_ceiling)
+
             # === MODEL TRAINING ===
             # All distributions (NegBin, Gamma) use LightGBMLSS training
             model = LightGBMLSS(dist_obj)
-            set_model_start_values(model, dist, X_train)
+            set_model_start_values(model, dist, X_train, shape_ceiling=shape_ceiling)
 
             hp_search_space = {
                 "feature_pre_filter": ["none", [False]],
@@ -531,8 +566,8 @@ def meditate(force, league):
             else:
                 opt_params = warm_start_hyper_opt(model, hp_search_space, dtrain,
                                                   opt_params,
-                                                  n_trials=100,
-                                                  max_minutes=15)
+                                                  n_trials=200,
+                                                  max_minutes=10)
 
             model.train(opt_params,
                         dtrain,
@@ -639,12 +674,8 @@ def meditate(force, league):
 
                 r_blend_val, p_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "NegBin", r=r_validation, **_zi_val)
 
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, r=r_test, gate=gate_blend_test)
-                y_proba_no_filt = np.array(
-                    [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
-
                 test_alpha = None
-                
+
             else:
                 # Gamma / ZAGamma — precision-weighted blend
                 _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
@@ -655,12 +686,48 @@ def meditate(force, league):
                 alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "Gamma", alpha=alpha_validation, **_zi_val)
                 r_test = None
 
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=alpha_blend, step=step, gate=gate_blend_test)
-                y_proba_no_filt = np.array(
-                    [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
-
                 # Store alpha for downstream use
                 test_alpha = alpha_blend
+
+            # === DISPERSION CALIBRATION ===
+            # Learn shape scaling factor on validation set to correct overconcentration.
+            # Keeps mean fixed; only adjusts distributional width.
+            y_class_val = (y_validation["Result"] >= B_validation["Line"]).astype(int).to_numpy()
+            val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
+
+            def dispersion_loss(c):
+                if dist in ("NegBin", "ZINB"):
+                    r_cal = r_blend_val * c
+                    under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist,
+                                     r=r_cal, gate=gate_blend_val)
+                else:
+                    alpha_cal = alpha_blend_val * c
+                    under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist,
+                                     alpha=alpha_cal, step=step, gate=gate_blend_val)
+                over = 1 - under
+                return np.mean((over - y_class_val) ** 2)
+
+            disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, 1.0), method='bounded')
+            c_opt = disp_result.x
+
+            # Apply dispersion calibration to test and validation params
+            if dist in ("NegBin", "ZINB"):
+                r_test = r_test * c_opt
+                r_blend_val = r_blend_val * c_opt
+            else:
+                alpha_blend = alpha_blend * c_opt
+                beta_blend = alpha_blend / weighted_mean
+                test_alpha = alpha_blend
+                alpha_blend_val = alpha_blend_val * c_opt
+                beta_blend_val = alpha_blend_val / val_weighted_mean
+
+            # Compute test set probabilities with calibrated params
+            if dist in ("NegBin", "ZINB"):
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, r=r_test, gate=gate_blend_test)
+            else:
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=alpha_blend, step=step, gate=gate_blend_test)
+            y_proba_no_filt = np.array(
+                [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
 
             # === TEMPERATURE SCALING CALIBRATION ===
             # Fit temperature T on validation set: p_cal = sigmoid(logit(p_raw) / T)
@@ -668,10 +735,9 @@ def meditate(force, league):
             _r_val = r_blend_val if dist in ("NegBin", "ZINB") else None
             _alpha_val = alpha_blend_val if dist in ("Gamma", "ZAGamma") else None
             _gate_val = gate_blend_val if dist in ("ZINB", "ZAGamma") else None
-            val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
+            # val_weighted_mean already computed before dispersion calibration (mean is invariant)
             val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist, alpha=_alpha_val, step=step, r=_r_val, gate=_gate_val)
             val_raw_over = 1 - val_raw_under
-            y_class_val = (y_validation["Result"] >= B_validation["Line"]).astype(int).to_numpy()
 
             val_raw_over_clipped = np.clip(val_raw_over, 1e-6, 1 - 1e-6)
             val_logits = logit(val_raw_over_clipped)
@@ -741,7 +807,7 @@ def meditate(force, league):
                 diag_model_shape = float(prob_params['total_count'].mean())
                 test_mu = y_test['Result'].mean()
                 test_var = y_test['Result'].var()
-                diag_empirical_shape = float(test_mu ** 2 / max(test_var - test_mu, 1e-6)) if test_var > test_mu else float('nan')
+                diag_empirical_shape = float(test_mu ** 2 / max(test_var - test_mu, 0.01))
                 diag_shape_label = "r"
 
             # EV diagnostics: start mean vs blended model EV vs line vs actual results
@@ -750,6 +816,42 @@ def meditate(force, league):
             diag_mean_line = float(B_test['Line'].mean())
             diag_ev_minus_line = float((weighted_mean - B_test['Line'].to_numpy()).mean())
             diag_result_mean = float(y_test['Result'].mean())
+
+            # --- Decomposition diagnostics ---
+            # Median and fraction help distinguish mean bias from shape bias
+            ev_minus_line_arr = weighted_mean - B_test['Line'].to_numpy()
+            diag_median_ev_diff = float(np.median(ev_minus_line_arr))
+            diag_frac_ev_gt_line = float((ev_minus_line_arr > 0).mean())
+
+            # Conditional Over%: split by sign of (ev - line)
+            ev_gt_mask = ev_minus_line_arr > 0
+            ev_lt_mask = ev_minus_line_arr <= 0
+            y_pred_nofilter = (y_proba_no_filt[:, 1] > 0.5).astype(int)
+            conf_mask = np.max(y_proba_no_filt, axis=1) > 0.54
+            if (ev_gt_mask & conf_mask).sum() > 10:
+                diag_over_pct_ev_gt = float(y_pred_nofilter[ev_gt_mask & conf_mask].mean())
+            else:
+                diag_over_pct_ev_gt = float('nan')
+            if (ev_lt_mask & conf_mask).sum() > 10:
+                diag_over_pct_ev_lt = float(y_pred_nofilter[ev_lt_mask & conf_mask].mean())
+            else:
+                diag_over_pct_ev_lt = float('nan')
+
+            # Counterfactual: what would Over% be with empirical shape?
+            if not np.isnan(diag_empirical_shape) and diag_empirical_shape > 0:
+                emp_shape = np.full_like(weighted_mean, diag_empirical_shape)
+                if dist in ("NegBin", "ZINB"):
+                    cf_under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist,
+                                        r=emp_shape, gate=gate_blend_test)
+                else:
+                    cf_under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist,
+                                        alpha=emp_shape, step=step, gate=gate_blend_test)
+                cf_over = 1 - cf_under
+                cf_pred = (cf_over > 0.5).astype(int)
+                cf_mask = np.maximum(cf_under, cf_over) > 0.54
+                diag_cf_over_pct = float(cf_pred[cf_mask].mean()) if cf_mask.sum() > 10 else float('nan')
+            else:
+                diag_cf_over_pct = float('nan')
 
             filedict = {
                 "model": model,
@@ -773,18 +875,30 @@ def meditate(force, league):
                     "mean_line": diag_mean_line,
                     "ev_minus_line": diag_ev_minus_line,
                     "result_mean": diag_result_mean,
+                    "dispersion_cal": c_opt,
+                    "median_ev_diff": diag_median_ev_diff,
+                    "frac_ev_gt_line": diag_frac_ev_gt_line,
+                    "over_pct_ev_gt": diag_over_pct_ev_gt,
+                    "over_pct_ev_lt": diag_over_pct_ev_lt,
+                    "cf_over_pct": diag_cf_over_pct,
+                    "shape_ceiling": shape_ceiling,
+                    "marginal_shape": marginal_shape,
                 },
                 "params": opt_params,
                 "distribution": dist,
                 "cv": cv,
                 "std": stat_std,
                 "temperature": T_opt,
+                "dispersion_cal": c_opt,
                 "weight": model_weight,
                 "r_book": r_book,
-                "hist_gate": hist_gate
+                "hist_gate": hist_gate,
+                "shape_ceiling": shape_ceiling,
             }
 
             X_test['Result'] = y_test['Result']
+            X_test['Line'] = B_test['Line'].values
+            X_test['Blended_EV'] = weighted_mean
             if dist in ("NegBin", "ZINB"):
                 # Store base distribution mean: mean = r*p/(1-p)
                 base_ev = prob_params['total_count'] * prob_params['probs'] / (1 - prob_params['probs'])
@@ -837,6 +951,8 @@ def report():
     stat_zi_local = load_zi_config()
     
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
+        league_models = {}  # {league: {market: model}} for summary tables
+        prev_league = None
         for model_str in model_list:
             with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
                 model = pickle.load(infile)
@@ -848,6 +964,9 @@ def report():
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
             h_gate = model.get("hist_gate", 0)
+
+            # Track models per league for summary table
+            league_models.setdefault(league, {})[market] = model
 
             stat_cv.setdefault(league, {})
             stat_cv[league][market] = float(cv)
@@ -874,15 +993,66 @@ def report():
             if "diagnostics" in model:
                 d = model["diagnostics"]
                 sl = d["shape_label"]
-                f.write(f" DIAG start_{sl}={d['start_shape']:.3f}"
-                        f" model_{sl}={d['model_shape']:.3f}"
-                        f" empirical_{sl}={d['empirical_shape']:.3f}\n")
-                f.write(f" DIAG start_mean={d['start_mean']:.2f}"
-                        f" model_ev={d['model_ev']:.2f}"
-                        f" mean_line={d['mean_line']:.2f}"
-                        f" result_mean={d['result_mean']:.2f}"
-                        f" ev_minus_line={d['ev_minus_line']:+.3f}\n")
+                emp_shape = d.get('empirical_shape', 0.0)
+                mod_shape = d.get('model_shape', 0.0)
+                shape_ratio = mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float('nan')
+                f.write(f" DIAG start_{sl}={d.get('start_shape', 0.0):.3f}"
+                        f" model_{sl}={mod_shape:.3f}"
+                        f" empirical_{sl}={emp_shape:.3f}"
+                        f" shape_ratio={shape_ratio:.1f}x\n")
+                f.write(f" DIAG start_mean={d.get('start_mean', 0.0):.2f}"
+                        f" model_ev={d.get('model_ev', 0.0):.2f}"
+                        f" mean_line={d.get('mean_line', 0.0):.2f}"
+                        f" result_mean={d.get('result_mean', 0.0):.2f}\n")
+                f.write(f" DIAG mean_ev_diff={d.get('ev_minus_line', 0.0):+.3f}"
+                        f" median_ev_diff={d.get('median_ev_diff', 0.0):+.3f}"
+                        f" frac_ev>line={d.get('frac_ev_gt_line', 0.0):.1%}\n")
+                f.write(f" DIAG Over%|ev>line={d.get('over_pct_ev_gt', float('nan')):.3f}"
+                        f" Over%|ev<line={d.get('over_pct_ev_lt', float('nan')):.3f}"
+                        f" CF_Over%(emp_shape)={d.get('cf_over_pct', float('nan')):.3f}\n")
+                f.write(f" DIAG shape_ceiling={d.get('shape_ceiling', 'N/A')}"
+                        f" marginal_shape={d.get('marginal_shape', 'N/A')}"
+                        f" dispersion_cal={d.get('dispersion_cal', 0.0):.3f}\n")
 
+            if "params" in model:
+                p = model["params"]
+                f.write(f" HP rounds={p.get('opt_rounds', '?')}"
+                        f" leaves={p.get('num_leaves', '?')}"
+                        f" lr={p.get('learning_rate', 0):.4f}"
+                        f" min_child={p.get('min_child_samples', '?')}"
+                        f" L1={p.get('lambda_l1', 0):.2e}"
+                        f" L2={p.get('lambda_l2', 0):.2e}\n")
+
+            f.write("\n")
+
+        # === PER-LEAGUE SUMMARY TABLES ===
+        for league, markets in sorted(league_models.items()):
+            f.write("\n" + "=" * 80 + "\n")
+            f.write(f" {league} SUMMARY TABLE\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"{'Market':<16} {'Dist':<8} {'Over%':>6} {'ShpR':>5}"
+                    f" {'FracEV>':>7} {'MedDiff':>8}"
+                    f" {'O%|EV>':>7} {'O%|EV<':>7} {'CF_O%':>6}\n")
+            f.write("-" * 80 + "\n")
+            for mkt, mdl in sorted(markets.items()):
+                if "diagnostics" not in mdl:
+                    continue
+                d = mdl["diagnostics"]
+                stats = mdl["stats"]
+                dist_name = mdl.get("distribution", "?")[:6]
+                over_pct_val = stats["Over%"][1]  # filtered
+                emp_s = d.get('empirical_shape', 0.0)
+                mod_s = d.get('model_shape', 0.0)
+                sr = mod_s / max(emp_s, 0.01) if not np.isnan(emp_s) else float('nan')
+                fev = d.get('frac_ev_gt_line', 0)
+                med = d.get('median_ev_diff', 0)
+                oeg = d.get('over_pct_ev_gt', float('nan'))
+                oel = d.get('over_pct_ev_lt', float('nan'))
+                cfo = d.get('cf_over_pct', float('nan'))
+                sr_str = f"{sr:>4.1f}x" if not np.isnan(sr) else "  nan"
+                f.write(f"{mkt:<16} {dist_name:<8} {over_pct_val:>6.3f} {sr_str}"
+                        f" {fev:>7.1%} {med:>+8.3f}"
+                        f" {oeg:>7.3f} {oel:>7.3f} {cfo:>6.3f}\n")
             f.write("\n")
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:

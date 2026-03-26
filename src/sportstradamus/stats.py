@@ -1360,7 +1360,11 @@ class StatsNBA(Stats):
 
         if not team_df.empty:
             self.teamlog = pd.concat(
-                [team_df[self.teamlog.columns], self.teamlog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
+                [team_df.reindex(columns=self.teamlog.columns), self.teamlog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
+
+        # Drop records with incomplete advanced stats so they can be re-fetched
+        if "OFF_RATING" in self.gamelog.columns:
+            self.gamelog = self.gamelog.dropna(subset=["OFF_RATING"])
 
         # Process each game
         nba_df = []
@@ -1458,7 +1462,7 @@ class StatsNBA(Stats):
             nba_df.loc[:, "totals"] = nba_df.apply(lambda x: archive.get_total(self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]), axis=1)
 
             self.gamelog = pd.concat(
-                [nba_df[self.gamelog.columns], self.gamelog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
+                [nba_df.reindex(columns=self.gamelog.columns), self.gamelog]).sort_values(self.log_strings["date"]).reset_index(drop=True)
 
         # Remove old games to prevent file bloat
         four_years_ago = today - timedelta(days=1461)
