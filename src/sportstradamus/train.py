@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from scipy.optimize import minimize, minimize_scalar
-from scipy.special import logit, expit
+from scipy.special import logit, expit, beta as beta_fn
 from scipy.stats import poisson, nbinom, norm, gamma, fit
 from sklearn.metrics import (
     precision_score,
@@ -477,7 +477,9 @@ def meditate(force, league):
                 stat_zi[league][market] = hist_gate
                 save_zi_config(stat_zi)
             
-            player_stats = player_stats.apply(lambda x: x[x != 0])
+            # apply() returns a MultiIndex Series (player, game_idx); regroup by player
+            # so subsequent .mean()/.std()/.var()/.count() are per-player, not global.
+            player_stats = player_stats.apply(lambda x: x[x != 0]).groupby(level=0)
 
             if dist in ["NegBin", "ZINB"]:
                 if dist == "NegBin":
@@ -485,15 +487,18 @@ def meditate(force, league):
                 else:
                     dist_obj = ZINB(stabilization="None", loss_fn="nll")
 
-                # Marginal shape from training targets (full between+within-player variance)
-                _nz = y_train_labels > 0
-                _vy = y_train_labels[_nz] if _nz.sum() > 30 else y_train_labels
-                _mu_m, _var_m = float(np.mean(_vy)), float(np.var(_vy))
-                marginal_shape = max(_mu_m**2 / max(_var_m - _mu_m, 0.01), 0.5)
+                # Per-player shape (r = μ²/(σ²-μ)), capped at R_CAP
+                R_CAP = 50  # NegBin with r >= 50 is effectively Poisson
+                per_player_r = player_stats.mean()**2 / np.maximum(player_stats.var() - player_stats.mean(), 0.01)
+                per_player_r = np.minimum(per_player_r, R_CAP)
+
+                # Marginal shape: 95th percentile of per-player r (representative max)
+                marginal_shape = max(float(np.quantile(per_player_r, 0.95)), 0.5)
                 K_SHAPE = 2.0
                 shape_ceiling = marginal_shape * K_SHAPE
 
-                cv = ((player_stats.var()-player_stats.mean())/player_stats.mean()**2*player_stats.count()/player_stats.count().sum()).sum()
+                # cv = weighted average of 1/r across players
+                cv = (1 / per_player_r * player_stats.count() / player_stats.count().sum()).sum()
                 cv = max(cv, 1/shape_ceiling)
             else:
                 if dist == "Gamma":
@@ -505,11 +510,9 @@ def meditate(force, league):
                 else:
                     dist_obj = ZAGamma(stabilization="None", loss_fn="nll", response_fn="softplus")
 
-                # Marginal shape from training targets (full between+within-player variance)
-                _nz = y_train_labels > 0
-                _vy = y_train_labels[_nz] if _nz.sum() > 30 else y_train_labels
-                _mu_m, _var_m = float(np.mean(_vy)), float(np.var(_vy))
-                marginal_shape = max((_mu_m / max(np.sqrt(_var_m), 0.01))**2, 0.5)
+                # Per-player shape (alpha = (μ/σ)²), 95th percentile as representative max
+                per_player_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01))**2
+                marginal_shape = max(float(np.quantile(per_player_alpha, 0.95)), 0.5)
                 K_SHAPE = 2.0
                 shape_ceiling = marginal_shape * K_SHAPE
 
@@ -690,24 +693,63 @@ def meditate(force, league):
                 test_alpha = alpha_blend
 
             # === DISPERSION CALIBRATION ===
-            # Learn shape scaling factor on validation set to correct overconcentration.
-            # Keeps mean fixed; only adjusts distributional width.
+            # Learn shape scaling factor on validation set using CRPS (proper scoring rule
+            # for distributional forecasts; Gneiting & Raftery, 2007).
+            # Bidirectional: c > 1 narrows distribution (model was too wide),
+            # c < 1 widens it (model was too narrow). Keeps mean fixed.
             y_class_val = (y_validation["Result"] >= B_validation["Line"]).astype(int).to_numpy()
+            y_val_arr = y_validation["Result"].to_numpy()
             val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
 
             def dispersion_loss(c):
                 if dist in ("NegBin", "ZINB"):
                     r_cal = r_blend_val * c
-                    under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist,
-                                     r=r_cal, gate=gate_blend_val)
+                    p_cal = r_cal / (r_cal + val_weighted_mean)
+
+                    # Discrete CRPS: sum_k (F(k) - I(y <= k))^2
+                    k_max = int(max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4, 30))
+                    k_vals = np.arange(k_max + 1)
+
+                    cdf = nbinom.cdf(k_vals[:, None], r_cal[None, :], p_cal[None, :])
+                    if gate_blend_val is not None:
+                        cdf = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf
+
+                    indicator = (y_val_arr[None, :] <= k_vals[:, None]).astype(float)
+                    crps = np.sum((cdf - indicator) ** 2, axis=0)
                 else:
                     alpha_cal = alpha_blend_val * c
-                    under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist,
-                                     alpha=alpha_cal, step=step, gate=gate_blend_val)
-                over = 1 - under
-                return np.mean((over - y_class_val) ** 2)
+                    scale_cal = val_weighted_mean / alpha_cal
 
-            disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, 1.0), method='bounded')
+                    if gate_blend_val is not None:
+                        # ZAGamma: numerical CDF-based CRPS over fine grid
+                        x_max = max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4)
+                        x_grid = np.linspace(0, x_max, 500)
+                        dx = x_grid[1] - x_grid[0]
+
+                        cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
+                        cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
+
+                        indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
+                        crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
+                    else:
+                        # Closed-form Gamma CRPS (Scheuerer & Hamill, 2015)
+                        F_y = gamma.cdf(y_val_arr, alpha_cal, scale=scale_cal)
+                        F_y_a1 = gamma.cdf(y_val_arr, alpha_cal + 1, scale=scale_cal)
+                        crps = y_val_arr * (2 * F_y - 1) - val_weighted_mean * (2 * F_y_a1 - 1) \
+                               - scale_cal / beta_fn(0.5, alpha_cal)
+
+                reg = 0.01 * np.log(c) ** 2  # L2 penalty toward c=1 (no correction)
+                return np.mean(crps) + reg
+
+            # Upper bound: don't let calibrated shape exceed training ceiling
+            if dist in ("NegBin", "ZINB"):
+                mean_shape = np.mean(r_blend_val)
+            else:
+                mean_shape = np.mean(alpha_blend_val)
+            max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
+            upper_bound = min(10.0, max_c)
+
+            disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, upper_bound), method='bounded')
             c_opt = disp_result.x
 
             # Apply dispersion calibration to test and validation params
@@ -744,7 +786,9 @@ def meditate(force, league):
 
             def brier_loss(T):
                 cal = expit(val_logits / T)
-                return np.mean((cal - y_class_val) ** 2)
+                brier = np.mean((cal - y_class_val) ** 2)
+                reg = 0.01 * (T - 1) ** 2  # L2 penalty toward T=1 (no correction)
+                return brier + reg
 
             result = minimize_scalar(brier_loss, bounds=(1.0, 10.0), method='bounded')
             T_opt = result.x
@@ -768,14 +812,22 @@ def meditate(force, league):
                        B_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
 
-            prec = np.zeros(2)
-            acc = np.zeros(2)
-            sharp = np.zeros(2)
-            ll = np.zeros(2)
-            over_pct = np.zeros(2)
-            under_prec = np.zeros(2)
+            # Raw model probabilities (before blending with book)
+            if dist in ("NegBin", "ZINB"):
+                _raw_under = get_odds(B_test["Line"].to_numpy(), ev, dist, r=r, gate=gate_test)
+            else:
+                _raw_under = get_odds(B_test["Line"].to_numpy(), ev, dist, alpha=alpha, step=step, gate=gate_test)
+            _raw_under = np.clip(_raw_under, 0, 1)
+            y_proba_raw = np.array([_raw_under, 1-_raw_under]).transpose()
 
-            for i, y_proba in enumerate([y_proba_no_filt, y_proba_filt]):
+            prec = np.zeros(3)
+            acc = np.zeros(3)
+            sharp = np.zeros(3)
+            ll = np.zeros(3)
+            over_pct = np.zeros(3)
+            under_prec = np.zeros(3)
+
+            for i, y_proba in enumerate([y_proba_raw, y_proba_no_filt, y_proba_filt]):
                 y_pred = (y_proba > .5).astype(int)[:, 1]
                 mask = np.max(y_proba, axis=1) > 0.54
                 prec[i] = precision_score(y_class[mask], y_pred[mask])
@@ -786,7 +838,7 @@ def meditate(force, league):
                 ll[i] = log_loss(y_class, y_proba[:, 1])
 
                 # Directional diagnostics
-                over_pct[i] = y_pred[mask].mean() if mask.sum() > 0 else np.nan
+                over_pct[i] = y_pred[mask].mean()/mask.mean() if mask.sum() > 0 else np.nan
                 under_mask = mask & (y_pred == 0)
                 under_prec[i] = (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
 
@@ -798,16 +850,16 @@ def meditate(force, league):
             if dist in ("Gamma", "ZAGamma"):
                 diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
                 diag_model_shape = float(prob_params['concentration'].mean())
-                test_mu = y_test['Result'].mean()
-                test_std = y_test['Result'].std()
-                diag_empirical_shape = float((test_mu / test_std) ** 2) if test_std > 0 else float('nan')
+                per_player_emp_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01))**2
+                diag_empirical_shape = float(np.median(per_player_emp_alpha))
                 diag_shape_label = "alpha"
             elif dist in ("NegBin", "ZINB"):
                 diag_start_shape = float(np.clip(test_mean_yr ** 2 / max(test_std_yr ** 2 - test_mean_yr, 1e-6), 1, 50))
                 diag_model_shape = float(prob_params['total_count'].mean())
-                test_mu = y_test['Result'].mean()
-                test_var = y_test['Result'].var()
-                diag_empirical_shape = float(test_mu ** 2 / max(test_var - test_mu, 0.01))
+                R_CAP = 50  # consistent with cv computation
+                per_player_emp_r = player_stats.mean()**2 / np.maximum(player_stats.var() - player_stats.mean(), 0.01)
+                per_player_emp_r = np.minimum(per_player_emp_r, R_CAP)
+                diag_empirical_shape = float(np.median(per_player_emp_r))
                 diag_shape_label = "r"
 
             # EV diagnostics: start mean vs blended model EV vs line vs actual results
@@ -829,11 +881,11 @@ def meditate(force, league):
             y_pred_nofilter = (y_proba_no_filt[:, 1] > 0.5).astype(int)
             conf_mask = np.max(y_proba_no_filt, axis=1) > 0.54
             if (ev_gt_mask & conf_mask).sum() > 10:
-                diag_over_pct_ev_gt = float(y_pred_nofilter[ev_gt_mask & conf_mask].mean())
+                diag_over_pct_ev_gt = float(y_pred_nofilter[ev_gt_mask & conf_mask].mean()/conf_mask.mean())
             else:
                 diag_over_pct_ev_gt = float('nan')
             if (ev_lt_mask & conf_mask).sum() > 10:
-                diag_over_pct_ev_lt = float(y_pred_nofilter[ev_lt_mask & conf_mask].mean())
+                diag_over_pct_ev_lt = float(y_pred_nofilter[ev_lt_mask & conf_mask].mean()/conf_mask.mean())
             else:
                 diag_over_pct_ev_lt = float('nan')
 
@@ -849,7 +901,7 @@ def meditate(force, league):
                 cf_over = 1 - cf_under
                 cf_pred = (cf_over > 0.5).astype(int)
                 cf_mask = np.maximum(cf_under, cf_over) > 0.54
-                diag_cf_over_pct = float(cf_pred[cf_mask].mean()) if cf_mask.sum() > 10 else float('nan')
+                diag_cf_over_pct = float(cf_pred[cf_mask].mean()/cf_mask.mean()) if cf_mask.sum() > 10 else float('nan')
             else:
                 diag_cf_over_pct = float('nan')
 
@@ -858,14 +910,15 @@ def meditate(force, league):
                 "step": step,
                 "stats": {
                     "Accuracy": acc,
-                    "Precision": prec,
+                    "Over Prec": prec,
                     "Under Prec": under_prec,
                     "Over%": over_pct,
                     "Sharpness": sharp,
-                    "NLL": ll,
-                    "Weight/Calib": [model_weight, model_calib]
+                    "NLL": ll
                 },
                 "diagnostics": {
+                    "model_weight": model_weight,
+                    "model_calib": model_calib,
                     "shape_label": diag_shape_label,
                     "start_shape": diag_start_shape,
                     "model_shape": diag_model_shape,
@@ -982,12 +1035,16 @@ def report():
             stat_zi_local.setdefault(league, {})
             stat_zi_local[league][market] = h_gate
 
-            f.write(f" {league} {market} ".center(60, "="))
+            f.write(f" {league} {market} ".center(62, "="))
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
             f.write(f" Historical Zero Rate: {h_gate:.4f}\n")
-            f.write(pd.DataFrame(model['stats'], index=[
-                    ['No Filter', 'Filter']]).to_string(index=False))
+            n_rows = len(list(model['stats'].values())[0])
+            if n_rows == 3:
+                idx = ['Raw Model', 'Corrected', 'Calibrated']
+            else:
+                idx = ['No Filter', 'Filter']
+            f.write(pd.DataFrame(model['stats'], index=idx).to_string())
             f.write("\n")
 
             if "diagnostics" in model:
@@ -996,6 +1053,8 @@ def report():
                 emp_shape = d.get('empirical_shape', 0.0)
                 mod_shape = d.get('model_shape', 0.0)
                 shape_ratio = mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float('nan')
+                f.write(f" DIAG model_weight={d.get('model_weight', float('nan')):.3f}"
+                        f" DIAG model_calib={d.get('model_calib', float('nan')):.3f}\n")
                 f.write(f" DIAG start_{sl}={d.get('start_shape', 0.0):.3f}"
                         f" model_{sl}={mod_shape:.3f}"
                         f" empirical_{sl}={emp_shape:.3f}"
@@ -1259,7 +1318,10 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
                      gate_model=None, gate_book=None):
     """
     Optimize the single blend weight between model predictions and
-    bookmaker lines by maximizing log-likelihood on validation data.
+    bookmaker lines by maximizing clamped log-likelihood on validation data.
+
+    Log-likelihood is clamped at -20 per observation to prevent outlier
+    domination while preserving per-observation conditional discrimination.
 
     Returns a single float w in [0.05, 0.9].
 
@@ -1275,21 +1337,20 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
     model_ev = np.asarray(model_ev, dtype=float)
     odds_ev = np.asarray(odds_ev, dtype=float)
     has_gate = gate_model is not None and gate_book is not None
-    
+
     if dist == "NegBin":
         model_r_arr = np.asarray(model_r, dtype=float)
         result_int = result.astype(int)
-        
+
         def objective(w):
             r_blend, p_blend, g_blend = fused_loc(w, model_ev, odds_ev, cv, "NegBin",
                                          r=model_r_arr, gate_model=gate_model, gate_book=gate_book)
-            base_logpmf = nbinom.logpmf(result_int, r_blend, p_blend)
+            base_logpmf = np.clip(nbinom.logpmf(result_int, r_blend, p_blend), -20, 0)
             if has_gate:
-                # ZI likelihood: P(y=0) = g + (1-g)*NB(0), P(y>0) = (1-g)*NB(y)
                 loglik = np.where(
                     result_int == 0,
-                    np.log(g_blend + (1 - g_blend) * np.exp(base_logpmf)),
-                    np.log(1 - g_blend) + base_logpmf
+                    np.log(np.clip(g_blend + (1 - g_blend) * np.exp(base_logpmf), 1e-12, None)),
+                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpmf
                 )
                 return -np.mean(loglik)
             return -np.mean(base_logpmf)
@@ -1299,17 +1360,16 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
         return res.x[0]
     else:
         model_alpha_arr = np.asarray(model_alpha, dtype=float)
-        
+
         def objective(w):
-            alpha, beta, g_blend = fused_loc(w, model_ev, odds_ev, cv, "Gamma",
+            alpha_bl, beta_bl, g_blend = fused_loc(w, model_ev, odds_ev, cv, "Gamma",
                                    alpha=model_alpha_arr, gate_model=gate_model, gate_book=gate_book)
-            base_logpdf = gamma.logpdf(result, alpha, scale=1 / beta)
+            base_logpdf = np.clip(gamma.logpdf(result, alpha_bl, scale=1 / beta_bl), -20, 0)
             if has_gate:
-                # ZA likelihood: P(y=0) = g, P(y>0) = (1-g)*Gamma(y)
                 loglik = np.where(
                     result == 0,
                     np.log(np.clip(g_blend, 1e-12, None)),
-                    np.log(1 - g_blend) + base_logpdf
+                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf
                 )
                 return -np.mean(loglik)
             return -np.mean(base_logpdf)

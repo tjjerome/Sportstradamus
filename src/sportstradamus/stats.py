@@ -1177,8 +1177,9 @@ class StatsNBA(Stats):
             shotData.loc[shotData["FGA"].iloc[:,7]<0.5, "B3_PPP"] = 0
             shotData = shotData.fillna(0)
 
-            playerBios = playerBios.merge(shotData,on="PLAYER_ID",suffixes=(None,"_y"), how="outer").fillna(0)
             playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
+            shotData.PLAYER_NAME = shotData.PLAYER_NAME.apply(remove_accents)
+            playerBios = playerBios.merge(shotData,on="PLAYER_NAME",suffixes=(None,"_y"), how="outer").fillna(0)
             player_df = player_df.merge(playerBios, on=["PLAYER_NAME", "TEAM_ABBREVIATION"],suffixes=(None,"_x"), how="outer")
             # For traded players, the CSV has the old team and playerBios has the new team,
             # producing two incomplete rows. Combine them by taking the first non-NaN value
