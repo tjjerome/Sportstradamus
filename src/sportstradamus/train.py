@@ -399,12 +399,17 @@ def meditate(force, league):
                 M = M.drop_duplicates(subset=['Player', 'Date'], keep='last')
             step = M["Result"].drop_duplicates().sort_values().diff().min()
             _prep_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
-            for i, row in M.loc[M.Odds.isna() | (M.Odds == 0)].iterrows():
+            synthetic_mask = M.Odds.isna() | (M.Odds == 0)
+            if "Odds_synthetic" in M.columns:
+                synthetic_mask |= M["Odds_synthetic"].fillna(False)
+            for i, row in M.loc[synthetic_mask].iterrows():
                 if np.isnan(row["EV"]) or row["EV"] <= 0:
                     M.loc[i, "Odds"] = 0.5
                     M.loc[i, "EV"] = get_ev(M.loc[i, "Line"], .5, cv=cv, dist=dist, gate=_prep_gate or None)
+                    M.loc[i, "Odds_synthetic"] = True
                 else:
                     M.loc[i, "Odds"] = 1-get_odds(row["Line"], row["EV"], dist, cv=cv, step=step, gate=_prep_gate or None)
+                    M.loc[i, "Odds_synthetic"] = False
 
             M = trim_matrix(M, 15000)
             M.to_csv(filepath)
