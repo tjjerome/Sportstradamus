@@ -172,6 +172,7 @@ docs/build
 *.txt
 *.prof
 *.pdf
+*.xlsx
 src/sportstradamus/data/training_report.txt
 src/sportstradamus/data/~$feature_importances.xlsx
 src/sportstradamus/data/feature_importances.xlsx

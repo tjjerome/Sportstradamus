@@ -1272,6 +1272,12 @@ class StatsNBA(Stats):
             "date_to_nullable": today.strftime("%m/%d/%Y")
         }
 
+        nba_gamelog = []
+        adv_gamelog = []
+        usg_gamelog = []
+        teamlog = []
+        sco_teamlog = []
+        adv_teamlog = []
         i = 0
 
         while (i < 10):
@@ -2331,13 +2337,13 @@ class StatsWNBA(StatsNBA):
 
         self.upcoming_games = {}
         today = datetime.today().date()
+
+        # Drop records with incomplete advanced stats so they can be re-fetched
+        if "OFF_RATING" in self.gamelog.columns:
+            self.gamelog = self.gamelog.dropna(subset=["OFF_RATING"])
+
         latest_date = self.season_start
         if not self.gamelog.empty:
-            # nanlog = self.gamelog.loc[self.gamelog.isnull().values.any(axis=1)]
-            # if not nanlog.empty:
-            #     latest_date = pd.to_datetime(nanlog[self.log_strings["date"]]).min().date()
-
-            # else:
             latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
             if latest_date < self.season_start:
                 latest_date = self.season_start
@@ -4268,13 +4274,17 @@ class StatsNFL(Stats):
         except:
             snaps = pd.DataFrame(columns=['game_id', 'pfr_game_id', 'season', 'game_type', 'week', 'player', 'pfr_player_id', 'position', 'team', 'opponent', 'offense_snaps', 'offense_pct', 'defense_snaps', 'defense_pct', 'st_snaps', 'st_pct'])
         
-        sched = nfl.import_schedules([self.season_start.year])
-        sched.loc[sched['away_team'] == 'LA', 'away_team'] = "LAR"
-        sched.loc[sched['home_team'] == 'LA', 'home_team'] = "LAR"
-        sched.loc[sched['away_team'] == 'OAK', 'away_team'] = "LV"
-        sched.loc[sched['home_team'] == 'OAK', 'home_team'] = "LV"
-        sched.loc[sched['away_team'] == 'WSH', 'away_team'] = "WAS"
-        sched.loc[sched['home_team'] == 'WSH', 'home_team'] = "WAS"
+        try:
+            sched = nfl.import_schedules([self.season_start.year])
+            sched.loc[sched['away_team'] == 'LA', 'away_team'] = "LAR"
+            sched.loc[sched['home_team'] == 'LA', 'home_team'] = "LAR"
+            sched.loc[sched['away_team'] == 'OAK', 'away_team'] = "LV"
+            sched.loc[sched['home_team'] == 'OAK', 'home_team'] = "LV"
+            sched.loc[sched['away_team'] == 'WSH', 'away_team'] = "WAS"
+            sched.loc[sched['home_team'] == 'WSH', 'home_team'] = "WAS"
+        except Exception:
+            logger.warning("Failed to fetch NFL schedule data; upcoming games and game metadata will not be updated this run")
+            sched = pd.DataFrame(columns=['away_team', 'home_team', 'gameday', 'weekday', 'gametime', 'week', 'game_id'])
         upcoming_games = sched.loc[pd.to_datetime(sched['gameday']).dt.date >= datetime.today().date(), [
             'gameday', 'away_team', 'home_team', 'weekday', 'gametime']]
         if not upcoming_games.empty:

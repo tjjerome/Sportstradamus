@@ -316,184 +316,272 @@ Calibrated  0.838046   0.901961    0.746082  0.619549   0.369935  0.478489
 ========================== WNBA AST ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0139
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.577745        0.5    0.577897  0.002007   0.120818  0.699224
-Filter     0.602462        0.0    0.602462  0.000000   0.074013  0.665031
- DIAG model_weight=0.100 DIAG model_calib=0.765
- DIAG start_r=50.000 model_r=10.151 empirical_r=2.156 shape_ratio=4.7x
- DIAG start_mean=2.30 model_ev=2.12 mean_line=2.54 result_mean=2.50
- DIAG mean_ev_diff=-0.419 median_ev_diff=-0.424 frac_ev>line=14.7%
- DIAG Over%|ev>line=0.017 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.000
- DIAG shape_ceiling=14.141415460054914 marginal_shape=7.070707730027457 dispersion_cal=1.000
- HP rounds=49 leaves=18 lr=0.0512 min_child=39 L1=2.41e+00 L2=5.84e+00
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.643059   0.621451    0.647790  0.216236   0.146542  0.645864
+Corrected   0.635937   0.588235    0.642428  0.149472   0.136065  0.648482
+Calibrated  0.637249   0.582888    0.644231  0.147206   0.123306  0.645666
+ DIAG model_weight=0.750 DIAG model_calib=0.772
+ DIAG start_r=50.000 model_r=28.200 empirical_r=50.000 shape_ratio=0.6x
+ DIAG start_mean=2.31 model_ev=2.34 mean_line=2.57 result_mean=2.49
+ DIAG mean_ev_diff=-0.230 median_ev_diff=-0.224 frac_ev>line=33.1%
+ DIAG Over%|ev>line=0.884 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.176
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.085
+ HP rounds=36 leaves=13 lr=0.1010 min_child=33 L1=2.04e+00 L2=7.07e+00
 
 ========================== WNBA BLK ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0113
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.725034   0.783784    0.724026  0.017249   0.093329  0.568515
-Filter     0.724406   0.783784    0.723384  0.017328   0.087319  0.568859
- DIAG model_weight=0.391 DIAG model_calib=0.803
- DIAG start_r=50.000 model_r=28.663 empirical_r=8.895 shape_ratio=3.2x
- DIAG start_mean=0.43 model_ev=0.38 mean_line=0.57 result_mean=0.36
- DIAG mean_ev_diff=-0.199 median_ev_diff=-0.246 frac_ev>line=9.5%
- DIAG Over%|ev>line=0.232 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.016
- DIAG shape_ceiling=306.1156227912455 marginal_shape=153.05781139562276 dispersion_cal=1.000
- HP rounds=55 leaves=8 lr=0.1104 min_child=137 L1=4.25e-05 L2=9.83e+00
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.695273   0.772727    0.694483  0.010388   0.119624  0.610704
+Corrected   0.698706   0.647059    0.699531  0.016278   0.106323  0.583901
+Calibrated  0.698751   0.647059    0.699577  0.016323   0.103993  0.582702
+ DIAG model_weight=0.650 DIAG model_calib=0.816
+ DIAG start_r=50.000 model_r=27.303 empirical_r=50.000 shape_ratio=0.5x
+ DIAG start_mean=0.44 model_ev=0.38 mean_line=0.58 result_mean=0.40
+ DIAG mean_ev_diff=-0.201 median_ev_diff=-0.244 frac_ev>line=12.0%
+ DIAG Over%|ev>line=0.185 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.017
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.004
+ HP rounds=63 leaves=12 lr=0.0817 min_child=50 L1=9.68e+00 L2=7.38e+00
+
+========================= WNBA BLST ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0092
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.537677   0.685259    0.513210  0.171618   0.115501  0.706382
+Corrected   0.531175   0.679558    0.513114  0.138569   0.089526  0.699276
+Calibrated  0.535622   0.694656    0.520878  0.117046   0.071531  0.692283
+ DIAG model_weight=0.736 DIAG model_calib=0.752
+ DIAG start_r=43.233 model_r=26.167 empirical_r=50.000 shape_ratio=0.5x
+ DIAG start_mean=1.23 model_ev=1.05 mean_line=1.11 result_mean=1.08
+ DIAG mean_ev_diff=-0.065 median_ev_diff=-0.028 frac_ev>line=45.4%
+ DIAG Over%|ev>line=0.459 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.179
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.117
+ HP rounds=36 leaves=120 lr=0.0708 min_child=31 L1=9.29e+00 L2=2.71e+00
+
+========================= WNBA DREB ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0131
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.655462   0.739305    0.587146  0.554622   0.162774  0.657980
+Corrected   0.665399   0.744318    0.601831  0.581841   0.139553  0.655251
+Calibrated  0.665399   0.744318    0.601831  0.581841   0.139553  0.655251
+ DIAG model_weight=0.780 DIAG model_calib=0.773
+ DIAG start_r=18.075 model_r=22.893 empirical_r=50.000 shape_ratio=0.5x
+ DIAG start_mean=2.77 model_ev=2.58 mean_line=2.57 result_mean=2.57
+ DIAG mean_ev_diff=+0.015 median_ev_diff=+0.170 frac_ev>line=60.3%
+ DIAG Over%|ev>line=1.205 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.614
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.192
+ HP rounds=64 leaves=8 lr=0.0772 min_child=66 L1=2.15e+00 L2=2.07e+00
 
 ========================= WNBA FG3M ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0141
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter   0.64385   0.714286    0.642507  0.020388   0.090491  0.634776
-Filter      0.64454   0.714286    0.643208  0.020432   0.090006  0.634684
- DIAG model_weight=0.241 DIAG model_calib=0.784
- DIAG start_r=50.000 model_r=25.534 empirical_r=1.521 shape_ratio=16.8x
- DIAG start_mean=0.94 model_ev=0.85 mean_line=1.03 result_mean=0.98
- DIAG mean_ev_diff=-0.176 median_ev_diff=-0.194 frac_ev>line=19.5%
- DIAG Over%|ev>line=0.164 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.001
- DIAG shape_ceiling=701.6210946345465 marginal_shape=350.81054731727323 dispersion_cal=0.666
- HP rounds=49 leaves=12 lr=0.1157 min_child=145 L1=6.35e-01 L2=9.60e+00
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.675570   0.530769    0.686863  0.081199   0.157924  0.620076
+Corrected   0.679224   0.567010    0.685801  0.063740   0.132021  0.607454
+Calibrated  0.678592   0.560440    0.685140  0.061115   0.129129  0.607200
+ DIAG model_weight=0.589 DIAG model_calib=0.792
+ DIAG start_r=50.000 model_r=21.901 empirical_r=50.000 shape_ratio=0.4x
+ DIAG start_mean=0.93 model_ev=0.88 mean_line=1.00 result_mean=0.89
+ DIAG mean_ev_diff=-0.120 median_ev_diff=-0.139 frac_ev>line=30.6%
+ DIAG Over%|ev>line=0.317 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.075
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=0.982
+ HP rounds=79 leaves=8 lr=0.0514 min_child=32 L1=1.13e+00 L2=7.70e+00
 
 ========================== WNBA FGA ==========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0213
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.620272        1.0    0.619697  0.004259   0.082498  0.724232
-Filter     0.342105        0.0    0.342105  0.000000   0.014613  0.693273
- DIAG model_weight=0.050 DIAG model_calib=0.750
- DIAG start_alpha=5.547 model_alpha=6.493 empirical_alpha=5.236 shape_ratio=1.2x
- DIAG start_mean=7.10 model_ev=7.12 mean_line=7.01 result_mean=7.09
- DIAG mean_ev_diff=+0.116 median_ev_diff=+0.426 frac_ev>line=82.4%
- DIAG Over%|ev>line=0.008 Over%|ev<line=0.000 CF_Over%(emp_shape)=1.167
- DIAG shape_ceiling=9.958372710255642 marginal_shape=4.979186355127821 dispersion_cal=1.000
- HP rounds=225 leaves=108 lr=0.0420 min_child=30 L1=6.48e-05 L2=1.29e-05
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.681985   0.765070    0.627411  0.452075   0.224082  0.640427
+Corrected   0.677200   0.752739    0.627692  0.456499   0.204464  0.661643
+Calibrated  0.679471   0.753185    0.631250  0.463452   0.192797  0.639277
+ DIAG model_weight=0.900 DIAG model_calib=0.782
+ DIAG start_alpha=5.543 model_alpha=7.554 empirical_alpha=3.839 shape_ratio=2.0x
+ DIAG start_mean=7.15 model_ev=6.75 mean_line=7.07 result_mean=7.15
+ DIAG mean_ev_diff=-0.313 median_ev_diff=-0.061 frac_ev>line=48.1%
+ DIAG Over%|ev>line=1.118 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.398
+ DIAG shape_ceiling=27.87136805145956 marginal_shape=13.93568402572978 dispersion_cal=1.126
+ HP rounds=549 leaves=98 lr=0.0187 min_child=31 L1=4.95e-04 L2=6.45e-05
 
 ========================== WNBA FTM ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0827
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.616066   0.600000    0.617685  0.111616   0.121773  0.674636
-Filter     0.623318   0.594595    0.625517  0.094021   0.094043  0.665351
- DIAG model_weight=0.731 DIAG model_calib=0.766
- DIAG start_r=2.742 model_r=5.487 empirical_r=2.248 shape_ratio=2.4x
- DIAG start_mean=1.48 model_ev=1.13 mean_line=1.27 result_mean=1.15
- DIAG mean_ev_diff=-0.139 median_ev_diff=-0.023 frac_ev>line=47.7%
- DIAG Over%|ev>line=0.308 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.119
- DIAG shape_ceiling=986.837932642847 marginal_shape=493.4189663214235 dispersion_cal=1.000
- HP rounds=39 leaves=8 lr=0.0875 min_child=120 L1=3.99e-04 L2=7.39e-05
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.620728   0.562500    0.629773  0.155469   0.129226  0.664775
+Corrected   0.619103   0.554217    0.630109  0.174329   0.121101  0.660725
+Calibrated  0.622776   0.566524    0.631796  0.169181   0.112259  0.659036
+ DIAG model_weight=0.900 DIAG model_calib=0.771
+ DIAG start_r=2.763 model_r=5.242 empirical_r=32.093 shape_ratio=0.2x
+ DIAG start_mean=1.53 model_ev=1.21 mean_line=1.30 result_mean=1.19
+ DIAG mean_ev_diff=-0.085 median_ev_diff=+0.030 frac_ev>line=53.9%
+ DIAG Over%|ev>line=0.391 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.385
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.045
+ HP rounds=90 leaves=8 lr=0.0208 min_child=62 L1=5.73e-01 L2=6.69e+00
 
 ========================== WNBA MIN ==========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0000
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.785464   0.823105        0.75  0.525469   0.304355  0.476304
-Filter     0.785464   0.823105        0.75  0.525469   0.304355  0.476304
- DIAG model_weight=0.709 DIAG model_calib=0.846
- DIAG start_alpha=15.240 model_alpha=45.070 empirical_alpha=35.330 shape_ratio=1.3x
- DIAG start_mean=23.41 model_ev=24.36 mean_line=24.17 result_mean=25.05
- DIAG mean_ev_diff=+0.194 median_ev_diff=+0.078 frac_ev>line=50.7%
- DIAG Over%|ev>line=1.083 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.526
- DIAG shape_ceiling=70.50971605042177 marginal_shape=35.254858025210886 dispersion_cal=1.000
- HP rounds=999 leaves=41 lr=0.1114 min_child=35 L1=2.43e-05 L2=1.22e-01
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.808061   0.829522    0.789661  0.493066   0.348691  0.401254
+Corrected   0.807322   0.828092    0.789661  0.492741   0.340283  0.403935
+Calibrated  0.807322   0.828092    0.789661  0.492741   0.340283  0.403935
+ DIAG model_weight=0.900 DIAG model_calib=0.865
+ DIAG start_alpha=16.469 model_alpha=51.802 empirical_alpha=6.584 shape_ratio=7.9x
+ DIAG start_mean=23.80 model_ev=24.78 mean_line=24.51 result_mean=25.03
+ DIAG mean_ev_diff=+0.266 median_ev_diff=-0.255 frac_ev>line=48.4%
+ DIAG Over%|ev>line=1.072 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.429
+ DIAG shape_ceiling=98.3618406787901 marginal_shape=49.18092033939505 dispersion_cal=1.016
+ HP rounds=997 leaves=112 lr=0.1186 min_child=34 L1=2.08e-04 L2=5.00e-06
 
 ========================= WNBA OREB ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0135
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.569691   0.631579    0.562358  0.116990   0.112424  0.687379
-Filter     0.591756   0.658537    0.584941  0.113937   0.072162  0.675973
- DIAG model_weight=0.215 DIAG model_calib=0.760
- DIAG start_r=50.000 model_r=26.954 empirical_r=10.948 shape_ratio=2.5x
- DIAG start_mean=0.93 model_ev=0.82 mean_line=0.87 result_mean=0.82
- DIAG mean_ev_diff=-0.048 median_ev_diff=-0.097 frac_ev>line=30.8%
- DIAG Over%|ev>line=0.495 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.101
- DIAG shape_ceiling=498.55713852184414 marginal_shape=249.27856926092207 dispersion_cal=1.000
- HP rounds=46 leaves=8 lr=0.1247 min_child=48 L1=4.59e-06 L2=4.40e+00
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.591003   0.652174    0.586303  0.080394   0.125811  0.714067
+Corrected   0.594944   0.686275    0.586753  0.096469   0.112977  0.689413
+Calibrated  0.603487   0.691176    0.596224  0.093742   0.095145  0.680055
+ DIAG model_weight=0.676 DIAG model_calib=0.764
+ DIAG start_r=50.000 model_r=24.995 empirical_r=50.000 shape_ratio=0.5x
+ DIAG start_mean=0.93 model_ev=0.81 mean_line=0.88 result_mean=0.82
+ DIAG mean_ev_diff=-0.076 median_ev_diff=-0.097 frac_ev>line=34.3%
+ DIAG Over%|ev>line=0.420 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.114
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.042
+ HP rounds=30 leaves=8 lr=0.0842 min_child=50 L1=4.43e-06 L2=5.61e+00
 
 ========================== WNBA PA ===========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0495
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.586667        1.0    0.586427  0.000644   0.130019  0.803591
-Filter     0.665158        0.0    0.665158  0.000000   0.057316  0.679179
- DIAG model_weight=0.118 DIAG model_calib=0.754
- DIAG start_alpha=4.621 model_alpha=7.069 empirical_alpha=3.509 shape_ratio=2.0x
- DIAG start_mean=12.40 model_ev=12.11 mean_line=13.72 result_mean=13.36
- DIAG mean_ev_diff=-1.616 median_ev_diff=-0.873 frac_ev>line=33.8%
- DIAG Over%|ev>line=0.002 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.052
- DIAG shape_ceiling=7.757547769637746 marginal_shape=3.878773884818873 dispersion_cal=0.655
- HP rounds=999 leaves=16 lr=0.0911 min_child=30 L1=5.84e-01 L2=3.68e-03
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.574442   0.536946    0.586592  0.282784   0.172629  0.877449
+Corrected   0.581873   0.565359    0.585619  0.214165   0.163313  0.856048
+Calibrated  0.585429   0.549242    0.592852  0.210379   0.133341  0.730170
+ DIAG model_weight=0.900 DIAG model_calib=0.762
+ DIAG start_alpha=4.494 model_alpha=6.608 empirical_alpha=2.949 shape_ratio=2.2x
+ DIAG start_mean=12.21 model_ev=12.40 mean_line=13.57 result_mean=13.42
+ DIAG mean_ev_diff=-1.168 median_ev_diff=-1.063 frac_ev>line=32.8%
+ DIAG Over%|ev>line=0.966 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.115
+ DIAG shape_ceiling=18.697930109649256 marginal_shape=9.348965054824628 dispersion_cal=0.945
+ HP rounds=996 leaves=9 lr=0.0343 min_child=31 L1=1.16e-01 L2=4.52e-01
 
 ========================== WNBA PR ===========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0380
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.505851   0.833333    0.502685  0.009676   0.119062  0.857239
-Filter     0.559783   0.000000    0.559783  0.000000   0.035022  0.694416
- DIAG model_weight=0.050 DIAG model_calib=0.749
- DIAG start_alpha=5.066 model_alpha=6.052 empirical_alpha=3.814 shape_ratio=1.6x
- DIAG start_mean=14.46 model_ev=14.02 mean_line=15.17 result_mean=15.69
- DIAG mean_ev_diff=-1.151 median_ev_diff=-0.324 frac_ev>line=39.4%
- DIAG Over%|ev>line=0.025 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.019
- DIAG shape_ceiling=8.3591511061546 marginal_shape=4.1795755530773 dispersion_cal=1.000
- HP rounds=208 leaves=8 lr=0.1295 min_child=30 L1=6.97e-06 L2=5.27e-01
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.566814   0.577746    0.558087  0.534204   0.181532  0.819011
+Corrected   0.573781   0.600707    0.558736  0.431326   0.169380  0.817628
+Calibrated  0.575034   0.609615    0.556025  0.459715   0.136328  0.726739
+ DIAG model_weight=0.900 DIAG model_calib=0.754
+ DIAG start_alpha=4.917 model_alpha=6.932 empirical_alpha=3.010 shape_ratio=2.3x
+ DIAG start_mean=14.35 model_ev=14.81 mean_line=15.05 result_mean=15.61
+ DIAG mean_ev_diff=-0.238 median_ev_diff=+0.022 frac_ev>line=50.3%
+ DIAG Over%|ev>line=1.071 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.308
+ DIAG shape_ceiling=21.009894346286103 marginal_shape=10.504947173143051 dispersion_cal=0.977
+ HP rounds=220 leaves=8 lr=0.1295 min_child=30 L1=6.97e-06 L2=5.27e-01
+
+========================== WNBA PRA ==========================
+ Distribution Model: Gamma
+ Historical Zero Rate: 0.0236
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.565650   0.619524    0.512376  0.565576   0.197447  0.835388
+Corrected   0.557680   0.626866    0.506118  0.497514   0.181203  0.843338
+Calibrated  0.562246   0.633914    0.508855  0.528028   0.142107  0.726033
+ DIAG model_weight=0.900 DIAG model_calib=0.755
+ DIAG start_alpha=5.835 model_alpha=8.375 empirical_alpha=3.401 shape_ratio=2.5x
+ DIAG start_mean=16.87 model_ev=17.70 mean_line=17.64 result_mean=18.64
+ DIAG mean_ev_diff=+0.059 median_ev_diff=+0.191 frac_ev>line=52.5%
+ DIAG Over%|ev>line=1.110 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.385
+ DIAG shape_ceiling=24.110902322373313 marginal_shape=12.055451161186657 dispersion_cal=1.001
+ HP rounds=259 leaves=8 lr=0.1042 min_child=30 L1=2.28e-05 L2=2.31e-03
 
 ========================== WNBA PTS ==========================
  Distribution Model: ZAGamma
  Historical Zero Rate: 0.1075
-           Accuracy  Over Prec  Under Prec  Over%  Sharpness       NLL
-No Filter  0.519388        0.0    0.519388    0.0   0.105155  0.851060
-Filter     0.491525        0.0    0.491525    0.0   0.036659  0.695068
- DIAG model_weight=0.050 DIAG model_calib=0.749
- DIAG start_alpha=3.446 model_alpha=4.153 empirical_alpha=2.142 shape_ratio=1.9x
- DIAG start_mean=9.69 model_ev=9.51 mean_line=9.67 result_mean=10.14
- DIAG mean_ev_diff=-0.166 median_ev_diff=+0.083 frac_ev>line=52.5%
- DIAG Over%|ev>line=0.000 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.000
- DIAG shape_ceiling=5.084543759940317 marginal_shape=2.5422718799701585 dispersion_cal=1.000
- HP rounds=585 leaves=8 lr=0.1114 min_child=30 L1=1.04e+00 L2=1.26e+00
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.583197   0.612994    0.564444  0.461690   0.179923  0.774057
+Corrected   0.570458   0.614000    0.553275  0.350864   0.161231  0.826622
+Calibrated  0.575238   0.615572    0.560997  0.363014   0.125206  0.727278
+ DIAG model_weight=0.900 DIAG model_calib=0.745
+ DIAG start_alpha=3.451 model_alpha=4.347 empirical_alpha=3.017 shape_ratio=1.4x
+ DIAG start_mean=9.68 model_ev=9.75 mean_line=9.72 result_mean=10.19
+ DIAG mean_ev_diff=+0.027 median_ev_diff=+0.253 frac_ev>line=55.3%
+ DIAG Over%|ev>line=0.788 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.316
+ DIAG shape_ceiling=15.25625879058582 marginal_shape=7.62812939529291 dispersion_cal=0.923
+ HP rounds=282 leaves=8 lr=0.1114 min_child=30 L1=1.04e+00 L2=1.26e+00
 
 ========================== WNBA RA ===========================
  Distribution Model: Gamma
  Historical Zero Rate: 0.0314
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.564649        0.6    0.564477  0.004878   0.127793  0.815003
-Filter     0.642254        0.0    0.642254  0.000000   0.079453  0.682645
- DIAG model_weight=0.050 DIAG model_calib=0.756
- DIAG start_alpha=4.452 model_alpha=4.319 empirical_alpha=2.756 shape_ratio=1.6x
- DIAG start_mean=6.22 model_ev=5.83 mean_line=6.73 result_mean=6.50
- DIAG mean_ev_diff=-0.899 median_ev_diff=-0.394 frac_ev>line=28.4%
- DIAG Over%|ev>line=0.017 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.008
- DIAG shape_ceiling=6.294964989751484 marginal_shape=3.147482494875742 dispersion_cal=0.764
- HP rounds=119 leaves=17 lr=0.0813 min_child=33 L1=2.30e-05 L2=5.99e-06
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.598988   0.556322    0.612807  0.286213   0.173524  0.749053
+Corrected   0.607303   0.596825    0.609556  0.206792   0.167219  0.754699
+Calibrated  0.613636   0.588679    0.618337  0.197168   0.137892  0.686956
+ DIAG model_weight=0.900 DIAG model_calib=0.758
+ DIAG start_alpha=4.423 model_alpha=5.316 empirical_alpha=3.373 shape_ratio=1.6x
+ DIAG start_mean=6.20 model_ev=6.02 mean_line=6.70 result_mean=6.43
+ DIAG mean_ev_diff=-0.684 median_ev_diff=-0.567 frac_ev>line=33.2%
+ DIAG Over%|ev>line=0.939 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.167
+ DIAG shape_ceiling=16.80289478063605 marginal_shape=8.401447390318024 dispersion_cal=0.969
+ HP rounds=228 leaves=10 lr=0.0834 min_child=30 L1=1.55e-04 L2=5.81e-06
 
 ========================== WNBA REB ==========================
  Distribution Model: NegBin
  Historical Zero Rate: 0.0126
-           Accuracy  Over Prec  Under Prec  Over%  Sharpness       NLL
-No Filter  0.530395        0.0    0.530395    0.0   0.082020  0.726959
-Filter     0.542056        0.0    0.542056    0.0   0.010642  0.691761
- DIAG model_weight=0.080 DIAG model_calib=0.750
- DIAG start_r=15.440 model_r=6.936 empirical_r=3.198 shape_ratio=2.2x
- DIAG start_mean=3.99 model_ev=3.73 mean_line=3.99 result_mean=4.07
- DIAG mean_ev_diff=-0.262 median_ev_diff=-0.191 frac_ev>line=32.1%
- DIAG Over%|ev>line=0.000 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.000
- DIAG shape_ceiling=8.789828291722209 marginal_shape=4.3949141458611045 dispersion_cal=1.000
- HP rounds=61 leaves=8 lr=0.0725 min_child=38 L1=2.37e-02 L2=1.03e-06
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.607610   0.604615    0.609496  0.480184   0.150933  0.688788
+Corrected   0.609335   0.626692    0.600764  0.441737   0.121744  0.683389
+Calibrated  0.612150   0.627767    0.604396  0.462891   0.108784  0.680722
+ DIAG model_weight=0.710 DIAG model_calib=0.759
+ DIAG start_r=15.904 model_r=21.235 empirical_r=21.802 shape_ratio=1.0x
+ DIAG start_mean=4.01 model_ev=4.02 mean_line=4.00 result_mean=4.09
+ DIAG mean_ev_diff=+0.021 median_ev_diff=+0.044 frac_ev>line=52.6%
+ DIAG Over%|ev>line=1.175 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.477
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.183
+ HP rounds=41 leaves=8 lr=0.1262 min_child=83 L1=3.10e-05 L2=5.02e+00
+
+========================== WNBA STL ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0090
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.527604   0.593023    0.524537  0.052490   0.098597  0.722074
+Corrected   0.525894   0.600000    0.524483  0.022448   0.075044  0.707859
+Calibrated  0.530647   0.631579    0.529547  0.013770   0.057978  0.696419
+ DIAG model_weight=0.702 DIAG model_calib=0.752
+ DIAG start_r=50.000 model_r=27.621 empirical_r=50.000 shape_ratio=0.6x
+ DIAG start_mean=0.85 model_ev=0.76 mean_line=0.84 result_mean=0.83
+ DIAG mean_ev_diff=-0.085 median_ev_diff=-0.072 frac_ev>line=34.4%
+ DIAG Over%|ev>line=0.106 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.040
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.046
+ HP rounds=107 leaves=8 lr=0.0275 min_child=30 L1=8.03e-02 L2=6.75e+00
+
+========================== WNBA TOV ==========================
+ Distribution Model: NegBin
+ Historical Zero Rate: 0.0082
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.553582   0.686992    0.501197  0.360797   0.120791  0.695651
+Corrected   0.544512   0.692913    0.499603  0.316320   0.094410  0.692002
+Calibrated  0.551102   0.700306    0.509402  0.325831   0.079053  0.688614
+ DIAG model_weight=0.755 DIAG model_calib=0.753
+ DIAG start_r=50.000 model_r=27.784 empirical_r=50.000 shape_ratio=0.6x
+ DIAG start_mean=1.47 model_ev=1.35 mean_line=1.35 result_mean=1.39
+ DIAG mean_ev_diff=-0.003 median_ev_diff=+0.032 frac_ev>line=54.6%
+ DIAG Over%|ev>line=0.827 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.361
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.116
+ HP rounds=80 leaves=22 lr=0.0402 min_child=30 L1=3.61e-06 L2=6.77e+00
 
 =============== WNBA fantasy points prizepicks ===============
  Distribution Model: Gamma
  Historical Zero Rate: 0.0137
-           Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-No Filter  0.667118   0.765957    0.652713  0.264725   0.103475  0.754619
-Filter     0.288889   1.000000    0.255814  1.519012   0.020445  0.693164
- DIAG model_weight=0.050 DIAG model_calib=0.749
- DIAG start_alpha=5.182 model_alpha=9.847 empirical_alpha=9.373 shape_ratio=1.1x
- DIAG start_mean=20.01 model_ev=20.51 mean_line=19.93 result_mean=21.13
- DIAG mean_ev_diff=+0.580 median_ev_diff=+1.426 frac_ev>line=69.4%
- DIAG Over%|ev>line=0.730 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.735
- DIAG shape_ceiling=14.485707408641035 marginal_shape=7.242853704320518 dispersion_cal=1.000
- HP rounds=386 leaves=8 lr=0.1241 min_child=33 L1=1.81e-03 L2=1.33e-05
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.754573   0.786358    0.708411  0.647747   0.291605  0.734858
+Corrected   0.754011   0.784794    0.709193  0.649882   0.286008  0.747469
+Calibrated  0.754011   0.784794    0.709193  0.649882   0.286007  0.596523
+ DIAG model_weight=0.900 DIAG model_calib=0.830
+ DIAG start_alpha=5.135 model_alpha=10.786 empirical_alpha=3.040 shape_ratio=3.5x
+ DIAG start_mean=19.93 model_ev=21.17 mean_line=19.81 result_mean=21.25
+ DIAG mean_ev_diff=+1.363 median_ev_diff=+1.838 frac_ev>line=62.8%
+ DIAG Over%|ev>line=1.093 Over%|ev<line=0.000 CF_Over%(emp_shape)=0.560
+ DIAG shape_ceiling=22.09655275497396 marginal_shape=11.04827637748698 dispersion_cal=1.163
+ HP rounds=371 leaves=8 lr=0.1241 min_child=33 L1=1.81e-03 L2=1.33e-05
 
 
 ================================================================================
@@ -529,17 +617,22 @@ fantasy points prizepicks Gamma     0.620  6.3x   60.0%   +1.937   1.050   0.000
 ================================================================================
 Market           Dist      Over%  ShpR FracEV>  MedDiff  O%|EV>  O%|EV<  CF_O%
 --------------------------------------------------------------------------------
-AST              NegBin    0.000  4.7x   14.7%   -0.424   0.017   0.000  0.000
-BLK              NegBin    0.017  3.2x    9.5%   -0.246   0.232   0.000  0.016
-FG3M             NegBin    0.020 16.8x   19.5%   -0.194   0.164   0.000  0.001
-FGA              Gamma     0.000  1.2x   82.4%   +0.426   0.008   0.000  1.167
-FTM              NegBin    0.094  2.4x   47.7%   -0.023   0.308   0.000  0.119
-MIN              Gamma     0.525  1.3x   50.7%   +0.078   1.083   0.000  0.526
-OREB             NegBin    0.114  2.5x   30.8%   -0.097   0.495   0.000  0.101
-PA               Gamma     0.000  2.0x   33.8%   -0.873   0.002   0.000  0.052
-PR               Gamma     0.000  1.6x   39.4%   -0.324   0.025   0.000  0.019
-PTS              ZAGamm    0.000  1.9x   52.5%   +0.083   0.000   0.000  0.000
-RA               Gamma     0.000  1.6x   28.4%   -0.394   0.017   0.000  0.008
-REB              NegBin    0.000  2.2x   32.1%   -0.191   0.000   0.000  0.000
-fantasy points prizepicks Gamma     1.519  1.1x   69.4%   +1.426   0.730   0.000  0.735
+AST              NegBin    0.149  0.6x   33.1%   -0.224   0.884   0.000  0.176
+BLK              NegBin    0.016  0.5x   12.0%   -0.244   0.185   0.000  0.017
+BLST             NegBin    0.139  0.5x   45.4%   -0.028   0.459   0.000  0.179
+DREB             NegBin    0.582  0.5x   60.3%   +0.170   1.205   0.000  0.614
+FG3M             NegBin    0.064  0.4x   30.6%   -0.139   0.317   0.000  0.075
+FGA              Gamma     0.456  2.0x   48.1%   -0.061   1.118   0.000  0.398
+FTM              NegBin    0.174  0.2x   53.9%   +0.030   0.391   0.000  0.385
+MIN              Gamma     0.493  7.9x   48.4%   -0.255   1.072   0.000  0.429
+OREB             NegBin    0.096  0.5x   34.3%   -0.097   0.420   0.000  0.114
+PA               Gamma     0.214  2.2x   32.8%   -1.063   0.966   0.000  0.115
+PR               Gamma     0.431  2.3x   50.3%   +0.022   1.071   0.000  0.308
+PRA              Gamma     0.498  2.5x   52.5%   +0.191   1.110   0.000  0.385
+PTS              ZAGamm    0.351  1.4x   55.3%   +0.253   0.788   0.000  0.316
+RA               Gamma     0.207  1.6x   33.2%   -0.567   0.939   0.000  0.167
+REB              NegBin    0.442  1.0x   52.6%   +0.044   1.175   0.000  0.477
+STL              NegBin    0.022  0.6x   34.4%   -0.072   0.106   0.000  0.040
+TOV              NegBin    0.316  0.6x   54.6%   +0.032   0.827   0.000  0.361
+fantasy points prizepicks Gamma     0.650  3.5x   62.8%   +1.838   1.093   0.000  0.560
 

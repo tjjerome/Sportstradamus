@@ -987,14 +987,16 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, g
 
     if dist == "NegBin":
         mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
-        r_blend = np.exp(w * np.log(r) + (1 - w) * np.log(1/cv))
+        r_blend = np.exp(w * np.log(np.clip(r, 1e-9, None)) + (1 - w) * np.log(1/cv))
         p = r_blend / (r_blend + mu)
         return r_blend, p, gate_blend
     else:  # Gamma – precision-weighted blend
-        model_alpha = np.asarray(alpha, dtype=float)
+        ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
+        ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
+        model_alpha = np.clip(np.asarray(alpha, dtype=float), 1e-9, None)
         book_alpha = 1 / cv**2
-        inv_var_m = model_alpha / np.asarray(ev_a, dtype=float)**2
-        inv_var_b = book_alpha / np.asarray(ev_b, dtype=float)**2
+        inv_var_m = model_alpha / ev_a**2
+        inv_var_b = book_alpha / ev_b**2
         total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
         blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
         blended_alpha = blended_mean**2 * total_inv_var

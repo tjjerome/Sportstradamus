@@ -135,7 +135,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P"]), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step"], errors="ignore"), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
@@ -151,7 +151,7 @@ def main(progress):
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict, "Sleeper", stats)
-        save_data(sl_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P"]), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+        save_data(sl_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step"], errors="ignore"), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
@@ -179,6 +179,8 @@ def main(progress):
         df["Bet"] = "Over"
         df = df.sort_values(["League", "Date", "Team", "Player", "Market"]).drop_duplicates(["Player", "League", "Date", "Market"],
                                                                                     ignore_index=True, keep="last").dropna()
+        # Drop rows with non-finite floats (Inf/-Inf) so gspread can JSON-serialize
+        df = df.replace([np.inf, -np.inf], np.nan).dropna()
         wks = gc.open("Sportstradamus").worksheet("Projections")
         wks.batch_clear(["A:K"])
         wks.update([df.columns.values.tolist()] + df.values.tolist())
@@ -202,26 +204,83 @@ def main(progress):
 
     archive.write()
     logger.info("Checking historical predictions")
+    from sportstradamus.analysis import _merge_offers, _migrate_flat_history
+
     filepath = pkg_resources.files(data) / "history.dat"
     if os.path.isfile(filepath):
         history = pd.read_pickle(filepath)
+        # Migrate old flat schema to normalized schema if needed
+        if "Offers" not in history.columns:
+            history = _migrate_flat_history(history)
     else:
         history = pd.DataFrame(
-            columns=["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Platform", "Model EV", "Books EV", "Model P", "Books P", "Result"])
+            columns=["Player", "League", "Team", "Date", "Market",
+                     "Model EV", "Books EV", "Dist", "CV", "Model Param",
+                     "Gate", "Temperature", "Disp Cal", "Step", "Offers", "Actual"])
 
-    df = pd.concat(all_offers).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                           ignore_index=True)[["Player", "League", "Team", "Date", "Market", "Line", "Bet", "Boost", "Books", "Model", "Platform", "Model EV", "Books EV", "Model P", "Books P"]]
-    df.loc[(df['Market'] == 'AST') & (
-        df['League'] == 'NHL'), 'Market'] = "assists"
-    df.loc[(df['Market'] == 'PTS') & (
-        df['League'] == 'NHL'), 'Market'] = "points"
-    df.loc[(df['Market'] == 'BLK') & (
-        df['League'] == 'NHL'), 'Market'] = "blocked"
-    df.dropna(subset='Market', inplace=True, ignore_index=True)
-    history = pd.concat([df, history]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                       ignore_index=True)
-    if "Result" not in history.columns:
-        history["Result"] = np.nan
+    # Build new predictions from current run
+    pred_key = ["Player", "League", "Date", "Market"]
+    pred_level_cols = ["Team", "Model EV", "Books EV", "Dist", "CV",
+                       "Model Param", "Gate", "Temperature", "Disp Cal", "Step"]
+    offer_cols = ["Line", "Boost", "Platform", "Bet", "Model P", "Books P"]
+
+    all_df = pd.concat(all_offers)
+    # NHL market normalization
+    all_df.loc[(all_df['Market'] == 'AST') & (all_df['League'] == 'NHL'), 'Market'] = "assists"
+    all_df.loc[(all_df['Market'] == 'PTS') & (all_df['League'] == 'NHL'), 'Market'] = "points"
+    all_df.loc[(all_df['Market'] == 'BLK') & (all_df['League'] == 'NHL'), 'Market'] = "blocked"
+    all_df.dropna(subset='Market', inplace=True, ignore_index=True)
+
+    # Group current run into normalized predictions
+    new_preds = []
+    for key, grp in all_df.groupby(pred_key):
+        player, league, date, market = key
+        latest = grp.iloc[-1]
+        offers = []
+        for _, r in grp.iterrows():
+            if pd.isna(r.get("Line")):
+                continue
+            offers.append((
+                float(r["Line"]),
+                float(r.get("Boost", 1)),
+                str(r.get("Platform", "")),
+                str(r.get("Bet", "")),
+                float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
+                float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
+            ))
+        row = {"Player": player, "League": league, "Date": date, "Market": market, "Offers": offers}
+        for col in pred_level_cols:
+            row[col] = latest.get(col, np.nan)
+        new_preds.append(row)
+
+    new_df = pd.DataFrame(new_preds)
+
+    # Merge with existing history
+    if not history.empty and not new_df.empty:
+        history = history.set_index(pred_key)
+        new_df = new_df.set_index(pred_key)
+
+        # Update existing predictions: overwrite pred-level cols, merge offers
+        for idx in new_df.index:
+            if idx in history.index:
+                old_offers = history.at[idx, "Offers"]
+                if not isinstance(old_offers, list):
+                    old_offers = []
+                history.at[idx, "Offers"] = _merge_offers(old_offers, new_df.at[idx, "Offers"])
+                for col in pred_level_cols:
+                    val = new_df.at[idx, col]
+                    if pd.notna(val):
+                        history.at[idx, col] = val
+            else:
+                history.loc[idx] = new_df.loc[idx]
+
+        history = history.reset_index()
+    elif not new_df.empty:
+        history = new_df
+
+    if "Actual" not in history.columns:
+        history["Actual"] = np.nan
+
     gameDates = pd.to_datetime(history.Date).dt.date
     history = history.loc[(datetime.datetime.today(
     ).date() - datetime.timedelta(days=365)) <= gameDates]
@@ -674,7 +733,11 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
                 "PB": prev_pb,
                 "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
                 "Bet Size": bet_size,
-                "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id)
+                "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id),
+                "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
+                "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
+                "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),
+                "Indep PB": float(np.prod(p_books[np.ix_(bet_id)]) * payout),
             }
             for j in range(bet_size):
                 parlay_dict["Leg " + str(j + 1)] = bet[j]["Desc"]
@@ -735,7 +798,7 @@ def save_data(df, parlay_df, book, gc):
                 sheet_df = pd.concat([sheet_df,parlay_df]).sort_values("Model EV", ascending=False)
                 
             wks.clear()
-            sheet_df = sheet_df.drop(columns=["Leg Probs"], errors="ignore")
+            sheet_df = sheet_df.drop(columns=["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"], errors="ignore")
             sheet_df = sheet_df.replace([np.inf, -np.inf], np.nan).fillna("")
             wks.update([sheet_df.columns.values.tolist()] +
                         sheet_df.values.tolist())
@@ -935,7 +998,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             r_blend, p_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
-                offer_df["Books EV"].fillna(0).to_numpy(),
+                offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
                 cv, "NegBin",
                 r=offer_df["Model R"].to_numpy() if "Model R" in offer_df.columns else None,
                 **_zi_kw
@@ -953,7 +1016,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             alpha_blend, beta_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
-                offer_df["Books EV"].fillna(0).to_numpy(),
+                offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
                 cv, "Gamma",
                 alpha=offer_df["Model Alpha"].to_numpy() if "Model Alpha" in offer_df.columns else None,
                 **_zi_kw
@@ -1034,7 +1097,15 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         else:
             offer_df["Model Param"] = offer_df["Model Alpha"]
 
-        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model Param", "Model P", "Books EV", "Books P", "K"]].to_dict('records')
+        # Distribution parameters for dashboard reconstruction
+        offer_df["Dist"] = dist
+        offer_df["CV"] = cv
+        offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
+        offer_df["Temperature"] = temperature
+        offer_df["Disp Cal"] = dispersion_cal
+        offer_df["Step"] = step
+
+        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model Param", "Model P", "Books EV", "Books P", "K", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step"]].to_dict('records')
 
     else:
         logger.warning(f"{filename} missing")
