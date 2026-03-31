@@ -927,9 +927,10 @@ def get_ud():
 
         offers[n["League"]][n["Market"]].append(n)
 
-        if player["League"] in ["NFL", "NBA", "WNBA"] and o["over_under"]["has_alternates"]:
+        if False and player["League"] in ["NFL", "NBA", "WNBA"] and o["over_under"]["has_alternates"]:
+            # TODO figure out why this keeps freezing
             id = o["over_under"].get("id", 0)
-            alts = scraper.get(f"https://api.underdogfantasy.com/v1/over_unders/{id}/alternate_projections")
+            alts = scraper.get(f"https://api.underdogfantasy.com/v3/over_unders/{id}/alternate_projections")
             if alts:
                 for a in alts["projections"]:
                     if not a["is_main"]:

@@ -135,7 +135,7 @@ def main(progress):
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step"], errors="ignore"), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step", "Player position", "K"], errors="ignore"), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
@@ -636,7 +636,7 @@ def find_correlation(offers, stats, platform):
         payouts = [0, 0, 3.5, 6.5, 6, 10, 25]
         parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
 
-    return df.drop(columns=["Player position", "K"]).dropna().sort_values("Model", ascending=False), parlay_df
+    return df.dropna(subset="Model").sort_values("Model", ascending=False), parlay_df
 
 def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_boost, bet_df, info, team, opp):
     K = 1000
