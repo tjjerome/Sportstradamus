@@ -3,6 +3,8 @@
 Combines market-level diagnostics with professional forecasting metrics
 following Gneiting & Raftery (2007) and Murphy (1973).
 """
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,8 +14,8 @@ from datetime import datetime, timedelta
 from sklearn.metrics import brier_score_loss, log_loss
 
 from sportstradamus.dashboard_data import (
-    load_history, load_stats, sidebar_filters, get_filtered_history,
-    get_prediction_history, resolve_and_save,
+    load_history, sidebar_filters, get_filtered_history,
+    get_prediction_history, load_resolve_meta,
 )
 from sportstradamus.analysis import (
     compute_brier_skill_score, murphy_decomposition,
@@ -21,16 +23,36 @@ from sportstradamus.analysis import (
     reconstruct_quantile, TIMEFRAMES,
 )
 
+TIMEFRAME_OPTIONS = {
+    "All time": None,
+    "Last 7 days": 7,
+    "Last 30 days": 30,
+    "Last 3 months": 91,
+    "Last 6 months": 183,
+    "Last year": 365,
+}
+
 st.title("Market Diagnostics & Forecast Quality")
 
-# --- Load data ---
+# --- Load data (pre-resolved by nightly script) ---
 history = load_history()
 if history.empty:
     st.warning("No prediction history found.")
     st.stop()
 
-stats = load_stats()
-history = resolve_and_save(history, stats)
+meta = load_resolve_meta()
+if meta.get("last_run"):
+    st.caption(f"Data last resolved: {meta['last_run']}")
+
+# --- Sidebar filters (time window first, then league/platform) ---
+st.sidebar.header("Filters")
+time_window = st.sidebar.selectbox(
+    "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="mkt_time"
+)
+cutoff = None
+if TIMEFRAME_OPTIONS[time_window] is not None:
+    cutoff = datetime.today().date() - timedelta(days=TIMEFRAME_OPTIONS[time_window])
+
 filters = sidebar_filters(history, key_prefix="mkt_")
 
 df = get_filtered_history(
@@ -47,11 +69,8 @@ prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() 
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
-# --- Time-split selector ---
-time_split = st.selectbox("Time window", ["All"] + [t[0] for t in TIMEFRAMES], index=0)
-if time_split != "All":
-    days = dict(TIMEFRAMES)[time_split]
-    cutoff = datetime.today().date() - timedelta(days=days)
+# Apply time window to exploded data
+if cutoff is not None:
     df = df.loc[df["_date"] >= cutoff]
 
 if df.empty:
@@ -283,11 +302,9 @@ pred_df = get_prediction_history(
     leagues=filters["leagues"],
     date_range=filters["date_range"],
 )
-if time_split != "All":
-    pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
+pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
+if cutoff is not None:
     pred_df = pred_df.loc[pred_df["_date"] >= cutoff]
-else:
-    pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
 
 # --- CRPS Over Time ---
 has_crps = "Dist" in pred_df.columns and "Actual" in pred_df.columns

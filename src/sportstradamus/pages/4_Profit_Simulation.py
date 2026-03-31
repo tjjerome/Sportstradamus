@@ -1,4 +1,6 @@
 """Page 4: Profit Simulation — preset and custom strategies with Monte Carlo."""
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,21 +9,21 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 from sportstradamus.dashboard_data import (
-    load_history, load_stats, resolve_and_save,
-    get_filtered_history,
+    load_history, get_filtered_history, load_resolve_meta,
 )
 from sportstradamus.analysis import TIMEFRAMES
 
 st.title("Profit Simulation")
 
-# --- Load data ---
+# --- Load data (pre-resolved by nightly script) ---
 history = load_history()
 if history.empty:
     st.warning("No prediction history found.")
     st.stop()
 
-stats = load_stats()
-history = resolve_and_save(history, stats)
+meta = load_resolve_meta()
+if meta.get("last_run"):
+    st.caption(f"Data last resolved: {meta['last_run']}")
 
 # --- Explode offers and filter to resolved, non-push ---
 df = get_filtered_history(history)
