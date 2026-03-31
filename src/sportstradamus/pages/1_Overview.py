@@ -1,4 +1,6 @@
 """Page 1: Overview — KPIs, accuracy trends, profit trends, and volume."""
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,14 +10,13 @@ from datetime import datetime, timedelta
 from sklearn.metrics import brier_score_loss
 
 from sportstradamus.dashboard_data import (
-    load_history, load_parlays, load_stats, load_stat_map,
-    resolve_and_save, resolve_parlays_and_save,
-    sidebar_filters, get_filtered_history,
+    load_history, load_parlays,
+    sidebar_filters, get_filtered_history, load_resolve_meta,
 )
 
 st.title("Overview")
 
-# --- Load and resolve data ---
+# --- Load data (pre-resolved by nightly script) ---
 history = load_history()
 parlays = load_parlays()
 
@@ -23,12 +24,11 @@ if history.empty:
     st.warning("No prediction history found. Run `prophecize` first.")
     st.stop()
 
-stats = load_stats()
-stat_map = load_stat_map()
-
-history = resolve_and_save(history, stats)
-if not parlays.empty:
-    parlays = resolve_parlays_and_save(parlays, stats, stat_map)
+meta = load_resolve_meta()
+if meta.get("last_run"):
+    st.caption(f"Data last resolved: {meta['last_run']}")
+else:
+    st.warning("Nightly resolution has not run yet. Run `poetry run nightly` to resolve prediction outcomes.")
 
 # --- Sidebar ---
 filters = sidebar_filters(history, parlays, key_prefix="overview_")

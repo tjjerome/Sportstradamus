@@ -1,4 +1,6 @@
 """Page 3: Correlations & Parlays — correlation effectiveness, hit rates, calibration."""
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,16 +9,24 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 from sportstradamus.dashboard_data import (
-    load_history, load_parlays, load_stats, load_stat_map,
-    resolve_and_save, resolve_parlays_and_save, sidebar_filters,
+    load_history, load_parlays, sidebar_filters, load_resolve_meta,
 )
 from sportstradamus.analysis import (
     compute_parlay_metrics, PAYOUT_TABLE, TIMEFRAMES,
 )
 
+TIMEFRAME_OPTIONS = {
+    "All time": None,
+    "Last 7 days": 7,
+    "Last 30 days": 30,
+    "Last 3 months": 91,
+    "Last 6 months": 183,
+    "Last year": 365,
+}
+
 st.title("Correlations & Parlays")
 
-# --- Load data ---
+# --- Load data (pre-resolved by nightly script) ---
 history = load_history()
 parlays = load_parlays()
 
@@ -24,20 +34,30 @@ if parlays.empty:
     st.warning("No parlay history found. Run `prophecize` first.")
     st.stop()
 
-stats = load_stats()
-stat_map = load_stat_map()
+meta = load_resolve_meta()
+if meta.get("last_run"):
+    st.caption(f"Data last resolved: {meta['last_run']}")
 
-if not history.empty:
-    history = resolve_and_save(history, stats)
-parlays = resolve_parlays_and_save(parlays, stats, stat_map)
+# --- Sidebar: time window first, then league/platform ---
+st.sidebar.header("Filters")
+time_window = st.sidebar.selectbox(
+    "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="corr_time"
+)
+cutoff = None
+if TIMEFRAME_OPTIONS[time_window] is not None:
+    cutoff = datetime.today().date() - timedelta(days=TIMEFRAME_OPTIONS[time_window])
 
-# --- Sidebar ---
 filters = sidebar_filters(history if not history.empty else parlays, key_prefix="corr_")
 
-# Filter parlays
+# --- Filter parlays ---
 pf = parlays.copy()
 pf["_date"] = pd.to_datetime(pf["Date"], errors="coerce").dt.date
 pf = pf.loc[pf["_date"].notna()]
+
+# Apply time window
+if cutoff is not None:
+    pf = pf.loc[pf["_date"] >= cutoff]
+
 if filters["date_range"]:
     pf = pf.loc[(pf["_date"] >= filters["date_range"][0]) & (pf["_date"] <= filters["date_range"][1])]
 if filters["leagues"]:
@@ -47,8 +67,9 @@ if filters["platforms"]:
 
 # Resolve for display
 resolved = pf.dropna(subset=["Legs"]).copy()
-resolved[["Legs", "Misses"]] = resolved[["Legs", "Misses"]].astype(int)
-resolved["Hit"] = (resolved["Misses"] == 0).astype(int)
+if not resolved.empty:
+    resolved[["Legs", "Misses"]] = resolved[["Legs", "Misses"]].astype(int)
+    resolved["Hit"] = (resolved["Misses"] == 0).astype(int)
 
 if resolved.empty:
     st.info("No resolved parlays match the current filters.")
@@ -127,17 +148,8 @@ if "Boost" in resolved.columns:
 # =====================================================================
 st.header("Hit Rate by Parlay Size")
 
-time_split = st.selectbox("Time window", ["All"] + [t[0] for t in TIMEFRAMES],
-                          index=0, key="parlay_time")
-if time_split != "All":
-    days = dict(TIMEFRAMES)[time_split]
-    cutoff = datetime.today().date() - timedelta(days=days)
-    size_resolved = resolved.loc[resolved["_date"] >= cutoff]
-else:
-    size_resolved = resolved
-
-for platform in sorted(size_resolved["Platform"].unique()):
-    plat_df = size_resolved.loc[size_resolved["Platform"] == platform]
+for platform in sorted(resolved["Platform"].unique()):
+    plat_df = resolved.loc[resolved["Platform"] == platform]
     st.subheader(f"{platform}")
 
     size_data = []

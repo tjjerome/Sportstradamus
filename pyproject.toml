@@ -41,7 +41,8 @@ plotly = ">=5.18"
 prophecize = "sportstradamus.sportstradamus:main"
 confer = "sportstradamus.moneylines:confer"
 meditate = "sportstradamus.train:meditate"
-reflect = "sportstradamus.dashboard:run"
+dashboard = "sportstradamus.dashboard:run"
+reflect = "sportstradamus.nightly:run"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"

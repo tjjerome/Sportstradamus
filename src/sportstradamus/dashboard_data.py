@@ -67,20 +67,19 @@ def load_parlays():
     return parlays
 
 
-@st.cache_resource(show_spinner="Loading league stats for resolution...")
+@st.cache_resource(show_spinner="Loading league stats...")
 def load_stats():
-    """Load Stats objects for all available leagues."""
+    """Load Stats objects from cached pickle files (no API calls).
+
+    API updates are handled by the nightly script (poetry run nightly),
+    not at dashboard startup. This keeps the dashboard load fast (~2 s).
+    """
     stats = {}
     for lg, cls in LEAGUE_CLASSES.items():
         try:
             obj = cls()
             obj.load()
             if hasattr(obj, "gamelog") and not obj.gamelog.empty:
-                if datetime.today().date() > (obj.season_start - timedelta(days=7)):
-                    try:
-                        obj.update()
-                    except Exception:
-                        pass
                 stats[lg] = obj
         except Exception:
             pass
@@ -91,6 +90,20 @@ def load_stats():
 def load_stat_map():
     with open(pkg_resources.files(data) / "stat_map.json", "r") as f:
         return json.load(f)
+
+
+def load_resolve_meta():
+    """Load nightly resolution metadata (last run time, counts).
+
+    Returns a dict with keys: last_run, history_resolved, parlays_resolved.
+    Returns empty dict if file doesn't exist (nightly hasn't run yet).
+    """
+    meta_path = pkg_resources.files(data) / "resolve_meta.json"
+    try:
+        with open(meta_path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 def resolve_and_save(history, stats):

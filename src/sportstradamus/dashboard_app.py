@@ -3,6 +3,15 @@
 This file serves as the entry point for Streamlit's multi-page app.
 Pages in the pages/ directory are auto-discovered and shown in the sidebar.
 """
+import sys
+from pathlib import Path
+
+# Ensure `src/` is before `src/sportstradamus/` in sys.path so that
+# `import sportstradamus` resolves to the package, not sportstradamus.py.
+_src_dir = str(Path(__file__).parent.parent)
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
 import streamlit as st
 
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
