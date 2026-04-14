@@ -12,7 +12,7 @@ from klepto.archives import hdfdir_archive, cache
 from sportstradamus import creds, data
 from time import sleep
 from operator import itemgetter
-from scipy.stats import poisson, nbinom, skellam, norm, gamma, iqr
+from scipy.stats import poisson, nbinom, skellam, norm, gamma, skewnorm, iqr
 from scipy.optimize import brentq, fsolve, minimize
 from scipy.integrate import dblquad
 import numpy as np
@@ -351,7 +351,7 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
-def get_ev(line, under, cv=1, dist="Gamma", gate=None):
+def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
     """
     Calculate the expected value (EV) given a line and under probability.
 
@@ -363,8 +363,10 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None):
         line (float): The line value.
         under (float): The under probability.
         cv (float): Coefficient of variation. 1/sqrt(alpha) for Gamma, 1/r for NegBin.
-        dist (str): Distribution type ("Gamma", "ZAGamma", "NegBin", "ZINB", "Poisson").
-        gate (float, optional): Historical zero-inflation probability for ZINB/ZAGamma.
+        dist (str): Distribution type ("Gamma", "ZAGamma", "NegBin", "ZINB",
+                     "Poisson", "SkewNormal").
+        gate (float, optional): Historical zero-inflation probability.
+        skew_alpha (float, optional): Skewness parameter for SkewNormal. Defaults to 0 (Normal).
 
     Returns:
         float: The base distribution mean (for ZI dists when gate given) or overall mean.
@@ -377,7 +379,7 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None):
     # For ZI distributions, strip out the zero-inflation component so we solve
     # for the base distribution mean: gate + (1-gate)*base_CDF = under
     # ⇒ base_CDF = (under - gate) / (1 - gate)
-    if gate is not None and gate > 0 and dist in ("ZINB", "ZAGamma"):
+    if gate is not None and gate > 0 and dist in ("ZINB", "ZAGamma", "SkewNormal"):
         under = np.clip((under - gate) / (1 - gate), 1e-6, 1 - 1e-6)
 
     # CDF is monotonically decreasing in mean (1→0), so a bracket is always valid:
@@ -400,6 +402,27 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None):
         while _nb_residual(hi) > 0:
             hi *= 2
         return float(brentq(_nb_residual, lo, hi, xtol=1e-8))
+
+    elif dist == "SkewNormal":
+        line = float(line)
+        a = float(skew_alpha) if skew_alpha is not None else 0.0
+        def _sn_residual(mean):
+            sigma = mean * cv
+            delta = a / np.sqrt(1 + a**2)
+            loc_sn = mean - sigma * delta * np.sqrt(2 / np.pi)
+            try:
+                return float(skewnorm.cdf(line, a, loc=loc_sn, scale=sigma)) - under
+            except (ValueError, RuntimeWarning):
+                return np.nan
+        # Expand hi until residual becomes negative, with safety cap
+        max_hi = 1e8
+        while hi < max_hi and _sn_residual(hi) > 0:
+            hi = min(hi * 2, max_hi)
+        # If we hit the cap and residual is still positive, return a reasonable fallback
+        if _sn_residual(hi) > 0 or np.isnan(_sn_residual(hi)):
+            return float(line)  # Fallback: return the line as EV
+        return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
+
     else:
         # Gamma / ZAGamma (default for all continuous distributions)
         line = float(line)
@@ -410,13 +433,14 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None):
             hi *= 2
         return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
         
-def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1):
+def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1,
+             sigma=None, skew_alpha=None):
     """
     Calculate raw probability of outcome being under the line.
-    
+
     Returns the raw distributional probability. Calibration (temperature
     scaling) is applied separately at the over/under decision level.
-    
+
     Parameters:
     -----------
     line : float
@@ -424,7 +448,8 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1):
     ev : float
         Expected value (mean)
     dist : str
-        Distribution type ("Poisson", "Gamma", "ZAGamma", "NegBin", "ZINB")
+        Distribution type ("Poisson", "Gamma", "ZAGamma", "NegBin", "ZINB",
+        "SkewNormal")
     cv : float
         Coefficient of variation. Used to derive alpha (Gamma) or r (NegBin)
         when those aren't supplied directly.
@@ -433,24 +458,28 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1):
     r : float or np.ndarray, optional
         NegBin dispersion parameter. If None for NegBin, derived as 1/cv.
     gate : float or np.ndarray, optional
-        Zero-inflation probability for ZINB/ZAGamma. If None, no zero-inflation.
+        Zero-inflation probability. If None, no zero-inflation.
     step : float, optional
         Step size for binning (default: 1)
-    
+    sigma : float or np.ndarray, optional
+        SkewNormal scale parameter. If None for SkewNormal, derived as ev*cv.
+    skew_alpha : float or np.ndarray, optional
+        SkewNormal skewness parameter. If None for SkewNormal, defaults to 0.
+
     Returns:
     --------
     float : Probability of outcome being under the line
     """
     high = np.floor((line+step)/step)*step
     low = np.ceil((line-step)/step)*step
-    
+
     # Poisson (discrete count data)
     # NegBin without model params falls back to Poisson only when cv==1 (old encoding);
     # when cv!=1 the archive EV was Gaussian-encoded by get_ev, so fall through to the
     # Gaussian/Gamma branch for a consistent round-trip.
     if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
         return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
-    
+
     elif dist in ("NegBin", "ZINB"):
         # NegBin / ZINB: use nbinom.cdf for overdispersed count data
         if r is None:
@@ -463,7 +492,21 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1):
             base_cdf = gate + (1 - gate) * base_cdf
             base_pmf = (1 - gate) * base_pmf
         return base_cdf - base_pmf/2
-    
+
+    elif dist == "SkewNormal":
+        # SkewNormal CDF via scipy.stats.skewnorm
+        sigma_val = sigma if sigma is not None else ev * cv
+        a = skew_alpha if skew_alpha is not None else 0.0
+        delta = a / np.sqrt(1 + a**2)
+        loc_sn = ev - sigma_val * delta * np.sqrt(2 / np.pi)
+        cdf_high = skewnorm.cdf(high, a, loc=loc_sn, scale=sigma_val)
+        cdf_low = skewnorm.cdf(low, a, loc=loc_sn, scale=sigma_val)
+        if gate is not None:
+            cdf_high = gate + (1 - gate) * cdf_high
+            cdf_low = gate + (1 - gate) * cdf_low
+        push = cdf_high - cdf_low
+        return cdf_high - push / 2
+
     else:
         if alpha is None:
             alpha = 1 / cv**2
@@ -940,7 +983,9 @@ def get_mlb_pitchers():
     return pitchers
 
 
-def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, gate_book=None):
+def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None,
+              sigma=None, skew_alpha=None,
+              gate_model=None, gate_book=None):
     """
     Compute blended distribution parameters for model weight w.
 
@@ -951,9 +996,11 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, g
       1/cv.  Both μ and r are blended in log-space with the same weight w.
     - Gamma: precision-weighted blend.  The model provides per-observation
       alpha; the book's alpha is derived as 1/cv².  Returns (alpha, beta).
+    - SkewNormal: precision-weighted blend of loc/sigma, linear blend of alpha.
+      Book uses alpha=0 (symmetric Normal). Returns (ev, sigma, alpha).
 
     When gate_model and gate_book are supplied (zero-inflated distributions),
-    the gate is blended linearly and returned as a third element.  ev_a and
+    the gate is blended linearly and returned as a final element.  ev_a and
     ev_b should be *base* distribution means (before gate deflation).
 
     Parameters
@@ -963,13 +1010,17 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, g
     ev_a, ev_b : float or np.ndarray
         Model and bookmaker base distribution means.
     cv : float
-        Coefficient of variation for book values. std/mu for Gamma, 1/r for NegBin.
+        Coefficient of variation for book values.
     dist : str
-        Distribution family: "NegBin" or "Gamma".
+        Distribution family: "NegBin", "Gamma", or "SkewNormal".
     r : float or np.ndarray, optional
-        NegBin per-observation dispersion from model (required for NegBin).
+        NegBin per-observation dispersion from model.
     alpha : float or np.ndarray, optional
-        Gamma shape parameter from model (required for Gamma).
+        Gamma shape parameter from model.
+    sigma : float or np.ndarray, optional
+        SkewNormal per-observation scale from model.
+    skew_alpha : float or np.ndarray, optional
+        SkewNormal per-observation skewness from model.
     gate_model : float or np.ndarray, optional
         Model's per-observation zero-inflation gate.
     gate_book : float, optional
@@ -977,19 +1028,52 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None, gate_model=None, g
 
     Returns
     -------
-    NegBin : tuple (r_blend, p, gate_blend)
-    Gamma  : tuple (alpha, beta, gate_blend)
+    NegBin    : tuple (r_blend, p, gate_blend)
+    Gamma     : tuple (alpha, beta, gate_blend)
+    SkewNormal: tuple (blended_ev, blended_sigma, blended_alpha, gate_blend)
     gate_blend is None when no gate parameters are supplied.
     """
     gate_blend = None
     if gate_model is not None and gate_book is not None:
         gate_blend = w * np.asarray(gate_model, dtype=float) + (1 - w) * gate_book
+    elif gate_book is not None and gate_book > 0:
+        # No model gate (hurdle model) — use book gate directly
+        gate_blend = gate_book
 
     if dist == "NegBin":
         mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
         r_blend = np.exp(w * np.log(np.clip(r, 1e-9, None)) + (1 - w) * np.log(1/cv))
         p = r_blend / (r_blend + mu)
         return r_blend, p, gate_blend
+
+    elif dist == "SkewNormal":
+        ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
+        ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
+        model_sigma = np.clip(np.asarray(sigma, dtype=float), 1e-6, None)
+        model_skew = np.asarray(skew_alpha, dtype=float)
+
+        # Book side: symmetric normal (alpha=0), sigma = ev * cv
+        book_sigma = np.clip(ev_b * cv, 1e-6, None)
+
+        # Derive loc from EV: loc = EV - sigma * delta * sqrt(2/pi)
+        model_delta = model_skew / np.sqrt(1 + model_skew**2)
+        model_loc = ev_a - model_sigma * model_delta * np.sqrt(2 / np.pi)
+        book_loc = ev_b  # alpha=0 → delta=0 → loc = EV
+
+        # Precision-weighted blend
+        prec_m = 1.0 / model_sigma**2
+        prec_b = 1.0 / book_sigma**2
+        total_prec = w * prec_m + (1 - w) * prec_b
+        blended_loc = (w * model_loc * prec_m + (1 - w) * book_loc * prec_b) / total_prec
+        blended_sigma = 1.0 / np.sqrt(total_prec)
+        blended_skew = w * model_skew  # book alpha=0, so blend reduces to w * model
+
+        # Compute blended EV from blended params
+        bl_delta = blended_skew / np.sqrt(1 + blended_skew**2)
+        blended_ev = blended_loc + blended_sigma * bl_delta * np.sqrt(2 / np.pi)
+
+        return blended_ev, blended_sigma, blended_skew, gate_blend
+
     else:  # Gamma – precision-weighted blend
         ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
         ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
@@ -1055,7 +1139,7 @@ def accel_asc(n):
         y = x + y - 1
         yield a[:k + 1]
 
-def set_model_start_values(model, dist, X_data, shape_ceiling=None):
+def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=False):
     """
     Set appropriate start values for different distribution types.
 
@@ -1063,16 +1147,20 @@ def set_model_start_values(model, dist, X_data, shape_ceiling=None):
     Response functions per distribution:
       NegBin/ZINB  : total_count → relu,     probs → sigmoid, gate → sigmoid
       Gamma/ZAGamma: concentration → softplus, rate → softplus, gate → sigmoid
+      SkewNormal   : loc → identity,  scale → exp,  alpha → identity
 
     Parameters
     ----------
     model : LightGBMLSS model
     dist : str
-        Distribution name ("NegBin", "ZINB", "Gamma", "ZAGamma", "Gaussian")
+        Distribution name ("NegBin", "ZINB", "Gamma", "ZAGamma", "SkewNormal")
     X_data : DataFrame
         Must contain columns "MeanYr" and "STDYr".
-    hist_gate : float
-        Historical zero-inflation rate for ZINB/ZAGamma (default 0).
+    shape_ceiling : float, optional
+        Upper bound on shape parameter during training.
+    normalized : bool
+        If True, targets are normalized to Result/MeanYr ≈ 1.0.
+        Start values are set for normalized space.
     """
     from scipy.special import logit
 
@@ -1090,7 +1178,22 @@ def set_model_start_values(model, dist, X_data, shape_ceiling=None):
     _r_upper = shape_ceiling if shape_ceiling is not None else 50
     _a_upper = shape_ceiling if shape_ceiling is not None else 100
 
-    if dist in ["NegBin", "ZINB"]:
+    if dist == "SkewNormal":
+        if normalized:
+            # Targets ≈ 1.0 for all players. Use global start values.
+            cv_player = np.clip(std / mu, 0.01, 10)
+            loc = np.ones(n)
+            scale = cv_player  # scale ≈ CV since mean ≈ 1.0
+        else:
+            loc = mu.copy()
+            scale = std.copy()
+        alpha_skew = np.zeros(n)  # start symmetric
+        # loc: identity → raw = value
+        # scale: exp → raw = log(value)
+        # alpha: identity → raw = value
+        sv = np.column_stack([loc, np.log(np.clip(scale, 1e-6, None)), alpha_skew])
+
+    elif dist in ["NegBin", "ZINB"]:
         # r = mu² / (var - mu); relu response → raw = value (identity for r>0)
         r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 0.5, _r_upper)
         # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs)
@@ -1102,6 +1205,7 @@ def set_model_start_values(model, dist, X_data, shape_ceiling=None):
             r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 0.5, _r_upper)
             probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
         sv = np.column_stack([r_init, logit(probs)])
+
     elif dist in ["Gamma", "ZAGamma"]:
         if dist == "ZAGamma":
             mu = mu / (1 - hist_gate)

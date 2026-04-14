@@ -26,6 +26,8 @@ from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.distributions.Gamma import Gamma
 from lightgbmlss.distributions.ZAGamma import ZAGamma
+from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
+from scipy.stats import skewnorm
 
 import torch
 import shap
@@ -486,7 +488,29 @@ def meditate(force, league):
             # so subsequent .mean()/.std()/.var()/.count() are per-player, not global.
             player_stats = player_stats.apply(lambda x: x[x != 0]).groupby(level=0)
 
-            if dist in ["NegBin", "ZINB"]:
+            # Check if market should use SkewNormal (mean >= 2)
+            global_mean = y_train_labels.mean()
+            normalize = global_mean >= 2.0 and dist not in ["NegBin", "ZINB"]
+
+            if normalize:
+                # Override distribution to SkewNormal + CRPS
+                original_dist = dist
+                dist = "SkewNormal"
+                dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
+
+                # CV from per-player std/mean
+                cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
+                cv = max(cv, 0.05)
+                shape_ceiling = None
+                marginal_shape = None
+
+                # Normalize targets: Result / MeanYr ≈ 1.0
+                meanyr_train = X_train["MeanYr"].clip(lower=0.5).to_numpy()
+                y_train_labels = y_train_labels / meanyr_train
+                # Clip zeros for continuous SkewNormal
+                y_train_labels = np.clip(y_train_labels, 0.01, None)
+
+            elif dist in ["NegBin", "ZINB"]:
                 if dist == "NegBin":
                     dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
                 else:
@@ -537,11 +561,21 @@ def meditate(force, league):
                 dist_obj.param_dict["total_count"] = _BoundedResponseFn(dist_obj.param_dict["total_count"], shape_ceiling)
             elif dist in ("Gamma", "ZAGamma"):
                 dist_obj.param_dict["concentration"] = _BoundedResponseFn(dist_obj.param_dict["concentration"], shape_ceiling)
+            # SkewNormal: no shape parameter to bound
 
             # === MODEL TRAINING ===
-            # All distributions (NegBin, Gamma) use LightGBMLSS training
+            # All distributions (NegBin, Gamma, SkewNormal) use LightGBMLSS training
             model = LightGBMLSS(dist_obj)
-            set_model_start_values(model, dist, X_train, shape_ceiling=shape_ceiling)
+            set_model_start_values(model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalize)
+
+            # Monotone constraint: enforce MeanYr → higher predicted mean
+            # for Gamma/ZAGamma and SkewNormal (where loc should increase with MeanYr).
+            # Skip NegBin/ZINB where the probs/total_count parameterization
+            # makes monotonicity direction ambiguous.
+            col_list = list(X_train.columns)
+            monotone = [0] * len(col_list)
+            if dist in ("Gamma", "ZAGamma", "SkewNormal") and "MeanYr" in col_list:
+                monotone[col_list.index("MeanYr")] = 1
 
             hp_search_space = {
                 "feature_pre_filter": ["none", [False]],
@@ -549,13 +583,14 @@ def meditate(force, league):
                 "max_depth": ["none", [-1]],
                 "max_bin": ["none", [127]],
                 "hist_pool_size": ["none", [9*1024]],
+                "monotone_constraints": ["none", [monotone]],
                 "path_smooth": ["float", {"low": 0, "high": 20, "log": False}],
                 "num_leaves": ["int", {"low": 8, "high": 127, "log": False}],
                 "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
                 "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
                 "min_child_samples": ["int", {"low": 30, "high": 150, "log": False}],
                 "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
-                "learning_rate": ["float", {"low": 0.001, "high": 0.15, "log": True}],
+                "learning_rate": ["float", {"low": 0.01, "high": 0.15, "log": True}],
                 "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                 "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                 "bagging_freq": ["none", [1]]
@@ -590,19 +625,19 @@ def meditate(force, league):
 
             # Use standard LightGBM prediction
             idx = X_train.index
-            set_model_start_values(model, dist, X_train)
+            set_model_start_values(model, dist, X_train, normalized=normalize)
             preds = model.predict(X_train, pred_type="parameters")
             preds.index = idx
             prob_params_train = pd.concat([prob_params_train, preds])
 
             idx = X_validation.index
-            set_model_start_values(model, dist, X_validation)
+            set_model_start_values(model, dist, X_validation, normalized=normalize)
             preds = model.predict(X_validation, pred_type="parameters")
             preds.index = idx
             prob_params_validation = pd.concat([prob_params_validation, preds])
 
             idx = X_test.index
-            set_model_start_values(model, dist, X_test)
+            set_model_start_values(model, dist, X_test, normalized=normalize)
             preds = model.predict(X_test, pred_type="parameters")
             preds.index = idx
             prob_params = pd.concat([prob_params, preds])
@@ -635,7 +670,47 @@ def meditate(force, league):
             # ZINB inherits NegBin base params + gate; ZAGamma inherits Gamma + gate
             # For ZI dists, ev/ev_validation are BASE means (not deflated by gate)
             # so that fused_loc blends apples-to-apples with the book's base mean.
-            if dist in ("NegBin", "ZINB"):
+            # SkewNormal-specific variables (set to None for other dists)
+            sn_sigma_test = None
+            sn_sigma_val = None
+            sn_alpha_test = None
+            sn_alpha_val = None
+
+            if dist == "SkewNormal":
+                # Extract normalized params
+                loc_norm = prob_params["loc"].to_numpy()
+                scale_norm = prob_params["scale"].to_numpy()
+                alpha_sn = prob_params["alpha"].to_numpy()
+                loc_norm_val = prob_params_validation["loc"].to_numpy()
+                scale_norm_val = prob_params_validation["scale"].to_numpy()
+                alpha_sn_val = prob_params_validation["alpha"].to_numpy()
+
+                # Denormalize: multiply loc and scale by MeanYr
+                meanyr_test = X_test["MeanYr"].clip(lower=0.5).to_numpy()
+                meanyr_val = X_validation["MeanYr"].clip(lower=0.5).to_numpy()
+                loc_abs = loc_norm * meanyr_test
+                scale_abs = scale_norm * meanyr_test
+                loc_abs_val = loc_norm_val * meanyr_val
+                scale_abs_val = scale_norm_val * meanyr_val
+                # alpha is dimensionless — no denormalization needed
+
+                # Compute EV from SkewNormal params: EV = loc + sigma * delta * sqrt(2/pi)
+                delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
+                ev = loc_abs + scale_abs * delta * np.sqrt(2 / np.pi)
+                delta_val = alpha_sn_val / np.sqrt(1 + alpha_sn_val**2)
+                ev_validation = loc_abs_val + scale_abs_val * delta_val * np.sqrt(2 / np.pi)
+
+                sn_sigma_test = scale_abs
+                sn_sigma_val = scale_abs_val
+                sn_alpha_test = alpha_sn
+                sn_alpha_val = alpha_sn_val
+
+                # Hurdle model: gate from stat_zi.json (no model gate parameter)
+                if hist_gate > 0.02:
+                    gate_test = np.full_like(ev, hist_gate)
+                    gate_validation = np.full_like(ev_validation, hist_gate)
+
+            elif dist in ("NegBin", "ZINB"):
                 r = prob_params["total_count"].to_numpy()
                 p = prob_params["probs"].to_numpy()
                 # PyTorch NegBin: probs = success probability → mean = n*p/(1-p)
@@ -659,117 +734,155 @@ def meditate(force, league):
                     gate_validation = prob_params_validation["gate"].to_numpy()
 
             # === MODEL WEIGHTING AND PROBABILITY CALCULATION ===
-            # fused_loc uses base distribution type (NegBin or Gamma) for blending
+            # fused_loc uses base distribution type (NegBin, Gamma, or SkewNormal)
             # For ZI distributions, pass gate_model + hist_gate so fused_loc can
             # blend the gate alongside the base distribution parameters.
             # Book EVs on disk are already base means (get_ev with gate stores base
             # means), so no conversion is needed here.
-            base_dist = "NegBin" if dist in ("NegBin", "ZINB") else "Gamma"
+            if dist == "SkewNormal":
+                base_dist = "SkewNormal"
+            else:
+                base_dist = "NegBin" if dist in ("NegBin", "ZINB") else "Gamma"
             book_ev_test = B_test["EV"].to_numpy()
             book_ev_val = B_validation["EV"].to_numpy()
-            _zi_kwargs = {}
-            if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
-                _zi_kwargs = dict(gate_model=gate_validation, gate_book=hist_gate)
-            model_weight = fit_model_weight(ev_validation, book_ev_val, y_validation["Result"].to_numpy(), base_dist, model_alpha=alpha_validation, model_r=r_validation, cv=cv, **_zi_kwargs)
 
-            if dist in ("NegBin", "ZINB"):
-                # fused_loc blends both μ and r via geometric mean
-                _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
-                _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZINB" else {}
-                r_blend_test, p_test, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "NegBin", r=r, **_zi_test)
-                weighted_mean = r_blend_test * (1 - p_test) / p_test
-                r_test = r_blend_test
+            if dist == "SkewNormal":
+                _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+                model_weight = fit_model_weight(
+                    ev_validation, book_ev_val, y_validation["Result"].to_numpy(),
+                    "SkewNormal", cv=cv,
+                    model_sigma=sn_sigma_val, model_skew_alpha=sn_alpha_val,
+                    **_zi_kwargs)
 
-                r_blend_val, p_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "NegBin", r=r_validation, **_zi_val)
+                _zi_test = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+                _zi_val = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+                weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
+                    model_weight, ev, book_ev_test, cv, "SkewNormal",
+                    sigma=sn_sigma_test, skew_alpha=sn_alpha_test, **_zi_test)
+                sn_sigma_blend_val, sn_alpha_blend_val = None, None
+                _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
+                    model_weight, ev_validation, book_ev_val, cv, "SkewNormal",
+                    sigma=sn_sigma_val, skew_alpha=sn_alpha_val, **_zi_val)
 
+                r_test = None
                 test_alpha = None
 
             else:
-                # Gamma / ZAGamma — precision-weighted blend
-                _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
-                _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZAGamma" else {}
-                alpha_blend, beta_blend, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "Gamma", alpha=alpha, **_zi_test)
-                weighted_mean = alpha_blend / beta_blend
+                _zi_kwargs = {}
+                if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
+                    _zi_kwargs = dict(gate_model=gate_validation, gate_book=hist_gate)
+                model_weight = fit_model_weight(ev_validation, book_ev_val, y_validation["Result"].to_numpy(), base_dist, model_alpha=alpha_validation, model_r=r_validation, cv=cv, **_zi_kwargs)
 
-                alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "Gamma", alpha=alpha_validation, **_zi_val)
-                r_test = None
+                if dist in ("NegBin", "ZINB"):
+                    # fused_loc blends both μ and r via geometric mean
+                    _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
+                    _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZINB" else {}
+                    r_blend_test, p_test, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "NegBin", r=r, **_zi_test)
+                    weighted_mean = r_blend_test * (1 - p_test) / p_test
+                    r_test = r_blend_test
 
-                # Store alpha for downstream use
-                test_alpha = alpha_blend
+                    r_blend_val, p_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "NegBin", r=r_validation, **_zi_val)
+
+                    test_alpha = None
+
+                else:
+                    # Gamma / ZAGamma — precision-weighted blend
+                    _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
+                    _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZAGamma" else {}
+                    alpha_blend, beta_blend, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "Gamma", alpha=alpha, **_zi_test)
+                    weighted_mean = alpha_blend / beta_blend
+
+                    alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "Gamma", alpha=alpha_validation, **_zi_val)
+                    r_test = None
+
+                    # Store alpha for downstream use
+                    test_alpha = alpha_blend
 
             # === DISPERSION CALIBRATION ===
-            # Learn shape scaling factor on validation set using CRPS (proper scoring rule
-            # for distributional forecasts; Gneiting & Raftery, 2007).
-            # Bidirectional: c > 1 narrows distribution (model was too wide),
-            # c < 1 widens it (model was too narrow). Keeps mean fixed.
+            # SkewNormal: CRPS loss handles dispersion — skip post-hoc calibration.
+            # NegBin/Gamma: Learn shape scaling factor on validation set.
             y_class_val = (y_validation["Result"] >= B_validation["Line"]).astype(int).to_numpy()
             y_val_arr = y_validation["Result"].to_numpy()
-            val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
 
-            def dispersion_loss(c):
-                if dist in ("NegBin", "ZINB"):
-                    r_cal = r_blend_val * c
-                    p_cal = r_cal / (r_cal + val_weighted_mean)
+            if dist == "SkewNormal":
+                c_opt = 1.0  # No dispersion calibration for SkewNormal
+                val_weighted_mean = weighted_mean  # Already in absolute space from fused_loc
+                # Use validation fused_loc result for val_weighted_mean
+                val_weighted_mean_val, _, _, _ = fused_loc(
+                    model_weight, ev_validation, book_ev_val, cv, "SkewNormal",
+                    sigma=sn_sigma_val, skew_alpha=sn_alpha_val,
+                    **(dict(gate_book=hist_gate) if hist_gate > 0.02 else {}))
+            else:
+                val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
 
-                    # Discrete CRPS: sum_k (F(k) - I(y <= k))^2
-                    k_max = int(max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4, 30))
-                    k_vals = np.arange(k_max + 1)
+                def dispersion_loss(c):
+                    if dist in ("NegBin", "ZINB"):
+                        r_cal = r_blend_val * c
+                        p_cal = r_cal / (r_cal + val_weighted_mean)
 
-                    cdf = nbinom.cdf(k_vals[:, None], r_cal[None, :], p_cal[None, :])
-                    if gate_blend_val is not None:
-                        cdf = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf
+                        # Discrete CRPS: sum_k (F(k) - I(y <= k))^2
+                        k_max = int(max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4, 30))
+                        k_vals = np.arange(k_max + 1)
 
-                    indicator = (y_val_arr[None, :] <= k_vals[:, None]).astype(float)
-                    crps = np.sum((cdf - indicator) ** 2, axis=0)
-                else:
-                    alpha_cal = alpha_blend_val * c
-                    scale_cal = val_weighted_mean / alpha_cal
+                        cdf = nbinom.cdf(k_vals[:, None], r_cal[None, :], p_cal[None, :])
+                        if gate_blend_val is not None:
+                            cdf = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf
 
-                    if gate_blend_val is not None:
-                        # ZAGamma: numerical CDF-based CRPS over fine grid
-                        x_max = max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4)
-                        x_grid = np.linspace(0, x_max, 500)
-                        dx = x_grid[1] - x_grid[0]
-
-                        cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
-                        cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
-
-                        indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
-                        crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
+                        indicator = (y_val_arr[None, :] <= k_vals[:, None]).astype(float)
+                        crps = np.sum((cdf - indicator) ** 2, axis=0)
                     else:
-                        # Closed-form Gamma CRPS (Scheuerer & Hamill, 2015)
-                        F_y = gamma.cdf(y_val_arr, alpha_cal, scale=scale_cal)
-                        F_y_a1 = gamma.cdf(y_val_arr, alpha_cal + 1, scale=scale_cal)
-                        crps = y_val_arr * (2 * F_y - 1) - val_weighted_mean * (2 * F_y_a1 - 1) \
-                               - scale_cal / beta_fn(0.5, alpha_cal)
+                        alpha_cal = alpha_blend_val * c
+                        scale_cal = val_weighted_mean / alpha_cal
 
-                reg = 0.01 * np.log(c) ** 2  # L2 penalty toward c=1 (no correction)
-                return np.mean(crps) + reg
+                        if gate_blend_val is not None:
+                            # ZAGamma: numerical CDF-based CRPS over fine grid
+                            x_max = max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4)
+                            x_grid = np.linspace(0, x_max, 500)
+                            dx = x_grid[1] - x_grid[0]
 
-            # Upper bound: don't let calibrated shape exceed training ceiling
-            if dist in ("NegBin", "ZINB"):
-                mean_shape = np.mean(r_blend_val)
-            else:
-                mean_shape = np.mean(alpha_blend_val)
-            max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
-            upper_bound = min(10.0, max_c)
+                            cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
+                            cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
 
-            disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, upper_bound), method='bounded')
-            c_opt = disp_result.x
+                            indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
+                            crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
+                        else:
+                            # Closed-form Gamma CRPS (Scheuerer & Hamill, 2015)
+                            F_y = gamma.cdf(y_val_arr, alpha_cal, scale=scale_cal)
+                            F_y_a1 = gamma.cdf(y_val_arr, alpha_cal + 1, scale=scale_cal)
+                            crps = y_val_arr * (2 * F_y - 1) - val_weighted_mean * (2 * F_y_a1 - 1) \
+                                   - scale_cal / beta_fn(0.5, alpha_cal)
 
-            # Apply dispersion calibration to test and validation params
-            if dist in ("NegBin", "ZINB"):
-                r_test = r_test * c_opt
-                r_blend_val = r_blend_val * c_opt
-            else:
-                alpha_blend = alpha_blend * c_opt
-                beta_blend = alpha_blend / weighted_mean
-                test_alpha = alpha_blend
-                alpha_blend_val = alpha_blend_val * c_opt
-                beta_blend_val = alpha_blend_val / val_weighted_mean
+                    reg = 0.01 * np.log(c) ** 2  # L2 penalty toward c=1 (no correction)
+                    return np.mean(crps) + reg
+
+                # Upper bound: don't let calibrated shape exceed training ceiling
+                if dist in ("NegBin", "ZINB"):
+                    mean_shape = np.mean(r_blend_val)
+                else:
+                    mean_shape = np.mean(alpha_blend_val)
+                max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
+                upper_bound = min(10.0, max_c)
+
+                disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, upper_bound), method='bounded')
+                c_opt = disp_result.x
+
+                # Apply dispersion calibration to test and validation params
+                if dist in ("NegBin", "ZINB"):
+                    r_test = r_test * c_opt
+                    r_blend_val = r_blend_val * c_opt
+                else:
+                    alpha_blend = alpha_blend * c_opt
+                    beta_blend = alpha_blend / weighted_mean
+                    test_alpha = alpha_blend
+                    alpha_blend_val = alpha_blend_val * c_opt
+                    beta_blend_val = alpha_blend_val / val_weighted_mean
 
             # Compute test set probabilities with calibrated params
-            if dist in ("NegBin", "ZINB"):
+            if dist == "SkewNormal":
+                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, "SkewNormal",
+                                           sigma=sn_sigma_blend_test, skew_alpha=sn_alpha_blend_test,
+                                           gate=gate_blend_test)
+            elif dist in ("NegBin", "ZINB"):
                 y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, r=r_test, gate=gate_blend_test)
             else:
                 y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=alpha_blend, step=step, gate=gate_blend_test)
@@ -779,11 +892,16 @@ def meditate(force, league):
             # === TEMPERATURE SCALING CALIBRATION ===
             # Fit temperature T on validation set: p_cal = sigmoid(logit(p_raw) / T)
             # T ≥ 1 ensures calibration only reduces confidence (pulls toward 0.5)
-            _r_val = r_blend_val if dist in ("NegBin", "ZINB") else None
-            _alpha_val = alpha_blend_val if dist in ("Gamma", "ZAGamma") else None
-            _gate_val = gate_blend_val if dist in ("ZINB", "ZAGamma") else None
-            # val_weighted_mean already computed before dispersion calibration (mean is invariant)
-            val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist, alpha=_alpha_val, step=step, r=_r_val, gate=_gate_val)
+            if dist == "SkewNormal":
+                val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean_val, "SkewNormal",
+                                         sigma=sn_sigma_blend_val, skew_alpha=sn_alpha_blend_val,
+                                         gate=gate_blend_val)
+            else:
+                _r_val = r_blend_val if dist in ("NegBin", "ZINB") else None
+                _alpha_val = alpha_blend_val if dist in ("Gamma", "ZAGamma") else None
+                _gate_val = gate_blend_val if dist in ("ZINB", "ZAGamma") else None
+                # val_weighted_mean already computed before dispersion calibration (mean is invariant)
+                val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist, alpha=_alpha_val, step=step, r=_r_val, gate=_gate_val)
             val_raw_over = 1 - val_raw_under
 
             val_raw_over_clipped = np.clip(val_raw_over, 1e-6, 1 - 1e-6)
@@ -818,7 +936,10 @@ def meditate(force, league):
             y_class = np.ravel(y_class.to_numpy())
 
             # Raw model probabilities (before blending with book)
-            if dist in ("NegBin", "ZINB"):
+            if dist == "SkewNormal":
+                _raw_under = get_odds(B_test["Line"].to_numpy(), ev, "SkewNormal",
+                                      sigma=sn_sigma_test, skew_alpha=sn_alpha_test, gate=gate_test)
+            elif dist in ("NegBin", "ZINB"):
                 _raw_under = get_odds(B_test["Line"].to_numpy(), ev, dist, r=r, gate=gate_test)
             else:
                 _raw_under = get_odds(B_test["Line"].to_numpy(), ev, dist, alpha=alpha, step=step, gate=gate_test)
@@ -852,7 +973,13 @@ def meditate(force, league):
             test_mean_yr = X_test['MeanYr'].mean()
             test_std_yr = X_test['STDYr'].mean()
 
-            if dist in ("Gamma", "ZAGamma"):
+            if dist == "SkewNormal":
+                # SkewNormal: report scale (sigma) and skewness (alpha) instead of shape
+                diag_start_shape = float(cv)  # CV used as starting scale
+                diag_model_shape = float(prob_params['scale'].mean())
+                diag_empirical_shape = float(cv)  # No separate empirical shape
+                diag_shape_label = "scale"
+            elif dist in ("Gamma", "ZAGamma"):
                 diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
                 diag_model_shape = float(prob_params['concentration'].mean())
                 per_player_emp_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01))**2
@@ -873,6 +1000,14 @@ def meditate(force, league):
             diag_mean_line = float(B_test['Line'].mean())
             diag_ev_minus_line = float((weighted_mean - B_test['Line'].to_numpy()).mean())
             diag_result_mean = float(y_test['Result'].mean())
+
+            # --- Compression diagnostic ---
+            # Compare how well model EV tracks MeanYr deviations vs how well Results do.
+            # If ev_corr << result_corr, the model is compressing toward the global mean.
+            _meanyr_arr = X_test['MeanYr'].to_numpy()
+            _result_arr = y_test['Result'].to_numpy()
+            diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, weighted_mean - _meanyr_arr)[0, 1])
+            diag_result_meanyr_corr = float(np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1])
 
             # --- Decomposition diagnostics ---
             # Median and fraction help distinguish mean bias from shape bias
@@ -895,7 +1030,10 @@ def meditate(force, league):
                 diag_over_pct_ev_lt = float('nan')
 
             # Counterfactual: what would Over% be with empirical shape?
-            if not np.isnan(diag_empirical_shape) and diag_empirical_shape > 0:
+            if dist == "SkewNormal":
+                # SkewNormal: no separate shape parameter for counterfactual
+                diag_cf_over_pct = float('nan')
+            elif not np.isnan(diag_empirical_shape) and diag_empirical_shape > 0:
                 emp_shape = np.full_like(weighted_mean, diag_empirical_shape)
                 if dist in ("NegBin", "ZINB"):
                     cf_under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist,
@@ -939,6 +1077,8 @@ def meditate(force, league):
                     "over_pct_ev_gt": diag_over_pct_ev_gt,
                     "over_pct_ev_lt": diag_over_pct_ev_lt,
                     "cf_over_pct": diag_cf_over_pct,
+                    "ev_meanyr_corr": diag_ev_meanyr_corr,
+                    "result_meanyr_corr": diag_result_meanyr_corr,
                     "shape_ceiling": shape_ceiling,
                     "marginal_shape": marginal_shape,
                 },
@@ -952,12 +1092,20 @@ def meditate(force, league):
                 "r_book": r_book,
                 "hist_gate": hist_gate,
                 "shape_ceiling": shape_ceiling,
+                "normalized": normalize,
             }
 
             X_test['Result'] = y_test['Result']
             X_test['Line'] = B_test['Line'].values
             X_test['Blended_EV'] = weighted_mean
-            if dist in ("NegBin", "ZINB"):
+            if dist == "SkewNormal":
+                X_test['EV'] = ev
+                X_test['SN_Loc'] = prob_params['loc']
+                X_test['SN_Scale'] = prob_params['scale']
+                X_test['SN_Alpha'] = prob_params['alpha']
+                if hist_gate > 0.02:
+                    X_test['Gate'] = hist_gate
+            elif dist in ("NegBin", "ZINB"):
                 # Store base distribution mean: mean = r*p/(1-p)
                 base_ev = prob_params['total_count'] * prob_params['probs'] / (1 - prob_params['probs'])
                 X_test['EV'] = base_ev
@@ -1077,6 +1225,8 @@ def report():
                 f.write(f" DIAG shape_ceiling={d.get('shape_ceiling', 'N/A')}"
                         f" marginal_shape={d.get('marginal_shape', 'N/A')}"
                         f" dispersion_cal={d.get('dispersion_cal', 0.0):.3f}\n")
+                f.write(f" DIAG ev_meanyr_corr={d.get('ev_meanyr_corr', float('nan')):.3f}"
+                        f" result_meanyr_corr={d.get('result_meanyr_corr', float('nan')):.3f}\n")
 
             if "params" in model:
                 p = model["params"]
@@ -1320,6 +1470,7 @@ def fit_book_weights(league, market):
         return {}
     
 def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=None, cv=None,
+                     model_sigma=None, model_skew_alpha=None,
                      gate_model=None, gate_book=None):
     """
     Optimize the single blend weight between model predictions and
@@ -1334,6 +1485,7 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
       both μ and r with a single weight w.  The book's r is 1/cv.
     - Gamma: precision-weighted blend using model alpha and book
       alpha (1/cv²).
+    - SkewNormal: precision-weighted blend of loc/sigma, linear blend of alpha.
 
     When gate_model/gate_book are provided, the likelihood accounts for
     zero-inflation: P(y) = gate*I(y=0) + (1-gate)*base_pdf(y).
@@ -1342,8 +1494,37 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
     model_ev = np.asarray(model_ev, dtype=float)
     odds_ev = np.asarray(odds_ev, dtype=float)
     has_gate = gate_model is not None and gate_book is not None
+    has_hurdle_gate = gate_book is not None and gate_model is None
 
-    if dist == "NegBin":
+    if dist == "SkewNormal":
+        model_sigma_arr = np.asarray(model_sigma, dtype=float)
+        model_skew_arr = np.asarray(model_skew_alpha, dtype=float)
+
+        def objective(w):
+            bl_ev, bl_sigma, bl_alpha, g_blend = fused_loc(
+                w, model_ev, odds_ev, cv, "SkewNormal",
+                sigma=model_sigma_arr, skew_alpha=model_skew_arr,
+                gate_book=gate_book)
+
+            delta = bl_alpha / np.sqrt(1 + bl_alpha**2)
+            bl_loc = bl_ev - bl_sigma * delta * np.sqrt(2 / np.pi)
+
+            base_logpdf = np.clip(skewnorm.logpdf(result, bl_alpha, loc=bl_loc, scale=bl_sigma), -20, 0)
+
+            if has_hurdle_gate and g_blend is not None:
+                loglik = np.where(
+                    result == 0,
+                    np.log(np.clip(g_blend, 1e-12, None)),
+                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf
+                )
+                return -np.mean(loglik)
+            return -np.mean(base_logpdf)
+
+        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)],
+                       tol=1e-8, method='TNC')
+        return res.x[0]
+
+    elif dist == "NegBin":
         model_r_arr = np.asarray(model_r, dtype=float)
         result_int = result.astype(int)
 

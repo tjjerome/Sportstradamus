@@ -316,8 +316,8 @@ class Stats:
 
         # Vectorized defense home split
         _def_home_mask = defenseGames[self.log_strings["home"]].astype(bool)
-        _def_home_mean = defenseGames.loc[_def_home_mask].groupby(self.log_strings["opponent"])[market].mean()
-        _def_all_mean = defenseGroups[market].mean()
+        _def_home_mean = defenseGames.loc[_def_home_mask].groupby(self.log_strings["opponent"])[market].mean().clip(0.1)
+        _def_all_mean = defenseGroups[market].mean().clip(0.1)
         self.defenseProfile['home'] = _def_home_mean / _def_all_mean - 1
 
         for position in self.positions:
@@ -559,6 +559,14 @@ class Stats:
         stats["GamesPlayed"] = playergames.groupby(_player_col)[market].count()
         _zero_counts = playergames.loc[playergames[market] == 0].groupby(_player_col).size()
         stats["ZeroYr"] = _zero_counts.reindex(stats.index, fill_value=0) / stats["GamesPlayed"]
+
+        # Scale-invariant ratio features: relative to player baseline
+        _meanyr_safe = stats["MeanYr"].clip(lower=0.5)
+        stats["Avg5_Ratio"] = stats["Avg5"] / _meanyr_safe
+        stats["Avg10_Ratio"] = stats["Avg10"] / _meanyr_safe
+        stats["Mean10_Ratio"] = stats["Mean10"] / _meanyr_safe
+        stats["STD_Ratio"] = stats["STDYr"] / _meanyr_safe
+
         stats = stats.loc[~stats.index.duplicated()]
 
         if date < datetime.today().date():
@@ -1888,16 +1896,17 @@ class StatsNBA(Stats):
 
         teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
         for team, team_df in teams:
-            alphas = team_df[f"proj {market} alpha"].copy()
-            betas  = team_df[f"proj {market} beta"].copy()
-            N      = len(team_df)
+            # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi) where delta = alpha/sqrt(1+alpha^2)
+            loc = team_df[f"proj {market} loc"].copy()
+            scale = team_df[f"proj {market} scale"].copy()
+            sn_alpha = team_df[f"proj {market} alpha"].copy() if f"proj {market} alpha" in team_df.columns else pd.Series(0, index=loc.index)
+            N = len(team_df)
 
-            # Gamma E[X] = alpha/beta, Var[X] = alpha/beta²
-            true_means = alphas / betas
-            true_vars  = alphas / (betas ** 2)
+            delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
+            true_means = loc + scale * delta * np.sqrt(2 / np.pi)
+            true_vars = scale ** 2
 
             total = true_means.sum()
-
             if total <= 0:
                 continue
 
@@ -1918,14 +1927,17 @@ class StatsNBA(Stats):
                 adjustments = true_means / total * deficit
             new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
 
-            # Update beta to achieve new mean; alpha (shape) is unchanged
-            new_betas = (alphas / new_means.replace(0, np.nan)).fillna(betas).clip(lower=0)
-            new_stds = np.sqrt(alphas) / new_betas
+            # Scale both loc and scale to preserve coefficient of variation
+            ratio = new_means / true_means.replace(0, np.nan)
+            ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+            new_scale = scale * ratio
+            new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 
-            self.playerProfile.loc[alphas.index, f"proj {market} mean"] = new_means
-            self.playerProfile.loc[betas.index, f"proj {market} std"]  = new_stds
+            self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
+            self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
+            self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
+            self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
 
-        self.playerProfile.drop(columns=[f"proj {market} alpha", f"proj {market} beta"], inplace=True)
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
@@ -4151,7 +4163,7 @@ class StatsNFL(Stats):
         Initialize the StatsNFL class.
         """
         super().__init__()
-        self.season_start = datetime(2026, 9, 10).date()
+        self.season_start = datetime(2025, 9, 10).date()
         cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
@@ -5178,6 +5190,7 @@ class StatsNFL(Stats):
             return dvpoa
         
     def check_combo_markets(self, market, player, date=datetime.today().date()):
+        return 0 # TODO reimplement this
         player_games = self.short_gamelog.loc[self.short_gamelog[self.log_strings["player"]]==player]
         cv = stat_cv.get(self.league, {}).get(market, 1)
         dist = stat_dist.get(self.league, {}).get(market, "Gamma")
@@ -5219,7 +5232,7 @@ class StatsNFL(Stats):
                     if subline == 0 and not player_games.empty:
                         subline = np.floor(player_games.iloc[-10:][submarket].median())+0.5
 
-                    if not subline == 0:
+                    if not subline <= 0:
                         under = (player_games[submarket]<subline).mean()
                         ev += get_ev(subline, under, sub_cv, dist=sub_dist)
                 else:
@@ -5330,16 +5343,19 @@ class StatsNFL(Stats):
             #   E[X] = concentration / rate
             # ---------------------------------------------------------------
             if market == "attempts":
-                # Convert Gamma params to true mean and std for downstream use
-                alphas = self.playerProfile[f"proj {market} alpha"].fillna(0)
-                betas  = self.playerProfile[f"proj {market} beta"].fillna(0)
+                # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
+                loc = self.playerProfile[f"proj {market} loc"].fillna(0)
+                scale = self.playerProfile[f"proj {market} scale"].fillna(0)
+                sn_alpha = self.playerProfile[f"proj {market} alpha"].fillna(0) if f"proj {market} alpha" in self.playerProfile.columns else 0
 
-                true_means = (alphas / betas.replace(0, np.nan)).fillna(0)
-                true_stds  = (np.sqrt(alphas) / betas.replace(0, np.nan)).fillna(0)
+                delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
+                true_means = loc + scale * delta * np.sqrt(2 / np.pi)
+                true_stds = scale
 
-                self.playerProfile.loc[alphas.index, f"proj {market} mean"] = true_means
-                self.playerProfile.loc[betas.index, f"proj {market} std"]  = true_stds
-                self.playerProfile.drop(columns=[f"proj {market} alpha", f"proj {market} beta"], inplace=True)
+                self.playerProfile.loc[loc.index, f"proj {market} mean"] = true_means
+                self.playerProfile.loc[scale.index, f"proj {market} std"] = true_stds
+                self.playerProfile.drop(columns=[f"proj {market} loc", f"proj {market} scale"], inplace=True, errors='ignore')
+                self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True, errors='ignore')
 
                 self.playerProfile.fillna(0, inplace=True)
                 continue
@@ -6309,13 +6325,15 @@ class StatsNHL(Stats):
 
             teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
             for team, team_df in teams:
-                alphas = team_df[f"proj {market} alpha"].copy()
-                betas  = team_df[f"proj {market} beta"].copy()
-                N      = len(team_df)
+                # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
+                loc = team_df[f"proj {market} loc"].copy()
+                scale = team_df[f"proj {market} scale"].copy()
+                sn_alpha = team_df[f"proj {market} alpha"].copy() if f"proj {market} alpha" in team_df.columns else pd.Series(0, index=loc.index)
+                N = len(team_df)
 
-                # Gamma E[X] = alpha/beta, Var[X] = alpha/beta²
-                true_means = alphas / betas
-                true_vars  = alphas / (betas ** 2)
+                delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
+                true_means = loc + scale * delta * np.sqrt(2 / np.pi)
+                true_vars = scale ** 2
 
                 total = true_means.sum()
                 if total <= 0:
@@ -6339,14 +6357,19 @@ class StatsNHL(Stats):
 
                 new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
 
-                # Update beta to achieve new mean; alpha (shape) is unchanged
-                new_betas = (alphas / new_means.replace(0, np.nan)).fillna(betas).clip(lower=0)
-                new_stds = np.sqrt(alphas) / new_betas
+                # Scale both loc and scale to preserve coefficient of variation
+                ratio = new_means / true_means.replace(0, np.nan)
+                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+                new_scale = scale * ratio
+                new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 
-                self.playerProfile.loc[alphas.index, f"proj {market} mean"] = new_means
-                self.playerProfile.loc[betas.index, f"proj {market} std"]  = new_stds
+                self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
+                self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
+                self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
+                self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
 
-        self.playerProfile.drop(columns=[f"proj {market} alpha", f"proj {market} beta"], inplace=True)
+        self.playerProfile.drop(columns=[f"proj {market} loc", f"proj {market} scale"], inplace=True, errors='ignore')
+        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True, errors='ignore')
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
