@@ -41,5 +41,27 @@
         "PRA": 0.023636009374249495,
         "fantasy points prizepicks": 0.013692759309696202,
         "MIN": 0
+    },
+    "NFL": {
+        "passing yards": 0.06598214628789385,
+        "rushing yards": 0.16688158281566132,
+        "receiving yards": 0.16619005799097708,
+        "yards": 0.08832248370148321,
+        "qb yards": 0.13831208503492912,
+        "attempts": 0,
+        "carries": 0,
+        "targets": 0,
+        "fantasy points prizepicks": 0.04574184778895647,
+        "fantasy points underdog": 0.028921390403302636,
+        "passing tds": 0.0060141045746665905,
+        "tds": 0.005729768964042203,
+        "rushing tds": 0.011147886016315875,
+        "receiving tds": 0.003247115085268382,
+        "qb tds": 0.007542206536575989,
+        "completions": 0.05669068647606183,
+        "receptions": 0.009844690563000559,
+        "interceptions": 0.012455733421215214,
+        "sacks taken": 0.03333700465302169,
+        "passing first downs": 0.07934161539633022
     }
 }

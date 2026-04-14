@@ -10,7 +10,7 @@ from google.auth.transport.requests import Request
 import gspread
 import click
 import re
-from scipy.stats import poisson, nbinom, skellam, norm, gamma, hmean, multivariate_normal
+from scipy.stats import poisson, nbinom, skellam, norm, gamma, hmean, multivariate_normal, skewnorm
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.special import softmax, logit, expit
 from math import comb
@@ -905,7 +905,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         shape_ceiling = filedict.get("shape_ceiling")
         dist = filedict["distribution"]
         step = filedict["step"]
-        hist_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
+        normalized = filedict.get("normalized", False)
+        hist_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
 
         if market in stat_data.volume_stats:
             prob_params = pd.DataFrame(index=playerStats.index)
@@ -924,7 +925,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype('category')
 
-            set_model_start_values(model, dist, playerStats)
+            set_model_start_values(model, dist, playerStats, normalized=normalized)
 
             prob_params = model.predict(
                 playerStats, pred_type="parameters")
@@ -977,12 +978,37 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if dist == "ZAGamma":
                 prob_params["Model Gate"] = prob_params["gate"]
             prob_params["Model Alpha"] = prob_params["concentration"]
-        
+
+        # SkewNormal parameters: denormalize and compute EV
+        if dist == "SkewNormal" and "loc" in prob_params.columns:
+            # Denormalize: loc and scale were normalized by MeanYr during training
+            meanyr_vals = playerStats["MeanYr"].values
+            loc_abs = prob_params["loc"].values * meanyr_vals
+            scale_abs = prob_params["scale"].values * meanyr_vals
+            alpha_sn = prob_params["alpha"].values
+
+            # Compute EV from SkewNormal: EV = loc + sigma * delta * sqrt(2/pi)
+            delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
+            base_ev = loc_abs + scale_abs * delta * np.sqrt(2 / np.pi)
+
+            prob_params["Model EV"] = base_ev
+            prob_params["Model Sigma"] = scale_abs
+            prob_params["Model Skew"] = alpha_sn
+            if hist_gate > 0.02:
+                prob_params["Model Gate"] = hist_gate
+
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
         offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
         if offer_df.empty:
             return []
-        offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None), axis=1)
+        # Compute book-side probability
+        if dist == "SkewNormal":
+            offer_df["Books"] = offer_df.apply(
+                lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv=cv, step=step,
+                                     sigma=x["Books EV"]*cv, skew_alpha=0, gate=hist_gate or None),
+                axis=1)
+        else:
+            offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None), axis=1)
         
         # Clamp model shape to training-time ceiling (safety net)
         if shape_ceiling is not None:
@@ -992,8 +1018,27 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 offer_df["Model Alpha"] = np.minimum(offer_df["Model Alpha"], shape_ceiling)
 
         # Blend model and book predictions via fused_loc (uses base dist type)
-        # For ZI dists, pass gate_model + hist_gate so fused_loc blends the gate.
-        if dist in ("NegBin", "ZINB"):
+        # For ZI/hurdle dists, pass gate_model + hist_gate so fused_loc blends the gate.
+        if dist == "SkewNormal":
+            _zi_kw = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+            blended_base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
+                model_weight,
+                offer_df["Model EV"].to_numpy(),
+                offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
+                cv, "SkewNormal",
+                sigma=offer_df["Model Sigma"].to_numpy() if "Model Sigma" in offer_df.columns else None,
+                skew_alpha=offer_df["Model Skew"].to_numpy() if "Model Skew" in offer_df.columns else None,
+                **_zi_kw
+            )
+            if gate_blend is not None:
+                offer_df["Model EV"] = (1 - gate_blend) * blended_base_mean
+                offer_df["Model Gate"] = gate_blend
+            else:
+                offer_df["Model EV"] = blended_base_mean
+            offer_df["Model Sigma"] = sigma_blend
+            offer_df["Model Skew"] = skew_blend
+
+        elif dist in ("NegBin", "ZINB"):
             _zi_kw = dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate) if dist == "ZINB" and "Model Gate" in offer_df.columns else {}
             r_blend, p_blend, gate_blend = fused_loc(
                 model_weight,
@@ -1029,12 +1074,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 offer_df["Model EV"] = blended_base_mean
             offer_df["Model Alpha"] = alpha_blend
         
-        # For display, convert Books EV from base mean to overall mean for ZI dists
-        if hist_gate and dist in ("ZINB", "ZAGamma"):
+        # For display, convert Books EV from base mean to overall mean for ZI/hurdle dists
+        if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
             offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
         
         # Apply dispersion calibration (keeps mean fixed, adjusts concentration)
-        if dispersion_cal != 1.0:
+        # SkewNormal: CRPS loss handles dispersion — skip post-hoc calibration
+        if dispersion_cal != 1.0 and dist != "SkewNormal":
             if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
                 offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
             elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
@@ -1043,9 +1089,16 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         # Raw distributional probability, then temperature scaling calibration
         _r = offer_df["Model R"].to_numpy() if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns) else None
         _alpha = offer_df["Model Alpha"].to_numpy() if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns) else None
-        _gate = offer_df["Model Gate"].to_numpy() if (dist in ("ZINB", "ZAGamma") and "Model Gate" in offer_df.columns) else None
+        _sigma = offer_df["Model Sigma"].to_numpy() if (dist == "SkewNormal" and "Model Sigma" in offer_df.columns) else None
+        _skew = offer_df["Model Skew"].to_numpy() if (dist == "SkewNormal" and "Model Skew" in offer_df.columns) else None
+        _gate = offer_df["Model Gate"].to_numpy() if (dist in ("ZINB", "ZAGamma", "SkewNormal") and "Model Gate" in offer_df.columns) else None
         _model_ev = blended_base_mean  # pass base mean to get_odds (gate handled separately)
-        _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv, alpha=_alpha, step=step, r=_r, gate=_gate)
+
+        if dist == "SkewNormal":
+            _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv=cv, step=step,
+                                  sigma=_sigma, skew_alpha=_skew, gate=_gate)
+        else:
+            _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv, alpha=_alpha, step=step, r=_r, gate=_gate)
         _raw_over = 1 - _raw_under
         if temperature is not None:
             _raw_over_clipped = np.clip(_raw_over, 1e-6, 1 - 1e-6)
@@ -1094,6 +1147,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
         if dist in ("NegBin", "ZINB"):
             offer_df["Model Param"] = offer_df["Model R"]
+        elif dist == "SkewNormal":
+            offer_df["Model Param"] = offer_df["Model Sigma"]
         else:
             offer_df["Model Param"] = offer_df["Model Alpha"]
 
