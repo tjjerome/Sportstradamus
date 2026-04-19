@@ -35,259 +35,42 @@ Usage
   poetry run python3 evaluate_model_features.py --league NBA --threshold 0.25 --top-candidates 15
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 import json
-import pickle
 import warnings
 import argparse
 import importlib.resources as pkg_resources
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_selection import mutual_info_regression
-from sklearn.preprocessing import QuantileTransformer
-from scipy.stats import spearmanr
+
 from sportstradamus import data
+from sportstradamus.feature_selection import (
+    META_COLS,
+    EVAL_DROP_CUTOFF as DEFAULT_DROP_THRESHOLD,
+    EVAL_ADD_THRESHOLD as DEFAULT_ADD_THRESHOLD,
+    EVAL_TOP_CANDIDATES as DEFAULT_TOP_CANDIDATES,
+    market_key,
+    model_path,
+    training_path,
+    strip_variant,
+    variants_of,
+    compute_shap_scores,
+    compute_corr_scores,
+    compute_from_training,
+    compute_redundancy,
+    normalize_scores,
+    composite_score,
+    discover_candidates,
+)
 
 warnings.filterwarnings("ignore")
-
-
-# ─── Constants ─────────────────────────────────────────────────────────────────
-
-META_COLS = {"Date", "Player", "Player team", "Result", "Line", "Odds", "EV", "Archived"}
-
-# Weights for composite scoring
-W_MODEL   = dict(shap=0.35, corr=0.25, mi=0.20, stability=0.20)
-W_NO_MODEL = dict(shap=0.00, corr=0.40, mi=0.35, stability=0.25)
-REDUNDANCY_WEIGHT = 0.40   # how much to penalise for collinearity with peers
-
-DEFAULT_DROP_THRESHOLD = 0.30    # features scoring below this are drop candidates
-DEFAULT_ADD_THRESHOLD  = 0.38    # candidates scoring above this are add candidates
-DEFAULT_TOP_CANDIDATES = 10      # max candidate additions to show per market
-
-
-# ─── Helpers ───────────────────────────────────────────────────────────────────
-
-def market_key(league: str, market: str) -> str:
-    """Column name used in feature_importances / feature_correlations CSVs."""
-    return f"{league}_{market.replace(' ', '-')}"
-
-
-def model_path(league: str, market: str) -> str:
-    filename = f"{league}_{market}".replace(" ", "-")
-    return pkg_resources.files(data) / f"models/{filename}.mdl"
-
-
-def training_path(league: str, market: str) -> str:
-    filename = f"{league}_{market}".replace(" ", "-")
-    return pkg_resources.files(data) / f"training_data/{filename}.csv"
-
-
-def strip_variant(col: str) -> str:
-    return col.replace(" short", "").replace(" growth", "")
-
-
-def variants_of(base: str, available_cols) -> list[str]:
-    """Return existing variants: base, base short, base growth."""
-    return [v for v in [base, base + " short", base + " growth"]
-            if v in available_cols]
 
 
 def load_csv_safe(path):
     if os.path.isfile(path):
         return pd.read_csv(path, index_col=0)
     return pd.DataFrame()
-
-
-# ─── Signal computation ────────────────────────────────────────────────────────
-
-def compute_shap_scores(features: list[str], mkey: str,
-                        shap_df: pd.DataFrame) -> dict[str, float]:
-    """
-    Aggregate SHAP importance across base + short + growth for each feature.
-    Returns a dict {feature: raw_shap_sum}.  0.0 if column absent.
-    """
-    if shap_df.empty or mkey not in shap_df.columns:
-        return {f: 0.0 for f in features}
-    col = shap_df[mkey]
-    scores = {}
-    for feat in features:
-        variants = [v for v in [feat, feat + " short", feat + " growth"]
-                    if v in col.index]
-        scores[feat] = col[variants].fillna(0).sum() if variants else 0.0
-    return scores
-
-
-def compute_corr_scores(features: list[str], mkey: str,
-                        corr_df: pd.DataFrame) -> dict[str, float]:
-    """
-    Max |correlation| across variants from pre-computed correlation CSV.
-    Falls back to 0 if unavailable.
-    """
-    if corr_df.empty or mkey not in corr_df.columns:
-        return {f: 0.0 for f in features}
-    col = corr_df[mkey].abs()
-    scores = {}
-    for feat in features:
-        variants = [v for v in [feat, feat + " short", feat + " growth"]
-                    if v in col.index]
-        scores[feat] = col[variants].max() if variants else 0.0
-    return scores
-
-
-def compute_from_training(features: list[str], train_df: pd.DataFrame,
-                          target: pd.Series) -> tuple[dict, dict, dict]:
-    """
-    Compute correlation, mutual information, and temporal stability from
-    training data.  Returns (corr_scores, mi_scores, stability_scores).
-    """
-    if train_df.empty or len(target) < 50:
-        zero = {f: 0.0 for f in features}
-        return zero, zero, zero
-
-    all_cols = set(train_df.columns)
-    n = len(train_df)
-    mid = n // 2
-
-    # For MI we need a clean numeric matrix — use best variant per feature
-    best_variant: dict[str, str] = {}
-    for feat in features:
-        cands = variants_of(feat, all_cols)
-        if not cands:
-            continue
-        # pick the variant with highest abs-correlation to target
-        best_c, best_r = cands[0], 0.0
-        for c in cands:
-            r = train_df[c].corr(target)
-            if abs(r) > best_r:
-                best_c, best_r = c, abs(r)
-        best_variant[feat] = best_c
-
-    mi_input_cols = list(best_variant.values())
-    if not mi_input_cols:
-        zero = {f: 0.0 for f in features}
-        return zero, zero, zero
-
-    X_mi = train_df[mi_input_cols].copy()
-    X_mi = X_mi.apply(pd.to_numeric, errors="coerce").fillna(0)
-
-    # Mutual information
-    mi_raw = mutual_info_regression(X_mi, target, random_state=42)
-    mi_map = dict(zip(mi_input_cols, mi_raw))
-
-    corr_scores, mi_scores, stability_scores = {}, {}, {}
-    for feat in features:
-        cands = variants_of(feat, all_cols)
-        if not cands:
-            corr_scores[feat] = mi_scores[feat] = stability_scores[feat] = 0.0
-            continue
-
-        # Correlation: max across variants
-        corr_vals = [abs(train_df[c].corr(target)) for c in cands]
-        corr_scores[feat] = max(corr_vals, default=0.0)
-
-        # MI: from best variant
-        bv = best_variant.get(feat, cands[0])
-        mi_scores[feat] = mi_map.get(bv, 0.0)
-
-        # Temporal stability: Spearman in first vs second half
-        col_data = train_df[bv]
-        early = col_data.iloc[:mid]
-        late  = col_data.iloc[mid:]
-        t_early = target.iloc[:mid]
-        t_late  = target.iloc[mid:]
-        r_early, _ = spearmanr(early.fillna(0), t_early)
-        r_late, _  = spearmanr(late.fillna(0), t_late)
-        re, rl = abs(r_early or 0), abs(r_late or 0)
-        if max(re, rl) > 0:
-            stability_scores[feat] = min(re, rl) / max(re, rl)
-        else:
-            stability_scores[feat] = 0.0
-
-    return corr_scores, mi_scores, stability_scores
-
-
-def compute_redundancy(features: list[str], train_df: pd.DataFrame) -> dict[str, float]:
-    """
-    For each feature, compute max |Pearson| against all OTHER features
-    using the best available variant.  High values indicate collinearity.
-    """
-    if train_df.empty:
-        return {f: 0.0 for f in features}
-    all_cols = set(train_df.columns)
-    # Map each feature to its best column (base preferred)
-    feat_col = {}
-    for feat in features:
-        for variant in [feat, feat + " short", feat + " growth"]:
-            if variant in all_cols:
-                feat_col[feat] = variant
-                break
-
-    if not feat_col:
-        return {f: 0.0 for f in features}
-
-    sub = train_df[list(feat_col.values())].apply(pd.to_numeric, errors="coerce")
-    corr_matrix = sub.corr().abs()
-    # Rename back to base names
-    rev = {v: k for k, v in feat_col.items()}
-    corr_matrix = corr_matrix.rename(index=rev, columns=rev)
-
-    redundancy = {}
-    for feat in features:
-        if feat not in corr_matrix.index:
-            redundancy[feat] = 0.0
-            continue
-        row = corr_matrix.loc[feat].drop(labels=[feat], errors="ignore")
-        redundancy[feat] = row.max() if len(row) else 0.0
-    return redundancy
-
-
-def normalize_scores(score_dict: dict[str, float]) -> dict[str, float]:
-    """Min-max normalize a dict of scores to [0, 1]."""
-    vals = np.array(list(score_dict.values()))
-    lo, hi = vals.min(), vals.max()
-    if hi <= lo:
-        return {k: 0.5 for k in score_dict}
-    return {k: (v - lo) / (hi - lo) for k, v in score_dict.items()}
-
-
-def composite_score(feat: str, shap_n, corr_n, mi_n, stab_n,
-                    redundancy: float, has_model: bool) -> float:
-    w = W_MODEL if has_model else W_NO_MODEL
-    raw = (w["shap"] * shap_n.get(feat, 0)
-           + w["corr"] * corr_n.get(feat, 0)
-           + w["mi"]   * mi_n.get(feat, 0)
-           + w["stability"] * stab_n.get(feat, 0))
-    return raw * (1.0 - REDUNDANCY_WEIGHT * redundancy)
-
-
-# ─── Candidate discovery ───────────────────────────────────────────────────────
-
-def discover_candidates(train_df: pd.DataFrame, common: set[str],
-                        current: set[str]) -> list[str]:
-    """
-    Return base feature names present in training data but not in Common or
-    the current market feature list.  Excludes metadata and near-constant cols.
-    """
-    if train_df.empty:
-        return []
-    all_cols = set(train_df.columns) - META_COLS
-    base_names = {strip_variant(c) for c in all_cols}
-    candidates = sorted(base_names - common - current)
-    # Drop near-constant: std == 0 across base variant
-    result = []
-    for feat in candidates:
-        col = next((c for c in [feat, feat + " short", feat + " growth"]
-                    if c in train_df.columns), None)
-        if col is None:
-            continue
-        vals = pd.to_numeric(train_df[col], errors="coerce").dropna()
-        if len(vals) > 10 and vals.std() > 0:
-            result.append(feat)
-    return result
 
 
 # ─── Per-market evaluation ─────────────────────────────────────────────────────

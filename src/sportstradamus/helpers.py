@@ -862,7 +862,7 @@ class Archive:
                 else:
                     records[(date, player)] = self.archive[league][market][date][player]
 
-        return pd.DataFrame(records).T
+        return pd.DataFrame.from_dict(records, orient='index')
 
     def write(self, all=False):
         """

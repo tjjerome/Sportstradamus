@@ -493,7 +493,7 @@ class Stats:
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
         self._ensure_comps()
-        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanH2H', 'STD10', 'STDYr', 'ZeroYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
+        stats = pd.DataFrame(columns=['Avg1', 'Avg3', 'Avg5', 'Avg10', 'AvgYr', 'AvgH2H', 'Mean10', 'MeanYr', 'MeanYr_nonzero', 'MeanH2H', 'STD10', 'STDYr', 'ZeroYr', 'DaysOff', 'DaysIntoSeason', 'GamesPlayed', 'H2HPlayed', 'Home', 'Moneyline', 'Total'])
         if isinstance(offers, dict):
             players = list(offers.keys())
             teams = {k:v["Team"] for k, v in offers.items()}
@@ -551,6 +551,9 @@ class Stats:
         stats["AvgYr"] = playergames.groupby(_player_col)[market].median()
         stats["Mean10"] = _pg_last10.groupby(_player_col)[market].mean()
         stats["MeanYr"] = playergames.groupby(_player_col)[market].mean()
+        _nonzero_games = playergames.loc[playergames[market] > 0]
+        stats["MeanYr_nonzero"] = _nonzero_games.groupby(_player_col)[market].mean()
+        stats["MeanYr_nonzero"] = stats["MeanYr_nonzero"].fillna(stats["MeanYr"].clip(lower=0.5))
         stats["STD10"] = _pg_last10.groupby(_player_col)[market].std()
         stats["STDYr"] = playergames.groupby(_player_col)[market].std()
         _last_date = pd.to_datetime(playergames.groupby(_player_col)[self.log_strings["date"]].last())
@@ -724,21 +727,35 @@ class Stats:
     def get_volume_stats(self, offers, date=datetime.today().date()):
         return
 
-    def get_stat_columns(self, market):
-        if market in feature_filter.get(self.league,{}):
-            cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])+feature_filter.get(self.league,{}).get(market,[])
-            profile_cols = [col for col in feature_filter.get(self.league,{}).get(market,[]) if "Player " in col and not any([string in col for string in [" age", " depth", " proj "]])]
-            
+    def get_stat_columns(self, market, unfiltered=False):
+        league_filter = feature_filter.get(self.league, {})
+        # Two-tier schema: Filtered (SHAP-ranked, refreshable) + Always (locked)
+        # Back-compat: if no "Filtered" key, treat the league block itself as the flat market list
+        filtered = league_filter.get("Filtered", league_filter)
+        always = league_filter.get("Always", {})
+
+        if market in filtered and not unfiltered:
+            market_always = list(always.get(market, [])) + list(always.get("_default", []))
+            market_filtered = list(filtered.get(market, []))
+            cols = (feature_filter.get("Common", [])
+                    + league_filter.get("Common", [])
+                    + market_always
+                    + market_filtered)
+            cols = list(dict.fromkeys(cols))  # de-dup, preserve order
+
+            profile_cols = [col for col in (market_always + market_filtered)
+                            if "Player " in col and not any([string in col for string in [" age", " depth", " proj ", " position"]])]
+
             count = 1
             for i, c in enumerate(cols.copy()):
                 if c in profile_cols:
                     cols.insert(i+count, c+" growth")
                     cols.insert(i+count, c+" short")
                     count = count + 2
-        
+
         else:
             self.base_profile()
-            cols = feature_filter.get("Common",[])+feature_filter.get(self.league,{}).get("Common",[])\
+            cols = feature_filter.get("Common",[])+league_filter.get("Common",[])\
                 + list(self.playerProfile.add_prefix("Player ").columns)\
                 + list(self.teamProfile.add_prefix("Team ").columns)\
                 + list(self.defenseProfile.add_prefix("Defense ").columns)
@@ -1779,12 +1796,6 @@ class StatsNBA(Stats):
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
         playerStats = self.get_stats(market, flat_offers, date)
-        cols = self.get_stat_columns(market)
-        if any([col not in playerStats.columns for col in cols]):
-            logger.warning(f"Gamelog missing - {date}")
-            return []
-
-        playerStats = playerStats[cols]
 
         if playerStats.empty:
             logger.warning(f"Gamelog missing - {date}")
@@ -1800,6 +1811,13 @@ class StatsNBA(Stats):
             else:
                 logger.warning(f"{filename} missing")
                 return []
+
+        # Slice to the trained schema embedded in the pickle.
+        cols = self._volume_model_cache["expected_columns"]
+        if any([col not in playerStats.columns for col in cols]):
+            logger.warning(f"Gamelog missing - {date}")
+            return []
+        playerStats = playerStats[cols]
 
         model = self._volume_model_cache["model"]
         dist = self._volume_model_cache["distribution"]
@@ -1823,7 +1841,15 @@ class StatsNBA(Stats):
 
         # Drop gate column for ZI distributions — not needed for budget normalization
         prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"concentration": f"proj {market} alpha", "rate": f"proj {market} beta"}), lsuffix="_obs")
+
+        # SkewNormal: rename loc/scale/alpha to proj {market} loc/scale/alpha
+        rename_map = {
+            "loc":   f"proj {market} loc",
+            "scale": f"proj {market} scale",
+            "alpha": f"proj {market} alpha",
+        }
+
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns=rename_map), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
 
         # ------------------------------------------------------------------
@@ -2130,6 +2156,7 @@ class StatsNBA(Stats):
             "Mean5": np.mean(game_res[-5:]) if game_res else 0,
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanYr_nonzero": (np.mean([x for x in game_res[-one_year_ago:] if x > 0]) if any(x > 0 for x in game_res[-one_year_ago:]) else max(np.mean(game_res[-one_year_ago:]) if game_res else 0.5, 0.5)),
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "STD10": np.std(game_res[-10:]) if game_res else 0,
             "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
@@ -3572,7 +3599,6 @@ class StatsMLB(Stats):
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
         playerStats = self.get_stats(market, flat_offers, date)
-        playerStats = playerStats[self.get_stat_columns(market)]
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
@@ -3588,6 +3614,8 @@ class StatsMLB(Stats):
 
         if filename in self._volume_model_cache:
             filedict = self._volume_model_cache[filename]
+            # Slice to the trained schema embedded in the pickle.
+            playerStats = playerStats[filedict["expected_columns"]]
             model = filedict["model"]
             dist = filedict["distribution"]
 
@@ -3931,6 +3959,7 @@ class StatsMLB(Stats):
             "Mean5": np.mean(game_res[-5:]) if game_res else 0,
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanYr_nonzero": (np.mean([x for x in game_res[-one_year_ago:] if x > 0]) if any(x > 0 for x in game_res[-one_year_ago:]) else max(np.mean(game_res[-one_year_ago:]) if game_res else 0.5, 0.5)),
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "STD10": np.std(game_res[-10:]) if game_res else 0,
             "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
@@ -5262,7 +5291,6 @@ class StatsNFL(Stats):
             self.profile_market(market, date)
             self.get_depth(flat_offers, date)
             playerStats = self.get_stats(market, flat_offers, date)
-            playerStats = playerStats[self.get_stat_columns(market)]
 
             filename = "_".join([self.league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
@@ -5278,6 +5306,10 @@ class StatsNFL(Stats):
 
             if filename in self._volume_model_cache:
                 filedict = self._volume_model_cache[filename]
+                # Slice to the trained schema embedded in the pickle. This is the
+                # source of truth — never re-derive from feature_filter.json here,
+                # which can drift between when the volume model was trained and now.
+                playerStats = playerStats[filedict["expected_columns"]]
                 model = filedict["model"]
                 dist = filedict["distribution"]
 
@@ -5306,23 +5338,19 @@ class StatsNFL(Stats):
             # ---------------------------------------------------------------
             # Store distribution parameters in playerProfile.
             #
-            # attempts  → Gamma/ZAGamma: concentration (α), rate (β)
+            # attempts  → SkewNormal: loc, scale, alpha
             # carries / targets → NegBin/ZINB: probs (p), total_count (n)
             #   NegBin mean     μ = n(1−p)/p
             #   NegBin variance σ² = n(1−p)/p² = μ/p
             # ---------------------------------------------------------------
             # Drop gate column for ZI distributions — not needed for budget normalization
             prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
-            if market == "attempts":
-                rename_map = {
-                    "concentration": f"proj {market} alpha",
-                    "rate":          f"proj {market} beta",
-                }
-            else:
-                rename_map = {
-                    "probs":       f"proj {market} probs",
-                    "total_count": f"proj {market} n",
-                }
+            # All NFL volume stats (attempts, carries, targets) now use SkewNormal
+            rename_map = {
+                "loc":   f"proj {market} loc",
+                "scale": f"proj {market} scale",
+                "alpha": f"proj {market} alpha",
+            }
 
             self.playerProfile = self.playerProfile.join(
                 prob_params.rename(columns=rename_map), lsuffix="_obs"
@@ -5339,8 +5367,8 @@ class StatsNFL(Stats):
             #   (B) total carries ≈ plays_per_game − proj_attempts − unmodeled_carry_reserve
             #   (C) total targets ≈ proj_attempts − unmodeled_target_reserve
             #
-            # proj_attempts is derived from the QB's Gamma posterior:
-            #   E[X] = concentration / rate
+            # proj_attempts is derived from SkewNormal:
+            #   E[X] = loc + scale * delta * sqrt(2/π) where delta = alpha/sqrt(1+alpha²)
             # ---------------------------------------------------------------
             if market == "attempts":
                 # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
@@ -5367,27 +5395,22 @@ class StatsNFL(Stats):
 
             teams = self.playerProfile.loc[self.playerProfile["team"]!=0].groupby("team")
             for team, team_df in teams:
-                probs_col = f"proj {market} probs"
-                n_col     = f"proj {market} n"
+                # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
+                loc = team_df[f"proj {market} loc"].copy()
+                scale = team_df[f"proj {market} scale"].copy()
+                sn_alpha = team_df[f"proj {market} alpha"].copy() if f"proj {market} alpha" in team_df.columns else 0
 
-                probs = team_df[probs_col].copy()   # p  (per-opp success rate)
-                ns    = team_df[n_col].copy()       # n  (total_count)
-
-                # NegBin true mean and variance
-                nb_means = ns * (1.0 - probs) / probs.replace(0, np.nan)
-                nb_vars  = nb_means / probs.replace(0, np.nan)
-                nb_means = nb_means.fillna(0)
-                nb_vars  = nb_vars.fillna(0)
-                total    = nb_means.sum()
+                delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
+                true_means = loc + scale * delta * np.sqrt(2 / np.pi)
+                true_vars = scale ** 2
+                total = true_means.sum()
 
                 if total <= 0:
                     continue
 
                 plays = self.teamProfile.loc[team, "plays_per_game"]
 
-                # proj_attempts for this team: Gamma E[X] from
-                # the already-stored attempts parameters, or fall back to
-                # plays × pass_rate from teamProfile
+                # proj_attempts for this team: from attempts market
                 if "proj attempts mean" in self.playerProfile.columns:
                     proj_attempts = self.playerProfile.loc[self.playerProfile["team"] == team, "proj attempts mean"].sum()
                 else:
@@ -5406,24 +5429,28 @@ class StatsNFL(Stats):
 
                 # Precision-weighted deficit distribution
                 deficit   = target - total
-                total_var = nb_vars.sum()
+                total_var = true_vars.sum()
                 if total_var > 0:
-                    adjustments = nb_vars / total_var * deficit
+                    adjustments = true_vars / total_var * deficit
                 else:
-                    adjustments = nb_means / total * deficit
+                    adjustments = true_means / total * deficit
 
-                new_means = (nb_means + adjustments).clip(lower=0, upper=cap)
+                new_means = (true_means + adjustments).clip(lower=0, upper=cap)
 
-                # Update total_count to achieve new mean; keep probs fixed
-                new_ns = (new_means * probs / (1.0 - probs).replace(0, np.nan)).fillna(ns).clip(lower=0)
-                new_stds = np.sqrt(new_ns * (1.0 - probs) / probs.replace(0, np.nan)**2).fillna(0)
+                # SkewNormal: scale both loc and scale to preserve CV
+                ratio = new_means / true_means.replace(0, np.nan)
+                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+                new_scale = scale * ratio
+                new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 
-                self.playerProfile.loc[ns.index, f"proj {market} mean"] = new_means
-                self.playerProfile.loc[ns.index, f"proj {market} std"] = new_stds
-                # probs unchanged — no update needed
-
-            self.playerProfile.drop(columns=[n_col, probs_col], inplace=True)
+                self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
+                self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
+                self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
+                self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
             self.playerProfile.fillna(0, inplace=True)
+
+        # Defragment after 3-market loop's sequential .join / .loc column inserts.
+        self.playerProfile = self.playerProfile.copy()
 
     def obs_get_stats(self, offer, date=datetime.today()):
         """
@@ -5569,6 +5596,7 @@ class StatsNFL(Stats):
             "Mean5": np.mean(game_res[-5:]) if game_res else 0,
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanYr_nonzero": (np.mean([x for x in game_res[-one_year_ago:] if x > 0]) if any(x > 0 for x in game_res[-one_year_ago:]) else max(np.mean(game_res[-one_year_ago:]) if game_res else 0.5, 0.5)),
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "STD10": np.std(game_res[-10:]) if game_res else 0,
             "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
@@ -6255,7 +6283,6 @@ class StatsNHL(Stats):
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
         playerStats = self.get_stats(market, flat_offers, date)
-        playerStats = playerStats[self.get_stat_columns(market)]
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
@@ -6271,6 +6298,8 @@ class StatsNHL(Stats):
 
         if filename in self._volume_model_cache:
             filedict = self._volume_model_cache[filename]
+            # Slice to the trained schema embedded in the pickle.
+            playerStats = playerStats[filedict["expected_columns"]]
             model = filedict["model"]
             dist = filedict["distribution"]
 
@@ -6297,9 +6326,17 @@ class StatsNHL(Stats):
 
         # Drop gate column for ZI distributions — not needed for budget normalization
         prob_params.drop(columns=["gate"], inplace=True, errors='ignore')
-        self.playerProfile = self.playerProfile.join(prob_params.rename(columns={"concentration": f"proj {market} alpha", "rate": f"proj {market} beta"}), lsuffix="_obs")
+
+        # SkewNormal: rename loc/scale/alpha to proj {market} loc/scale/alpha
+        rename_map = {
+            "loc":   f"proj {market} loc",
+            "scale": f"proj {market} scale",
+            "alpha": f"proj {market} alpha",
+        }
+
+        self.playerProfile = self.playerProfile.join(prob_params.rename(columns=rename_map), lsuffix="_obs")
         self.playerProfile.drop(columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True)
-        
+
         if not pitcher:
             # ------------------------------------------------------------------
             # Budget parameters — derived by analyzing historical NHL gamelogs.
@@ -6368,8 +6405,8 @@ class StatsNHL(Stats):
                 self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
                 self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
 
-        self.playerProfile.drop(columns=[f"proj {market} loc", f"proj {market} scale"], inplace=True, errors='ignore')
-        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True, errors='ignore')
+        # Drop SkewNormal parameters (keep only mean/std for downstream use)
+        self.playerProfile.drop(columns=[f"proj {market} loc", f"proj {market} scale", f"proj {market} alpha"], inplace=True, errors='ignore')
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
@@ -6937,6 +6974,7 @@ class StatsNHL(Stats):
             "Mean5": np.mean(game_res[-5:]) if game_res else 0,
             "Mean10": np.mean(game_res[-10:]) if game_res else 0,
             "MeanYr": np.mean(game_res[-one_year_ago:]) if game_res else 0,
+            "MeanYr_nonzero": (np.mean([x for x in game_res[-one_year_ago:] if x > 0]) if any(x > 0 for x in game_res[-one_year_ago:]) else max(np.mean(game_res[-one_year_ago:]) if game_res else 0.5, 0.5)),
             "MeanH2H": np.mean(h2h_res[-5:]) if h2h_res else 0,
             "STD10": np.std(game_res[-10:]) if game_res else 0,
             "STDYr": np.std(game_res[-one_year_ago:]) if game_res else 0,
