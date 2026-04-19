@@ -1,5 +1,6 @@
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
 from sportstradamus.helpers import get_ev, get_odds, stat_cv, stat_zi, Archive, book_weights, feature_filter, set_model_start_values, fused_loc
+from sportstradamus import feature_selection as fs
 import pickle
 import importlib.resources as pkg_resources
 from sportstradamus import data
@@ -162,10 +163,36 @@ def warm_start_hyper_opt(model, hp_dict, train_set, initial_params,
 @click.option("--force/--no-force", default=False, help="Force update of all models")
 @click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
               help="Select league to train on")
-def meditate(force, league):
+@click.option("--rebuild-filter/--no-rebuild-filter", default=False,
+              help="Train with full feature set (ignore Filtered), then rerun SHAP and rewrite filter")
+@click.option("--reset-markets", default="",
+              help="Comma-separated league:market pairs (or just market for active league) to clear from Filtered before training")
+def meditate(force, league, rebuild_filter, reset_markets):
     global book_weights, archive, stat_structs
 
     np.random.seed(69)
+
+    # --reset-markets: clear specified entries from Filtered so next training pass uses unfiltered features
+    if reset_markets.strip():
+        ff_path = pkg_resources.files(data) / "feature_filter.json"
+        with open(ff_path) as fh:
+            ff = json.load(fh)
+        for tok in [t.strip() for t in reset_markets.split(",") if t.strip()]:
+            if ":" in tok:
+                lg, mk = tok.split(":", 1)
+            else:
+                lg, mk = league, tok
+            mk = mk.strip()
+            ff.setdefault(lg, {}).setdefault("Filtered", {})
+            if mk in ff[lg]["Filtered"]:
+                del ff[lg]["Filtered"][mk]
+                print(f"Reset filter for {lg}:{mk}")
+        with open(ff_path, "w") as fh:
+            json.dump(ff, fh, indent=4)
+        # Reload module-level feature_filter so this run sees the change
+        from sportstradamus import helpers as _hp
+        _hp.feature_filter.clear()
+        _hp.feature_filter.update(ff)
 
     # Initialize stats and archive
     nba = StatsNBA()
@@ -177,15 +204,15 @@ def meditate(force, league):
     stat_structs = {}
     archive = Archive()
 
-    if datetime.today().date() > (nba.season_start - timedelta(days=7)) or league == "NBA":
+    if (league == "All" and datetime.today().date() > (nba.season_start - timedelta(days=7))) or league == "NBA":
         nba.load()
         nba.update()
         stat_structs.update({"NBA": nba})
-    if datetime.today().date() > (nfl.season_start - timedelta(days=7)) or league == "NFL":
+    if (league == "All" and datetime.today().date() > (nfl.season_start - timedelta(days=7))) or league == "NFL":
         nfl.load()
         nfl.update()
         stat_structs.update({"NFL": nfl})
-    if datetime.today().date() > (wnba.season_start - timedelta(days=7)) or league == "WNBA":
+    if (league == "All" and datetime.today().date() > (wnba.season_start - timedelta(days=7))) or league == "WNBA":
         wnba.load()
         wnba.update()
         stat_structs.update({"WNBA": wnba})
@@ -396,6 +423,9 @@ def meditate(force, league):
                 continue
 
             M = pd.concat([M, new_M], ignore_index=True)
+            if M.empty:
+                print(f"  No usable training data for {league} {market}, skipping")
+                continue
             M.Date = pd.to_datetime(M.Date, format='mixed')
             if 'Player' in M.columns:
                 M = M.drop_duplicates(subset=['Player', 'Date'], keep='last')
@@ -418,6 +448,12 @@ def meditate(force, league):
 
             # Write latest runtime comps to JSON for inspection
             stat_data.save_comps()
+
+            if rebuild_filter:
+                print(f"  Scouting pass for filter rebuild...")
+                diag = _scouting_shap_and_filter(league, market, M, stat_data)
+                if diag is not None:
+                    print(f"  Filter: kept={diag['n_kept']} dropped={diag['n_dropped']} added={diag['n_added']}")
 
             y = M[['Result']]
 
@@ -469,33 +505,29 @@ def meditate(force, league):
             }
             threshold = threshold_dict.get(league, 60)
             player_stats = stat_data.gamelog.groupby(stat_data.log_strings.get("player")).filter(lambda x: x[market].gt(0).sum() > threshold).groupby(stat_data.log_strings.get("player"))[market]
-            if market in stat_dist[league]:
-                # Use previously selected distribution
-                dist = stat_dist[league][market]
-                hist_gate = stat_zi.get(league, {}).get(market, 0)
-            else:
-                dist, hist_gate = select_distribution(player_stats)
-    
-                # Save selected distribution for future runs
-                stat_dist[league][market] = dist
-                save_distribution_config(stat_dist)
 
-                # Save historical zero rate for all distributions
-                stat_zi[league][market] = hist_gate
-                save_zi_config(stat_zi)
+            # Compute zero-inflation rate directly (don't call select_distribution which returns unwanted dist)
+            zero_mask = y_train_labels == 0
+            hist_gate = zero_mask.sum() / len(y_train_labels) if len(y_train_labels) > 0 else 0
+
+            # Save historical zero rate for reference
+            stat_zi[league][market] = hist_gate
+            save_zi_config(stat_zi)
             
             # apply() returns a MultiIndex Series (player, game_idx); regroup by player
             # so subsequent .mean()/.std()/.var()/.count() are per-player, not global.
             player_stats = player_stats.apply(lambda x: x[x != 0]).groupby(level=0)
 
-            # Check if market should use SkewNormal (mean >= 2)
+            # Determine distribution based on global mean, not stat_dist.json
             global_mean = y_train_labels.mean()
-            normalize = global_mean >= 2.0 and dist not in ["NegBin", "ZINB"]
+            normalize = False  # Will be set to True for SkewNormal
 
-            if normalize:
-                # Override distribution to SkewNormal + CRPS
-                original_dist = dist
+            # Distribution selection: mean < 2 → NegBin, mean >= 2 → SkewNormal
+            # Zero-inflation determined by zero rate separately
+            if global_mean >= 2.0:
+                # SkewNormal for higher-mean markets
                 dist = "SkewNormal"
+                normalize = True
                 dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
 
                 # CV from per-player std/mean
@@ -504,13 +536,28 @@ def meditate(force, league):
                 shape_ceiling = None
                 marginal_shape = None
 
-                # Normalize targets: Result / MeanYr ≈ 1.0
-                meanyr_train = X_train["MeanYr"].clip(lower=0.5).to_numpy()
+                # For markets with meaningful zero-rate: train SkewNormal on non-zero rows only.
+                # The SkewNormal learns P(X | X > 0); gate from stat_zi.json handles P(X = 0) at inference.
+                # Training on zero rows (clipped to 0.01) corrupts loc/sigma estimates.
+                if hist_gate > 0.05:
+                    nonzero_mask = y_train_labels > 0
+                    X_train = X_train[nonzero_mask]
+                    y_train_labels = y_train_labels[nonzero_mask]
+                    # Use conditional mean (E[X | X > 0]) — matches what the hurdle-filtered model predicts
+                    denom_col = "MeanYr_nonzero" if "MeanYr_nonzero" in X_train.columns else "MeanYr"
+                else:
+                    denom_col = "MeanYr"
+
+                # Normalize targets: Result / denom ≈ 1.0
+                meanyr_train = X_train[denom_col].clip(lower=0.5).to_numpy()
                 y_train_labels = y_train_labels / meanyr_train
                 # Clip zeros for continuous SkewNormal
                 y_train_labels = np.clip(y_train_labels, 0.01, None)
-
-            elif dist in ["NegBin", "ZINB"]:
+            else:
+                # NegBin for lower-mean markets
+                dist = "NegBin"
+                if hist_gate > 0.02:
+                    dist = "ZINB"
                 if dist == "NegBin":
                     dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
                 else:
@@ -529,21 +576,6 @@ def meditate(force, league):
                 # cv = weighted average of 1/r across players
                 cv = (1 / per_player_r * player_stats.count() / player_stats.count().sum()).sum()
                 cv = max(cv, 1/shape_ceiling)
-            else:
-                if dist == "Gamma":
-                    dist_obj = Gamma(stabilization="None", loss_fn="nll", response_fn="softplus")
-                    nonzero_mask = y_train_labels > 0
-                    X_train = X_train[nonzero_mask]
-                    y_train = y_train[nonzero_mask]
-                    y_train_labels = y_train_labels[nonzero_mask]
-                else:
-                    dist_obj = ZAGamma(stabilization="None", loss_fn="nll", response_fn="softplus")
-
-                # Per-player shape (alpha = (μ/σ)²), 95th percentile as representative max
-                per_player_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01))**2
-                marginal_shape = max(float(np.quantile(per_player_alpha, 0.95)), 0.5)
-                K_SHAPE = 2.0
-                shape_ceiling = marginal_shape * K_SHAPE
 
                 cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
                 cv = max(cv, 1/np.sqrt(shape_ceiling))
@@ -685,9 +717,10 @@ def meditate(force, league):
                 scale_norm_val = prob_params_validation["scale"].to_numpy()
                 alpha_sn_val = prob_params_validation["alpha"].to_numpy()
 
-                # Denormalize: multiply loc and scale by MeanYr
-                meanyr_test = X_test["MeanYr"].clip(lower=0.5).to_numpy()
-                meanyr_val = X_validation["MeanYr"].clip(lower=0.5).to_numpy()
+                # Denormalize: multiply loc and scale by the same denom used in training
+                # (MeanYr_nonzero when hurdle-filtered, MeanYr otherwise)
+                meanyr_test = X_test[denom_col].clip(lower=0.5).to_numpy()
+                meanyr_val = X_validation[denom_col].clip(lower=0.5).to_numpy()
                 loc_abs = loc_norm * meanyr_test
                 scale_abs = scale_norm * meanyr_test
                 loc_abs_val = loc_norm_val * meanyr_val
@@ -972,12 +1005,16 @@ def meditate(force, league):
             # Three-way comparison: start values (method of moments) vs model vs empirical
             test_mean_yr = X_test['MeanYr'].mean()
             test_std_yr = X_test['STDYr'].mean()
+            # For SkewNormal, denormalize using the same denom column used in training
+            test_denom_mean = X_test[denom_col].mean() if dist == "SkewNormal" else test_mean_yr
 
             if dist == "SkewNormal":
                 # SkewNormal: report scale (sigma) and skewness (alpha) instead of shape
-                diag_start_shape = float(cv)  # CV used as starting scale
-                diag_model_shape = float(prob_params['scale'].mean())
-                diag_empirical_shape = float(cv)  # No separate empirical shape
+                diag_start_shape = float(cv)  # CV used as starting scale (normalized)
+                scale_norm_mean = float(prob_params['scale'].mean())
+                diag_model_shape = scale_norm_mean * test_denom_mean  # Absolute sigma = normalized scale * denom
+                result_arr = y_test['Result'].to_numpy()
+                diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))  # True empirical CV
                 diag_shape_label = "scale"
             elif dist in ("Gamma", "ZAGamma"):
                 diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
@@ -1016,16 +1053,16 @@ def meditate(force, league):
             diag_frac_ev_gt_line = float((ev_minus_line_arr > 0).mean())
 
             # Conditional Over%: split by sign of (ev - line)
+            # Use actual outcomes (y_class) not model predictions
             ev_gt_mask = ev_minus_line_arr > 0
             ev_lt_mask = ev_minus_line_arr <= 0
-            y_pred_nofilter = (y_proba_no_filt[:, 1] > 0.5).astype(int)
             conf_mask = np.max(y_proba_no_filt, axis=1) > 0.54
             if (ev_gt_mask & conf_mask).sum() > 10:
-                diag_over_pct_ev_gt = float(y_pred_nofilter[ev_gt_mask & conf_mask].mean()/conf_mask.mean())
+                diag_over_pct_ev_gt = float(y_class[ev_gt_mask & conf_mask].mean())
             else:
                 diag_over_pct_ev_gt = float('nan')
             if (ev_lt_mask & conf_mask).sum() > 10:
-                diag_over_pct_ev_lt = float(y_pred_nofilter[ev_lt_mask & conf_mask].mean()/conf_mask.mean())
+                diag_over_pct_ev_lt = float(y_class[ev_lt_mask & conf_mask].mean())
             else:
                 diag_over_pct_ev_lt = float('nan')
 
@@ -1093,6 +1130,7 @@ def meditate(force, league):
                 "hist_gate": hist_gate,
                 "shape_ceiling": shape_ceiling,
                 "normalized": normalize,
+                "expected_columns": list(X.columns),
             }
 
             X_test['Result'] = y_test['Result']
@@ -1279,107 +1317,198 @@ def report():
     save_zi_config(stat_zi_local)
 
 
+_DIST_DROP_COLS = {
+    "Gamma": ["Alpha"],
+    "ZAGamma": ["Alpha", "Gate"],
+    "NegBin": ["R", "NB_P"],
+    "ZINB": ["R", "NB_P", "Gate"],
+    "Mixture2G": ["STD"],
+}
+
+
+def _compute_shap_and_corr(model, test_df, distribution):
+    """SHAP |val| + Pearson corr for one market test set. Returns (shap_dict_pct, corr_dict)."""
+    X = test_df.drop(columns=["Result", "EV", "P"], errors="ignore")
+    C = X.corrwith(test_df["Result"])
+
+    drop_cols = _DIST_DROP_COLS.get(distribution, [])
+    X.drop(columns=drop_cols, inplace=True, errors="ignore")
+    C.drop(drop_cols, inplace=True, errors="ignore")
+
+    features = X.columns
+    for c in ("Home", "Player position"):
+        if c in features:
+            X[c] = X[c].astype("category")
+
+    explainer = shap.TreeExplainer(model.booster)
+    subvals = explainer.shap_values(X)
+    if isinstance(subvals, list):
+        subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
+
+    vals = np.mean(np.abs(subvals), axis=0)
+    total = np.sum(vals)
+    if total > 0:
+        vals = vals / total * 100
+
+    return dict(zip(features, vals)), C.to_dict()
+
+
+def _refresh_all_aggregates(shap_df):
+    for col in [c for c in shap_df.columns if c.endswith("_ALL") or c == "ALL"]:
+        shap_df.drop(columns=[col], inplace=True)
+    for league in ["NBA", "WNBA", "NFL", "NHL", "MLB"]:
+        cols = [c for c in shap_df.columns if c.startswith(league + "_")]
+        if cols:
+            shap_df[league + "_ALL"] = shap_df[cols].mean(axis=1)
+    all_cols = [c for c in shap_df.columns if c.endswith("_ALL")]
+    if all_cols:
+        shap_df["ALL"] = shap_df[all_cols].mean(axis=1)
+    return shap_df
+
+
+def compute_market_importance(league, market, model, test_df, distribution):
+    """Update one market column in feature_importances.csv + feature_correlations.csv.
+    test_df must contain Result + features + (any dist params)."""
+    shap_dict, corr_dict = _compute_shap_and_corr(model, test_df, distribution)
+
+    col_name = f"{league}_{market.replace(' ', '-')}"
+    shap_path = pkg_resources.files(data) / "feature_importances.csv"
+    corr_path = pkg_resources.files(data) / "feature_correlations.csv"
+
+    shap_df = pd.read_csv(shap_path, index_col=0) if shap_path.is_file() else pd.DataFrame()
+    corr_df = pd.read_csv(corr_path, index_col=0) if corr_path.is_file() else pd.DataFrame()
+
+    if col_name in shap_df.columns:
+        shap_df.drop(columns=[col_name], inplace=True)
+    if col_name in corr_df.columns:
+        corr_df.drop(columns=[col_name], inplace=True)
+
+    shap_df = shap_df.join(pd.Series(shap_dict, name=col_name), how="outer").fillna(0)
+    corr_df = corr_df.join(pd.Series(corr_dict, name=col_name), how="outer")
+
+    shap_df = _refresh_all_aggregates(shap_df)
+
+    shap_df.to_csv(shap_path)
+    corr_df.to_csv(corr_path)
+
+
 def see_features():
-    """Analyze feature importance and correlations across all models using SHAP."""
-    model_list = [f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name]
-    model_list.sort()
+    """Batch: rebuild full feature_importances.csv + feature_correlations.csv from all saved models."""
+    model_list = sorted(f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name)
     feature_importances = []
     feature_correlations = []
     for model_str in tqdm(model_list, desc="Analyzing feature importances...", unit="market"):
         with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
             filedict = pickle.load(infile)
+        test_path = pkg_resources.files(data) / ("test_sets/" + model_str.replace(".mdl", ".csv"))
+        test_df = pd.read_csv(test_path, index_col=0)
+        shap_dict, corr_dict = _compute_shap_and_corr(filedict["model"], test_df, filedict["distribution"])
+        feature_importances.append(shap_dict)
+        feature_correlations.append(corr_dict)
 
-        filepath = pkg_resources.files(
-            data) / ("test_sets/" + model_str.replace(".mdl", ".csv"))
-        M = pd.read_csv(filepath, index_col=0)
-
-        y = M[['Result']]
-        X = M.drop(columns=['Result', 'EV', 'P'])
-        C = X.corrwith(M["Result"])
-        
-        # Drop distribution-specific parameters that aren't features
-        dist = filedict["distribution"]
-        if dist in ("Gamma", "ZAGamma"):
-            X.drop(columns=["Alpha"], inplace=True, errors='ignore')
-            C.drop(["Alpha"], inplace=True, errors='ignore')
-        elif dist in ("NegBin", "ZINB"):
-            X.drop(columns=["R", "NB_P"], inplace=True, errors='ignore')
-            C.drop(["R", "NB_P"], inplace=True, errors='ignore')
-        elif dist == "Mixture2G":
-            X.drop(columns=["STD"], inplace=True, errors='ignore')
-            C.drop(["STD"], inplace=True, errors='ignore')
-        # Drop gate column for zero-inflated distributions
-        if dist in ("ZINB", "ZAGamma"):
-            X.drop(columns=["Gate"], inplace=True, errors='ignore')
-            C.drop(["Gate"], inplace=True, errors='ignore')
-        
-        features = X.columns
-
-        categories = ["Home", "Player position"]
-        if "Player position" not in features:
-            categories.remove("Player position")
-        for c in categories:
-            X[c] = X[c].astype('category')
-
-        model = filedict['model']
-
-        vals = np.zeros(len(X.columns))
-        
-        explainer = shap.TreeExplainer(model.booster)
-        subvals = explainer.shap_values(X)
-        
-        # Aggregate |SHAP| across distribution outputs for multi-output models
-        if isinstance(subvals, list):
-            subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
-
-        vals += np.mean(np.abs(subvals), axis=0)
-
-        vals = vals/np.sum(vals)*100
-        feature_importances.append(
-            {k: v for k, v in list(zip(features, vals))})
-        feature_correlations.append(C.to_dict())
-
-    df = pd.DataFrame(feature_importances, index=[
-                      market[:-4] for market in model_list]).fillna(0).infer_objects(copy=False).transpose()
-    
-    for league in ["NBA", "WNBA", "NFL", "NHL", "MLB"]:
-        df[league + "_ALL"] = df[[col for col in df.columns if league in col]].mean(axis=1)
-
-    df["ALL"] = df[[col for col in df.columns if "ALL" in col]].mean(axis=1)
+    df = pd.DataFrame(feature_importances, index=[m[:-4] for m in model_list]).fillna(0).infer_objects(copy=False).transpose()
+    df = _refresh_all_aggregates(df)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
-    pd.DataFrame(feature_correlations, index=[
-                      market[:-4] for market in model_list]).T.to_csv(pkg_resources.files(data) / "feature_correlations.csv")
+    pd.DataFrame(feature_correlations, index=[m[:-4] for m in model_list]).T.to_csv(
+        pkg_resources.files(data) / "feature_correlations.csv")
 
-def filter_features():
-    """Identify and filter low-importance features based on SHAP analysis."""
-    shap_df = pd.read_csv(pkg_resources.files(data) / "feature_importances.csv", index_col=0)
-    shap_df.drop(columns=[col for col in shap_df.columns if "ALL" in col], inplace=True)
-    corr_df = pd.read_csv(pkg_resources.files(data) / "feature_correlations.csv", index_col=0)
-    shap_df[shap_df < .3] = 0
-    shap_df.fillna(0, inplace=True)
-    corr_df = np.abs(corr_df)
-    corr_df[corr_df < .1] = 0
-    corr_df.fillna(0, inplace=True)
+def _load_shap_corr_dfs():
+    """Read SHAP + corr CSVs, drop ALL aggregate cols, return (shap_df, corr_df)."""
+    sp = pkg_resources.files(data) / "feature_importances.csv"
+    cp = pkg_resources.files(data) / "feature_correlations.csv"
+    shap_df = pd.read_csv(sp, index_col=0) if sp.is_file() else pd.DataFrame()
+    corr_df = pd.read_csv(cp, index_col=0) if cp.is_file() else pd.DataFrame()
+    if not shap_df.empty:
+        drop = [c for c in shap_df.columns if c == "ALL" or c.endswith("_ALL")]
+        shap_df = shap_df.drop(columns=drop, errors="ignore").fillna(0)
+    return shap_df, corr_df
 
-    leagues = list(set([col.split("_")[0] for col in shap_df.columns]))
-    for league in leagues:
-        feature_filter.setdefault(league, {})
-        importances = shap_df.drop(index=feature_filter[league]["Common"]).rank(ascending=False, method="max")
-        correlations = corr_df.drop(index=feature_filter[league]["Common"]).rank(ascending=False, method="max")
-        
-        markets = [col.split("_")[1] for col in shap_df.columns if col.split("_")[0] == league]
-        for market in markets:
-            if market not in feature_filter[league]:
-                stats = []
-                stats.extend([stat.replace(" short", "").replace(" growth", "") for stat in importances.loc[importances["_".join([league, market])] <= 30].index])
-                stats.extend([stat.replace(" short", "").replace(" growth", "") for stat in correlations.loc[correlations["_".join([league, market])] <= 20].index])
-                stats = list(set(stats))
-                stats.sort()
 
-                feature_filter[league][market.replace("-", " ")] = stats
-
+def _save_feature_filter():
     with open(pkg_resources.files(data) / "feature_filter.json", "w") as outfile:
         json.dump(feature_filter, outfile, indent=4)
+
+
+def _scouting_shap_and_filter(league, market, M, stat_data):
+    """Train fixed-HP regression LightGBM on unfiltered features, write SHAP+corr columns
+    via compute_market_importance, rewrite Filtered bucket via filter_market.
+    Used only under --rebuild-filter, before the final Optuna training pass."""
+    cols = stat_data.get_stat_columns(market, unfiltered=True)
+    cols = [c for c in cols if c in M.columns]
+    if not cols or "Result" not in M.columns:
+        return None
+
+    X = M[cols].copy()
+    for c in ("Home", "Player position"):
+        if c in X.columns:
+            X[c] = X[c].astype("category")
+
+    y = pd.to_numeric(M["Result"], errors="coerce").fillna(0).to_numpy()
+
+    M_sorted = M.sort_values("Date")
+    n_train = int(len(M_sorted) * 0.7)
+    if n_train < 50:
+        return None
+    train_idx = M_sorted.index[:n_train]
+    test_idx = M_sorted.index[n_train:]
+    X_train, X_test = X.loc[train_idx], X.loc[test_idx]
+    pos_map = {ix: i for i, ix in enumerate(M.index)}
+    y_train = y[[pos_map[i] for i in train_idx]]
+    y_test = y[[pos_map[i] for i in test_idx]]
+
+    dtrain = lgb.Dataset(X_train, label=y_train, free_raw_data=False,
+                         categorical_feature=[c for c in ("Home", "Player position") if c in X_train.columns])
+    params = dict(objective="regression", learning_rate=0.05, num_leaves=63,
+                  min_child_samples=50, feature_fraction=0.8, bagging_fraction=0.8,
+                  bagging_freq=1, verbose=-1, num_threads=8)
+    booster = lgb.train(params, dtrain, num_boost_round=200)
+
+    class _Shim:
+        pass
+    shim = _Shim()
+    shim.booster = booster
+
+    test_df = X_test.copy()
+    test_df["Result"] = y_test
+    compute_market_importance(league, market, shim, test_df, distribution="regression")
+    return filter_market(league, market)
+
+
+def filter_market(league, market):
+    """Per-market filter rebuild. Updates feature_filter[league]['Filtered'][market]
+    in memory + on disk. Returns diagnostic dict."""
+    shap_df, corr_df = _load_shap_corr_dfs()
+    new_filtered, diag = fs.filter_market_features(
+        league, market, feature_filter, shap_df, corr_df)
+
+    # `feature_filter` is the same dict object as helpers.feature_filter (imported
+    # by reference). Mutating it here is what `get_stat_columns` will see on the
+    # next call — no clear/reload needed.
+    feature_filter.setdefault(league, {})
+    feature_filter[league].setdefault("Common", [])
+    feature_filter[league].setdefault("Always", {"_default": []})
+    feature_filter[league].setdefault("Filtered", {})
+    feature_filter[league]["Filtered"][market] = new_filtered
+    _save_feature_filter()
+    return diag
+
+
+def filter_features():
+    """Batch: rebuild Filtered bucket for every (league, market) seen in SHAP CSV.
+    Reuses per-market path so logic stays single-source."""
+    shap_df, _ = _load_shap_corr_dfs()
+    if shap_df.empty:
+        return
+    seen = set()
+    for col in shap_df.columns:
+        if "_" not in col:
+            continue
+        league, raw_market = col.split("_", 1)
+        market = raw_market.replace("-", " ")
+        if (league, market) in seen:
+            continue
+        seen.add((league, market))
+        filter_market(league, market)
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -2249,5 +2378,3 @@ def correlate(league, force=False):
 if __name__ == "__main__":
     warnings.simplefilter('ignore', UserWarning)
     meditate()
-    see_features()
-    filter_features()

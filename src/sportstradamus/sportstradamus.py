@@ -850,8 +850,14 @@ def match_offers(offers, league, market, platform, stat_data):
             playerStats = stat_data.get_stats(market, offers)
             if playerStats.empty:
                 return playerStats
-            
-            playerStats = playerStats[stat_data.get_stat_columns(market)]
+
+            # Slice to the model's trained schema. expected_columns is embedded
+            # in the pickle at training time and is the source of truth.
+            filename = "_".join([league, market]).replace(" ", "-")
+            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+            with open(filepath, "rb") as infile:
+                expected_cols = pickle.load(infile)["expected_columns"]
+            playerStats = playerStats[expected_cols]
 
             return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0).infer_objects(copy=False)
     else:
@@ -981,8 +987,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         # SkewNormal parameters: denormalize and compute EV
         if dist == "SkewNormal" and "loc" in prob_params.columns:
-            # Denormalize: loc and scale were normalized by MeanYr during training
-            meanyr_vals = playerStats["MeanYr"].values
+            # Denormalize: loc and scale were normalized by the same denom used in training.
+            # Hurdle-filtered markets (hist_gate > 0.05) trained on MeanYr_nonzero; others on MeanYr.
+            denom_col = "MeanYr_nonzero" if (hist_gate > 0.05 and "MeanYr_nonzero" in playerStats.columns) else "MeanYr"
+            meanyr_vals = playerStats[denom_col].clip(lower=0.5).values
             loc_abs = prob_params["loc"].values * meanyr_vals
             scale_abs = prob_params["scale"].values * meanyr_vals
             alpha_sn = prob_params["alpha"].values
