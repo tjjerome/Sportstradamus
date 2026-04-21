@@ -1,0 +1,5 @@
+Usage: main [OPTIONS]
+
+Options:
+  --progress / --no-progress  Display progress bars
+  --help                      Show this message and exit.

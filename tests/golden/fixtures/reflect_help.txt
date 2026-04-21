@@ -1,0 +1,9 @@
+Usage: run [OPTIONS]
+
+  Nightly resolution: update stats, fill Actual/Legs/Misses, save.
+
+Options:
+  --league TEXT   Resolve only this league (default: all).
+  --skip-update   Skip stats.update() API calls — use cached gamelogs only.
+  --history-only  Skip parlay resolution (much faster).
+  --help          Show this message and exit.

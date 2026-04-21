@@ -1,0 +1,6 @@
+Usage: run [OPTIONS]
+
+  Launch the Sportstradamus Streamlit dashboard.
+
+Options:
+  --help  Show this message and exit.

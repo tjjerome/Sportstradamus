@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --with dev
+
+      - name: Lint (ruff check)
+        run: poetry run ruff check src/ tests/
+
+      - name: Format check (ruff format)
+        run: poetry run ruff format --check src/ tests/
+
+      - name: Golden tests
+        run: poetry run pytest tests/golden/ -v
+
+      - name: Type check (mypy, advisory)
+        # Does not gate merges; surfaces warnings only.
+        continue-on-error: true
+        run: poetry run mypy src/sportstradamus

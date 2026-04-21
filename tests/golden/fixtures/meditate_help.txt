@@ -1,0 +1,13 @@
+Usage: meditate [OPTIONS]
+
+Options:
+  --force / --no-force            Force update of all models
+  --league [All|NFL|NBA|MLB|NHL|WNBA]
+                                  Select league to train on
+  --rebuild-filter / --no-rebuild-filter
+                                  Train with full feature set (ignore Filtered),
+                                  then rerun SHAP and rewrite filter
+  --reset-markets TEXT            Comma-separated league:market pairs (or just
+                                  market for active league) to clear from
+                                  Filtered before training
+  --help                          Show this message and exit.
