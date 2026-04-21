@@ -584,7 +584,9 @@ def meditate(force, league, rebuild_filter, reset_markets):
             with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
                 json.dump(stat_cv, f, indent=4)
             
-            opt_params = filedict.get("params")
+            # Under --rebuild-filter the feature set just changed; warm-starting
+            # from the old pickle's hyperparams is invalid. Force fresh Optuna.
+            opt_params = None if rebuild_filter else filedict.get("params")
             dtrain = lgb.Dataset(
                 X_train, label=y_train_labels)
             
