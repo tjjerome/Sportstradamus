@@ -3,6 +3,7 @@
 This file serves as the entry point for Streamlit's multi-page app.
 Pages in the pages/ directory are auto-discovered and shown in the sidebar.
 """
+
 import sys
 from pathlib import Path
 

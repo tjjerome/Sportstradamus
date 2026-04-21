@@ -1,16 +1,17 @@
 # %%
-import pandas as pd
-from sportstradamus.drafts import data
 import importlib.resources as pkg_resources
-import numpy as np
+
+import pandas as pd
 from tqdm import tqdm
+
+from sportstradamus.drafts import data
+
 # %%
-data_list = [f.name for f in pkg_resources.files(
-    data).iterdir() if "teams.csv" in f.name]
+data_list = [f.name for f in pkg_resources.files(data).iterdir() if "teams.csv" in f.name]
 
 # %%
 df = pd.DataFrame()
-for data_str in tqdm(data_list, desc='Loading Data Files', unit='file'):
+for data_str in tqdm(data_list, desc="Loading Data Files", unit="file"):
     if df.empty:
         df = pd.read_csv(pkg_resources.files(data) / data_str)
     else:

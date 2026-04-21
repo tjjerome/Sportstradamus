@@ -1,6 +1,7 @@
-from sportstradamus.helpers import Archive, remove_accents, merge_dict
 import numpy as np
 from tqdm import tqdm
+
+from sportstradamus.helpers import Archive, merge_dict, remove_accents
 
 archive = Archive()
 
@@ -9,7 +10,13 @@ for league in tqdm(leagues, unit="leagues", position=0):
     markets = list(archive[league].keys())
     for market in tqdm(markets, desc=league, unit="Markets", position=1, leave=False):
         # cv = stat_cv.get(league, {}).get(market, 1)
-        for date in tqdm(list(archive[league][market].keys()), desc=market, unit="Gamedays", position=2, leave=False):
+        for date in tqdm(
+            list(archive[league][market].keys()),
+            desc=market,
+            unit="Gamedays",
+            position=2,
+            leave=False,
+        ):
             players = list(archive[league][market][date].keys())
             for player in players:
                 if player not in archive[league][market][date]:
@@ -27,24 +34,23 @@ for league in tqdm(leagues, unit="leagues", position=0):
 
                     player_name = remove_accents(player)
 
-                    if player_name != player:
-                        names = [player, player_name]
-                    else:
-                        names = [player_name]
+                    names = [player, player_name] if player_name != player else [player_name]
 
                     for name in names:
                         if name not in archive[league][market][date]:
                             continue
 
-                        if not type(archive[league][market][date][name]) is dict:
+                        if type(archive[league][market][date][name]) is not dict:
                             archive[league][market][date].pop(name)
-                        
-                        if not type(archive[league][market][date][name].get("EV", {})) is dict:
+
+                        if type(archive[league][market][date][name].get("EV", {})) is not dict:
                             if len(archive[league][market][date][name]["EV"]) != 4:
                                 archive[league][market][date][name]["EV"] = {}
                             else:
                                 ev = {}
-                                for i, book in enumerate(["draftkings", "fanduel", "pinnacle", "williamhill_us"]):
+                                for i, book in enumerate(
+                                    ["draftkings", "fanduel", "pinnacle", "williamhill_us"]
+                                ):
                                     v = archive[league][market][date][name]["EV"][i]
                                     if v is None:
                                         v = np.nan
@@ -52,12 +58,19 @@ for league in tqdm(leagues, unit="leagues", position=0):
 
                                 archive[league][market][date][name]["EV"] = ev
 
-                        archive[league][market][date][name]["Lines"] = [line for line in archive[league][market][date][name]["Lines"] if line]
+                        archive[league][market][date][name]["Lines"] = [
+                            line for line in archive[league][market][date][name]["Lines"] if line
+                        ]
 
                     if player_name != player:
-                        archive[league][market][date][player_name] = merge_dict(archive[league][market][date].get(player_name,{}), archive[league][market][date].pop(player))
+                        archive[league][market][date][player_name] = merge_dict(
+                            archive[league][market][date].get(player_name, {}),
+                            archive[league][market][date].pop(player),
+                        )
 
-                    if not len(archive[league][market][date][player_name]["EV"]) and not len(archive[league][market][date][player_name]["Lines"]):
+                    if not len(archive[league][market][date][player_name]["EV"]) and not len(
+                        archive[league][market][date][player_name]["Lines"]
+                    ):
                         archive[league][market][date].pop(player_name)
 
             if not len(archive[league][market][date]):

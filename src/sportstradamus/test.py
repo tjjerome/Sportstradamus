@@ -1,8 +1,6 @@
-from sportstradamus.stats import StatsNBA, StatsMLB, StatsNFL, StatsNHL, StatsWNBA
-# from sportstradamus.books import get_ud
-from sportstradamus.helpers import scraper, archive, stat_cv, stat_map
 # from urllib.parse import urlencode
 from datetime import datetime, timedelta
+
 # import importlib.resources as pkg_resources
 # from sportstradamus import data
 # import pickle
@@ -11,6 +9,11 @@ from datetime import datetime, timedelta
 # import os
 # from scipy.stats import norm, poisson
 import pandas as pd
+
+# from sportstradamus.books import get_ud
+from sportstradamus.helpers import archive, scraper, stat_cv, stat_map
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+
 # import numpy as np
 # from tqdm import tqdm
 # from time import time
@@ -73,7 +76,7 @@ stats.get_training_matrix("shots")
 #             "yearly": yearly,
 #             "fantasy": fantasy,
 #             "volume": volume
-#         }    
+#         }
 #     col_df = pd.DataFrame(col_stats).T.sort_values("volume", ascending=False)
 #     pass
 
@@ -112,10 +115,10 @@ stats.get_training_matrix("shots")
 #     defenseVsComp = defenseVsComp[markets].div(defenseVsComp["MIN"], axis=0)
 #     defenseVsPlayer = defenseVsPlayer[markets].div(defenseVsPlayer["MIN"], axis=0)
 #     posVsLeague = posVsLeague[markets].div(posVsLeague["MIN"], axis=0)
-        
+
 #     defenseResult = (defenseVsComp.mean()/defenseVsLeague.mean().replace(0, np.inf)).to_dict()
 #     compResult = (defenseVsComp.mean()/compVsLeague.mean().replace(0, np.inf)).to_dict()
-    
+
 #     gameResult = (game[markets]/game["MIN"]).to_dict()
 #     gameRecords2.append(gameResult|
 #                         {"comp_"+k:v for k, v in compResult.items()}|
@@ -168,7 +171,6 @@ stats.get_training_matrix("shots")
 # NBA.season = "2023-24"
 # NBA.season_start = datetime(2023, 10, 1).date()
 # NBA.update()
-
 
 
 # MLB = StatsMLB()

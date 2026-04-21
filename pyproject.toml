@@ -105,6 +105,47 @@ ignore = [
     "PLR0913", "PLR0915",
     # Long-line rule — the formatter already handles wrapping.
     "E501",
+
+    # ----- Refactor ratchet: lifted as each phase fixes the underlying issue.
+    # Phase 3 (helpers/moneylines) removes:
+    #   D101 D102 D103 D107 D205 D414 D415 D417 — docstring coverage
+    "D101", "D102", "D103", "D107", "D205", "D414", "D415", "D417",
+    # Phase 3-5 (renaming variables, splitting big functions) removes:
+    #   N803 N806 N816 — non-conforming names inside the refactored modules
+    #   PLR0911 PLR0912 — branch/return counts
+    #   PLR2004 — magic-value comparisons (replaced by named constants)
+    #   PLW0602 PLW0603 — global-statement usage in train.py / sportstradamus.py
+    "N803", "N806", "N816",
+    "PLR0911", "PLR0912", "PLR2004",
+    "PLW0602", "PLW0603",
+    # Phase 3 (helpers/scraping + helpers/config) removes:
+    #   PTH100 PTH110 PTH113 PTH118 PTH120 PTH123 — pathlib migration
+    "PTH100", "PTH110", "PTH113", "PTH118", "PTH120", "PTH123",
+    # Phase 4-5 (deep refactors) removes:
+    #   B007 B008 B023 — bugbear false positives in numeric code
+    #   E402 — late imports inside script-style modules
+    #   E714 E721 E722 E741 — older idioms inside stats/train
+    #   F401 F403 F405 F811 — wildcard re-exports across packages
+    #   F821 — undefined names (limited to deprecated/unused_funcs.py; archived in Phase 2)
+    #   PERF401 PERF403 — performance suggestions
+    #   PLW0127 PLW2901 — assignment patterns
+    #   PLR1704 — argument shadowing
+    #   RUF001 RUF002 RUF003 RUF012 — Unicode characters and class defaults
+    #   SIM102 — collapsible-if
+    #   UP015 — redundant open modes
+    #   W291 W293 — whitespace inside docstrings
+    "B007", "B008", "B023",
+    "E402", "E714", "E721", "E722", "E741",
+    "F401", "F403", "F405", "F811", "F821",
+    "PERF401", "PERF403",
+    "PLW0127", "PLW2901", "PLR1704",
+    "RUF001", "RUF002", "RUF003", "RUF012",
+    "SIM102",
+    "UP015",
+    "W291", "W293",
+    # Phase 2 (rename modules) removes:
+    #   N812 N999 — module/import casing
+    "N812", "N999",
 ]
 
 [tool.ruff.lint.per-file-ignores]

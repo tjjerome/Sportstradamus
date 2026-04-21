@@ -1,17 +1,22 @@
 """Page 1: Overview — KPIs, accuracy trends, profit trends, and volume."""
-import sys, pathlib
+
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
-import streamlit as st
+
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+import streamlit as st
 from sklearn.metrics import brier_score_loss
 
 from sportstradamus.dashboard_data import (
-    load_history, load_parlays,
-    sidebar_filters, get_filtered_history, load_resolve_meta,
+    get_filtered_history,
+    load_history,
+    load_parlays,
+    load_resolve_meta,
+    sidebar_filters,
 )
 
 st.title("Overview")
@@ -28,7 +33,9 @@ meta = load_resolve_meta()
 if meta.get("last_run"):
     st.caption(f"Data last resolved: {meta['last_run']}")
 else:
-    st.warning("Nightly resolution has not run yet. Run `poetry run nightly` to resolve prediction outcomes.")
+    st.warning(
+        "Nightly resolution has not run yet. Run `poetry run nightly` to resolve prediction outcomes."
+    )
 
 # --- Sidebar ---
 filters = sidebar_filters(history, parlays, key_prefix="overview_")
@@ -71,10 +78,14 @@ st.download_button(
 
 # --- Cumulative Accuracy Time Series ---
 st.subheader("Rolling 30-Day Accuracy by League")
-daily_league = df.groupby(["_date", "League"]).agg(
-    Hits=("Hit", "sum"),
-    Bets=("Hit", "count"),
-).reset_index()
+daily_league = (
+    df.groupby(["_date", "League"])
+    .agg(
+        Hits=("Hit", "sum"),
+        Bets=("Hit", "count"),
+    )
+    .reset_index()
+)
 daily_league.sort_values("_date", inplace=True)
 
 fig_acc = go.Figure()
@@ -86,10 +97,14 @@ for league in sorted(daily_league["League"].unique()):
     ld["Roll30_Hits"] = ld["Hits"].rolling(30, min_periods=1).sum()
     ld["Roll30_Bets"] = ld["Bets"].rolling(30, min_periods=1).sum()
     ld["Roll30_Acc"] = ld["Roll30_Hits"] / ld["Roll30_Bets"]
-    fig_acc.add_trace(go.Scatter(
-        x=ld["_date"], y=ld["Roll30_Acc"],
-        mode="lines", name=league,
-    ))
+    fig_acc.add_trace(
+        go.Scatter(
+            x=ld["_date"],
+            y=ld["Roll30_Acc"],
+            mode="lines",
+            name=league,
+        )
+    )
 
 fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="50%")
 fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
@@ -97,14 +112,23 @@ st.plotly_chart(fig_acc, use_container_width=True)
 
 # --- Cumulative Profit Time Series ---
 st.subheader("Cumulative Profit (Units)")
-daily_profit = df.groupby("_date").agg(
-    Profit=("Profit Unit", "sum"),
-    Bets=("Hit", "count"),
-).reset_index().sort_values("_date")
+daily_profit = (
+    df.groupby("_date")
+    .agg(
+        Profit=("Profit Unit", "sum"),
+        Bets=("Hit", "count"),
+    )
+    .reset_index()
+    .sort_values("_date")
+)
 daily_profit["Cumulative Profit"] = daily_profit["Profit"].cumsum()
 
-fig_profit = px.area(daily_profit, x="_date", y="Cumulative Profit",
-                     labels={"_date": "Date", "Cumulative Profit": "Units"})
+fig_profit = px.area(
+    daily_profit,
+    x="_date",
+    y="Cumulative Profit",
+    labels={"_date": "Date", "Cumulative Profit": "Units"},
+)
 fig_profit.update_layout(height=400)
 st.plotly_chart(fig_profit, use_container_width=True)
 

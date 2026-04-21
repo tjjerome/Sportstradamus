@@ -1,28 +1,28 @@
-from sportstradamus.spiderLogger import logger
-from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
 import random
-from tqdm import tqdm
-import numpy as np
-import statsapi as mlb
-from time import sleep
+from datetime import UTC, datetime, timedelta
 from operator import itemgetter
+from time import sleep
+from urllib.parse import urlencode
+
+import statsapi as mlb
+from tqdm import tqdm
+
 from sportstradamus.helpers import (
     Scrape,
-    requests,
-    get_mlb_pitchers,
-    remove_accents,
-    no_vig_odds,
     get_ev,
-    nhl_goalies
+    get_mlb_pitchers,
+    nhl_goalies,
+    no_vig_odds,
+    remove_accents,
+    requests,
 )
+from sportstradamus.spiderLogger import logger
 
 scraper = Scrape()
 
 
 def get_dk(events, categories, league):
-    """
-    Retrieve DraftKings data for given events and categories.
+    """Retrieve DraftKings data for given events and categories.
 
     Args:
         events (str): The event ID.
@@ -51,8 +51,10 @@ def get_dk(events, categories, league):
 
         # Store game IDs and names
         for i in dk_api["eventGroup"]["events"]:
-            games[i["eventId"]] = {"Title": i["name"], "Date": datetime.fromisoformat(
-                i["startDate"]).astimezone().strftime("%Y-%m-%d")}
+            games[i["eventId"]] = {
+                "Title": i["name"],
+                "Date": datetime.fromisoformat(i["startDate"]).astimezone().strftime("%Y-%m-%d"),
+            }
 
         # Get offer subcategory descriptors
         for i in dk_api["eventGroup"]["offerCategories"]:
@@ -88,36 +90,38 @@ def get_dk(events, categories, league):
                             if market in ["TD Scorer", "Goalscorer"]:
                                 for o in k["outcomes"]:
                                     if o.get("criterionName") == "Anytime Scorer":
-                                        player = remove_accents(
-                                            o["participant"])
+                                        player = remove_accents(o["participant"])
                                         p = no_vig_odds(o["oddsDecimal"])
                                         newline = {
                                             "Player": player,
                                             "League": league,
                                             "Market": market,
                                             "Date": games[k["eventId"]]["Date"],
-                                            "Line": '0.5',
+                                            "Line": "0.5",
                                             "Over": p[0],
-                                            "Under": p[1]
+                                            "Under": p[1],
                                         }
                                         players.append(newline)
 
                             if "line" not in k["outcomes"][0]:
                                 continue
                             if "participant" in k["outcomes"][0]:
-                                player = remove_accents(
-                                    k["outcomes"][0]["participant"])
+                                player = remove_accents(k["outcomes"][0]["participant"])
                             elif market == "1st Inning Total Runs":
                                 for e in dk_api["eventGroup"]["events"]:
                                     if e["eventId"] == k["eventId"]:
                                         player = (
-                                            remove_accents(e["eventMetadata"][
-                                                "participantMetadata"
-                                            ].get("awayTeamStartingPitcherName", ""))
+                                            remove_accents(
+                                                e["eventMetadata"]["participantMetadata"].get(
+                                                    "awayTeamStartingPitcherName", ""
+                                                )
+                                            )
                                             + " + "
-                                            + remove_accents(e["eventMetadata"][
-                                                "participantMetadata"
-                                            ].get("homeTeamStartingPitcherName", ""))
+                                            + remove_accents(
+                                                e["eventMetadata"]["participantMetadata"].get(
+                                                    "homeTeamStartingPitcherName", ""
+                                                )
+                                            )
                                         )
                             elif ": " in k["label"]:
                                 player = k["label"][: k["label"].find(": ")]
@@ -127,9 +131,7 @@ def get_dk(events, categories, league):
                                 continue
 
                             try:
-                                outcomes = sorted(
-                                    k["outcomes"][:2], key=lambda x: x["label"]
-                                )
+                                outcomes = sorted(k["outcomes"][:2], key=lambda x: x["label"])
                                 line = outcomes[0]["line"]
                                 if len(outcomes) == 1:
                                     p = no_vig_odds(outcomes[0]["oddsDecimal"])
@@ -145,7 +147,7 @@ def get_dk(events, categories, league):
                                     "Date": games[k["eventId"]]["Date"],
                                     "Line": line,
                                     "Over": p[0],
-                                    "Under": p[1]
+                                    "Under": p[1],
                                 }
                                 players.append(newline)
                             except:
@@ -154,8 +156,7 @@ def get_dk(events, categories, league):
 
 
 def get_fd(sport, tabs):
-    """
-    Retrieve FanDuel data for a given sport and tabs.
+    """Retrieve FanDuel data for a given sport and tabs.
 
     Args:
         sport (str): The sport ID.
@@ -176,12 +177,10 @@ def get_fd(sport, tabs):
         "timezone": "America%2FChicago",
         "_ak": "FhMFpcPWXMeyZxOx",
         "page": "CUSTOM",
-        "customPageId": sport
+        "customPageId": sport,
     }
 
-    data = scraper.get_proxy(
-        api_url.format("content-managed-page") + urlencode(params)
-    )
+    data = scraper.get_proxy(api_url.format("content-managed-page") + urlencode(params))
 
     if not data:
         logger.warning(f"No lines found for {sport}.")
@@ -195,8 +194,15 @@ def get_fd(sport, tabs):
     events = attachments["events"]
 
     # Filter event IDs based on open date
-    event_ids = [(str(event['eventId']), datetime.fromisoformat(event["openDate"]).astimezone().strftime("%Y-%m-%d")) for event in events.values() if (datetime.fromisoformat(
-        event["openDate"]) > datetime.now(timezone.utc)) and (datetime.fromisoformat(event["openDate"]) - timedelta(days=10) < datetime.now(timezone.utc))]
+    event_ids = [
+        (
+            str(event["eventId"]),
+            datetime.fromisoformat(event["openDate"]).astimezone().strftime("%Y-%m-%d"),
+        )
+        for event in events.values()
+        if (datetime.fromisoformat(event["openDate"]) > datetime.now(UTC))
+        and (datetime.fromisoformat(event["openDate"]) - timedelta(days=10) < datetime.now(UTC))
+    ]
 
     players = []
 
@@ -212,9 +218,7 @@ def get_fd(sport, tabs):
                 "tab": tab,
             }
 
-            data = scraper.get_proxy(
-                api_url.format("event-page") + urlencode(new_params)
-            )
+            data = scraper.get_proxy(api_url.format("event-page") + urlencode(new_params))
 
             if not data:
                 skip = True
@@ -232,8 +236,7 @@ def get_fd(sport, tabs):
             offers = [
                 offer
                 for offer in offers.values()
-                if offer["bettingType"] == "MOVING_HANDICAP"
-                or offer["bettingType"] == "ODDS"
+                if offer["bettingType"] == "MOVING_HANDICAP" or offer["bettingType"] == "ODDS"
             ]
             offers = [
                 offer
@@ -263,17 +266,26 @@ def get_fd(sport, tabs):
 
             # Iterate over offers
             for offer in offers:
-
-                if offer["marketName"] in ["Any Time Touchdown Scorer", "To Record A Hit", "To Hit A Home Run",
-                                           "To Record a Run", "To Record an RBI", "To Hit a Single",
-                                           "To Hit a Double", "Any Time Goal Scorer", "Player to Record 1+ Assists",
-                                           "Player to Record 1+ Points", "Player to Record 1+ Powerplay Points"]:
+                if offer["marketName"] in [
+                    "Any Time Touchdown Scorer",
+                    "To Record A Hit",
+                    "To Hit A Home Run",
+                    "To Record a Run",
+                    "To Record an RBI",
+                    "To Hit a Single",
+                    "To Hit a Double",
+                    "Any Time Goal Scorer",
+                    "Player to Record 1+ Assists",
+                    "Player to Record 1+ Points",
+                    "Player to Record 1+ Powerplay Points",
+                ]:
                     for o in offer["runners"]:
                         player = remove_accents(o["runnerName"])
                         market = offer["marketName"]
 
                         p = no_vig_odds(
-                            o["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"])
+                            o["winRunnerOdds"]["trueOdds"]["decimalOdds"]["decimalOdds"]
+                        )
 
                         newline = {
                             "Player": player,
@@ -291,10 +303,9 @@ def get_fd(sport, tabs):
 
                 try:
                     if " - " in offer["marketName"]:
-                        player = remove_accents(
-                            offer["marketName"].split(" - ")[0])
+                        player = remove_accents(offer["marketName"].split(" - ")[0])
                         market = offer["marketName"].split(" - ")[1]
-                    elif sport == 'mlb' and "@" in events[event_id]["name"]:
+                    elif sport == "mlb" and "@" in events[event_id]["name"]:
                         teams = (
                             events[event_id]["name"]
                             .replace(" @ ", ")")
@@ -302,26 +313,19 @@ def get_fd(sport, tabs):
                             .split(")")
                         )
                         pitcher1 = get_mlb_pitchers().get(
-                            mlb.lookup_team(teams[0].strip())[
-                                0]["fileCode"].upper(), ""
+                            mlb.lookup_team(teams[0].strip())[0]["fileCode"].upper(), ""
                         )
                         pitcher2 = get_mlb_pitchers().get(
-                            mlb.lookup_team(teams[3].strip())[
-                                0]["fileCode"].upper(), ""
+                            mlb.lookup_team(teams[3].strip())[0]["fileCode"].upper(), ""
                         )
                         player = pitcher1 + " + " + pitcher2
                         market = offer["marketName"]
                     else:
                         continue
 
-                    outcomes = sorted(
-                        offer["runners"][:2], key=lambda x: x["runnerName"])
+                    outcomes = sorted(offer["runners"][:2], key=lambda x: x["runnerName"])
                     if outcomes[1]["handicap"] == 0:
-                        line = [
-                            float(s)
-                            for s in market.split(" ")
-                            if s.replace(".", "").isdigit()
-                        ]
+                        line = [float(s) for s in market.split(" ") if s.replace(".", "").isdigit()]
                         if line:
                             line = line[-1]
                         else:
@@ -351,8 +355,7 @@ def get_fd(sport, tabs):
 
 
 def get_pinnacle(league):
-    """
-    Retrieve Pinnacle data for a given league.
+    """Retrieve Pinnacle data for a given league.
 
     Args:
         league (int): The league ID.
@@ -361,7 +364,7 @@ def get_pinnacle(league):
         dict: The parsed Pinnacle data.
     """
     header = {"X-API-KEY": "CmX2KcMrXuFmNg6YFbmTxE0y9CIrOi0R"}
-    url = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight",
+    url = (f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/markets/straight",)
 
     leagues = {246: "MLB", 487: "NBA", 889: "NFL", 1456: "NHL"}
 
@@ -371,7 +374,7 @@ def get_pinnacle(league):
         logger.warning("No lines found for league: " + str(league))
         return {}
 
-    if not type(odds) == list or not type(odds[0]) == dict:
+    if type(odds) != list or type(odds[0]) != dict:
         logger.warning("No lines found for league: " + str(league))
         return {}
 
@@ -397,9 +400,10 @@ def get_pinnacle(league):
                     "Line": price["points"],
                 }
             elif price.get("designation"):
-                lines[line["matchupId"]][line["key"]][
-                    price["designation"].capitalize()
-                ] = {"Price": price["price"], "Line": price["points"]}
+                lines[line["matchupId"]][line["key"]][price["designation"].capitalize()] = {
+                    "Price": price["price"],
+                    "Line": price["points"],
+                }
 
     url = f"https://guest.api.arcadia.pinnacle.com/0.1/leagues/{league}/matchups"
 
@@ -417,30 +421,33 @@ def get_pinnacle(league):
 
     players = []
     for market in tqdm(markets):
-        player = market["special"]["description"].replace(
-            " (BAL)", "").replace(" (BUF)", "").replace(" (CAR)", "")
+        player = (
+            market["special"]["description"]
+            .replace(" (BAL)", "")
+            .replace(" (BUF)", "")
+            .replace(" (CAR)", "")
+        )
         player = player.replace(" (", ")").split(")")
         bet = player[1]
         player = remove_accents(player[0])
         try:
-            outcomes = sorted(market["participants"]
-                              [:2], key=lambda x: x["name"])
+            outcomes = sorted(market["participants"][:2], key=lambda x: x["name"])
             if outcomes[0]["name"] == "No":
                 outcomes.reverse()
 
             code = "s;0;ou" if "s;0;ou" in lines[market["id"]] else "s;0;m"
-            line = lines[market["id"]][code][outcomes[1]
-                                             ["id"]].get("Line", 0.5)
+            line = lines[market["id"]][code][outcomes[1]["id"]].get("Line", 0.5)
             prices = [
-                lines[market["id"]][code][participant["id"]]["Price"]
-                for participant in outcomes
+                lines[market["id"]][code][participant["id"]]["Price"] for participant in outcomes
             ]
             p = no_vig_odds(prices[0], prices[1])
             newline = {
                 "Player": player,
                 "Market": bet,
                 "League": leagues.get(league),
-                "Date": datetime.fromisoformat(market["startTime"]).astimezone().strftime("%Y-%m-%d"),
+                "Date": datetime.fromisoformat(market["startTime"])
+                .astimezone()
+                .strftime("%Y-%m-%d"),
                 "EV": get_ev(line, p[1]),
                 "Line": str(line),
                 "Over": p[0],
@@ -451,11 +458,7 @@ def get_pinnacle(league):
             continue
 
     if league == 246:
-        games = [
-            line
-            for line in api
-            if 3 in [period["period"] for period in line.get("periods")]
-        ]
+        games = [line for line in api if 3 in [period["period"] for period in line.get("periods")]]
         for game in tqdm(games):
             if lines.get(game["id"], {"s;3;ou;0.5": False}).get("s;3;ou;0.5"):
                 try:
@@ -468,8 +471,7 @@ def get_pinnacle(league):
                         else:
                             team_name = team["name"]
 
-                        team_abbr = mlb.lookup_team(
-                            team_name)[0]["fileCode"].upper()
+                        team_abbr = mlb.lookup_team(team_name)[0]["fileCode"].upper()
                         if game_num > 1:
                             team_abbr = team_abbr + str(game_num)
 
@@ -488,7 +490,9 @@ def get_pinnacle(league):
                         "Player": player,
                         "Market": bet,
                         "League": leagues.get(league),
-                        "Date": datetime.fromisoformat(market["startTime"]).astimezone().strftime("%Y-%m-%d"),
+                        "Date": datetime.fromisoformat(market["startTime"])
+                        .astimezone()
+                        .strftime("%Y-%m-%d"),
                         "EV": get_ev(line, p[1]),
                         "Line": str(line),
                         "Over": p[0],
@@ -503,8 +507,7 @@ def get_pinnacle(league):
 
 
 def get_caesars(sport, league):
-    """
-    Retrieves player props data from the Caesars API for the specified sport and league.
+    """Retrieves player props data from the Caesars API for the specified sport and league.
 
     Args:
         sport (str): The sport for which to fetch player props data.
@@ -540,7 +543,7 @@ def get_caesars(sport, league):
             and game["marketCountActivePreMatch"] > 20
         ]
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Caesars API request failed")
         return {}
 
@@ -562,16 +565,13 @@ def get_caesars(sport, league):
                 for market in api["markets"]
                 if market.get("active")
                 and (
-                    market.get("metadata", {}).get("marketType", {})
-                    == "PLAYERLINEBASED" or
-                    market.get("metadata", {}).get("marketType", {})
-                    == "PLAYEROUTCOME"
+                    market.get("metadata", {}).get("marketType", {}) == "PLAYERLINEBASED"
+                    or market.get("metadata", {}).get("marketType", {}) == "PLAYEROUTCOME"
                     or market.get("displayName") == "Run In 1st Inning?"
                 )
             ]
 
-            date = datetime.fromisoformat(
-                api["startTime"]).astimezone().strftime("%Y-%m-%d")
+            date = datetime.fromisoformat(api["startTime"]).astimezone().strftime("%Y-%m-%d")
 
         except:
             logger.exception(f"Unable to parse game {id}")
@@ -582,8 +582,7 @@ def get_caesars(sport, league):
                 marketName = market.get("displayName")
                 line = 0.5
                 for o in market.get("selections", []):
-                    player = remove_accents(
-                        o.get('name', '').replace('|', '').strip())
+                    player = remove_accents(o.get("name", "").replace("|", "").strip())
                     if not o.get("price"):
                         continue
                     p = no_vig_odds(o["price"]["d"])
@@ -605,9 +604,7 @@ def get_caesars(sport, league):
                 line = 0.5
                 player = " + ".join(
                     [
-                        get_mlb_pitchers().get(
-                            team["teamData"].get("teamAbbreviation", ""), ""
-                        )
+                        get_mlb_pitchers().get(team["teamData"].get("teamAbbreviation", ""), "")
                         for team in api["markets"][0]["selections"]
                     ]
                 )
@@ -625,8 +622,7 @@ def get_caesars(sport, league):
                 marketName = marketSwap.get(marketName, marketName)
 
                 if marketName == "Props":
-                    marketName = market.get("metadata", {}).get(
-                        "marketCategoryName")
+                    marketName = market.get("metadata", {}).get("marketCategoryName")
 
                 line = market["line"]
 
@@ -650,8 +646,7 @@ def get_caesars(sport, league):
 
 
 def get_pp(books=False):
-    """
-    Retrieves player offers data from the PrizePicks API.
+    """Retrieves player offers data from the PrizePicks API.
 
     Returns:
         dict: A dictionary containing player offers data in the following format:
@@ -702,8 +697,7 @@ def get_pp(books=False):
             and not any([string in i["attributes"]["name"] for string in live_bets])
         ]
         if not books:
-            leagues = [league for league in leagues if int(league) in [
-                2, 3, 7, 8, 9]]
+            leagues = [league for league in leagues if int(league) in [2, 3, 7, 8, 9]]
     except:
         logger.exception("Retrieving leagues failed")
         leagues = [2, 3, 7, 8, 9]
@@ -711,8 +705,7 @@ def get_pp(books=False):
     for l in tqdm(leagues, desc="Processing PrizePicks offers"):
         try:
             # Retrieve players and lines for each league
-            api = scraper.get_proxy(
-                f"https://api.prizepicks.com/projections?league_id={l}")
+            api = scraper.get_proxy(f"https://api.prizepicks.com/projections?league_id={l}")
             players = api["included"]
             lines = api["data"]
         except:
@@ -731,29 +724,32 @@ def get_pp(books=False):
             "LAV": "LV",
             "NJY": "NYJ",
             "NJD": "NJ",
-            "AZ": "ARI"
+            "AZ": "ARI",
         }
 
         for p in players:
             if p["type"] == "new_player":
                 player_ids[p["id"]] = {
                     "Name": p["attributes"]["name"].replace("\t", "").strip(),
-                    "Team": abbr_map.get(p["attributes"]["team"], p["attributes"]["team"])
+                    "Team": abbr_map.get(p["attributes"]["team"], p["attributes"]["team"]),
                 }
                 if "position" in p["attributes"]:
-                    player_ids[p["id"]].update(
-                        {"Position": p["attributes"]["position"]})
+                    player_ids[p["id"]].update({"Position": p["attributes"]["position"]})
             elif p["type"] == "league":
                 league = p["attributes"]["name"].replace("CMB", "")
 
         for o in tqdm(lines, desc="Getting offers for " + league, unit="offer"):
             if o["attributes"]["adjusted_odds"] or o["attributes"]["is_promo"]:
                 continue
-            
-            players = player_ids[o["relationships"]
-                                 ["new_player"]["data"]["id"]]["Name"].split(" + ")
-            teams = player_ids[o["relationships"]["new_player"]
-                               ["data"]["id"]]["Team"].upper().split("/")
+
+            players = player_ids[o["relationships"]["new_player"]["data"]["id"]]["Name"].split(
+                " + "
+            )
+            teams = (
+                player_ids[o["relationships"]["new_player"]["data"]["id"]]["Team"]
+                .upper()
+                .split("/")
+            )
             opponents = o["attributes"]["description"].upper().split("/")
             n = {
                 "Player": " + ".join([remove_accents(p) for p in players]),
@@ -766,7 +762,10 @@ def get_pp(books=False):
             }
 
             if league == "NFL" and n["Market"] == "Pass+Rush+Rec TDs":
-                if player_ids[o["relationships"]["new_player"]["data"]["id"]].get("Position") == "QB":
+                if (
+                    player_ids[o["relationships"]["new_player"]["data"]["id"]].get("Position")
+                    == "QB"
+                ):
                     n["Market"] = "Pass+Rush TDs"
                 else:
                     n["Market"] = "Rush+Rec TDs"
@@ -783,8 +782,7 @@ def get_pp(books=False):
 
 
 def get_ud():
-    """
-    Retrieves player offers data from the Underdog Fantasy API.
+    """Retrieves player offers data from the Underdog Fantasy API.
 
     Returns:
         dict: A dictionary containing player offers data in the following format:
@@ -818,8 +816,7 @@ def get_ud():
     for i in teams["teams"]:
         team_ids[i["id"]] = i["abbr"]
 
-    api = scraper.get(
-        "https://api.underdogfantasy.com/beta/v6/over_under_lines")
+    api = scraper.get("https://api.underdogfantasy.com/beta/v6/over_under_lines")
     if not api:
         logger.info("No offers found")
         return {}
@@ -838,12 +835,11 @@ def get_ud():
             "Away": team_ids.get(i["away_team_id"]),
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
-                datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
-                - timedelta(hours=5)
+                datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
         }
     for i in api["solo_games"]:
-        if not " vs " in i["title"] and not " @ " in i["title"]:
+        if " vs " not in i["title"] and " @ " not in i["title"]:
             continue
         if " vs " in i["title"]:
             i["title"] = " @ ".join(i["title"].split(" vs ")[::-1])
@@ -852,8 +848,7 @@ def get_ud():
             "Away": i["title"].split(" @ ")[0],
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": (
-                datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
-                - timedelta(hours=5)
+                datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
         }
 
@@ -871,13 +866,7 @@ def get_ud():
             "Date": match_ids.get(i["match_id"], {"Date": ""})["Date"],
         }
 
-    abbr_map = {
-        "WSH": "WAS",
-        "GS": "GSW",
-        "PHO": "PHX",
-        "NOP": "NO",
-        "AZ": "ARI"
-    }
+    abbr_map = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI"}
 
     offers = {}
     for o in tqdm(api["over_under_lines"], desc="Getting Underdog Over/Unders", unit="offer"):
@@ -927,10 +916,12 @@ def get_ud():
 
         offers[n["League"]][n["Market"]].append(n)
 
-        if False and player["League"] in ["NFL", "NBA", "WNBA"] and o["over_under"]["has_alternates"]:
+        if False:
             # TODO figure out why this keeps freezing
             id = o["over_under"].get("id", 0)
-            alts = scraper.get(f"https://api.underdogfantasy.com/v3/over_unders/{id}/alternate_projections")
+            alts = scraper.get(
+                f"https://api.underdogfantasy.com/v3/over_unders/{id}/alternate_projections"
+            )
             if alts:
                 for a in alts["projections"]:
                     if not a["is_main"]:
@@ -953,7 +944,6 @@ def get_ud():
                         }
                         offers[n["League"]][n["Market"]].append(n)
 
-
     rivals = scraper.get("https://api.underdogfantasy.com/beta/v3/rival_lines")
 
     if not rivals:
@@ -961,33 +951,32 @@ def get_ud():
         return offers
 
     for i in rivals["players"]:
-        if not i["id"] in player_ids:
+        if i["id"] not in player_ids:
             player_ids[i["id"]] = {
                 "Name": str(i["first_name"] or "") + " " + str(i["last_name"] or ""),
                 "League": i["sport_id"],
             }
 
     for i in rivals["games"]:
-        if not i["id"] in match_ids:
+        if i["id"] not in match_ids:
             match_ids[i["id"]] = {
                 "Home": team_ids[i["home_team_id"]],
                 "Away": team_ids[i["away_team_id"]],
                 "League": i["sport_id"],
                 "Date": (
-                    datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ")
-                    - timedelta(hours=5)
+                    datetime.strptime(i["scheduled_at"], "%Y-%m-%dT%H:%M:%SZ") - timedelta(hours=5)
                 ).strftime("%Y-%m-%d"),
             }
 
     for i in rivals["appearances"]:
-        if not i["id"] in players:
+        if i["id"] not in players:
             players[i["id"]] = {
                 "Name": player_ids.get(i["player_id"], {"Name": ""})["Name"],
                 "Team": team_ids.get(i["team_id"], ""),
                 "League": player_ids.get(i["player_id"], {"League": ""})["League"],
             }
 
-        if not i["id"] in matches:
+        if i["id"] not in matches:
             matches[i["id"]] = {
                 "Home": match_ids.get(i["match_id"], {"Home": ""})["Home"],
                 "Away": match_ids.get(i["match_id"], {"Away": ""})["Away"],
@@ -1005,19 +994,20 @@ def get_ud():
         opponent2 = game2.get("Home", "NA")
         if opponent2 == player2["Team"]:
             opponent2 = game2.get("Away", "NA")
-        bet = o["options"][0]["appearance_stat"]["display_stat"].replace(
-            "Fewer ", "")
+        bet = o["options"][0]["appearance_stat"]["display_stat"].replace("Fewer ", "")
         n = {
-            "Player": remove_accents(player1["Name"])
-            + " vs. "
-            + remove_accents(player2["Name"]),
+            "Player": remove_accents(player1["Name"]) + " vs. " + remove_accents(player2["Name"]),
             "League": player1["League"],
-            "Team": abbr_map.get(player1["Team"], player1["Team"]) + "/" + abbr_map.get(player2["Team"], player2["Team"]),
-            "Opponent": abbr_map.get(opponent1, opponent1) + "/" + abbr_map.get(opponent2, opponent2),
+            "Team": abbr_map.get(player1["Team"], player1["Team"])
+            + "/"
+            + abbr_map.get(player2["Team"], player2["Team"]),
+            "Opponent": abbr_map.get(opponent1, opponent1)
+            + "/"
+            + abbr_map.get(opponent2, opponent2),
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
-            "Boost": 1
+            "Boost": 1,
         }
         if "Fantasy" in market and n["League"] == "MLB":
             if n["Player"] in list(get_mlb_pitchers().values()):
@@ -1043,7 +1033,7 @@ def get_sleeper():
 
     if res.status_code != 200:
         return offers
-    
+
     res = res.json()
     leagues = set([x["sport"] for x in res])
 
@@ -1053,20 +1043,14 @@ def get_sleeper():
     if alt.status_code == 200:
         res.extend(alt.json())
 
-    abbr_map = {
-        "WSH": "WAS",
-        "GS": "GSW",
-        "PHO": "PHX",
-        "NOP": "NO",
-        "AZ": "ARI"
-    }
+    abbr_map = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI"}
 
     url = "https://api.sleeper.app/scores/lines_game_picker"
     game_res = requests.get(url)
 
     if game_res.status_code != 200:
         return offers
-    
+
     games = {}
     for game in game_res.json():
         games.setdefault(game["sport"], {})
@@ -1077,17 +1061,17 @@ def get_sleeper():
         if isinstance(away_team, dict):
             away_team = away_team.get("team")
         games[game["sport"]][game["game_id"]] = {
-            'teams': [abbr_map.get(home_team, home_team), abbr_map.get(away_team, away_team)],
-            'date': game.get("date")
-            }
+            "teams": [abbr_map.get(home_team, home_team), abbr_map.get(away_team, away_team)],
+            "date": game.get("date"),
+        }
 
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
         url = f"https://api.sleeper.app/players/{league}?exclude_injury=false"
         players = requests.get(url)
-        
+
         if players.status_code != 200:
             continue
-        
+
         players = players.json()
         props = [x for x in res if x["sport"] == league]
 
@@ -1098,26 +1082,23 @@ def get_sleeper():
 
             player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
             player_team = player["team"]
-            teams = games.get(league, {}).get(prop["game_id"], {}).get('teams')
+            teams = games.get(league, {}).get(prop["game_id"], {}).get("teams")
             if len(teams) != 2:
                 continue
 
-            game_date = games.get(league, {}).get(prop["game_id"], {}).get('date')
+            game_date = games.get(league, {}).get(prop["game_id"], {}).get("date")
 
-            all_outcomes = sorted(prop["options"], key=itemgetter('outcome', 'outcome_value'))
+            all_outcomes = sorted(prop["options"], key=itemgetter("outcome", "outcome_value"))
             lines = set([x["outcome_value"] for x in all_outcomes])
             for line in lines:
                 outcomes = [x for x in all_outcomes if x["outcome_value"] == line]
                 if len(outcomes) < 2:
                     if outcomes[0]["outcome"] == "over":
-                        outcomes = outcomes + [{}]
+                        outcomes = [*outcomes, {}]
                     else:
-                        outcomes = [{}] + outcomes
-                
-                if player_team:
-                    opp = [team for team in teams if team != player_team][0]
-                else:
-                    opp = None
+                        outcomes = [{}, *outcomes]
+
+                opp = next(team for team in teams if team != player_team) if player_team else None
 
                 n = {
                     "Player": player_name,
@@ -1136,9 +1117,9 @@ def get_sleeper():
 
     return offers
 
+
 def get_thrive():
-    """
-    Retrieves upcoming house prop data from the Thrive Fantasy API.
+    """Retrieves upcoming house prop data from the Thrive Fantasy API.
 
     Returns:
         dict: A dictionary containing house prop data in the following format:
@@ -1199,12 +1180,7 @@ def get_thrive():
         logger.error(api["message"])
         return []
 
-    abbr_map = {
-        "WSH": "WAS",
-        "GS": "GSW",
-        "PHO": "PHX",
-        "NOP": "NO"
-    }
+    abbr_map = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO"}
 
     lines = api["response"]["data"]
 
@@ -1212,11 +1188,9 @@ def get_thrive():
     for line in tqdm(lines, desc="Getting Thrive Offers", unit="offer"):
         o = line.get("contestProp")
         team = o["player1"]["teamAbbr"].upper()
-        opponent = str(o.get("team2Abbr", "")
-                       or "").upper()
+        opponent = str(o.get("team2Abbr", "") or "").upper()
         if team == opponent:
-            opponent = str(o.get("team1Abbr", "")
-                           or "").upper()
+            opponent = str(o.get("team1Abbr", "") or "").upper()
         n = {
             "Player": remove_accents(
                 " ".join([o["player1"]["firstName"], o["player1"]["lastName"]])
@@ -1225,8 +1199,7 @@ def get_thrive():
             "Team": abbr_map.get(team, team),
             "Opponent": abbr_map.get(opponent, opponent),
             "Date": (
-                datetime.strptime(
-                    o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
+                datetime.strptime(o["startTime"], "%Y/%m/%d %H:%M") - timedelta(hours=5)
             ).strftime("%Y-%m-%d"),
             "Market": " + ".join(o["player1"]["propParameters"]),
             "Line": float(o["propValue"]),
@@ -1246,8 +1219,7 @@ def get_thrive():
 
 
 def get_parp():
-    """
-    Retrieves cross-game search data from the ParlayPlay API.
+    """Retrieves cross-game search data from the ParlayPlay API.
 
     Returns:
         dict: A dictionary containing cross-game search data in the following format:
@@ -1276,22 +1248,22 @@ def get_parp():
         "X-CSRFToken": "1",
         "X-Parlay-Request": "1",
         "X-ParlayPlay-Platform": "web",
-        "X-Requested-With": "XMLHttpRequest"
+        "X-Requested-With": "XMLHttpRequest",
     }
     try:
         api = scraper.get_proxy(
             "https://parlayplay.io/api/v1/crossgame/search/?sport=All&league=&includeAlt=true&version=2",
-            headers=header
+            headers=header,
         )
-        
+
         if "players" not in api:
             logger.error("Error getting ParlayPlay Offers")
             return {}
-        
+
         if datetime.today().month > 8 or datetime.today().month < 2:
             nfl = scraper.get_proxy(
                 "https://parlayplay.io/api/v1/crossgame/search/?sport=Football&league=NFL&includeAlt=true&version=2",
-                headers=header
+                headers=header,
             )
 
             if "players" in nfl:
@@ -1303,7 +1275,6 @@ def get_parp():
         logger.exception(id)
         return {}
 
-    
     abbr_map = {
         "WSH": "WAS",
         "GS": "GSW",
@@ -1314,7 +1285,7 @@ def get_parp():
         "NJY": "NYJ",
         "NJD": "NJ",
         "AZ": "ARI",
-        "CHW": "CWS"
+        "CHW": "CWS",
     }
     offers = {}
     for player in tqdm(api["players"], desc="Getting ParlayPlay Offers", unit="offer"):
@@ -1326,10 +1297,14 @@ def get_parp():
         ]
 
         player_team = player["player"]["team"]["teamAbbreviation"]
-        opponent_team = [team for team in
-                         [player["match"]["homeTeam"]["teamAbbreviation"],
-                             player["match"]["awayTeam"]["teamAbbreviation"]]
-                         if team != player_team][0]
+        opponent_team = next(
+            team
+            for team in [
+                player["match"]["homeTeam"]["teamAbbreviation"],
+                player["match"]["awayTeam"]["teamAbbreviation"],
+            ]
+            if team != player_team
+        )
 
         if player_team is not None:
             player_team = abbr_map.get(player_team, player_team)
@@ -1352,31 +1327,35 @@ def get_parp():
                 "Team": player_team,
                 "Opponent": opponent_team,
                 "Date": player["match"]["matchDate"].split("T")[0],
-                "Market": market
+                "Market": market,
             }
             for altLine in stat["altLines"]["values"]:
                 m = n | {
                     "Line": float(altLine["selectionPoints"]),
                     "Boost_Over": float(altLine.get("decimalPriceOver", 0.0)),
-                    "Boost_Under": float(altLine.get("decimalPriceUnder", 0.0))
+                    "Boost_Under": float(altLine.get("decimalPriceUnder", 0.0)),
                 }
-                
+
                 offers[n["League"]][n["Market"]].append(m)
 
     for combo in tqdm(api["comboPackages"], desc="Getting ParlayPlay Combos", unit="offer"):
         teams = []
         opponents = []
         players = []
-        for player in combo['packageLegs']:
+        for player in combo["packageLegs"]:
             players.append(remove_accents(player["player"]["fullName"]))
 
             player_team = player["player"]["team"]["teamAbbreviation"]
 
-            opponent_team = [team for team in
-                             [player["match"]["homeTeam"]["teamAbbreviation"],
-                              player["match"]["awayTeam"]["teamAbbreviation"]]
-                             if team != player_team][0]
-            
+            opponent_team = next(
+                team
+                for team in [
+                    player["match"]["homeTeam"]["teamAbbreviation"],
+                    player["match"]["awayTeam"]["teamAbbreviation"],
+                ]
+                if team != player_team
+            )
+
             if player_team is not None:
                 player_team = abbr_map.get(player_team, player_team)
                 teams.append(player_team)
@@ -1384,13 +1363,12 @@ def get_parp():
                 opponent_team = abbr_map.get(opponent_team, opponent_team)
                 opponents.append(opponent_team)
 
-        market = combo['pickType']['challengeName']
-        if "Fantasy" in market:
-            if combo['league']['leagueNameShort'] == "MLB":
-                if player.get("position") == "SP":
-                    market = "Pitcher Fantasy Points"
-                else:
-                    market = "Hitter Fantasy Points"
+        market = combo["pickType"]["challengeName"]
+        if "Fantasy" in market and combo["league"]["leagueNameShort"] == "MLB":
+            if player.get("position") == "SP":
+                market = "Pitcher Fantasy Points"
+            else:
+                market = "Hitter Fantasy Points"
 
         n = {
             "Player": " + ".join(players),
@@ -1401,7 +1379,7 @@ def get_parp():
             "Market": market,
             "Line": float(combo["pickValue"]),
             "Boost_Over": combo.get("defaultMultiplier", 1.77),
-            "Boost_Under": combo.get("defaultMultiplier", 1.77)
+            "Boost_Under": combo.get("defaultMultiplier", 1.77),
         }
 
         if n["League"] not in offers:

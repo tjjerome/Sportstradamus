@@ -17,30 +17,30 @@ Metrics:
 - Accuracy / Over% at >0.54 confidence
 """
 
-import sys
 import json
+import sys
 import warnings
+from pathlib import Path
+
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from sklearn.model_selection import train_test_split
-from scipy.stats import gamma as gamma_dist, lognorm, nbinom
-from scipy.special import logit
-import lightgbm as lgb
-from lightgbmlss.model import LightGBMLSS
 from lightgbmlss.distributions.Gamma import Gamma
 from lightgbmlss.distributions.LogNormal import LogNormal
-from lightgbmlss.distributions.ZAGamma import ZAGamma
 from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
-from lightgbmlss.distributions.ZALN import ZALN
+from lightgbmlss.model import LightGBMLSS
+from scipy.special import logit
+from scipy.stats import gamma as gamma_dist
+from scipy.stats import lognorm, nbinom
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 # Add project root
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from sportstradamus.skew_normal import SkewNormal
 from sportstradamus.helpers import set_model_start_values
+from sportstradamus.skew_normal import SkewNormal
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "training_data"
 
@@ -50,21 +50,37 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "training_data"
 
 MARKETS = {
     # NBA
-    "NBA_PTS":      {"file": "NBA_PTS.csv",            "dist": "ZAGamma", "zi": 0.065, "continuous": True},
-    "NBA_PRA":      {"file": "NBA_PRA.csv",            "dist": "Gamma",   "zi": 0.026, "continuous": True},
-    "NBA_BLK":      {"file": "NBA_BLK.csv",            "dist": "NegBin",  "zi": 0.007, "continuous": False},
-    "NBA_AST":      {"file": "NBA_AST.csv",            "dist": "NegBin",  "zi": 0.013, "continuous": False},
+    "NBA_PTS": {"file": "NBA_PTS.csv", "dist": "ZAGamma", "zi": 0.065, "continuous": True},
+    "NBA_PRA": {"file": "NBA_PRA.csv", "dist": "Gamma", "zi": 0.026, "continuous": True},
+    "NBA_BLK": {"file": "NBA_BLK.csv", "dist": "NegBin", "zi": 0.007, "continuous": False},
+    "NBA_AST": {"file": "NBA_AST.csv", "dist": "NegBin", "zi": 0.013, "continuous": False},
     # NFL
-    "NFL_pass_yds": {"file": "NFL_passing-yards.csv",  "dist": "ZAGamma", "zi": 0.066, "continuous": True},
-    "NFL_fantasy-points-underdog":  {"file": "NFL_fantasy-points-underdog.csv",        "dist": "Gamma",  "zi": 0.0289,   "continuous": True},
-    "NFL_receptions":  {"file": "NFL_receptions.csv",     "dist": "NegBin",  "zi": 0.0098,   "continuous": False},
-    "NFL_tds":      {"file": "NFL_tds.csv",            "dist": "NegBin",  "zi": 0.006, "continuous": False},
+    "NFL_pass_yds": {
+        "file": "NFL_passing-yards.csv",
+        "dist": "ZAGamma",
+        "zi": 0.066,
+        "continuous": True,
+    },
+    "NFL_fantasy-points-underdog": {
+        "file": "NFL_fantasy-points-underdog.csv",
+        "dist": "Gamma",
+        "zi": 0.0289,
+        "continuous": True,
+    },
+    "NFL_receptions": {
+        "file": "NFL_receptions.csv",
+        "dist": "NegBin",
+        "zi": 0.0098,
+        "continuous": False,
+    },
+    "NFL_tds": {"file": "NFL_tds.csv", "dist": "NegBin", "zi": 0.006, "continuous": False},
 }
 
 EPSILON = 0.01  # Clip value for zeros in continuous distributions
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
+
 
 def preprocess_zi(y, zi_gate, is_continuous_base, rng=None):
     """Remove structural zeros from data.
@@ -132,7 +148,7 @@ def load_market(market_file, zi_gate, is_continuous_base):
     # Ensure numpy-native dtypes (not nullable Int64/Float64) for scipy compat
     for df_ in [X_train, X_val, X_test]:
         for c in df_.columns:
-            if hasattr(df_[c].dtype, 'numpy_dtype'):
+            if hasattr(df_[c].dtype, "numpy_dtype"):
                 df_[c] = df_[c].astype(df_[c].dtype.numpy_dtype)
 
     return X_train, X_val, X_test, y_train, y_val, y_test, meta_val, meta_test
@@ -150,8 +166,8 @@ def make_global_start_values(dist_label, y_train_norm):
     cv = np.clip(sigma_emp / mu, 0.01, 10)
 
     if dist_label in ("LogNormal", "ZALN"):
-        sigma = np.sqrt(np.log1p(cv ** 2))
-        loc = np.log(mu) - sigma ** 2 / 2
+        sigma = np.sqrt(np.log1p(cv**2))
+        loc = np.log(mu) - sigma**2 / 2
         sv = np.array([[loc, np.log(np.clip(sigma, 1e-6, None))]])
         if dist_label == "ZALN":
             gate_frac = np.mean(y_train_norm <= 0)
@@ -177,7 +193,7 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
     # Compute P(under line)
     if dist_type in ("LogNormal", "ZALN"):
         sigma = sigma_or_shape
-        mu_param = np.log(np.clip(ev, 1e-9, None)) - sigma ** 2 / 2
+        mu_param = np.log(np.clip(ev, 1e-9, None)) - sigma**2 / 2
         under_probs = lognorm.cdf(lines, s=sigma, scale=np.exp(mu_param))
         if gate is not None and dist_type == "ZALN":
             under_probs = gate + (1 - gate) * under_probs
@@ -193,7 +209,8 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
     elif dist_type == "SkewNormal":
         scale, alpha_skew = sigma_or_shape
         from scipy.stats import skewnorm
-        delta = alpha_skew / np.sqrt(1 + alpha_skew ** 2)
+
+        delta = alpha_skew / np.sqrt(1 + alpha_skew**2)
         loc_sn = ev - scale * delta * np.sqrt(2 / np.pi)
         under_probs = skewnorm.cdf(lines, alpha_skew, loc=loc_sn, scale=scale)
     else:
@@ -219,9 +236,22 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
 
 # ── Main experiment runner ──────────────────────────────────────────────
 
-def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
-                   meta_test, dist_obj, dist_label, loss_fn,
-                   normalize=False, start_values_fn=None):
+
+def run_experiment(
+    name,
+    X_train,
+    X_val,
+    X_test,
+    y_train,
+    y_val,
+    y_test,
+    meta_test,
+    dist_obj,
+    dist_label,
+    loss_fn,
+    normalize=False,
+    start_values_fn=None,
+):
     """Run a single experiment configuration."""
     y_labels = y_train.copy()
 
@@ -261,7 +291,8 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
 
     try:
         opt_params = model.hyper_opt(
-            hp, dtrain,
+            hp,
+            dtrain,
             num_boost_round=500,
             nfold=4,
             early_stopping_rounds=30,
@@ -287,7 +318,7 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
     if dist_label in ("LogNormal", "ZALN"):
         loc = preds["loc"].values
         scale = preds["scale"].values
-        ev_norm = np.exp(loc + scale ** 2 / 2)
+        ev_norm = np.exp(loc + scale**2 / 2)
         if normalize:
             meanyr_test = np.clip(X_test["MeanYr"].values, 0.5, None)
             ev = ev_norm * meanyr_test
@@ -306,17 +337,17 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
                 y_t == 0,
                 -np.log(np.clip(gate, 1e-12, None)),
                 -np.log(np.clip(1 - gate, 1e-12, None))
-                + (-lognorm.logpdf(np.clip(y_t, 1e-9, None), s=sigma,
-                                   scale=np.exp(loc_abs)))
+                + (-lognorm.logpdf(np.clip(y_t, 1e-9, None), s=sigma, scale=np.exp(loc_abs))),
             )
         else:
             valid = y_t > 0
-            nll_vals = -lognorm.logpdf(np.clip(y_t[valid], 1e-9, None),
-                                       s=sigma[valid], scale=np.exp(loc_abs[valid]))
+            nll_vals = -lognorm.logpdf(
+                np.clip(y_t[valid], 1e-9, None), s=sigma[valid], scale=np.exp(loc_abs[valid])
+            )
         metrics["nll"] = float(np.mean(np.clip(nll_vals, -20, 20)))
         metrics["model_sigma_mean"] = float(np.mean(sigma))
         empirical_cv = np.std(y_t[y_t > 0]) / np.mean(y_t[y_t > 0]) if np.sum(y_t > 0) > 1 else 1.0
-        metrics["empirical_sigma"] = float(np.sqrt(np.log1p(empirical_cv ** 2)))
+        metrics["empirical_sigma"] = float(np.sqrt(np.log1p(empirical_cv**2)))
 
     elif dist_label in ("Gamma", "ZAGamma"):
         alpha = preds["concentration"].values
@@ -332,8 +363,7 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
         gate = preds["gate"].values if "gate" in preds.columns else None
 
         metrics = compute_metrics(
-            ev, y_t, lines, alpha,
-            "ZAGamma" if gate is not None else "Gamma", gate=gate
+            ev, y_t, lines, alpha, "ZAGamma" if gate is not None else "Gamma", gate=gate
         )
 
         valid = y_t > 0
@@ -342,12 +372,12 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
                 y_t == 0,
                 -np.log(np.clip(gate, 1e-12, None)),
                 -np.log(np.clip(1 - gate, 1e-12, None))
-                + (-gamma_dist.logpdf(np.clip(y_t, 1e-9, None), alpha,
-                                      scale=1 / beta_abs))
+                + (-gamma_dist.logpdf(np.clip(y_t, 1e-9, None), alpha, scale=1 / beta_abs)),
             )
         else:
-            nll_vals = -gamma_dist.logpdf(np.clip(y_t[valid], 1e-9, None),
-                                          alpha[valid], scale=1 / beta_abs[valid])
+            nll_vals = -gamma_dist.logpdf(
+                np.clip(y_t[valid], 1e-9, None), alpha[valid], scale=1 / beta_abs[valid]
+            )
         metrics["nll"] = float(np.mean(np.clip(nll_vals, -20, 20)))
         metrics["model_alpha_mean"] = float(np.mean(alpha))
 
@@ -374,7 +404,7 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
         loc = preds["loc"].values
         scale = preds["scale"].values
         alpha_skew = preds["alpha"].values
-        delta = alpha_skew / np.sqrt(1 + alpha_skew ** 2)
+        delta = alpha_skew / np.sqrt(1 + alpha_skew**2)
         ev_sn = loc + scale * delta * np.sqrt(2 / np.pi)
         if normalize:
             meanyr_test = np.clip(X_test["MeanYr"].values, 0.5, None)
@@ -389,6 +419,7 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
         metrics = compute_metrics(ev, y_t, lines, (scale_abs, alpha_skew), "SkewNormal")
 
         from scipy.stats import skewnorm
+
         nll_vals = -skewnorm.logpdf(y_t, alpha_skew, loc=loc_abs, scale=scale_abs)
         metrics["nll"] = float(np.mean(np.clip(nll_vals, -20, 20)))
         metrics["model_alpha_skew_mean"] = float(np.mean(alpha_skew))
@@ -397,8 +428,8 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
     meanyr = X_test["MeanYr"].values
     metrics["ev_meanyr_corr"] = float(np.corrcoef(meanyr, ev - meanyr)[0, 1])
     metrics["result_meanyr_corr"] = float(np.corrcoef(meanyr, y_t - meanyr)[0, 1])
-    metrics["compression_ratio"] = (
-        abs(metrics["ev_meanyr_corr"]) / max(abs(metrics["result_meanyr_corr"]), 1e-6)
+    metrics["compression_ratio"] = abs(metrics["ev_meanyr_corr"]) / max(
+        abs(metrics["result_meanyr_corr"]), 1e-6
     )
 
     # Hyperparameters selected
@@ -416,6 +447,7 @@ def run_experiment(name, X_train, X_val, X_test, y_train, y_val, y_test,
 
 # ── Main ────────────────────────────────────────────────────────────────
 
+
 def main():
     all_results = []
 
@@ -424,13 +456,16 @@ def main():
         print(f"  {market_name}  (current dist: {cfg['dist']})")
         print(f"{'=' * 60}")
 
-        X_train, X_val, X_test, y_train, y_val, y_test, meta_val, meta_test = \
-            load_market(cfg["file"], cfg["zi"], cfg["continuous"])
+        X_train, X_val, X_test, y_train, y_val, y_test, meta_val, meta_test = load_market(
+            cfg["file"], cfg["zi"], cfg["continuous"]
+        )
 
         global_mean = np.mean(y_train)
         zero_rate = np.mean(y_train == 0)
-        print(f"  After ZI preprocessing: mean={global_mean:.2f}, "
-              f"zero_rate={zero_rate:.3f}, N_train={len(y_train)}")
+        print(
+            f"  After ZI preprocessing: mean={global_mean:.2f}, "
+            f"zero_rate={zero_rate:.3f}, N_train={len(y_train)}"
+        )
 
         # Normalized targets for computing global start values
         meanyr_train = np.clip(X_train["MeanYr"].values, 0.5, None)
@@ -442,66 +477,102 @@ def main():
         cur_dist = cfg["dist"]
         if cur_dist == "ZAGamma":
             # Zeros already removed for continuous-base → use Gamma (non-ZA)
-            experiments.append((
-                "Baseline Gamma (no ZA)",
-                Gamma(stabilization="None", loss_fn="nll", response_fn="softplus"),
-                "Gamma", "nll", False,
-                lambda m, X: set_model_start_values(m, "Gamma", X),
-            ))
+            experiments.append(
+                (
+                    "Baseline Gamma (no ZA)",
+                    Gamma(stabilization="None", loss_fn="nll", response_fn="softplus"),
+                    "Gamma",
+                    "nll",
+                    False,
+                    lambda m, X: set_model_start_values(m, "Gamma", X),
+                )
+            )
         elif cur_dist == "Gamma":
-            experiments.append((
-                "Baseline Gamma",
-                Gamma(stabilization="None", loss_fn="nll", response_fn="softplus"),
-                "Gamma", "nll", False,
-                lambda m, X: set_model_start_values(m, "Gamma", X),
-            ))
+            experiments.append(
+                (
+                    "Baseline Gamma",
+                    Gamma(stabilization="None", loss_fn="nll", response_fn="softplus"),
+                    "Gamma",
+                    "nll",
+                    False,
+                    lambda m, X: set_model_start_values(m, "Gamma", X),
+                )
+            )
         elif cur_dist == "NegBin":
-            experiments.append((
-                "Baseline NegBin",
-                NegativeBinomial(stabilization="None", loss_fn="nll"),
-                "NegBin", "nll", False,
-                lambda m, X: set_model_start_values(m, "NegBin", X),
-            ))
+            experiments.append(
+                (
+                    "Baseline NegBin",
+                    NegativeBinomial(stabilization="None", loss_fn="nll"),
+                    "NegBin",
+                    "nll",
+                    False,
+                    lambda m, X: set_model_start_values(m, "NegBin", X),
+                )
+            )
 
         # ── 2. LogNormal normalized NLL ─────────────────────────────────
         ln_sv = make_global_start_values("LogNormal", y_train_norm)
-        experiments.append((
-            "LogNormal norm NLL",
-            LogNormal(stabilization="None", loss_fn="nll"),
-            "LogNormal", "nll", True, ln_sv,
-        ))
+        experiments.append(
+            (
+                "LogNormal norm NLL",
+                LogNormal(stabilization="None", loss_fn="nll"),
+                "LogNormal",
+                "nll",
+                True,
+                ln_sv,
+            )
+        )
 
         # ── 3. LogNormal normalized CRPS ────────────────────────────────
-        experiments.append((
-            "LogNormal norm CRPS",
-            LogNormal(stabilization="None", loss_fn="crps"),
-            "LogNormal", "crps", True, ln_sv,
-        ))
+        experiments.append(
+            (
+                "LogNormal norm CRPS",
+                LogNormal(stabilization="None", loss_fn="crps"),
+                "LogNormal",
+                "crps",
+                True,
+                ln_sv,
+            )
+        )
 
         # ── 4. SkewNormal normalized NLL ────────────────────────────────
         sn_sv = make_global_start_values("SkewNormal", y_train_norm)
-        experiments.append((
-            "SkewNormal norm NLL",
-            SkewNormal(stabilization="None", loss_fn="nll"),
-            "SkewNormal", "nll", True, sn_sv,
-        ))
+        experiments.append(
+            (
+                "SkewNormal norm NLL",
+                SkewNormal(stabilization="None", loss_fn="nll"),
+                "SkewNormal",
+                "nll",
+                True,
+                sn_sv,
+            )
+        )
 
         # ── 5. SkewNormal normalized CRPS ───────────────────────────────
-        experiments.append((
-            "SkewNormal norm CRPS",
-            SkewNormal(stabilization="None", loss_fn="crps"),
-            "SkewNormal", "crps", True, sn_sv,
-        ))
+        experiments.append(
+            (
+                "SkewNormal norm CRPS",
+                SkewNormal(stabilization="None", loss_fn="crps"),
+                "SkewNormal",
+                "crps",
+                True,
+                sn_sv,
+            )
+        )
 
         # ── 6. Current dist normalized (only for continuous base) ───────
         # NegBin can't handle non-integer normalized targets, so skip
         if cfg["continuous"]:
-            experiments.append((
-                "Gamma norm NLL",
-                Gamma(stabilization="None", loss_fn="nll", response_fn="softplus"),
-                "Gamma", "nll", True,
-                lambda m, X: set_model_start_values(m, "Gamma", X),
-            ))
+            experiments.append(
+                (
+                    "Gamma norm NLL",
+                    Gamma(stabilization="None", loss_fn="nll", response_fn="softplus"),
+                    "Gamma",
+                    "nll",
+                    True,
+                    lambda m, X: set_model_start_values(m, "Gamma", X),
+                )
+            )
 
         # ── Run all experiments for this market ─────────────────────────
         for exp_name, dist_obj, dist_label, loss_fn, normalize, sv_fn in experiments:
@@ -509,31 +580,49 @@ def main():
             print(f"\n  ▸ {exp_name} ...", flush=True)
             try:
                 result = run_experiment(
-                    full_name, X_train, X_val, X_test,
-                    y_train, y_val, y_test,
-                    meta_test, dist_obj, dist_label, loss_fn,
-                    normalize=normalize, start_values_fn=sv_fn,
+                    full_name,
+                    X_train,
+                    X_val,
+                    X_test,
+                    y_train,
+                    y_val,
+                    y_test,
+                    meta_test,
+                    dist_obj,
+                    dist_label,
+                    loss_fn,
+                    normalize=normalize,
+                    start_values_fn=sv_fn,
                 )
                 all_results.append(result)
 
                 if "error" in result:
                     print(f"    ERROR: {result['error']}")
                 else:
-                    print(f"    NLL={result['nll']:.3f}  "
-                          f"Acc={result.get('accuracy', float('nan')):.3f}  "
-                          f"Over%={result.get('over_pct', float('nan')):.3f}")
-                    print(f"    EV_mean={result['model_ev_mean']:.2f}  "
-                          f"Result_mean={result['result_mean']:.2f}")
-                    print(f"    ev_corr={result['ev_meanyr_corr']:.3f}  "
-                          f"result_corr={result['result_meanyr_corr']:.3f}  "
-                          f"compress_ratio={result['compression_ratio']:.2f}x")
-                    lr = result.get('lr', 0)
-                    print(f"    HP: lr={lr:.4f}  "
-                          f"rounds={result.get('rounds', '?')}  "
-                          f"leaves={result.get('leaves', '?')}")
+                    print(
+                        f"    NLL={result['nll']:.3f}  "
+                        f"Acc={result.get('accuracy', float('nan')):.3f}  "
+                        f"Over%={result.get('over_pct', float('nan')):.3f}"
+                    )
+                    print(
+                        f"    EV_mean={result['model_ev_mean']:.2f}  "
+                        f"Result_mean={result['result_mean']:.2f}"
+                    )
+                    print(
+                        f"    ev_corr={result['ev_meanyr_corr']:.3f}  "
+                        f"result_corr={result['result_meanyr_corr']:.3f}  "
+                        f"compress_ratio={result['compression_ratio']:.2f}x"
+                    )
+                    lr = result.get("lr", 0)
+                    print(
+                        f"    HP: lr={lr:.4f}  "
+                        f"rounds={result.get('rounds', '?')}  "
+                        f"leaves={result.get('leaves', '?')}"
+                    )
             except Exception as e:
                 print(f"    EXCEPTION: {e}")
                 import traceback
+
                 traceback.print_exc()
                 all_results.append({"name": full_name, "error": str(e)})
 
@@ -541,9 +630,11 @@ def main():
     print(f"\n\n{'=' * 130}")
     print("SUMMARY")
     print(f"{'=' * 130}")
-    header = (f"{'Name':<45} {'Dist':<12} {'Loss':<6} {'Norm':<5} "
-              f"{'NLL':>7} {'Acc':>6} {'Over%':>6} "
-              f"{'EV_corr':>8} {'R_corr':>8} {'Cmpr':>6}")
+    header = (
+        f"{'Name':<45} {'Dist':<12} {'Loss':<6} {'Norm':<5} "
+        f"{'NLL':>7} {'Acc':>6} {'Over%':>6} "
+        f"{'EV_corr':>8} {'R_corr':>8} {'Cmpr':>6}"
+    )
     print(header)
     print("-" * 130)
     for r in all_results:
@@ -569,7 +660,7 @@ def main():
     for r in all_results:
         sr = {}
         for k, v in r.items():
-            if isinstance(v, (np.floating, np.integer)):
+            if isinstance(v, np.floating | np.integer):
                 sr[k] = float(v)
             else:
                 sr[k] = v

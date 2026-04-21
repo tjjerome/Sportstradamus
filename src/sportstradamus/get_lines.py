@@ -1,11 +1,12 @@
-from sportstradamus.helpers import Scrape, Archive, no_vig_odds
+from sportstradamus.helpers import Archive, Scrape, no_vig_odds
 
 scraper = Scrape()
-from sportstradamus.stats import StatsNFL
 from datetime import datetime, timedelta
+
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-import numpy as np
+
+from sportstradamus.stats import StatsNFL
 
 nba_market_ids = {
     "RA": 337,
@@ -59,11 +60,11 @@ nfl.update()
 
 archive = Archive()
 with logging_redirect_tqdm():
-    players = list(nfl.gamelog['player display name'].unique())
+    players = list(nfl.gamelog["player display name"].unique())
     for player in tqdm(players, unit="player", position=1):
         tryJr = False
         code = player.lower().replace(".", "").replace("'", "").replace(" ", "-")
-        player_games = nfl.gamelog.loc[nfl.gamelog['player display name'] == player]
+        player_games = nfl.gamelog.loc[nfl.gamelog["player display name"] == player]
 
         for market, mid in tqdm(
             list(nfl_market_ids.items()), unit="market", position=2, leave=False
@@ -74,8 +75,7 @@ with logging_redirect_tqdm():
                 props = [
                     (i["event"], i["propOffer"])
                     for i in res["analyses"]
-                    if i["propOffer"]["season"] <= 2022
-                    and i["propOffer"]["line"]
+                    if i["propOffer"]["season"] <= 2022 and i["propOffer"]["line"]
                 ]
             except:
                 if tryJr:
@@ -98,8 +98,7 @@ with logging_redirect_tqdm():
                         props = [
                             (i["event"], i["propOffer"])
                             for i in res["analyses"]
-                            if i["propOffer"]["season"] <= 2022
-                            and i["propOffer"]["line"]
+                            if i["propOffer"]["season"] <= 2022 and i["propOffer"]["line"]
                         ]
                     except:
                         tqdm.write(f"Error finding {player}, {market}")
@@ -108,8 +107,7 @@ with logging_redirect_tqdm():
             for event, prop in props:
                 line = prop["line"]
                 date = (
-                    datetime.strptime(event["scheduled"], "%Y-%m-%d %H:%M:%S")
-                    - timedelta(hours=5)
+                    datetime.strptime(event["scheduled"], "%Y-%m-%d %H:%M:%S") - timedelta(hours=5)
                 ).strftime("%Y-%m-%d")
                 odds = [prop["cost"], prop["cost_inverse"]]
                 if 0 in odds:
@@ -131,8 +129,7 @@ with logging_redirect_tqdm():
                 if date not in archive.archive["NFL"][market]:
                     archive.archive["NFL"][market][date] = {}
                 if player not in archive.archive["NFL"][market][date]:
-                    archive.archive["NFL"][market][date][player] = {
-                        'Line': [line], 'EV': stats}
+                    archive.archive["NFL"][market][date][player] = {"Line": [line], "EV": stats}
 
 
 archive.write()

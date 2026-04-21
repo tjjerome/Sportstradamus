@@ -1,5 +1,4 @@
-"""
-Custom SkewNormal distribution for use with LightGBMLSS.
+"""Custom SkewNormal distribution for use with LightGBMLSS.
 
 Provides:
   - SkewNormalTorch: a PyTorch Distribution subclass implementing the skew-normal
@@ -16,20 +15,20 @@ Usage:
 """
 
 import math
+
 import torch
 import torch.distributions as D
-from torch.distributions import constraints
 from lightgbmlss.distributions.distribution_utils import DistributionClass
-from lightgbmlss.utils import identity_fn, exp_fn, softplus_fn
-
+from lightgbmlss.utils import exp_fn, identity_fn, softplus_fn
+from torch.distributions import constraints
 
 # ---------------------------------------------------------------------------
 # PyTorch Distribution: SkewNormal
 # ---------------------------------------------------------------------------
 
+
 class SkewNormalTorch(D.Distribution):
-    r"""
-    Skew-Normal distribution.
+    r"""Skew-Normal distribution.
 
     The skew-normal distribution is a continuous probability distribution that
     generalises the normal distribution to allow for non-zero skewness.
@@ -98,8 +97,7 @@ class SkewNormalTorch(D.Distribution):
         return log_pdf
 
     def rsample(self, sample_shape=torch.Size()):
-        """
-        Reparameterised sample via the stochastic representation:
+        """Reparameterised sample via the stochastic representation:
 
             X = ξ + ω · (δ·|Z₀| + √(1−δ²)·Z₁)
 
@@ -109,7 +107,7 @@ class SkewNormalTorch(D.Distribution):
         gradient/hessian computation in LightGBMLSS.
         """
         shape = self._extended_shape(sample_shape)
-        delta = self.alpha / torch.sqrt(1.0 + self.alpha ** 2)
+        delta = self.alpha / torch.sqrt(1.0 + self.alpha**2)
 
         z0 = torch.randn(shape, dtype=self.loc.dtype, device=self.loc.device)
         z1 = torch.randn(shape, dtype=self.loc.dtype, device=self.loc.device)
@@ -117,27 +115,27 @@ class SkewNormalTorch(D.Distribution):
         # |Z₀| via soft-abs (retains gradient flow)
         abs_z0 = torch.abs(z0)
 
-        x = self.loc + self.scale * (delta * abs_z0 + torch.sqrt(1.0 - delta ** 2) * z1)
+        x = self.loc + self.scale * (delta * abs_z0 + torch.sqrt(1.0 - delta**2) * z1)
         return x
 
     @property
     def mean(self):
-        delta = self.alpha / torch.sqrt(1.0 + self.alpha ** 2)
+        delta = self.alpha / torch.sqrt(1.0 + self.alpha**2)
         return self.loc + self.scale * delta * math.sqrt(2.0 / math.pi)
 
     @property
     def variance(self):
-        delta = self.alpha / torch.sqrt(1.0 + self.alpha ** 2)
-        return self.scale ** 2 * (1.0 - 2.0 * delta ** 2 / math.pi)
+        delta = self.alpha / torch.sqrt(1.0 + self.alpha**2)
+        return self.scale**2 * (1.0 - 2.0 * delta**2 / math.pi)
 
 
 # ---------------------------------------------------------------------------
 # LightGBMLSS Distribution wrapper: SkewNormal
 # ---------------------------------------------------------------------------
 
+
 class SkewNormal(DistributionClass):
-    """
-    Skew-Normal Distribution Class for LightGBMLSS.
+    """Skew-Normal Distribution Class for LightGBMLSS.
 
     Distributional Parameters
     -------------------------
@@ -179,27 +177,21 @@ class SkewNormal(DistributionClass):
                 "Invalid stabilization method. Please choose from 'None', 'MAD' or 'L2'."
             )
         if loss_fn not in ["nll", "crps"]:
-            raise ValueError(
-                "Invalid loss function. Please choose from 'nll' or 'crps'."
-            )
+            raise ValueError("Invalid loss function. Please choose from 'nll' or 'crps'.")
         if not isinstance(initialize, bool):
-            raise ValueError(
-                "Invalid initialize. Please choose from True or False."
-            )
+            raise ValueError("Invalid initialize. Please choose from True or False.")
 
         # Specify Response Functions
         response_functions = {"exp": exp_fn, "softplus": softplus_fn}
         if response_fn in response_functions:
             response_fn = response_functions[response_fn]
         else:
-            raise ValueError(
-                "Invalid response function. Please choose from 'exp' or 'softplus'."
-            )
+            raise ValueError("Invalid response function. Please choose from 'exp' or 'softplus'.")
 
         # Set the parameters specific to the distribution
         distribution = SkewNormalTorch
         param_dict = {
-            "loc": identity_fn,    # unconstrained
+            "loc": identity_fn,  # unconstrained
             "scale": response_fn,  # positive
             "alpha": identity_fn,  # unconstrained (skewness)
         }
