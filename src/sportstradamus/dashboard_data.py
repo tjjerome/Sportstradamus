@@ -2,20 +2,24 @@
 
 All pages import from here to get cached DataFrames and filters.
 """
-import os
-import json
-import pandas as pd
-import numpy as np
-import streamlit as st
+
 import importlib.resources as pkg_resources
+import json
+import os
 from datetime import datetime, timedelta
 
+import numpy as np
+import pandas as pd
+import streamlit as st
+
 from sportstradamus import data
-from sportstradamus.stats import StatsNBA, StatsWNBA, StatsMLB, StatsNHL, StatsNFL
 from sportstradamus.analysis import (
-    resolve_history, check_bet, PAYOUT_TABLE, TIMEFRAMES,
-    _migrate_flat_history, explode_offers,
+    _migrate_flat_history,
+    check_bet,
+    explode_offers,
+    resolve_history,
 )
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 LEAGUE_CLASSES = {
     "NBA": StatsNBA,
@@ -88,7 +92,7 @@ def load_stats():
 
 @st.cache_data(ttl=3600, show_spinner="Loading stat map...")
 def load_stat_map():
-    with open(pkg_resources.files(data) / "stat_map.json", "r") as f:
+    with open(pkg_resources.files(data) / "stat_map.json") as f:
         return json.load(f)
 
 
@@ -100,7 +104,7 @@ def load_resolve_meta():
     """
     meta_path = pkg_resources.files(data) / "resolve_meta.json"
     try:
-        with open(meta_path, "r") as f:
+        with open(meta_path) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
@@ -133,6 +137,7 @@ def resolve_parlays_and_save(parlays, stats, stat_map):
         return parlays
 
     from tqdm import tqdm
+
     tqdm.pandas()
     results = unresolved.progress_apply(
         lambda bet: check_bet(bet, stats, stat_map), axis=1
@@ -145,8 +150,9 @@ def resolve_parlays_and_save(parlays, stats, stat_map):
     return parlays
 
 
-def get_filtered_history(history, leagues=None, platforms=None, markets=None,
-                         date_range=None, min_model_p=None):
+def get_filtered_history(
+    history, leagues=None, platforms=None, markets=None, date_range=None, min_model_p=None
+):
     """Explode offers and apply sidebar filters.
 
     Returns a per-offer DataFrame with columns: all prediction-level cols +
@@ -232,11 +238,15 @@ def sidebar_filters(history, parlays=None, key_prefix=""):
 
     # League filter
     leagues = sorted(history["League"].dropna().unique()) if not history.empty else []
-    selected_leagues = st.sidebar.multiselect("Leagues", leagues, default=leagues, key=f"{key_prefix}leagues")
+    selected_leagues = st.sidebar.multiselect(
+        "Leagues", leagues, default=leagues, key=f"{key_prefix}leagues"
+    )
 
     # Platform filter (extracted from Offers in normalized schema)
     platforms = _extract_platforms(history)
-    selected_platforms = st.sidebar.multiselect("Platforms", platforms, default=platforms, key=f"{key_prefix}platforms")
+    selected_platforms = st.sidebar.multiselect(
+        "Platforms", platforms, default=platforms, key=f"{key_prefix}platforms"
+    )
 
     # Data coverage indicator
     if not history.empty and "Dist" in history.columns:

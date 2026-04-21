@@ -15,15 +15,15 @@ Does NOT write to the archive. Uncomment the `archive.write()` call at the
 bottom when ready.
 """
 
+import importlib.resources as pkg_resources
 import json
 import subprocess
+
 import numpy as np
-import importlib.resources as pkg_resources
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import Archive, get_ev, get_odds
-
 
 # Predecessor of e4011bf ("Implement SkewNormal + CRPS for compression
 # reduction (Phase 2)"), i.e. the last commit before the fix-compression merge.
@@ -37,7 +37,9 @@ def _load_json_at_rev(rev: str, repo_path: str) -> dict:
     """Read a JSON blob from a specific git revision."""
     out = subprocess.run(
         ["git", "show", f"{rev}:{repo_path}"],
-        capture_output=True, check=True, text=True,
+        capture_output=True,
+        check=True,
+        text=True,
     )
     return json.loads(out.stdout)
 
@@ -45,7 +47,7 @@ def _load_json_at_rev(rev: str, repo_path: str) -> dict:
 def load_current_json(filename: str) -> dict:
     filepath = pkg_resources.files(data) / filename
     try:
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
@@ -79,7 +81,9 @@ def migrate_archive():
     }
 
     for league in tqdm(list(archive.archive.keys()), desc="Leagues", unit="league"):
-        for market in tqdm(list(archive[league].keys()), desc=f"{league}", unit="market", leave=False):
+        for market in tqdm(
+            list(archive[league].keys()), desc=f"{league}", unit="market", leave=False
+        ):
             if market in SKIP_MARKETS:
                 continue
 
@@ -119,7 +123,11 @@ def migrate_archive():
                     changed = False
 
                     for book, old_ev in ev_dict.items():
-                        if old_ev is None or (isinstance(old_ev, float) and np.isnan(old_ev)) or old_ev <= 0:
+                        if (
+                            old_ev is None
+                            or (isinstance(old_ev, float) and np.isnan(old_ev))
+                            or old_ev <= 0
+                        ):
                             stats["deleted"] += 1
                             continue
 
@@ -129,8 +137,10 @@ def migrate_archive():
                                 continue
 
                             under_prob = get_odds(
-                                line, float(old_ev),
-                                dist=old_dist, cv=cv,
+                                line,
+                                float(old_ev),
+                                dist=old_dist,
+                                cv=cv,
                                 gate=(old_gate or None),
                             )
 
@@ -139,8 +149,10 @@ def migrate_archive():
                                 continue
 
                             new_ev = get_ev(
-                                line, under_prob,
-                                cv=cv, dist=new_dist,
+                                line,
+                                under_prob,
+                                cv=cv,
+                                dist=new_dist,
                                 gate=(new_gate or None),
                                 skew_alpha=(0 if new_dist == "SkewNormal" else None),
                             )

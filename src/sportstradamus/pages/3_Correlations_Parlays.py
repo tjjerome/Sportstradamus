@@ -1,18 +1,22 @@
 """Page 3: Correlations & Parlays — correlation effectiveness, hit rates, calibration."""
-import sys, pathlib
+
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
 from sportstradamus.dashboard_data import (
-    load_history, load_parlays, sidebar_filters, load_resolve_meta,
-)
-from sportstradamus.analysis import (
-    compute_parlay_metrics, PAYOUT_TABLE, TIMEFRAMES,
+    load_history,
+    load_parlays,
+    load_resolve_meta,
+    sidebar_filters,
 )
 
 TIMEFRAME_OPTIONS = {
@@ -59,7 +63,9 @@ if cutoff is not None:
     pf = pf.loc[pf["_date"] >= cutoff]
 
 if filters["date_range"]:
-    pf = pf.loc[(pf["_date"] >= filters["date_range"][0]) & (pf["_date"] <= filters["date_range"][1])]
+    pf = pf.loc[
+        (pf["_date"] >= filters["date_range"][0]) & (pf["_date"] <= filters["date_range"][1])
+    ]
 if filters["leagues"]:
     pf = pf.loc[pf["League"].isin(filters["leagues"])]
 if filters["platforms"]:
@@ -77,7 +83,9 @@ if resolved.empty:
 
 st.download_button(
     "Export parlays (CSV)",
-    resolved.drop(columns=["Corr Pairs", "Boost Pairs", "Leg Probs"], errors="ignore").to_csv(index=False),
+    resolved.drop(columns=["Corr Pairs", "Boost Pairs", "Leg Probs"], errors="ignore").to_csv(
+        index=False
+    ),
     "parlays_filtered.csv",
     "text/csv",
 )
@@ -95,20 +103,27 @@ if has_indep and has_corr_p:
     scatter_df["Outcome"] = scatter_df["Hit"].map({1: "Hit", 0: "Miss"})
 
     fig_scatter = px.scatter(
-        scatter_df, x="Indep P", y="P",
+        scatter_df,
+        x="Indep P",
+        y="P",
         color="Outcome",
         color_discrete_map={"Hit": "#2ecc71", "Miss": "#e74c3c"},
         opacity=0.5,
-        labels={"Indep P": "Independent Probability (no correlation)",
-                "P": "Correlated Probability"},
+        labels={
+            "Indep P": "Independent Probability (no correlation)",
+            "P": "Correlated Probability",
+        },
         title="Correlation Adjustment: Independent vs Correlated Probability",
     )
-    fig_scatter.add_trace(go.Scatter(
-        x=[0, scatter_df[["Indep P", "P"]].max().max()],
-        y=[0, scatter_df[["Indep P", "P"]].max().max()],
-        mode="lines", line=dict(dash="dash", color="gray"),
-        name="No adjustment line",
-    ))
+    fig_scatter.add_trace(
+        go.Scatter(
+            x=[0, scatter_df[["Indep P", "P"]].max().max()],
+            y=[0, scatter_df[["Indep P", "P"]].max().max()],
+            mode="lines",
+            line=dict(dash="dash", color="gray"),
+            name="No adjustment line",
+        )
+    )
     fig_scatter.update_layout(height=500)
     st.plotly_chart(fig_scatter, use_container_width=True)
 
@@ -118,12 +133,19 @@ if has_indep and has_corr_p:
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Correlation boosted parlays", f"{len(above_line)}")
-    col2.metric("Hit rate (boosted)", f"{above_line['Hit'].mean():.1%}" if len(above_line) > 0 else "N/A")
-    col3.metric("Hit rate (not boosted)", f"{below_line['Hit'].mean():.1%}" if len(below_line) > 0 else "N/A")
+    col2.metric(
+        "Hit rate (boosted)", f"{above_line['Hit'].mean():.1%}" if len(above_line) > 0 else "N/A"
+    )
+    col3.metric(
+        "Hit rate (not boosted)",
+        f"{below_line['Hit'].mean():.1%}" if len(below_line) > 0 else "N/A",
+    )
 
 elif has_corr_p:
-    st.info("Indep P data not yet available (pre-update predictions). "
-            "Falling back to Leg Probs for independent rate estimation.")
+    st.info(
+        "Indep P data not yet available (pre-update predictions). "
+        "Falling back to Leg Probs for independent rate estimation."
+    )
 
 # --- Correlation Boost vs Hit Rate ---
 st.subheader("Correlation Boost vs Hit Rate")
@@ -131,15 +153,23 @@ if "Boost" in resolved.columns:
     boost_df = resolved.copy()
     boost_df["Boost_Bucket"] = pd.qcut(boost_df["Boost"], q=5, duplicates="drop")
 
-    boost_stats = boost_df.groupby("Boost_Bucket", observed=False).agg(
-        Hit_Rate=("Hit", "mean"),
-        Count=("Hit", "count"),
-    ).reset_index()
+    boost_stats = (
+        boost_df.groupby("Boost_Bucket", observed=False)
+        .agg(
+            Hit_Rate=("Hit", "mean"),
+            Count=("Hit", "count"),
+        )
+        .reset_index()
+    )
     boost_stats["Boost_Bucket"] = boost_stats["Boost_Bucket"].astype(str)
 
-    fig_boost = px.bar(boost_stats, x="Boost_Bucket", y="Hit_Rate",
-                       text="Count",
-                       labels={"Boost_Bucket": "Boost Range", "Hit_Rate": "Hit Rate"})
+    fig_boost = px.bar(
+        boost_stats,
+        x="Boost_Bucket",
+        y="Hit_Rate",
+        text="Count",
+        labels={"Boost_Bucket": "Boost Range", "Hit_Rate": "Hit Rate"},
+    )
     fig_boost.update_layout(height=400)
     st.plotly_chart(fig_boost, use_container_width=True)
 
@@ -171,7 +201,7 @@ for platform in sorted(resolved["Platform"].unique()):
             row["Independent P"] = round(sdf["Indep P"].mean(), 4)
         elif "Leg Probs" in sdf.columns and sdf["Leg Probs"].notna().any():
             indep = sdf["Leg Probs"].apply(
-                lambda lp: np.prod(lp) if isinstance(lp, (list, tuple)) and len(lp) > 0 else np.nan
+                lambda lp: np.prod(lp) if isinstance(lp, list | tuple) and len(lp) > 0 else np.nan
             )
             row["Independent P"] = round(indep.mean(), 4)
         size_data.append(row)
@@ -182,11 +212,22 @@ for platform in sorted(resolved["Platform"].unique()):
 
         # Miss distribution chart
         miss_cols = ["Hit All", "Missed 1", "Missed 2+"]
-        miss_df = size_df[["Size"] + miss_cols].melt(id_vars="Size", var_name="Outcome", value_name="Count")
-        fig_miss = px.bar(miss_df, x="Size", y="Count", color="Outcome",
-                          barmode="stack",
-                          color_discrete_map={"Hit All": "#2ecc71", "Missed 1": "#f39c12", "Missed 2+": "#e74c3c"},
-                          labels={"Size": "Parlay Size", "Count": "Parlays"})
+        miss_df = size_df[["Size", *miss_cols]].melt(
+            id_vars="Size", var_name="Outcome", value_name="Count"
+        )
+        fig_miss = px.bar(
+            miss_df,
+            x="Size",
+            y="Count",
+            color="Outcome",
+            barmode="stack",
+            color_discrete_map={
+                "Hit All": "#2ecc71",
+                "Missed 1": "#f39c12",
+                "Missed 2+": "#e74c3c",
+            },
+            labels={"Size": "Parlay Size", "Count": "Parlays"},
+        )
         fig_miss.update_layout(height=350)
         st.plotly_chart(fig_miss, use_container_width=True)
 
@@ -198,24 +239,36 @@ if "P" in resolved.columns and resolved["P"].notna().any():
     cal_df = resolved.dropna(subset=["P"]).copy()
     bins = np.linspace(0, cal_df["P"].quantile(0.95), 11)
     cal_df["p_bin"] = pd.cut(cal_df["P"], bins=bins)
-    cal_stats = cal_df.groupby("p_bin", observed=False).agg(
-        Predicted=("P", "mean"),
-        Actual=("Hit", "mean"),
-        Count=("Hit", "count"),
-    ).reset_index().dropna(subset=["Predicted"])
+    cal_stats = (
+        cal_df.groupby("p_bin", observed=False)
+        .agg(
+            Predicted=("P", "mean"),
+            Actual=("Hit", "mean"),
+            Count=("Hit", "count"),
+        )
+        .reset_index()
+        .dropna(subset=["Predicted"])
+    )
 
     fig_pcal = go.Figure()
-    fig_pcal.add_trace(go.Scatter(
-        x=[0, cal_stats["Predicted"].max()],
-        y=[0, cal_stats["Predicted"].max()],
-        mode="lines", line=dict(dash="dash", color="gray"),
-        name="Perfect",
-    ))
-    fig_pcal.add_trace(go.Scatter(
-        x=cal_stats["Predicted"], y=cal_stats["Actual"],
-        mode="lines+markers", name="Model",
-        text=[f"n={c}" for c in cal_stats["Count"]],
-    ))
+    fig_pcal.add_trace(
+        go.Scatter(
+            x=[0, cal_stats["Predicted"].max()],
+            y=[0, cal_stats["Predicted"].max()],
+            mode="lines",
+            line=dict(dash="dash", color="gray"),
+            name="Perfect",
+        )
+    )
+    fig_pcal.add_trace(
+        go.Scatter(
+            x=cal_stats["Predicted"],
+            y=cal_stats["Actual"],
+            mode="lines+markers",
+            name="Model",
+            text=[f"n={c}" for c in cal_stats["Count"]],
+        )
+    )
     fig_pcal.update_layout(
         xaxis_title="Predicted Correlated Probability",
         yaxis_title="Actual Hit Rate",

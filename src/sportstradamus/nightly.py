@@ -9,19 +9,20 @@ Runs after games finish to:
 Schedule with cron after games finish, e.g.:
     0 2 * * * cd /home/trevor/Sportstradamus && poetry run nightly
 """
+
+import importlib.resources as pkg_resources
 import json
 import logging
-import numpy as np
-import importlib.resources as pkg_resources
 from datetime import datetime
 
 import click
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.stats import StatsNBA, StatsWNBA, StatsMLB, StatsNHL, StatsNFL
-from sportstradamus.analysis import resolve_history, check_bet
+from sportstradamus.analysis import check_bet, resolve_history
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -36,15 +37,18 @@ LEAGUE_CLASSES = {
 
 
 @click.command()
-@click.option("--league", default=None,
-              help="Resolve only this league (default: all).")
-@click.option("--skip-update", is_flag=True, default=False,
-              help="Skip stats.update() API calls — use cached gamelogs only.")
-@click.option("--history-only", is_flag=True, default=False,
-              help="Skip parlay resolution (much faster).")
+@click.option("--league", default=None, help="Resolve only this league (default: all).")
+@click.option(
+    "--skip-update",
+    is_flag=True,
+    default=False,
+    help="Skip stats.update() API calls — use cached gamelogs only.",
+)
+@click.option(
+    "--history-only", is_flag=True, default=False, help="Skip parlay resolution (much faster)."
+)
 def run(league, skip_update, history_only):
     """Nightly resolution: update stats, fill Actual/Legs/Misses, save."""
-
     # ------------------------------------------------------------------
     # 1. Load league Stats objects (optionally with update)
     # ------------------------------------------------------------------
@@ -82,6 +86,7 @@ def run(league, skip_update, history_only):
     if "Offers" not in history.columns:
         # Migrate old flat schema first
         from sportstradamus.analysis import _migrate_flat_history
+
         logger.info("Migrating history.dat to normalized schema")
         history = _migrate_flat_history(history)
 
@@ -102,9 +107,7 @@ def run(league, skip_update, history_only):
     if not history_only:
         parlay_path = pkg_resources.files(data) / "parlay_hist.dat"
         parlays = pd.read_pickle(parlay_path)
-        stat_map = json.loads(
-            (pkg_resources.files(data) / "stat_map.json").read_text()
-        )
+        stat_map = json.loads((pkg_resources.files(data) / "stat_map.json").read_text())
 
         unresolved = parlays.loc[parlays["Legs"].isna()]
         n_before_parl = len(unresolved)

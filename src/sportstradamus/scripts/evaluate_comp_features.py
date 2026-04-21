@@ -18,34 +18,37 @@ Usage:
     poetry run python3 evaluate_comp_features.py --league WNBA --position G F C
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import argparse
+import importlib.resources as pkg_resources
+import json
+import warnings
 
 import numpy as np
 import pandas as pd
-import json
-import importlib.resources as pkg_resources
-from sportstradamus import data
-from sportstradamus.stats import StatsNFL, StatsNHL, StatsNBA, StatsWNBA
 from tqdm import tqdm
-import argparse
-import warnings
+
+from sportstradamus import data
+from sportstradamus.stats import StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+
 warnings.filterwarnings("ignore")
 
 from optimize_comp_weights import (
     build_weighted_comps,
     measure_comp_quality,
-    precompute_market_lookups,
-    optimize_position_weights,
     normalize_weights,
+    optimize_position_weights,
+    precompute_market_lookups,
 )
-
 
 # ─── Scoring ───────────────────────────────────────────────────────────────────
 
-def score_feature_set(features, full_profile, position, lookups,
-                      min_comps=5, max_comps=15):
+
+def score_feature_set(features, full_profile, position, lookups, min_comps=5, max_comps=15):
     """
     Score a feature set using equal weights.
 
@@ -55,14 +58,13 @@ def score_feature_set(features, full_profile, position, lookups,
 
     profile = full_profile[list(features)].copy()
     for col in profile.columns:
-        profile[col] = pd.to_numeric(profile[col], errors='coerce')
+        profile[col] = pd.to_numeric(profile[col], errors="coerce")
     profile = profile.dropna()
 
     if len(profile) < min_comps + 2:
         return 0.0, len(profile)
 
-    z = profile.apply(
-        lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0, axis=0)
+    z = profile.apply(lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0, axis=0)
     z = z.replace([np.inf, -np.inf], np.nan).dropna()
 
     if len(z) < min_comps + 2:
@@ -74,12 +76,14 @@ def score_feature_set(features, full_profile, position, lookups,
         return 0.0, len(z)
 
     comps_dict = {position: comps}
-    score = measure_comp_quality(comps_dict, player_opp_z, player_games,
-                                 player_positions, [position])
+    score = measure_comp_quality(
+        comps_dict, player_opp_z, player_games, player_positions, [position]
+    )
     return score, len(z)
 
 
 # ─── Feature discovery ─────────────────────────────────────────────────────────
+
 
 def discover_numeric_features(profile, min_coverage=0.5, min_unique=3):
     """Find all numeric features with adequate coverage."""
@@ -88,7 +92,7 @@ def discover_numeric_features(profile, min_coverage=0.5, min_unique=3):
         if col.endswith("growth") or col.endswith("short"):
             continue
         try:
-            vals = pd.to_numeric(profile[col], errors='coerce')
+            vals = pd.to_numeric(profile[col], errors="coerce")
             coverage = vals.notna().mean()
             n_unique = vals.dropna().nunique()
             if coverage >= min_coverage and n_unique >= min_unique:
@@ -102,24 +106,46 @@ def discover_numeric_features(profile, min_coverage=0.5, min_unique=3):
 
 # Columns that are identifiers or intermediate calculations, not features
 NFL_EXCLUDE = {
-    "player", "player_id", "position", "team_name", "player_game_count",
+    "player",
+    "player_id",
+    "position",
+    "team_name",
+    "player_game_count",
     # Raw columns used only for derivation
-    "dropbacks", "attempts", "routes", "targets", "scrambles",
-    "designed_yards", "total_touches", "breakaway_yards",
-    "contested_targets", "deep_contested_targets",
-    "zone_grades_pass_route", "man_grades_pass_route",
+    "dropbacks",
+    "attempts",
+    "routes",
+    "targets",
+    "scrambles",
+    "designed_yards",
+    "total_touches",
+    "breakaway_yards",
+    "contested_targets",
+    "deep_contested_targets",
+    "zone_grades_pass_route",
+    "man_grades_pass_route",
     "center_medium_grades_pass",
     # Intermediate filter columns
-    "snap_counts_offense", "snap_counts_defense", "snap_counts_special_teams",
+    "snap_counts_offense",
+    "snap_counts_defense",
+    "snap_counts_special_teams",
 }
 
 NHL_EXCLUDE = {
-    "playerName", "position", "team",
+    "playerName",
+    "position",
+    "team",
 }
 
 NBA_EXCLUDE = {
-    "TEAM_ABBREVIATION", "PLAYER_ID", "GAME_ID", "SEASON_YEAR", "POS",
-    "HOME", "OPP", "WL",
+    "TEAM_ABBREVIATION",
+    "PLAYER_ID",
+    "GAME_ID",
+    "SEASON_YEAR",
+    "POS",
+    "HOME",
+    "OPP",
+    "WL",
 }
 
 WNBA_EXCLUDE = NBA_EXCLUDE.copy()
@@ -131,9 +157,11 @@ def get_nfl_position_data(playerProfile, stats_obj, position):
 
     posProfile = playerProfile.loc[playerProfile.position == position].copy()
     posProfile[filterStat[position]] = (
-        posProfile[filterStat[position]] / posProfile["player_game_count"])
+        posProfile[filterStat[position]] / posProfile["player_game_count"]
+    )
     posProfile = posProfile.loc[
-        posProfile[filterStat[position]] >= posProfile[filterStat[position]].quantile(.25)]
+        posProfile[filterStat[position]] >= posProfile[filterStat[position]].quantile(0.25)
+    ]
 
     gamelog = stats_obj.gamelog.copy()
     pos_gamelog = gamelog[gamelog["player display name"].isin(posProfile.index)]
@@ -146,23 +174,33 @@ def get_nfl_position_data(playerProfile, stats_obj, position):
     }
 
     lookups = precompute_market_lookups(
-        pos_gamelog, "player display name", "opponent", "gameday",
-        target_markets[position], "position", min_games=5)
+        pos_gamelog,
+        "player display name",
+        "opponent",
+        "gameday",
+        target_markets[position],
+        "position",
+        min_games=5,
+    )
 
     return posProfile, lookups
 
 
 # ─── NHL data loading ──────────────────────────────────────────────────────────
 
+
 def get_nhl_position_data(playerProfile, all_players, id_to_name, stats_obj, position):
     """Get position-filtered profile and pre-computed lookups for NHL."""
-    pos_players = [p for p, v in all_players.items()
-                   if v.get("position") == position and p in playerProfile.index]
+    pos_players = [
+        p
+        for p, v in all_players.items()
+        if v.get("position") == position and p in playerProfile.index
+    ]
     posProfile = playerProfile.loc[pos_players].copy()
 
     # Re-index by player name to match gamelog
     posProfile.index = posProfile.index.map(lambda x: id_to_name.get(x, x))
-    posProfile = posProfile[~posProfile.index.duplicated(keep='first')]
+    posProfile = posProfile[~posProfile.index.duplicated(keep="first")]
 
     gamelog = stats_obj.gamelog.copy()
     pos_gamelog = gamelog[gamelog["playerName"].isin(posProfile.index)]
@@ -175,59 +213,85 @@ def get_nhl_position_data(playerProfile, all_players, id_to_name, stats_obj, pos
     }
 
     lookups = precompute_market_lookups(
-        pos_gamelog, "playerName", "opponent", "gameDate",
-        target_markets[position], "position", min_games=5)
+        pos_gamelog,
+        "playerName",
+        "opponent",
+        "gameDate",
+        target_markets[position],
+        "position",
+        min_games=5,
+    )
 
     return posProfile, lookups
 
 
 # ─── NBA / WNBA data loading ───────────────────────────────────────────────────
 
+
 def get_nba_position_data(playerProfile, playerDict, stats_obj, position):
     """Get position-filtered profile and pre-computed lookups for NBA."""
-    pos_players = [p for p, v in playerDict.items()
-                   if v.get("POS") == position and p in playerProfile.index]
+    pos_players = [
+        p for p, v in playerDict.items() if v.get("POS") == position and p in playerProfile.index
+    ]
     posProfile = playerProfile.loc[pos_players].copy()
 
     gamelog = stats_obj.gamelog.copy()
     pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(posProfile.index)]
 
     lookups = precompute_market_lookups(
-        pos_gamelog, "PLAYER_NAME", "OPP", "GAME_DATE",
-        ["fantasy points prizepicks"], "POS", min_games=10)
+        pos_gamelog,
+        "PLAYER_NAME",
+        "OPP",
+        "GAME_DATE",
+        ["fantasy points prizepicks"],
+        "POS",
+        min_games=10,
+    )
 
     return posProfile, lookups
 
 
 def get_wnba_position_data(playerProfile, playerDict, stats_obj, position):
     """Get position-filtered profile and pre-computed lookups for WNBA."""
-    pos_players = [p for p, v in playerDict.items()
-                   if v.get("POS") == position and p in playerProfile.index]
+    pos_players = [
+        p for p, v in playerDict.items() if v.get("POS") == position and p in playerProfile.index
+    ]
     posProfile = playerProfile.loc[pos_players].copy()
 
     gamelog = stats_obj.gamelog.copy()
     pos_gamelog = gamelog[gamelog["PLAYER_NAME"].isin(posProfile.index)]
 
     lookups = precompute_market_lookups(
-        pos_gamelog, "PLAYER_NAME", "OPP", "GAME_DATE",
-        ["fantasy points prizepicks"], "POS", min_games=8)
+        pos_gamelog,
+        "PLAYER_NAME",
+        "OPP",
+        "GAME_DATE",
+        ["fantasy points prizepicks"],
+        "POS",
+        min_games=8,
+    )
 
     return posProfile, lookups
 
 
 # ─── Feature evaluation phases ─────────────────────────────────────────────────
 
-def run_marginal_analysis(current_features, available_features, full_profile,
-                          position, lookups, min_comps=5, max_comps=15):
+
+def run_marginal_analysis(
+    current_features, available_features, full_profile, position, lookups, min_comps=5, max_comps=15
+):
     """
     Test adding each unused feature and removing each current feature.
 
     Returns (baseline_score, additions_list, removals_list).
     """
     baseline_score, baseline_n = score_feature_set(
-        current_features, full_profile, position, lookups, min_comps, max_comps)
-    print(f"  Baseline: {baseline_score:.5f} "
-          f"({baseline_n} players, {len(current_features)} features)")
+        current_features, full_profile, position, lookups, min_comps, max_comps
+    )
+    print(
+        f"  Baseline: {baseline_score:.5f} "
+        f"({baseline_n} players, {len(current_features)} features)"
+    )
 
     unused = [f for f in available_features if f not in current_features]
 
@@ -235,9 +299,10 @@ def run_marginal_analysis(current_features, available_features, full_profile,
     if unused:
         print(f"\n  Testing {len(unused)} feature additions...")
         for feat in tqdm(unused, desc="  Adding", leave=False):
-            test_features = list(current_features) + [feat]
+            test_features = [*list(current_features), feat]
             score, n = score_feature_set(
-                test_features, full_profile, position, lookups, min_comps, max_comps)
+                test_features, full_profile, position, lookups, min_comps, max_comps
+            )
             additions.append((feat, score - baseline_score, score, n))
         additions.sort(key=lambda x: -x[1])
 
@@ -247,21 +312,29 @@ def run_marginal_analysis(current_features, available_features, full_profile,
         for feat in tqdm(current_features, desc="  Removing", leave=False):
             test_features = [f for f in current_features if f != feat]
             score, n = score_feature_set(
-                test_features, full_profile, position, lookups, min_comps, max_comps)
+                test_features, full_profile, position, lookups, min_comps, max_comps
+            )
             removals.append((feat, score - baseline_score, score, n))
         removals.sort(key=lambda x: -x[1])
 
     return baseline_score, additions, removals
 
 
-def greedy_forward_selection(current_features, available_features, full_profile,
-                             position, lookups, min_comps=5, max_comps=15,
-                             max_additions=5, threshold=0.0005):
+def greedy_forward_selection(
+    current_features,
+    available_features,
+    full_profile,
+    position,
+    lookups,
+    min_comps=5,
+    max_comps=15,
+    max_additions=5,
+    threshold=0.0005,
+):
     """Greedily add features that improve the comp quality score."""
     features = list(current_features)
     unused = [f for f in available_features if f not in features]
-    score, _ = score_feature_set(
-        features, full_profile, position, lookups, min_comps, max_comps)
+    score, _ = score_feature_set(features, full_profile, position, lookups, min_comps, max_comps)
     history = [("baseline", score, len(features))]
 
     for step in range(max_additions):
@@ -270,9 +343,8 @@ def greedy_forward_selection(current_features, available_features, full_profile,
 
         best_feat, best_delta = None, 0.0
         for feat in tqdm(unused, desc=f"  Fwd step {step+1}", leave=False):
-            test = features + [feat]
-            s, _ = score_feature_set(
-                test, full_profile, position, lookups, min_comps, max_comps)
+            test = [*features, feat]
+            s, _ = score_feature_set(test, full_profile, position, lookups, min_comps, max_comps)
             delta = s - score
             if delta > best_delta:
                 best_feat, best_delta = feat, delta
@@ -290,13 +362,20 @@ def greedy_forward_selection(current_features, available_features, full_profile,
     return features, score, history
 
 
-def greedy_backward_elimination(current_features, full_profile, position, lookups,
-                                min_comps=5, max_comps=15, max_removals=5,
-                                threshold=0.0005, min_features=5):
+def greedy_backward_elimination(
+    current_features,
+    full_profile,
+    position,
+    lookups,
+    min_comps=5,
+    max_comps=15,
+    max_removals=5,
+    threshold=0.0005,
+    min_features=5,
+):
     """Greedily remove features that improve (or least hurt) the score."""
     features = list(current_features)
-    score, _ = score_feature_set(
-        features, full_profile, position, lookups, min_comps, max_comps)
+    score, _ = score_feature_set(features, full_profile, position, lookups, min_comps, max_comps)
     history = [("baseline", score, len(features))]
 
     for step in range(max_removals):
@@ -306,8 +385,7 @@ def greedy_backward_elimination(current_features, full_profile, position, lookup
         best_feat, best_delta = None, 0.0
         for feat in tqdm(features, desc=f"  Bwd step {step+1}", leave=False):
             test = [f for f in features if f != feat]
-            s, _ = score_feature_set(
-                test, full_profile, position, lookups, min_comps, max_comps)
+            s, _ = score_feature_set(test, full_profile, position, lookups, min_comps, max_comps)
             delta = s - score
             if delta > best_delta:
                 best_feat, best_delta = feat, delta
@@ -326,26 +404,42 @@ def greedy_backward_elimination(current_features, full_profile, position, lookup
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Evaluate feature sets for player comps")
-    parser.add_argument("--league", required=True, choices=["NFL", "NHL", "NBA", "WNBA"],
-                        help="League to evaluate")
-    parser.add_argument("--position", nargs="+", default=None,
-                        help="Position(s) to evaluate (e.g., WR, C W); defaults to all")
-    parser.add_argument("--optimize", action="store_true",
-                        help="Run weight optimization on the best feature set")
-    parser.add_argument("--maxiter", type=int, default=20,
-                        help="Max DE iterations for --optimize (default: 20)")
-    parser.add_argument("--max-additions", type=int, default=5,
-                        help="Max features to add in forward selection (default: 5)")
-    parser.add_argument("--max-removals", type=int, default=5,
-                        help="Max features to remove in backward elimination (default: 5)")
-    parser.add_argument("--save", action="store_true",
-                        help="Save the best feature set to playerCompStats.json")
+    parser = argparse.ArgumentParser(description="Evaluate feature sets for player comps")
+    parser.add_argument(
+        "--league", required=True, choices=["NFL", "NHL", "NBA", "WNBA"], help="League to evaluate"
+    )
+    parser.add_argument(
+        "--position",
+        nargs="+",
+        default=None,
+        help="Position(s) to evaluate (e.g., WR, C W); defaults to all",
+    )
+    parser.add_argument(
+        "--optimize", action="store_true", help="Run weight optimization on the best feature set"
+    )
+    parser.add_argument(
+        "--maxiter", type=int, default=20, help="Max DE iterations for --optimize (default: 20)"
+    )
+    parser.add_argument(
+        "--max-additions",
+        type=int,
+        default=5,
+        help="Max features to add in forward selection (default: 5)",
+    )
+    parser.add_argument(
+        "--max-removals",
+        type=int,
+        default=5,
+        help="Max features to remove in backward elimination (default: 5)",
+    )
+    parser.add_argument(
+        "--save", action="store_true", help="Save the best feature set to playerCompStats.json"
+    )
     args = parser.parse_args()
 
-    with open(pkg_resources.files(data) / "playerCompStats.json", "r") as f:
+    with open(pkg_resources.files(data) / "playerCompStats.json") as f:
         current_weights = json.load(f)
 
     # Load league data once
@@ -396,20 +490,22 @@ def main():
 
         # Get position data
         if args.league == "NFL":
-            pos_profile, lookups = get_nfl_position_data(
-                full_profile, stats_obj, position)
+            pos_profile, lookups = get_nfl_position_data(full_profile, stats_obj, position)
             min_comps = 5
         elif args.league == "NHL":
             pos_profile, lookups = get_nhl_position_data(
-                full_profile, all_players, id_to_name, stats_obj, position)
+                full_profile, all_players, id_to_name, stats_obj, position
+            )
             min_comps = 4 if position == "G" else 5
         elif args.league == "NBA":
             pos_profile, lookups = get_nba_position_data(
-                full_profile, player_dict, stats_obj, position)
+                full_profile, player_dict, stats_obj, position
+            )
             min_comps = 5
         elif args.league == "WNBA":
             pos_profile, lookups = get_wnba_position_data(
-                full_profile, player_dict, stats_obj, position)
+                full_profile, player_dict, stats_obj, position
+            )
             min_comps = 5
 
         player_opp_z, player_games, player_positions = lookups
@@ -419,8 +515,7 @@ def main():
 
         # Discover all available features
         available = discover_numeric_features(pos_profile)
-        available_names = [f for f, _, _ in available
-                          if f not in exclude]
+        available_names = [f for f, _, _ in available if f not in exclude]
         unused = [f for f in available_names if f not in current_features]
         print(f"\n  Available features: {len(available_names)}")
         print(f"  Unused candidates ({len(unused)}):")
@@ -429,39 +524,58 @@ def main():
                 print(f"    {f:<40s} coverage={cov:.0%}  unique={uniq}")
 
         # ── Phase 1: Marginal analysis ──
-        print(f"\n  Phase 1: Marginal Analysis")
+        print("\n  Phase 1: Marginal Analysis")
         print(f"  {'-'*50}")
         baseline, additions, removals = run_marginal_analysis(
-            current_features, available_names, pos_profile, position, lookups,
-            min_comps=min_comps, max_comps=15)
+            current_features,
+            available_names,
+            pos_profile,
+            position,
+            lookups,
+            min_comps=min_comps,
+            max_comps=15,
+        )
 
         if additions:
-            print(f"\n  Feature additions (sorted by improvement):")
+            print("\n  Feature additions (sorted by improvement):")
             print(f"  {'Feature':<40s} {'Delta':>8s} {'Score':>8s} {'N':>5s}")
             for feat, delta, score, n in additions:
                 marker = " <<<" if delta > 0.001 else ""
                 print(f"  {feat:<40s} {delta:>+8.5f} {score:>8.5f} {n:>5d}{marker}")
 
         if removals:
-            print(f"\n  Feature removals (sorted by improvement):")
+            print("\n  Feature removals (sorted by improvement):")
             print(f"  {'Feature':<40s} {'Delta':>8s} {'Score':>8s} {'N':>5s}")
             for feat, delta, score, n in removals:
                 marker = " <<<" if delta > 0.001 else ""
                 print(f"  {feat:<40s} {delta:>+8.5f} {score:>8.5f} {n:>5d}{marker}")
 
         # ── Phase 2: Greedy forward selection ──
-        print(f"\n  Phase 2: Greedy Forward Selection")
+        print("\n  Phase 2: Greedy Forward Selection")
         print(f"  {'-'*50}")
         fwd_features, fwd_score, fwd_history = greedy_forward_selection(
-            current_features, available_names, pos_profile, position, lookups,
-            min_comps=min_comps, max_comps=15, max_additions=args.max_additions)
+            current_features,
+            available_names,
+            pos_profile,
+            position,
+            lookups,
+            min_comps=min_comps,
+            max_comps=15,
+            max_additions=args.max_additions,
+        )
 
         # ── Phase 3: Greedy backward elimination ──
-        print(f"\n  Phase 3: Greedy Backward Elimination")
+        print("\n  Phase 3: Greedy Backward Elimination")
         print(f"  {'-'*50}")
         best_features, best_score, bwd_history = greedy_backward_elimination(
-            fwd_features, pos_profile, position, lookups,
-            min_comps=min_comps, max_comps=15, max_removals=args.max_removals)
+            fwd_features,
+            pos_profile,
+            position,
+            lookups,
+            min_comps=min_comps,
+            max_comps=15,
+            max_removals=args.max_removals,
+        )
 
         # ── Summary ──
         print(f"\n  {'='*50}")
@@ -478,37 +592,46 @@ def main():
         if removed:
             print(f"  Removed: {removed}")
         if not added and not removed:
-            print(f"  No changes recommended")
+            print("  No changes recommended")
 
-        print(f"\n  Best feature set:")
+        print("\n  Best feature set:")
         for feat in best_features:
             tag = " (NEW)" if feat in added else ""
             print(f"    {feat}{tag}")
 
         # ── Phase 4: Optional weight optimization ──
         if args.optimize and (best_score > baseline or added or removed):
-            print(f"\n  Phase 4: Weight Optimization on best feature set")
+            print("\n  Phase 4: Weight Optimization on best feature set")
             print(f"  {'-'*50}")
 
             profile = pos_profile[best_features].copy()
             for col in profile.columns:
-                profile[col] = pd.to_numeric(profile[col], errors='coerce')
+                profile[col] = pd.to_numeric(profile[col], errors="coerce")
             profile = profile.dropna()
             z_profile = profile.apply(
-                lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0, axis=0)
+                lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0, axis=0
+            )
             z_profile = z_profile.replace([np.inf, -np.inf], np.nan).dropna()
 
             init_weights = np.ones(len(best_features))
 
             best_w, opt_score, eq_score = optimize_position_weights(
-                z_profile, player_opp_z, player_games, player_positions,
-                position, best_features, init_weights,
-                min_comps=min_comps, max_comps=20,
-                maxiter=args.maxiter, popsize=8)
+                z_profile,
+                player_opp_z,
+                player_games,
+                player_positions,
+                position,
+                best_features,
+                init_weights,
+                min_comps=min_comps,
+                max_comps=20,
+                maxiter=args.maxiter,
+                popsize=8,
+            )
 
             print(f"\n  Equal-weight score:     {eq_score:.5f}")
             print(f"  Optimized-weight score: {opt_score:.5f}")
-            print(f"\n  Optimized weights:")
+            print("\n  Optimized weights:")
             for f, w in sorted(best_w.items(), key=lambda x: -x[1]):
                 tag = " (NEW)" if f in added else ""
                 print(f"    {f:<40s} {w:>5.1f}{tag}")

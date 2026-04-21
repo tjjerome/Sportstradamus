@@ -1,11 +1,13 @@
+import importlib.resources as pkg_resources
+import os.path
+
+import gspread
 import pandas as pd
 import requests
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-import gspread
-import os.path
-import importlib.resources as pkg_resources
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+
 from sportstradamus import creds
 
 # Authorize the gspread API
@@ -16,7 +18,7 @@ SCOPES = [
 cred = None
 
 # Check if token.json file exists and load credentials
-if os.path.exists((pkg_resources.files(creds) / "token.json")):
+if os.path.exists(pkg_resources.files(creds) / "token.json"):
     cred = Credentials.from_authorized_user_file(
         (pkg_resources.files(creds) / "token.json"), SCOPES
     )
@@ -41,11 +43,14 @@ url = "https://stats.underdogfantasy.com/v1/slates/71dbd531-99ea-4a1a-b7b4-f4f51
 
 res = requests.get(url).json()
 
-api_df = pd.json_normalize(res, record_path='appearances', record_prefix='appearances.')
-api_df['appearances.badges'] = ""
-api_df = api_df[[col for col in api_df.columns if col not in ['appearances.score', 'appearances.team_id']]+['appearances.score', 'appearances.team_id']]
-api_df.update(api_df.apply(pd.to_numeric, errors='coerce'))
+api_df = pd.json_normalize(res, record_path="appearances", record_prefix="appearances.")
+api_df["appearances.badges"] = ""
+api_df = api_df[
+    [col for col in api_df.columns if col not in ["appearances.score", "appearances.team_id"]]
+    + ["appearances.score", "appearances.team_id"]
+]
+api_df.update(api_df.apply(pd.to_numeric, errors="coerce"))
 
 wks = gc.open("Best Ball Made EZ").worksheet("UD Apps")
 wks.clear()
-wks.update([api_df.columns.values.tolist()] + api_df.values.tolist())
+wks.update([api_df.columns.values.tolist(), *api_df.values.tolist()])

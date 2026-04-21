@@ -21,7 +21,6 @@ from sportstradamus.dashboard import run as dashboard_cli
 from sportstradamus.nightly import run as reflect_cli
 from sportstradamus.sportstradamus import main as prophecize_cli
 from sportstradamus.train import meditate as meditate_cli
-
 from tests.golden.conftest import read_snapshot, write_snapshot
 
 CLI_CASES = [

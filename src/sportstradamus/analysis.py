@@ -3,20 +3,20 @@
 Extracted from analyze_parlay_hist.py with additional professional forecasting
 metrics (CRPS, Brier Skill Score, Murphy decomposition, prediction intervals).
 """
-import pandas as pd
-import numpy as np
+
 import re
 from datetime import datetime, timedelta
-from tqdm import tqdm
-from scipy.stats import nbinom, gamma as gamma_dist
-from scipy.special import expit, logit
+
+import numpy as np
+import pandas as pd
+from scipy.stats import gamma as gamma_dist
+from scipy.stats import nbinom
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
+from tqdm import tqdm
 
 from sportstradamus.helpers import get_odds
 
-LEG_PATTERN = re.compile(
-    r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%"
-)
+LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
 PAYOUT_TABLE = {
     "Underdog": [
@@ -53,23 +53,24 @@ def check_bet(bet, stats, stat_map):
 
     new_map = stat_map.get(bet.Platform, {}).copy()
     if bet.League == "NHL":
-        new_map.update({
-            "Points": "points",
-            "Blocked Shots": "blocked",
-            "Assists": "assists",
-        })
+        new_map.update(
+            {
+                "Points": "points",
+                "Blocked Shots": "blocked",
+                "Assists": "assists",
+            }
+        )
     if bet.League in ("NBA", "WNBA"):
-        new_map.update({
-            "Fantasy Points": "fantasy points prizepicks",
-        })
+        new_map.update(
+            {
+                "Fantasy Points": "fantasy points prizepicks",
+            }
+        )
 
     gamelog = stat_obj.gamelog
     game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
     bet_date = pd.to_datetime(bet.Date).date()
-    game = gamelog.loc[
-        (game_dates == bet_date) &
-        (gamelog[ls["team"]].isin(bet.Game.split("/")))
-    ]
+    game = gamelog.loc[(game_dates == bet_date) & (gamelog[ls["team"]].isin(bet.Game.split("/")))]
 
     if game.empty:
         return np.nan, np.nan
@@ -133,8 +134,19 @@ def _migrate_flat_history(history):
     """
     pred_key = ["Player", "League", "Date", "Market"]
     offer_cols = ["Line", "Boost", "Platform", "Bet", "Model P", "Books P"]
-    pred_cols = ["Team", "Model EV", "Books EV", "Dist", "CV", "Model Param",
-                 "Gate", "Temperature", "Disp Cal", "Step", "Actual"]
+    pred_cols = [
+        "Team",
+        "Model EV",
+        "Books EV",
+        "Dist",
+        "CV",
+        "Model Param",
+        "Gate",
+        "Temperature",
+        "Disp Cal",
+        "Step",
+        "Actual",
+    ]
 
     # Ensure columns exist
     for col in offer_cols + pred_cols + ["Actual"]:
@@ -160,20 +172,25 @@ def _migrate_flat_history(history):
             line = r.get("Line")
             if pd.isna(line):
                 continue
-            offers.append((
-                float(line),
-                float(r.get("Boost", 1)),
-                str(r.get("Platform", "")),
-                str(r.get("Bet", "")),
-                float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
-                float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
-            ))
+            offers.append(
+                (
+                    float(line),
+                    float(r.get("Boost", 1)),
+                    str(r.get("Platform", "")),
+                    str(r.get("Bet", "")),
+                    float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
+                    float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
+                )
+            )
 
         # Dedup offers by (Line, Platform)
         offers = _dedup_offers(offers)
 
         row = {
-            "Player": player, "League": league, "Date": date, "Market": market,
+            "Player": player,
+            "League": league,
+            "Date": date,
+            "Market": market,
             "Offers": offers,
         }
         for col in pred_cols:
@@ -181,7 +198,7 @@ def _migrate_flat_history(history):
 
         # Try to recover Actual from old Result column
         if pd.isna(row.get("Actual")) and "Result" in grp.columns:
-            result = latest.get("Result")
+            latest.get("Result")
             # Can't recover numeric Actual from Over/Under, but mark as resolved
             # so resolve_history will skip it if Actual is still NaN
             pass
@@ -237,24 +254,28 @@ def explode_offers(history):
             # Derive result from actual vs line
             if pd.notna(actual) and pd.notna(line):
                 if " vs. " in str(pred.get("Player", "")):
-                    result = "Over" if (actual + line) > 0 else (
-                        "Under" if (actual + line) < 0 else "Push")
+                    result = (
+                        "Over"
+                        if (actual + line) > 0
+                        else ("Under" if (actual + line) < 0 else "Push")
+                    )
                 else:
-                    result = "Over" if actual > line else (
-                        "Under" if actual < line else "Push")
+                    result = "Over" if actual > line else ("Under" if actual < line else "Push")
             else:
                 result = np.nan
 
             row = {col: pred[col] for col in pred_cols}
-            row.update({
-                "Line": line,
-                "Boost": boost,
-                "Platform": platform,
-                "Bet": bet,
-                "Model P": model_p,
-                "Books P": books_p,
-                "Result": result,
-            })
+            row.update(
+                {
+                    "Line": line,
+                    "Boost": boost,
+                    "Platform": platform,
+                    "Bet": bet,
+                    "Model P": model_p,
+                    "Books P": books_p,
+                    "Result": result,
+                }
+            )
             rows.append(row)
 
     if not rows:
@@ -264,9 +285,9 @@ def explode_offers(history):
     if "Result" in exploded.columns and "Bet" in exploded.columns:
         resolved = exploded.dropna(subset=["Result", "Bet"])
         if not resolved.empty:
-            exploded.loc[resolved.index, "Hit"] = (
-                resolved["Bet"] == resolved["Result"]
-            ).astype(int)
+            exploded.loc[resolved.index, "Hit"] = (resolved["Bet"] == resolved["Result"]).astype(
+                int
+            )
     # Derive Kelly-relevant columns
     if "Model P" in exploded.columns and "Boost" in exploded.columns:
         exploded["Model"] = exploded["Model P"] * exploded["Boost"]
@@ -285,8 +306,8 @@ def resolve_history(history, stats):
         history["Actual"] = np.nan
 
     pending = history.loc[
-        history["Actual"].isna() &
-        (pd.to_datetime(history["Date"], errors="coerce").dt.date < datetime.today().date())
+        history["Actual"].isna()
+        & (pd.to_datetime(history["Date"], errors="coerce").dt.date < datetime.today().date())
     ]
 
     for i, row in tqdm(pending.iterrows(), desc="Checking history", total=len(pending)):
@@ -302,35 +323,45 @@ def resolve_history(history, stats):
             if " + " in row["Player"]:
                 players = row["Player"].split(" + ")
                 g1 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[0]) &
-                    (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
+                    (gamelog[ls["player"]] == players[0])
+                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
                 ]
                 g2 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[1]) &
-                    (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
+                    (gamelog[ls["player"]] == players[1])
+                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
                 ]
-                if g1.empty or g2.empty or g1[row["Market"]].isna().any() or g2[row["Market"]].isna().any():
+                if (
+                    g1.empty
+                    or g2.empty
+                    or g1[row["Market"]].isna().any()
+                    or g2[row["Market"]].isna().any()
+                ):
                     continue
                 history.at[i, "Actual"] = g1.iloc[0][row["Market"]] + g2.iloc[0][row["Market"]]
 
             elif " vs. " in row["Player"]:
                 players = row["Player"].split(" vs. ")
                 g1 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[0]) &
-                    (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
+                    (gamelog[ls["player"]] == players[0])
+                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
                 ]
                 g2 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[1]) &
-                    (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
+                    (gamelog[ls["player"]] == players[1])
+                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
                 ]
-                if g1.empty or g2.empty or g1[row["Market"]].isna().any() or g2[row["Market"]].isna().any():
+                if (
+                    g1.empty
+                    or g2.empty
+                    or g1[row["Market"]].isna().any()
+                    or g2[row["Market"]].isna().any()
+                ):
                     continue
                 history.at[i, "Actual"] = g1.iloc[0][row["Market"]] - g2.iloc[0][row["Market"]]
 
             else:
                 g = gamelog.loc[
-                    (gamelog[ls["player"]] == row["Player"]) &
-                    (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
+                    (gamelog[ls["player"]] == row["Player"])
+                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
                 ]
                 if g.empty or g[row["Market"]].isna().any():
                     continue
@@ -368,7 +399,9 @@ def compute_individual_metrics(history):
     if len(history) == 0:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    prob_col = "Model P" if "Model P" in history.columns and history["Model P"].notna().any() else "Model"
+    prob_col = (
+        "Model P" if "Model P" in history.columns and history["Model P"].notna().any() else "Model"
+    )
     today = datetime.today().date()
     history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
     history = history.loc[history["_date"].notna()].copy()
@@ -407,19 +440,25 @@ def compute_individual_metrics(history):
 
     hist_stats = pd.DataFrame(rows)
     if not hist_stats.empty:
-        hist_stats = hist_stats[["Period", "Split", "Accuracy", "Balance", "LogLoss", "Brier", "ROI", "Samples"]]
+        hist_stats = hist_stats[
+            ["Period", "Split", "Accuracy", "Balance", "LogLoss", "Brier", "ROI", "Samples"]
+        ]
 
     # --- Daily granular data for time series charting ---
     one_year = filtered.loc[filtered["_date"] >= today - timedelta(days=365)].copy()
     one_year["Hit"] = (one_year["Bet"] == one_year["Result"]).astype(int)
     one_year["Profit Unit"] = one_year["Hit"] * (100 / 110) - (1 - one_year["Hit"])
 
-    daily = one_year.groupby(["_date", "League", "Market"]).agg(
-        Bets=("Hit", "count"),
-        Hits=("Hit", "sum"),
-        Avg_Model_P=(prob_col, "mean"),
-        Profit=("Profit Unit", "sum"),
-    ).reset_index()
+    daily = (
+        one_year.groupby(["_date", "League", "Market"])
+        .agg(
+            Bets=("Hit", "count"),
+            Hits=("Hit", "sum"),
+            Avg_Model_P=(prob_col, "mean"),
+            Profit=("Profit Unit", "sum"),
+        )
+        .reset_index()
+    )
     daily.rename(columns={"_date": "Date"}, inplace=True)
     daily["Date"] = daily["Date"].astype(str)
     daily = daily.sort_values(["Date", "League", "Market"])
@@ -428,11 +467,15 @@ def compute_individual_metrics(history):
     cal_data = one_year.copy()
     bins = np.linspace(0.5, 1.0, 11)
     cal_data["bin"] = pd.cut(cal_data[prob_col], bins=bins)
-    calibration = cal_data.groupby("bin", observed=False).agg(
-        Predicted=(prob_col, "mean"),
-        Actual=("Hit", "mean"),
-        Count=("Hit", "count"),
-    ).reset_index()
+    calibration = (
+        cal_data.groupby("bin", observed=False)
+        .agg(
+            Predicted=(prob_col, "mean"),
+            Actual=("Hit", "mean"),
+            Count=("Hit", "count"),
+        )
+        .reset_index()
+    )
     calibration["Bin"] = calibration["bin"].astype(str)
     calibration = calibration[["Bin", "Predicted", "Actual", "Count"]]
 
@@ -443,21 +486,26 @@ def compute_individual_metrics(history):
             cutoff = today - timedelta(days=tf_days)
             for label_filter, subset in [
                 ("All", history.loc[history["_date"] >= cutoff]),
-                ("Book Filtered", history.loc[(history["_date"] >= cutoff) & (history["Books"] > 0.52)]),
+                (
+                    "Book Filtered",
+                    history.loc[(history["_date"] >= cutoff) & (history["Books"] > 0.52)],
+                ),
             ]:
                 t_sub = subset.loc[subset["Model"] > threshold]
                 if len(t_sub) == 0:
                     continue
                 wins = (t_sub["Bet"] == t_sub["Result"]).sum()
                 profit = wins * (100 / 110) - (len(t_sub) - wins)
-                roi_rows.append({
-                    "Period": tf_label,
-                    "Threshold": threshold,
-                    "Filter": label_filter,
-                    "Bets": len(t_sub),
-                    "Win%": round(wins / len(t_sub), 4),
-                    "ROI": round(profit / len(t_sub), 4),
-                })
+                roi_rows.append(
+                    {
+                        "Period": tf_label,
+                        "Threshold": threshold,
+                        "Filter": label_filter,
+                        "Bets": len(t_sub),
+                        "Win%": round(wins / len(t_sub), 4),
+                        "ROI": round(profit / len(t_sub), 4),
+                    }
+                )
     roi = pd.DataFrame(roi_rows)
 
     return hist_stats, daily, calibration, roi
@@ -497,14 +545,17 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     if len(ud_parlays) > 0:
         ud_parlays["Profit"] = ud_parlays.apply(
             lambda x: np.clip(
-                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses] *
-                (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
-                None, 100
-            ) - 1, axis=1
+                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
+                * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
+                None,
+                100,
+            )
+            - 1,
+            axis=1,
         )
         ud_parlays["Profit"] = ud_parlays["Profit"] * np.round(ud_parlays["Rec Bet"] * 2) / 2
 
-        for league in ["All"] + sorted(ud_parlays["League"].unique()):
+        for league in ["All", *sorted(ud_parlays["League"].unique())]:
             ldf = ud_parlays if league == "All" else ud_parlays.loc[ud_parlays["League"] == league]
             if ldf.empty:
                 continue
@@ -512,16 +563,22 @@ def compute_parlay_metrics(parlays, stats, stat_map):
                 cutoff = today - timedelta(days=tf_days)
                 tf_df = ldf.loc[ldf["_date"] >= cutoff]
                 if not tf_df.empty:
-                    p = tf_df.sort_values("Model EV", ascending=False).groupby(
-                        ["Game", "Date"]).apply(lambda x: x.Profit.mean()).sum()
-                    profit_rows.append({
-                        "Platform": "Underdog",
-                        "League": league,
-                        "Period": tf_label,
-                        "Profit": round(p, 2),
-                        "Parlays": len(tf_df),
-                        "Hit Rate": round(tf_df["Hit"].mean(), 4),
-                    })
+                    p = (
+                        tf_df.sort_values("Model EV", ascending=False)
+                        .groupby(["Game", "Date"])
+                        .apply(lambda x: x.Profit.mean())
+                        .sum()
+                    )
+                    profit_rows.append(
+                        {
+                            "Platform": "Underdog",
+                            "League": league,
+                            "Period": tf_label,
+                            "Profit": round(p, 2),
+                            "Parlays": len(tf_df),
+                            "Hit Rate": round(tf_df["Hit"].mean(), 4),
+                        }
+                    )
 
     profit_df = pd.DataFrame(profit_rows)
 
@@ -529,13 +586,17 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     daily_rows = []
     for platform in parlays["Platform"].unique():
         plat_df = parlays.loc[parlays["Platform"] == platform]
-        daily_plat = plat_df.groupby(["_date", "League"]).agg(
-            Parlays=("Hit", "count"),
-            Hits=("Hit", "sum"),
-            Misses_0=("Misses", lambda x: (x == 0).sum()),
-            Misses_1=("Misses", lambda x: (x == 1).sum()),
-            Misses_2_plus=("Misses", lambda x: (x >= 2).sum()),
-        ).reset_index()
+        daily_plat = (
+            plat_df.groupby(["_date", "League"])
+            .agg(
+                Parlays=("Hit", "count"),
+                Hits=("Hit", "sum"),
+                Misses_0=("Misses", lambda x: (x == 0).sum()),
+                Misses_1=("Misses", lambda x: (x == 1).sum()),
+                Misses_2_plus=("Misses", lambda x: (x >= 2).sum()),
+            )
+            .reset_index()
+        )
         daily_plat["Platform"] = platform
         daily_plat.rename(columns={"_date": "Date"}, inplace=True)
         daily_rows.append(daily_plat)
@@ -543,8 +604,18 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     if daily_rows:
         daily_parlays = pd.concat(daily_rows, ignore_index=True)
         daily_parlays["Date"] = daily_parlays["Date"].astype(str)
-        daily_parlays = daily_parlays[["Date", "Platform", "League", "Parlays", "Hits",
-                                       "Misses_0", "Misses_1", "Misses_2_plus"]].sort_values(["Date", "Platform", "League"])
+        daily_parlays = daily_parlays[
+            [
+                "Date",
+                "Platform",
+                "League",
+                "Parlays",
+                "Hits",
+                "Misses_0",
+                "Misses_1",
+                "Misses_2_plus",
+            ]
+        ].sort_values(["Date", "Platform", "League"])
     else:
         daily_parlays = pd.DataFrame()
 
@@ -575,7 +646,9 @@ def compute_parlay_metrics(parlays, stats, stat_map):
                     row["Independent Rate"] = round(size_df["Indep P"].mean(), 4)
                 elif "Leg Probs" in parlays.columns and size_df["Leg Probs"].notna().any():
                     indep = size_df["Leg Probs"].apply(
-                        lambda lp: np.prod(lp) if isinstance(lp, (list, tuple)) and len(lp) > 0 else np.nan
+                        lambda lp: np.prod(lp)
+                        if isinstance(lp, list | tuple) and len(lp) > 0
+                        else np.nan
                     )
                     row["Independent Rate"] = round(indep.mean(), 4)
                 size_rows.append(row)
@@ -586,11 +659,15 @@ def compute_parlay_metrics(parlays, stats, stat_map):
         cal_df = parlays.copy()
         bins = np.linspace(0, 1, 11)
         cal_df["p_bin"] = pd.cut(cal_df["P"], bins=bins)
-        corr_cal = cal_df.groupby("p_bin", observed=False).agg(
-            Predicted=("P", "mean"),
-            Actual=("Hit", "mean"),
-            Count=("Hit", "count"),
-        ).reset_index()
+        corr_cal = (
+            cal_df.groupby("p_bin", observed=False)
+            .agg(
+                Predicted=("P", "mean"),
+                Actual=("Hit", "mean"),
+                Count=("Hit", "count"),
+            )
+            .reset_index()
+        )
         corr_cal["Bin"] = corr_cal["p_bin"].astype(str)
         corr_cal = corr_cal[["Bin", "Predicted", "Actual", "Count"]]
     else:
@@ -605,6 +682,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
 # ---------------------------------------------------------------------------
 # Professional forecasting metrics
 # ---------------------------------------------------------------------------
+
 
 def reconstruct_prob(row, line=None):
     """Reconstruct P(outcome <= line) from saved distribution parameters.
@@ -734,7 +812,9 @@ def compute_crps_row(row):
                 base = gamma_dist.cdf(x, alpha, scale=1 / beta)
                 return gate + (1 - gate) * base
 
-            integrand = lambda x: (_cdf(x) - (1 if x >= y else 0)) ** 2
+            def integrand(x):
+                return (_cdf(x) - (1 if x >= y else 0)) ** 2
+
             crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
             return crps
 
@@ -744,10 +824,15 @@ def compute_crps_row(row):
         # where F is Gamma(alpha, beta) CDF, F_a1 is Gamma(alpha+1, beta) CDF,
         # and B is the Beta function
         from scipy.special import beta as beta_fn
+
         scale = 1 / beta
         cdf_y = gamma_dist.cdf(y, alpha, scale=scale)
         cdf_y_a1 = gamma_dist.cdf(y, alpha + 1, scale=scale)
-        crps = y * (2 * cdf_y - 1) - (alpha / beta) * (2 * cdf_y_a1 - 1) - 1 / (beta * beta_fn(0.5, alpha))
+        crps = (
+            y * (2 * cdf_y - 1)
+            - (alpha / beta) * (2 * cdf_y_a1 - 1)
+            - 1 / (beta * beta_fn(0.5, alpha))
+        )
         return crps
 
 
@@ -760,7 +845,9 @@ def compute_brier_skill_score(subset, base_rate=0.5):
     if len(subset) == 0:
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
-    prob_col = "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+    prob_col = (
+        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+    )
     brier = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_ref = base_rate * (1 - base_rate)
     if brier_ref == 0:
@@ -779,7 +866,9 @@ def murphy_decomposition(subset):
     if len(subset) == 0:
         return {"Reliability": np.nan, "Resolution": np.nan, "Uncertainty": np.nan, "Brier": np.nan}
 
-    prob_col = "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+    prob_col = (
+        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+    )
     hits = (subset["Bet"] == subset["Result"]).astype(float)
     probs = subset[prob_col].clip(0, 1).values
     bar_o = hits.mean()

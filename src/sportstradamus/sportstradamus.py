@@ -1,37 +1,48 @@
+from sportstradamus.books import get_sleeper, get_ud
+from sportstradamus.helpers import (
+    Archive,
+    banned,
+    fused_loc,
+    get_ev,
+    get_odds,
+    set_model_start_values,
+    stat_cv,
+    stat_map,
+    stat_std,
+    stat_zi,
+)
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsNBA, StatsMLB, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.books import get_pp, get_ud, get_sleeper, get_parp
-from sportstradamus.helpers import Archive, fused_loc, get_ev, get_odds, stat_cv, stat_std, stat_zi, stat_map, banned, set_model_start_values
+from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
 archive = Archive()
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-import gspread
-import click
-import re
-from scipy.stats import poisson, nbinom, skellam, norm, gamma, hmean, multivariate_normal, skewnorm
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.special import softmax, logit, expit
-from math import comb
-import numpy as np
-import pickle
-import json
-from sportstradamus import creds, data
-from functools import partialmethod
-from tqdm import tqdm
-import pandas as pd
-import os.path
 import datetime
 import importlib.resources as pkg_resources
+import os.path
+import pickle
+import re
 import warnings
+from functools import partialmethod
 from itertools import combinations
+from math import comb
 from operator import itemgetter
-from time import time
-import line_profiler
 
-pd.set_option('mode.chained_assignment', None)
-pd.set_option('future.no_silent_downcasting', True)
+import click
+import gspread
+import line_profiler
+import numpy as np
+import pandas as pd
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.special import expit, logit
+from scipy.stats import gamma, hmean, multivariate_normal, nbinom, norm, poisson, skellam
+from tqdm import tqdm
+
+from sportstradamus import creds, data
+
+pd.set_option("mode.chained_assignment", None)
+pd.set_option("future.no_silent_downcasting", True)
 os.environ["LINE_PROFILE"] = "0"
 
 
@@ -50,7 +61,7 @@ def main(progress):
     cred = None
 
     # Check if token.json file exists and load credentials
-    if os.path.exists((pkg_resources.files(creds) / "token.json")):
+    if os.path.exists(pkg_resources.files(creds) / "token.json"):
         cred = Credentials.from_authorized_user_file(
             (pkg_resources.files(creds) / "token.json"), SCOPES
         )
@@ -125,7 +136,7 @@ def main(progress):
     #     save_data(pp_offers, pp5.drop(columns=["P", "PB"]), "PrizePicks", gc)
     #     parlay_df = pd.concat([parlay_df, pp5])
     #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-        # all_offers.append(pp_offers)
+    # all_offers.append(pp_offers)
     # except Exception as exc:
     #     logger.exception("Failed to get PrizePicks")
 
@@ -133,31 +144,77 @@ def main(progress):
 
     try:
         ud_dict = get_ud()
-        ud_offers, ud5 = process_offers(
-            ud_dict, "Underdog", stats)
-        save_data(ud_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step", "Player position", "K"], errors="ignore"), ud5.drop(columns=["P", "PB"]), "Underdog", gc)
+        ud_offers, ud5 = process_offers(ud_dict, "Underdog", stats)
+        save_data(
+            ud_offers.drop(
+                columns=[
+                    "Model EV",
+                    "Model Param",
+                    "Books EV",
+                    "Model P",
+                    "Books P",
+                    "Dist",
+                    "CV",
+                    "Gate",
+                    "Temperature",
+                    "Disp Cal",
+                    "Step",
+                    "Player position",
+                    "K",
+                ],
+                errors="ignore",
+            ),
+            ud5.drop(columns=["P", "PB"]),
+            "Underdog",
+            gc,
+        )
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"] = 1.78*ud_offers.loc[ud_offers["Bet"]=="Over", "Boost"]
-        ud_offers.loc[ud_offers["Bet"]=="Under", "Boost"] = 1.78/ud_offers.loc[ud_offers["Bet"]=="Under", "Boost"]
+        ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"] = (
+            1.78 * ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"]
+        )
+        ud_offers.loc[ud_offers["Bet"] == "Under", "Boost"] = (
+            1.78 / ud_offers.loc[ud_offers["Bet"] == "Under", "Boost"]
+        )
         ud_offers["Platform"] = "Underdog"
         all_offers.append(ud_offers)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to get Underdog")
 
     # Sleeper
 
     try:
         sl_dict = get_sleeper()
-        sl_offers, sl5 = process_offers(
-            sl_dict, "Sleeper", stats)
-        save_data(sl_offers.drop(columns=["Model EV", "Model Param", "Books EV", "Model P", "Books P", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step"], errors="ignore"), sl5.drop(columns=["P", "PB"]), "Sleeper", gc)
+        sl_offers, sl5 = process_offers(sl_dict, "Sleeper", stats)
+        save_data(
+            sl_offers.drop(
+                columns=[
+                    "Model EV",
+                    "Model Param",
+                    "Books EV",
+                    "Model P",
+                    "Books P",
+                    "Dist",
+                    "CV",
+                    "Gate",
+                    "Temperature",
+                    "Disp Cal",
+                    "Step",
+                ],
+                errors="ignore",
+            ),
+            sl5.drop(columns=["P", "PB"]),
+            "Sleeper",
+            gc,
+        )
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
-        sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"] = 1.78*1.78/sl_offers.loc[sl_offers["Bet"]=="Under", "Boost"]
+        sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"] = (
+            1.78 * 1.78 / sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"]
+        )
         sl_offers["Platform"] = "Sleeper"
         all_offers.append(sl_offers)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to get Sleeper")
 
     # ParlayPlay
@@ -175,30 +232,48 @@ def main(progress):
 
     if len(all_offers) > 0:
         df = pd.concat(all_offers)
-        df = df[["League", "Date", "Team", "Opponent", "Player", "Market", "Model EV", "Model Param", "Line", "Boost", "Bet"]]
+        df = df[
+            [
+                "League",
+                "Date",
+                "Team",
+                "Opponent",
+                "Player",
+                "Market",
+                "Model EV",
+                "Model Param",
+                "Line",
+                "Boost",
+                "Bet",
+            ]
+        ]
         df["Bet"] = "Over"
-        df = df.sort_values(["League", "Date", "Team", "Player", "Market"]).drop_duplicates(["Player", "League", "Date", "Market"],
-                                                                                    ignore_index=True, keep="last").dropna()
+        df = (
+            df.sort_values(["League", "Date", "Team", "Player", "Market"])
+            .drop_duplicates(["Player", "League", "Date", "Market"], ignore_index=True, keep="last")
+            .dropna()
+        )
         # Drop rows with non-finite floats (Inf/-Inf) so gspread can JSON-serialize
         df = df.replace([np.inf, -np.inf], np.nan).dropna()
         wks = gc.open("Sportstradamus").worksheet("Projections")
         wks.batch_clear(["A:K"])
-        wks.update([df.columns.values.tolist()] + df.values.tolist())
-            
+        wks.update([df.columns.values.tolist(), *df.values.tolist()])
 
     if not parlay_df.empty:
         parlay_df.sort_values("Model EV", ascending=False, inplace=True)
         parlay_df.drop_duplicates(inplace=True)
         parlay_df.reset_index(drop=True, inplace=True)
         parlay_df[["Legs", "Misses", "Profit"]] = np.nan
-        
+
         wks = gc.open("Sportstradamus").worksheet("Parlay Search")
         wks.batch_clear(["J7:J50"])
 
         filepath = pkg_resources.files(data) / "parlay_hist.dat"
         if os.path.isfile(filepath):
             old5 = pd.read_pickle(filepath)
-            parlay_df = pd.concat([parlay_df, old5], ignore_index=True).drop_duplicates(subset=["Model EV", "Books EV"], ignore_index=True)
+            parlay_df = pd.concat([parlay_df, old5], ignore_index=True).drop_duplicates(
+                subset=["Model EV", "Books EV"], ignore_index=True
+            )
 
         parlay_df.to_pickle(filepath)
 
@@ -214,22 +289,47 @@ def main(progress):
             history = _migrate_flat_history(history)
     else:
         history = pd.DataFrame(
-            columns=["Player", "League", "Team", "Date", "Market",
-                     "Model EV", "Books EV", "Dist", "CV", "Model Param",
-                     "Gate", "Temperature", "Disp Cal", "Step", "Offers", "Actual"])
+            columns=[
+                "Player",
+                "League",
+                "Team",
+                "Date",
+                "Market",
+                "Model EV",
+                "Books EV",
+                "Dist",
+                "CV",
+                "Model Param",
+                "Gate",
+                "Temperature",
+                "Disp Cal",
+                "Step",
+                "Offers",
+                "Actual",
+            ]
+        )
 
     # Build new predictions from current run
     pred_key = ["Player", "League", "Date", "Market"]
-    pred_level_cols = ["Team", "Model EV", "Books EV", "Dist", "CV",
-                       "Model Param", "Gate", "Temperature", "Disp Cal", "Step"]
-    offer_cols = ["Line", "Boost", "Platform", "Bet", "Model P", "Books P"]
+    pred_level_cols = [
+        "Team",
+        "Model EV",
+        "Books EV",
+        "Dist",
+        "CV",
+        "Model Param",
+        "Gate",
+        "Temperature",
+        "Disp Cal",
+        "Step",
+    ]
 
     all_df = pd.concat(all_offers)
     # NHL market normalization
-    all_df.loc[(all_df['Market'] == 'AST') & (all_df['League'] == 'NHL'), 'Market'] = "assists"
-    all_df.loc[(all_df['Market'] == 'PTS') & (all_df['League'] == 'NHL'), 'Market'] = "points"
-    all_df.loc[(all_df['Market'] == 'BLK') & (all_df['League'] == 'NHL'), 'Market'] = "blocked"
-    all_df.dropna(subset='Market', inplace=True, ignore_index=True)
+    all_df.loc[(all_df["Market"] == "AST") & (all_df["League"] == "NHL"), "Market"] = "assists"
+    all_df.loc[(all_df["Market"] == "PTS") & (all_df["League"] == "NHL"), "Market"] = "points"
+    all_df.loc[(all_df["Market"] == "BLK") & (all_df["League"] == "NHL"), "Market"] = "blocked"
+    all_df.dropna(subset="Market", inplace=True, ignore_index=True)
 
     # Group current run into normalized predictions
     new_preds = []
@@ -240,14 +340,16 @@ def main(progress):
         for _, r in grp.iterrows():
             if pd.isna(r.get("Line")):
                 continue
-            offers.append((
-                float(r["Line"]),
-                float(r.get("Boost", 1)),
-                str(r.get("Platform", "")),
-                str(r.get("Bet", "")),
-                float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
-                float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
-            ))
+            offers.append(
+                (
+                    float(r["Line"]),
+                    float(r.get("Boost", 1)),
+                    str(r.get("Platform", "")),
+                    str(r.get("Bet", "")),
+                    float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
+                    float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
+                )
+            )
         row = {"Player": player, "League": league, "Date": date, "Market": market, "Offers": offers}
         for col in pred_level_cols:
             row[col] = latest.get(col, np.nan)
@@ -282,8 +384,9 @@ def main(progress):
         history["Actual"] = np.nan
 
     gameDates = pd.to_datetime(history.Date).dt.date
-    history = history.loc[(datetime.datetime.today(
-    ).date() - datetime.timedelta(days=365)) <= gameDates]
+    history = history.loc[
+        (datetime.datetime.today().date() - datetime.timedelta(days=365)) <= gameDates
+    ]
     history.to_pickle(filepath)
 
     logger.info("Success!")
@@ -291,8 +394,7 @@ def main(progress):
 
 @line_profiler.profile
 def process_offers(offer_dict, book, stats):
-    """
-    Process the offers from the given offer dictionary and match them with player statistics.
+    """Process the offers from the given offer dictionary and match them with player statistics.
 
     Args:
         offer_dict (dict): Dictionary containing the offers to be processed.
@@ -307,8 +409,7 @@ def process_offers(offer_dict, book, stats):
     logger.info(f"Processing {book} offers")
     if len(offer_dict) > 0:
         # Calculate the total number of offers to process
-        total = sum(sum(len(i) for i in v.values())
-                    for v in offer_dict.values())
+        total = sum(sum(len(i) for i in v.values()) for v in offer_dict.values())
 
         # Display a progress bar
         with tqdm(total=total, desc=f"Matching {book} Offers", unit="offer") as pbar:
@@ -334,9 +435,7 @@ def process_offers(offer_dict, book, stats):
                 for market, offers in markets.items():
                     archive.add_dfs(offers, book, stat_map[book])
                     # Match the offers with player statistics
-                    playerStats = match_offers(
-                        offers, league, market, book, stat_data
-                    )
+                    playerStats = match_offers(offers, league, market, book, stat_data)
                     pbar.update(len(offers))
                     if len(playerStats) == 0:
                         # No matched offers found for the market
@@ -359,13 +458,17 @@ def find_correlation(offers, stats, platform):
     logger.info("Finding Correlations")
 
     new_map = stat_map[platform].copy()
-    warnings.simplefilter('ignore')
+    warnings.simplefilter("ignore")
 
     df = pd.DataFrame(offers)
     versus_mask = df["Player"].str.contains(" vs. ")
     if not df.loc[versus_mask].empty:
-        df.loc[versus_mask, "Team"] = df.loc[versus_mask].apply(lambda x: x["Team"].split("/")[0 if x["Bet"]=="Over" else 1], axis=1)
-        df.loc[versus_mask, "Opponent"] = df.loc[versus_mask].apply(lambda x: x["Opponent"].split("/")[0 if x["Bet"]=="Over" else 1], axis=1)
+        df.loc[versus_mask, "Team"] = df.loc[versus_mask].apply(
+            lambda x: x["Team"].split("/")[0 if x["Bet"] == "Over" else 1], axis=1
+        )
+        df.loc[versus_mask, "Opponent"] = df.loc[versus_mask].apply(
+            lambda x: x["Opponent"].split("/")[0 if x["Bet"] == "Over" else 1], axis=1
+        )
 
     combo_mask = df["Team"].apply(lambda x: len(set(x.split("/"))) == 1)
     df.loc[combo_mask, "Team"] = df.loc[combo_mask, "Team"].apply(lambda x: x.split("/")[0])
@@ -373,50 +476,70 @@ def find_correlation(offers, stats, platform):
 
     df["Team Correlation"] = ""
     df["Opp Correlation"] = ""
-    parlay_df = pd.DataFrame(columns=["Game", "Date", "League", "Platform", "Model EV", "Books EV", "Boost", "Rec Bet", "Leg 1", "Leg 2", "Leg 3", "Leg 4", "Leg 5", "Leg 6", "Legs", "P", "PB", "Fun", "Bet Size"])
-    usage_str = {
-        "NBA": "MIN",
-        "WNBA": "MIN",
-        "NFL": "snap pct",
-        "NHL": "TimeShare"
-    }
+    parlay_df = pd.DataFrame(
+        columns=[
+            "Game",
+            "Date",
+            "League",
+            "Platform",
+            "Model EV",
+            "Books EV",
+            "Boost",
+            "Rec Bet",
+            "Leg 1",
+            "Leg 2",
+            "Leg 3",
+            "Leg 4",
+            "Leg 5",
+            "Leg 6",
+            "Legs",
+            "P",
+            "PB",
+            "Fun",
+            "Bet Size",
+        ]
+    )
+    usage_str = {"NBA": "MIN", "WNBA": "MIN", "NFL": "snap pct", "NHL": "TimeShare"}
     tiebreaker_str = {
         "NBA": "USG_PCT short",
         "WNBA": "USG_PCT short",
         "NFL": "route participation short",
-        "NHL": "Fenwick short"
+        "NHL": "Fenwick short",
     }
     positions = {
         "NBA": ["P", "C", "F", "W", "B"],
         "NFL": ["QB", "WR", "RB", "TE"],
         "NHL": ["C", "W", "D", "G"],
-        "WNBA": ['G', 'F', 'C']
+        "WNBA": ["G", "F", "C"],
     }
-    payout_table = { # using equivalent payouts when insured picks are better
+    payout_table = {  # using equivalent payouts when insured picks are better
         "Underdog": [3.5, 6.5, 10.9, 20.2, 39.9],
         "PrizePicks": [3, 5.3, 10, 20.8, 38.8],
         "Sleeper": [1, 1, 1, 1, 1],
         "ParlayPlay": [1, 1, 1, 1, 1],
-        "Chalkboard": [1, 1, 1, 1, 1]
+        "Chalkboard": [1, 1, 1, 1, 1],
     }
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
             continue
-        c = pd.read_csv(pkg_resources.files(data) / (f"{league}_corr.csv"), index_col = [0,1,2])
+        c = pd.read_csv(pkg_resources.files(data) / (f"{league}_corr.csv"), index_col=[0, 1, 2])
         c.rename_axis(["team", "market", "correlation"], inplace=True)
         c.columns = ["R"]
         stat_data = stats.get(league)
-        team_mod_map = banned[platform][league]['team']
-        opp_mod_map = banned[platform][league]['opponent']
+        team_mod_map = banned[platform][league]["team"]
+        opp_mod_map = banned[platform][league]["opponent"]
         if platform == "Underdog":
             league_df["Boost"] = league_df["Boost"] / 1.78
 
         if league != "MLB":
-            league_df["Player position"] = league_df["Player position"].apply(lambda x: positions[league][x-1] if isinstance(
-                x, int) else [positions[league][i-1] for i in x])
-            combo_df = league_df.loc[league_df.Player.str.contains("\+|vs.")]
+            league_df["Player position"] = league_df["Player position"].apply(
+                lambda x: positions[league][x - 1]
+                if isinstance(x, int)
+                else [positions[league][i - 1] for i in x]
+            )
+            combo_df = league_df.loc[league_df.Player.str.contains(r"\+|vs.")]
             league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
             player_df = league_df[["Player", "Team", "Player position"]]
             # for i, row in combo_df.iterrows():
@@ -435,13 +558,24 @@ def find_correlation(offers, stats, platform):
             player_df.drop_duplicates(inplace=True)
             stat_data.profile_market(usage_str[league])
             usage = pd.DataFrame(
-                stat_data.playerProfile[[usage_str[league] + " short", tiebreaker_str[league]]])
+                stat_data.playerProfile[[usage_str[league] + " short", tiebreaker_str[league]]]
+            )
             usage.reset_index(inplace=True)
             usage.rename(
-                columns={"player display name": "Player", "playerName": "Player", "PLAYER_NAME": "Player"}, inplace=True)
-            player_df = player_df.merge(usage, how='left').fillna(0).infer_objects(copy=False)
-            ranks = player_df.sort_values(tiebreaker_str[league], ascending=False).groupby(
-                ["Team", "Player position"]).rank(ascending=False, method='first')[usage_str[league] + " short"].astype(int)
+                columns={
+                    "player display name": "Player",
+                    "playerName": "Player",
+                    "PLAYER_NAME": "Player",
+                },
+                inplace=True,
+            )
+            player_df = player_df.merge(usage, how="left").fillna(0).infer_objects(copy=False)
+            ranks = (
+                player_df.sort_values(tiebreaker_str[league], ascending=False)
+                .groupby(["Team", "Player position"])
+                .rank(ascending=False, method="first")[usage_str[league] + " short"]
+                .astype(int)
+            )
             player_df["Player position"] = player_df["Player position"] + ranks.astype(str)
             player_df.index = player_df.Player
             player_df = player_df["Player position"].to_dict()
@@ -450,28 +584,45 @@ def find_correlation(offers, stats, platform):
             #     lambda x: [player_df.get(p) for p in x.replace("vs.", "+").split(" + ")])
             # league_df = pd.concat([league_df, combo_df])
         else:
-            league_df["Player position"] = league_df["Player position"].apply(lambda x: ("B"+str(x) if x>0 else "P") if isinstance(x, int) else ["B"+str(i) if i>0 else "P" for i in x])
+            league_df["Player position"] = league_df["Player position"].apply(
+                lambda x: ("B" + str(x) if x > 0 else "P")
+                if isinstance(x, int)
+                else ["B" + str(i) if i > 0 else "P" for i in x]
+            )
 
         if league == "NHL":
-            new_map.update({
-                "Points": "points",
-                "Blocked Shots": "blocked",
-                "Assists": "assists"
-            })
-        if league == "NBA" or league == "WNBA":
-            new_map.update({
-                "Fantasy Points": "fantasy points prizepicks"
-            })
+            new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
+        if league in ("NBA", "WNBA"):
+            new_map.update({"Fantasy Points": "fantasy points prizepicks"})
 
-        league_df["cMarket"] = league_df.apply(lambda x: [x["Player position"] + "." + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))] if isinstance(
-            x["Player position"], str) else [p + "." + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", "")) for p in x["Player position"]], axis=1)
+        league_df["cMarket"] = league_df.apply(
+            lambda x: [
+                x["Player position"]
+                + "."
+                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
+            ]
+            if isinstance(x["Player position"], str)
+            else [
+                p
+                + "."
+                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
+                for p in x["Player position"]
+            ],
+            axis=1,
+        )
 
-        league_df["Desc"] = league_df[[
-            "Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
+        league_df["Desc"] = (
+            league_df[["Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
+        )
 
-        league_df["Desc"] = league_df["Desc"] + " - " + \
-            league_df["Model P"].multiply(100).round(1).astype(str) + "%, " + \
-            league_df["Boost"].round(2).astype(str) + "x"
+        league_df["Desc"] = (
+            league_df["Desc"]
+            + " - "
+            + league_df["Model P"].multiply(100).round(1).astype(str)
+            + "%, "
+            + league_df["Boost"].round(2).astype(str)
+            + "x"
+        )
 
         checked_teams = []
         teams = [team for team in league_df.Team.unique() if "/" not in team]
@@ -484,54 +635,83 @@ def find_correlation(offers, stats, platform):
             opp_df = league_df.loc[league_df["Team"] == opp]
             if not opp_df.empty:
                 opp_df["cMarket"] = opp_df.apply(
-                    lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
-            split_df = league_df.loc[league_df["Team"].str.contains("/") & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))]
+                    lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1
+                )
+            split_df = league_df.loc[
+                league_df["Team"].str.contains("/")
+                & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))
+            ]
             if not split_df.empty:
-                split_df["cMarket"] = split_df.apply(lambda x: [("_OPP_" + c) if (
-                    x["Team"].split("/")[d] == opp) else c for d, c in enumerate(x["cMarket"])], axis=1)
+                split_df["cMarket"] = split_df.apply(
+                    lambda x: [
+                        ("_OPP_" + c) if (x["Team"].split("/")[d] == opp) else c
+                        for d, c in enumerate(x["cMarket"])
+                    ],
+                    axis=1,
+                )
             game_df = pd.concat([team_df, opp_df, split_df])
             game_df.drop_duplicates(subset="Desc", inplace=True)
             checked_teams.append(team)
             checked_teams.append(opp)
 
-            off_weight = .75
-            team_c = c.loc[team]*.5
-            def_mask = ["_OPP_" in x and "_OPP_" in y for x,y in team_c.index]
+            off_weight = 0.75
+            team_c = c.loc[team] * 0.5
+            def_mask = ["_OPP_" in x and "_OPP_" in y for x, y in team_c.index]
             off_mask = [not x for x in def_mask]
-            team_c.loc[off_mask] = team_c.loc[off_mask]*2*off_weight
-            team_c.loc[def_mask] = team_c.loc[def_mask]*2*(1-off_weight)
-            opp_c = c.loc[opp]*.5
-            def_mask = ["_OPP_" in x and "_OPP_" in y for x,y in opp_c.index]
+            team_c.loc[off_mask] = team_c.loc[off_mask] * 2 * off_weight
+            team_c.loc[def_mask] = team_c.loc[def_mask] * 2 * (1 - off_weight)
+            opp_c = c.loc[opp] * 0.5
+            def_mask = ["_OPP_" in x and "_OPP_" in y for x, y in opp_c.index]
             off_mask = [not x for x in def_mask]
-            opp_c.loc[off_mask] = opp_c.loc[off_mask]*2*off_weight
-            opp_c.loc[def_mask] = opp_c.loc[def_mask]*2*(1-off_weight)
-            opp_c.index = pd.MultiIndex.from_tuples([(f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", "")) for x, y in opp_c.index], names=("market", "correlation"))
+            opp_c.loc[off_mask] = opp_c.loc[off_mask] * 2 * off_weight
+            opp_c.loc[def_mask] = opp_c.loc[def_mask] * 2 * (1 - off_weight)
+            opp_c.index = pd.MultiIndex.from_tuples(
+                [
+                    (f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", ""))
+                    for x, y in opp_c.index
+                ],
+                names=("market", "correlation"),
+            )
             c_map = team_c["R"].add(opp_c["R"], fill_value=0).to_dict()
 
             game_df.reset_index(drop=True, inplace=True)
-            game_dict = game_df.to_dict('index')
+            game_dict = game_df.to_dict("index")
 
-            idx = game_df.loc[(game_df["Books"] > .85) & (game_df["Books P"] >= .25) & (game_df["Model"] > 1) & (game_df["Model P"] >= .3)].sort_values("K", ascending=False)
+            idx = game_df.loc[
+                (game_df["Books"] > 0.85)
+                & (game_df["Books P"] >= 0.25)
+                & (game_df["Model"] > 1)
+                & (game_df["Model P"] >= 0.3)
+            ].sort_values("K", ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
-            idx = idx.groupby('Player').head(6)
-            idx = idx.sort_values(['Model', 'Books'], ascending=False).groupby('Team').head(30).sort_values(['Team', 'Player'])
-            idx = idx.sort_values(['Model', 'Books'], ascending=False).head(40).sort_values(['Team', 'Player'])
+            idx = idx.groupby("Player").head(6)
+            idx = (
+                idx.sort_values(["Model", "Books"], ascending=False)
+                .groupby("Team")
+                .head(30)
+                .sort_values(["Team", "Player"])
+            )
+            idx = (
+                idx.sort_values(["Model", "Books"], ascending=False)
+                .head(40)
+                .sort_values(["Team", "Player"])
+            )
             # idx = idx.sort_values(['Model', 'Books', 'Team', 'Player'], ascending=False).head(50)
-            bet_df = idx.to_dict('index')
+            bet_df = idx.to_dict("index")
 
             C = np.eye(len(game_dict))
             M = np.zeros([len(game_dict), len(game_dict)])
             p_model = game_df["Model P"].to_numpy()
             p_books = game_df["Books P"].to_numpy()
             boosts = game_df["Boost"].to_numpy()
-            V = p_model*(1-p_model)
-            V = V.reshape(len(game_dict),1)*V
+            V = p_model * (1 - p_model)
+            V = V.reshape(len(game_dict), 1) * V
             V = np.sqrt(V)
-            P = p_model.reshape(len(p_model),1)*p_model
-            Vb = p_books*(1-p_books)
-            Vb = Vb.reshape(len(game_dict),1)*Vb
+            P = p_model.reshape(len(p_model), 1) * p_model
+            Vb = p_books * (1 - p_books)
+            Vb = Vb.reshape(len(game_dict), 1) * Vb
             Vb = np.sqrt(Vb)
-            Pb = p_books.reshape(len(p_books),1)*p_books
+            Pb = p_books.reshape(len(p_books), 1) * p_books
             for i, j in combinations(range(len(game_dict)), 2):
                 leg1 = game_dict[i]
                 leg2 = game_dict[j]
@@ -556,89 +736,139 @@ def find_correlation(offers, stats, platform):
                         if b1[xi] != b2[yi]:
                             increment = -increment
                         rho += increment
-                            
-                        # Modify boost based on conditions
-                        if ("_OPP_" in x) == ("_OPP_" in y):
-                            mod_map = team_mod_map
-                        else:
-                            mod_map = opp_mod_map
 
-                        x_key = re.sub(r'[0-9]', '', x)
-                        y_key = re.sub(r'[0-9]', '', y)
+                        # Modify boost based on conditions
+                        mod_map = team_mod_map if ("_OPP_" in x) == ("_OPP_" in y) else opp_mod_map
+
+                        x_key = re.sub(r"[0-9]", "", x)
+                        y_key = re.sub(r"[0-9]", "", y)
                         x_key = x_key.replace("_OPP_", "")
                         y_key = y_key.replace("_OPP_", "")
 
-                        modifier = mod_map.get(frozenset([x_key, y_key]), [1,1])
+                        modifier = mod_map.get(frozenset([x_key, y_key]), [1, 1])
                         boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
 
                 C[i, j] = C[j, i] = rho / len(cm1) / len(cm2)
                 M[i, j] = M[j, i] = boost
 
-            EV = np.multiply(np.multiply(np.exp(np.multiply(C,V)),P),boosts.reshape(len(boosts),1)*M*boosts)*payout_table[platform][0]
-            EVb = np.multiply(np.multiply(np.exp(np.multiply(C,Vb)),Pb),boosts.reshape(len(boosts),1)*M*boosts)*payout_table[platform][0]
+            EV = (
+                np.multiply(
+                    np.multiply(np.exp(np.multiply(C, V)), P),
+                    boosts.reshape(len(boosts), 1) * M * boosts,
+                )
+                * payout_table[platform][0]
+            )
+            EVb = (
+                np.multiply(
+                    np.multiply(np.exp(np.multiply(C, Vb)), Pb),
+                    boosts.reshape(len(boosts), 1) * M * boosts,
+                )
+                * payout_table[platform][0]
+            )
 
             for i, offer in game_df.iterrows():
-                indices = (EV[:,i] > .95) & (C[:,i] > .05) & (EVb[:,i] > .9)
+                indices = (EV[:, i] > 0.95) & (C[:, i] > 0.05) & (EVb[:, i] > 0.9)
                 corr = game_df.loc[indices].copy()
                 corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
                 corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
                 same = corr.loc[corr["Team"] == offer["Team"]]
                 other = corr.loc[corr["Team"] != offer["Team"]]
-                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Team Correlation'] = ", ".join(
-                    (same["Desc"] + " (" + same["Corr Mult"].round(2).astype(str) + "x)").to_list())
-                df.loc[(df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]), 'Opp Correlation'] = ", ".join(
-                    (other["Desc"] + " (" + other["Corr Mult"].round(2).astype(str) + "x)").to_list())
-            
+                df.loc[
+                    (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
+                    "Team Correlation",
+                ] = ", ".join(
+                    (same["Desc"] + " (" + same["Corr Mult"].round(2).astype(str) + "x)").to_list()
+                )
+                df.loc[
+                    (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
+                    "Opp Correlation",
+                ] = ", ".join(
+                    (
+                        other["Desc"] + " (" + other["Corr Mult"].round(2).astype(str) + "x)"
+                    ).to_list()
+                )
+
             info = {
-                    "Game": "/".join(sorted([team, opp])),
-                    "Date": date,
-                    "League": league,
-                    "Platform": platform
-                    }
+                "Game": "/".join(sorted([team, opp])),
+                "Date": date,
+                "League": league,
+                "Platform": platform,
+            }
             best_bets = []
             if not (platform in ["Chalkboard", "ParlayPlay"] and league == "MLB"):
                 payouts = payout_table[platform]
                 max_boost = 2.5 if platform == "Underdog" else 60
                 best_bets = beam_search_parlays(
-                    idx, EV, C, M, p_model, p_books, boosts,
-                    payouts, max_boost, bet_df, info, team, opp
+                    idx,
+                    EV,
+                    C,
+                    M,
+                    p_model,
+                    p_books,
+                    boosts,
+                    payouts,
+                    max_boost,
+                    bet_df,
+                    info,
+                    team,
+                    opp,
                 )
 
                 if len(best_bets) > 0:
                     bets = pd.DataFrame(best_bets)
-                    
-                    df5 = pd.concat([bets.sort_values('Model EV', ascending=False).head(300),
-                                     bets.sort_values('Rec Bet', ascending=False).head(300),
-                                     bets.sort_values('Fun', ascending=False).head(300)]).drop_duplicates().sort_values('Model EV', ascending=False)
-                    
+
+                    df5 = (
+                        pd.concat(
+                            [
+                                bets.sort_values("Model EV", ascending=False).head(300),
+                                bets.sort_values("Rec Bet", ascending=False).head(300),
+                                bets.sort_values("Fun", ascending=False).head(300),
+                            ]
+                        )
+                        .drop_duplicates()
+                        .sort_values("Model EV", ascending=False)
+                    )
+
                     if len(df5) > 5:
                         rho_matrix = np.zeros([len(df5), len(df5)])
                         bets = df5["Bet ID"].to_list()
-                        for i, j in tqdm(combinations(range(len(df5)), 2), desc="Filtering...", leave=False, total=comb(len(df5),2)):
+                        for i, j in tqdm(
+                            combinations(range(len(df5)), 2),
+                            desc="Filtering...",
+                            leave=False,
+                            total=comb(len(df5), 2),
+                        ):
                             bet1 = bets[i]
                             bet2 = bets[j]
                             rho_cross = np.mean(C[np.ix_(bet1, bet2)])
                             rho_bet1 = np.mean(C[np.ix_(bet1, bet1)])
                             rho_bet2 = np.mean(C[np.ix_(bet2, bet2)])
 
-                            rho_matrix[i, j] = np.clip(rho_cross/np.sqrt(rho_bet1)/np.sqrt(rho_bet2),-1,0.999)
+                            rho_matrix[i, j] = np.clip(
+                                rho_cross / np.sqrt(rho_bet1) / np.sqrt(rho_bet2), -1, 0.999
+                            )
 
-                        X = np.concatenate([row[i+1:] for i, row in enumerate(1-rho_matrix)])
-                        Z = linkage(X, 'ward')
-                        df5["Family"] = fcluster(Z, 3, criterion='maxclust')
-                        
+                        X = np.concatenate([row[i + 1 :] for i, row in enumerate(1 - rho_matrix)])
+                        Z = linkage(X, "ward")
+                        df5["Family"] = fcluster(Z, 3, criterion="maxclust")
+
                     else:
                         df5["Family"] = 1
 
-                    parlay_df = pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
+                    parlay_df = pd.concat(
+                        [parlay_df, df5.drop(columns="Bet ID")], ignore_index=True
+                    )
 
     if platform == "Underdog":
         payouts = [0, 0, 3.5, 6.5, 6, 10, 25]
-        parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x :payouts[x])*parlay_df["Boost"]
+        parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x: payouts[x]) * parlay_df["Boost"]
 
     return df.dropna(subset="Model").sort_values("Model", ascending=False), parlay_df
 
-def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_boost, bet_df, info, team, opp):
+
+def beam_search_parlays(
+    idx, EV, C, M, p_model, p_books, boosts, payouts, max_boost, bet_df, info, team, opp
+):
     K = 1000
     max_bet_size = len(payouts) + 1
     leg_indices = sorted(idx.index.to_numpy())
@@ -649,7 +879,9 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
     candidates = [(i,) for i in leg_indices]
     all_results = []
 
-    for target_size in tqdm(range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False):
+    for target_size in tqdm(
+        range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
+    ):
         next_candidates = []
 
         for parlay in candidates:
@@ -665,7 +897,7 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
                 if any(new_player in p or p in new_player for p in used_players):
                     continue
 
-                extended = parlay + (new_leg,)
+                extended = (*parlay, new_leg)
 
                 # Fast screening: geometric mean of pairwise EVs
                 n_pairs = target_size * (target_size - 1) // 2
@@ -693,7 +925,9 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
             if not (covers_team and covers_opp):
                 continue
 
-            boost = np.prod(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]) * np.prod(boosts[np.ix_(bet_id)])
+            boost = np.prod(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]) * np.prod(
+                boosts[np.ix_(bet_id)]
+            )
             if boost <= 0.7 or boost > max_boost:
                 continue
 
@@ -725,13 +959,31 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
                 "Books EV": pb,
                 "Boost": boost,
                 "Rec Bet": units,
-                "Leg 1": "", "Leg 2": "", "Leg 3": "",
-                "Leg 4": "", "Leg 5": "", "Leg 6": "",
+                "Leg 1": "",
+                "Leg 2": "",
+                "Leg 3": "",
+                "Leg 4": "",
+                "Leg 5": "",
+                "Leg 6": "",
                 "Legs": ", ".join([leg["Desc"] for leg in bet]),
                 "Bet ID": bet_id,
                 "P": prev_p,
                 "PB": prev_pb,
-                "Fun": np.sum([3-(np.abs(leg["Line"])/stat_std.get(info["League"], {}).get(leg["Market"], 1)) if ("H2H" in leg["Desc"]) else 2 - 1/stat_cv.get(info["League"], {}).get(leg["Market"], 1) + leg["Line"]/stat_std.get(info["League"], {}).get(leg["Market"], 1) for leg in bet if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])]),
+                "Fun": np.sum(
+                    [
+                        3
+                        - (
+                            np.abs(leg["Line"])
+                            / stat_std.get(info["League"], {}).get(leg["Market"], 1)
+                        )
+                        if ("H2H" in leg["Desc"])
+                        else 2
+                        - 1 / stat_cv.get(info["League"], {}).get(leg["Market"], 1)
+                        + leg["Line"] / stat_std.get(info["League"], {}).get(leg["Market"], 1)
+                        for leg in bet
+                        if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])
+                    ]
+                ),
                 "Bet Size": bet_size,
                 "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id),
                 "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
@@ -749,9 +1001,9 @@ def beam_search_parlays(idx, EV, C, M, p_model, p_books, boosts, payouts, max_bo
 
     return all_results
 
+
 def save_data(df, parlay_df, book, gc):
-    """
-    Save offers data to a Google Sheets worksheet.
+    """Save offers data to a Google Sheets worksheet.
 
     Args:
         offers (list): List of offer data.
@@ -762,30 +1014,29 @@ def save_data(df, parlay_df, book, gc):
         Exception: If there is an error writing the offers to the worksheet.
     """
     if len(df) > 0:
-
         try:
             df.sort_values("Model", ascending=False, inplace=True)
-            mask = (df.Books > .95) & (df.Model > 1.02) & (2.5 >= df.Boost)
+            mask = (df.Books > 0.95) & (df.Model > 1.02) & (df.Boost <= 2.5)
             if book == "Underdog":
-                df["Boost"] = df["Boost"]/1.78
+                df["Boost"] = df["Boost"] / 1.78
             # Access the Google Sheets worksheet and update its contents
             wks = gc.open("Sportstradamus").worksheet(book)
             wks.clear()
-            wks.update([df.columns.values.tolist()] + df.loc[mask].values.tolist() + df.loc[~mask].values.tolist())
+            wks.update(
+                [
+                    df.columns.values.tolist(),
+                    *df.loc[mask].values.tolist(),
+                    *df.loc[~mask].values.tolist(),
+                ]
+            )
             wks.set_basic_filter()
             # Apply number formatting to the relevant columns
-            wks.format(
-                "J:K", {"numberFormat": {
-                    "type": "NUMBER", "pattern": "0.00"}}
-            )
-            wks.format(
-                "N:P", {"numberFormat": {
-                    "type": "PERCENT", "pattern": "0.00%"}}
-            )
+            wks.format("J:K", {"numberFormat": {"type": "NUMBER", "pattern": "0.00"}})
+            wks.format("N:P", {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}})
             wks.update_cell(
-                1, 19,
-                "Last Updated: "
-                + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
+                1,
+                19,
+                "Last Updated: " + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S"),
             )
 
             wks = gc.open("Sportstradamus").worksheet("All Parlays")
@@ -793,16 +1044,20 @@ def save_data(df, parlay_df, book, gc):
             if not sheet_df.empty:
                 sheet_df = sheet_df.loc[sheet_df.Platform != book]
             if not parlay_df.empty:
-                bet_ranks = parlay_df.groupby(["Platform", "Game", "Family"]).rank('first', False)[["Model EV", "Rec Bet", "Fun"]]
+                bet_ranks = parlay_df.groupby(["Platform", "Game", "Family"]).rank("first", False)[
+                    ["Model EV", "Rec Bet", "Fun"]
+                ]
                 parlay_df = parlay_df.join(bet_ranks, rsuffix=" Rank")
-                sheet_df = pd.concat([sheet_df,parlay_df]).sort_values("Model EV", ascending=False)
-                
+                sheet_df = pd.concat([sheet_df, parlay_df]).sort_values("Model EV", ascending=False)
+
             wks.clear()
-            sheet_df = sheet_df.drop(columns=["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"], errors="ignore")
+            sheet_df = sheet_df.drop(
+                columns=["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"],
+                errors="ignore",
+            )
             sheet_df = sheet_df.replace([np.inf, -np.inf], np.nan).fillna("")
-            wks.update([sheet_df.columns.values.tolist()] +
-                        sheet_df.values.tolist())
-            
+            wks.update([sheet_df.columns.values.tolist(), *sheet_df.values.tolist()])
+
             if not sheet_df.empty:
                 wks = gc.open("Sportstradamus").worksheet("Parlay Search")
                 wks.update_cell(1, 5, sheet_df.iloc[0]["Platform"])
@@ -813,10 +1068,9 @@ def save_data(df, parlay_df, book, gc):
                 wks.update_cell(7, 5, 1)
                 wks.update_cell(7, 8, 1)
                 wks.update_cell(
-                    1, 10, "Last Updated: "
-                    + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+                    1, 10, "Last Updated: " + datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
                 )
-            
+
         except Exception:
             # Log the exception if there is an error writing the offers to the worksheet
             logger.exception(f"Error writing {book} offers")
@@ -824,8 +1078,7 @@ def save_data(df, parlay_df, book, gc):
 
 @line_profiler.profile
 def match_offers(offers, league, market, platform, stat_data):
-    """
-    Matches offers with statistical data and applies various calculations and transformations.
+    """Matches offers with statistical data and applies various calculations and transformations.
 
     Args:
         offers (list): List of offers to match.
@@ -837,12 +1090,10 @@ def match_offers(offers, league, market, platform, stat_data):
     Returns:
         list: List of matched offers.
     """
-
     market = stat_map[platform].get(market, market)
     if league == "NHL":
-        market = {"AST": "assists", "PTS": "points",
-                  "BLK": "blocked"}.get(market, market)
-    if league == "NBA" or league == "WNBA":
+        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
+    if league in ("NBA", "WNBA"):
         market = market.replace("underdog", "prizepicks")
     if market in stat_data.gamelog.columns:
         with warnings.catch_warnings():
@@ -859,14 +1110,17 @@ def match_offers(offers, league, market, platform, stat_data):
                 expected_cols = pickle.load(infile)["expected_columns"]
             playerStats = playerStats[expected_cols]
 
-            return playerStats[~playerStats.index.duplicated(keep='first')].fillna(0).infer_objects(copy=False)
+            return (
+                playerStats[~playerStats.index.duplicated(keep="first")]
+                .fillna(0)
+                .infer_objects(copy=False)
+            )
     else:
         return pd.DataFrame()
 
 
 def model_prob(offers, league, market, platform, stat_data, playerStats):
-    """
-    Matches offers with statistical data and applies various calculations and transformations.
+    """Matches offers with statistical data and applies various calculations and transformations.
 
     Args:
         offers (list): List of offers to match.
@@ -881,18 +1135,23 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
     """
 
     def odds_from_boost(o):
-        p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
-                0.5/o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1-0.5/o.get("Boost_Under", 1)]
-        return p/np.sum(p)
+        p = [
+            0.5 / o.get("Boost_Under", 1)
+            if o.get("Boost_Under", 1) > 0
+            else 1 - 0.5 / o.get("Boost_Over", 1),
+            0.5 / o.get("Boost_Over", 1)
+            if o.get("Boost_Over", 1) > 0
+            else 1 - 0.5 / o.get("Boost_Under", 1),
+        ]
+        return p / np.sum(p)
 
     totals_map = archive.default_totals
-    dateMap = {x["Player"]:x["Date"] for x in offers}
+    dateMap = {x["Player"]: x["Date"] for x in offers}
 
     market = stat_map[platform].get(market, market)
     if league == "NHL":
-        market = {"AST": "assists", "PTS": "points",
-                  "BLK": "blocked"}.get(market, market)
-    if league == "NBA" or league == "WNBA":
+        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
+    if league in ("NBA", "WNBA"):
         market = market.replace("underdog", "prizepicks")
     filename = "_".join([league, market]).replace(" ", "-")
     filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
@@ -912,7 +1171,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         dist = filedict["distribution"]
         step = filedict["step"]
         normalized = filedict.get("normalized", False)
-        hist_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
+        hist_gate = (
+            stat_zi.get(league, {}).get(market, 0)
+            if dist in ("ZINB", "ZAGamma", "SkewNormal")
+            else 0
+        )
 
         if market in stat_data.volume_stats:
             prob_params = pd.DataFrame(index=playerStats.index)
@@ -920,7 +1183,10 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if f"proj {market} std" in stat_data.playerProfile.columns:
                 prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
 
-            prob_params.rename(columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model Param"}, inplace=True)
+            prob_params.rename(
+                columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model Param"},
+                inplace=True,
+            )
 
         else:
             model = filedict["model"]
@@ -929,12 +1195,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if "Player position" not in playerStats.columns:
                 categories.remove("Player position")
             for c in categories:
-                playerStats[c] = playerStats[c].astype('category')
+                playerStats[c] = playerStats[c].astype("category")
 
             set_model_start_values(model, dist, playerStats, normalized=normalized)
 
-            prob_params = model.predict(
-                playerStats, pred_type="parameters")
+            prob_params = model.predict(playerStats, pred_type="parameters")
             prob_params.index = playerStats.index
 
         prob_params.sort_index(inplace=True)
@@ -945,26 +1210,32 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         evs = []
         for player in playerStats.index:
-            ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ''), player)
-            line = archive.get_line(stat_data.league, market, dateMap.get(player, ''), player)
+            ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ""), player)
+            line = archive.get_line(stat_data.league, market, dateMap.get(player, ""), player)
             if np.isnan(ev):
-                ev = stat_data.check_combo_markets(market, player, dateMap.get(player, ''))
+                ev = stat_data.check_combo_markets(market, player, dateMap.get(player, ""))
             if line <= 0:
-                line = np.max([playerStats.loc[player, 'Avg10'], 0.5])
+                line = np.max([playerStats.loc[player, "Avg10"], 0.5])
             if (ev <= 0 or np.isnan(ev)) and player in offer_df.index:
                 o = offer_df.loc[player]
                 if isinstance(o, pd.DataFrame):
                     o = o.iloc[0]
                 # get_ev with gate returns the base mean directly
-                ev = get_ev(line, odds_from_boost(o.to_dict())[0], stat_cv[stat_data.league].get(market,1), dist=dist, gate=hist_gate or None)
+                ev = get_ev(
+                    line,
+                    odds_from_boost(o.to_dict())[0],
+                    stat_cv[stat_data.league].get(market, 1),
+                    dist=dist,
+                    gate=hist_gate or None,
+                )
             elif hist_gate and ev > 0:
                 # Archive EVs are already base means (get_ev with gate)
                 pass
-            
+
             evs.append(ev)
 
         playerStats["Books EV"] = evs
-        playerStats["Books STD"] = cv*np.array(evs)
+        playerStats["Books STD"] = cv * np.array(evs)
 
         # NegBin/ZINB parameters need explicit mean computation from total_count and probs
         # PyTorch NegBin: probs = success probability → mean = r*p/(1-p)
@@ -976,7 +1247,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             if dist == "ZINB":
                 prob_params["Model Gate"] = prob_params["gate"]
             prob_params["Model R"] = prob_params["total_count"]
-        
+
         # Gamma/ZAGamma parameters need explicit mean computation from alpha (concentration) and beta (rate)
         if dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
             base_ev = prob_params["concentration"] / prob_params["rate"]
@@ -989,7 +1260,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if dist == "SkewNormal" and "loc" in prob_params.columns:
             # Denormalize: loc and scale were normalized by the same denom used in training.
             # Hurdle-filtered markets (hist_gate > 0.05) trained on MeanYr_nonzero; others on MeanYr.
-            denom_col = "MeanYr_nonzero" if (hist_gate > 0.05 and "MeanYr_nonzero" in playerStats.columns) else "MeanYr"
+            denom_col = (
+                "MeanYr_nonzero"
+                if (hist_gate > 0.05 and "MeanYr_nonzero" in playerStats.columns)
+                else "MeanYr"
+            )
             meanyr_vals = playerStats[denom_col].clip(lower=0.5).values
             loc_abs = prob_params["loc"].values * meanyr_vals
             scale_abs = prob_params["scale"].values * meanyr_vals
@@ -1012,12 +1287,26 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         # Compute book-side probability
         if dist == "SkewNormal":
             offer_df["Books"] = offer_df.apply(
-                lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv=cv, step=step,
-                                     sigma=x["Books EV"]*cv, skew_alpha=0, gate=hist_gate or None),
-                axis=1)
+                lambda x: 1
+                - get_odds(
+                    x["Line"],
+                    x["Books EV"],
+                    dist,
+                    cv=cv,
+                    step=step,
+                    sigma=x["Books EV"] * cv,
+                    skew_alpha=0,
+                    gate=hist_gate or None,
+                ),
+                axis=1,
+            )
         else:
-            offer_df["Books"] = offer_df.apply(lambda x: 1-get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None), axis=1)
-        
+            offer_df["Books"] = offer_df.apply(
+                lambda x: 1
+                - get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None),
+                axis=1,
+            )
+
         # Clamp model shape to training-time ceiling (safety net)
         if shape_ceiling is not None:
             if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
@@ -1033,10 +1322,15 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
                 offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
-                cv, "SkewNormal",
-                sigma=offer_df["Model Sigma"].to_numpy() if "Model Sigma" in offer_df.columns else None,
-                skew_alpha=offer_df["Model Skew"].to_numpy() if "Model Skew" in offer_df.columns else None,
-                **_zi_kw
+                cv,
+                "SkewNormal",
+                sigma=offer_df["Model Sigma"].to_numpy()
+                if "Model Sigma" in offer_df.columns
+                else None,
+                skew_alpha=offer_df["Model Skew"].to_numpy()
+                if "Model Skew" in offer_df.columns
+                else None,
+                **_zi_kw,
             )
             if gate_blend is not None:
                 offer_df["Model EV"] = (1 - gate_blend) * blended_base_mean
@@ -1047,14 +1341,19 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             offer_df["Model Skew"] = skew_blend
 
         elif dist in ("NegBin", "ZINB"):
-            _zi_kw = dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate) if dist == "ZINB" and "Model Gate" in offer_df.columns else {}
+            _zi_kw = (
+                dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate)
+                if dist == "ZINB" and "Model Gate" in offer_df.columns
+                else {}
+            )
             r_blend, p_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
                 offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
-                cv, "NegBin",
+                cv,
+                "NegBin",
                 r=offer_df["Model R"].to_numpy() if "Model R" in offer_df.columns else None,
-                **_zi_kw
+                **_zi_kw,
             )
             blended_base_mean = r_blend * (1 - p_blend) / p_blend
             # Display EV = overall mean (deflated by blended gate for ZI dists)
@@ -1065,14 +1364,21 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 offer_df["Model EV"] = blended_base_mean
             offer_df["Model R"] = r_blend
         else:
-            _zi_kw = dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate) if dist == "ZAGamma" and "Model Gate" in offer_df.columns else {}
+            _zi_kw = (
+                dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate)
+                if dist == "ZAGamma" and "Model Gate" in offer_df.columns
+                else {}
+            )
             alpha_blend, beta_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
                 offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
-                cv, "Gamma",
-                alpha=offer_df["Model Alpha"].to_numpy() if "Model Alpha" in offer_df.columns else None,
-                **_zi_kw
+                cv,
+                "Gamma",
+                alpha=offer_df["Model Alpha"].to_numpy()
+                if "Model Alpha" in offer_df.columns
+                else None,
+                **_zi_kw,
             )
             blended_base_mean = alpha_blend / beta_blend
             if gate_blend is not None:
@@ -1081,11 +1387,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             else:
                 offer_df["Model EV"] = blended_base_mean
             offer_df["Model Alpha"] = alpha_blend
-        
+
         # For display, convert Books EV from base mean to overall mean for ZI/hurdle dists
         if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
             offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
-        
+
         # Apply dispersion calibration (keeps mean fixed, adjusts concentration)
         # SkewNormal: CRPS loss handles dispersion — skip post-hoc calibration
         if dispersion_cal != 1.0 and dist != "SkewNormal":
@@ -1095,18 +1401,55 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
 
         # Raw distributional probability, then temperature scaling calibration
-        _r = offer_df["Model R"].to_numpy() if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns) else None
-        _alpha = offer_df["Model Alpha"].to_numpy() if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns) else None
-        _sigma = offer_df["Model Sigma"].to_numpy() if (dist == "SkewNormal" and "Model Sigma" in offer_df.columns) else None
-        _skew = offer_df["Model Skew"].to_numpy() if (dist == "SkewNormal" and "Model Skew" in offer_df.columns) else None
-        _gate = offer_df["Model Gate"].to_numpy() if (dist in ("ZINB", "ZAGamma", "SkewNormal") and "Model Gate" in offer_df.columns) else None
+        _r = (
+            offer_df["Model R"].to_numpy()
+            if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns)
+            else None
+        )
+        _alpha = (
+            offer_df["Model Alpha"].to_numpy()
+            if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns)
+            else None
+        )
+        _sigma = (
+            offer_df["Model Sigma"].to_numpy()
+            if (dist == "SkewNormal" and "Model Sigma" in offer_df.columns)
+            else None
+        )
+        _skew = (
+            offer_df["Model Skew"].to_numpy()
+            if (dist == "SkewNormal" and "Model Skew" in offer_df.columns)
+            else None
+        )
+        _gate = (
+            offer_df["Model Gate"].to_numpy()
+            if (dist in ("ZINB", "ZAGamma", "SkewNormal") and "Model Gate" in offer_df.columns)
+            else None
+        )
         _model_ev = blended_base_mean  # pass base mean to get_odds (gate handled separately)
 
         if dist == "SkewNormal":
-            _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv=cv, step=step,
-                                  sigma=_sigma, skew_alpha=_skew, gate=_gate)
+            _raw_under = get_odds(
+                offer_df["Line"].to_numpy(),
+                _model_ev,
+                dist,
+                cv=cv,
+                step=step,
+                sigma=_sigma,
+                skew_alpha=_skew,
+                gate=_gate,
+            )
         else:
-            _raw_under = get_odds(offer_df["Line"].to_numpy(), _model_ev, dist, cv, alpha=_alpha, step=step, r=_r, gate=_gate)
+            _raw_under = get_odds(
+                offer_df["Line"].to_numpy(),
+                _model_ev,
+                dist,
+                cv,
+                alpha=_alpha,
+                step=step,
+                r=_r,
+                gate=_gate,
+            )
         _raw_over = 1 - _raw_under
         if temperature is not None:
             _raw_over_clipped = np.clip(_raw_over, 1e-6, 1 - 1e-6)
@@ -1115,7 +1458,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         else:
             offer_df["Model Under"] = _raw_under
 
-        offer_df["Model Over"] = (1 - offer_df["Model Under"])
+        offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
         # Hard cap on confidence before boost
         MAX_CONFIDENCE = 0.90
@@ -1130,29 +1473,47 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         if "Boost" in offer_df.columns:
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         # TODO handle combo props here
-        offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(0).infer_objects(copy=False) * (1.78 if platform == "Underdog" else 1)
-        offer_df["Boost"] = offer_df.apply(lambda x: (x["Boost_Over"] if x["Bet"]=="Over" else x["Boost_Under"]) if not np.isnan(x["Boost_Over"]) else x["Boost"], axis=1)
+        offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(
+            0
+        ).infer_objects(copy=False) * (1.78 if platform == "Underdog" else 1)
+        offer_df["Boost"] = offer_df.apply(
+            lambda x: (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
+            if not np.isnan(x["Boost_Over"])
+            else x["Boost"],
+            axis=1,
+        )
 
         # Boosted values only for Kelly criterion
         offer_df["Model"] = offer_df["Model P"] * offer_df["Boost"]
-        offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"])
-        offer_df["Books P"] = offer_df["Books"].fillna(.5)
+        offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (
+            1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"]
+        )
+        offer_df["Books P"] = offer_df["Books"].fillna(0.5)
         offer_df["Books"] = offer_df["Books P"] * offer_df["Boost"]
         offer_df["K"] = (offer_df["Model"] - 1) / (offer_df["Boost"] - 1)
-        offer_df["Distance"] = offer_df["Boost"]/1.78
-        offer_df.loc[offer_df["Distance"] < 1, "Distance"] = 1/offer_df.loc[offer_df["Distance"] < 1, "Distance"]
-        offer_df = offer_df.loc[offer_df["Boost"] <= 3.65].sort_values("Distance", ascending=True).groupby("Player").head(3)
+        offer_df["Distance"] = offer_df["Boost"] / 1.78
+        offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
+            1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
+        )
+        offer_df = (
+            offer_df.loc[offer_df["Boost"] <= 3.65]
+            .sort_values("Distance", ascending=True)
+            .groupby("Player")
+            .head(3)
+        )
 
-        offer_df["Avg 5"] = offer_df["Avg5"]-offer_df["Line"]
-        offer_df["Avg H2H"] = offer_df["AvgH2H"]-offer_df["Line"]
+        offer_df["Avg 5"] = offer_df["Avg5"] - offer_df["Line"]
+        offer_df["Avg H2H"] = offer_df["AvgH2H"] - offer_df["Line"]
         offer_df.loc[offer_df["H2HPlayed"] == 0, "Avg H2H"] = 0
-        offer_df["O/U"] = offer_df["Total"]/totals_map.get(league, 1)
+        offer_df["O/U"] = offer_df["Total"] / totals_map.get(league, 1)
         offer_df["DVPOA"] = offer_df["Defense position"]
         if "Player position" not in offer_df:
             offer_df["Player position"] = -1
-            
+
         offer_df["Player position"] = offer_df["Player position"].astype("category")
-        offer_df["Player position"] = offer_df["Player position"].cat.set_categories(range(-1,5)).fillna(-1).astype(int)
+        offer_df["Player position"] = (
+            offer_df["Player position"].cat.set_categories(range(-1, 5)).fillna(-1).astype(int)
+        )
         if dist in ("NegBin", "ZINB"):
             offer_df["Model Param"] = offer_df["Model R"]
         elif dist == "SkewNormal":
@@ -1168,13 +1529,45 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         offer_df["Disp Cal"] = dispersion_cal
         offer_df["Step"] = step
 
-        return offer_df[["League", "Date", "Team", "Opponent", "Player", "Market", "Line", "Boost", "Bet", "Books", "Model", "Avg 5", "Avg H2H", "Moneyline", "O/U", "DVPOA", "Player position", "Model EV", "Model Param", "Model P", "Books EV", "Books P", "K", "Dist", "CV", "Gate", "Temperature", "Disp Cal", "Step"]].to_dict('records')
+        return offer_df[
+            [
+                "League",
+                "Date",
+                "Team",
+                "Opponent",
+                "Player",
+                "Market",
+                "Line",
+                "Boost",
+                "Bet",
+                "Books",
+                "Model",
+                "Avg 5",
+                "Avg H2H",
+                "Moneyline",
+                "O/U",
+                "DVPOA",
+                "Player position",
+                "Model EV",
+                "Model Param",
+                "Model P",
+                "Books EV",
+                "Books P",
+                "K",
+                "Dist",
+                "CV",
+                "Gate",
+                "Temperature",
+                "Disp Cal",
+                "Step",
+            ]
+        ].to_dict("records")
 
     else:
         logger.warning(f"{filename} missing")
         return []
 
-    for o in tqdm(offers, leave=False): # TODO try this with pd array funcs
+    for o in tqdm(offers, leave=False):  # TODO try this with pd array funcs
         players = [o["Player"]]
         if "+" in o["Player"] or "vs." in o["Player"]:
             players = o["Player"].replace("vs.", "+").split("+")
@@ -1211,10 +1604,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
         else:
-            if o["Player"] in playerStats.index:
-                stats = playerStats.loc[o["Player"]]
-            else:
-                stats = 0
+            stats = playerStats.loc[o["Player"]] if o["Player"] in playerStats.index else 0
             if type(stats) is int:
                 logger.warning(f"{o['Player']}, {market} stat error")
                 continue
@@ -1231,8 +1621,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
                     else:
                         line = o["Line"]
-                        p = [norm.cdf(line, ev, ev*cv),
-                            norm.sf(line, ev, ev*cv)]
+                        p = [norm.cdf(line, ev, ev * cv), norm.sf(line, ev, ev * cv)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -1248,8 +1637,12 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     r2_raw, p2_raw = params[1]["total_count"], params[1]["probs"]
                     # Blend each player's r with r_book via geometric mean
                     if r_book is not None:
-                        r1 = np.exp(model_weight * np.log(r1_raw) + (1 - model_weight) * np.log(r_book))
-                        r2 = np.exp(model_weight * np.log(r2_raw) + (1 - model_weight) * np.log(r_book))
+                        r1 = np.exp(
+                            model_weight * np.log(r1_raw) + (1 - model_weight) * np.log(r_book)
+                        )
+                        r2 = np.exp(
+                            model_weight * np.log(r2_raw) + (1 - model_weight) * np.log(r_book)
+                        )
                     else:
                         r1, r2 = r1_raw, r2_raw
                     r_sum = r1 + r2
@@ -1259,21 +1652,21 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     p_sum = (r1 * p1_scipy + r2 * p2_scipy) / (r1 + r2)
                     under = nbinom.cdf(int(o["Line"]), r_sum, p_sum)
                     push = nbinom.pmf(int(o["Line"]), r_sum, p_sum)
-                    under -= push/2
+                    under -= push / 2
                 elif dist in ("Gamma", "ZAGamma"):
                     # Gamma combo: sum of two independent Gammas
                     alpha1 = params[0]["concentration"]
                     alpha2 = params[1]["concentration"]
                     beta1 = params[0]["rate"]
                     beta2 = params[1]["rate"]
-                    ev_sum = alpha1/beta1 + alpha2/beta2
-                    var_sum = alpha1/beta1**2 + alpha2/beta2**2
+                    ev_sum = alpha1 / beta1 + alpha2 / beta2
+                    var_sum = alpha1 / beta1**2 + alpha2 / beta2**2
                     alpha_sum = ev_sum**2 / var_sum
-                    high = np.floor((o["Line"]+step)/step)*step
-                    low = np.ceil((o["Line"]-step)/step)*step
+                    high = np.floor((o["Line"] + step) / step) * step
+                    low = np.ceil((o["Line"] - step) / step) * step
                     under = gamma.cdf(high, alpha_sum, scale=ev_sum / alpha_sum)
                     push = under - gamma.cdf(low, alpha_sum, scale=ev_sum / alpha_sum)
-                    under = under - push/2
+                    under = under - push / 2
 
             elif "vs." in o["Player"]:
                 ev1 = archive.get_ev(o["League"], market, o["Date"], players[0])
@@ -1281,12 +1674,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 if not np.isnan(ev1) and not np.isnan(ev2):
                     if dist == "Poisson":
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                        p = [skellam.cdf(line[0], ev2, ev1),
-                            skellam.sf(line[1], ev2, ev1)]
+                        p = [skellam.cdf(line[0], ev2, ev1), skellam.sf(line[1], ev2, ev1)]
                     else:
                         line = o["Line"]
-                        p = [norm.cdf(-line, ev1 - ev2, (ev1 + ev2)*cv),
-                            norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
+                        p = [
+                            norm.cdf(-line, ev1 - ev2, (ev1 + ev2) * cv),
+                            norm.sf(-line, ev1 - ev2, (ev1 + ev2) * cv),
+                        ]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -1303,37 +1697,43 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     mu2 = params[1]["total_count"] * params[1]["probs"] / (1 - params[1]["probs"])
                     under = skellam.cdf(o["Line"], mu2, mu1)
                     push = skellam.pmf(o["Line"], mu2, mu1)
-                    under -= push/2
+                    under -= push / 2
                 elif dist in ("Gamma", "ZAGamma"):
                     # Gamma vs: difference of two independent Gammas approximated
                     alpha1 = params[0]["concentration"]
                     beta1 = params[0]["rate"]
                     alpha2 = params[1]["concentration"]
                     beta2 = params[1]["rate"]
-                    diff_mean = alpha1/beta1 - alpha2/beta2
-                    diff_std = np.sqrt(alpha1/beta1**2 + alpha2/beta2**2)
-                    high = np.floor((-o["Line"]+step)/step)*step
-                    low = np.ceil((-o["Line"]-step)/step)*step
+                    diff_mean = alpha1 / beta1 - alpha2 / beta2
+                    diff_std = np.sqrt(alpha1 / beta1**2 + alpha2 / beta2**2)
+                    high = np.floor((-o["Line"] + step) / step) * step
+                    low = np.ceil((-o["Line"] - step) / step) * step
                     under = norm.cdf(high, diff_mean, diff_std)
                     push = under - norm.cdf(low, diff_mean, diff_std)
-                    under = under - push/2
+                    under = under - push / 2
 
             else:
                 if stats["Line"] != o["Line"]:
-                    ev = get_ev(stats["Line"], 1-stats["Odds"], cv, dist=dist)
-                    p = 1-get_odds(o["Line"], ev, dist, cv, step=step)
+                    ev = get_ev(stats["Line"], 1 - stats["Odds"], cv, dist=dist)
+                    p = 1 - get_odds(o["Line"], ev, dist, cv, step=step)
                     if np.isnan(p):
                         stats["Odds"] = 0
                     else:
                         stats["Odds"] = p
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
-                    p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
-                         0.5/o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1-0.5/o.get("Boost_Under", 1)]
-                    p = p/np.sum(p)
+                    p = [
+                        0.5 / o.get("Boost_Under", 1)
+                        if o.get("Boost_Under", 1) > 0
+                        else 1 - 0.5 / o.get("Boost_Over", 1),
+                        0.5 / o.get("Boost_Over", 1)
+                        if o.get("Boost_Over", 1) > 0
+                        else 1 - 0.5 / o.get("Boost_Under", 1),
+                    ]
+                    p = p / np.sum(p)
                     stats["Odds"] = p[1]
                 else:
-                    p = [1-stats["Odds"], stats["Odds"]]
+                    p = [1 - stats["Odds"], stats["Odds"]]
 
                 params = prob_params.loc[o["Player"]]
                 if dist in ("NegBin", "ZINB"):
@@ -1342,24 +1742,30 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     p_scipy = 1 - params["probs"]
                     under = nbinom.cdf(int(o["Line"]), r, p_scipy)
                     push = nbinom.pmf(int(o["Line"]), r, p_scipy)
-                    under -= push/2
+                    under -= push / 2
                 elif dist in ("Gamma", "ZAGamma"):
                     alpha = params["concentration"]
                     beta = params["rate"]
-                    high = np.floor((o["Line"]+step)/step)*step
-                    low = np.ceil((o["Line"]-step)/step)*step
-                    under = gamma.cdf(high, alpha, scale=1/beta)
-                    push = under - gamma.cdf(low, alpha, scale=1/beta)
-                    under = under - push/2
+                    high = np.floor((o["Line"] + step) / step) * step
+                    low = np.ceil((o["Line"] - step) / step) * step
+                    under = gamma.cdf(high, alpha, scale=1 / beta)
+                    push = under - gamma.cdf(low, alpha, scale=1 / beta)
+                    under = under - push / 2
 
-            proba = filt.predict_proba([[2*(1-under)-1, 2*p[1]-1]])[0]
+            proba = filt.predict_proba([[2 * (1 - under) - 1, 2 * p[1] - 1]])[0]
 
         else:
             if "+" in o["Player"]:
-                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv, dist=dist) if stats[0]["Odds"] != 0.5 else None
-                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv, dist=dist) if stats[1]["Odds"] != 0.5 else None
+                ev1 = (
+                    get_ev(stats[0]["Line"], 1 - stats[0]["Odds"], cv, dist=dist)
+                    if stats[0]["Odds"] != 0.5
+                    else None
+                )
+                ev2 = (
+                    get_ev(stats[1]["Line"], 1 - stats[1]["Odds"], cv, dist=dist)
+                    if stats[1]["Odds"] != 0.5
+                    else None
+                )
 
                 if ev1 and ev2:
                     ev = ev1 + ev2
@@ -1368,27 +1774,33 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                         p = [poisson.cdf(line[0], ev), poisson.sf(line[1], ev)]
                     else:
                         line = o["Line"]
-                        p = [norm.cdf(line, ev, ev*cv),
-                            norm.sf(line, ev, ev*cv)]
+                        p = [norm.cdf(line, ev, ev * cv), norm.sf(line, ev, ev * cv)]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
                 else:
                     p = [0.5] * 2
             elif "vs." in o["Player"]:
-                ev1 = get_ev(stats[0]["Line"], 1-stats[0]
-                            ["Odds"], cv, dist=dist) if stats[0]["Odds"] != 0.5 else None
-                ev2 = get_ev(stats[1]["Line"], 1-stats[1]
-                            ["Odds"], cv, dist=dist) if stats[1]["Odds"] != 0.5 else None
+                ev1 = (
+                    get_ev(stats[0]["Line"], 1 - stats[0]["Odds"], cv, dist=dist)
+                    if stats[0]["Odds"] != 0.5
+                    else None
+                )
+                ev2 = (
+                    get_ev(stats[1]["Line"], 1 - stats[1]["Odds"], cv, dist=dist)
+                    if stats[1]["Odds"] != 0.5
+                    else None
+                )
                 if ev1 and ev2:
                     if dist == "Poisson":
                         line = (np.ceil(o["Line"] - 1), np.floor(o["Line"]))
-                        p = [skellam.cdf(line[0], ev2, ev1),
-                            skellam.sf(line[1], ev2, ev1)]
+                        p = [skellam.cdf(line[0], ev2, ev1), skellam.sf(line[1], ev2, ev1)]
                     else:
                         line = o["Line"]
-                        p = [norm.cdf(-line, ev1 - ev2, (ev1 + ev2)*cv),
-                            norm.sf(-line, ev1 - ev2, (ev1 + ev2)*cv)]
+                        p = [
+                            norm.cdf(-line, ev1 - ev2, (ev1 + ev2) * cv),
+                            norm.sf(-line, ev1 - ev2, (ev1 + ev2) * cv),
+                        ]
                     push = 1 - p[1] - p[0]
                     p[0] += push / 2
                     p[1] += push / 2
@@ -1396,20 +1808,29 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     p = [0.5] * 2
             else:
                 if stats["Line"] != o["Line"]:
-                    ev = get_ev(stats["Line"], 1-stats["Odds"], cv, dist=dist)
+                    ev = get_ev(stats["Line"], 1 - stats["Odds"], cv, dist=dist)
                     stats["Odds"] = get_odds(o["Line"], ev, dist, cv, step)
 
                 if (stats["Odds"] == 0) or (stats["Odds"] == 0.5):
-                    p = [0.5/o.get("Boost_Under", 1) if o.get("Boost_Under", 1) > 0 else 1-0.5/o.get("Boost_Over", 1),
-                         0.5/o.get("Boost_Over", 1) if o.get("Boost_Over", 1) > 0 else 1-0.5/o.get("Boost_Under", 1)]
-                    p = p/np.sum(p)
+                    p = [
+                        0.5 / o.get("Boost_Under", 1)
+                        if o.get("Boost_Under", 1) > 0
+                        else 1 - 0.5 / o.get("Boost_Over", 1),
+                        0.5 / o.get("Boost_Over", 1)
+                        if o.get("Boost_Over", 1) > 0
+                        else 1 - 0.5 / o.get("Boost_Under", 1),
+                    ]
+                    p = p / np.sum(p)
                     stats["Odds"] = p[1]
                 else:
-                    p = [1-stats["Odds"], stats["Odds"]]
-            
+                    p = [1 - stats["Odds"], stats["Odds"]]
+
             proba = p
 
-        if proba[1]*o.get("Boost_Over", 1) > proba[0]*o.get("Boost_Under", 1) or o.get("Boost", 1) > 1:
+        if (
+            proba[1] * o.get("Boost_Over", 1) > proba[0] * o.get("Boost_Under", 1)
+            or o.get("Boost", 1) > 1
+        ):
             o["Boost"] = o.get("Boost_Over", 1)
             o["Bet"] = "Over"
             o["Books"] = p[1]
@@ -1429,12 +1850,13 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             avgh2h = np.sum([s["AvgH2H"] for s in stats])
             o["Avg H2H"] = avgh2h - o["Line"] if avgh2h != 0 else 0
             o["Moneyline"] = np.mean([s["Moneyline"] for s in stats])
-            o["O/U"] = np.mean([s["Total"] for s in stats]) / \
-                totals_map.get(o["League"], 1)
-            o["DVPOA"] = hmean([s["Defense position"]+1 for s in stats])-1
+            o["O/U"] = np.mean([s["Total"] for s in stats]) / totals_map.get(o["League"], 1)
+            o["DVPOA"] = hmean([s["Defense position"] + 1 for s in stats]) - 1
             if ("Player position" in stats[0]) and ("Player position" in stats[1]):
-                o["Player position"] = (int(stats[0]["Player position"]),
-                                    int(stats[1]["Player position"]))
+                o["Player position"] = (
+                    int(stats[0]["Player position"]),
+                    int(stats[1]["Player position"]),
+                )
             else:
                 o["Player position"] = (-1, -1)
         elif "vs." in o["Player"]:
@@ -1442,31 +1864,30 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             o["Avg 5"] = avg5 + o["Line"]
             avgh2h = stats[0]["AvgH2H"] - stats[1]["AvgH2H"]
             o["Avg H2H"] = avgh2h + o["Line"]
-            o["Moneyline"] = np.mean(
-                [stats[0]["Moneyline"], 1-stats[1]["Moneyline"]])
-            o["O/U"] = np.mean([s["Total"] for s in stats]) / \
-                totals_map.get(o["League"], 1)
-            o["DVPOA"] = hmean(
-                [stats[0]["Defense position"]+1, 1-stats[1]["Defense position"]])-1
+            o["Moneyline"] = np.mean([stats[0]["Moneyline"], 1 - stats[1]["Moneyline"]])
+            o["O/U"] = np.mean([s["Total"] for s in stats]) / totals_map.get(o["League"], 1)
+            o["DVPOA"] = (
+                hmean([stats[0]["Defense position"] + 1, 1 - stats[1]["Defense position"]]) - 1
+            )
             if ("Player position" in stats[0]) and ("Player position" in stats[1]):
-                o["Player position"] = (int(stats[0]["Player position"]),
-                                    int(stats[1]["Player position"]))
+                o["Player position"] = (
+                    int(stats[0]["Player position"]),
+                    int(stats[1]["Player position"]),
+                )
             else:
                 o["Player position"] = (-1, -1)
         else:
-            o["Avg 5"] = stats["Avg5"] - \
-                o["Line"] if stats["Avg5"] != 0 else 0
-            o["Avg H2H"] = stats["AvgH2H"] - \
-                o["Line"] if stats["AvgH2H"] != 0 else 0
+            o["Avg 5"] = stats["Avg5"] - o["Line"] if stats["Avg5"] != 0 else 0
+            o["Avg H2H"] = stats["AvgH2H"] - o["Line"] if stats["AvgH2H"] != 0 else 0
             o["Moneyline"] = stats["Moneyline"]
-            o["O/U"] = stats["Total"]/totals_map.get(o["League"], 1)
+            o["O/U"] = stats["Total"] / totals_map.get(o["League"], 1)
             o["DVPOA"] = stats["Defense position"]
             if "Player position" in stats:
                 o["Player position"] = int(stats["Player position"])
             else:
                 o["Player position"] = -1
 
-        if 2 > o.get("Boost", 1) > .5:
+        if 2 > o.get("Boost", 1) > 0.5:
             new_offers.append(o)
 
     return new_offers

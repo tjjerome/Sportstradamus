@@ -35,33 +35,36 @@ Usage
   poetry run python3 evaluate_model_features.py --league NBA --threshold 0.25 --top-candidates 15
 """
 
-import os
-import json
-import warnings
 import argparse
 import importlib.resources as pkg_resources
+import json
+import os
+import warnings
 
-import numpy as np
 import pandas as pd
 
 from sportstradamus import data
 from sportstradamus.feature_selection import (
-    META_COLS,
-    EVAL_DROP_CUTOFF as DEFAULT_DROP_THRESHOLD,
     EVAL_ADD_THRESHOLD as DEFAULT_ADD_THRESHOLD,
+)
+from sportstradamus.feature_selection import (
+    EVAL_DROP_CUTOFF as DEFAULT_DROP_THRESHOLD,
+)
+from sportstradamus.feature_selection import (
     EVAL_TOP_CANDIDATES as DEFAULT_TOP_CANDIDATES,
-    market_key,
-    model_path,
-    training_path,
-    strip_variant,
-    variants_of,
-    compute_shap_scores,
+)
+from sportstradamus.feature_selection import (
+    META_COLS,
+    composite_score,
     compute_corr_scores,
     compute_from_training,
     compute_redundancy,
-    normalize_scores,
-    composite_score,
+    compute_shap_scores,
     discover_candidates,
+    market_key,
+    model_path,
+    normalize_scores,
+    training_path,
 )
 
 warnings.filterwarnings("ignore")
@@ -75,10 +78,17 @@ def load_csv_safe(path):
 
 # ─── Per-market evaluation ─────────────────────────────────────────────────────
 
-def evaluate_market(league: str, market: str, feature_filter: dict,
-                    shap_df: pd.DataFrame, corr_df: pd.DataFrame,
-                    drop_threshold: float, add_threshold: float,
-                    top_candidates: int) -> dict:
+
+def evaluate_market(
+    league: str,
+    market: str,
+    feature_filter: dict,
+    shap_df: pd.DataFrame,
+    corr_df: pd.DataFrame,
+    drop_threshold: float,
+    add_threshold: float,
+    top_candidates: int,
+) -> dict:
     """
     Evaluate all features for one market.
 
@@ -88,13 +98,13 @@ def evaluate_market(league: str, market: str, feature_filter: dict,
       'drop'            – list of features to consider removing
       'add'             – list of (feature, score) candidates to consider adding
     """
-    common   = set(feature_filter.get(league, {}).get("Common", []))
-    current  = list(feature_filter.get(league, {}).get(market, []))
+    common = set(feature_filter.get(league, {}).get("Common", []))
+    current = list(feature_filter.get(league, {}).get(market, []))
 
     if not current:
         return {}
 
-    mkey      = market_key(league, market)
+    mkey = market_key(league, market)
     has_model = os.path.isfile(model_path(league, market))
 
     # ── Load training data ──
@@ -102,16 +112,17 @@ def evaluate_market(league: str, market: str, feature_filter: dict,
     if os.path.isfile(tpath):
         train_df = pd.read_csv(tpath, index_col=0)
         train_df = train_df.sort_values("Date").reset_index(drop=True)
-        target   = pd.to_numeric(train_df["Result"], errors="coerce").fillna(0)
-        train_df = train_df.drop(columns=[c for c in META_COLS if c in train_df.columns],
-                                  errors="ignore")
+        target = pd.to_numeric(train_df["Result"], errors="coerce").fillna(0)
+        train_df = train_df.drop(
+            columns=[c for c in META_COLS if c in train_df.columns], errors="ignore"
+        )
     else:
         train_df = pd.DataFrame()
-        target   = pd.Series(dtype=float)
+        target = pd.Series(dtype=float)
 
     # ── Signal computation for existing features ──
-    shap_raw  = compute_shap_scores(current, mkey, shap_df)
-    corr_pre  = compute_corr_scores(current, mkey, corr_df)
+    shap_raw = compute_shap_scores(current, mkey, shap_df)
+    corr_pre = compute_corr_scores(current, mkey, corr_df)
     corr_train, mi_raw, stab_raw = compute_from_training(current, train_df, target)
 
     # Prefer pre-computed correlation; fall back to on-the-fly
@@ -120,12 +131,12 @@ def evaluate_market(league: str, market: str, feature_filter: dict,
     redundancy = compute_redundancy(current, train_df)
 
     # Normalize each signal across current features to [0,1]
-    shap_n  = normalize_scores(shap_raw)
-    corr_n  = normalize_scores(corr_raw)
-    mi_n    = normalize_scores(mi_raw)
-    stab_n  = normalize_scores(stab_raw)
+    shap_n = normalize_scores(shap_raw)
+    corr_n = normalize_scores(corr_raw)
+    mi_n = normalize_scores(mi_raw)
+    stab_n = normalize_scores(stab_raw)
 
-    current_scores  = {}
+    current_scores = {}
     current_signals = {}
     for feat in current:
         r = redundancy.get(feat, 0.0)
@@ -147,24 +158,29 @@ def evaluate_market(league: str, market: str, feature_filter: dict,
     add_candidates = []
     if candidates and not train_df.empty:
         c_corr, c_mi, c_stab = compute_from_training(candidates, train_df, target)
-        c_red  = compute_redundancy(candidates, train_df)
+        c_red = compute_redundancy(candidates, train_df)
         # Normalize candidates against themselves
         c_corr_n = normalize_scores(c_corr)
-        c_mi_n   = normalize_scores(c_mi)
+        c_mi_n = normalize_scores(c_mi)
         c_stab_n = normalize_scores(c_stab)
         zero = {f: 0.0 for f in candidates}
         for feat in candidates:
             r = c_red.get(feat, 0.0)
-            s = composite_score(feat, zero, c_corr_n, c_mi_n, c_stab_n, r,
-                                has_model=False)
+            s = composite_score(feat, zero, c_corr_n, c_mi_n, c_stab_n, r, has_model=False)
             if s >= add_threshold:
-                add_candidates.append((feat, s, dict(
-                    corr=c_corr.get(feat, 0.0),
-                    mi=c_mi.get(feat, 0.0),
-                    stability=c_stab.get(feat, 0.0),
-                    redundancy=r,
-                    composite=s,
-                )))
+                add_candidates.append(
+                    (
+                        feat,
+                        s,
+                        dict(
+                            corr=c_corr.get(feat, 0.0),
+                            mi=c_mi.get(feat, 0.0),
+                            stability=c_stab.get(feat, 0.0),
+                            redundancy=r,
+                            composite=s,
+                        ),
+                    )
+                )
         add_candidates.sort(key=lambda x: -x[1])
         add_candidates = add_candidates[:top_candidates]
 
@@ -180,8 +196,8 @@ def evaluate_market(league: str, market: str, feature_filter: dict,
 
 # ─── Reporting ─────────────────────────────────────────────────────────────────
 
-def print_market_report(league: str, market: str, result: dict,
-                        drop_threshold: float) -> None:
+
+def print_market_report(league: str, market: str, result: dict, drop_threshold: float) -> None:
     if not result:
         print(f"  (no features configured for {league}/{market})")
         return
@@ -191,7 +207,7 @@ def print_market_report(league: str, market: str, result: dict,
     has_model = result["has_model"]
     n_train = result["n_training"]
     drops = result["drops"]
-    adds  = result["add_candidates"]
+    adds = result["add_candidates"]
 
     model_tag = "[model]" if has_model else "[no model]"
     print(f"\n{'='*70}")
@@ -208,13 +224,15 @@ def print_market_report(league: str, market: str, result: dict,
 
     for feat in sorted(scores, key=lambda f: -scores[f]):
         sig = sigs[feat]
-        s   = sig["composite"]
+        s = sig["composite"]
         tag = " <<<DROP" if feat in drops else ""
         row = f"  {feat:<45s} {s:>6.3f}"
         if has_model:
             row += f" {sig['shap']:>6.2f}"
-        row += (f" {sig['corr']:>6.3f} {sig['mi']:>6.3f}"
-                f" {sig['stability']:>6.3f} {sig['redundancy']:>6.3f}{tag}")
+        row += (
+            f" {sig['corr']:>6.3f} {sig['mi']:>6.3f}"
+            f" {sig['stability']:>6.3f} {sig['redundancy']:>6.3f}{tag}"
+        )
         print(row)
 
     # Drop summary
@@ -227,21 +245,29 @@ def print_market_report(league: str, market: str, result: dict,
 
     # Add candidates
     if adds:
-        print(f"\n  ADD candidates (not in current filter):")
+        print("\n  ADD candidates (not in current filter):")
         print(f"  {'Feature':<45s} {'Score':>6s} {'Corr':>6s} {'MI':>6s} {'Stab':>6s}")
         print("  " + "-" * 78)
         for feat, s, sig in adds:
-            print(f"  {feat:<45s} {s:>6.3f} {sig['corr']:>6.3f}"
-                  f" {sig['mi']:>6.3f} {sig['stability']:>6.3f}")
+            print(
+                f"  {feat:<45s} {s:>6.3f} {sig['corr']:>6.3f}"
+                f" {sig['mi']:>6.3f} {sig['stability']:>6.3f}"
+            )
     else:
         print("  No strong addition candidates found.")
 
 
 # ─── Applying recommendations ──────────────────────────────────────────────────
 
-def apply_recommendations(feature_filter: dict, league: str, market: str,
-                           result: dict, drop_threshold: float,
-                           add_threshold: float) -> list[str]:
+
+def apply_recommendations(
+    feature_filter: dict,
+    league: str,
+    market: str,
+    result: dict,
+    drop_threshold: float,
+    add_threshold: float,
+) -> list[str]:
     """
     Return an updated feature list for feature_filter[league][market]:
     - Removes drop candidates
@@ -259,24 +285,44 @@ def apply_recommendations(feature_filter: dict, league: str, market: str,
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate and optimize feature_filter.json market feature sets")
-    parser.add_argument("--league", required=True,
-                        choices=["NFL", "NHL", "MLB", "WNBA", "NBA"],
-                        help="League to evaluate")
-    parser.add_argument("--market", nargs="+", default=None,
-                        help="Market(s) to evaluate (default: all in league)")
-    parser.add_argument("--threshold", type=float, default=DEFAULT_DROP_THRESHOLD,
-                        help=f"Drop threshold (default: {DEFAULT_DROP_THRESHOLD})")
-    parser.add_argument("--add-threshold", type=float, default=DEFAULT_ADD_THRESHOLD,
-                        help=f"Candidate addition threshold (default: {DEFAULT_ADD_THRESHOLD})")
-    parser.add_argument("--top-candidates", type=int, default=DEFAULT_TOP_CANDIDATES,
-                        help=f"Max additions to show per market (default: {DEFAULT_TOP_CANDIDATES})")
-    parser.add_argument("--save", action="store_true",
-                        help="Apply recommendations and save feature_filter.json")
-    parser.add_argument("--no-add", action="store_true",
-                        help="Do not suggest or apply feature additions")
+        description="Evaluate and optimize feature_filter.json market feature sets"
+    )
+    parser.add_argument(
+        "--league",
+        required=True,
+        choices=["NFL", "NHL", "MLB", "WNBA", "NBA"],
+        help="League to evaluate",
+    )
+    parser.add_argument(
+        "--market", nargs="+", default=None, help="Market(s) to evaluate (default: all in league)"
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=DEFAULT_DROP_THRESHOLD,
+        help=f"Drop threshold (default: {DEFAULT_DROP_THRESHOLD})",
+    )
+    parser.add_argument(
+        "--add-threshold",
+        type=float,
+        default=DEFAULT_ADD_THRESHOLD,
+        help=f"Candidate addition threshold (default: {DEFAULT_ADD_THRESHOLD})",
+    )
+    parser.add_argument(
+        "--top-candidates",
+        type=int,
+        default=DEFAULT_TOP_CANDIDATES,
+        help=f"Max additions to show per market (default: {DEFAULT_TOP_CANDIDATES})",
+    )
+    parser.add_argument(
+        "--save", action="store_true", help="Apply recommendations and save feature_filter.json"
+    )
+    parser.add_argument(
+        "--no-add", action="store_true", help="Do not suggest or apply feature additions"
+    )
     args = parser.parse_args()
 
     # ── Load shared data ──
@@ -288,7 +334,7 @@ def main():
     corr_df = load_csv_safe(pkg_resources.files(data) / "feature_correlations.csv")
 
     if not shap_df.empty:
-        shap_df = shap_df.clip(lower=0)          # SHAP is always non-negative here
+        shap_df = shap_df.clip(lower=0)  # SHAP is always non-negative here
     if not corr_df.empty:
         corr_df = corr_df.abs()
 
@@ -327,8 +373,8 @@ def main():
 
         if args.save and result:
             updated = apply_recommendations(
-                feature_filter, args.league, market, result,
-                args.threshold, add_threshold)
+                feature_filter, args.league, market, result, args.threshold, add_threshold
+            )
             old = feature_filter[args.league][market]
             if sorted(updated) != sorted(old):
                 changes[market] = dict(

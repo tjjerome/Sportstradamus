@@ -1,17 +1,22 @@
 """Page 4: Profit Simulation — preset and custom strategies with Monte Carlo."""
-import sys, pathlib
+
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
 from sportstradamus.dashboard_data import (
-    load_history, get_filtered_history, load_resolve_meta,
+    get_filtered_history,
+    load_history,
+    load_resolve_meta,
 )
-from sportstradamus.analysis import TIMEFRAMES
 
 st.title("Profit Simulation")
 
@@ -70,7 +75,9 @@ df = df.loc[df["League"].isin(selected_leagues)]
 
 # Platform filter
 platforms = sorted(df["Platform"].unique())
-selected_platforms = st.sidebar.multiselect("Platforms", platforms, default=platforms, key="profit_platforms")
+selected_platforms = st.sidebar.multiselect(
+    "Platforms", platforms, default=platforms, key="profit_platforms"
+)
 df = df.loc[df["Platform"].isin(selected_platforms)]
 
 N_MONTE_CARLO = 100
@@ -79,7 +86,7 @@ N_MONTE_CARLO = 100
 RANKING_MAP = {
     "Kelly": "K",
     "Probability": "Model P",  # raw predicted probability
-    "EV": "Model",             # Model P * Boost
+    "EV": "Model",  # Model P * Boost
 }
 
 
@@ -95,8 +102,17 @@ def compute_payout(row):
         return (100 / 110) * boost
 
 
-def simulate_strategy(df, min_model_p, min_books_p, max_bets_day, sizing_pct,
-                      use_kelly, ranking, initial_bankroll, n_mc=N_MONTE_CARLO):
+def simulate_strategy(
+    df,
+    min_model_p,
+    min_books_p,
+    max_bets_day,
+    sizing_pct,
+    use_kelly,
+    ranking,
+    initial_bankroll,
+    n_mc=N_MONTE_CARLO,
+):
     """Run Monte Carlo profit simulation on exploded offer data.
 
     Returns DataFrame with columns: date, run, bankroll, daily_pnl
@@ -104,10 +120,7 @@ def simulate_strategy(df, min_model_p, min_books_p, max_bets_day, sizing_pct,
     rank_col = RANKING_MAP.get(ranking, "K")
 
     # Filter by thresholds
-    eligible = df.loc[
-        (df[prob_col] >= min_model_p) &
-        (df["Books"].fillna(0) >= min_books_p)
-    ].copy()
+    eligible = df.loc[(df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)].copy()
 
     if eligible.empty:
         return pd.DataFrame()
@@ -185,7 +198,9 @@ def simulate_strategy(df, min_model_p, min_books_p, max_bets_day, sizing_pct,
 
             bankroll += daily_pnl
             bankroll = max(bankroll, 0)
-            run_data.append({"date": date, "run": run_i, "bankroll": bankroll, "daily_pnl": daily_pnl})
+            run_data.append(
+                {"date": date, "run": run_i, "bankroll": bankroll, "daily_pnl": daily_pnl}
+            )
 
         all_runs.extend(run_data)
 
@@ -194,17 +209,43 @@ def simulate_strategy(df, min_model_p, min_books_p, max_bets_day, sizing_pct,
 
 # --- Preset Strategies ---
 PRESETS = {
-    "Conservative": {"min_model_p": 0.65, "min_books_p": 0.52, "max_bets_day": 5,
-                     "sizing_pct": 1.0, "use_kelly": False, "ranking": "Kelly"},
-    "Moderate": {"min_model_p": 0.60, "min_books_p": 0.52, "max_bets_day": 10,
-                 "sizing_pct": 1.0, "use_kelly": False, "ranking": "Kelly"},
-    "Aggressive": {"min_model_p": 0.55, "min_books_p": 0.50, "max_bets_day": 20,
-                   "sizing_pct": 2.0, "use_kelly": False, "ranking": "EV"},
-    "Kelly": {"min_model_p": 0.58, "min_books_p": 0.52, "max_bets_day": 15,
-              "sizing_pct": 1.0, "use_kelly": True, "ranking": "Kelly"},
+    "Conservative": {
+        "min_model_p": 0.65,
+        "min_books_p": 0.52,
+        "max_bets_day": 5,
+        "sizing_pct": 1.0,
+        "use_kelly": False,
+        "ranking": "Kelly",
+    },
+    "Moderate": {
+        "min_model_p": 0.60,
+        "min_books_p": 0.52,
+        "max_bets_day": 10,
+        "sizing_pct": 1.0,
+        "use_kelly": False,
+        "ranking": "Kelly",
+    },
+    "Aggressive": {
+        "min_model_p": 0.55,
+        "min_books_p": 0.50,
+        "max_bets_day": 20,
+        "sizing_pct": 2.0,
+        "use_kelly": False,
+        "ranking": "EV",
+    },
+    "Kelly": {
+        "min_model_p": 0.58,
+        "min_books_p": 0.52,
+        "max_bets_day": 15,
+        "sizing_pct": 1.0,
+        "use_kelly": True,
+        "ranking": "Kelly",
+    },
 }
 
-initial_bankroll = st.sidebar.number_input("Initial Bankroll ($)", value=1000, min_value=100, step=100)
+initial_bankroll = st.sidebar.number_input(
+    "Initial Bankroll ($)", value=1000, min_value=100, step=100
+)
 
 # --- Custom Strategy ---
 with st.sidebar.expander("Custom Strategy"):
@@ -213,8 +254,9 @@ with st.sidebar.expander("Custom Strategy"):
     custom_max_bets = st.slider("Max Bets/Day", 1, 50, 10, key="custom_max_bets")
     custom_sizing = st.slider("Bet Size (%)", 0.5, 5.0, 1.0, 0.5, key="custom_sizing")
     custom_kelly = st.toggle("Kelly Sizing", value=False, key="custom_kelly")
-    custom_ranking = st.selectbox("Selection Ranking",
-                                  list(RANKING_MAP.keys()), key="custom_ranking")
+    custom_ranking = st.selectbox(
+        "Selection Ranking", list(RANKING_MAP.keys()), key="custom_ranking"
+    )
 
 # --- Run Simulations ---
 st.header("Strategy Comparison")
@@ -224,9 +266,13 @@ with st.spinner("Running Monte Carlo simulations..."):
 
     for name, params in PRESETS.items():
         result = simulate_strategy(
-            df, params["min_model_p"], params["min_books_p"],
-            params["max_bets_day"], params["sizing_pct"],
-            params["use_kelly"], params["ranking"],
+            df,
+            params["min_model_p"],
+            params["min_books_p"],
+            params["max_bets_day"],
+            params["sizing_pct"],
+            params["use_kelly"],
+            params["ranking"],
             initial_bankroll,
         )
         if not result.empty:
@@ -234,8 +280,13 @@ with st.spinner("Running Monte Carlo simulations..."):
 
     # Custom
     custom_result = simulate_strategy(
-        df, custom_min_p, custom_min_books, custom_max_bets,
-        custom_sizing, custom_kelly, custom_ranking,
+        df,
+        custom_min_p,
+        custom_min_books,
+        custom_max_bets,
+        custom_sizing,
+        custom_kelly,
+        custom_ranking,
         initial_bankroll,
     )
     if not custom_result.empty:
@@ -249,11 +300,15 @@ if not all_results:
 fig_bank = go.Figure()
 
 for name, result in all_results.items():
-    agg = result.groupby("date").agg(
-        mean_bankroll=("bankroll", "mean"),
-        p10=("bankroll", lambda x: np.percentile(x, 10)),
-        p90=("bankroll", lambda x: np.percentile(x, 90)),
-    ).reset_index()
+    agg = (
+        result.groupby("date")
+        .agg(
+            mean_bankroll=("bankroll", "mean"),
+            p10=("bankroll", lambda x: np.percentile(x, 10)),
+            p90=("bankroll", lambda x: np.percentile(x, 90)),
+        )
+        .reset_index()
+    )
 
     color_map = {
         "Conservative": "#3498db",
@@ -265,28 +320,40 @@ for name, result in all_results.items():
     color = color_map.get(name, "#95a5a6")
 
     # Confidence band
-    fig_bank.add_trace(go.Scatter(
-        x=pd.concat([agg["date"], agg["date"][::-1]]),
-        y=pd.concat([agg["p90"], agg["p10"][::-1]]),
-        fill="toself", fillcolor=color.replace(")", ",0.1)").replace("rgb", "rgba") if "rgb" in color else color + "1A",
-        line=dict(width=0),
-        name=f"{name} (10th-90th %ile)",
-        showlegend=False,
-        hoverinfo="skip",
-    ))
+    fig_bank.add_trace(
+        go.Scatter(
+            x=pd.concat([agg["date"], agg["date"][::-1]]),
+            y=pd.concat([agg["p90"], agg["p10"][::-1]]),
+            fill="toself",
+            fillcolor=color.replace(")", ",0.1)").replace("rgb", "rgba")
+            if "rgb" in color
+            else color + "1A",
+            line=dict(width=0),
+            name=f"{name} (10th-90th %ile)",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
 
     # Mean line
-    fig_bank.add_trace(go.Scatter(
-        x=agg["date"], y=agg["mean_bankroll"],
-        mode="lines", name=name,
-        line=dict(color=color, width=2),
-    ))
+    fig_bank.add_trace(
+        go.Scatter(
+            x=agg["date"],
+            y=agg["mean_bankroll"],
+            mode="lines",
+            name=name,
+            line=dict(color=color, width=2),
+        )
+    )
 
-fig_bank.add_hline(y=initial_bankroll, line_dash="dash", line_color="gray",
-                   annotation_text="Starting bankroll")
+fig_bank.add_hline(
+    y=initial_bankroll, line_dash="dash", line_color="gray", annotation_text="Starting bankroll"
+)
 fig_bank.update_layout(
-    xaxis_title="Date", yaxis_title="Bankroll ($)",
-    height=500, title="Cumulative Bankroll (Monte Carlo Mean with 10th-90th Percentile Band)",
+    xaxis_title="Date",
+    yaxis_title="Bankroll ($)",
+    height=500,
+    title="Cumulative Bankroll (Monte Carlo Mean with 10th-90th Percentile Band)",
 )
 st.plotly_chart(fig_bank, use_container_width=True)
 
@@ -314,7 +381,8 @@ for name, result in all_results.items():
 
     # Sharpe-like ratio
     daily_returns = result.groupby("run").apply(
-        lambda x: x["daily_pnl"].values / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
+        lambda x: x["daily_pnl"].values
+        / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
     )
     all_returns = np.concatenate(daily_returns.values)
     sharpe = np.mean(all_returns) / np.std(all_returns) if np.std(all_returns) > 0 else 0
@@ -323,14 +391,16 @@ for name, result in all_results.items():
     daily_outcomes = result.groupby(["run", "date"])["daily_pnl"].sum().reset_index()
     win_rate = (daily_outcomes["daily_pnl"] > 0).mean()
 
-    summary_rows.append({
-        "Strategy": name,
-        "Final Bankroll": f"${mean_final:,.0f}",
-        "ROI": f"{roi:+.1%}",
-        "Max Drawdown": f"{mean_dd:.1%}",
-        "Sharpe Ratio": f"{sharpe:.3f}",
-        "Win% (daily)": f"{win_rate:.1%}",
-    })
+    summary_rows.append(
+        {
+            "Strategy": name,
+            "Final Bankroll": f"${mean_final:,.0f}",
+            "ROI": f"{roi:+.1%}",
+            "Max Drawdown": f"{mean_dd:.1%}",
+            "Sharpe Ratio": f"{sharpe:.3f}",
+            "Win% (daily)": f"{win_rate:.1%}",
+        }
+    )
 
 summary_df = pd.DataFrame(summary_rows)
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
@@ -342,10 +412,14 @@ if selected_strategy in all_results:
     pnl_data = all_results[selected_strategy]
     daily_pnl_agg = pnl_data.groupby("date")["daily_pnl"].mean().reset_index()
 
-    fig_pnl = px.bar(daily_pnl_agg, x="date", y="daily_pnl",
-                     color=daily_pnl_agg["daily_pnl"].apply(lambda x: "Profit" if x >= 0 else "Loss"),
-                     color_discrete_map={"Profit": "#2ecc71", "Loss": "#e74c3c"},
-                     labels={"date": "Date", "daily_pnl": "Daily P&L ($)"})
+    fig_pnl = px.bar(
+        daily_pnl_agg,
+        x="date",
+        y="daily_pnl",
+        color=daily_pnl_agg["daily_pnl"].apply(lambda x: "Profit" if x >= 0 else "Loss"),
+        color_discrete_map={"Profit": "#2ecc71", "Loss": "#e74c3c"},
+        labels={"date": "Date", "daily_pnl": "Daily P&L ($)"},
+    )
     fig_pnl.update_layout(height=400, showlegend=False)
     st.plotly_chart(fig_pnl, use_container_width=True)
 
@@ -353,15 +427,23 @@ if selected_strategy in all_results:
 st.subheader("Drawdown Over Time")
 if selected_strategy in all_results:
     dd_data = all_results[selected_strategy]
-    dd_agg = dd_data.groupby("date").agg(
-        mean_bankroll=("bankroll", "mean"),
-    ).reset_index()
+    dd_agg = (
+        dd_data.groupby("date")
+        .agg(
+            mean_bankroll=("bankroll", "mean"),
+        )
+        .reset_index()
+    )
     dd_agg["Peak"] = dd_agg["mean_bankroll"].cummax()
     dd_agg["Drawdown"] = (dd_agg["Peak"] - dd_agg["mean_bankroll"]) / dd_agg["Peak"].clip(lower=1)
 
-    fig_dd = px.area(dd_agg, x="date", y="Drawdown",
-                     labels={"date": "Date", "Drawdown": "Drawdown (%)"},
-                     color_discrete_sequence=["#e74c3c"])
+    fig_dd = px.area(
+        dd_agg,
+        x="date",
+        y="Drawdown",
+        labels={"date": "Date", "Drawdown": "Drawdown (%)"},
+        color_discrete_sequence=["#e74c3c"],
+    )
     fig_dd.update_layout(height=350, yaxis_tickformat=".0%")
     st.plotly_chart(fig_dd, use_container_width=True)
 

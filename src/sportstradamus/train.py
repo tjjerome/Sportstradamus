@@ -1,93 +1,113 @@
-from sportstradamus.stats import StatsMLB, StatsNBA, StatsNHL, StatsNFL, StatsWNBA
-from sportstradamus.helpers import get_ev, get_odds, stat_cv, stat_zi, Archive, book_weights, feature_filter, set_model_start_values, fused_loc
-from sportstradamus import feature_selection as fs
-import pickle
 import importlib.resources as pkg_resources
-from sportstradamus import data
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from scipy.optimize import minimize, minimize_scalar
-from scipy.special import logit, expit, beta as beta_fn
-from scipy.stats import poisson, nbinom, norm, gamma, fit
-from sklearn.metrics import (
-    precision_score,
-    accuracy_score,
-    log_loss
-)
-from scipy.special import softmax
-import lightgbm as lgb
-import pandas as pd
-import click
 import os
+import pickle
 from datetime import datetime, timedelta
-from tqdm import tqdm
-from lightgbmlss.model import LightGBMLSS
+
+import click
+import lightgbm as lgb
+import numpy as np
+import pandas as pd
+import shap
+import torch
 from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
-from lightgbmlss.distributions.Gamma import Gamma
-from lightgbmlss.distributions.ZAGamma import ZAGamma
-from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from scipy.stats import skewnorm
+from lightgbmlss.model import LightGBMLSS
+from scipy.optimize import minimize, minimize_scalar
+from scipy.special import beta as beta_fn
+from scipy.special import expit, logit
+from scipy.stats import fit, gamma, nbinom, norm, poisson, skewnorm
+from sklearn.metrics import accuracy_score, log_loss, precision_score
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
-import torch
-import shap
+from sportstradamus import data
+from sportstradamus import feature_selection as fs
+from sportstradamus.helpers import (
+    Archive,
+    book_weights,
+    feature_filter,
+    fused_loc,
+    get_ev,
+    get_odds,
+    set_model_start_values,
+    stat_cv,
+    stat_zi,
+)
+from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
+from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
 
 class _BoundedResponseFn:
     """Picklable callable that clamps a response function's output."""
+
     def __init__(self, orig_fn, ceiling):
         self.orig_fn = orig_fn
         self.ceiling = float(ceiling)
 
     def __call__(self, predt):
         return torch.clamp(self.orig_fn(predt), max=self.ceiling)
+
+
 import json
 import warnings
+
 pd.options.mode.chained_assignment = None
-pd.set_option('future.no_silent_downcasting', True)
-np.seterr(divide='ignore', invalid='ignore')
+pd.set_option("future.no_silent_downcasting", True)
+np.seterr(divide="ignore", invalid="ignore")
 
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
+
 def load_distribution_config():
     """Load distribution configuration from stat_dist.json."""
     filepath = pkg_resources.files(data) / "stat_dist.json"
     if os.path.isfile(filepath):
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             return json.load(f)
     return {}
+
 
 def save_distribution_config(config):
     """Save distribution configuration to stat_dist.json."""
     filepath = pkg_resources.files(data) / "stat_dist.json"
-    with open(filepath, 'w') as f:
+    with open(filepath, "w") as f:
         json.dump(config, f, indent=4)
+
 
 def load_zi_config():
     """Load zero-inflation gate configuration from stat_zi.json."""
     filepath = pkg_resources.files(data) / "stat_zi.json"
     if os.path.isfile(filepath):
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             return json.load(f)
     return {}
+
 
 def save_zi_config(config):
     """Save zero-inflation gate configuration to stat_zi.json."""
     filepath = pkg_resources.files(data) / "stat_zi.json"
-    with open(filepath, 'w') as f:
+    with open(filepath, "w") as f:
         json.dump(config, f, indent=4)
 
-def warm_start_hyper_opt(model, hp_dict, train_set, initial_params,
-                         num_boost_round=999, nfold=4,
-                         early_stopping_rounds=50, max_minutes=15,
-                         n_trials=100, silence=True):
+
+def warm_start_hyper_opt(
+    model,
+    hp_dict,
+    train_set,
+    initial_params,
+    num_boost_round=999,
+    nfold=4,
+    early_stopping_rounds=50,
+    max_minutes=15,
+    n_trials=100,
+    silence=True,
+):
     """Run a shortened hyper_opt seeded with previous best parameters."""
     import optuna
-    from optuna.samplers import TPESampler
     from optuna.integration import LightGBMPruningCallback
+    from optuna.samplers import TPESampler
 
     tunable_params = {k for k, v in hp_dict.items() if v[0] != "none"}
 
@@ -95,32 +115,37 @@ def warm_start_hyper_opt(model, hp_dict, train_set, initial_params,
         hyper_params = {}
         for param_name, param_value in hp_dict.items():
             param_type = param_value[0]
-            if param_type == "categorical" or param_type == "none":
+            if param_type in ("categorical", "none"):
                 hyper_params[param_name] = trial.suggest_categorical(param_name, param_value[1])
             elif param_type == "float":
                 c = param_value[1]
                 hyper_params[param_name] = trial.suggest_float(
-                    param_name, low=c["low"], high=c["high"], log=c["log"])
+                    param_name, low=c["low"], high=c["high"], log=c["log"]
+                )
             elif param_type == "int":
                 c = param_value[1]
                 hyper_params[param_name] = trial.suggest_int(
-                    param_name, low=c["low"], high=c["high"], log=c["log"])
+                    param_name, low=c["low"], high=c["high"], log=c["log"]
+                )
 
         if "boosting" not in hyper_params:
             hyper_params["boosting"] = trial.suggest_categorical("boosting", ["gbdt"])
 
         pruning_callback = LightGBMPruningCallback(trial, model.dist.loss_fn)
         early_stopping_callback = lgb.early_stopping(
-            stopping_rounds=early_stopping_rounds, verbose=False)
+            stopping_rounds=early_stopping_rounds, verbose=False
+        )
 
-        cv_result = model.cv(hyper_params, train_set,
-                             num_boost_round=num_boost_round,
-                             nfold=nfold,
-                             callbacks=[pruning_callback, early_stopping_callback],
-                             seed=None)
+        cv_result = model.cv(
+            hyper_params,
+            train_set,
+            num_boost_round=num_boost_round,
+            nfold=nfold,
+            callbacks=[pruning_callback, early_stopping_callback],
+            seed=None,
+        )
 
-        opt_rounds = np.argmin(
-            np.array(cv_result[f"valid {model.dist.loss_fn}-mean"])) + 1
+        opt_rounds = np.argmin(np.array(cv_result[f"valid {model.dist.loss_fn}-mean"])) + 1
         trial.set_user_attr("opt_round", int(opt_rounds))
         return np.min(np.array(cv_result[f"valid {model.dist.loss_fn}-mean"]))
 
@@ -129,44 +154,59 @@ def warm_start_hyper_opt(model, hp_dict, train_set, initial_params,
 
     sampler = TPESampler()
     pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20)
-    study = optuna.create_study(sampler=sampler, pruner=pruner, direction="minimize",
-                                study_name="LightGBMLSS Warm-Start Optimization")
+    study = optuna.create_study(
+        sampler=sampler,
+        pruner=pruner,
+        direction="minimize",
+        study_name="LightGBMLSS Warm-Start Optimization",
+    )
 
     # Enqueue previous best params as the first trial
     seed_params = {k: v for k, v in initial_params.items() if k in tunable_params}
     seed_params["boosting"] = "gbdt"
     study.enqueue_trial(seed_params)
 
-    study.optimize(objective, n_trials=n_trials, timeout=60 * max_minutes,
-                   show_progress_bar=True)
+    study.optimize(objective, n_trials=n_trials, timeout=60 * max_minutes, show_progress_bar=True)
 
     print("\nWarm-Start Hyper-Parameter Optimization finished.")
     print("  Number of finished trials: ", len(study.trials))
     print("  Best trial:")
     opt_param = study.best_trial
     opt_param.params["opt_rounds"] = int(
-        study.trials_dataframe()["user_attrs_opt_round"][
-            study.trials_dataframe()["value"].idxmin()])
+        study.trials_dataframe()["user_attrs_opt_round"][study.trials_dataframe()["value"].idxmin()]
+    )
 
-    print("    Value: {}".format(opt_param.value))
+    print(f"    Value: {opt_param.value}")
     print("    Params: ")
     for key, value in opt_param.params.items():
-        print("    {}: {}".format(key, value))
+        print(f"    {key}: {value}")
 
     return opt_param.params
+
 
 # ============================================================================
 # MAIN TRAINING PIPELINE
 # ============================================================================
 
+
 @click.command()
 @click.option("--force/--no-force", default=False, help="Force update of all models")
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
-              help="Select league to train on")
-@click.option("--rebuild-filter/--no-rebuild-filter", default=False,
-              help="Train with full feature set (ignore Filtered), then rerun SHAP and rewrite filter")
-@click.option("--reset-markets", default="",
-              help="Comma-separated league:market pairs (or just market for active league) to clear from Filtered before training")
+@click.option(
+    "--league",
+    type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]),
+    default="All",
+    help="Select league to train on",
+)
+@click.option(
+    "--rebuild-filter/--no-rebuild-filter",
+    default=False,
+    help="Train with full feature set (ignore Filtered), then rerun SHAP and rewrite filter",
+)
+@click.option(
+    "--reset-markets",
+    default="",
+    help="Comma-separated league:market pairs (or just market for active league) to clear from Filtered before training",
+)
 def meditate(force, league, rebuild_filter, reset_markets):
     global book_weights, archive, stat_structs
 
@@ -191,6 +231,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
             json.dump(ff, fh, indent=4)
         # Reload module-level feature_filter so this run sees the change
         from sportstradamus import helpers as _hp
+
         _hp.feature_filter.clear()
         _hp.feature_filter.update(ff)
 
@@ -204,15 +245,21 @@ def meditate(force, league, rebuild_filter, reset_markets):
     stat_structs = {}
     archive = Archive()
 
-    if (league == "All" and datetime.today().date() > (nba.season_start - timedelta(days=7))) or league == "NBA":
+    if (
+        league == "All" and datetime.today().date() > (nba.season_start - timedelta(days=7))
+    ) or league == "NBA":
         nba.load()
         nba.update()
         stat_structs.update({"NBA": nba})
-    if (league == "All" and datetime.today().date() > (nfl.season_start - timedelta(days=7))) or league == "NFL":
+    if (
+        league == "All" and datetime.today().date() > (nfl.season_start - timedelta(days=7))
+    ) or league == "NFL":
         nfl.load()
         nfl.update()
         stat_structs.update({"NFL": nfl})
-    if (league == "All" and datetime.today().date() > (wnba.season_start - timedelta(days=7))) or league == "WNBA":
+    if (
+        league == "All" and datetime.today().date() > (wnba.season_start - timedelta(days=7))
+    ) or league == "WNBA":
         wnba.load()
         wnba.update()
         stat_structs.update({"WNBA": wnba})
@@ -293,7 +340,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
             "TOV",
             "FTM",
             "PRA",
-            "fantasy points prizepicks"
+            "fantasy points prizepicks",
         ],
         "MLB": [
             "plateAppearances",
@@ -319,7 +366,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
             "batter strikeouts",
             "singles",
             "doubles",
-            "home runs"
+            "home runs",
         ],
         "NHL": [
             "timeOnIce",
@@ -338,15 +385,15 @@ def meditate(force, league, rebuild_filter, reset_markets):
             "goals",
             "assists",
             "faceOffWins",
-        ]
+        ],
     }
-    if not league == "All":
+    if league != "All":
         all_markets = {league: all_markets[league]}
     for league, markets in all_markets.items():
         stat_data = stat_structs.get(league)
         if stat_data is None:
             continue
-        
+
         book_weights.setdefault(league, {}).setdefault("Moneyline", {})
         book_weights[league]["Moneyline"] = fit_book_weights(league, "Moneyline")
 
@@ -364,7 +411,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
         elif league == "NHL":
             stat_data.dump_goalie_list()
 
-        with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
+        with open(pkg_resources.files(data) / "book_weights.json", "w") as outfile:
             json.dump(book_weights, outfile, indent=4)
 
         stat_data.update_player_comps()
@@ -377,7 +424,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
             stat_zi.setdefault(league, {})
 
             if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
-                with open(pkg_resources.files(data) / "book_weights.json", 'r') as infile:
+                with open(pkg_resources.files(data) / "book_weights.json") as infile:
                     book_weights = json.load(infile)
             else:
                 book_weights = {}
@@ -385,21 +432,21 @@ def meditate(force, league, rebuild_filter, reset_markets):
             book_weights.setdefault(league, {}).setdefault(market, {})
             book_weights[league][market] = fit_book_weights(league, market)
 
-            with open(pkg_resources.files(data) / "book_weights.json", 'w') as outfile:
+            with open(pkg_resources.files(data) / "book_weights.json", "w") as outfile:
                 json.dump(book_weights, outfile, indent=4)
 
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
             need_model = True
             if os.path.isfile(filepath):
-                with open(filepath, 'rb') as infile:
+                with open(filepath, "rb") as infile:
                     filedict = pickle.load(infile)
-                    model = filedict['model']
-                    params = filedict['params']
-                    dist = filedict['distribution']
-                    cv = filedict['cv']
-                    step = filedict['step']
-                
+                    model = filedict["model"]
+                    filedict["params"]
+                    dist = filedict["distribution"]
+                    cv = filedict["cv"]
+                    step = filedict["step"]
+
                 need_model = False
             else:
                 filedict = {}
@@ -408,11 +455,14 @@ def meditate(force, league, rebuild_filter, reset_markets):
             print(f"Training {league} - {market}")
             cv = stat_cv[league].get(market, 1)
             filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
-            
+
             if os.path.isfile(filepath):
                 M = pd.read_csv(filepath, index_col=0)
                 cutoff_date = pd.to_datetime(M["Date"]).max().date()
-                M = M.loc[(pd.to_datetime(M.Date).dt.date <= cutoff_date) & (pd.to_datetime(M.Date).dt.date > league_start_date)]
+                M = M.loc[
+                    (pd.to_datetime(M.Date).dt.date <= cutoff_date)
+                    & (pd.to_datetime(M.Date).dt.date > league_start_date)
+                ]
             else:
                 cutoff_date = league_start_date
                 M = pd.DataFrame()
@@ -426,21 +476,27 @@ def meditate(force, league, rebuild_filter, reset_markets):
             if M.empty:
                 print(f"  No usable training data for {league} {market}, skipping")
                 continue
-            M.Date = pd.to_datetime(M.Date, format='mixed')
-            if 'Player' in M.columns:
-                M = M.drop_duplicates(subset=['Player', 'Date'], keep='last')
+            M.Date = pd.to_datetime(M.Date, format="mixed")
+            if "Player" in M.columns:
+                M = M.drop_duplicates(subset=["Player", "Date"], keep="last")
             step = M["Result"].drop_duplicates().sort_values().diff().min()
-            _prep_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
+            _prep_gate = (
+                stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
+            )
             synthetic_mask = M.Odds.isna() | (M.Odds == 0)
             if "Odds_synthetic" in M.columns:
                 synthetic_mask |= M["Odds_synthetic"].fillna(False)
             for i, row in M.loc[synthetic_mask].iterrows():
                 if np.isnan(row["EV"]) or row["EV"] <= 0:
                     M.loc[i, "Odds"] = 0.5
-                    M.loc[i, "EV"] = get_ev(M.loc[i, "Line"], .5, cv=cv, dist=dist, gate=_prep_gate or None)
+                    M.loc[i, "EV"] = get_ev(
+                        M.loc[i, "Line"], 0.5, cv=cv, dist=dist, gate=_prep_gate or None
+                    )
                     M.loc[i, "Odds_synthetic"] = True
                 else:
-                    M.loc[i, "Odds"] = 1-get_odds(row["Line"], row["EV"], dist, cv=cv, step=step, gate=_prep_gate or None)
+                    M.loc[i, "Odds"] = 1 - get_odds(
+                        row["Line"], row["EV"], dist, cv=cv, step=step, gate=_prep_gate or None
+                    )
                     M.loc[i, "Odds_synthetic"] = False
 
             M = trim_matrix(M, 15000)
@@ -450,12 +506,14 @@ def meditate(force, league, rebuild_filter, reset_markets):
             stat_data.save_comps()
 
             if rebuild_filter:
-                print(f"  Scouting pass for filter rebuild...")
+                print("  Scouting pass for filter rebuild...")
                 diag = _scouting_shap_and_filter(league, market, M, stat_data)
                 if diag is not None:
-                    print(f"  Filter: kept={diag['n_kept']} dropped={diag['n_dropped']} added={diag['n_added']}")
+                    print(
+                        f"  Filter: kept={diag['n_kept']} dropped={diag['n_dropped']} added={diag['n_added']}"
+                    )
 
-            y = M[['Result']]
+            y = M[["Result"]]
 
             X = M[stat_data.get_stat_columns(market)]
 
@@ -463,9 +521,9 @@ def meditate(force, league, rebuild_filter, reset_markets):
             if "Player position" not in X.columns:
                 categories.remove("Player position")
             for c in categories:
-                X[c] = X[c].astype('category')
+                X[c] = X[c].astype("category")
 
-            categories = "name:"+",".join(categories)
+            categories = "name:" + ",".join(categories)
 
             # === TEMPORAL SPLIT: earliest 70% of games (by date) to train, latest 30% to test ===
             # Sort by date, then split
@@ -485,9 +543,9 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 X_test, y_test, test_size=0.5, random_state=25
             )
 
-            B_train = M.loc[X_train.index, ['Line', 'Odds', 'EV']]
-            B_test = M.loc[X_test.index, ['Line', 'Odds', 'EV']]
-            B_validation = M.loc[X_validation.index, ['Line', 'Odds', 'EV']]
+            B_train = M.loc[X_train.index, ["Line", "Odds", "EV"]]
+            B_test = M.loc[X_test.index, ["Line", "Odds", "EV"]]
+            B_validation = M.loc[X_validation.index, ["Line", "Odds", "EV"]]
 
             y_train_labels = np.ravel(y_train.to_numpy())
 
@@ -495,16 +553,14 @@ def meditate(force, league, rebuild_filter, reset_markets):
             # Choose between NegBin (count data) or Gamma (continuous-like data)
             # Load from stat_dist.json or auto-select via NLL comparison
             # TODO Add Binomial dist for underdispersed markets like TDs?
-            
-            threshold_dict = {
-                "NBA": 60,
-                "NFL": 10,
-                "NHL": 60,
-                "WNBA": 40,
-                "MLB": 60
-            }
+
+            threshold_dict = {"NBA": 60, "NFL": 10, "NHL": 60, "WNBA": 40, "MLB": 60}
             threshold = threshold_dict.get(league, 60)
-            player_stats = stat_data.gamelog.groupby(stat_data.log_strings.get("player")).filter(lambda x: x[market].gt(0).sum() > threshold).groupby(stat_data.log_strings.get("player"))[market]
+            player_stats = (
+                stat_data.gamelog.groupby(stat_data.log_strings.get("player"))
+                .filter(lambda x: x[market].gt(0).sum() > threshold)
+                .groupby(stat_data.log_strings.get("player"))[market]
+            )
 
             # Compute zero-inflation rate directly (don't call select_distribution which returns unwanted dist)
             zero_mask = y_train_labels == 0
@@ -513,7 +569,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
             # Save historical zero rate for reference
             stat_zi[league][market] = hist_gate
             save_zi_config(stat_zi)
-            
+
             # apply() returns a MultiIndex Series (player, game_idx); regroup by player
             # so subsequent .mean()/.std()/.var()/.count() are per-player, not global.
             player_stats = player_stats.apply(lambda x: x[x != 0]).groupby(level=0)
@@ -531,7 +587,12 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
 
                 # CV from per-player std/mean
-                cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
+                cv = (
+                    player_stats.std()
+                    / player_stats.mean()
+                    * player_stats.count()
+                    / player_stats.count().sum()
+                ).sum()
                 cv = max(cv, 0.05)
                 shape_ceiling = None
                 marginal_shape = None
@@ -544,7 +605,9 @@ def meditate(force, league, rebuild_filter, reset_markets):
                     X_train = X_train[nonzero_mask]
                     y_train_labels = y_train_labels[nonzero_mask]
                     # Use conditional mean (E[X | X > 0]) — matches what the hurdle-filtered model predicts
-                    denom_col = "MeanYr_nonzero" if "MeanYr_nonzero" in X_train.columns else "MeanYr"
+                    denom_col = (
+                        "MeanYr_nonzero" if "MeanYr_nonzero" in X_train.columns else "MeanYr"
+                    )
                 else:
                     denom_col = "MeanYr"
 
@@ -565,7 +628,9 @@ def meditate(force, league, rebuild_filter, reset_markets):
 
                 # Per-player shape (r = μ²/(σ²-μ)), capped at R_CAP
                 R_CAP = 50  # NegBin with r >= 50 is effectively Poisson
-                per_player_r = player_stats.mean()**2 / np.maximum(player_stats.var() - player_stats.mean(), 0.01)
+                per_player_r = player_stats.mean() ** 2 / np.maximum(
+                    player_stats.var() - player_stats.mean(), 0.01
+                )
                 per_player_r = np.minimum(per_player_r, R_CAP)
 
                 # Marginal shape: 95th percentile of per-player r (representative max)
@@ -575,32 +640,42 @@ def meditate(force, league, rebuild_filter, reset_markets):
 
                 # cv = weighted average of 1/r across players
                 cv = (1 / per_player_r * player_stats.count() / player_stats.count().sum()).sum()
-                cv = max(cv, 1/shape_ceiling)
+                cv = max(cv, 1 / shape_ceiling)
 
-                cv = (player_stats.std()/player_stats.mean()*player_stats.count()/player_stats.count().sum()).sum()
-                cv = max(cv, 1/np.sqrt(shape_ceiling))
+                cv = (
+                    player_stats.std()
+                    / player_stats.mean()
+                    * player_stats.count()
+                    / player_stats.count().sum()
+                ).sum()
+                cv = max(cv, 1 / np.sqrt(shape_ceiling))
 
             stat_cv[league][market] = cv
             with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
                 json.dump(stat_cv, f, indent=4)
-            
+
             # Under --rebuild-filter the feature set just changed; warm-starting
             # from the old pickle's hyperparams is invalid. Force fresh Optuna.
             opt_params = None if rebuild_filter else filedict.get("params")
-            dtrain = lgb.Dataset(
-                X_train, label=y_train_labels)
-            
+            dtrain = lgb.Dataset(X_train, label=y_train_labels)
+
             # === BOUND SHAPE RESPONSE FUNCTION (safety net) ===
             if dist in ("NegBin", "ZINB"):
-                dist_obj.param_dict["total_count"] = _BoundedResponseFn(dist_obj.param_dict["total_count"], shape_ceiling)
+                dist_obj.param_dict["total_count"] = _BoundedResponseFn(
+                    dist_obj.param_dict["total_count"], shape_ceiling
+                )
             elif dist in ("Gamma", "ZAGamma"):
-                dist_obj.param_dict["concentration"] = _BoundedResponseFn(dist_obj.param_dict["concentration"], shape_ceiling)
+                dist_obj.param_dict["concentration"] = _BoundedResponseFn(
+                    dist_obj.param_dict["concentration"], shape_ceiling
+                )
             # SkewNormal: no shape parameter to bound
 
             # === MODEL TRAINING ===
             # All distributions (NegBin, Gamma, SkewNormal) use LightGBMLSS training
             model = LightGBMLSS(dist_obj)
-            set_model_start_values(model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalize)
+            set_model_start_values(
+                model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalize
+            )
 
             # Monotone constraint: enforce MeanYr → higher predicted mean
             # for Gamma/ZAGamma and SkewNormal (where loc should increase with MeanYr).
@@ -616,40 +691,40 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 "num_threads": ["none", [8]],
                 "max_depth": ["none", [-1]],
                 "max_bin": ["none", [127]],
-                "hist_pool_size": ["none", [9*1024]],
+                "hist_pool_size": ["none", [9 * 1024]],
                 "monotone_constraints": ["none", [monotone]],
                 "path_smooth": ["float", {"low": 0, "high": 20, "log": False}],
                 "num_leaves": ["int", {"low": 8, "high": 127, "log": False}],
                 "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
                 "lambda_l2": ["float", {"low": 1e-6, "high": 10, "log": True}],
                 "min_child_samples": ["int", {"low": 30, "high": 150, "log": False}],
-                "min_child_weight": ["float", {"low": 1e-3, "high": .75*len(X_train)/1000, "log": True}],
+                "min_child_weight": [
+                    "float",
+                    {"low": 1e-3, "high": 0.75 * len(X_train) / 1000, "log": True},
+                ],
                 "learning_rate": ["float", {"low": 0.01, "high": 0.15, "log": True}],
                 "feature_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
                 "bagging_fraction": ["float", {"low": 0.4, "high": 1.0, "log": False}],
-                "bagging_freq": ["none", [1]]
+                "bagging_freq": ["none", [1]],
             }
 
             if opt_params is None or opt_params.get("opt_rounds") is None:
-                opt_params = model.hyper_opt(hp_search_space,
-                                            dtrain,
-                                            num_boost_round=999,
-                                            nfold=4,
-                                            early_stopping_rounds=50,
-                                            max_minutes=60,
-                                            n_trials=300,
-                                            silence=True,
-                                            )
+                opt_params = model.hyper_opt(
+                    hp_search_space,
+                    dtrain,
+                    num_boost_round=999,
+                    nfold=4,
+                    early_stopping_rounds=50,
+                    max_minutes=60,
+                    n_trials=300,
+                    silence=True,
+                )
             else:
-                opt_params = warm_start_hyper_opt(model, hp_search_space, dtrain,
-                                                  opt_params,
-                                                  n_trials=200,
-                                                  max_minutes=10)
+                opt_params = warm_start_hyper_opt(
+                    model, hp_search_space, dtrain, opt_params, n_trials=200, max_minutes=10
+                )
 
-            model.train(opt_params,
-                        dtrain,
-                        num_boost_round=opt_params["opt_rounds"]
-                        )
+            model.train(opt_params, dtrain, num_boost_round=opt_params["opt_rounds"])
 
             # === PREDICTIONS AND PARAMETER EXTRACTION ===
             # Generate predictions on all datasets and extract distribution parameters
@@ -677,11 +752,11 @@ def meditate(force, league, rebuild_filter, reset_markets):
             prob_params = pd.concat([prob_params, preds])
 
             prob_params_train.sort_index(inplace=True)
-            prob_params_train['result'] = y_train['Result']
+            prob_params_train["result"] = y_train["Result"]
             prob_params_validation.sort_index(inplace=True)
-            prob_params_validation['result'] = y_validation['Result']
+            prob_params_validation["result"] = y_validation["Result"]
             prob_params.sort_index(inplace=True)
-            prob_params['result'] = y_test['Result']
+            prob_params["result"] = y_test["Result"]
             X_train.sort_index(inplace=True)
             B_train.sort_index(inplace=True)
             y_train.sort_index(inplace=True)
@@ -784,54 +859,112 @@ def meditate(force, league, rebuild_filter, reset_markets):
             if dist == "SkewNormal":
                 _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
                 model_weight = fit_model_weight(
-                    ev_validation, book_ev_val, y_validation["Result"].to_numpy(),
-                    "SkewNormal", cv=cv,
-                    model_sigma=sn_sigma_val, model_skew_alpha=sn_alpha_val,
-                    **_zi_kwargs)
+                    ev_validation,
+                    book_ev_val,
+                    y_validation["Result"].to_numpy(),
+                    "SkewNormal",
+                    cv=cv,
+                    model_sigma=sn_sigma_val,
+                    model_skew_alpha=sn_alpha_val,
+                    **_zi_kwargs,
+                )
 
                 _zi_test = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
                 _zi_val = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
-                weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
-                    model_weight, ev, book_ev_test, cv, "SkewNormal",
-                    sigma=sn_sigma_test, skew_alpha=sn_alpha_test, **_zi_test)
+                weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = (
+                    fused_loc(
+                        model_weight,
+                        ev,
+                        book_ev_test,
+                        cv,
+                        "SkewNormal",
+                        sigma=sn_sigma_test,
+                        skew_alpha=sn_alpha_test,
+                        **_zi_test,
+                    )
+                )
                 sn_sigma_blend_val, sn_alpha_blend_val = None, None
                 _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
-                    model_weight, ev_validation, book_ev_val, cv, "SkewNormal",
-                    sigma=sn_sigma_val, skew_alpha=sn_alpha_val, **_zi_val)
+                    model_weight,
+                    ev_validation,
+                    book_ev_val,
+                    cv,
+                    "SkewNormal",
+                    sigma=sn_sigma_val,
+                    skew_alpha=sn_alpha_val,
+                    **_zi_val,
+                )
 
                 r_test = None
-                test_alpha = None
 
             else:
                 _zi_kwargs = {}
                 if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
                     _zi_kwargs = dict(gate_model=gate_validation, gate_book=hist_gate)
-                model_weight = fit_model_weight(ev_validation, book_ev_val, y_validation["Result"].to_numpy(), base_dist, model_alpha=alpha_validation, model_r=r_validation, cv=cv, **_zi_kwargs)
+                model_weight = fit_model_weight(
+                    ev_validation,
+                    book_ev_val,
+                    y_validation["Result"].to_numpy(),
+                    base_dist,
+                    model_alpha=alpha_validation,
+                    model_r=r_validation,
+                    cv=cv,
+                    **_zi_kwargs,
+                )
 
                 if dist in ("NegBin", "ZINB"):
                     # fused_loc blends both μ and r via geometric mean
-                    _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
-                    _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZINB" else {}
-                    r_blend_test, p_test, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "NegBin", r=r, **_zi_test)
+                    _zi_test = (
+                        dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
+                    )
+                    _zi_val = (
+                        dict(gate_model=gate_validation, gate_book=hist_gate)
+                        if dist == "ZINB"
+                        else {}
+                    )
+                    r_blend_test, p_test, gate_blend_test = fused_loc(
+                        model_weight, ev, book_ev_test, cv, "NegBin", r=r, **_zi_test
+                    )
                     weighted_mean = r_blend_test * (1 - p_test) / p_test
                     r_test = r_blend_test
 
-                    r_blend_val, p_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "NegBin", r=r_validation, **_zi_val)
-
-                    test_alpha = None
+                    r_blend_val, p_val, gate_blend_val = fused_loc(
+                        model_weight,
+                        ev_validation,
+                        book_ev_val,
+                        cv,
+                        "NegBin",
+                        r=r_validation,
+                        **_zi_val,
+                    )
 
                 else:
                     # Gamma / ZAGamma — precision-weighted blend
-                    _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
-                    _zi_val = dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZAGamma" else {}
-                    alpha_blend, beta_blend, gate_blend_test = fused_loc(model_weight, ev, book_ev_test, cv, "Gamma", alpha=alpha, **_zi_test)
+                    _zi_test = (
+                        dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
+                    )
+                    _zi_val = (
+                        dict(gate_model=gate_validation, gate_book=hist_gate)
+                        if dist == "ZAGamma"
+                        else {}
+                    )
+                    alpha_blend, beta_blend, gate_blend_test = fused_loc(
+                        model_weight, ev, book_ev_test, cv, "Gamma", alpha=alpha, **_zi_test
+                    )
                     weighted_mean = alpha_blend / beta_blend
 
-                    alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(model_weight, ev_validation, book_ev_val, cv, "Gamma", alpha=alpha_validation, **_zi_val)
+                    alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(
+                        model_weight,
+                        ev_validation,
+                        book_ev_val,
+                        cv,
+                        "Gamma",
+                        alpha=alpha_validation,
+                        **_zi_val,
+                    )
                     r_test = None
 
                     # Store alpha for downstream use
-                    test_alpha = alpha_blend
 
             # === DISPERSION CALIBRATION ===
             # SkewNormal: CRPS loss handles dispersion — skip post-hoc calibration.
@@ -844,11 +977,21 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 val_weighted_mean = weighted_mean  # Already in absolute space from fused_loc
                 # Use validation fused_loc result for val_weighted_mean
                 val_weighted_mean_val, _, _, _ = fused_loc(
-                    model_weight, ev_validation, book_ev_val, cv, "SkewNormal",
-                    sigma=sn_sigma_val, skew_alpha=sn_alpha_val,
-                    **(dict(gate_book=hist_gate) if hist_gate > 0.02 else {}))
+                    model_weight,
+                    ev_validation,
+                    book_ev_val,
+                    cv,
+                    "SkewNormal",
+                    sigma=sn_sigma_val,
+                    skew_alpha=sn_alpha_val,
+                    **(dict(gate_book=hist_gate) if hist_gate > 0.02 else {}),
+                )
             else:
-                val_weighted_mean = r_blend_val * (1 - p_val) / p_val if dist in ("NegBin", "ZINB") else alpha_blend_val / beta_blend_val
+                val_weighted_mean = (
+                    r_blend_val * (1 - p_val) / p_val
+                    if dist in ("NegBin", "ZINB")
+                    else alpha_blend_val / beta_blend_val
+                )
 
                 def dispersion_loss(c):
                     if dist in ("NegBin", "ZINB"):
@@ -875,8 +1018,12 @@ def meditate(force, league, rebuild_filter, reset_markets):
                             x_grid = np.linspace(0, x_max, 500)
                             dx = x_grid[1] - x_grid[0]
 
-                            cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
-                            cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
+                            cdf_grid = gamma.cdf(
+                                x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :]
+                            )
+                            cdf_grid = (
+                                gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
+                            )
 
                             indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
                             crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
@@ -884,8 +1031,11 @@ def meditate(force, league, rebuild_filter, reset_markets):
                             # Closed-form Gamma CRPS (Scheuerer & Hamill, 2015)
                             F_y = gamma.cdf(y_val_arr, alpha_cal, scale=scale_cal)
                             F_y_a1 = gamma.cdf(y_val_arr, alpha_cal + 1, scale=scale_cal)
-                            crps = y_val_arr * (2 * F_y - 1) - val_weighted_mean * (2 * F_y_a1 - 1) \
-                                   - scale_cal / beta_fn(0.5, alpha_cal)
+                            crps = (
+                                y_val_arr * (2 * F_y - 1)
+                                - val_weighted_mean * (2 * F_y_a1 - 1)
+                                - scale_cal / beta_fn(0.5, alpha_cal)
+                            )
 
                     reg = 0.01 * np.log(c) ** 2  # L2 penalty toward c=1 (no correction)
                     return np.mean(crps) + reg
@@ -898,7 +1048,9 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
                 upper_bound = min(10.0, max_c)
 
-                disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, upper_bound), method='bounded')
+                disp_result = minimize_scalar(
+                    dispersion_loss, bounds=(0.1, upper_bound), method="bounded"
+                )
                 c_opt = disp_result.x
 
                 # Apply dispersion calibration to test and validation params
@@ -908,35 +1060,60 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 else:
                     alpha_blend = alpha_blend * c_opt
                     beta_blend = alpha_blend / weighted_mean
-                    test_alpha = alpha_blend
                     alpha_blend_val = alpha_blend_val * c_opt
                     beta_blend_val = alpha_blend_val / val_weighted_mean
 
             # Compute test set probabilities with calibrated params
             if dist == "SkewNormal":
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, "SkewNormal",
-                                           sigma=sn_sigma_blend_test, skew_alpha=sn_alpha_blend_test,
-                                           gate=gate_blend_test)
+                y_proba_no_filt = get_odds(
+                    B_test["Line"].to_numpy(),
+                    weighted_mean,
+                    "SkewNormal",
+                    sigma=sn_sigma_blend_test,
+                    skew_alpha=sn_alpha_blend_test,
+                    gate=gate_blend_test,
+                )
             elif dist in ("NegBin", "ZINB"):
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, r=r_test, gate=gate_blend_test)
+                y_proba_no_filt = get_odds(
+                    B_test["Line"].to_numpy(), weighted_mean, dist, r=r_test, gate=gate_blend_test
+                )
             else:
-                y_proba_no_filt = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist, alpha=alpha_blend, step=step, gate=gate_blend_test)
-            y_proba_no_filt = np.array(
-                [y_proba_no_filt, 1-y_proba_no_filt]).transpose()
+                y_proba_no_filt = get_odds(
+                    B_test["Line"].to_numpy(),
+                    weighted_mean,
+                    dist,
+                    alpha=alpha_blend,
+                    step=step,
+                    gate=gate_blend_test,
+                )
+            y_proba_no_filt = np.array([y_proba_no_filt, 1 - y_proba_no_filt]).transpose()
 
             # === TEMPERATURE SCALING CALIBRATION ===
             # Fit temperature T on validation set: p_cal = sigmoid(logit(p_raw) / T)
             # T ≥ 1 ensures calibration only reduces confidence (pulls toward 0.5)
             if dist == "SkewNormal":
-                val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean_val, "SkewNormal",
-                                         sigma=sn_sigma_blend_val, skew_alpha=sn_alpha_blend_val,
-                                         gate=gate_blend_val)
+                val_raw_under = get_odds(
+                    B_validation["Line"].to_numpy(),
+                    val_weighted_mean_val,
+                    "SkewNormal",
+                    sigma=sn_sigma_blend_val,
+                    skew_alpha=sn_alpha_blend_val,
+                    gate=gate_blend_val,
+                )
             else:
                 _r_val = r_blend_val if dist in ("NegBin", "ZINB") else None
                 _alpha_val = alpha_blend_val if dist in ("Gamma", "ZAGamma") else None
                 _gate_val = gate_blend_val if dist in ("ZINB", "ZAGamma") else None
                 # val_weighted_mean already computed before dispersion calibration (mean is invariant)
-                val_raw_under = get_odds(B_validation["Line"].to_numpy(), val_weighted_mean, dist, alpha=_alpha_val, step=step, r=_r_val, gate=_gate_val)
+                val_raw_under = get_odds(
+                    B_validation["Line"].to_numpy(),
+                    val_weighted_mean,
+                    dist,
+                    alpha=_alpha_val,
+                    step=step,
+                    r=_r_val,
+                    gate=_gate_val,
+                )
             val_raw_over = 1 - val_raw_under
 
             val_raw_over_clipped = np.clip(val_raw_over, 1e-6, 1 - 1e-6)
@@ -948,7 +1125,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 reg = 0.01 * (T - 1) ** 2  # L2 penalty toward T=1 (no correction)
                 return brier + reg
 
-            result = minimize_scalar(brier_loss, bounds=(1.0, 10.0), method='bounded')
+            result = minimize_scalar(brier_loss, bounds=(1.0, 10.0), method="bounded")
             T_opt = result.x
 
             # Evaluate calibration quality
@@ -959,27 +1136,33 @@ def meditate(force, league, rebuild_filter, reset_markets):
             test_raw_over = y_proba_no_filt[:, 1]
             test_raw_over_clipped = np.clip(test_raw_over, 1e-6, 1 - 1e-6)
             test_calibrated_over = expit(logit(test_raw_over_clipped) / T_opt)
-            y_proba_filt = np.array(
-                [1 - test_calibrated_over, test_calibrated_over]).transpose()
+            y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
 
             stat_std = y.Result.std()
 
             # === TEST SET STATISTICS ===
             # Calculate model performance metrics on held-out test set
-            y_class = (y_test["Result"] >=
-                       B_test["Line"]).astype(int)
+            y_class = (y_test["Result"] >= B_test["Line"]).astype(int)
             y_class = np.ravel(y_class.to_numpy())
 
             # Raw model probabilities (before blending with book)
             if dist == "SkewNormal":
-                _raw_under = get_odds(B_test["Line"].to_numpy(), ev, "SkewNormal",
-                                      sigma=sn_sigma_test, skew_alpha=sn_alpha_test, gate=gate_test)
+                _raw_under = get_odds(
+                    B_test["Line"].to_numpy(),
+                    ev,
+                    "SkewNormal",
+                    sigma=sn_sigma_test,
+                    skew_alpha=sn_alpha_test,
+                    gate=gate_test,
+                )
             elif dist in ("NegBin", "ZINB"):
                 _raw_under = get_odds(B_test["Line"].to_numpy(), ev, dist, r=r, gate=gate_test)
             else:
-                _raw_under = get_odds(B_test["Line"].to_numpy(), ev, dist, alpha=alpha, step=step, gate=gate_test)
+                _raw_under = get_odds(
+                    B_test["Line"].to_numpy(), ev, dist, alpha=alpha, step=step, gate=gate_test
+                )
             _raw_under = np.clip(_raw_under, 0, 1)
-            y_proba_raw = np.array([_raw_under, 1-_raw_under]).transpose()
+            y_proba_raw = np.array([_raw_under, 1 - _raw_under]).transpose()
 
             prec = np.zeros(3)
             acc = np.zeros(3)
@@ -989,7 +1172,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
             under_prec = np.zeros(3)
 
             for i, y_proba in enumerate([y_proba_raw, y_proba_no_filt, y_proba_filt]):
-                y_pred = (y_proba > .5).astype(int)[:, 1]
+                y_pred = (y_proba > 0.5).astype(int)[:, 1]
                 mask = np.max(y_proba, axis=1) > 0.54
                 prec[i] = precision_score(y_class[mask], y_pred[mask])
                 acc[i] = accuracy_score(y_class[mask], y_pred[mask])
@@ -999,36 +1182,50 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 ll[i] = log_loss(y_class, y_proba[:, 1])
 
                 # Directional diagnostics
-                over_pct[i] = y_pred[mask].mean()/mask.mean() if mask.sum() > 0 else np.nan
+                over_pct[i] = y_pred[mask].mean() / mask.mean() if mask.sum() > 0 else np.nan
                 under_mask = mask & (y_pred == 0)
-                under_prec[i] = (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
+                under_prec[i] = (
+                    (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
+                )
 
             # --- Shape parameter diagnostics ---
             # Three-way comparison: start values (method of moments) vs model vs empirical
-            test_mean_yr = X_test['MeanYr'].mean()
-            test_std_yr = X_test['STDYr'].mean()
+            test_mean_yr = X_test["MeanYr"].mean()
+            test_std_yr = X_test["STDYr"].mean()
             # For SkewNormal, denormalize using the same denom column used in training
             test_denom_mean = X_test[denom_col].mean() if dist == "SkewNormal" else test_mean_yr
 
             if dist == "SkewNormal":
                 # SkewNormal: report scale (sigma) and skewness (alpha) instead of shape
                 diag_start_shape = float(cv)  # CV used as starting scale (normalized)
-                scale_norm_mean = float(prob_params['scale'].mean())
-                diag_model_shape = scale_norm_mean * test_denom_mean  # Absolute sigma = normalized scale * denom
-                result_arr = y_test['Result'].to_numpy()
-                diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))  # True empirical CV
+                scale_norm_mean = float(prob_params["scale"].mean())
+                diag_model_shape = (
+                    scale_norm_mean * test_denom_mean
+                )  # Absolute sigma = normalized scale * denom
+                result_arr = y_test["Result"].to_numpy()
+                diag_empirical_shape = float(
+                    result_arr.std() / max(result_arr.mean(), 1e-6)
+                )  # True empirical CV
                 diag_shape_label = "scale"
             elif dist in ("Gamma", "ZAGamma"):
-                diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
-                diag_model_shape = float(prob_params['concentration'].mean())
-                per_player_emp_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01))**2
+                diag_start_shape = float(
+                    np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100)
+                )
+                diag_model_shape = float(prob_params["concentration"].mean())
+                per_player_emp_alpha = (
+                    player_stats.mean() / np.maximum(player_stats.std(), 0.01)
+                ) ** 2
                 diag_empirical_shape = float(np.median(per_player_emp_alpha))
                 diag_shape_label = "alpha"
             elif dist in ("NegBin", "ZINB"):
-                diag_start_shape = float(np.clip(test_mean_yr ** 2 / max(test_std_yr ** 2 - test_mean_yr, 1e-6), 1, 50))
-                diag_model_shape = float(prob_params['total_count'].mean())
+                diag_start_shape = float(
+                    np.clip(test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6), 1, 50)
+                )
+                diag_model_shape = float(prob_params["total_count"].mean())
                 R_CAP = 50  # consistent with cv computation
-                per_player_emp_r = player_stats.mean()**2 / np.maximum(player_stats.var() - player_stats.mean(), 0.01)
+                per_player_emp_r = player_stats.mean() ** 2 / np.maximum(
+                    player_stats.var() - player_stats.mean(), 0.01
+                )
                 per_player_emp_r = np.minimum(per_player_emp_r, R_CAP)
                 diag_empirical_shape = float(np.median(per_player_emp_r))
                 diag_shape_label = "r"
@@ -1036,21 +1233,23 @@ def meditate(force, league, rebuild_filter, reset_markets):
             # EV diagnostics: start mean vs blended model EV vs line vs actual results
             diag_start_mean = float(test_mean_yr)
             diag_model_ev = float(weighted_mean.mean())
-            diag_mean_line = float(B_test['Line'].mean())
-            diag_ev_minus_line = float((weighted_mean - B_test['Line'].to_numpy()).mean())
-            diag_result_mean = float(y_test['Result'].mean())
+            diag_mean_line = float(B_test["Line"].mean())
+            diag_ev_minus_line = float((weighted_mean - B_test["Line"].to_numpy()).mean())
+            diag_result_mean = float(y_test["Result"].mean())
 
             # --- Compression diagnostic ---
             # Compare how well model EV tracks MeanYr deviations vs how well Results do.
             # If ev_corr << result_corr, the model is compressing toward the global mean.
-            _meanyr_arr = X_test['MeanYr'].to_numpy()
-            _result_arr = y_test['Result'].to_numpy()
+            _meanyr_arr = X_test["MeanYr"].to_numpy()
+            _result_arr = y_test["Result"].to_numpy()
             diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, weighted_mean - _meanyr_arr)[0, 1])
-            diag_result_meanyr_corr = float(np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1])
+            diag_result_meanyr_corr = float(
+                np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1]
+            )
 
             # --- Decomposition diagnostics ---
             # Median and fraction help distinguish mean bias from shape bias
-            ev_minus_line_arr = weighted_mean - B_test['Line'].to_numpy()
+            ev_minus_line_arr = weighted_mean - B_test["Line"].to_numpy()
             diag_median_ev_diff = float(np.median(ev_minus_line_arr))
             diag_frac_ev_gt_line = float((ev_minus_line_arr > 0).mean())
 
@@ -1062,30 +1261,45 @@ def meditate(force, league, rebuild_filter, reset_markets):
             if (ev_gt_mask & conf_mask).sum() > 10:
                 diag_over_pct_ev_gt = float(y_class[ev_gt_mask & conf_mask].mean())
             else:
-                diag_over_pct_ev_gt = float('nan')
+                diag_over_pct_ev_gt = float("nan")
             if (ev_lt_mask & conf_mask).sum() > 10:
                 diag_over_pct_ev_lt = float(y_class[ev_lt_mask & conf_mask].mean())
             else:
-                diag_over_pct_ev_lt = float('nan')
+                diag_over_pct_ev_lt = float("nan")
 
             # Counterfactual: what would Over% be with empirical shape?
             if dist == "SkewNormal":
                 # SkewNormal: no separate shape parameter for counterfactual
-                diag_cf_over_pct = float('nan')
+                diag_cf_over_pct = float("nan")
             elif not np.isnan(diag_empirical_shape) and diag_empirical_shape > 0:
                 emp_shape = np.full_like(weighted_mean, diag_empirical_shape)
                 if dist in ("NegBin", "ZINB"):
-                    cf_under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist,
-                                        r=emp_shape, gate=gate_blend_test)
+                    cf_under = get_odds(
+                        B_test["Line"].to_numpy(),
+                        weighted_mean,
+                        dist,
+                        r=emp_shape,
+                        gate=gate_blend_test,
+                    )
                 else:
-                    cf_under = get_odds(B_test["Line"].to_numpy(), weighted_mean, dist,
-                                        alpha=emp_shape, step=step, gate=gate_blend_test)
+                    cf_under = get_odds(
+                        B_test["Line"].to_numpy(),
+                        weighted_mean,
+                        dist,
+                        alpha=emp_shape,
+                        step=step,
+                        gate=gate_blend_test,
+                    )
                 cf_over = 1 - cf_under
                 cf_pred = (cf_over > 0.5).astype(int)
                 cf_mask = np.maximum(cf_under, cf_over) > 0.54
-                diag_cf_over_pct = float(cf_pred[cf_mask].mean()/cf_mask.mean()) if cf_mask.sum() > 10 else float('nan')
+                diag_cf_over_pct = (
+                    float(cf_pred[cf_mask].mean() / cf_mask.mean())
+                    if cf_mask.sum() > 10
+                    else float("nan")
+                )
             else:
-                diag_cf_over_pct = float('nan')
+                diag_cf_over_pct = float("nan")
 
             filedict = {
                 "model": model,
@@ -1096,7 +1310,7 @@ def meditate(force, league, rebuild_filter, reset_markets):
                     "Under Prec": under_prec,
                     "Over%": over_pct,
                     "Sharpness": sharp,
-                    "NLL": ll
+                    "NLL": ll,
                 },
                 "diagnostics": {
                     "model_weight": model_weight,
@@ -1135,32 +1349,34 @@ def meditate(force, league, rebuild_filter, reset_markets):
                 "expected_columns": list(X.columns),
             }
 
-            X_test['Result'] = y_test['Result']
-            X_test['Line'] = B_test['Line'].values
-            X_test['Blended_EV'] = weighted_mean
+            X_test["Result"] = y_test["Result"]
+            X_test["Line"] = B_test["Line"].values
+            X_test["Blended_EV"] = weighted_mean
             if dist == "SkewNormal":
-                X_test['EV'] = ev
-                X_test['SN_Loc'] = prob_params['loc']
-                X_test['SN_Scale'] = prob_params['scale']
-                X_test['SN_Alpha'] = prob_params['alpha']
+                X_test["EV"] = ev
+                X_test["SN_Loc"] = prob_params["loc"]
+                X_test["SN_Scale"] = prob_params["scale"]
+                X_test["SN_Alpha"] = prob_params["alpha"]
                 if hist_gate > 0.02:
-                    X_test['Gate'] = hist_gate
+                    X_test["Gate"] = hist_gate
             elif dist in ("NegBin", "ZINB"):
                 # Store base distribution mean: mean = r*p/(1-p)
-                base_ev = prob_params['total_count'] * prob_params['probs'] / (1 - prob_params['probs'])
-                X_test['EV'] = base_ev
+                base_ev = (
+                    prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
+                )
+                X_test["EV"] = base_ev
                 if dist == "ZINB":
-                    X_test['Gate'] = prob_params['gate']
-                X_test['R'] = prob_params['total_count']
-                X_test['NB_P'] = prob_params['probs']
+                    X_test["Gate"] = prob_params["gate"]
+                X_test["R"] = prob_params["total_count"]
+                X_test["NB_P"] = prob_params["probs"]
             elif dist in ("Gamma", "ZAGamma"):
-                base_ev = prob_params['concentration'] / prob_params['rate']
-                X_test['EV'] = base_ev
+                base_ev = prob_params["concentration"] / prob_params["rate"]
+                X_test["EV"] = base_ev
                 if dist == "ZAGamma":
-                    X_test['Gate'] = prob_params['gate']
-                X_test['Alpha'] = prob_params['concentration']
+                    X_test["Gate"] = prob_params["gate"]
+                X_test["Alpha"] = prob_params["concentration"]
 
-            X_test['P'] = y_proba_filt[:, 1]
+            X_test["P"] = y_proba_filt[:, 1]
 
             # === SAVE TEST PREDICTIONS ===
             # Store predictions on test set for later analysis
@@ -1179,33 +1395,33 @@ def meditate(force, league, rebuild_filter, reset_markets):
             report()
 
 
-
 # ============================================================================
 # REPORTING AND ANALYSIS FUNCTIONS
 # ============================================================================
 
+
 def report():
     """Generate training report summarizing all model performance metrics."""
-    model_list = [f.name for f in (pkg_resources.files(
-        data)/"models/").iterdir() if ".mdl" in f.name]
+    model_list = [
+        f.name for f in (pkg_resources.files(data) / "models/").iterdir() if ".mdl" in f.name
+    ]
     model_list.sort()
-    with open(pkg_resources.files(data) / "stat_cv.json", "r") as f:
+    with open(pkg_resources.files(data) / "stat_cv.json") as f:
         stat_cv = json.load(f)
-    with open(pkg_resources.files(data) / "stat_std.json", "r") as f:
+    with open(pkg_resources.files(data) / "stat_std.json") as f:
         stat_std = json.load(f)
     stat_dist = load_distribution_config()
     stat_zi_local = load_zi_config()
-    
+
     with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
         league_models = {}  # {league: {market: model}} for summary tables
-        prev_league = None
         for model_str in model_list:
             with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
                 model = pickle.load(infile)
 
             name = model_str.split("_")
-            cv = model['cv']
-            std = model.get('std',0)
+            cv = model["cv"]
+            std = model.get("std", 0)
             league = name[0]
             market = name[1].replace("-", " ").replace(".mdl", "")
             dist = model["distribution"]
@@ -1219,7 +1435,7 @@ def report():
 
             stat_std.setdefault(league, {})
             stat_std[league][market] = float(std)
-            
+
             # Save distribution selection
             stat_dist.setdefault(league, {})
             stat_dist[league][market] = dist
@@ -1232,50 +1448,68 @@ def report():
             f.write("\n")
             f.write(f" Distribution Model: {dist}\n")
             f.write(f" Historical Zero Rate: {h_gate:.4f}\n")
-            n_rows = len(list(model['stats'].values())[0])
+            n_rows = len(next(iter(model["stats"].values())))
             if n_rows == 3:
-                idx = ['Raw Model', 'Corrected', 'Calibrated']
+                idx = ["Raw Model", "Corrected", "Calibrated"]
             else:
-                idx = ['No Filter', 'Filter']
-            f.write(pd.DataFrame(model['stats'], index=idx).to_string())
+                idx = ["No Filter", "Filter"]
+            f.write(pd.DataFrame(model["stats"], index=idx).to_string())
             f.write("\n")
 
             if "diagnostics" in model:
                 d = model["diagnostics"]
                 sl = d["shape_label"]
-                emp_shape = d.get('empirical_shape', 0.0)
-                mod_shape = d.get('model_shape', 0.0)
-                shape_ratio = mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float('nan')
-                f.write(f" DIAG model_weight={d.get('model_weight', float('nan')):.3f}"
-                        f" DIAG model_calib={d.get('model_calib', float('nan')):.3f}\n")
-                f.write(f" DIAG start_{sl}={d.get('start_shape', 0.0):.3f}"
-                        f" model_{sl}={mod_shape:.3f}"
-                        f" empirical_{sl}={emp_shape:.3f}"
-                        f" shape_ratio={shape_ratio:.1f}x\n")
-                f.write(f" DIAG start_mean={d.get('start_mean', 0.0):.2f}"
-                        f" model_ev={d.get('model_ev', 0.0):.2f}"
-                        f" mean_line={d.get('mean_line', 0.0):.2f}"
-                        f" result_mean={d.get('result_mean', 0.0):.2f}\n")
-                f.write(f" DIAG mean_ev_diff={d.get('ev_minus_line', 0.0):+.3f}"
-                        f" median_ev_diff={d.get('median_ev_diff', 0.0):+.3f}"
-                        f" frac_ev>line={d.get('frac_ev_gt_line', 0.0):.1%}\n")
-                f.write(f" DIAG Over%|ev>line={d.get('over_pct_ev_gt', float('nan')):.3f}"
-                        f" Over%|ev<line={d.get('over_pct_ev_lt', float('nan')):.3f}"
-                        f" CF_Over%(emp_shape)={d.get('cf_over_pct', float('nan')):.3f}\n")
-                f.write(f" DIAG shape_ceiling={d.get('shape_ceiling', 'N/A')}"
-                        f" marginal_shape={d.get('marginal_shape', 'N/A')}"
-                        f" dispersion_cal={d.get('dispersion_cal', 0.0):.3f}\n")
-                f.write(f" DIAG ev_meanyr_corr={d.get('ev_meanyr_corr', float('nan')):.3f}"
-                        f" result_meanyr_corr={d.get('result_meanyr_corr', float('nan')):.3f}\n")
+                emp_shape = d.get("empirical_shape", 0.0)
+                mod_shape = d.get("model_shape", 0.0)
+                shape_ratio = (
+                    mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float("nan")
+                )
+                f.write(
+                    f" DIAG model_weight={d.get('model_weight', float('nan')):.3f}"
+                    f" DIAG model_calib={d.get('model_calib', float('nan')):.3f}\n"
+                )
+                f.write(
+                    f" DIAG start_{sl}={d.get('start_shape', 0.0):.3f}"
+                    f" model_{sl}={mod_shape:.3f}"
+                    f" empirical_{sl}={emp_shape:.3f}"
+                    f" shape_ratio={shape_ratio:.1f}x\n"
+                )
+                f.write(
+                    f" DIAG start_mean={d.get('start_mean', 0.0):.2f}"
+                    f" model_ev={d.get('model_ev', 0.0):.2f}"
+                    f" mean_line={d.get('mean_line', 0.0):.2f}"
+                    f" result_mean={d.get('result_mean', 0.0):.2f}\n"
+                )
+                f.write(
+                    f" DIAG mean_ev_diff={d.get('ev_minus_line', 0.0):+.3f}"
+                    f" median_ev_diff={d.get('median_ev_diff', 0.0):+.3f}"
+                    f" frac_ev>line={d.get('frac_ev_gt_line', 0.0):.1%}\n"
+                )
+                f.write(
+                    f" DIAG Over%|ev>line={d.get('over_pct_ev_gt', float('nan')):.3f}"
+                    f" Over%|ev<line={d.get('over_pct_ev_lt', float('nan')):.3f}"
+                    f" CF_Over%(emp_shape)={d.get('cf_over_pct', float('nan')):.3f}\n"
+                )
+                f.write(
+                    f" DIAG shape_ceiling={d.get('shape_ceiling', 'N/A')}"
+                    f" marginal_shape={d.get('marginal_shape', 'N/A')}"
+                    f" dispersion_cal={d.get('dispersion_cal', 0.0):.3f}\n"
+                )
+                f.write(
+                    f" DIAG ev_meanyr_corr={d.get('ev_meanyr_corr', float('nan')):.3f}"
+                    f" result_meanyr_corr={d.get('result_meanyr_corr', float('nan')):.3f}\n"
+                )
 
             if "params" in model:
                 p = model["params"]
-                f.write(f" HP rounds={p.get('opt_rounds', '?')}"
-                        f" leaves={p.get('num_leaves', '?')}"
-                        f" lr={p.get('learning_rate', 0):.4f}"
-                        f" min_child={p.get('min_child_samples', '?')}"
-                        f" L1={p.get('lambda_l1', 0):.2e}"
-                        f" L2={p.get('lambda_l2', 0):.2e}\n")
+                f.write(
+                    f" HP rounds={p.get('opt_rounds', '?')}"
+                    f" leaves={p.get('num_leaves', '?')}"
+                    f" lr={p.get('learning_rate', 0):.4f}"
+                    f" min_child={p.get('min_child_samples', '?')}"
+                    f" L1={p.get('lambda_l1', 0):.2e}"
+                    f" L2={p.get('lambda_l2', 0):.2e}\n"
+                )
 
             f.write("\n")
 
@@ -1284,9 +1518,11 @@ def report():
             f.write("\n" + "=" * 80 + "\n")
             f.write(f" {league} SUMMARY TABLE\n")
             f.write("=" * 80 + "\n")
-            f.write(f"{'Market':<16} {'Dist':<8} {'Over%':>6} {'ShpR':>5}"
-                    f" {'FracEV>':>7} {'MedDiff':>8}"
-                    f" {'O%|EV>':>7} {'O%|EV<':>7} {'CF_O%':>6}\n")
+            f.write(
+                f"{'Market':<16} {'Dist':<8} {'Over%':>6} {'ShpR':>5}"
+                f" {'FracEV>':>7} {'MedDiff':>8}"
+                f" {'O%|EV>':>7} {'O%|EV<':>7} {'CF_O%':>6}\n"
+            )
             f.write("-" * 80 + "\n")
             for mkt, mdl in sorted(markets.items()):
                 if "diagnostics" not in mdl:
@@ -1295,18 +1531,20 @@ def report():
                 stats = mdl["stats"]
                 dist_name = mdl.get("distribution", "?")[:6]
                 over_pct_val = stats["Over%"][1]  # filtered
-                emp_s = d.get('empirical_shape', 0.0)
-                mod_s = d.get('model_shape', 0.0)
-                sr = mod_s / max(emp_s, 0.01) if not np.isnan(emp_s) else float('nan')
-                fev = d.get('frac_ev_gt_line', 0)
-                med = d.get('median_ev_diff', 0)
-                oeg = d.get('over_pct_ev_gt', float('nan'))
-                oel = d.get('over_pct_ev_lt', float('nan'))
-                cfo = d.get('cf_over_pct', float('nan'))
+                emp_s = d.get("empirical_shape", 0.0)
+                mod_s = d.get("model_shape", 0.0)
+                sr = mod_s / max(emp_s, 0.01) if not np.isnan(emp_s) else float("nan")
+                fev = d.get("frac_ev_gt_line", 0)
+                med = d.get("median_ev_diff", 0)
+                oeg = d.get("over_pct_ev_gt", float("nan"))
+                oel = d.get("over_pct_ev_lt", float("nan"))
+                cfo = d.get("cf_over_pct", float("nan"))
                 sr_str = f"{sr:>4.1f}x" if not np.isnan(sr) else "  nan"
-                f.write(f"{mkt:<16} {dist_name:<8} {over_pct_val:>6.3f} {sr_str}"
-                        f" {fev:>7.1%} {med:>+8.3f}"
-                        f" {oeg:>7.3f} {oel:>7.3f} {cfo:>6.3f}\n")
+                f.write(
+                    f"{mkt:<16} {dist_name:<8} {over_pct_val:>6.3f} {sr_str}"
+                    f" {fev:>7.1%} {med:>+8.3f}"
+                    f" {oeg:>7.3f} {oel:>7.3f} {cfo:>6.3f}\n"
+                )
             f.write("\n")
 
     with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
@@ -1314,7 +1552,7 @@ def report():
 
     with open(pkg_resources.files(data) / "stat_std.json", "w") as f:
         json.dump(stat_std, f, indent=4)
-    
+
     save_distribution_config(stat_dist)
     save_zi_config(stat_zi_local)
 
@@ -1352,7 +1590,7 @@ def _compute_shap_and_corr(model, test_df, distribution):
     if total > 0:
         vals = vals / total * 100
 
-    return dict(zip(features, vals)), C.to_dict()
+    return dict(zip(features, vals, strict=False)), C.to_dict()
 
 
 def _refresh_all_aggregates(shap_df):
@@ -1370,7 +1608,8 @@ def _refresh_all_aggregates(shap_df):
 
 def compute_market_importance(league, market, model, test_df, distribution):
     """Update one market column in feature_importances.csv + feature_correlations.csv.
-    test_df must contain Result + features + (any dist params)."""
+    test_df must contain Result + features + (any dist params).
+    """
     shap_dict, corr_dict = _compute_shap_and_corr(model, test_df, distribution)
 
     col_name = f"{league}_{market.replace(' ', '-')}"
@@ -1396,7 +1635,9 @@ def compute_market_importance(league, market, model, test_df, distribution):
 
 def see_features():
     """Batch: rebuild full feature_importances.csv + feature_correlations.csv from all saved models."""
-    model_list = sorted(f.name for f in (pkg_resources.files(data)/"models").iterdir() if ".mdl" in f.name)
+    model_list = sorted(
+        f.name for f in (pkg_resources.files(data) / "models").iterdir() if ".mdl" in f.name
+    )
     feature_importances = []
     feature_correlations = []
     for model_str in tqdm(model_list, desc="Analyzing feature importances...", unit="market"):
@@ -1404,15 +1645,24 @@ def see_features():
             filedict = pickle.load(infile)
         test_path = pkg_resources.files(data) / ("test_sets/" + model_str.replace(".mdl", ".csv"))
         test_df = pd.read_csv(test_path, index_col=0)
-        shap_dict, corr_dict = _compute_shap_and_corr(filedict["model"], test_df, filedict["distribution"])
+        shap_dict, corr_dict = _compute_shap_and_corr(
+            filedict["model"], test_df, filedict["distribution"]
+        )
         feature_importances.append(shap_dict)
         feature_correlations.append(corr_dict)
 
-    df = pd.DataFrame(feature_importances, index=[m[:-4] for m in model_list]).fillna(0).infer_objects(copy=False).transpose()
+    df = (
+        pd.DataFrame(feature_importances, index=[m[:-4] for m in model_list])
+        .fillna(0)
+        .infer_objects(copy=False)
+        .transpose()
+    )
     df = _refresh_all_aggregates(df)
     df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
     pd.DataFrame(feature_correlations, index=[m[:-4] for m in model_list]).T.to_csv(
-        pkg_resources.files(data) / "feature_correlations.csv")
+        pkg_resources.files(data) / "feature_correlations.csv"
+    )
+
 
 def _load_shap_corr_dfs():
     """Read SHAP + corr CSVs, drop ALL aggregate cols, return (shap_df, corr_df)."""
@@ -1434,7 +1684,8 @@ def _save_feature_filter():
 def _scouting_shap_and_filter(league, market, M, stat_data):
     """Train fixed-HP regression LightGBM on unfiltered features, write SHAP+corr columns
     via compute_market_importance, rewrite Filtered bucket via filter_market.
-    Used only under --rebuild-filter, before the final Optuna training pass."""
+    Used only under --rebuild-filter, before the final Optuna training pass.
+    """
     cols = stat_data.get_stat_columns(market, unfiltered=True)
     cols = [c for c in cols if c in M.columns]
     if not cols or "Result" not in M.columns:
@@ -1458,15 +1709,28 @@ def _scouting_shap_and_filter(league, market, M, stat_data):
     y_train = y[[pos_map[i] for i in train_idx]]
     y_test = y[[pos_map[i] for i in test_idx]]
 
-    dtrain = lgb.Dataset(X_train, label=y_train, free_raw_data=False,
-                         categorical_feature=[c for c in ("Home", "Player position") if c in X_train.columns])
-    params = dict(objective="regression", learning_rate=0.05, num_leaves=63,
-                  min_child_samples=50, feature_fraction=0.8, bagging_fraction=0.8,
-                  bagging_freq=1, verbose=-1, num_threads=8)
+    dtrain = lgb.Dataset(
+        X_train,
+        label=y_train,
+        free_raw_data=False,
+        categorical_feature=[c for c in ("Home", "Player position") if c in X_train.columns],
+    )
+    params = dict(
+        objective="regression",
+        learning_rate=0.05,
+        num_leaves=63,
+        min_child_samples=50,
+        feature_fraction=0.8,
+        bagging_fraction=0.8,
+        bagging_freq=1,
+        verbose=-1,
+        num_threads=8,
+    )
     booster = lgb.train(params, dtrain, num_boost_round=200)
 
     class _Shim:
         pass
+
     shim = _Shim()
     shim.booster = booster
 
@@ -1478,10 +1742,10 @@ def _scouting_shap_and_filter(league, market, M, stat_data):
 
 def filter_market(league, market):
     """Per-market filter rebuild. Updates feature_filter[league]['Filtered'][market]
-    in memory + on disk. Returns diagnostic dict."""
+    in memory + on disk. Returns diagnostic dict.
+    """
     shap_df, corr_df = _load_shap_corr_dfs()
-    new_filtered, diag = fs.filter_market_features(
-        league, market, feature_filter, shap_df, corr_df)
+    new_filtered, diag = fs.filter_market_features(league, market, feature_filter, shap_df, corr_df)
 
     # `feature_filter` is the same dict object as helpers.feature_filter (imported
     # by reference). Mutating it here is what `get_stat_columns` will see on the
@@ -1497,7 +1761,8 @@ def filter_market(league, market):
 
 def filter_features():
     """Batch: rebuild Filtered bucket for every (league, market) seen in SHAP CSV.
-    Reuses per-market path so logic stays single-source."""
+    Reuses per-market path so logic stays single-source.
+    """
     shap_df, _ = _load_shap_corr_dfs()
     if shap_df.empty:
         return
@@ -1512,14 +1777,16 @@ def filter_features():
         seen.add((league, market))
         filter_market(league, market)
 
+
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
 
+
 def fit_book_weights(league, market):
     """Fit optimal weights for multiple sportsbooks using historical accuracy."""
     global book_weights
-    warnings.simplefilter('ignore', UserWarning)
+    warnings.simplefilter("ignore", UserWarning)
     print(f"Fitting Book Weights - {league}, {market}")
     df = archive.to_pandas(league, market)
     df = df[[col for col in df.columns if col != "pinnacle"]]
@@ -1529,82 +1796,142 @@ def fit_book_weights(league, market):
     cv = stat_cv[league].get(market, 1)
     stat_dist = load_distribution_config()
     dist = stat_dist[league].get(market, "Poisson")
-    
+
     if market == "Moneyline":
-        log = stat_data.teamlog[[stat_data.log_strings["team"], stat_data.log_strings["date"], stat_data.log_strings["win"]]]
+        log = stat_data.teamlog[
+            [
+                stat_data.log_strings["team"],
+                stat_data.log_strings["date"],
+                stat_data.log_strings["win"],
+            ]
+        ]
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["team"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[stat_data.log_strings["win"]]
+        df["Result"] = log.drop_duplicates(
+            [stat_data.log_strings["date"], stat_data.log_strings["team"]]
+        ).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[
+            stat_data.log_strings["win"]
+        ]
         df.dropna(subset="Result", inplace=True)
         result = (df["Result"] == "W").astype(int)
-        test_df = df.drop(columns='Result')
+        test_df = df.drop(columns="Result")
 
     elif market == "Totals":
-        log = stat_data.teamlog[[stat_data.log_strings["team"], stat_data.log_strings["date"], stat_data.log_strings["score"]]]
+        log = stat_data.teamlog[
+            [
+                stat_data.log_strings["team"],
+                stat_data.log_strings["date"],
+                stat_data.log_strings["score"],
+            ]
+        ]
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["team"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[stat_data.log_strings["score"]]
+        df["Result"] = log.drop_duplicates(
+            [stat_data.log_strings["date"], stat_data.log_strings["team"]]
+        ).set_index([stat_data.log_strings["date"], stat_data.log_strings["team"]])[
+            stat_data.log_strings["score"]
+        ]
         df.dropna(subset="Result", inplace=True)
         result = df["Result"].astype(float)
-        test_df = df.drop(columns='Result')
-    
+        test_df = df.drop(columns="Result")
+
     elif market == "1st 1 innings":
-        log = stat_data.gamelog.loc[stat_data.gamelog["starting pitcher"], ["opponent", stat_data.log_strings["date"], "1st inning runs allowed"]]
+        log = stat_data.gamelog.loc[
+            stat_data.gamelog["starting pitcher"],
+            ["opponent", stat_data.log_strings["date"], "1st inning runs allowed"],
+        ]
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], "opponent"]).set_index([stat_data.log_strings["date"], "opponent"])["1st inning runs allowed"]
+        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], "opponent"]).set_index(
+            [stat_data.log_strings["date"], "opponent"]
+        )["1st inning runs allowed"]
         df.dropna(subset="Result", inplace=True)
         result = df["Result"].astype(float)
-        test_df = df.drop(columns='Result')
-    
+        test_df = df.drop(columns="Result")
+
     else:
-        log = stat_data.gamelog[[stat_data.log_strings["player"], stat_data.log_strings["date"], market]]
+        log = stat_data.gamelog[
+            [stat_data.log_strings["player"], stat_data.log_strings["date"], market]
+        ]
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
-        df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], stat_data.log_strings["player"]]).set_index([stat_data.log_strings["date"], stat_data.log_strings["player"]])[market]
+        df["Result"] = log.drop_duplicates(
+            [stat_data.log_strings["date"], stat_data.log_strings["player"]]
+        ).set_index([stat_data.log_strings["date"], stat_data.log_strings["player"]])[market]
         df.dropna(subset="Result", inplace=True)
         result = df["Result"].astype(float)
-        test_df = df.drop(columns='Result')
-        
+        test_df = df.drop(columns="Result")
 
     if market == "Moneyline":
+
         def objective(w, x, y):
-            prob = np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1))
+            prob = np.exp(
+                np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1)
+            )
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
 
     elif dist in ["NegBin", "ZINB", "Poisson"]:
+
         def objective(w, x, y):
-            proj = np.array(np.exp(np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1)))
+            proj = np.array(
+                np.exp(
+                    np.ma.average(np.ma.MaskedArray(np.log(x), mask=np.isnan(x)), weights=w, axis=1)
+                )
+            )
             return -np.mean(poisson.logpmf(y.astype(int), proj))
-        
+
     else:
+
         def objective(w, x, y):
-            s = np.ma.MaskedArray(x*cv, mask=np.isnan(x))
-            std = np.sqrt(1/np.ma.average(np.power(s,-2), weights=w, axis=1))
-            proj = np.array(np.ma.average(np.ma.MaskedArray(x*np.power(s,-2), mask=np.isnan(x)), weights=w, axis=1)*std*std)
+            s = np.ma.MaskedArray(x * cv, mask=np.isnan(x))
+            std = np.sqrt(1 / np.ma.average(np.power(s, -2), weights=w, axis=1))
+            proj = np.array(
+                np.ma.average(
+                    np.ma.MaskedArray(x * np.power(s, -2), mask=np.isnan(x)), weights=w, axis=1
+                )
+                * std
+                * std
+            )
             return -np.mean(norm.logpdf(y, proj, std))
-        
+
     if "Line" in test_df.columns:
         test_df.drop(columns=["Line"], inplace=True)
 
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
-    x[x<0] = np.nan
+    x[x < 0] = np.nan
     y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
     if len(x) > 9:
         prev_weights = book_weights.get(league, {}).get(market, {})
         guess = {}
         for book in test_df.columns:
-            guess.update({book: prev_weights.get(book,1)})
-            
+            guess.update({book: prev_weights.get(book, 1)})
+
         guess = list(guess.values())
-        guess = np.clip(guess/np.sum(guess),0.005,.75)
-        res = minimize(objective, guess, args=(x, y), bounds=[(0.001, 1)]*len(test_df.columns), tol=1e-8, method='TNC')
-    
-        return {k:res.x[i] for i, k in enumerate(test_df.columns)}
+        guess = np.clip(guess / np.sum(guess), 0.005, 0.75)
+        res = minimize(
+            objective,
+            guess,
+            args=(x, y),
+            bounds=[(0.001, 1)] * len(test_df.columns),
+            tol=1e-8,
+            method="TNC",
+        )
+
+        return {k: res.x[i] for i, k in enumerate(test_df.columns)}
     else:
         return {}
-    
-def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=None, cv=None,
-                     model_sigma=None, model_skew_alpha=None,
-                     gate_model=None, gate_book=None):
-    """
-    Optimize the single blend weight between model predictions and
+
+
+def fit_model_weight(
+    model_ev,
+    odds_ev,
+    result,
+    dist,
+    model_alpha=None,
+    model_r=None,
+    cv=None,
+    model_sigma=None,
+    model_skew_alpha=None,
+    gate_model=None,
+    gate_book=None,
+):
+    """Optimize the single blend weight between model predictions and
     bookmaker lines by maximizing clamped log-likelihood on validation data.
 
     Log-likelihood is clamped at -20 per observation to prevent outlier
@@ -1633,26 +1960,33 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
 
         def objective(w):
             bl_ev, bl_sigma, bl_alpha, g_blend = fused_loc(
-                w, model_ev, odds_ev, cv, "SkewNormal",
-                sigma=model_sigma_arr, skew_alpha=model_skew_arr,
-                gate_book=gate_book)
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "SkewNormal",
+                sigma=model_sigma_arr,
+                skew_alpha=model_skew_arr,
+                gate_book=gate_book,
+            )
 
             delta = bl_alpha / np.sqrt(1 + bl_alpha**2)
             bl_loc = bl_ev - bl_sigma * delta * np.sqrt(2 / np.pi)
 
-            base_logpdf = np.clip(skewnorm.logpdf(result, bl_alpha, loc=bl_loc, scale=bl_sigma), -20, 0)
+            base_logpdf = np.clip(
+                skewnorm.logpdf(result, bl_alpha, loc=bl_loc, scale=bl_sigma), -20, 0
+            )
 
             if has_hurdle_gate and g_blend is not None:
                 loglik = np.where(
                     result == 0,
                     np.log(np.clip(g_blend, 1e-12, None)),
-                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf
+                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf,
                 )
                 return -np.mean(loglik)
             return -np.mean(base_logpdf)
 
-        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)],
-                       tol=1e-8, method='TNC')
+        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)], tol=1e-8, method="TNC")
         return res.x[0]
 
     elif dist == "NegBin":
@@ -1660,49 +1994,71 @@ def fit_model_weight(model_ev, odds_ev, result, dist, model_alpha=None, model_r=
         result_int = result.astype(int)
 
         def objective(w):
-            r_blend, p_blend, g_blend = fused_loc(w, model_ev, odds_ev, cv, "NegBin",
-                                         r=model_r_arr, gate_model=gate_model, gate_book=gate_book)
+            r_blend, p_blend, g_blend = fused_loc(
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "NegBin",
+                r=model_r_arr,
+                gate_model=gate_model,
+                gate_book=gate_book,
+            )
             base_logpmf = np.clip(nbinom.logpmf(result_int, r_blend, p_blend), -20, 0)
             if has_gate:
                 loglik = np.where(
                     result_int == 0,
                     np.log(np.clip(g_blend + (1 - g_blend) * np.exp(base_logpmf), 1e-12, None)),
-                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpmf
+                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpmf,
                 )
                 return -np.mean(loglik)
             return -np.mean(base_logpmf)
 
-        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)],
-                       tol=1e-8, method='TNC')
+        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)], tol=1e-8, method="TNC")
         return res.x[0]
     else:
         model_alpha_arr = np.asarray(model_alpha, dtype=float)
 
         def objective(w):
-            alpha_bl, beta_bl, g_blend = fused_loc(w, model_ev, odds_ev, cv, "Gamma",
-                                   alpha=model_alpha_arr, gate_model=gate_model, gate_book=gate_book)
+            alpha_bl, beta_bl, g_blend = fused_loc(
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "Gamma",
+                alpha=model_alpha_arr,
+                gate_model=gate_model,
+                gate_book=gate_book,
+            )
             base_logpdf = np.clip(gamma.logpdf(result, alpha_bl, scale=1 / beta_bl), -20, 0)
             if has_gate:
                 loglik = np.where(
                     result == 0,
                     np.log(np.clip(g_blend, 1e-12, None)),
-                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf
+                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf,
                 )
                 return -np.mean(loglik)
             return -np.mean(base_logpdf)
 
-        res = minimize(objective, .5, bounds=[(0.05, 0.9)], tol=1e-8, method='TNC')
+        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)], tol=1e-8, method="TNC")
         return res.x[0]
+
 
 def select_distribution(player_stats):
     import warnings
-    warnings.filterwarnings('ignore', 'overflow', RuntimeWarning)
+
+    warnings.filterwarnings("ignore", "overflow", RuntimeWarning)
 
     # Check data type properties (market-level, not per-player)
     sample = player_stats.first()
     is_integer = all(v == int(v) for v in sample)
     if is_integer:
-        uniques = player_stats.apply(lambda x: x.unique().tolist()).explode().drop_duplicates().sort_values()
+        uniques = (
+            player_stats.apply(lambda x: x.unique().tolist())
+            .explode()
+            .drop_duplicates()
+            .sort_values()
+        )
         step = uniques.diff().dropna().min() if len(uniques) > 1 else 1
     else:
         step = 0
@@ -1717,6 +2073,7 @@ def select_distribution(player_stats):
         def _player_resolution(x):
             nz = x[x > 0]
             return step / nz.mean() if len(nz) > 0 else np.nan
+
         resolutions = player_stats.apply(_player_resolution).dropna()
         resolution = resolutions.median()
         dist = "NegBin" if resolution > 0.2 else "Gamma"
@@ -1726,6 +2083,7 @@ def select_distribution(player_stats):
     observed_zeros = player_stats.agg(lambda x: x.eq(0).mean())
 
     if dist in ["NegBin", "ZINB"]:
+
         def _nb_mom(x):
             mu, var = x.mean(), x.var()
             if var <= mu:
@@ -1733,27 +2091,30 @@ def select_distribution(player_stats):
             p = np.clip(mu / var, 1e-3, 1 - 1e-3)
             n = np.clip(mu * p / (1 - p), 0.1, 50)
             return (n, p)
+
         nb_fit = player_stats.apply(_nb_mom)
         base_zero_prob = nb_fit.apply(lambda row: nbinom.pmf(0, row[0], row[1]))
         p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
         if p_zero > 0.1:
             dist = "ZINB"
     else:
-        gam_fit = player_stats.apply(lambda x: fit(gamma, x[x>0].astype(float), {"a":(0, 50), "scale":(0, 500)}).params)
+        gam_fit = player_stats.apply(
+            lambda x: fit(gamma, x[x > 0].astype(float), {"a": (0, 50), "scale": (0, 500)}).params
+        )
         base_zero_prob = gam_fit.apply(lambda row: gamma.cdf(0.99, row[0], scale=row[2]))
         p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
         if p_zero > 0.05:
             dist = "ZAGamma"
 
-    print(f"  Data type: {'integer (step={})'.format(int(step)) if is_integer else 'continuous'}")
+    print(f"  Data type: {f'integer (step={int(step)})' if is_integer else 'continuous'}")
     print(f"  Zero inflation - {p_zero:.4f}")
     print(f"  Selected: {dist}")
 
     return dist, p_zero
 
+
 def count_training_rows(stat_data, market, start_date):
-    """
-    Estimate the number of training rows get_training_matrix would produce for
+    """Estimate the number of training rows get_training_matrix would produce for
     a given market and start_date, using the archive and gamelog directly.
 
     Counts:
@@ -1766,10 +2127,12 @@ def count_training_rows(stat_data, market, start_date):
     gamelog = stat_data.gamelog.drop_duplicates(
         subset=[stat_data.log_strings["game"], stat_data.log_strings["player"]], keep="last"
     ).copy()
-    gamelog[stat_data.log_strings["date"]] = pd.to_datetime(gamelog[stat_data.log_strings["date"]]).dt.date
+    gamelog[stat_data.log_strings["date"]] = pd.to_datetime(
+        gamelog[stat_data.log_strings["date"]]
+    ).dt.date
     gamelog = gamelog.loc[
-        (gamelog[stat_data.log_strings["date"]] > start_date) &
-        (gamelog[stat_data.log_strings["date"]] < datetime.today().date())
+        (gamelog[stat_data.log_strings["date"]] > start_date)
+        & (gamelog[stat_data.log_strings["date"]] < datetime.today().date())
     ]
     if gamelog.empty:
         return 0
@@ -1787,9 +2150,7 @@ def count_training_rows(stat_data, market, start_date):
         archived_count = len(archived_players & played)
 
         # Count non-archived unique players above usage cutoff
-        non_archived = players.drop_duplicates(
-            subset=stat_data.log_strings["player"]
-        ).loc[
+        non_archived = players.drop_duplicates(subset=stat_data.log_strings["player"]).loc[
             lambda df: ~df[stat_data.log_strings["player"]].isin(archived_players)
         ]
         non_archived_count = (non_archived[stat_data.usage_stat] > usage_cutoff).sum()
@@ -1833,19 +2194,23 @@ def trim_matrix(M, min_rows=7500):
     proportions.  All removal steps respect min_rows so that sparse-
     archive markets are not destroyed.
     """
-    warnings.simplefilter('ignore', UserWarning)
+    warnings.simplefilter("ignore", UserWarning)
 
     # --- 1. Fix DaysIntoSeason wrapping ---
     while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
-        M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                    < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
-        M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = M.loc[M["DaysIntoSeason"]
-                                                                    > 300, "DaysIntoSeason"] - M.loc[M["DaysIntoSeason"]
-                                                                                                    > 300, "DaysIntoSeason"].min()
+        M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = (
+            M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
+        )
+        M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = (
+            M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"]
+            - M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"].min()
+        )
 
     # --- 2. Remove result outliers (archived rows always kept) ---
-    M = M.loc[((M["Result"] >= M["Result"].quantile(.05)) & (
-        M["Result"] <= M["Result"].quantile(.95))) | (M["Archived"] == 1)]
+    M = M.loc[
+        ((M["Result"] >= M["Result"].quantile(0.05)) & (M["Result"] <= M["Result"].quantile(0.95)))
+        | (M["Archived"] == 1)
+    ]
 
     # --- 3. Clip lines to a realistic range ---
     # Use archived range when coverage is good; otherwise fall back to
@@ -1866,8 +2231,7 @@ def trim_matrix(M, min_rows=7500):
     # the line distribution using histogram-matched removal weights.
     # Per-position archived median is used when >= 20 archived rows exist
     # for that position; otherwise the overall median is used.
-    overall_target = (M.loc[archived_mask, "Line"].median()
-                      if n_archived >= 5 else M["Line"].mean())
+    overall_target = M.loc[archived_mask, "Line"].median() if n_archived >= 5 else M["Line"].mean()
 
     def _balance_lines(M, pos_mask):
         budget = max(len(M) - min_rows, 0)
@@ -1876,8 +2240,7 @@ def trim_matrix(M, min_rows=7500):
 
         pos_archived = archived_mask & pos_mask
         n_pos_archived = pos_archived.sum()
-        target = (M.loc[pos_archived, "Line"].median()
-                  if n_pos_archived >= 20 else overall_target)
+        target = M.loc[pos_archived, "Line"].median() if n_pos_archived >= 20 else overall_target
 
         non_arch = ~archived_mask & pos_mask
         less = M.loc[non_arch & (M["Line"] < target), "Line"]
@@ -1917,8 +2280,7 @@ def trim_matrix(M, min_rows=7500):
 
     archived_no_push = M["Archived"] == 1
     if archived_no_push.sum() >= 20:
-        target = (M.loc[archived_no_push, "Result"] >
-                  M.loc[archived_no_push, "Line"]).mean()
+        target = (M.loc[archived_no_push, "Result"] > M.loc[archived_no_push, "Line"]).mean()
     else:
         target = (M["Result"] > M["Line"]).mean()
 
@@ -1928,17 +2290,13 @@ def trim_matrix(M, min_rows=7500):
 
     if n > 0:
         if balance < target:
-            chopping_block = M.loc[(M["Archived"] != 1) & (
-                M["Result"] < M["Line"])].index
-            p = (1/M.loc[chopping_block,
-                            "MeanYr"].clip(0.1)).to_numpy()
-            p = p/np.sum(p)
+            chopping_block = M.loc[(M["Archived"] != 1) & (M["Result"] < M["Line"])].index
+            p = (1 / M.loc[chopping_block, "MeanYr"].clip(0.1)).to_numpy()
+            p = p / np.sum(p)
         else:
-            chopping_block = M.loc[(M["Archived"] != 1) & (
-                M["Result"] > M["Line"])].index
-            p = (M.loc[chopping_block, "MeanYr"].clip(
-                0.1)).to_numpy()
-            p = p/np.sum(p)
+            chopping_block = M.loc[(M["Archived"] != 1) & (M["Result"] > M["Line"])].index
+            p = (M.loc[chopping_block, "MeanYr"].clip(0.1)).to_numpy()
+            p = p / np.sum(p)
 
         n = min(n, len(chopping_block))
         cut = np.random.choice(chopping_block, n, replace=False, p=p)
@@ -1956,10 +2314,11 @@ def trim_matrix(M, min_rows=7500):
 
     return M
 
+
 def correlate(league, force=False):
     """Calculate feature correlations with outcomes for feature engineering."""
     print(f"Correlating {league}...")
-    tracked_stats = { 
+    tracked_stats = {
         "NFL": {
             "QB": [
                 "passing yards",
@@ -1980,7 +2339,7 @@ def correlate(league, force=False):
                 "passing first downs",
                 "first downs",
                 "fumbles lost",
-                "completion percentage"
+                "completion percentage",
             ],
             "RB": [
                 "rushing yards",
@@ -1997,7 +2356,7 @@ def correlate(league, force=False):
                 "longest rush",
                 "longest reception",
                 "first downs",
-                "fumbles lost"
+                "fumbles lost",
             ],
             "WR": [
                 "receiving yards",
@@ -2010,7 +2369,7 @@ def correlate(league, force=False):
                 "targets",
                 "longest reception",
                 "first downs",
-                "fumbles lost"
+                "fumbles lost",
             ],
             "TE": [
                 "receiving yards",
@@ -2023,15 +2382,11 @@ def correlate(league, force=False):
                 "targets",
                 "longest reception",
                 "first downs",
-                "fumbles lost"
+                "fumbles lost",
             ],
         },
         "NHL": {
-            "G": [
-                "saves",
-                "goalsAgainst",
-                "goalie fantasy points underdog"
-            ],
+            "G": ["saves", "goalsAgainst", "goalie fantasy points underdog"],
             "C": [
                 "points",
                 "shots",
@@ -2070,7 +2425,7 @@ def correlate(league, force=False):
                 "assists",
                 "faceOffWins",
                 "timeOnIce",
-            ]
+            ],
         },
         "NBA": {
             "C": [
@@ -2095,7 +2450,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
             "P": [
                 "PTS",
@@ -2119,7 +2474,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
             "B": [
                 "PTS",
@@ -2143,7 +2498,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
             "F": [
                 "PTS",
@@ -2167,7 +2522,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
             "W": [
                 "PTS",
@@ -2191,8 +2546,8 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
-            ]
+                "MIN",
+            ],
         },
         "WNBA": {
             "G": [
@@ -2217,7 +2572,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
             "F": [
                 "PTS",
@@ -2241,7 +2596,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
             "C": [
                 "PTS",
@@ -2265,7 +2620,7 @@ def correlate(league, force=False):
                 "OREB",
                 "DREB",
                 "PF",
-                "MIN"
+                "MIN",
             ],
         },
         "MLB": {
@@ -2279,7 +2634,7 @@ def correlate(league, force=False):
                 "1st inning hits allowed",
                 "pitcher fantasy score",
                 "pitcher fantasy points underdog",
-                "walks allowed"
+                "walks allowed",
             ],
             "B": [
                 "hitter fantasy score",
@@ -2295,9 +2650,9 @@ def correlate(league, force=False):
                 "singles",
                 "doubles",
                 "triples",
-                "home runs"
-            ]
-        }
+                "home runs",
+            ],
+        },
     }
 
     stats = tracked_stats[league]
@@ -2309,10 +2664,10 @@ def correlate(league, force=False):
         matrix = pd.read_csv(filepath, index_col=0)
         matrix.DATE = pd.to_datetime(matrix.DATE, format="mixed")
         latest_date = matrix.DATE.max()
-        matrix = matrix.loc[matrix.DATE >= datetime.today()-timedelta(days=300)]
+        matrix = matrix.loc[datetime.today() - timedelta(days=300) <= matrix.DATE]
     else:
         matrix = pd.DataFrame()
-        latest_date = datetime.today()-timedelta(days=300)
+        latest_date = datetime.today() - timedelta(days=300)
 
     games = log.gamelog[log_str["game"]].unique()
     game_data = []
@@ -2322,42 +2677,68 @@ def correlate(league, force=False):
         gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
         if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != 2:
             continue
-        [home_team, away_team] = tuple(game_df.sort_values(log_str["home"], ascending=False)[log_str["team"]].unique())
+        [home_team, away_team] = tuple(
+            game_df.sort_values(log_str["home"], ascending=False)[log_str["team"]].unique()
+        )
 
         if league == "MLB":
-            bat_df = game_df.loc[game_df['starting batter']]
+            bat_df = game_df.loc[game_df["starting batter"]]
             bat_df.position = "B" + bat_df.battingOrder.astype(str)
             bat_df.index = bat_df.position
-            pitch_df = game_df.loc[game_df['starting pitcher']]
+            pitch_df = game_df.loc[game_df["starting pitcher"]]
             pitch_df.position = "P"
             pitch_df.index = pitch_df.position
             game_df = pd.concat([bat_df, pitch_df])
         else:
             log.profile_market(log_str["usage"], date=gameDate)
             usage = pd.DataFrame(
-                log.playerProfile[[f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]])
+                log.playerProfile[
+                    [f"{log_str.get('usage')} short", f"{log_str.get('usage_sec')} short"]
+                ]
+            )
             usage.reset_index(inplace=True)
             game_df = game_df.merge(usage, how="left")
             game_df = game_df.loc[game_df[log_str["position"]].apply(lambda x: isinstance(x, str))]
             game_df = game_df.fillna(0).infer_objects(copy=False)
-            ranks = game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False).groupby(
-                [log_str["team"], log_str["position"]]).rank(ascending=False, method='first')[f"{log_str.get('usage')} short"].astype(int)
-            game_df[log_str["position"]] = game_df[log_str["position"]] + \
-                ranks.astype(str)
+            ranks = (
+                game_df.sort_values(f"{log_str.get('usage_sec')} short", ascending=False)
+                .groupby([log_str["team"], log_str["position"]])
+                .rank(ascending=False, method="first")[f"{log_str.get('usage')} short"]
+                .astype(int)
+            )
+            game_df[log_str["position"]] = game_df[log_str["position"]] + ranks.astype(str)
             game_df.index = game_df[log_str["position"]]
 
         homeStats = {}
         awayStats = {}
-        for position in stats.keys():
-            homeStats.update(game_df.loc[(game_df[log_str["team"]] == home_team) & game_df[log_str["position"]].str.contains(
-                position), stats[position]].to_dict('index'))
-            awayStats.update(game_df.loc[(game_df[log_str["team"]] == away_team) & game_df[log_str["position"]].str.contains(
-                position), stats[position]].to_dict('index'))
+        for position in stats:
+            homeStats.update(
+                game_df.loc[
+                    (game_df[log_str["team"]] == home_team)
+                    & game_df[log_str["position"]].str.contains(position),
+                    stats[position],
+                ].to_dict("index")
+            )
+            awayStats.update(
+                game_df.loc[
+                    (game_df[log_str["team"]] == away_team)
+                    & game_df[log_str["position"]].str.contains(position),
+                    stats[position],
+                ].to_dict("index")
+            )
 
-        game_data.append({"TEAM": home_team} | {"DATE": gameDate.date()} |
-            homeStats | {"_OPP_" + k: v for k, v in awayStats.items()})
-        game_data.append({"TEAM": away_team} | {"DATE": gameDate.date()} |
-            awayStats | {"_OPP_" + k: v for k, v in homeStats.items()})
+        game_data.append(
+            {"TEAM": home_team}
+            | {"DATE": gameDate.date()}
+            | homeStats
+            | {"_OPP_" + k: v for k, v in awayStats.items()}
+        )
+        game_data.append(
+            {"TEAM": away_team}
+            | {"DATE": gameDate.date()}
+            | awayStats
+            | {"_OPP_" + k: v for k, v in homeStats.items()}
+        )
 
     matrix = pd.concat([matrix, pd.json_normalize(game_data)], ignore_index=True)
     matrix.to_csv(filepath)
@@ -2366,17 +2747,20 @@ def correlate(league, force=False):
     matrix.drop(columns="DATE", inplace=True)
     matrix.fillna(0, inplace=True)
     for team in matrix.TEAM.unique():
-        team_matrix = matrix.loc[matrix.TEAM == team].drop(columns="TEAM")
-        team_matrix = team_matrix.loc[:,((team_matrix==0).mean() < .5)]
+        team_matrix = matrix.loc[team == matrix.TEAM].drop(columns="TEAM")
+        team_matrix = team_matrix.loc[:, ((team_matrix == 0).mean() < 0.5)]
         team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
-        c_spearman = team_matrix.corr(method='spearman', min_periods=int(len(team_matrix)*.75)).unstack()
+        c_spearman = team_matrix.corr(
+            method="spearman", min_periods=int(len(team_matrix) * 0.75)
+        ).unstack()
         c = 2 * np.sin(np.pi / 6 * c_spearman)
         c = c.reindex(c.abs().sort_values(ascending=False).index).dropna()
-        c = c.loc[c.abs()>0.05]
+        c = c.loc[c.abs() > 0.05]
         big_c.update({team: c})
 
-    pd.concat(big_c).to_csv((pkg_resources.files(data) / f"{league}_corr.csv"))
+    pd.concat(big_c).to_csv(pkg_resources.files(data) / f"{league}_corr.csv")
+
 
 if __name__ == "__main__":
-    warnings.simplefilter('ignore', UserWarning)
+    warnings.simplefilter("ignore", UserWarning)
     meditate()

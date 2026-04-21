@@ -17,11 +17,12 @@ Process for each stored EV:
 Does NOT write to the archive. Uncomment the archive.write() call at the bottom when ready.
 """
 
+import importlib.resources as pkg_resources
 import json
 import os
+
 import numpy as np
-import importlib.resources as pkg_resources
-from scipy.stats import poisson, norm
+from scipy.stats import norm, poisson
 from tqdm import tqdm
 
 from sportstradamus import data
@@ -82,7 +83,6 @@ def decode_old_ev(line, ev, old_cv):
         return float(norm.cdf(float(line), ev, ev * old_cv))
 
 
-
 # ---------------------------------------------------------------------------
 # Main conversion
 # ---------------------------------------------------------------------------
@@ -124,8 +124,8 @@ def remap_archive():
                 new_dist = "Poisson" if new_cv == 1 else "Gamma"
 
             # Determine whether the encoding actually changes
-            old_is_poisson = (old_cv == 1)
-            new_is_poisson = (new_dist == "Poisson" and new_cv == 1)
+            old_is_poisson = old_cv == 1
+            new_is_poisson = new_dist == "Poisson" and new_cv == 1
             if old_is_poisson and new_is_poisson:
                 stats["skipped_no_change"] += 1
                 continue
@@ -159,7 +159,11 @@ def remap_archive():
                     new_ev_dict = {}
                     changed = False
                     for book, old_ev in ev_dict.items():
-                        if old_ev is None or (isinstance(old_ev, float) and np.isnan(old_ev)) or old_ev <= 0:
+                        if (
+                            old_ev is None
+                            or (isinstance(old_ev, float) and np.isnan(old_ev))
+                            or old_ev <= 0
+                        ):
                             new_ev_dict[book] = old_ev
                             stats["skipped_bad_data"] += 1
                             continue
@@ -172,7 +176,9 @@ def remap_archive():
                                 stats["skipped_bad_data"] += 1
                                 continue
 
-                            new_ev = get_ev(line, under_prob, cv=new_cv, dist=new_dist, gate=gate or None)
+                            new_ev = get_ev(
+                                line, under_prob, cv=new_cv, dist=new_dist, gate=gate or None
+                            )
 
                             if new_ev is None or np.isnan(new_ev) or new_ev <= 0:
                                 new_ev_dict[book] = old_ev
@@ -182,7 +188,7 @@ def remap_archive():
                                 changed = True
                                 stats["converted"] += 1
 
-                        except Exception as exc:
+                        except Exception:
                             new_ev_dict[book] = old_ev
                             stats["errors"] += 1
 

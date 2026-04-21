@@ -1,11 +1,18 @@
-from sportstradamus.stats import StatsNFL, StatsNHL, StatsNBA, StatsWNBA, StatsMLB
 from datetime import datetime
-from tqdm import tqdm
+
 import click
+from tqdm import tqdm
+
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+
 
 @click.command()
-@click.option("--league", type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]), default="All",
-              help="Select league to train on")
+@click.option(
+    "--league",
+    type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]),
+    default="All",
+    help="Select league to train on",
+)
 def main(league):
     """
     Resets the stat structures for all leagues. This is useful for when we want to reprocess the data from scratch, or if we want to clear out any old data that may be causing issues.
@@ -69,6 +76,7 @@ def main(league):
             MLB.season_start = season_start
             MLB.update()
         MLB.trim_gamelog()
+
 
 if __name__ == "__main__":
     main()

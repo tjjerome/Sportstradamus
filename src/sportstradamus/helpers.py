@@ -1,77 +1,81 @@
-from sportstradamus.spiderLogger import logger
-import requests
-import json
-import pickle
-import os
-import re
-import random
-import unicodedata
 import datetime
 import importlib.resources as pkg_resources
-from klepto.archives import hdfdir_archive, cache
-from sportstradamus import creds, data
-from time import sleep
-from operator import itemgetter
-from scipy.stats import poisson, nbinom, skellam, norm, gamma, skewnorm, iqr
-from scipy.optimize import brentq, fsolve, minimize
-from scipy.integrate import dblquad
-import numpy as np
-import statsapi as mlb
-import pandas as pd
-from scrapeops_python_requests.scrapeops_requests import ScrapeOpsRequests
-from tqdm.contrib.logging import logging_redirect_tqdm
+import json
+import os
+import pickle
+import random
+import re
+import unicodedata
 import warnings
+from time import sleep
 
+import numpy as np
+import pandas as pd
+import requests
+import statsapi as mlb
+from klepto.archives import cache, hdfdir_archive
+from scipy.integrate import dblquad
+from scipy.optimize import brentq, minimize
+from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
+from tqdm.contrib.logging import logging_redirect_tqdm
+
+from sportstradamus import creds, data
+from sportstradamus.spiderLogger import logger
 
 # Load API key
-with open((pkg_resources.files(creds) / "keys.json"), "r") as infile:
+with open(pkg_resources.files(creds) / "keys.json") as infile:
     keys = json.load(infile)
     odds_api = keys["odds_api"]
 
-with open((pkg_resources.files(data) / "abbreviations.json"), "r") as infile:
+with open(pkg_resources.files(data) / "abbreviations.json") as infile:
     abbreviations = json.load(infile)
 
-with open((pkg_resources.files(data) / "combo_props.json"), "r") as infile:
+with open(pkg_resources.files(data) / "combo_props.json") as infile:
     combo_props = json.load(infile)
 
-with open((pkg_resources.files(data) / "stat_cv.json"), "r") as infile:
+with open(pkg_resources.files(data) / "stat_cv.json") as infile:
     stat_cv = json.load(infile)
 
-with open((pkg_resources.files(data) / "stat_dist.json"), "r") as infile:
+with open(pkg_resources.files(data) / "stat_dist.json") as infile:
     stat_dist = json.load(infile)
 
-with open((pkg_resources.files(data) / "stat_std.json"), "r") as infile:
+with open(pkg_resources.files(data) / "stat_std.json") as infile:
     stat_std = json.load(infile)
 
 _zi_path = pkg_resources.files(data) / "stat_zi.json"
 if os.path.isfile(_zi_path):
-    with open(_zi_path, "r") as infile:
+    with open(_zi_path) as infile:
         stat_zi = json.load(infile)
 else:
     stat_zi = {}
-    
-with open((pkg_resources.files(data) / "stat_map.json"), "r") as infile:
+
+with open(pkg_resources.files(data) / "stat_map.json") as infile:
     stat_map = json.load(infile)
 
-with open((pkg_resources.files(data) / "book_weights.json"), "r") as infile:
+with open(pkg_resources.files(data) / "book_weights.json") as infile:
     book_weights = json.load(infile)
 
-with open(pkg_resources.files(data) / "prop_books.json", "r") as infile:
+with open(pkg_resources.files(data) / "prop_books.json") as infile:
     books = json.load(infile)
 
-with open((pkg_resources.files(data) / "goalies.json"), "r") as infile:
+with open(pkg_resources.files(data) / "goalies.json") as infile:
     nhl_goalies = json.load(infile)
 
-with open(pkg_resources.files(data) / "feature_filter.json", "r") as infile:
+with open(pkg_resources.files(data) / "feature_filter.json") as infile:
     feature_filter = json.load(infile)
 
-with open(pkg_resources.files(data) / "banned_combos.json", "r") as infile:
+with open(pkg_resources.files(data) / "banned_combos.json") as infile:
     banned = json.load(infile)
-    
-for platform in banned.keys():
+
+for platform in banned:
     for league in list(banned[platform].keys()):
-        banned[platform][league]["team"] = {frozenset(k.split(" & ")): v for k,v in banned[platform][league]["team"] .items()}
-        banned[platform][league]["opponent"] = {frozenset(k.split(" & ")): v for k,v in banned[platform][league]["opponent"] .items()}
+        banned[platform][league]["team"] = {
+            frozenset(k.split(" & ")): v for k, v in banned[platform][league]["team"].items()
+        }
+        banned[platform][league]["opponent"] = {
+            frozenset(k.split(" & ")): v for k, v in banned[platform][league]["opponent"].items()
+        }
+
 
 def get_active_sports():
     # Get available sports from the API
@@ -80,18 +84,17 @@ def get_active_sports():
     res = res.json()
 
     # Filter sports
-    sports = [s["title"] for s in res if s["title"] in [
-        "NBA", "MLB", "NHL", "NFL"] and s["active"]]
+    sports = [s["title"] for s in res if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]]
 
     return sports
 
+
 class Scrape:
     def __init__(self):
-        """
-        Initialize the Scrape object. Loads API keys from credentials.
+        """Initialize the Scrape object. Loads API keys from credentials.
         Browser headers are fetched lazily on first use.
         """
-        with open(pkg_resources.files(creds) / "keys.json", "r") as f:
+        with open(pkg_resources.files(creds) / "keys.json") as f:
             _keys = json.load(f)
         self.apikey = _keys["scrapingfish"]
         self._scrapeops_key = _keys["scrapeops"]
@@ -131,9 +134,7 @@ class Scrape:
         self._weights = value
 
     def _new_headers(self):
-        """
-        Update the weights of the headers and choose a new header based on the weights.
-        """
+        """Update the weights of the headers and choose a new header based on the weights."""
         self._ensure_headers()
         for i in range(len(self._headers)):
             if self._headers[i] == self._header:
@@ -143,9 +144,8 @@ class Scrape:
 
         self._header = random.choices(self._headers, weights=self._weights)[0]
 
-    def get(self, url, max_attempts=3, headers={}, params={}):
-        """
-        Perform a GET request to the specified URL with the provided headers and parameters.
+    def get(self, url, max_attempts=3, headers=None, params=None):
+        """Perform a GET request to the specified URL with the provided headers and parameters.
 
         Args:
             url (str): The URL to fetch.
@@ -159,6 +159,10 @@ class Scrape:
         Raises:
             Exception: If an exception occurs during the request attempts.
         """
+        if params is None:
+            params = {}
+        if headers is None:
+            headers = {}
         with logging_redirect_tqdm():
             for i in range(1, max_attempts + 1):
                 if i > 1:
@@ -166,39 +170,30 @@ class Scrape:
                     headers.update(self.header)
                     sleep(random.uniform(1, 3))
                 try:
-                    response = requests.get(
-                        url, headers=headers, params=params
-                    )
+                    response = requests.get(url, headers=headers, params=params)
                     if response.status_code == 200:
                         return response.json()
                     else:
-                        logger.debug(
-                            "Attempt " + str(i) + ", Error " +
-                            str(response.status_code)
-                        )
-                except Exception as exc:
+                        logger.debug("Attempt " + str(i) + ", Error " + str(response.status_code))
+                except Exception:
                     logger.exception("Attempt " + str(i) + ",")
 
             logger.warning("Max Attempts Reached")
             return {}
 
-    def get_proxy(self, url, headers={}):
-        params = {
-            "api_key": self.apikey,
-            "url": url
-        }
+    def get_proxy(self, url, headers=None):
+        if headers is None:
+            headers = {}
+        params = {"api_key": self.apikey, "url": url}
 
         if headers:
             headers = self.header | headers
             params["headers"] = json.dumps(headers)
 
         i = 0
-        while (True):
+        while True:
             i += 1
-            response = requests.get(
-                "https://scraping.narf.ai/api/v1/",
-                params=params
-            )
+            response = requests.get("https://scraping.narf.ai/api/v1/", params=params)
             if response.status_code != 500 or i > 2:
                 break
 
@@ -213,9 +208,8 @@ class Scrape:
             logger.warning("Proxy Failed")
             return {}
 
-    def post(self, url, max_attempts=3, headers={}, params={}):
-        """
-        Perform a POST request to the specified URL with the provided headers and parameters.
+    def post(self, url, max_attempts=3, headers=None, params=None):
+        """Perform a POST request to the specified URL with the provided headers and parameters.
 
         Args:
             url (str): The URL to fetch.
@@ -229,36 +223,34 @@ class Scrape:
         Raises:
             Exception: If an exception occurs during the request attempts.
         """
+        if params is None:
+            params = {}
+        if headers is None:
+            headers = {}
         with logging_redirect_tqdm():
             for i in range(1, max_attempts + 1):
                 if i > 1:
                     self._new_headers()
                     sleep(random.uniform(2, 3))
                 try:
-                    response = requests.post(
-                        url, headers=self.header | headers, params=params
-                    )
+                    response = requests.post(url, headers=self.header | headers, params=params)
                     if response.status_code == 200:
                         return response.json()
                     else:
-                        logger.debug(
-                            "Attempt " + str(i) + ", Error " +
-                            str(response.status_code)
-                        )
-                except Exception as exc:
+                        logger.debug("Attempt " + str(i) + ", Error " + str(response.status_code))
+                except Exception:
                     logger.exception("Attempt " + str(i) + ",")
 
             logger.warning("Max Attempts Reached")
             return None
 
 
-with open((pkg_resources.files(data) / "name_map.json"), "r") as infile:
+with open(pkg_resources.files(data) / "name_map.json") as infile:
     name_map = json.load(infile)
 
 
 def remove_accents(input_str):
-    """
-    Remove accents from the input string.
+    """Remove accents from the input string.
 
     Args:
         input_str (str): The input string to remove accents from.
@@ -275,23 +267,20 @@ def remove_accents(input_str):
         if out_str.endswith(substr):
             out_str = out_str.replace(substr, "")
     out_str = out_str.replace("’", "'")
-    out_str = re.sub("[\(\[].*?[\)\]]", "", out_str).strip().title()
+    out_str = re.sub(r"[\(\[].*?[\)\]]", "", out_str).strip().title()
     if "+" in out_str:
         names = out_str.split("+")
-        out_str = " + ".join([name_map.get(n.strip(), n.strip())
-                             for n in names])
+        out_str = " + ".join([name_map.get(n.strip(), n.strip()) for n in names])
     elif " vs " in out_str:
         names = out_str.split(" vs ")
-        out_str = " vs. ".join(
-            [name_map.get(n.strip(), n.strip()) for n in names])
+        out_str = " vs. ".join([name_map.get(n.strip(), n.strip()) for n in names])
     else:
         out_str = name_map.get(out_str, out_str)
     return out_str
 
 
 def odds_to_prob(odds):
-    """
-    Convert odds to probability.
+    """Convert odds to probability.
 
     Args:
         odds (float): The odds value.
@@ -307,8 +296,7 @@ def odds_to_prob(odds):
 
 
 def prob_to_odds(p):
-    """
-    Convert probability to odds.
+    """Convert probability to odds.
 
     Args:
         p (float): The probability value.
@@ -323,8 +311,7 @@ def prob_to_odds(p):
 
 
 def no_vig_odds(over, under=None):
-    """
-    Calculate no-vig odds given over and under odds.
+    """Calculate no-vig odds given over and under odds.
 
     Args:
         over (float): The over odds.
@@ -333,18 +320,12 @@ def no_vig_odds(over, under=None):
     Returns:
         list: A list containing the no-vig odds for over and under.
     """
-    if np.abs(over) >= 100:
-        o = odds_to_prob(over)
-    else:
-        o = 1 / over
+    o = odds_to_prob(over) if np.abs(over) >= 100 else 1 / over
     if under is None or under <= 0:
         juice = 1.0652
         u = juice - o
     else:
-        if np.abs(under) >= 100:
-            u = odds_to_prob(under)
-        else:
-            u = 1 / under
+        u = odds_to_prob(under) if np.abs(under) >= 100 else 1 / under
 
         juice = o + u
 
@@ -352,8 +333,7 @@ def no_vig_odds(over, under=None):
 
 
 def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
-    """
-    Calculate the expected value (EV) given a line and under probability.
+    """Calculate the expected value (EV) given a line and under probability.
 
     For zero-inflated distributions (ZINB/ZAGamma), when gate is provided the
     book's CDF is decomposed as gate + (1-gate)*base_CDF.  The function solves
@@ -390,15 +370,19 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
     if dist in ("NegBin", "ZINB", "Poisson"):
         line = np.ceil(float(line) - 1)
         if cv == 1:
+
             def _pois_residual(mean):
                 return float(poisson.cdf(line, mean)) - under
+
             while _pois_residual(hi) > 0:
                 hi *= 2
             return float(brentq(_pois_residual, lo, hi, xtol=1e-8))
         r = 1.0 / cv
+
         def _nb_residual(mean):
             p = r / (r + mean)
             return float(nbinom.cdf(line, r, p)) - under
+
         while _nb_residual(hi) > 0:
             hi *= 2
         return float(brentq(_nb_residual, lo, hi, xtol=1e-8))
@@ -406,6 +390,7 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
     elif dist == "SkewNormal":
         line = float(line)
         a = float(skew_alpha) if skew_alpha is not None else 0.0
+
         def _sn_residual(mean):
             sigma = mean * cv
             delta = a / np.sqrt(1 + a**2)
@@ -414,6 +399,7 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
                 return float(skewnorm.cdf(line, a, loc=loc_sn, scale=sigma)) - under
             except (ValueError, RuntimeWarning):
                 return np.nan
+
         # Expand hi until residual becomes negative, with safety cap
         max_hi = 1e8
         while hi < max_hi and _sn_residual(hi) > 0:
@@ -426,17 +412,20 @@ def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
     else:
         # Gamma / ZAGamma (default for all continuous distributions)
         line = float(line)
-        alpha = 1.0 / (cv ** 2)
+        alpha = 1.0 / (cv**2)
+
         def _gamma_residual(mean):
             return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
+
         while _gamma_residual(hi) > 0:
             hi *= 2
         return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
-        
-def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1,
-             sigma=None, skew_alpha=None):
-    """
-    Calculate raw probability of outcome being under the line.
+
+
+def get_odds(
+    line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, sigma=None, skew_alpha=None
+):
+    """Calculate raw probability of outcome being under the line.
 
     Returns the raw distributional probability. Calibration (temperature
     scaling) is applied separately at the over/under decision level.
@@ -470,15 +459,15 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1,
     --------
     float : Probability of outcome being under the line
     """
-    high = np.floor((line+step)/step)*step
-    low = np.ceil((line-step)/step)*step
+    high = np.floor((line + step) / step) * step
+    low = np.ceil((line - step) / step) * step
 
     # Poisson (discrete count data)
     # NegBin without model params falls back to Poisson only when cv==1 (old encoding);
     # when cv!=1 the archive EV was Gaussian-encoded by get_ev, so fall through to the
     # Gaussian/Gamma branch for a consistent round-trip.
     if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
-        return poisson.cdf(line, ev) - poisson.pmf(line, ev)/2
+        return poisson.cdf(line, ev) - poisson.pmf(line, ev) / 2
 
     elif dist in ("NegBin", "ZINB"):
         # NegBin / ZINB: use nbinom.cdf for overdispersed count data
@@ -491,7 +480,7 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1,
             # ZI-CDF: gate + (1 - gate) * base_CDF
             base_cdf = gate + (1 - gate) * base_cdf
             base_pmf = (1 - gate) * base_pmf
-        return base_cdf - base_pmf/2
+        return base_cdf - base_pmf / 2
 
     elif dist == "SkewNormal":
         # SkewNormal CDF via scipy.stats.skewnorm
@@ -519,52 +508,61 @@ def get_odds(line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1,
             cdf_high = gate + (1 - gate) * cdf_high
             cdf_low = gate + (1 - gate) * cdf_low
         push = cdf_high - cdf_low
-        return cdf_high - push/2
+        return cdf_high - push / 2
 
-def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=.1, upper_tol=.001):
 
+def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=0.1, upper_tol=0.001):
     def objective(w, m, s):
-        v = w if w >= 1 else 1/w
+        v = w if w >= 1 else 1 / w
         if s > 0:
-            return 100*max((norm.cdf(lower_bound, w*m, v*s)-lower_tol),0) + max((norm.sf(upper_bound, w*m, v*s)-upper_tol),0) + np.power(1-v, 2)
+            return (
+                100 * max((norm.cdf(lower_bound, w * m, v * s) - lower_tol), 0)
+                + max((norm.sf(upper_bound, w * m, v * s) - upper_tol), 0)
+                + np.power(1 - v, 2)
+            )
         else:
-            return 100*max((poisson.cdf(lower_bound, w*m)-lower_tol),0) + max((poisson.sf(upper_bound, w*m)-upper_tol),0) + np.power(1-v, 2)
-        
-    res = minimize(objective, [1], args=(mean, std), bounds=[(.5, 2)], tol=1e-3, method='TNC')
+            return (
+                100 * max((poisson.cdf(lower_bound, w * m) - lower_tol), 0)
+                + max((poisson.sf(upper_bound, w * m) - upper_tol), 0)
+                + np.power(1 - v, 2)
+            )
+
+    res = minimize(objective, [1], args=(mean, std), bounds=[(0.5, 2)], tol=1e-3, method="TNC")
     return res.x[0]
 
+
 def merge_dict(a, b, path=None):
-    "merges b into a"
+    """Merges b into a."""
     if path is None:
         path = []
     for key in b:
         if key in a:
             if isinstance(a[key], dict) and isinstance(b[key], dict):
-                merge_dict(a[key], b[key], path + [str(key)])
+                merge_dict(a[key], b[key], [*path, str(key)])
             elif np.all(a[key] == b[key]):
                 pass  # same leaf value
+            # raise Exception('Conflict at %s' % '.'.join(path + [str(key)]))
+            elif key == "Line":
+                a[key].extend(b[key])
+            elif key == "EV":
+                a[key].update(b[key])
             else:
-                # raise Exception('Conflict at %s' % '.'.join(path + [str(key)]))
-                if key == "Line":
-                    a[key].extend(b[key])
-                elif key == "EV":
-                    a[key].update(b[key])
-                else:
-                    a[key] = b[key]
+                a[key] = b[key]
         else:
             a[key] = b[key]
     return a
 
+
 def clean_archive(a, cutoff_date=None):
     if cutoff_date is None:
-        cutoff_date = (datetime.datetime.today()-datetime.timedelta(days=365*4)).date()
+        cutoff_date = (datetime.datetime.today() - datetime.timedelta(days=365 * 4)).date()
     leagues = list(a.keys())
     for league in leagues:
         markets = list(a[league].keys())
 
         for market in markets:
             for date in list(a[league][market].keys()):
-                if date == '' or datetime.datetime.strptime(date, "%Y-%m-%d").date() < cutoff_date:
+                if date == "" or datetime.datetime.strptime(date, "%Y-%m-%d").date() < cutoff_date:
                     a[league][market].pop(date)
                     continue
 
@@ -581,11 +579,18 @@ def clean_archive(a, cutoff_date=None):
 
                         player_name = remove_accents(player)
                         if player_name != player:
-                            a[league][market][date][player_name] = merge_dict(a[league][market][date].get(player_name,{}), a[league][market][date].pop(player))
+                            a[league][market][date][player_name] = merge_dict(
+                                a[league][market][date].get(player_name, {}),
+                                a[league][market][date].pop(player),
+                            )
 
-                        a[league][market][date][player_name]["Lines"] = [line for line in a[league][market][date][player_name]["Lines"] if line]
+                        a[league][market][date][player_name]["Lines"] = [
+                            line for line in a[league][market][date][player_name]["Lines"] if line
+                        ]
 
-                        if not len(a[league][market][date][player_name]["EV"]) and not len(a[league][market][date][player_name]["Lines"]):
+                        if not len(a[league][market][date][player_name]["EV"]) and not len(
+                            a[league][market][date][player_name]["Lines"]
+                        ):
                             a[league][market][date].pop(player_name)
 
                 if not len(a[league][market][date]):
@@ -599,9 +604,9 @@ def clean_archive(a, cutoff_date=None):
 
     return a
 
+
 class Archive:
-    """
-    A class to manage the archive of sports data. Uses singleton pattern
+    """A class to manage the archive of sports data. Uses singleton pattern
     so all consumers share one instance and one copy of loaded data.
 
     Attributes:
@@ -622,8 +627,7 @@ class Archive:
         return cls._instance
 
     def __init__(self):
-        """
-        Initialize the Archive class.
+        """Initialize the Archive class.
 
         Loads the archive data from a file if it exists.
         """
@@ -657,9 +661,9 @@ class Archive:
             "NBA": 111.667,
             "WNBA": 81.667,
             "NFL": 22.668,
-            "NHL": 2.674
-            }
-        
+            "NHL": 2.674,
+        }
+
         self._changed_keys = {}
 
     def _mark_changed(self, league, market):
@@ -672,8 +676,7 @@ class Archive:
             self._loaded.add(league)
 
     def __getitem__(self, item):
-        """
-        Retrieve an item from the archive.
+        """Retrieve an item from the archive.
 
         Args:
             item (str): The key to retrieve from the archive.
@@ -685,8 +688,7 @@ class Archive:
         return self.archive[item]
 
     def add(self, o, lines, key):
-        """
-        Add data to the archive.
+        """Add data to the archive.
 
         Args:
             o (dict): The data to add.
@@ -703,8 +705,7 @@ class Archive:
         dist = stat_dist.get(o["League"], {}).get(market, "Gamma")
         gate = stat_zi.get(o["League"], {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
         if o["League"] == "NHL":
-            market_swap = {"AST": "assists",
-                           "PTS": "points", "BLK": "blocked"}
+            market_swap = {"AST": "assists", "PTS": "points", "BLK": "blocked"}
             market = market_swap.get(market, market)
         if o["League"] == "NBA":
             market = market.replace("underdog", "prizepicks")
@@ -712,34 +713,37 @@ class Archive:
         self._mark_changed(o["League"], market)
 
         if len(lines) < 4:
-            lines = [None]*4
+            lines = [None] * 4
 
         self.archive.setdefault(o["League"], {}).setdefault(market, {})
         self.archive[o["League"]][market].setdefault(o["Date"], {})
-        self.archive[o["League"]][market][o["Date"]
-                                          ].setdefault(o["Player"], {"Lines": []})
+        self.archive[o["League"]][market][o["Date"]].setdefault(o["Player"], {"Lines": []})
 
-        old_evs = self.archive[o["League"]][market][o["Date"]
-                                                    ][o["Player"]].get("EV", [None]*4)
+        old_evs = self.archive[o["League"]][market][o["Date"]][o["Player"]].get("EV", [None] * 4)
         if len(old_evs) == 0:
-            old_evs = [None]*4
+            old_evs = [None] * 4
 
         evs = []
         for i, line in enumerate(lines):
             if line:
-                ev = get_ev(float(line["Line"]),
-                            float(line["Under"]), cv, dist=dist, gate=gate or None)
+                ev = get_ev(
+                    float(line["Line"]), float(line["Under"]), cv, dist=dist, gate=gate or None
+                )
             else:
                 ev = old_evs[i]
 
             evs = np.append(evs, ev)
 
-        if o["Line"] and float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
-            self.archive[o["League"]][market][o["Date"]
-                                              ][o["Player"]]["Lines"].append(float(o["Line"]))
+        if (
+            o["Line"]
+            and float(o["Line"])
+            not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]
+        ):
+            self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(
+                float(o["Line"])
+            )
 
-        self.archive[o["League"]][market][o["Date"]
-                                          ][o["Player"]]["EV"] = evs
+        self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"] = evs
 
     def add_dfs(self, offers, platform, key):
         if not isinstance(offers, list):
@@ -750,9 +754,9 @@ class Archive:
             df["Boost_Over"] = np.nan
         if "Boost" in df.columns:
             df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
-        df["Boost Factor"] = np.abs(df["Boost_Over"]-1)
+        df["Boost Factor"] = np.abs(df["Boost_Over"] - 1)
         df = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])]
-        offers = df.to_dict(orient='records')
+        offers = df.to_dict(orient="records")
         for o in offers:
             if not o["Line"]:
                 continue
@@ -763,21 +767,29 @@ class Archive:
             dist = stat_dist.get(o["League"], {}).get(market, "Gamma")
             gate = stat_zi.get(o["League"], {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
             if o["League"] == "NHL":
-                market_swap = {"AST": "assists",
-                            "PTS": "points", "BLK": "blocked"}
+                market_swap = {"AST": "assists", "PTS": "points", "BLK": "blocked"}
                 market = market_swap.get(market, market)
             if o["League"] == "NBA" or o["League"] == "WNBA":
                 market = market.replace("underdog", "prizepicks")
 
             self._mark_changed(o["League"], market)
-            self.archive.setdefault(o["League"], {}).setdefault(market, {}).setdefault(o["Date"], {}).setdefault(o["Player"], {"EV": {}, "Lines": []})
+            self.archive.setdefault(o["League"], {}).setdefault(market, {}).setdefault(
+                o["Date"], {}
+            ).setdefault(o["Player"], {"EV": {}, "Lines": []})
 
-            if float(o["Line"]) not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]:
-                self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(float(o["Line"]))
+            if (
+                float(o["Line"])
+                not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]
+            ):
+                self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(
+                    float(o["Line"])
+                )
 
             over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
             odds = no_vig_odds(over, o.get("Boost_Under"))
-            self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(o["Line"], odds[1], cv, dist=dist, gate=gate or None)
+            self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"][platform] = get_ev(
+                o["Line"], odds[1], cv, dist=dist, gate=gate or None
+            )
 
     def get_moneyline(self, league, date, team):
         self._ensure_loaded(league)
@@ -785,10 +797,10 @@ class Archive:
         w = []
         arr = self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).get(team, {})
         if not arr:
-            return .5
+            return 0.5
         elif type(arr) is not dict:
             self.archive.get(league, {}).get("Moneyline", {}).get(date, {}).pop(team)
-            return .5
+            return 0.5
         for book, ev in arr.items():
             a.append(ev)
             w.append(book_weights.get(league, {}).get("Moneyline", {}).get(book, 1))
@@ -815,7 +827,9 @@ class Archive:
         self._ensure_loaded(league)
         a = []
         w = []
-        arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
+        arr = (
+            self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("EV", {})
+        )
         if not arr:
             return np.nan
         for book, ev in arr.items():
@@ -839,19 +853,29 @@ class Archive:
 
     def get_line(self, league, market, date, player):
         self._ensure_loaded(league)
-        arr = self.archive.get(league, {}).get(market, {}).get(date, {}).get(player, {}).get("Lines", [np.nan])
+        arr = (
+            self.archive.get(league, {})
+            .get(market, {})
+            .get(date, {})
+            .get(player, {})
+            .get("Lines", [np.nan])
+        )
 
-        line = np.floor(2*np.median(arr))/2
+        line = np.floor(2 * np.median(arr)) / 2
 
         return 0 if np.isnan(line) else line
-    
+
     def to_pandas(self, league, market):
         self._ensure_loaded(league)
         records = {}
         if market not in self.archive[league]:
             return pd.DataFrame()
         for date in list(self.archive[league][market].keys()):
-            if market not in ["Moneyline", "Total"] and datetime.datetime.strptime(date, "%Y-%m-%d").date() < datetime.datetime(2023, 5, 3).date():
+            if (
+                market not in ["Moneyline", "Total"]
+                and datetime.datetime.strptime(date, "%Y-%m-%d").date()
+                < datetime.datetime(2023, 5, 3).date()
+            ):
                 continue
             for player in list(self.archive[league][market][date].keys()):
                 if "EV" in self.archive[league][market][date][player]:
@@ -862,11 +886,10 @@ class Archive:
                 else:
                     records[(date, player)] = self.archive[league][market][date][player]
 
-        return pd.DataFrame.from_dict(records, orient='index')
+        return pd.DataFrame.from_dict(records, orient="index")
 
     def write(self, all=False):
-        """
-        Write the archive data to a file.
+        """Write the archive data to a file.
 
         Uses incremental dump (per-market) when possible to avoid
         rewriting unchanged market files.
@@ -877,13 +900,17 @@ class Archive:
         if all:
             for league in list(self.archive.keys()):
                 if type(self.archive[league]) is not cache:
-                    self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
+                    self.archive[league] = hdfdir_archive(
+                        f"archive/{league}", self.archive[league], protocol=-1
+                    )
                 self.archive[league].dump()
         else:
             for league, markets in self._changed_keys.items():
                 if type(self.archive[league]) is not cache:
                     # New league from plain dict — must dump everything
-                    self.archive[league] = hdfdir_archive(f"archive/{league}", self.archive[league], protocol=-1)
+                    self.archive[league] = hdfdir_archive(
+                        f"archive/{league}", self.archive[league], protocol=-1
+                    )
                     self.archive[league].dump()
                 else:
                     for market in markets:
@@ -893,13 +920,12 @@ class Archive:
 
     def clip(self, cutoff_date=None):
         if cutoff_date is None:
-            cutoff_date = (datetime.datetime.today() -
-                           datetime.timedelta(days=7))
+            cutoff_date = datetime.datetime.today() - datetime.timedelta(days=7)
 
         for league in list(self.archive.keys()):
             self._ensure_loaded(league)
             for market in list(self.archive[league].keys()):
-                if market not in ['Moneyline', 'Totals']:
+                if market not in ["Moneyline", "Totals"]:
                     for date in list(self.archive[league][market].keys()):
                         try:
                             if datetime.datetime.strptime(date, "%Y-%m-%d") < cutoff_date:
@@ -911,7 +937,9 @@ class Archive:
                 else:
                     for date in list(self.archive[league][market].keys()):
                         try:
-                            if datetime.datetime.strptime(date, "%Y-%m-%d") < (datetime.datetime.today() - datetime.timedelta(days=300)):
+                            if datetime.datetime.strptime(date, "%Y-%m-%d") < (
+                                datetime.datetime.today() - datetime.timedelta(days=300)
+                            ):
                                 self.archive[league][market].pop(date)
                                 self._mark_changed(league, market)
                         except:
@@ -920,25 +948,27 @@ class Archive:
 
     def merge(self, filepath):
         if os.path.isfile(filepath):
-            with open(filepath, 'rb') as infile:
+            with open(filepath, "rb") as infile:
                 new_archive = pickle.load(infile)
 
             if type(new_archive) is dict:
                 self.archive = merge_dict(self.archive, new_archive)
 
     def rename_market(self, league, old_name, new_name):
-        """rename_market Rename a market in the archive"""
+        """rename_market Rename a market in the archive."""
         self._ensure_loaded(league)
         self._mark_changed(league, new_name)
 
         if new_name in self.archive[league]:
             self.archive[league][new_name] = merge_dict(
-                self.archive[league][new_name], self.archive[league].pop(old_name))
+                self.archive[league][new_name], self.archive[league].pop(old_name)
+            )
         else:
             self.archive[league][new_name] = self.archive[league].pop(old_name)
 
 
 _mlb_pitchers_cache = None
+
 
 def get_mlb_pitchers():
     global _mlb_pitchers_cache
@@ -946,21 +976,18 @@ def get_mlb_pitchers():
         return _mlb_pitchers_cache
 
     mlb_games = mlb.schedule(
-        start_date=datetime.date.today(), end_date=(datetime.date.today() + datetime.timedelta(days=7))
+        start_date=datetime.date.today(),
+        end_date=(datetime.date.today() + datetime.timedelta(days=7)),
     )
     mlb_teams = mlb.get("teams", {"sportId": 1})
     pitchers = {}
     for game in mlb_games:
         if game["status"] in ["Pre-Game", "Scheduled"]:
             awayTeam = [
-                team["abbreviation"]
-                for team in mlb_teams["teams"]
-                if team["id"] == game["away_id"]
+                team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["away_id"]
             ]
             homeTeam = [
-                team["abbreviation"]
-                for team in mlb_teams["teams"]
-                if team["id"] == game["home_id"]
+                team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["home_id"]
             ]
             if len(awayTeam) == 1 and len(homeTeam) == 1:
                 awayTeam = awayTeam[0]
@@ -969,11 +996,9 @@ def get_mlb_pitchers():
                 continue
             if game["game_num"] == 1:
                 if "away_probable_pitcher" in game and awayTeam not in pitchers:
-                    pitchers[awayTeam] = remove_accents(
-                        game["away_probable_pitcher"])
+                    pitchers[awayTeam] = remove_accents(game["away_probable_pitcher"])
                 if "home_probable_pitcher" in game and homeTeam not in pitchers:
-                    pitchers[homeTeam] = remove_accents(
-                        game["home_probable_pitcher"])
+                    pitchers[homeTeam] = remove_accents(game["home_probable_pitcher"])
 
     pitchers["LA"] = pitchers.get("LAD", "")
     pitchers["ANA"] = pitchers.get("LAA", "")
@@ -983,11 +1008,21 @@ def get_mlb_pitchers():
     return pitchers
 
 
-def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None,
-              sigma=None, skew_alpha=None,
-              gate_model=None, gate_book=None):
-    """
-    Compute blended distribution parameters for model weight w.
+def fused_loc(
+    w,
+    ev_a,
+    ev_b,
+    cv,
+    dist,
+    *,
+    r=None,
+    alpha=None,
+    sigma=None,
+    skew_alpha=None,
+    gate_model=None,
+    gate_book=None,
+):
+    """Compute blended distribution parameters for model weight w.
 
     Blends between model prediction (ev_a) and bookmaker line (ev_b)
     using the logarithmic opinion pool (Genest & Zidek 1986):
@@ -1026,7 +1061,7 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None,
     gate_book : float, optional
         Historical zero-inflation gate for the book side.
 
-    Returns
+    Returns:
     -------
     NegBin    : tuple (r_blend, p, gate_blend)
     Gamma     : tuple (alpha, beta, gate_blend)
@@ -1041,8 +1076,10 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None,
         gate_blend = gate_book
 
     if dist == "NegBin":
-        mu = np.exp(w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None)))
-        r_blend = np.exp(w * np.log(np.clip(r, 1e-9, None)) + (1 - w) * np.log(1/cv))
+        mu = np.exp(
+            w * np.log(np.clip(ev_a, 1e-9, None)) + (1 - w) * np.log(np.clip(ev_b, 1e-9, None))
+        )
+        r_blend = np.exp(w * np.log(np.clip(r, 1e-9, None)) + (1 - w) * np.log(1 / cv))
         p = r_blend / (r_blend + mu)
         return r_blend, p, gate_blend
 
@@ -1089,13 +1126,18 @@ def fused_loc(w, ev_a, ev_b, cv, dist, *, r=None, alpha=None,
 
 
 def prob_diff(X, Y, line):
-    def joint_pdf(x, y): return X(x)*Y(y)
+    def joint_pdf(x, y):
+        return X(x) * Y(y)
+
     return dblquad(joint_pdf, -np.inf, np.inf, lambda x: x - line, np.inf)
 
 
 def prob_sum(X, Y, line):
-    def joint_pdf(x, y): return X(x)*Y(y)
+    def joint_pdf(x, y):
+        return X(x) * Y(y)
+
     return dblquad(joint_pdf, -np.inf, np.inf, -np.inf, lambda x: line - x)
+
 
 def get_trends(x):
     if len(x) < 3:
@@ -1104,18 +1146,20 @@ def get_trends(x):
         trend = np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0]
     return pd.Series(trend, index=x.columns)
 
+
 def hmean(items):
     total = 0
     count = 0
     for i in items:
         if (i != 0) and type(i) is not str:
             count += 1
-            total += 1/i
+            total += 1 / i
 
     if total != 0:
-        return count/total
+        return count / total
     else:
         return 0
+
 
 def accel_asc(n):
     a = [0 for i in range(n + 1)]
@@ -1132,16 +1176,16 @@ def accel_asc(n):
         while x <= y:
             a[k] = x
             a[l] = y
-            yield a[:k + 2]
+            yield a[: k + 2]
             x += 1
             y -= 1
         a[k] = x + y
         y = x + y - 1
-        yield a[:k + 1]
+        yield a[: k + 1]
+
 
 def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=False):
-    """
-    Set appropriate start values for different distribution types.
+    """Set appropriate start values for different distribution types.
 
     Values are in LightGBMLSS raw space (pre-response-function).
     Response functions per distribution:
@@ -1195,14 +1239,14 @@ def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=F
 
     elif dist in ["NegBin", "ZINB"]:
         # r = mu² / (var - mu); relu response → raw = value (identity for r>0)
-        r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 0.5, _r_upper)
+        r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
         # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs)
         probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
         if dist == "ZINB":
             nb_zeros = nbinom.pmf(0, r_init, probs)
             hist_gate = np.clip(hist_gate - nb_zeros, 0, 0.99)
             mu = mu / (1 - hist_gate)
-            r_init = np.clip(mu ** 2 / np.clip(std ** 2 - mu, 1e-6, None), 0.5, _r_upper)
+            r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
             probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
         sv = np.column_stack([r_init, logit(probs)])
 

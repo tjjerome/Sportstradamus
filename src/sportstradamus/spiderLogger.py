@@ -1,7 +1,8 @@
+import importlib.resources as pkg_resources
 import logging
 import sys
 from datetime import datetime
-import importlib.resources as pkg_resources
+
 from sportstradamus import logs
 
 # create logger
@@ -31,9 +32,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_exception
 
 # create formatter
-formatter = logging.Formatter(
-    "%(asctime)s::%(levelname)s::%(filename)s::%(lineno)d - %(message)s"
-)
+formatter = logging.Formatter("%(asctime)s::%(levelname)s::%(filename)s::%(lineno)d - %(message)s")
 
 # add formatter to ch
 fh.setFormatter(formatter)
