@@ -1,0 +1,35 @@
+# Pre-commit hooks for Sportstradamus.
+# See docs/STYLE_GUIDE.md §14 for rationale.
+#
+# Setup: `poetry install && poetry run pre-commit install`
+# Run on the whole tree: `poetry run pre-commit run --all-files`
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.1
+    hooks:
+      - id: mypy
+        # Advisory only — see pyproject.toml [tool.mypy].
+        files: ^src/sportstradamus/
+        additional_dependencies: []
+        # Skip on commit so slow type checks don't block local iteration;
+        # CI runs the same check and surfaces warnings there.
+        stages: [manual]

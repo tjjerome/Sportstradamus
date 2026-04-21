@@ -58,6 +58,9 @@ smogn = "^0.1.2"
 seaborn = "^0.13.1"
 flask = "^2.3.2"
 flask-table = "^0.5.0"
+ruff = "^0.6.0"
+mypy = "^1.10.0"
+pre-commit = "^3.7.0"
 
 
 [[tool.poetry.source]]
@@ -74,3 +77,61 @@ priority = "explicit"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+# -----------------------------------------------------------------------------
+# Code quality tooling. See docs/STYLE_GUIDE.md for the conventions these
+# configurations enforce.
+# -----------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Archived code stays readable but is not held to the live style.
+extend-exclude = ["src/deprecated"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: isort, UP: pyupgrade, B: bugbear,
+# D: pydocstyle, SIM: simplify, RUF: ruff-native, N: naming,
+# PTH: pathlib, PLR/PLW: pylint refactor/warning, PERF: performance,
+# TID: tidy-imports.
+select = [
+    "E", "W", "F", "I", "UP", "B", "D", "SIM", "RUF",
+    "N", "PTH", "PLR", "PLW", "PERF", "TID",
+]
+ignore = [
+    # Module and package docstrings — ratcheting up as each file gains one.
+    "D100", "D104",
+    # Argument and statement-count limits — advisory during the refactor.
+    "PLR0913", "PLR0915",
+    # Long-line rule — the formatter already handles wrapping.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts are terser by nature; tests do not need docstrings.
+"src/sportstradamus/scripts/*" = ["D", "PLR"]
+"tests/*" = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["sportstradamus"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/sportstradamus"]
+# Advisory: run alongside ruff but do not gate merges.
+follow_imports = "silent"
+ignore_missing_imports = true
+warn_unused_ignores = true
+# Strict on what is annotated; permissive on what is not.
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
