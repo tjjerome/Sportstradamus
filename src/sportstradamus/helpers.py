@@ -14,7 +14,6 @@ import pandas as pd
 import requests
 import statsapi as mlb
 from klepto.archives import cache, hdfdir_archive
-from scipy.integrate import dblquad
 from scipy.optimize import brentq, minimize
 from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -75,18 +74,6 @@ for platform in banned:
         banned[platform][league]["opponent"] = {
             frozenset(k.split(" & ")): v for k, v in banned[platform][league]["opponent"].items()
         }
-
-
-def get_active_sports():
-    # Get available sports from the API
-    url = f"https://api.the-odds-api.com/v4/sports/?apiKey={odds_api}"
-    res = requests.get(url)
-    res = res.json()
-
-    # Filter sports
-    sports = [s["title"] for s in res if s["title"] in ["NBA", "MLB", "NHL", "NFL"] and s["active"]]
-
-    return sports
 
 
 class Scrape:
@@ -1125,20 +1112,6 @@ def fused_loc(
         return blended_alpha, blended_beta, gate_blend
 
 
-def prob_diff(X, Y, line):
-    def joint_pdf(x, y):
-        return X(x) * Y(y)
-
-    return dblquad(joint_pdf, -np.inf, np.inf, lambda x: x - line, np.inf)
-
-
-def prob_sum(X, Y, line):
-    def joint_pdf(x, y):
-        return X(x) * Y(y)
-
-    return dblquad(joint_pdf, -np.inf, np.inf, -np.inf, lambda x: line - x)
-
-
 def get_trends(x):
     if len(x) < 3:
         trend = np.zeros(len(x.columns))
@@ -1159,29 +1132,6 @@ def hmean(items):
         return count / total
     else:
         return 0
-
-
-def accel_asc(n):
-    a = [0 for i in range(n + 1)]
-    k = 1
-    y = n - 1
-    while k != 0:
-        x = a[k - 1] + 1
-        k -= 1
-        while 2 * x <= y:
-            a[k] = x
-            y -= x
-            k += 1
-        l = k + 1
-        while x <= y:
-            a[k] = x
-            a[l] = y
-            yield a[: k + 2]
-            x += 1
-            y -= 1
-        a[k] = x + y
-        y = x + y - 1
-        yield a[: k + 1]
 
 
 def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=False):

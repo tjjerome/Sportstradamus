@@ -1,3 +1,12 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/see_features.py
+# Reason: LightGBM feature-importance plot script; never imported.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import pickle
+#   import lightgbm as lgb
+#   from sportstradamus import data
+
 import importlib.resources as pkg_resources
 import pickle
 

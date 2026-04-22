@@ -1,3 +1,16 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/correlation.py
+# Reason: Generates {LEAGUE}_corr.csv; the CSVs in repo are stale and no script invokes this.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import os.path
+#   from datetime import datetime, timedelta
+#   import numpy as np
+#   import pandas as pd
+#   from tqdm import tqdm
+#   from sportstradamus import data
+#   from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL
+
 import importlib.resources as pkg_resources
 import os.path
 from datetime import datetime, timedelta

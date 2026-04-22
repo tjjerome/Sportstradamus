@@ -1,3 +1,13 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/get_lines.py
+# Reason: NFL prop scraper for BettingPros; superseded by `moneylines.get_props`.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   from sportstradamus.helpers import Archive, Scrape, no_vig_odds
+#   from datetime import datetime, timedelta
+#   from tqdm import tqdm
+#   from tqdm.contrib.logging import logging_redirect_tqdm
+#   from sportstradamus.stats import StatsNFL
+
 from sportstradamus.helpers import Archive, Scrape, no_vig_odds
 
 scraper = Scrape()

@@ -1,3 +1,17 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/opt_kelley_bet.py
+# Reason: Kelly bet sizing utility; never wired into the prediction pipeline.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import json
+#   import os.path
+#   import numpy as np
+#   import pandas as pd
+#   from matplotlib import pyplot as plt
+#   from tqdm import tqdm
+#   from sportstradamus import data
+#   from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL
+
 import importlib.resources as pkg_resources
 import json
 import os.path

@@ -1,3 +1,12 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/test.py
+# Reason: Ad-hoc testing utilities (NOT pytest tests); never imported.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   from datetime import datetime, timedelta
+#   import pandas as pd
+#   from sportstradamus.helpers import archive, scraper, stat_cv, stat_map
+#   from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+
 # from urllib.parse import urlencode
 from datetime import datetime, timedelta
 
