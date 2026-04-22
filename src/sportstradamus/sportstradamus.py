@@ -127,19 +127,6 @@ def main(progress):
     all_offers = []
     parlay_df = pd.DataFrame()
 
-    # PrizePicks
-
-    # try:
-    #     pp_dict = get_pp()
-    #     pp_offers, pp5 = process_offers(
-    #         pp_dict, "PrizePicks", stats)
-    #     save_data(pp_offers, pp5.drop(columns=["P", "PB"]), "PrizePicks", gc)
-    #     parlay_df = pd.concat([parlay_df, pp5])
-    #     pp_offers["Market"] = pp_offers["Market"].map(stat_map["PrizePicks"])
-    # all_offers.append(pp_offers)
-    # except Exception as exc:
-    #     logger.exception("Failed to get PrizePicks")
-
     # Underdog
 
     try:
@@ -216,19 +203,6 @@ def main(progress):
         all_offers.append(sl_offers)
     except Exception:
         logger.exception("Failed to get Sleeper")
-
-    # ParlayPlay
-
-    # try:
-    #     parp_dict = get_parp()
-    #     parp_offers, parp5 = process_offers(
-    #         parp_dict, "ParlayPlay", stats)
-    #     save_data(parp_offers.drop(columns=["Model EV", "Model Param", "Books EV"]), parp5.drop(columns=["P", "PB"]), "ParlayPlay", gc)
-    #     parlay_df = pd.concat([parlay_df, parp5])
-    #     parp_offers["Market"] = parp_offers["Market"].map(stat_map["ParlayPlay"])
-    #     all_offers.append(parp_offers)
-    # except Exception as exc:
-    #     logger.exception("Failed to get ParlayPlay")
 
     if len(all_offers) > 0:
         df = pd.concat(all_offers)

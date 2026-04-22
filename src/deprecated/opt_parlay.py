@@ -1,3 +1,18 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/opt_parlay.py
+# Reason: Parlay-search optimizer; partner module to opt_kelley_bet, never wired in.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import json
+#   import os.path
+#   import re
+#   from itertools import combinations
+#   import numpy as np
+#   import pandas as pd
+#   from scipy.optimize import minimize
+#   from scipy.stats import multivariate_normal, norm
+#   from sklearn.metrics import log_loss
+
 import importlib.resources as pkg_resources
 import json
 import os.path

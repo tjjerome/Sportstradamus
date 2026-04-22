@@ -1,3 +1,9 @@
+# ARCHIVED 2026-04-21 from src/sportstradamus/unused_funcs.py
+# Reason: Parlay-search optimizer (`find_bets`); never reachable from any entry point.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+
+
 def find_bets(
     C,
     M,
