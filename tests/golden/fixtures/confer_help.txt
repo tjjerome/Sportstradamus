@@ -1,0 +1,6 @@
+Usage: confer [OPTIONS]
+
+  Fetch current odds and player props into the archive.
+
+Options:
+  --help  Show this message and exit.

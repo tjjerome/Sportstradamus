@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 from sportstradamus.dashboard import run as dashboard_cli
+from sportstradamus.moneylines import confer as confer_cli
 from sportstradamus.nightly import run as reflect_cli
 from sportstradamus.sportstradamus import main as prophecize_cli
 from sportstradamus.train import meditate as meditate_cli
@@ -28,6 +29,7 @@ CLI_CASES = [
     ("meditate", meditate_cli, "meditate_help.txt"),
     ("reflect", reflect_cli, "reflect_help.txt"),
     ("dashboard", dashboard_cli, "dashboard_help.txt"),
+    ("confer", confer_cli, "confer_help.txt"),
 ]
 
 
@@ -46,15 +48,3 @@ def test_cli_help_matches_snapshot(name: str, command, snapshot: str) -> None:
         f"{name} --help drifted from {snapshot}. "
         "If the change is intentional, rerun with REGENERATE_SNAPSHOTS=1."
     )
-
-
-def test_confer_entry_point_is_callable() -> None:
-    """``confer`` is a plain function (not yet a click command).
-
-    Phase 3 will give it a click decorator; until then we just verify the
-    entry point exists and is callable so the ``poetry run confer`` wiring
-    in ``pyproject.toml`` does not silently rot.
-    """
-    from sportstradamus.moneylines import confer
-
-    assert callable(confer), "confer is not callable — pyproject script will break"
