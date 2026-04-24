@@ -57,6 +57,12 @@ header protocol and reintroduction process.
 - [ ] **TODO: decide fate of orphaned `helpers.py` math utilities**
       (`prob_diff`, `prob_sum`, `accel_asc`, `get_active_sports`) — preserved
       in [`src/deprecated/helpers_orphans.py`](src/deprecated/helpers_orphans.py).
+- [ ] **TODO: orphan methods** (`Archive.add`, `Archive.clip`, `Archive.merge`,
+      `Archive.rename_market`, `Scrape.get_proxy`, `Scrape.post`) — preserved
+      in [`src/deprecated/helpers_orphans.py`](src/deprecated/helpers_orphans.py)
+      as de-methodized top-level functions. `Archive.add` looks like the
+      intended write path for the `confer` pipeline but was never wired in;
+      decide whether to wire it or delete.
 - [ ] **TODO: deprecated sportsbook scrapers** (`get_dk`, `get_fd`,
       `get_pinnacle`, `get_caesars`, `get_thrive`, `get_pp`, `get_parp`)
       preserved in [`src/deprecated/books_deprecated.py`](src/deprecated/books_deprecated.py).

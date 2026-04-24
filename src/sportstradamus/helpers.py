@@ -168,70 +168,6 @@ class Scrape:
             logger.warning("Max Attempts Reached")
             return {}
 
-    def get_proxy(self, url, headers=None):
-        if headers is None:
-            headers = {}
-        params = {"api_key": self.apikey, "url": url}
-
-        if headers:
-            headers = self.header | headers
-            params["headers"] = json.dumps(headers)
-
-        i = 0
-        while True:
-            i += 1
-            response = requests.get("https://scraping.narf.ai/api/v1/", params=params)
-            if response.status_code != 500 or i > 2:
-                break
-
-        if response.status_code == 200:
-            try:
-                response = response.json()
-            except:
-                return {}
-
-            return response
-        else:
-            logger.warning("Proxy Failed")
-            return {}
-
-    def post(self, url, max_attempts=3, headers=None, params=None):
-        """Perform a POST request to the specified URL with the provided headers and parameters.
-
-        Args:
-            url (str): The URL to fetch.
-            max_attempts (int): Maximum number of attempts to make the request.
-            headers (dict): Additional headers to include in the request.
-            params (dict): Parameters to include in the request.
-
-        Returns:
-            dict or None: The response JSON if the request is successful (status code 200), otherwise None.
-
-        Raises:
-            Exception: If an exception occurs during the request attempts.
-        """
-        if params is None:
-            params = {}
-        if headers is None:
-            headers = {}
-        with logging_redirect_tqdm():
-            for i in range(1, max_attempts + 1):
-                if i > 1:
-                    self._new_headers()
-                    sleep(random.uniform(2, 3))
-                try:
-                    response = requests.post(url, headers=self.header | headers, params=params)
-                    if response.status_code == 200:
-                        return response.json()
-                    else:
-                        logger.debug("Attempt " + str(i) + ", Error " + str(response.status_code))
-                except Exception:
-                    logger.exception("Attempt " + str(i) + ",")
-
-            logger.warning("Max Attempts Reached")
-            return None
-
-
 with open(pkg_resources.files(data) / "name_map.json") as infile:
     name_map = json.load(infile)
 
@@ -674,64 +610,6 @@ class Archive:
         self._ensure_loaded(item)
         return self.archive[item]
 
-    def add(self, o, lines, key):
-        """Add data to the archive.
-
-        Args:
-            o (dict): The data to add.
-            lines (list): The list of lines.
-            key (dict): A dictionary for key mapping.
-
-        Returns:
-            None
-        """
-        self._ensure_loaded(o["League"])
-        market = o["Market"].replace("H2H ", "")
-        market = key.get(market, market)
-        cv = stat_cv.get(o["League"], {}).get(market, 1)
-        dist = stat_dist.get(o["League"], {}).get(market, "Gamma")
-        gate = stat_zi.get(o["League"], {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
-        if o["League"] == "NHL":
-            market_swap = {"AST": "assists", "PTS": "points", "BLK": "blocked"}
-            market = market_swap.get(market, market)
-        if o["League"] == "NBA":
-            market = market.replace("underdog", "prizepicks")
-
-        self._mark_changed(o["League"], market)
-
-        if len(lines) < 4:
-            lines = [None] * 4
-
-        self.archive.setdefault(o["League"], {}).setdefault(market, {})
-        self.archive[o["League"]][market].setdefault(o["Date"], {})
-        self.archive[o["League"]][market][o["Date"]].setdefault(o["Player"], {"Lines": []})
-
-        old_evs = self.archive[o["League"]][market][o["Date"]][o["Player"]].get("EV", [None] * 4)
-        if len(old_evs) == 0:
-            old_evs = [None] * 4
-
-        evs = []
-        for i, line in enumerate(lines):
-            if line:
-                ev = get_ev(
-                    float(line["Line"]), float(line["Under"]), cv, dist=dist, gate=gate or None
-                )
-            else:
-                ev = old_evs[i]
-
-            evs = np.append(evs, ev)
-
-        if (
-            o["Line"]
-            and float(o["Line"])
-            not in self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"]
-        ):
-            self.archive[o["League"]][market][o["Date"]][o["Player"]]["Lines"].append(
-                float(o["Line"])
-            )
-
-        self.archive[o["League"]][market][o["Date"]][o["Player"]]["EV"] = evs
-
     def add_dfs(self, offers, platform, key):
         if not isinstance(offers, list):
             offers = [offers]
@@ -904,54 +782,6 @@ class Archive:
                         self.archive[league].dump(market)
 
         self._changed_keys.clear()
-
-    def clip(self, cutoff_date=None):
-        if cutoff_date is None:
-            cutoff_date = datetime.datetime.today() - datetime.timedelta(days=7)
-
-        for league in list(self.archive.keys()):
-            self._ensure_loaded(league)
-            for market in list(self.archive[league].keys()):
-                if market not in ["Moneyline", "Totals"]:
-                    for date in list(self.archive[league][market].keys()):
-                        try:
-                            if datetime.datetime.strptime(date, "%Y-%m-%d") < cutoff_date:
-                                self.archive[league][market].pop(date)
-                                self._mark_changed(league, market)
-                        except:
-                            self.archive[league][market].pop(date)
-                            self._mark_changed(league, market)
-                else:
-                    for date in list(self.archive[league][market].keys()):
-                        try:
-                            if datetime.datetime.strptime(date, "%Y-%m-%d") < (
-                                datetime.datetime.today() - datetime.timedelta(days=300)
-                            ):
-                                self.archive[league][market].pop(date)
-                                self._mark_changed(league, market)
-                        except:
-                            self.archive[league][market].pop(date)
-                            self._mark_changed(league, market)
-
-    def merge(self, filepath):
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                new_archive = pickle.load(infile)
-
-            if type(new_archive) is dict:
-                self.archive = merge_dict(self.archive, new_archive)
-
-    def rename_market(self, league, old_name, new_name):
-        """rename_market Rename a market in the archive."""
-        self._ensure_loaded(league)
-        self._mark_changed(league, new_name)
-
-        if new_name in self.archive[league]:
-            self.archive[league][new_name] = merge_dict(
-                self.archive[league][new_name], self.archive[league].pop(old_name)
-            )
-        else:
-            self.archive[league][new_name] = self.archive[league].pop(old_name)
 
 
 _mlb_pitchers_cache = None
