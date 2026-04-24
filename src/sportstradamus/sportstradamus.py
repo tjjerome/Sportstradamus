@@ -315,6 +315,10 @@ def process_offers(offer_dict, book, stats):
             for league, markets in offer_dict.items():
                 if league in stats:
                     stat_data = stats.get(league)
+                    if stat_data.season_start > datetime.datetime.today().date() - datetime.timedelta(days=14):
+                        logger.info(f"{league} season has not started, skipping stat matching")
+                        continue
+
                     all_offers = {}
                     for offers in markets.values():
                         all_offers.update({v["Player"]: v for v in offers})
