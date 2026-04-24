@@ -4192,7 +4192,7 @@ class StatsNFL(Stats):
         Initialize the StatsNFL class.
         """
         super().__init__()
-        self.season_start = datetime(2025, 9, 10).date()
+        self.season_start = datetime(2026, 9, 10).date()
         cols = ['player id', 'player display name', 'position group', 'team', 'season', 'week', 'season type',
                 'snap pct', 'completions', 'attempts', 'passing yards', 'passing tds', 'interceptions', 'sacks',
                 'sack fumbles', 'sack fumbles lost', 'passing 2pt conversions', 'carries', 'rushing yards',
