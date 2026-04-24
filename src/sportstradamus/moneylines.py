@@ -1,3 +1,19 @@
+"""Odds API ingest for game-level and player-prop markets.
+
+Entry point: ``confer`` (wired to ``poetry run confer`` via ``pyproject.toml``).
+Two internal workhorses:
+
+* :func:`get_moneylines` — fetches h2h / totals / spreads for every active
+  league of interest and writes book-level EVs to the archive's
+  ``Moneyline`` / ``Totals`` buckets.
+* :func:`get_props` — fetches per-event player prop markets, computes a
+  no-vig EV per book, and writes them to the per-market archive buckets.
+
+Both support a historical mode (``date != today``) that routes the request
+through ``the-odds-api.com``'s historical endpoints; that path uses the
+paid ``odds_api_plus`` key because the free tier doesn't include history.
+"""
+
 import importlib.resources as pkg_resources
 import json
 from datetime import datetime, timedelta
@@ -5,6 +21,7 @@ from itertools import groupby
 from operator import itemgetter
 from time import sleep
 
+import click
 import numpy as np
 import pytz
 import requests
@@ -21,9 +38,40 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.spiderLogger import logger
 
+# Leagues with live odds we care about. The Odds API also surfaces NHL / MLB
+# but their prop coverage is thin enough that we get those from the direct
+# book scrapers in sportstradamus.books instead.
+LEAGUES_OF_INTEREST = ("NBA", "NFL", "WNBA")
 
+_ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+ODDS_API_SPORTS_URL = f"{_ODDS_API_BASE}/sports/"
+ODDS_API_EVENTS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/events"
+ODDS_API_EVENT_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/events/{{eventId}}/odds"
+ODDS_API_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds/"
+ODDS_API_HISTORICAL_EVENTS_URL = f"{_ODDS_API_BASE}/historical/sports/{{sport}}/events"
+ODDS_API_HISTORICAL_EVENT_ODDS_URL = (
+    f"{_ODDS_API_BASE}/historical/sports/{{sport}}/events/{{eventId}}/odds"
+)
+ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/"
+
+
+def _get_with_retry(url, params=None):
+    """GET ``url`` with one 429-retry. Returns the ``requests.Response``.
+
+    The Odds API hands back 429s under bursty load; a single 1-second
+    retry clears them in practice. Other non-200 statuses propagate back
+    so callers can decide whether to ``continue`` or bail.
+    """
+    res = requests.get(url, params=params)
+    if res.status_code == 429:
+        sleep(1)
+        res = requests.get(url, params=params)
+    return res
+
+
+@click.command()
 def confer():
-    # Load API key
+    """Fetch current odds and player props into the archive."""
     filepath = pkg_resources.files(creds) / "keys.json"
     with open(filepath) as infile:
         keys = json.load(infile)
@@ -34,7 +82,6 @@ def confer():
     archive = get_moneylines(archive, keys)
     logger.info("Game data complete")
 
-    # Load prop markets
     filepath = pkg_resources.files(data) / "stat_map.json"
     with open(filepath) as infile:
         stat_map = json.load(infile)
@@ -53,13 +100,14 @@ def get_moneylines(
     sport="All",
     key=None,
 ):
-    """Retrieve moneyline and totals data from the odds API for NBA, MLB, and NHL.
-    Process the data and store it in the archive file.
-    """
-    # Get available sports from the API
-    url = f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}"
-    res = requests.get(url)
+    """Fetch h2h / totals / spreads into archive's Moneyline & Totals buckets.
 
+    When ``sport="All"`` (the ``confer`` default), enumerates active leagues
+    from the Odds API sports index and filters to ``LEAGUES_OF_INTEREST``.
+    When called with an explicit ``sport`` + ``key`` the caller supplies
+    the Odds API sport key directly (used by ``scripts/moneylines_hist.py``
+    for backfills).
+    """
     historical = date.date() != datetime.today().date()
     low_on_credits = 0
 
@@ -67,19 +115,15 @@ def get_moneylines(
         if historical:
             logger.warning("All sports only supported if date is today")
             return archive
-        # Get available sports from the API
-        res = requests.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey['odds_api']}")
+        res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey["odds_api"]})
         if res.status_code != 200:
             return archive
 
         low_on_credits = int(res.headers.get("X-Requests-Remaining")) < 50
         res = res.json()
 
-        # Filter sports
         sports = [
-            (s["key"], s["title"])
-            for s in res
-            if s["title"] in ["NBA", "NFL", "WNBA"] and s["active"]
+            (s["key"], s["title"]) for s in res if s["title"] in LEAGUES_OF_INTEREST and s["active"]
         ]
     elif key is None:
         logger.warning("Key needed for sports other than All")
@@ -90,34 +134,30 @@ def get_moneylines(
     markets = ["h2h", "totals", "spreads"]
 
     if historical:
-        url = "https://api.the-odds-api.com/v4/sports/{sport}/odds-history/?regions=us&markets={markets}&date={date}&apiKey={apikey}"
+        url_template = ODDS_API_HISTORICAL_ODDS_URL
         dayDelta = 1
         params = {
-            "apikey": apikey["odds_api_plus"],
+            "apiKey": apikey["odds_api_plus"],
+            "regions": "us",
             "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "markets": ",".join(markets),
         }
     else:
-        url = "https://api.the-odds-api.com/v4/sports/{sport}/odds/?regions=us&markets={markets}&apiKey={apikey}"
+        url_template = ODDS_API_ODDS_URL
         dayDelta = 6
         params = {
-            "apikey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
+            "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
+            "regions": "us",
             "markets": ",".join(markets),
         }
 
-    # Retrieve odds data for each sport
     for sport, league in sports:
-        params.update({"sport": sport})
-        res = requests.get(url.format(**params))
-        if res.status_code == 429:
-            sleep(1)
-            res = requests.get(url.format(**params))
+        res = _get_with_retry(url_template.format(sport=sport), params=params)
         if res.status_code != 200:
             continue
 
         res = res.json()["data"] if historical else res.json()
 
-        # Process odds data for each game
         for game in tqdm(res, desc=f"Getting {league} Game Data", unit="game"):
             gameDate = datetime.fromisoformat(game["commence_time"]).astimezone(
                 pytz.timezone("America/Chicago")
@@ -137,7 +177,6 @@ def get_moneylines(
             spread_home = {}
             spread_away = {}
 
-            # Extract moneyline and totals data from bookmakers and markets
             for book in game["bookmakers"]:
                 for market in book["markets"]:
                     if market["key"] == "h2h":
@@ -165,7 +204,6 @@ def get_moneylines(
                             spread_home[book["key"]] = -spread
                             spread_away[book["key"]] = spread
 
-            # Update archive data with the processed odds
             archive._mark_changed(league, "Moneyline")
             archive._mark_changed(league, "Totals")
             archive[league].setdefault("Moneyline", {}).setdefault(gameDate, {})
@@ -192,9 +230,7 @@ def get_props(
     sport="All",
     key=None,
 ):
-    """Retrieve moneyline and totals data from the odds API for NBA, MLB, and NHL.
-    Process the data and store it in the archive file.
-    """
+    """Fetch per-event player-prop markets and store book-level EVs."""
     stat_cv["NCAAB"] = stat_cv["NBA"]
     stat_cv["NCAAF"] = stat_cv["NFL"]
     historical = date.date() != datetime.today().date()
@@ -203,17 +239,13 @@ def get_props(
         if historical:
             logger.warning("All sports only supported if date is today")
             return archive
-        # Get available sports from the API
-        res = requests.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={apikey}")
+        res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey})
         if res.status_code != 200:
             return archive
 
         res = res.json()
-        # Filter sports
         sports = [
-            (s["key"], s["title"])
-            for s in res
-            if s["title"] in ["NBA", "NFL", "WNBA"] and s["active"]
+            (s["key"], s["title"]) for s in res if s["title"] in LEAGUES_OF_INTEREST and s["active"]
         ]
     elif key is None:
         logger.warning("Key needed for sports other than All")
@@ -222,29 +254,24 @@ def get_props(
         sports = [(key, sport)]
 
     if historical:
-        url = "https://api.the-odds-api.com/v4/historical/sports/{sport}/events/{eventId}/odds?apiKey={apikey}&regions=us&markets={markets}&date={date}"
-        event_url = "https://api.the-odds-api.com/v4/historical/sports/{sport}/events?date={date}&apiKey={apikey}"
+        event_url_template = ODDS_API_HISTORICAL_EVENTS_URL
+        odds_url_template = ODDS_API_HISTORICAL_EVENT_ODDS_URL
         dayDelta = 1
         params = {
-            "apikey": apikey,
+            "apiKey": apikey,
             "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     else:
-        url = "https://api.the-odds-api.com/v4/sports/{sport}/events/{eventId}/odds?apiKey={apikey}&regions=us&markets={markets}"
-        event_url = "https://api.the-odds-api.com/v4/sports/{sport}/events?apiKey={apikey}"
+        event_url_template = ODDS_API_EVENTS_URL
+        odds_url_template = ODDS_API_EVENT_ODDS_URL
         dayDelta = 6
-        params = {"apikey": apikey}
+        params = {"apiKey": apikey}
 
-    # Retrieve odds data for each sport
     for sport, league in sports:
-        params.update({"sport": sport, "markets": ",".join(props[league].keys())})
+        params.update({"markets": ",".join(props[league].keys())})
         if league == "MLB":
             params["markets"] = params["markets"] + ",totals_1st_1_innings,spreads_1st_1_innings"
-            # params['markets'] = "totals_1st_1_innings,spreads_1st_1_innings"
-        events = requests.get(event_url.format(**params))
-        if events.status_code == 429:
-            sleep(1)
-            events = requests.get(event_url.format(**params))
+        events = _get_with_retry(event_url_template.format(sport=sport), params=params)
         if events.status_code != 200:
             continue
 
@@ -257,11 +284,10 @@ def get_props(
             if gameDate > date + timedelta(days=dayDelta):
                 continue
             gameDate = gameDate.strftime("%Y-%m-%d")
-            params.update({"eventId": event["id"]})
-            res = requests.get(url.format(**params))
-            if res.status_code == 429:
-                sleep(1)
-                res = requests.get(url.format(**params))
+            event_params = {**params, "regions": "us"}
+            res = _get_with_retry(
+                odds_url_template.format(sport=sport, eventId=event["id"]), params=event_params
+            )
             if res.status_code == 404:
                 return archive
             elif res.status_code != 200:
@@ -274,7 +300,6 @@ def get_props(
             spread_home = {}
             spread_away = {}
 
-            # Extract prop data from bookmakers and markets
             for book in game["bookmakers"]:
                 for market in book["markets"]:
                     if "totals" in market["key"]:
@@ -343,7 +368,6 @@ def get_props(
 
                         odds[market_name][player]["EV"][book["key"]] = ev
 
-            # Update archive data with the processed odds
             for market in odds:
                 archive._mark_changed(league, market)
                 archive[league].setdefault(market, {}).setdefault(gameDate, {})
