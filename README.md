@@ -63,6 +63,12 @@ header protocol and reintroduction process.
       as de-methodized top-level functions. `Archive.add` looks like the
       intended write path for the `confer` pipeline but was never wired in;
       decide whether to wire it or delete.
+- [ ] **TODO: Stats orphan methods** (21 methods across all league subclasses) —
+      preserved in [`src/deprecated/stats_deprecated.py`](src/deprecated/stats_deprecated.py).
+      The `obs_*` family (`obs_get_stats`, `obs_get_training_matrix`, `obs_profile_market`,
+      `dvpoa`, `bucket_stats`) was an older per-observation prediction API superseded by
+      the current vectorized offer-based API. `get_fantasy` (StatsNFL) was unused NFL
+      fantasy scoring logic. Reintroduce if the obs_* API is revived for analysis tooling.
 - [ ] **TODO: deprecated sportsbook scrapers** (`get_dk`, `get_fd`,
       `get_pinnacle`, `get_caesars`, `get_thrive`, `get_pp`, `get_parp`)
       preserved in [`src/deprecated/books_deprecated.py`](src/deprecated/books_deprecated.py).
