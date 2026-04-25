@@ -38,7 +38,7 @@ streamlit = ">=1.30"
 plotly = ">=5.18"
 
 [tool.poetry.scripts]
-prophecize = "sportstradamus.sportstradamus:main"
+prophecize = "sportstradamus.prediction.cli:main"
 confer = "sportstradamus.moneylines:confer"
 meditate = "sportstradamus.train:meditate"
 dashboard = "sportstradamus.dashboard:run"
