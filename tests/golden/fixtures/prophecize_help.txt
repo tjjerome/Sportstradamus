@@ -1,5 +1,7 @@
 Usage: main [OPTIONS]
 
+  Run the full prediction pipeline and write results to Google Sheets.
+
 Options:
   --progress / --no-progress  Display progress bars
   --help                      Show this message and exit.
