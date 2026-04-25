@@ -5004,6 +5004,8 @@ class StatsMLB(Stats):
                     ("stolen bases", 5),
                 ]
 
+            v_outs = 0
+            v_runs = 0
             for submarket, weight in fantasy_props:
                 sub_cv = stat_cv["MLB"].get(submarket, 1)
                 sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
@@ -5013,10 +5015,11 @@ class StatsMLB(Stats):
                     p = 1 - get_odds(subline, v, sub_dist, cv=sub_cv)
                     ev += p * weight
                 elif submarket == "quality start":
-                    std = stat_cv["MLB"].get(submarket, 1) * v_outs
-                    p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
-                    p *= poisson.cdf(3, v_runs)
-                    ev += p * weight
+                    if v_outs > 0:
+                        std = stat_cv["MLB"].get(submarket, 1) * v_outs
+                        p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
+                        p *= poisson.cdf(3, v_runs) if v_runs > 0 else 0.5
+                        ev += p * weight
                 elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
                     _hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
                     _hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
@@ -5049,9 +5052,9 @@ class StatsMLB(Stats):
                         ev += v * weight
 
                 if submarket == "runs allowed":
-                    pass
+                    v_runs = v if not np.isnan(v) and v > 0 else v_runs
                 if submarket == "pitching outs":
-                    pass
+                    v_outs = v if not np.isnan(v) and v > 0 else v_outs
 
             if not book_odds:
                 ev = 0
@@ -5258,6 +5261,8 @@ class StatsMLB(Stats):
                         ("stolen bases", 5),
                     ]
 
+                v_outs = 0
+                v_runs = 0
                 for submarket, weight in fantasy_props:
                     sub_cv = stat_cv["MLB"].get(submarket, 1)
                     sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
@@ -5267,10 +5272,11 @@ class StatsMLB(Stats):
                         p = 1 - get_odds(subline, v, sub_dist, cv=sub_cv)
                         ev += p * weight
                     elif submarket == "quality start":
-                        std = stat_cv["MLB"].get(submarket, 1) * v_outs
-                        p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
-                        p *= poisson.cdf(3, v_runs)
-                        ev += p * weight
+                        if v_outs > 0:
+                            std = stat_cv["MLB"].get(submarket, 1) * v_outs
+                            p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
+                            p *= poisson.cdf(3, v_runs) if v_runs > 0 else 0.5
+                            ev += p * weight
                     elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(
                         v
                     ):
@@ -5312,9 +5318,9 @@ class StatsMLB(Stats):
                             ev += v * weight
 
                     if submarket == "runs allowed":
-                        pass
+                        v_runs = v if not np.isnan(v) and v > 0 else v_runs
                     if submarket == "pitching outs":
-                        pass
+                        v_outs = v if not np.isnan(v) and v > 0 else v_outs
 
                 if not book_odds:
                     ev = 0
