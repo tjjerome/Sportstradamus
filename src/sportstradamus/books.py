@@ -1,3 +1,11 @@
+"""Live sportsbook scrapers for Underdog Fantasy and Sleeper.
+
+These are the two DFS platforms still scraped directly. Sportsbook odds
+(DraftKings, FanDuel, Pinnacle, Caesars, etc.) are ingested via the Odds
+API in :mod:`sportstradamus.moneylines`; the deprecated per-book scrapers
+live in ``src/deprecated/books_deprecated.py``.
+"""
+
 from datetime import datetime, timedelta
 from operator import itemgetter
 
@@ -12,35 +20,49 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.spiderLogger import logger
 
-scraper = Scrape()
+# Underdog Fantasy API endpoints
+_UD_BASE = "https://api.underdogfantasy.com"
+UD_TEAMS_URL = "https://stats.underdogfantasy.com/v1/teams"
+UD_LINES_URL = f"{_UD_BASE}/beta/v6/over_under_lines"
+UD_RIVALS_URL = f"{_UD_BASE}/beta/v3/rival_lines"
+
+# Sleeper API endpoints
+SLEEPER_AVAILABLE_URL = "https://api.sleeper.app/lines/available"
+SLEEPER_ALT_URL = "https://api.sleeper.app/lines/available_alt"
+SLEEPER_GAMES_URL = "https://api.sleeper.app/scores/lines_game_picker"
+SLEEPER_PLAYERS_URL = "https://api.sleeper.app/players/{league}?exclude_injury=false"
+
+# Team abbreviation corrections applied across both scrapers
+ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI"}
+
+_scraper: Scrape | None = None
+
+
+def _get_scraper() -> Scrape:
+    """Return the shared Scrape singleton, creating it on first call."""
+    global _scraper
+    if _scraper is None:
+        _scraper = Scrape()
+    return _scraper
 
 
 def get_ud():
-    """Retrieves player offers data from the Underdog Fantasy API.
+    """Retrieve player prop offers from the Underdog Fantasy API.
+
+    Fetches over/under lines and rival (head-to-head) lines, normalizes
+    player names and team abbreviations, and splits MLB/NHL fantasy points
+    into position-specific markets.
 
     Returns:
-        dict: A dictionary containing player offers data in the following format:
-              {
-                  'League Name': {
-                      'Market Name': [
-                          {
-                              'Player': player_name,
-                              'League': league_name,
-                              'Team': team_name,
-                              'Date': start_date,
-                              'Market': market_type,
-                              'Line': line_score,
-                              'Opponent': opponent_description
-                          },
-                          ...
-                      ],
-                      ...
-                  },
-                  ...
-              }
+        dict: ``{league: {market: [offer, ...]}}`` where each offer contains
+            ``Player``, ``League``, ``Team``, ``Opponent``, ``Date``,
+            ``Market``, ``Line``, ``Boost_Over``, and ``Boost_Under``.
+            Returns ``[]`` if the teams endpoint fails, ``{}`` if the lines
+            endpoint fails.
     """
+    scraper = _get_scraper()
     logger.info("Getting Underdog Lines")
-    teams = scraper.get("https://stats.underdogfantasy.com/v1/teams")
+    teams = scraper.get(UD_TEAMS_URL)
 
     if not teams:
         logger.warning("Could not receive offer data")
@@ -50,7 +72,7 @@ def get_ud():
     for i in teams["teams"]:
         team_ids[i["id"]] = i["abbr"]
 
-    api = scraper.get("https://api.underdogfantasy.com/beta/v6/over_under_lines")
+    api = scraper.get(UD_LINES_URL)
     if not api:
         logger.info("No offers found")
         return {}
@@ -100,8 +122,6 @@ def get_ud():
             "Date": match_ids.get(i["match_id"], {"Date": ""})["Date"],
         }
 
-    abbr_map = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI"}
-
     offers = {}
     for o in tqdm(api["over_under_lines"], desc="Getting Underdog Over/Unders", unit="offer"):
         player = players[o["over_under"]["appearance_stat"]["appearance_id"]]
@@ -124,8 +144,8 @@ def get_ud():
         n = {
             "Player": remove_accents(player["Name"]),
             "League": player["League"],
-            "Team": abbr_map.get(player["Team"], player["Team"]),
-            "Opponent": abbr_map.get(opponent, opponent),
+            "Team": ABBR_MAP.get(player["Team"], player["Team"]),
+            "Opponent": ABBR_MAP.get(opponent, opponent),
             "Date": game["Date"],
             "Market": market,
             "Line": float(o["stat_value"]),
@@ -150,35 +170,7 @@ def get_ud():
 
         offers[n["League"]][n["Market"]].append(n)
 
-        if False:
-            # TODO figure out why this keeps freezing
-            id = o["over_under"].get("id", 0)
-            alts = scraper.get(
-                f"https://api.underdogfantasy.com/v3/over_unders/{id}/alternate_projections"
-            )
-            if alts:
-                for a in alts["projections"]:
-                    if not a["is_main"]:
-                        boosts = [0, 0]
-                        for option in a["options"]:
-                            if option["choice"] == "higher":
-                                boosts[0] = float(option["payout_multiplier"])
-                            elif option["choice"] == "lower":
-                                boosts[1] = float(option["payout_multiplier"])
-                        n = {
-                            "Player": remove_accents(player["Name"]),
-                            "League": player["League"],
-                            "Team": abbr_map.get(player["Team"], player["Team"]),
-                            "Opponent": abbr_map.get(opponent, opponent),
-                            "Date": game["Date"],
-                            "Market": market,
-                            "Line": float(a["stat_value"]),
-                            "Boost_Over": boosts[0],
-                            "Boost_Under": boosts[1],
-                        }
-                        offers[n["League"]][n["Market"]].append(n)
-
-    rivals = scraper.get("https://api.underdogfantasy.com/beta/v3/rival_lines")
+    rivals = scraper.get(UD_RIVALS_URL)
 
     if not rivals:
         logger.info(str(len(offers)) + " offers found")
@@ -232,12 +224,12 @@ def get_ud():
         n = {
             "Player": remove_accents(player1["Name"]) + " vs. " + remove_accents(player2["Name"]),
             "League": player1["League"],
-            "Team": abbr_map.get(player1["Team"], player1["Team"])
+            "Team": ABBR_MAP.get(player1["Team"], player1["Team"])
             + "/"
-            + abbr_map.get(player2["Team"], player2["Team"]),
-            "Opponent": abbr_map.get(opponent1, opponent1)
+            + ABBR_MAP.get(player2["Team"], player2["Team"]),
+            "Opponent": ABBR_MAP.get(opponent1, opponent1)
             + "/"
-            + abbr_map.get(opponent2, opponent2),
+            + ABBR_MAP.get(opponent2, opponent2),
             "Date": game1["Date"],
             "Market": "H2H " + bet,
             "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
@@ -261,9 +253,19 @@ def get_ud():
 
 
 def get_sleeper():
+    """Retrieve player prop offers from the Sleeper API.
+
+    Fetches standard and alternate lines, resolves player names and
+    team abbreviations, and structures offers by league and market.
+
+    Returns:
+        dict: ``{league: {market: [offer, ...]}}`` where each offer contains
+            ``Player``, ``League``, ``Team``, ``Opponent``, ``Date``,
+            ``Market``, ``Line``, ``Boost_Over``, and ``Boost_Under``.
+            Returns ``{}`` on API failure.
+    """
     offers = {}
-    url = "https://api.sleeper.app/lines/available"
-    res = requests.get(url)
+    res = requests.get(SLEEPER_AVAILABLE_URL)
 
     if res.status_code != 200:
         return offers
@@ -271,17 +273,11 @@ def get_sleeper():
     res = res.json()
     leagues = set([x["sport"] for x in res])
 
-    url = "https://api.sleeper.app/lines/available_alt"
-    alt = requests.get(url)
-
+    alt = requests.get(SLEEPER_ALT_URL)
     if alt.status_code == 200:
         res.extend(alt.json())
 
-    abbr_map = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI"}
-
-    url = "https://api.sleeper.app/scores/lines_game_picker"
-    game_res = requests.get(url)
-
+    game_res = requests.get(SLEEPER_GAMES_URL)
     if game_res.status_code != 200:
         return offers
 
@@ -295,14 +291,12 @@ def get_sleeper():
         if isinstance(away_team, dict):
             away_team = away_team.get("team")
         games[game["sport"]][game["game_id"]] = {
-            "teams": [abbr_map.get(home_team, home_team), abbr_map.get(away_team, away_team)],
+            "teams": [ABBR_MAP.get(home_team, home_team), ABBR_MAP.get(away_team, away_team)],
             "date": game.get("date"),
         }
 
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
-        url = f"https://api.sleeper.app/players/{league}?exclude_injury=false"
-        players = requests.get(url)
-
+        players = requests.get(SLEEPER_PLAYERS_URL.format(league=league))
         if players.status_code != 200:
             continue
 
@@ -337,8 +331,8 @@ def get_sleeper():
                 n = {
                     "Player": player_name,
                     "League": league.upper(),
-                    "Team": abbr_map.get(player_team, player_team),
-                    "Opponent": abbr_map.get(opp, opp),
+                    "Team": ABBR_MAP.get(player_team, player_team),
+                    "Opponent": ABBR_MAP.get(opp, opp),
                     "Date": game_date,
                     "Market": prop["wager_type"],
                     "Line": line,
@@ -350,5 +344,3 @@ def get_sleeper():
                 offers[n["League"]][n["Market"]].append(n)
 
     return offers
-
-
