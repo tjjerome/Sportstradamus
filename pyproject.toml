@@ -40,7 +40,7 @@ plotly = ">=5.18"
 [tool.poetry.scripts]
 prophecize = "sportstradamus.prediction.cli:main"
 confer = "sportstradamus.moneylines:confer"
-meditate = "sportstradamus.train:meditate"
+meditate = "sportstradamus.training.cli:meditate"
 dashboard = "sportstradamus.dashboard:run"
 reflect = "sportstradamus.nightly:run"
 

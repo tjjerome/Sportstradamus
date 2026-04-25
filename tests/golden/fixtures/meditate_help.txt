@@ -1,5 +1,7 @@
 Usage: meditate [OPTIONS]
 
+  Train or retrain LightGBMLSS models for each configured market.
+
 Options:
   --force / --no-force            Force update of all models
   --league [All|NFL|NBA|MLB|NHL|WNBA]
