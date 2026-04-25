@@ -66,7 +66,7 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
-def get_ev(line, under, cv=1, dist="Gamma", gate=None, skew_alpha=None):
+def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     """Invert the book's (line, under-prob) to recover the implied mean.
 
     For zero-inflated distributions (ZINB/ZAGamma) with ``gate`` supplied,
