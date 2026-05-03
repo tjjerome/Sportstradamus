@@ -297,7 +297,7 @@ def explode_offers(history):
 
 
 def resolve_history(history, stats):
-    """Fill in Actual column for predictions in history.dat.
+    """Fill in Actual column for predictions in history.parquet.
 
     Only sets the Actual numeric value. Result (Over/Under/Push) is derived
     per-offer in explode_offers() from Actual vs Line.

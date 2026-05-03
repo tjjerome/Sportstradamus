@@ -8,12 +8,26 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus import data
+from sportstradamus.helpers.io import MODEL_STATS_PATH, _atomic_write_parquet
 from sportstradamus.training.config import (
     load_distribution_config,
     load_zi_config,
     save_distribution_config,
     save_zi_config,
 )
+
+# Stats matrix row labels — depend on number of rows present in model["stats"].
+_STATS_ROW_LABELS_3 = ("raw", "corrected", "calibrated")
+_STATS_ROW_LABELS_2 = ("no_filter", "filter")
+# Column rename: source key in model["stats"] -> snake_case for parquet.
+_STATS_COL_MAP = {
+    "Accuracy": "accuracy",
+    "Over Prec": "over_prec",
+    "Under Prec": "under_prec",
+    "Over%": "over_pct",
+    "Sharpness": "sharpness",
+    "NLL": "nll",
+}
 
 
 def report() -> None:
@@ -168,3 +182,78 @@ def report() -> None:
 
     save_distribution_config(stat_dist)
     save_zi_config(stat_zi_local)
+
+    write_model_stats(league_models, stat_cv, stat_std)
+
+
+def write_model_stats(league_models: dict, stat_cv: dict, stat_std: dict) -> None:
+    """Persist a structured per-market metrics table for the dashboard.
+
+    One row per (league, market, metric_row). Diagnostics and hyperparameters
+    are repeated per metric_row so each row is self-contained for filtering.
+    """
+    rows = []
+    for league, markets in league_models.items():
+        for market, model in markets.items():
+            stats_block = model.get("stats", {})
+            n_rows = len(next(iter(stats_block.values()))) if stats_block else 0
+            labels = (
+                _STATS_ROW_LABELS_3
+                if n_rows == 3
+                else _STATS_ROW_LABELS_2
+                if n_rows == 2
+                else tuple(f"row_{i}" for i in range(n_rows))
+            )
+            diag = model.get("diagnostics", {}) or {}
+            params = model.get("params", {}) or {}
+            emp_shape = diag.get("empirical_shape", float("nan"))
+            mod_shape = diag.get("model_shape", float("nan"))
+            shape_ratio = (
+                mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float("nan")
+            )
+
+            for i, label in enumerate(labels):
+                row = {
+                    "league": league,
+                    "market": market,
+                    "distribution": model.get("distribution"),
+                    "metric_row": label,
+                }
+                for src, dst in _STATS_COL_MAP.items():
+                    vals = stats_block.get(src)
+                    row[dst] = float(vals[i]) if vals is not None and i < len(vals) else float("nan")
+                row.update(
+                    {
+                        "model_weight": diag.get("model_weight", float("nan")),
+                        "model_calib": diag.get("model_calib", float("nan")),
+                        "start_shape": diag.get("start_shape", float("nan")),
+                        "model_shape": mod_shape,
+                        "empirical_shape": emp_shape,
+                        "shape_ratio": shape_ratio,
+                        "model_ev": diag.get("model_ev", float("nan")),
+                        "mean_line": diag.get("mean_line", float("nan")),
+                        "result_mean": diag.get("result_mean", float("nan")),
+                        "mean_ev_diff": diag.get("ev_minus_line", float("nan")),
+                        "median_ev_diff": diag.get("median_ev_diff", float("nan")),
+                        "frac_ev_gt_line": diag.get("frac_ev_gt_line", float("nan")),
+                        "over_pct_ev_gt": diag.get("over_pct_ev_gt", float("nan")),
+                        "over_pct_ev_lt": diag.get("over_pct_ev_lt", float("nan")),
+                        "cf_over_pct": diag.get("cf_over_pct", float("nan")),
+                        "dispersion_cal": diag.get("dispersion_cal", float("nan")),
+                        "marginal_shape": diag.get("marginal_shape", float("nan")),
+                        "shape_ceiling": diag.get("shape_ceiling", float("nan")),
+                        "hp_rounds": params.get("opt_rounds", float("nan")),
+                        "hp_leaves": params.get("num_leaves", float("nan")),
+                        "hp_lr": params.get("learning_rate", float("nan")),
+                        "hp_min_child": params.get("min_child_samples", float("nan")),
+                        "hp_l1": params.get("lambda_l1", float("nan")),
+                        "hp_l2": params.get("lambda_l2", float("nan")),
+                        "cv": float(stat_cv.get(league, {}).get(market, float("nan"))),
+                        "std": float(stat_std.get(league, {}).get(market, float("nan"))),
+                        "historical_zero_rate": model.get("hist_gate", float("nan")),
+                    }
+                )
+                rows.append(row)
+
+    df = pd.DataFrame(rows)
+    _atomic_write_parquet(df, MODEL_STATS_PATH)

@@ -2,8 +2,8 @@
 
 Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
-2. Fill in Actual column in history.dat
-3. Fill in Legs/Misses columns in parlay_hist.dat
+2. Fill in Actual column in history.parquet
+3. Fill in Legs/Misses columns in parlay_hist.parquet
 4. Write resolve_meta.json with last-run timestamp
 
 Schedule with cron after games finish, e.g.:
@@ -17,11 +17,16 @@ from datetime import datetime
 
 import click
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.analysis import check_bet, resolve_history
+from sportstradamus.helpers.io import (
+    read_history,
+    read_parlay_hist,
+    write_history,
+    write_parlay_hist,
+)
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -78,17 +83,9 @@ def run(league, skip_update, history_only):
         raise SystemExit(1)
 
     # ------------------------------------------------------------------
-    # 2. Resolve history.dat (fill Actual column)
+    # 2. Resolve history.parquet (fill Actual column)
     # ------------------------------------------------------------------
-    history_path = pkg_resources.files(data) / "history.dat"
-    history = pd.read_pickle(history_path)
-
-    if "Offers" not in history.columns:
-        # Migrate old flat schema first
-        from sportstradamus.analysis import _migrate_flat_history
-
-        logger.info("Migrating history.dat to normalized schema")
-        history = _migrate_flat_history(history)
+    history = read_history()
 
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -96,17 +93,16 @@ def run(league, skip_update, history_only):
     n_before_hist = int(history["Actual"].isna().sum())
     logger.info(f"Resolving {n_before_hist} pending history rows")
     history = resolve_history(history, stats)
-    history.to_pickle(history_path)
+    write_history(history)
     n_resolved_hist = n_before_hist - int(history["Actual"].isna().sum())
     logger.info(f"History: resolved {n_resolved_hist} / {n_before_hist} pending rows")
 
     # ------------------------------------------------------------------
-    # 3. Resolve parlay_hist.dat (fill Legs/Misses columns)
+    # 3. Resolve parlay_hist.parquet (fill Legs/Misses columns)
     # ------------------------------------------------------------------
     n_resolved_parl = 0
     if not history_only:
-        parlay_path = pkg_resources.files(data) / "parlay_hist.dat"
-        parlays = pd.read_pickle(parlay_path)
+        parlays = read_parlay_hist()
         stat_map = json.loads((pkg_resources.files(data) / "stat_map.json").read_text())
 
         unresolved = parlays.loc[parlays["Legs"].isna()]
@@ -119,7 +115,7 @@ def run(league, skip_update, history_only):
                 lambda bet: check_bet(bet, stats, stat_map), axis=1
             ).tolist()
             parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
-            parlays.to_pickle(parlay_path)
+            write_parlay_hist(parlays)
             n_resolved_parl = sum(
                 1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
             )

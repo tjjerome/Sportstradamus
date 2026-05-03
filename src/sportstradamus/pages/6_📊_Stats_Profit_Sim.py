@@ -16,9 +16,11 @@ from sportstradamus.dashboard_data import (
     get_filtered_history,
     load_history,
     load_resolve_meta,
+    render_banner,
 )
 
 st.title("Profit Simulation")
+render_banner("stats", "Monte Carlo strategy backtesting")
 
 # --- Load data (pre-resolved by nightly script) ---
 history = load_history()

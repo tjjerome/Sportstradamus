@@ -16,10 +16,12 @@ from sportstradamus.dashboard_data import (
     load_history,
     load_parlays,
     load_resolve_meta,
+    render_banner,
     sidebar_filters,
 )
 
 st.title("Overview")
+render_banner("stats", "historical accuracy, profit, and volume")
 
 # --- Load data (pre-resolved by nightly script) ---
 history = load_history()
