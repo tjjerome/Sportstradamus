@@ -7,7 +7,7 @@ Runs after games finish to:
 4. Write resolve_meta.json with last-run timestamp
 
 Schedule with cron after games finish, e.g.:
-    0 2 * * * cd /home/trevor/Sportstradamus && poetry run nightly
+    0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
 """
 
 import importlib.resources as pkg_resources

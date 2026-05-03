@@ -34,7 +34,7 @@ if meta.get("last_run"):
     st.caption(f"Data last resolved: {meta['last_run']}")
 else:
     st.warning(
-        "Nightly resolution has not run yet. Run `poetry run nightly` to resolve prediction outcomes."
+        "Nightly resolution has not run yet. Run `poetry run reflect` to resolve prediction outcomes."
     )
 
 # --- Sidebar ---
