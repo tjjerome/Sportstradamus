@@ -2,8 +2,9 @@
 
 :func:`find_correlation` takes the flat list of scored offers produced by
 :func:`process_offers`, groups them by game, looks up the pre-computed
-``{LEAGUE}_corr.csv`` correlation matrix, and annotates each offer with
-its most correlated team-mate and opponent legs.  It also calls
+stratified correlation matrices (``{LEAGUE}_corr_same_team.csv`` and
+``{LEAGUE}_corr_opposing.csv``), and annotates each offer with its most
+correlated team-mate and opponent legs.  It also calls
 :func:`beam_search_parlays` to enumerate the top parlay combinations.
 """
 
@@ -26,6 +27,70 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers import banned, stat_cv, stat_map, stat_std
 from sportstradamus.spiderLogger import logger
+
+# Legacy weighting from the unified-matrix era: same-team and cross pairs
+# (where the team is the offensive actor) are weighted higher than the
+# team's view of the opposing team's same-team pairs.
+_OFFENSIVE_PAIR_WEIGHT: float = 0.75
+_DEFENSIVE_PAIR_WEIGHT: float = 1.0 - _OFFENSIVE_PAIR_WEIGHT
+
+
+def _team_slice(corr_df: pd.DataFrame, team: str) -> pd.Series:
+    """Return the R series for one team from a stratified correlation DataFrame.
+
+    Args:
+        corr_df: Stratified correlation DataFrame with MultiIndex
+            ``(team, market_a, market_b)`` and a single ``R`` column.
+        team: Team abbreviation to look up.
+
+    Returns:
+        A Series indexed by ``(market_a, market_b)`` for the requested team,
+        empty if the team has no entries.
+    """
+    try:
+        return corr_df.loc[team]["R"]
+    except KeyError:
+        return pd.Series([], dtype=float)
+
+
+def _build_game_corr_map(
+    team: str,
+    opp: str,
+    c_same: pd.DataFrame,
+    c_opp: pd.DataFrame,
+) -> dict[tuple[str, str], float]:
+    """Combine same-team and opposing matrices into one pair-keyed lookup.
+
+    Keys preserve the legacy ``_OPP_`` prefix convention so the rest of
+    :func:`find_correlation` can keep using string-keyed lookups:
+
+    * ``(a, b)`` — same-team pair on ``team``.
+    * ``(_OPP_a, _OPP_b)`` — same-team pair on ``opp`` (i.e. ``team`` faces it).
+    * ``(a, _OPP_b)`` — cross pair where ``a`` is on ``team`` and ``b`` on ``opp``.
+
+    Cross pairs are summed across the two perspectives (team's gamelog and
+    opp's gamelog) to mirror the legacy unified-matrix arithmetic.
+    """
+    c_map: dict[tuple[str, str], float] = {}
+
+    for (a, b), r in _team_slice(c_same, team).items():
+        key = (a, b)
+        c_map[key] = c_map.get(key, 0.0) + r * _OFFENSIVE_PAIR_WEIGHT
+
+    for (a, b), r in _team_slice(c_same, opp).items():
+        key = (f"_OPP_{a}", f"_OPP_{b}")
+        c_map[key] = c_map.get(key, 0.0) + r * _DEFENSIVE_PAIR_WEIGHT
+
+    for (a, b), r in _team_slice(c_opp, team).items():
+        key = (a, f"_OPP_{b}")
+        c_map[key] = c_map.get(key, 0.0) + r * _OFFENSIVE_PAIR_WEIGHT
+
+    for (a, b), r in _team_slice(c_opp, opp).items():
+        # opp file convention: level 1 is opp's market, level 2 is team's market.
+        key = (b, f"_OPP_{a}")
+        c_map[key] = c_map.get(key, 0.0) + r * _OFFENSIVE_PAIR_WEIGHT
+
+    return c_map
 
 
 @line_profiler.profile
@@ -63,9 +128,7 @@ def find_correlation(offers, stats, platform):
 
     combo_mask = df["Team"].apply(lambda x: len(set(x.split("/"))) == 1)
     df.loc[combo_mask, "Team"] = df.loc[combo_mask, "Team"].apply(lambda x: x.split("/")[0])
-    df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(
-        lambda x: x.split("/")[0]
-    )
+    df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(lambda x: x.split("/")[0])
 
     df["Team Correlation"] = ""
     df["Opp Correlation"] = ""
@@ -117,9 +180,18 @@ def find_correlation(offers, stats, platform):
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
             continue
-        c = pd.read_csv(pkg_resources.files(data) / (f"{league}_corr.csv"), index_col=[0, 1, 2])
-        c.rename_axis(["team", "market", "correlation"], inplace=True)
-        c.columns = ["R"]
+        c_same = pd.read_csv(
+            pkg_resources.files(data) / f"{league}_corr_same_team.csv",
+            index_col=[0, 1, 2],
+        )
+        c_same.rename_axis(["team", "market", "correlation"], inplace=True)
+        c_same.columns = ["R"]
+        c_opp = pd.read_csv(
+            pkg_resources.files(data) / f"{league}_corr_opposing.csv",
+            index_col=[0, 1, 2],
+        )
+        c_opp.rename_axis(["team", "market", "correlation"], inplace=True)
+        c_opp.columns = ["R"]
         stat_data = stats.get(league)
         team_mod_map = banned[platform][league]["team"]
         opp_mod_map = banned[platform][league]["opponent"]
@@ -128,9 +200,11 @@ def find_correlation(offers, stats, platform):
 
         if league != "MLB":
             league_df["Player position"] = league_df["Player position"].apply(
-                lambda x: positions[league][x - 1]
-                if isinstance(x, int)
-                else [positions[league][i - 1] for i in x]
+                lambda x: (
+                    positions[league][x - 1]
+                    if isinstance(x, int)
+                    else [positions[league][i - 1] for i in x]
+                )
             )
             combo_df = league_df.loc[league_df.Player.str.contains(r"\+|vs.")]
             league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
@@ -162,9 +236,11 @@ def find_correlation(offers, stats, platform):
             league_df["Player position"] = league_df.Player.map(player_df)
         else:
             league_df["Player position"] = league_df["Player position"].apply(
-                lambda x: ("B" + str(x) if x > 0 else "P")
-                if isinstance(x, int)
-                else ["B" + str(i) if i > 0 else "P" for i in x]
+                lambda x: (
+                    ("B" + str(x) if x > 0 else "P")
+                    if isinstance(x, int)
+                    else ["B" + str(i) if i > 0 else "P" for i in x]
+                )
             )
 
         if league == "NHL":
@@ -173,18 +249,20 @@ def find_correlation(offers, stats, platform):
             new_map.update({"Fantasy Points": "fantasy points prizepicks"})
 
         league_df["cMarket"] = league_df.apply(
-            lambda x: [
-                x["Player position"]
-                + "."
-                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
-            ]
-            if isinstance(x["Player position"], str)
-            else [
-                p
-                + "."
-                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
-                for p in x["Player position"]
-            ],
+            lambda x: (
+                [
+                    x["Player position"]
+                    + "."
+                    + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
+                ]
+                if isinstance(x["Player position"], str)
+                else [
+                    p
+                    + "."
+                    + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
+                    for p in x["Player position"]
+                ]
+            ),
             axis=1,
         )
 
@@ -231,25 +309,7 @@ def find_correlation(offers, stats, platform):
             checked_teams.append(team)
             checked_teams.append(opp)
 
-            off_weight = 0.75
-            team_c = c.loc[team] * 0.5
-            def_mask = ["_OPP_" in x and "_OPP_" in y for x, y in team_c.index]
-            off_mask = [not x for x in def_mask]
-            team_c.loc[off_mask] = team_c.loc[off_mask] * 2 * off_weight
-            team_c.loc[def_mask] = team_c.loc[def_mask] * 2 * (1 - off_weight)
-            opp_c = c.loc[opp] * 0.5
-            def_mask = ["_OPP_" in x and "_OPP_" in y for x, y in opp_c.index]
-            off_mask = [not x for x in def_mask]
-            opp_c.loc[off_mask] = opp_c.loc[off_mask] * 2 * off_weight
-            opp_c.loc[def_mask] = opp_c.loc[def_mask] * 2 * (1 - off_weight)
-            opp_c.index = pd.MultiIndex.from_tuples(
-                [
-                    (f"_OPP_{x}".replace("_OPP__OPP_", ""), f"_OPP_{y}".replace("_OPP__OPP_", ""))
-                    for x, y in opp_c.index
-                ],
-                names=("market", "correlation"),
-            )
-            c_map = team_c["R"].add(opp_c["R"], fill_value=0).to_dict()
+            c_map = _build_game_corr_map(team, opp, c_same, c_opp)
 
             game_df.reset_index(drop=True, inplace=True)
             game_dict = game_df.to_dict("index")
