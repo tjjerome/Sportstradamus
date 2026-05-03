@@ -28,6 +28,7 @@ from sportstradamus.dashboard_data import (
     get_prediction_history,
     load_history,
     load_resolve_meta,
+    render_banner,
     sidebar_filters,
 )
 
@@ -41,6 +42,7 @@ TIMEFRAME_OPTIONS = {
 }
 
 st.title("Market Diagnostics & Forecast Quality")
+render_banner("stats", "per-market accuracy, calibration, CRPS")
 
 # --- Load data (pre-resolved by nightly script) ---
 history = load_history()

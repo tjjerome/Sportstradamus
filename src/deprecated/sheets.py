@@ -1,3 +1,8 @@
+# ARCHIVED 2026-05-03 from src/sportstradamus/prediction/sheets.py
+# Reason: Google Sheets output replaced by Streamlit dashboard parquet snapshots.
+# Last live SHA: a22c851
+# Original imports (now unresolved here):
+#   from sportstradamus.spiderLogger import logger
 """Google Sheets write helpers for the prediction pipeline.
 
 :func:`save_data` writes per-platform offer tables and the All Parlays
