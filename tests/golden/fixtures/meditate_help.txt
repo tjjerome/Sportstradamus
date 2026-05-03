@@ -12,4 +12,8 @@ Options:
   --reset-markets TEXT            Comma-separated league:market pairs (or just
                                   market for active league) to clear from
                                   Filtered before training
+  --rebuild-correlations / --no-rebuild-correlations
+                                  Rebuild only the per-league correlation
+                                  matrices and exit; skip the per-market
+                                  training loop
   --help                          Show this message and exit.
