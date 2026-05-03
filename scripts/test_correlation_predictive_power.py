@@ -150,16 +150,18 @@ def build_corr_old(matrix: pd.DataFrame) -> pd.Series:
     return out
 
 
-def build_corr_new(matrix_residualized: pd.DataFrame) -> pd.Series:
-    """Run the new methodology on a pre-residualized team-game matrix.
+def _team_corr_pairwise(
+    matrix: pd.DataFrame,
+    *,
+    shrink: bool,
+    magnitude_floor: float,
+) -> pd.Series:
+    """Per-team Spearman + Fisher remap with pairwise-complete handling.
 
-    Residualization happens upstream because it operates on the per-player
-    gamelog (one row per player-game), not the per-team matrix. Per team:
-    Spearman on residuals (pairwise-complete), Fisher remap, sample-size
-    shrinkage toward zero below MIN_OVERLAP_FOR_FULL_WEIGHT, magnitude
-    floor.
+    Used as a building block for the ablation variants. Skips fillna, drops
+    only fully-NaN columns, and (optionally) shrinks low-overlap pairs.
     """
-    matrix = matrix_residualized.drop(columns="DATE", errors="ignore").copy()
+    matrix = matrix.drop(columns="DATE", errors="ignore").copy()
     blocks: dict = {}
     for team in matrix["TEAM"].unique():
         team_matrix = matrix.loc[matrix["TEAM"] == team].drop(columns="TEAM")
@@ -173,9 +175,9 @@ def build_corr_new(matrix_residualized: pd.DataFrame) -> pd.Series:
             warnings.simplefilter("ignore")
             c_spearman = team_matrix.corr(method="spearman")
         c_remap = 2 * np.sin(np.pi / 6 * c_spearman)
-        c_shrunk = _shrink_correlations(c_remap, overlap)
-        c_stack = c_shrunk.unstack().dropna()
-        c_stack = c_stack.loc[c_stack.abs() > CORR_MAGNITUDE_FLOOR]
+        c = _shrink_correlations(c_remap, overlap) if shrink else c_remap
+        c_stack = c.unstack().dropna()
+        c_stack = c_stack.loc[c_stack.abs() > magnitude_floor]
         if not c_stack.empty:
             blocks[team] = c_stack
     if not blocks:
@@ -183,6 +185,31 @@ def build_corr_new(matrix_residualized: pd.DataFrame) -> pd.Series:
     out = pd.concat(blocks)
     out.name = "R"
     return out
+
+
+def build_corr_pairwise_only(matrix_raw: pd.DataFrame) -> pd.Series:
+    """Ablation A: same as OLD but with NaN handling like NEW.
+
+    Pairwise-complete Spearman on raw (non-residualized) values, no
+    fillna(0), no shrinkage. Isolates the contribution of dropping the
+    fillna step from residualization + shrinkage.
+    """
+    return _team_corr_pairwise(matrix_raw, shrink=False, magnitude_floor=0.001)
+
+
+def build_corr_residual_only(matrix_residualized: pd.DataFrame) -> pd.Series:
+    """Ablation B: residualization + pairwise NaN handling, no shrinkage.
+
+    Isolates the contribution of residualization on top of NaN handling.
+    """
+    return _team_corr_pairwise(matrix_residualized, shrink=False, magnitude_floor=0.001)
+
+
+def build_corr_new(matrix_residualized: pd.DataFrame) -> pd.Series:
+    """Full new methodology: residualize + pairwise NaN + shrinkage + floor."""
+    return _team_corr_pairwise(
+        matrix_residualized, shrink=True, magnitude_floor=CORR_MAGNITUDE_FLOOR
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -418,18 +445,55 @@ def run_synthetic(seed: int, n_games: int) -> None:
     res_team_matrix = _gamelog_to_team_matrix(residualized_log, stat_cols)
 
     overlap_new = _per_team_overlap(res_team_matrix)
-    overlap_old = _per_team_overlap(raw_team_matrix)
+    overlap_raw = _per_team_overlap(raw_team_matrix)
 
-    old_stacked = build_corr_old(raw_team_matrix)
-    new_stacked = build_corr_new(res_team_matrix)
+    # Four variants for the ablation:
+    #   OLD            = fillna(0) + drop>=50%-zero cols + min_periods spearman   (legacy)
+    #   PAIRWISE_ONLY  = pairwise-complete spearman on RAW values                 (NaN-handling delta only)
+    #   RESIDUAL_ONLY  = pairwise + residualization, no shrinkage                  (adds residualization)
+    #   NEW            = pairwise + residualization + shrinkage + 0.05 floor       (full new method)
+    variants = [
+        ("OLD", build_corr_old(raw_team_matrix), overlap_raw),
+        ("PAIRWISE_ONLY", build_corr_pairwise_only(raw_team_matrix), overlap_raw),
+        ("RESIDUAL_ONLY", build_corr_residual_only(res_team_matrix), overlap_new),
+        ("NEW", build_corr_new(res_team_matrix), overlap_new),
+    ]
+    metrics_per_variant: dict[str, dict[str, float]] = {}
+    for name, stacked, overlap in variants:
+        per_team = _stacked_to_per_team(stacked)
+        metrics_per_variant[name] = _score_recovery(per_team, truth, overlap)
 
-    old_per_team = _stacked_to_per_team(old_stacked)
-    new_per_team = _stacked_to_per_team(new_stacked)
+    _print_ablation_table(metrics_per_variant)
 
-    metrics_old = _score_recovery(old_per_team, truth, overlap_old)
-    metrics_new = _score_recovery(new_per_team, truth, overlap_new)
 
-    _print_recovery_table(metrics_old, metrics_new)
+def _print_ablation_table(metrics_per_variant: dict[str, dict[str, float]]) -> None:
+    """Side-by-side table for OLD / PAIRWISE_ONLY / RESIDUAL_ONLY / NEW.
+
+    Reading the columns left-to-right shows what each methodology change
+    contributed in isolation: PAIRWISE_ONLY isolates NaN handling,
+    RESIDUAL_ONLY adds residualization, NEW adds shrinkage + magnitude floor.
+    """
+    rows = [
+        ("pairs scored", "n_pairs", "{:>10.0f}"),
+        ("MAE (lower better)", "mae", "{:>10.4f}"),
+        ("RMSE (lower better)", "rmse", "{:>10.4f}"),
+        ("Spearman rank rho (higher better)", "spearman_rho", "{:>10.4f}"),
+        ("confounded-pair MAE (lower better)", "confounded_mae", "{:>10.4f}"),
+        ("low-overlap pair MAE (lower better)", "low_overlap_mae", "{:>10.4f}"),
+        ("n confounded", "n_confounded", "{:>10.0f}"),
+        ("n low overlap (<30 shared)", "n_low_overlap", "{:>10.0f}"),
+    ]
+    names = ["OLD", "PAIRWISE_ONLY", "RESIDUAL_ONLY", "NEW"]
+    click.echo("")
+    header = "      " + f"{'metric':<38}" + "  " + "  ".join(f"{n:>14}" for n in names)
+    click.echo(header)
+    click.echo("      " + "-" * 38 + "  " + "  ".join("-" * 14 for _ in names))
+    for label, key, fmt in rows:
+        cells = []
+        for n in names:
+            v = metrics_per_variant[n][key]
+            cells.append(fmt.replace(":>10", ":>14").format(v))
+        click.echo(f"      {label:<38}  " + "  ".join(cells))
 
 
 def _print_recovery_table(old: dict[str, float], new: dict[str, float]) -> None:
