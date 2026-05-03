@@ -38,7 +38,12 @@ np.seterr(divide="ignore", invalid="ignore")
     default="",
     help="Comma-separated league:market pairs (or just market for active league) to clear from Filtered before training",
 )
-def meditate(force, league, rebuild_filter, reset_markets):
+@click.option(
+    "--rebuild-correlations/--no-rebuild-correlations",
+    default=False,
+    help="Rebuild only the per-league correlation matrices and exit; skip the per-market training loop",
+)
+def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations):
     """Train or retrain LightGBMLSS models for each configured market."""
     np.random.seed(69)
 
@@ -71,7 +76,6 @@ def meditate(force, league, rebuild_filter, reset_markets):
     # nhl = StatsNHL()
 
     stat_structs = {}
-    archive = Archive()
 
     if (
         league == "All" and datetime.today().date() > (nba.season_start - timedelta(days=7))
@@ -103,6 +107,17 @@ def meditate(force, league, rebuild_filter, reset_markets):
     active_markets = dict(ALL_MARKETS)
     if league != "All":
         active_markets = {league: ALL_MARKETS[league]}
+
+    if rebuild_correlations:
+        for lg in active_markets:
+            stat_data = stat_structs.get(lg)
+            if stat_data is None:
+                continue
+            stat_data.update_player_comps()
+            correlate(lg, stat_data, force)
+        return
+
+    archive = Archive()
 
     for lg, markets in active_markets.items():
         stat_data = stat_structs.get(lg)
