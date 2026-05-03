@@ -430,7 +430,7 @@ def _per_team_overlap(matrix: pd.DataFrame) -> dict[str, pd.DataFrame]:
 
 def run_synthetic(seed: int, n_games: int) -> None:
     rng = np.random.default_rng(seed)
-    click.echo("[1/2] Synthetic ground-truth experiment")
+    click.echo("[1/3] Synthetic latent-corr recovery experiment")
     click.echo(f"      seed={seed} n_games={n_games} n_teams={DEFAULT_N_TEAMS}")
     click.echo("      simulating gamelog with per-player AR(1) skill drift + 20% missing rows")
 
@@ -518,7 +518,235 @@ def _print_recovery_table(old: dict[str, float], new: dict[str, float]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Experiment 2 — real gamelog holdout
+# Experiment 2 — beat-line conditional probability (production-relevant)
+# ---------------------------------------------------------------------------
+#
+# Production cares about a downstream conditional, not the latent stat
+# correlation in the abstract: if Player A beats their line in market X,
+# is Player B more likely to beat their line in market Y? The correlation
+# matrix gets multiplied into parlay EV in
+# ``prediction/correlation.py:389-402`` — positive value between two "Over"
+# legs raises joint probability, negative lowers it. So the right ground
+# truth is the empirical correlation of {beat-line indicator}, not the
+# Pearson correlation of the raw stat values.
+#
+# We approximate bookmaker line-setting with each player's leak-free rolling
+# 8-game mean (same window the production residualization uses). That makes
+# the test slightly favorable to residualization by construction — the line
+# is exactly what residualization subtracts — but it's also the most honest
+# proxy for what real lines do, so the comparison still tells us which
+# method's output best matches the conditional we actually consume.
+
+
+def _beat_line_team_matrix(
+    gamelog: pd.DataFrame,
+    stat_cols: list[str],
+) -> pd.DataFrame:
+    """Build per-team-per-game beat-line booleans (1 / 0 / NaN per stat).
+
+    For each (player, stat) we set the line equal to the player's
+    leak-free rolling-N-game mean — the same window used by
+    ``_residualize_gamelog``. ``hit[t] = 1`` if ``stat[t] > line[t]``,
+    ``0`` otherwise; ``NaN`` when there isn't enough history yet (so the
+    line is undefined and the player would not have a posted line in
+    real life either).
+
+    The empirical correlation of these per-team boolean columns IS the
+    quantity production cares about — it's the realized conditional
+    structure of "did A beat its line jointly with B beating its line".
+    """
+    line_df = _residualize_gamelog(gamelog, "player", "DATE", stat_cols)
+    hits = line_df.copy()
+    for stat in stat_cols:
+        if stat not in line_df.columns:
+            continue
+        # Residual = stat - rolling_line, so beat-line iff residual > 0.
+        # Residuals that are exactly 0 (continuous data: never) count as
+        # "not beat" same as the bookmaker convention.
+        hits[stat] = (line_df[stat] > 0).astype("float")
+        hits.loc[line_df[stat].isna(), stat] = np.nan
+    return _gamelog_to_team_matrix(hits, stat_cols)
+
+
+def _empirical_beat_line_corr(matrix: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Per-team Pearson correlation of beat-line booleans across games.
+
+    Pearson on 0/1 indicators is the phi coefficient — exactly the binary
+    co-occurrence structure production wants the matrix to predict.
+    """
+    matrix = matrix.drop(columns="DATE", errors="ignore")
+    out: dict[str, pd.DataFrame] = {}
+    for team in matrix["TEAM"].unique():
+        team_matrix = matrix.loc[matrix["TEAM"] == team].drop(columns="TEAM")
+        team_matrix = team_matrix.loc[:, team_matrix.notna().any(axis=0)]
+        # Need at least 2 games and 2 stats with non-degenerate variance.
+        if team_matrix.shape[1] < 2 or len(team_matrix) < 2:
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out[team] = cast(pd.DataFrame, team_matrix.corr(method="pearson"))
+    return out
+
+
+def _score_against_beat_line(
+    estimate_per_team: dict[str, pd.DataFrame],
+    beat_line_per_team: dict[str, pd.DataFrame],
+) -> dict[str, float]:
+    """Compare each method's predicted pair correlations to beat-line truth.
+
+    We also bucket pairs by predicted-correlation magnitude and report the
+    mean realized beat-line correlation per bucket — this is the most
+    directly interpretable answer to the user's question. If the method's
+    output is meaningful, "high predicted" pairs should have higher mean
+    realized beat-line correlation than "low predicted" pairs.
+    """
+    pred: list[float] = []
+    actual: list[float] = []
+    sign_match = 0
+    sign_total = 0
+
+    for team, truth in beat_line_per_team.items():
+        est = estimate_per_team.get(team)
+        cols = list(truth.columns)
+        for i, a in enumerate(cols):
+            for b in cols[i + 1 :]:
+                t = float(truth.loc[a, b])
+                if pd.isna(t):
+                    continue
+                if est is not None and a in est.index and b in est.columns:
+                    p = float(est.loc[a, b])
+                else:
+                    p = 0.0
+                pred.append(p)
+                actual.append(t)
+                if abs(p) >= SIGN_AGREEMENT_MAG_FLOOR and abs(t) >= SIGN_AGREEMENT_MAG_FLOOR:
+                    sign_total += 1
+                    if np.sign(p) == np.sign(t):
+                        sign_match += 1
+
+    pa = np.array(pred)
+    aa = np.array(actual)
+    if len(pa) == 0:
+        return {"n_pairs": 0.0}
+
+    # Bucket realized lift by predicted-correlation magnitude. Buckets
+    # are: |pred| < 0.05 (background), 0.05-0.20 (weak), 0.20-0.40
+    # (moderate), > 0.40 (strong). For a method with predictive power,
+    # bucket means of |actual| should rise monotonically.
+    from itertools import pairwise
+
+    abs_pred = np.abs(pa)
+    bucket_edges = [0.0, 0.05, 0.20, 0.40, np.inf]
+    bucket_labels = ["bg(<.05)", "weak(.05-.20)", "mod(.20-.40)", "strong(>.40)"]
+    bucket_means = []
+    bucket_counts = []
+    for lo, hi in pairwise(bucket_edges):
+        mask = (abs_pred >= lo) & (abs_pred < hi)
+        if mask.any():
+            # Use signed actual but matched-direction: when predicted is
+            # positive we want actual positive; when negative, we want
+            # negative. Equivalent to: predicted * actual > 0 for "match".
+            signed_actual = np.where(pa[mask] >= 0, aa[mask], -aa[mask])
+            bucket_means.append(float(np.mean(signed_actual)))
+        else:
+            bucket_means.append(float("nan"))
+        bucket_counts.append(int(mask.sum()))
+
+    return {
+        "n_pairs": float(len(pa)),
+        "mae_vs_beat_line": float(np.mean(np.abs(pa - aa))),
+        "rho_pred_vs_actual": (
+            float(spearmanr(pa, aa).statistic) if len(pa) > 1 else float("nan")
+        ),
+        "sign_agreement": (sign_match / sign_total) if sign_total else float("nan"),
+        "n_sign_pairs": float(sign_total),
+        # Per-bucket mean of direction-matched realized beat-line correlation.
+        # Higher (positive) = predictions in this bucket really do correspond
+        # to legs that co-occur more often (or, for negative predictions, to
+        # legs that anti-correlate as predicted).
+        "bucket_labels": bucket_labels,
+        "bucket_means": bucket_means,
+        "bucket_counts": bucket_counts,
+    }
+
+
+def run_beat_line(seed: int, n_games: int) -> None:
+    """Score each method against the empirical beat-line correlation.
+
+    We reuse the synthetic gamelog generator from experiment 1 — same
+    seed, same data — so the only thing that changes is the ground-truth
+    target. Now we measure how well each method predicts the realized
+    pairwise beat-line correlation, which is what the parlay EV
+    multiplication consumes downstream.
+    """
+    rng = np.random.default_rng(seed)
+    click.echo("[2/3] Beat-line conditional-probability experiment")
+    click.echo(f"      seed={seed} n_games={n_games}")
+    click.echo("      ground truth = empirical Pearson corr of beat-line booleans per team")
+
+    gamelog, _truth_latent = _simulate_gamelog(DEFAULT_N_TEAMS, n_games, rng)
+    stat_cols = [c for c in gamelog.columns if c.startswith("P")]
+
+    raw_team_matrix = _gamelog_to_team_matrix(gamelog, stat_cols)
+    residualized_log = _residualize_gamelog(gamelog, "player", "DATE", stat_cols)
+    res_team_matrix = _gamelog_to_team_matrix(residualized_log, stat_cols)
+    beat_line_matrix = _beat_line_team_matrix(gamelog, stat_cols)
+
+    beat_line_truth = _empirical_beat_line_corr(beat_line_matrix)
+
+    variants = [
+        ("OLD", build_corr_old(raw_team_matrix)),
+        ("PAIRWISE_ONLY", build_corr_pairwise_only(raw_team_matrix)),
+        ("RESIDUAL_ONLY", build_corr_residual_only(res_team_matrix)),
+        ("NEW", build_corr_new(res_team_matrix)),
+    ]
+    metrics_per_variant: dict[str, dict] = {}
+    for name, stacked in variants:
+        per_team = _stacked_to_per_team(stacked)
+        metrics_per_variant[name] = _score_against_beat_line(per_team, beat_line_truth)
+
+    _print_beat_line_table(metrics_per_variant)
+
+
+def _print_beat_line_table(metrics_per_variant: dict[str, dict]) -> None:
+    rows = [
+        ("pairs scored", "n_pairs", "{:>14.0f}"),
+        ("MAE vs beat-line corr (lower better)", "mae_vs_beat_line", "{:>14.4f}"),
+        ("Spearman rho pred vs actual (higher better)", "rho_pred_vs_actual", "{:>14.4f}"),
+        ("sign agreement (higher better)", "sign_agreement", "{:>14.4f}"),
+        ("n sign-comparable pairs", "n_sign_pairs", "{:>14.0f}"),
+    ]
+    names = list(metrics_per_variant.keys())
+    click.echo("")
+    click.echo("      " + f"{'metric':<46}" + "  " + "  ".join(f"{n:>14}" for n in names))
+    click.echo("      " + "-" * 46 + "  " + "  ".join("-" * 14 for _ in names))
+    for label, key, fmt in rows:
+        cells = []
+        for n in names:
+            v = metrics_per_variant[n].get(key, float("nan"))
+            cells.append(fmt.format(v))
+        click.echo(f"      {label:<46}  " + "  ".join(cells))
+
+    # Bucketed realized lift: shows whether higher predicted correlation
+    # actually corresponds to higher realized beat-line co-occurrence.
+    click.echo("")
+    click.echo("      direction-matched realized beat-line corr by predicted-magnitude bucket")
+    click.echo("      (positive = pred direction agrees with realized direction; higher = better)")
+    bucket_labels = metrics_per_variant[names[0]]["bucket_labels"]
+    header = "      " + f"{'bucket':<14}" + "  " + "  ".join(f"{n:>14}" for n in names)
+    click.echo(header)
+    click.echo("      " + "-" * 14 + "  " + "  ".join("-" * 14 for _ in names))
+    for i, label in enumerate(bucket_labels):
+        cells = []
+        for n in names:
+            mean = metrics_per_variant[n]["bucket_means"][i]
+            count = metrics_per_variant[n]["bucket_counts"][i]
+            cells.append(f"{mean:>+8.4f} (n={count:>3d})")
+        click.echo(f"      {label:<14}  " + "  ".join(cells))
+
+
+# ---------------------------------------------------------------------------
+# Experiment 3 — real gamelog holdout
 # ---------------------------------------------------------------------------
 
 
@@ -621,7 +849,7 @@ def _holdout_metrics(
 
 
 def run_real(league: str) -> bool:
-    click.echo(f"[2/2] Real-data holdout for league={league}")
+    click.echo(f"[3/3] Real-data holdout for league={league}")
     stats = _try_load_stats(league)
     if stats is None:
         return False
@@ -728,12 +956,23 @@ def _print_holdout_table(old: dict[str, float], new: dict[str, float]) -> None:
 @click.option("--seed", type=int, default=DEFAULT_SEED)
 @click.option("--n-games", type=int, default=DEFAULT_N_GAMES)
 @click.option("--skip-real", is_flag=True, help="Skip the real-data holdout experiment.")
-@click.option("--skip-synthetic", is_flag=True, help="Skip the synthetic experiment.")
-def main(league: str, seed: int, n_games: int, skip_real: bool, skip_synthetic: bool) -> None:
+@click.option("--skip-synthetic", is_flag=True, help="Skip both synthetic experiments.")
+@click.option("--skip-beat-line", is_flag=True, help="Skip the beat-line conditional experiment.")
+def main(
+    league: str,
+    seed: int,
+    n_games: int,
+    skip_real: bool,
+    skip_synthetic: bool,
+    skip_beat_line: bool,
+) -> None:
     click.echo("Correlation methodology comparison: OLD vs NEW")
     click.echo("=" * 72)
     if not skip_synthetic:
         run_synthetic(seed=seed, n_games=n_games)
+    if not skip_synthetic and not skip_beat_line:
+        click.echo("")
+        run_beat_line(seed=seed, n_games=n_games)
     if not skip_real:
         click.echo("")
         ran = run_real(league=league)
