@@ -16,6 +16,7 @@ from sportstradamus.dashboard_data import (
     load_history,
     load_parlays,
     load_resolve_meta,
+    render_banner,
     sidebar_filters,
 )
 
@@ -29,6 +30,7 @@ TIMEFRAME_OPTIONS = {
 }
 
 st.title("Correlations & Parlays")
+render_banner("stats", "correlation lift, hit rates, parlay calibration")
 
 # --- Load data (pre-resolved by nightly script) ---
 history = load_history()
