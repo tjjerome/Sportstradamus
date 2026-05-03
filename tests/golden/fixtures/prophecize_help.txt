@@ -1,6 +1,6 @@
 Usage: main [OPTIONS]
 
-  Run the full prediction pipeline and write results to Google Sheets.
+  Run the full prediction pipeline and snapshot results to parquet.
 
 Options:
   --progress / --no-progress  Display progress bars

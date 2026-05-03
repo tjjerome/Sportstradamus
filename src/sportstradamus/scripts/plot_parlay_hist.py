@@ -1,6 +1,5 @@
 import importlib.resources as pkg_resources
 import json
-import os.path
 
 import numpy as np
 import pandas as pd
@@ -9,6 +8,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.helpers.io import read_parlay_hist, write_parlay_hist
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL
 
 
@@ -57,10 +57,7 @@ def reflect():
     with open(pkg_resources.files(data) / "stat_map.json") as infile:
         stat_map = json.load(infile)
 
-    filepath = pkg_resources.files(data) / "parlay_hist.dat"
-    if os.path.isfile(filepath):
-        parlays_clean = pd.read_pickle(filepath)
-
+    parlays_clean = read_parlay_hist()
     parlays = parlays_clean.copy()
 
     def check_bet(bet):
@@ -145,8 +142,8 @@ def reflect():
         axis=1,
     )
 
-    pd.concat([parlays, parlays_clean]).drop_duplicates(subset=parlays.columns[:-3]).to_pickle(
-        filepath
+    write_parlay_hist(
+        pd.concat([parlays, parlays_clean]).drop_duplicates(subset=parlays.columns[:-3])
     )
 
     parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99

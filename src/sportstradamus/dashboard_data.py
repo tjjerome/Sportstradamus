@@ -5,19 +5,25 @@ All pages import from here to get cached DataFrames and filters.
 
 import importlib.resources as pkg_resources
 import json
-import os
 from datetime import datetime, timedelta
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from sportstradamus import data
-from sportstradamus.analysis import (
-    _migrate_flat_history,
-    check_bet,
-    explode_offers,
-    resolve_history,
+from sportstradamus.analysis import check_bet, explode_offers, resolve_history
+from sportstradamus.helpers.io import (
+    CURRENT_META_PATH,
+    CURRENT_OFFERS_PATH,
+    CURRENT_PARLAYS_PATH,
+    MODEL_STATS_PATH,
+    read_history,
+    read_parlay_hist,
+    read_parquet_safe,
+    write_history,
+    write_parlay_hist,
 )
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
@@ -29,46 +35,78 @@ LEAGUE_CLASSES = {
     "NHL": StatsNHL,
 }
 
+# Banner accent colors used by the two visual sections.
+PRED_BANNER_COLOR = "#1f4e79"  # deep teal
+STATS_BANNER_COLOR = "#2d6a4f"  # forest green
+
 
 @st.cache_data(ttl=3600, show_spinner="Loading prediction history...")
 def load_history():
-    """Load prediction history in normalized schema.
-
-    If old flat schema is detected (no Offers column), migrates automatically
-    and saves the migrated data back to pickle.
-    """
-    filepath = pkg_resources.files(data) / "history.dat"
-    if not os.path.isfile(filepath):
-        return pd.DataFrame()
-    history = pd.read_pickle(filepath)
-
-    # Migrate old flat schema → normalized (one row per prediction, Offers list)
-    if "Offers" not in history.columns:
-        history = _migrate_flat_history(history)
-        history.to_pickle(filepath)
-
-    # Ensure prediction-level columns exist for backward compatibility
+    """Load prediction history from parquet (Offers round-trips as list[tuple])."""
+    history = read_history()
+    if history.empty:
+        return history
     for col in ["Dist", "CV", "Model Param", "Gate", "Temperature", "Disp Cal", "Step", "Actual"]:
         if col not in history.columns:
             history[col] = np.nan
-
     return history
 
 
 @st.cache_data(ttl=3600, show_spinner="Loading parlay history...")
 def load_parlays():
-    """Load parlay history."""
-    filepath = pkg_resources.files(data) / "parlay_hist.dat"
-    if not os.path.isfile(filepath):
-        return pd.DataFrame()
-    parlays = pd.read_pickle(filepath)
-
-    # Backward compat
+    """Load parlay history from parquet."""
+    parlays = read_parlay_hist()
+    if parlays.empty:
+        return parlays
     for col in ["Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"]:
         if col not in parlays.columns:
             parlays[col] = np.nan
-
     return parlays
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading current offers...")
+def load_current_offers() -> pd.DataFrame:
+    """Today's scored offers, written by `prophecize`."""
+    return read_parquet_safe(CURRENT_OFFERS_PATH)
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading current parlays...")
+def load_current_parlays() -> pd.DataFrame:
+    """Today's parlay candidates, written by `prophecize`."""
+    return read_parquet_safe(CURRENT_PARLAYS_PATH)
+
+
+@st.cache_data(ttl=3600)
+def load_current_meta() -> dict:
+    """Snapshot metadata (timestamp, leagues, platforms, row counts)."""
+    if not CURRENT_META_PATH.is_file():
+        return {}
+    try:
+        with open(CURRENT_META_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner="Loading model training stats...")
+def load_model_stats() -> pd.DataFrame:
+    """Per-(league, market, metric_row) training diagnostics from `meditate`."""
+    return read_parquet_safe(MODEL_STATS_PATH)
+
+
+def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
+    """Render a colored section banner so Predictions vs Stats are visually distinct."""
+    if kind == "predictions":
+        color, icon, label = PRED_BANNER_COLOR, "🎯", "Predictions"
+    else:
+        color, icon, label = STATS_BANNER_COLOR, "📊", "Stats"
+    sub = f" — {subtitle}" if subtitle else ""
+    st.markdown(
+        f'<div style="background:{color};padding:10px 14px;border-radius:6px;'
+        f'color:white;margin-bottom:14px;font-size:14px">'
+        f"{icon} <b>{label}</b>{sub}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_resource(show_spinner="Loading league stats...")
@@ -111,7 +149,7 @@ def load_resolve_meta():
 
 
 def resolve_and_save(history, stats):
-    """Resolve pending predictions (fill Actual) and save back to pickle."""
+    """Resolve pending predictions (fill Actual) and save back to parquet."""
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
 
@@ -120,15 +158,12 @@ def resolve_and_save(history, stats):
         return history
 
     history = resolve_history(history, stats)
-
-    filepath = pkg_resources.files(data) / "history.dat"
-    history.to_pickle(filepath)
-
+    write_history(history)
     return history
 
 
 def resolve_parlays_and_save(parlays, stats, stat_map):
-    """Resolve pending parlays and save back to pickle."""
+    """Resolve pending parlays and save back to parquet."""
     if parlays.empty or "Legs" not in parlays.columns:
         return parlays
 
@@ -143,10 +178,7 @@ def resolve_parlays_and_save(parlays, stats, stat_map):
         lambda bet: check_bet(bet, stats, stat_map), axis=1
     ).to_list()
     parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
-
-    filepath = pkg_resources.files(data) / "parlay_hist.dat"
-    parlays.to_pickle(filepath)
-
+    write_parlay_hist(parlays)
     return parlays
 
 
