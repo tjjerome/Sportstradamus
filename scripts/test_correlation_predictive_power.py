@@ -30,22 +30,41 @@ from scipy.stats import spearmanr
 
 
 def _load_correlate_module():
-    """Load src/sportstradamus/training/correlate.py without importing the package.
+    """Load ``sportstradamus.training.correlate`` with two strategies.
 
-    The package's __init__ chain pulls in optional ML deps and reads
-    credentials at import time, which we don't have in this test env.
-    correlate.py itself only depends on numpy/pandas/tqdm and a tiny
-    ``from sportstradamus import data`` (a namespace package, no code),
-    so we load it directly by file path.
+    Strategy A (preferred): a normal ``import sportstradamus.training.correlate``.
+    This is what runs in any environment with the package properly installed
+    (i.e. anywhere ``poetry install`` succeeded), and it leaves the rest of
+    the ``sportstradamus`` package importable so experiment 3 can do
+    ``from sportstradamus import stats``.
+
+    Strategy B (fallback for sandboxes without the full dep tree): load
+    ``correlate.py`` directly by file path, after stubbing the
+    ``sportstradamus`` and ``sportstradamus.data`` package entries so the
+    ``from sportstradamus import data`` line at the top of correlate.py
+    resolves. This path is only taken when strategy A fails — typically
+    because optional ML deps or credentials referenced in the package
+    ``__init__`` chain are missing. Once strategy B runs, the rest of the
+    package can no longer be imported normally; experiment 3 will detect
+    that and skip with a clear message.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    correlate_path = repo_root / "src/sportstradamus/training/correlate.py"
-
-    # Stub the package paths the module imports so ``from sportstradamus
-    # import data`` resolves without triggering the real package init.
     src_root = repo_root / "src"
     if str(src_root) not in sys.path:
         sys.path.insert(0, str(src_root))
+
+    try:
+        import sportstradamus.training.correlate as mod
+        return mod
+    except Exception as exc:
+        click.echo(
+            f"      (note: normal import of sportstradamus.training.correlate failed: "
+            f"{type(exc).__name__}: {exc}; falling back to file-load. Experiment 3 "
+            f"will be unavailable in this mode.)",
+            err=True,
+        )
+
+    correlate_path = repo_root / "src/sportstradamus/training/correlate.py"
     for pkg_name, pkg_path in [
         ("sportstradamus", src_root / "sportstradamus"),
         ("sportstradamus.data", src_root / "sportstradamus" / "data"),
@@ -55,26 +74,23 @@ def _load_correlate_module():
         spec = importlib.util.spec_from_file_location(
             pkg_name, pkg_path / "__init__.py", submodule_search_locations=[str(pkg_path)]
         )
-        # No __init__.py for some — fall back to a bare namespace module.
         if spec is None or spec.loader is None:
-            mod = importlib.util.module_from_spec(
+            stub = importlib.util.module_from_spec(
                 importlib.util.spec_from_loader(pkg_name, loader=None)
             )
-            mod.__path__ = [str(pkg_path)]
-            sys.modules[pkg_name] = mod
+            stub.__path__ = [str(pkg_path)]
+            sys.modules[pkg_name] = stub
         else:
             mod = importlib.util.module_from_spec(spec)
             sys.modules[pkg_name] = mod
             try:
                 spec.loader.exec_module(mod)
             except Exception:
-                # Some sub-packages have heavy __init__ — fall back to a
-                # bare namespace so submodule imports still work.
-                mod = importlib.util.module_from_spec(
+                stub = importlib.util.module_from_spec(
                     importlib.util.spec_from_loader(pkg_name, loader=None)
                 )
-                mod.__path__ = [str(pkg_path)]
-                sys.modules[pkg_name] = mod
+                stub.__path__ = [str(pkg_path)]
+                sys.modules[pkg_name] = stub
 
     spec = importlib.util.spec_from_file_location(
         "sportstradamus.training.correlate", correlate_path
@@ -854,6 +870,13 @@ def run_real(league: str) -> bool:
     if stats is None:
         return False
 
+    if not hasattr(_correlate, "_build_team_game_records"):
+        click.echo(
+            "      correlate module loaded via file-stub fallback — production "
+            "_build_team_game_records is not available in this mode. Re-run in "
+            "an env where ``import sportstradamus.training.correlate`` works."
+        )
+        return False
     _build_team_game_records = _correlate._build_team_game_records
     _TRACKED_STATS = _correlate._TRACKED_STATS
     if league not in _TRACKED_STATS:
@@ -865,16 +888,32 @@ def run_real(league: str) -> bool:
     # _residualize_gamelog internally, so this is effectively the "new"
     # method's input. For the OLD method we re-pivot the raw gamelog from
     # the same set of (gameId, team) rows so comparisons are apples-to-apples.
-    earliest = pd.to_datetime(stats.gamelog[stats.log_strings["date"]]).min().to_pydatetime()
-    res_records = _build_team_game_records(league, stats, earliest)
-    res_matrix = pd.DataFrame(pd.json_normalize(res_records))
+    try:
+        earliest = pd.to_datetime(
+            stats.gamelog[stats.log_strings["date"]]
+        ).min().to_pydatetime()
+        res_records = _build_team_game_records(league, stats, earliest)
+        res_matrix = pd.DataFrame(pd.json_normalize(res_records))
+    except Exception as exc:
+        click.echo(
+            f"      _build_team_game_records (residualized) raised "
+            f"{type(exc).__name__}: {exc} — skipping"
+        )
+        return False
     if res_matrix.empty or "DATE" not in res_matrix.columns:
         click.echo("      _build_team_game_records returned no usable rows — skipping")
         return False
 
     # Mirror the same pivot but skip residualization for the OLD path.
-    raw_records = _build_team_game_records_no_residual(league, stats, earliest)
-    raw_matrix = pd.DataFrame(pd.json_normalize(raw_records))
+    try:
+        raw_records = _build_team_game_records_no_residual(league, stats, earliest)
+        raw_matrix = pd.DataFrame(pd.json_normalize(raw_records))
+    except Exception as exc:
+        click.echo(
+            f"      _build_team_game_records (raw) raised "
+            f"{type(exc).__name__}: {exc} — skipping"
+        )
+        return False
 
     # Time-based 70/30 split on the residualized matrix; align the raw
     # matrix to the same date cutoff.
