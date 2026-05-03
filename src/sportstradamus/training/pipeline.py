@@ -320,7 +320,7 @@ def train_market(
         )
     else:
         opt_params = warm_start_hyper_opt(
-            model, hp_search_space, dtrain, opt_params, n_trials=200, max_minutes=10
+            model, hp_search_space, dtrain, opt_params, n_trials=150, max_minutes=5
         )
 
     model.train(opt_params, dtrain, num_boost_round=opt_params["opt_rounds"])

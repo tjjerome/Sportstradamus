@@ -75,7 +75,7 @@ def load_parlays():
 def load_stats():
     """Load Stats objects from cached pickle files (no API calls).
 
-    API updates are handled by the nightly script (poetry run nightly),
+    API updates are handled by the nightly script (poetry run reflect),
     not at dashboard startup. This keeps the dashboard load fast (~2 s).
     """
     stats = {}
