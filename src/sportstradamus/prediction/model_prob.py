@@ -24,6 +24,7 @@ from sportstradamus.helpers import (
     fused_loc,
     get_ev,
     get_odds,
+    get_push_prob,
     set_model_start_values,
     stat_cv,
     stat_map,
@@ -367,6 +368,22 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 gate=_gate,
             )
         _raw_over = 1 - _raw_under
+
+        # Push probability for integer-line discrete-distribution markets. Used
+        # by :mod:`sportstradamus.prediction.correlation` to apply the Underdog
+        # "push drops one leg" rule. Continuous distributions return zero.
+        _push = get_push_prob(
+            offer_df["Line"].to_numpy(),
+            _model_ev,
+            dist,
+            cv=cv,
+            r=_r,
+            sigma=_sigma,
+            skew_alpha=_skew,
+            gate=_gate,
+        )
+        offer_df["Push P"] = np.asarray(_push, dtype=float)
+
         if temperature is not None:
             _raw_over_clipped = np.clip(_raw_over, 1e-6, 1 - 1e-6)
             _cal_over = expit(logit(_raw_over_clipped) / temperature)
@@ -460,6 +477,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 "Model EV",
                 "Model Param",
                 "Model P",
+                "Push P",
                 "Books EV",
                 "Books P",
                 "K",

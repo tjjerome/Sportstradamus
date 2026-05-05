@@ -33,7 +33,7 @@ archive = Archive()
 
 
 @line_profiler.profile
-def process_offers(offer_dict, book, stats):
+def process_offers(offer_dict, book, stats, *, contest_variant="power", legacy=False):
     """Score all offers from one platform and return annotated DataFrames.
 
     Iterates every league/market pair in ``offer_dict``, adds DFS lines to
@@ -45,6 +45,8 @@ def process_offers(offer_dict, book, stats):
         offer_dict: ``{league: {market: [offer, ...]}}`` from the scraper.
         book: DFS platform name (e.g. ``"Underdog"``).
         stats: ``{league: Stats}`` dict for currently active leagues.
+        contest_variant: Underdog contest variant; passed to find_correlation.
+        legacy: Legacy-pipeline escape hatch; passed to find_correlation.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)``.
@@ -58,7 +60,10 @@ def process_offers(offer_dict, book, stats):
             for league, markets in offer_dict.items():
                 if league in stats:
                     stat_data = stats.get(league)
-                    if stat_data.season_start > datetime.datetime.today().date() - datetime.timedelta(days=14):
+                    if (
+                        stat_data.season_start
+                        > datetime.datetime.today().date() - datetime.timedelta(days=14)
+                    ):
                         logger.info(f"{league} season has not started, skipping stat matching")
                         continue
 
@@ -89,7 +94,9 @@ def process_offers(offer_dict, book, stats):
                         )
                         new_offers.extend(modeled_offers)
 
-    offer_df, parlays = find_correlation(new_offers, stats, book)
+    offer_df, parlays = find_correlation(
+        new_offers, stats, book, contest_variant=contest_variant, legacy=legacy
+    )
 
     logger.info(str(len(offer_df)) + " offers processed")
     return offer_df, parlays

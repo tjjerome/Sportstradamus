@@ -85,8 +85,27 @@ def _authorize_sheets():
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
+@click.option(
+    "--legacy-correlation/--no-legacy-correlation",
+    default=False,
+    help=(
+        "Reproduce the pre-2026.05 parlay pipeline verbatim — no PSD repair, "
+        "no push-aware EV, mixed insurance/power Boost overwrite. Removed "
+        "next release; provided as a one-cycle escape hatch."
+    ),
+)
+@click.option(
+    "--contest-variant",
+    type=click.Choice(["power", "flex", "insurance", "rivals"]),
+    default="power",
+    help=(
+        "Underdog contest variant for parlay scoring. Default 'power' "
+        "matches the displayed Boost column historically; 'insurance' "
+        "matches the legacy ranking line."
+    ),
+)
 @line_profiler.profile
-def main(progress):
+def main(progress, legacy_correlation, contest_variant):
     """Run the full prediction pipeline and write results to Google Sheets."""
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -122,7 +141,13 @@ def main(progress):
 
     try:
         ud_dict = get_ud()
-        ud_offers, ud5 = process_offers(ud_dict, "Underdog", stats)
+        ud_offers, ud5 = process_offers(
+            ud_dict,
+            "Underdog",
+            stats,
+            contest_variant=contest_variant,
+            legacy=legacy_correlation,
+        )
         save_data(
             ud_offers.drop(columns=_EXPORT_DROP_COLS, errors="ignore"),
             ud5.drop(columns=["P", "PB"]),
@@ -144,7 +169,13 @@ def main(progress):
 
     try:
         sl_dict = get_sleeper()
-        sl_offers, sl5 = process_offers(sl_dict, "Sleeper", stats)
+        sl_offers, sl5 = process_offers(
+            sl_dict,
+            "Sleeper",
+            stats,
+            contest_variant=contest_variant,
+            legacy=legacy_correlation,
+        )
         save_data(
             sl_offers.drop(
                 columns=[c for c in _EXPORT_DROP_COLS if c != "Player position"],

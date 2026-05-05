@@ -41,12 +41,14 @@ from sportstradamus.helpers.config import (
     stat_map,
     stat_std,
     stat_zi,
+    underdog_payouts,
 )
 from sportstradamus.helpers.distributions import (
     fit_distro,
     fused_loc,
     get_ev,
     get_odds,
+    get_push_prob,
     no_vig_odds,
     odds_to_prob,
     prob_to_odds,
@@ -76,6 +78,7 @@ __all__ = [
     "get_ev",
     "get_mlb_pitchers",
     "get_odds",
+    "get_push_prob",
     "get_trends",
     "hmean",
     "merge_dict",
@@ -93,4 +96,5 @@ __all__ = [
     "stat_map",
     "stat_std",
     "stat_zi",
+    "underdog_payouts",
 ]

@@ -80,3 +80,16 @@ for platform in banned:
 
 with open(pkg_resources.files(data) / "name_map.json") as infile:
     name_map = json.load(infile)
+
+# Underdog contest-variant payouts feed parlay scoring + display reconciliation
+# in :mod:`sportstradamus.prediction.correlation`. Keys are bet sizes encoded
+# as strings; rewrite to int keys so callers can index by ``bet_size``
+# directly.
+with open(pkg_resources.files(data) / "underdog_payouts.json") as infile:
+    _raw_underdog = json.load(infile)
+
+underdog_payouts: dict[str, dict[int, float | list[float]]] = {}
+for _variant, _table in _raw_underdog.items():
+    if _variant.startswith("_"):
+        continue
+    underdog_payouts[_variant] = {int(k): v for k, v in _table.items()}
