@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import sys
 import warnings
@@ -54,8 +55,12 @@ def _load_correlate_module():
         sys.path.insert(0, str(src_root))
 
     try:
-        import sportstradamus.training.correlate as mod
-        return mod
+        # NOTE: do not use `import sportstradamus.training.correlate as mod` —
+        # the training package __init__ does `from .correlate import correlate`,
+        # which rebinds the `correlate` attribute on the package namespace to
+        # the function, and `import ... as` resolves via attribute access.
+        # importlib.import_module reads sys.modules and returns the submodule.
+        return importlib.import_module("sportstradamus.training.correlate")
     except Exception as exc:
         click.echo(
             f"      (note: normal import of sportstradamus.training.correlate failed: "
@@ -512,27 +517,6 @@ def _print_ablation_table(metrics_per_variant: dict[str, dict[str, float]]) -> N
         click.echo(f"      {label:<38}  " + "  ".join(cells))
 
 
-def _print_recovery_table(old: dict[str, float], new: dict[str, float]) -> None:
-    rows = [
-        ("pairs scored", "n_pairs", "{:>10.0f}"),
-        ("MAE (lower better)", "mae", "{:>10.4f}"),
-        ("RMSE (lower better)", "rmse", "{:>10.4f}"),
-        ("Spearman rank rho (higher better)", "spearman_rho", "{:>10.4f}"),
-        ("confounded-pair MAE (lower better)", "confounded_mae", "{:>10.4f}"),
-        ("low-overlap pair MAE (lower better)", "low_overlap_mae", "{:>10.4f}"),
-        ("n confounded", "n_confounded", "{:>10.0f}"),
-        ("n low overlap (<30 shared)", "n_low_overlap", "{:>10.0f}"),
-    ]
-    click.echo("")
-    click.echo(f"      {'metric':<38}  {'OLD':>10}  {'NEW':>10}  {'delta':>10}")
-    click.echo(f"      {'-'*38}  {'-'*10}  {'-'*10}  {'-'*10}")
-    for label, key, fmt in rows:
-        ov, nv = old[key], new[key]
-        delta = nv - ov
-        delta_str = (f"{delta:>+10.4f}") if "f" in fmt else f"{delta:>+10.0f}"
-        click.echo(f"      {label:<38}  {fmt.format(ov)}  {fmt.format(nv)}  {delta_str}")
-
-
 # ---------------------------------------------------------------------------
 # Experiment 2 — beat-line conditional probability (production-relevant)
 # ---------------------------------------------------------------------------
@@ -684,6 +668,182 @@ def _score_against_beat_line(
         "bucket_means": bucket_means,
         "bucket_counts": bucket_counts,
     }
+
+
+def _same_player_real(a: str, b: str) -> bool:
+    """Two real-data column names refer to the same player.
+
+    Real-data column format from ``_build_team_game_records`` is
+    ``{position}.{stat}`` for own team (e.g. ``PG1.PTS``) and
+    ``_OPP_{position}.{stat}`` for opponent. Player identity = everything
+    before the first ``.``; opponent vs own-team prefix prevents accidental
+    cross-team matches because ``_OPP_PG1`` != ``PG1``.
+    """
+    return a.split(".")[0] == b.split(".")[0]
+
+
+def _score_against_beat_line_quantile(
+    estimate_per_team: dict[str, pd.DataFrame],
+    beat_line_per_team: dict[str, pd.DataFrame],
+    same_player_fn,
+) -> dict:
+    """Real-data variant of beat-line scoring with data-driven bucket cutoffs.
+
+    Bucket layout (4 rows):
+      1. bottom 25% of |pred|, same-player pairs excluded
+      2. middle 25%-75%, same-player pairs excluded
+      3. top 25% (>75th pct), same-player pairs excluded
+      4. extreme tail INCLUDING same-player pairs (i<j only, so the trivial
+         A.X/A.X self-correlation is already excluded), threshold =
+         max(95th pct of no-self |pred|, 75th pct of full |pred|).
+
+    All cutoffs are computed per-variant from the variant's own |pred|
+    distribution — the synthetic hardcoded edges (0.05/0.20/0.40) are not
+    reused because real-data magnitude scales differ.
+    """
+    pred_full: list[float] = []
+    actual_full: list[float] = []
+    pred_no_self: list[float] = []
+    actual_no_self: list[float] = []
+    sign_match = 0
+    sign_total = 0
+
+    for team, truth in beat_line_per_team.items():
+        est = estimate_per_team.get(team)
+        cols = list(truth.columns)
+        for i, a in enumerate(cols):
+            for b in cols[i + 1 :]:
+                t = float(truth.loc[a, b])
+                if pd.isna(t):
+                    continue
+                if est is not None and a in est.index and b in est.columns:
+                    p = float(est.loc[a, b])
+                else:
+                    p = 0.0
+                pred_full.append(p)
+                actual_full.append(t)
+                if not same_player_fn(a, b):
+                    pred_no_self.append(p)
+                    actual_no_self.append(t)
+                if abs(p) >= SIGN_AGREEMENT_MAG_FLOOR and abs(t) >= SIGN_AGREEMENT_MAG_FLOOR:
+                    sign_total += 1
+                    if np.sign(p) == np.sign(t):
+                        sign_match += 1
+
+    pa_full = np.array(pred_full)
+    aa_full = np.array(actual_full)
+    pa_ns = np.array(pred_no_self)
+    aa_ns = np.array(actual_no_self)
+    if len(pa_full) == 0 or len(pa_ns) == 0:
+        return {"n_pairs": 0.0}
+
+    abs_ns = np.abs(pa_ns)
+    abs_full = np.abs(pa_full)
+    q25 = float(np.quantile(abs_ns, 0.25))
+    q75 = float(np.quantile(abs_ns, 0.75))
+    q95_ns = float(np.quantile(abs_ns, 0.95))
+    q75_full = float(np.quantile(abs_full, 0.75))
+    extreme_cutoff = max(q95_ns, q75_full)
+
+    def _bucket_lift(pa: np.ndarray, aa: np.ndarray, mask: np.ndarray) -> tuple[float, int]:
+        if not mask.any():
+            return float("nan"), 0
+        signed = np.where(pa[mask] >= 0, aa[mask], -aa[mask])
+        return float(np.mean(signed)), int(mask.sum())
+
+    bucket_specs = [
+        (f"bot25(<{q25:.3f})",      _bucket_lift(pa_ns, aa_ns, abs_ns < q25)),
+        (f"mid({q25:.3f}-{q75:.3f})", _bucket_lift(pa_ns, aa_ns, (abs_ns >= q25) & (abs_ns < q75))),
+        (f"top25(>{q75:.3f})",      _bucket_lift(pa_ns, aa_ns, abs_ns >= q75)),
+        (f"extreme(>{extreme_cutoff:.3f},+self)", _bucket_lift(pa_full, aa_full, abs_full >= extreme_cutoff)),
+    ]
+    bucket_labels = [s[0] for s in bucket_specs]
+    bucket_means = [s[1][0] for s in bucket_specs]
+    bucket_counts = [s[1][1] for s in bucket_specs]
+
+    return {
+        "n_pairs": float(len(pa_full)),
+        "n_pairs_no_self": float(len(pa_ns)),
+        "mae_vs_beat_line": float(np.mean(np.abs(pa_full - aa_full))),
+        "rho_pred_vs_actual": (
+            float(spearmanr(pa_full, aa_full).statistic) if len(pa_full) > 1 else float("nan")
+        ),
+        "sign_agreement": (sign_match / sign_total) if sign_total else float("nan"),
+        "n_sign_pairs": float(sign_total),
+        "bucket_labels": bucket_labels,
+        "bucket_means": bucket_means,
+        "bucket_counts": bucket_counts,
+        "q25": q25,
+        "q75": q75,
+        "q95_no_self": q95_ns,
+        "q75_full": q75_full,
+        "extreme_cutoff": extreme_cutoff,
+    }
+
+
+def _print_beat_line_quantile_table(metrics_per_variant: dict[str, dict]) -> None:
+    """Print the real-data beat-line table with data-driven quantile buckets.
+
+    Each variant has its own cutoffs (computed from its own |pred|
+    distribution), so the bucket-row labels live in the variant column —
+    we render one row per logical bucket (bot/mid/top/extreme) and the
+    label stays identical, but the cutoff values appear in the cells.
+    """
+    rows = [
+        ("pairs scored (full)", "n_pairs", "{:>22.0f}"),
+        ("pairs scored (no self)", "n_pairs_no_self", "{:>22.0f}"),
+        ("MAE vs beat-line corr (lower better)", "mae_vs_beat_line", "{:>22.4f}"),
+        ("Spearman rho pred vs actual (higher better)", "rho_pred_vs_actual", "{:>22.4f}"),
+        ("sign agreement (higher better)", "sign_agreement", "{:>22.4f}"),
+        ("n sign-comparable pairs", "n_sign_pairs", "{:>22.0f}"),
+    ]
+    names = list(metrics_per_variant.keys())
+    click.echo("")
+    click.echo("      " + f"{'metric':<46}" + "  " + "  ".join(f"{n:>22}" for n in names))
+    click.echo("      " + "-" * 46 + "  " + "  ".join("-" * 22 for _ in names))
+    for label, key, fmt in rows:
+        cells = []
+        for n in names:
+            v = metrics_per_variant[n].get(key, float("nan"))
+            cells.append(fmt.format(v))
+        click.echo(f"      {label:<46}  " + "  ".join(cells))
+
+    # Per-variant cutoffs row — buckets are quantile-defined per variant,
+    # so we print the actual cutoff values used.
+    click.echo("")
+    click.echo("      |pred| cutoffs per variant (q25 / q75 / extreme):")
+    for n in names:
+        m = metrics_per_variant[n]
+        click.echo(
+            f"        {n:<14} q25={m['q25']:.4f}  q75={m['q75']:.4f}  "
+            f"extreme={m['extreme_cutoff']:.4f}  "
+            f"(=max of q95_no_self={m['q95_no_self']:.4f}, q75_full={m['q75_full']:.4f})"
+        )
+
+    click.echo("")
+    click.echo(
+        "      direction-matched realized beat-line corr by |pred| quantile bucket"
+    )
+    click.echo(
+        "      buckets 1-3 exclude same-player pairs; bucket 4 includes them"
+    )
+    bucket_headers = [
+        "bot 25% (no self)",
+        "mid 25-75% (no self)",
+        "top 25% (no self)",
+        "extreme (incl self)",
+    ]
+    click.echo(
+        "      " + f"{'bucket':<22}" + "  " + "  ".join(f"{n:>18}" for n in names)
+    )
+    click.echo("      " + "-" * 22 + "  " + "  ".join("-" * 18 for _ in names))
+    for i, header in enumerate(bucket_headers):
+        cells = []
+        for n in names:
+            mean = metrics_per_variant[n]["bucket_means"][i]
+            count = metrics_per_variant[n]["bucket_counts"][i]
+            cells.append(f"{mean:>+8.4f} (n={count:>5d})")
+        click.echo(f"      {header:<22}  " + "  ".join(cells))
 
 
 def run_beat_line(seed: int, n_games: int) -> None:
@@ -877,22 +1037,22 @@ def run_real(league: str) -> bool:
             "an env where ``import sportstradamus.training.correlate`` works."
         )
         return False
-    _build_team_game_records = _correlate._build_team_game_records
     _TRACKED_STATS = _correlate._TRACKED_STATS
     if league not in _TRACKED_STATS:
         click.echo(f"      league {league} not in _TRACKED_STATS — skipping")
         return False
 
-    # Build the per-team-per-game matrix the same way the production
-    # correlate() does. _build_team_game_records already runs
-    # _residualize_gamelog internally, so this is effectively the "new"
-    # method's input. For the OLD method we re-pivot the raw gamelog from
-    # the same set of (gameId, team) rows so comparisons are apples-to-apples.
+    # Build three per-team-per-game matrices over the same (game, team) row
+    # set, differing only in per-cell transform:
+    #   res_matrix       — residualized stat values (production "new" input)
+    #   raw_matrix       — raw stat values (production "old" input)
+    #   beat_line_matrix — 1/0/NaN beat-line booleans against rolling line
+    #                      (ground truth for the conditional-probability test)
     try:
         earliest = pd.to_datetime(
             stats.gamelog[stats.log_strings["date"]]
         ).min().to_pydatetime()
-        res_records = _build_team_game_records(league, stats, earliest)
+        res_records = _correlate._build_team_game_records(league, stats, earliest)
         res_matrix = pd.DataFrame(pd.json_normalize(res_records))
     except Exception as exc:
         click.echo(
@@ -904,48 +1064,98 @@ def run_real(league: str) -> bool:
         click.echo("      _build_team_game_records returned no usable rows — skipping")
         return False
 
-    # Mirror the same pivot but skip residualization for the OLD path.
     try:
         raw_records = _build_team_game_records_no_residual(league, stats, earliest)
         raw_matrix = pd.DataFrame(pd.json_normalize(raw_records))
+        beat_line_records = _build_team_game_records_beat_line(league, stats, earliest)
+        beat_line_matrix = pd.DataFrame(pd.json_normalize(beat_line_records))
     except Exception as exc:
         click.echo(
-            f"      _build_team_game_records (raw) raised "
+            f"      auxiliary _build_team_game_records pivot raised "
             f"{type(exc).__name__}: {exc} — skipping"
         )
         return False
 
-    # Time-based 70/30 split on the residualized matrix; align the raw
-    # matrix to the same date cutoff.
+    # Time-based 70/30 split on the residualized matrix; align the others
+    # to the same date cutoff.
     res_matrix = res_matrix.sort_values("DATE").reset_index(drop=True)
     raw_matrix = raw_matrix.sort_values("DATE").reset_index(drop=True)
+    beat_line_matrix = beat_line_matrix.sort_values("DATE").reset_index(drop=True)
     n = len(res_matrix)
     cutoff_date = res_matrix.loc[int(n * TRAIN_FRACTION), "DATE"]
     click.echo(f"      train/test cutoff = {cutoff_date} ({int(n*TRAIN_FRACTION)}/{n} rows)")
 
     res_train = res_matrix.loc[res_matrix["DATE"] <= cutoff_date]
-    res_test = res_matrix.loc[res_matrix["DATE"] > cutoff_date]
     raw_train = raw_matrix.loc[raw_matrix["DATE"] <= cutoff_date]
     raw_test = raw_matrix.loc[raw_matrix["DATE"] > cutoff_date]
+    beat_test = beat_line_matrix.loc[beat_line_matrix["DATE"] > cutoff_date]
 
-    if len(res_test) < 50:
-        click.echo(f"      only {len(res_test)} test rows — too few, skipping")
+    if (raw_matrix["DATE"] > cutoff_date).sum() < 50:
+        click.echo("      fewer than 50 test rows — skipping")
         return False
 
-    old_stacked = build_corr_old(raw_train)
-    new_stacked = build_corr_new(res_train)
+    # Same four variants as the synthetic experiments — same input
+    # convention: OLD/PAIRWISE_ONLY consume the raw matrix, RESIDUAL_ONLY/NEW
+    # consume the residualized matrix.
+    variants = [
+        ("OLD", build_corr_old(raw_train)),
+        ("PAIRWISE_ONLY", build_corr_pairwise_only(raw_train)),
+        ("RESIDUAL_ONLY", build_corr_residual_only(res_train)),
+        ("NEW", build_corr_new(res_train)),
+    ]
+    overlap_raw = _per_team_overlap(raw_train)
+    overlap_res = _per_team_overlap(res_train)
+    overlap_per_variant = {
+        "OLD": overlap_raw,
+        "PAIRWISE_ONLY": overlap_raw,
+        "RESIDUAL_ONLY": overlap_res,
+        "NEW": overlap_res,
+    }
 
-    old_per_team = _stacked_to_per_team(old_stacked)
-    new_per_team = _stacked_to_per_team(new_stacked)
+    test_spearman = _empirical_corr(raw_test)
+    test_beat_line = _empirical_beat_line_corr(beat_test)
 
-    test_per_team = _empirical_corr(raw_test)
-    overlap_per_team = _per_team_overlap(res_train)
+    holdout_metrics: dict[str, dict[str, float]] = {}
+    beat_line_metrics: dict[str, dict] = {}
+    for name, stacked in variants:
+        per_team = _stacked_to_per_team(stacked)
+        holdout_metrics[name] = _holdout_metrics(
+            per_team, test_spearman, overlap_per_variant[name]
+        )
+        beat_line_metrics[name] = _score_against_beat_line_quantile(
+            per_team, test_beat_line, _same_player_real
+        )
 
-    metrics_old = _holdout_metrics(old_per_team, test_per_team, overlap_per_team)
-    metrics_new = _holdout_metrics(new_per_team, test_per_team, overlap_per_team)
-
-    _print_holdout_table(metrics_old, metrics_new)
+    click.echo("")
+    click.echo("      [3a] Train-vs-test Spearman recovery (analogous to experiment 1)")
+    _print_holdout_ablation_table(holdout_metrics)
+    click.echo("")
+    click.echo("      [3b] Beat-line conditional probability (analogous to experiment 2)")
+    _print_beat_line_quantile_table(beat_line_metrics)
     return True
+
+
+def _print_holdout_ablation_table(metrics_per_variant: dict[str, dict[str, float]]) -> None:
+    """Multi-variant version of _print_holdout_table for the real-data run."""
+    rows = [
+        ("pairs scored", "n_pairs", "{:>14.0f}"),
+        ("holdout MAE (lower better)", "mae", "{:>14.4f}"),
+        ("Spearman rho train vs test (higher better)", "spearman_rho", "{:>14.4f}"),
+        ("sign agreement (higher better)", "sign_agreement", "{:>14.4f}"),
+        ("n sign-comparable pairs", "n_sign_pairs", "{:>14.0f}"),
+        ("low-overlap MAE (lower better)", "low_overlap_mae", "{:>14.4f}"),
+        ("n low overlap pairs", "n_low_overlap", "{:>14.0f}"),
+    ]
+    names = list(metrics_per_variant.keys())
+    click.echo("")
+    click.echo("      " + f"{'metric':<46}" + "  " + "  ".join(f"{n:>14}" for n in names))
+    click.echo("      " + "-" * 46 + "  " + "  ".join("-" * 14 for _ in names))
+    for label, key, fmt in rows:
+        cells = []
+        for n in names:
+            v = metrics_per_variant[n].get(key, float("nan"))
+            cells.append(fmt.format(v))
+        click.echo(f"      {label:<46}  " + "  ".join(cells))
 
 
 def _build_team_game_records_no_residual(league: str, stats, earliest_date) -> list[dict]:
@@ -965,24 +1175,39 @@ def _build_team_game_records_no_residual(league: str, stats, earliest_date) -> l
         cmod._residualize_gamelog = orig
 
 
-def _print_holdout_table(old: dict[str, float], new: dict[str, float]) -> None:
-    rows = [
-        ("pairs scored", "n_pairs", "{:>10.0f}"),
-        ("holdout MAE (lower better)", "mae", "{:>10.4f}"),
-        ("Spearman rho train vs test (higher better)", "spearman_rho", "{:>10.4f}"),
-        ("sign agreement (higher better)", "sign_agreement", "{:>10.4f}"),
-        ("n sign-comparable pairs", "n_sign_pairs", "{:>10.0f}"),
-        ("low-overlap MAE (lower better)", "low_overlap_mae", "{:>10.4f}"),
-        ("n low overlap pairs", "n_low_overlap", "{:>10.0f}"),
-    ]
-    click.echo("")
-    click.echo(f"      {'metric':<46}  {'OLD':>10}  {'NEW':>10}  {'delta':>10}")
-    click.echo(f"      {'-'*46}  {'-'*10}  {'-'*10}  {'-'*10}")
-    for label, key, fmt in rows:
-        ov, nv = old[key], new[key]
-        delta = nv - ov
-        delta_str = (f"{delta:>+10.4f}") if "f" in fmt else f"{delta:>+10.0f}"
-        click.echo(f"      {label:<46}  {fmt.format(ov)}  {fmt.format(nv)}  {delta_str}")
+def _build_team_game_records_beat_line(league: str, stats, earliest_date) -> list[dict]:
+    """Same pivot as production, but cells are beat-line booleans.
+
+    We patch ``_residualize_gamelog`` so each tracked stat becomes 1.0 if the
+    raw value beat the rolling-mean line (residual > 0), 0.0 otherwise, and
+    NaN where rolling history was insufficient (line undefined). The
+    surrounding pivot logic in ``_build_team_game_records`` is unchanged, so
+    the resulting matrix has identical (gameId, team) rows and column names
+    to the residualized/raw variants — only the per-cell semantics differ.
+
+    The Pearson correlation of these per-team boolean columns IS what the
+    parlay EV multiplication consumes downstream — see the comment block at
+    the top of experiment 2.
+    """
+    cmod = _correlate
+    orig = cmod._residualize_gamelog
+
+    def beat_line_residualize(gamelog, player_col, date_col, stat_cols):
+        residualized = orig(gamelog, player_col, date_col, stat_cols)
+        for s in stat_cols:
+            if s not in residualized.columns:
+                continue
+            vals = residualized[s]
+            hits = (vals > 0).astype("float")
+            hits[vals.isna()] = np.nan
+            residualized[s] = hits
+        return residualized
+
+    cmod._residualize_gamelog = beat_line_residualize
+    try:
+        return cmod._build_team_game_records(league, stats, earliest_date)
+    finally:
+        cmod._residualize_gamelog = orig
 
 
 # ---------------------------------------------------------------------------
