@@ -113,7 +113,8 @@ def _payout_curve_for(
 
     legacy_tables: dict[str, list[float]] = {
         "PrizePicks": [3.0, 5.3, 10.0, 20.8, 38.8],
-        "Sleeper": [1.0, 1.0, 1.0, 1.0, 1.0],
+        # Sleeper caps real parlays at 3 legs — sizes 4-6 not enumerated.
+        "Sleeper": [1.0, 1.0],
         "ParlayPlay": [1.0, 1.0, 1.0, 1.0, 1.0],
         "Chalkboard": [1.0, 1.0, 1.0, 1.0, 1.0],
     }
@@ -123,15 +124,19 @@ def _payout_curve_for(
         return lst, full
 
     variant_table = underdog_payouts[contest_variant]
-    if contest_variant == "flex":
+    if contest_variant in ("flex", "insurance"):
         full_curve = {int(sz): [float(v) for v in row] for sz, row in variant_table.items()}
     else:
         full_curve = {int(sz): [float(variant_table[sz]), 0.0] for sz in variant_table}
 
-    sizes = sorted(full_curve.keys())
-    min_size = sizes[0]
-    max_size = sizes[-1]
-    search = [full_curve[sz][0] for sz in range(min_size, max_size + 1)]
+    # Pad sizes below the variant's minimum with zero-payout placeholders so
+    # the beam-search ranking heuristic indexes by ``size - 2`` consistently
+    # and the EV pre-checks naturally reject those sizes (insurance only
+    # exists at 5/6, flex at 3-6).
+    max_size = max(full_curve.keys())
+    for sz in range(2, max_size + 1):
+        full_curve.setdefault(sz, [0.0])
+    search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
     return search, full_curve
 
 
@@ -861,7 +866,15 @@ def beam_search_parlays(
             push_legs = p_push[np.ix_(bet_id)]
             has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
 
-            if has_pushes and not legacy:
+            # Curves with payouts at multiple miss-counts (e.g. Underdog flex
+            # and insurance) need the MC path even with zero pushes — the
+            # analytical mvn.cdf only gives P(all hit), which discards the
+            # partial-hit tiers. Pure all-hit curves (power, rivals, legacy
+            # platform tables) keep the fast analytical path.
+            curve = full_payouts.get(bet_size, [payout_base, 0.0])
+            multi_tier = sum(1 for v in curve if v > 0) > 1
+
+            if (has_pushes or multi_tier) and not legacy:
                 p = _expected_payout_with_pushes(
                     p,
                     push_legs,

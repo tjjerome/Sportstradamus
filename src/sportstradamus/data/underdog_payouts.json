@@ -1,5 +1,5 @@
 {
-  "_comment": "Underdog contest-variant payout multipliers. Keys are bet sizes (string-encoded ints). For 'flex', each value is a list indexed by miss-count (0 misses first). Power/insurance/rivals are single payouts at full-hit. Numbers reflect the public Underdog terms current as of 2026-05; tune via calibration audits and update in place.",
+  "_comment": "Underdog contest-variant payout multipliers. Keys are bet sizes (string-encoded ints). For 'flex' and 'insurance', each value is a list indexed by miss-count (0 misses first). Power/rivals are single payouts at full-hit. Insurance contests only exist at sizes 5 and 6. Numbers reflect the public Underdog terms current as of 2026-05; tune via calibration audits and update in place.",
   "power": {
     "2": 3.0,
     "3": 6.0,
@@ -8,11 +8,8 @@
     "6": 25.0
   },
   "insurance": {
-    "2": 3.5,
-    "3": 6.5,
-    "4": 10.9,
-    "5": 20.2,
-    "6": 39.9
+    "5": [10.0, 2.5, 0.0, 0.0, 0.0],
+    "6": [25.0, 2.6, 0.25, 0.0, 0.0, 0.0, 0.0]
   },
   "flex": {
     "3": [2.25, 1.25, 0.0],
