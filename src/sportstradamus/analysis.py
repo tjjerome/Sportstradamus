@@ -130,7 +130,9 @@ def _migrate_flat_history(history):
     """Convert old flat history schema (one row per offer) to normalized schema.
 
     Groups by (Player, League, Date, Market) and collects per-offer columns
-    into an Offers list of tuples: (Line, Boost, Platform, Bet, ModelP, BooksP).
+    into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, ModelP, BooksP,
+    CloseBooksP, MarketCLV, ModelCLV). The trailing three are NaN-padded for
+    pre-CLV rows; ``reflect`` populates them from the archive on resolution.
     """
     pred_key = ["Player", "League", "Date", "Market"]
     offer_cols = ["Line", "Boost", "Platform", "Bet", "Model P", "Books P"]
@@ -180,6 +182,9 @@ def _migrate_flat_history(history):
                     str(r.get("Bet", "")),
                     float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
                     float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
+                    np.nan,  # Close Books P — populated by reflect.
+                    np.nan,  # Market CLV
+                    np.nan,  # Model CLV
                 )
             )
 
@@ -220,24 +225,51 @@ def _dedup_offers(offers):
 def _merge_offers(old_offers, new_offers):
     """Merge old and new offer lists, deduplicating by (Line, Platform).
 
-    New offers overwrite old ones with the same (Line, Platform) key.
+    New offers overwrite old ones with the same (Line, Platform) key, except
+    in the closing-trio positions (CloseBooksP, MarketCLV, ModelCLV): a
+    captured non-NaN closing value on the old offer is preserved when the
+    new offer is NaN there. Without this, the next ``prophecize`` run would
+    clobber any close-line snapshot ``reflect`` had already filled in.
     """
     merged = {}
     if old_offers:
         for offer in old_offers:
             key = (offer[0], offer[2])  # (Line, Platform)
-            merged[key] = offer
+            merged[key] = _pad_legacy(offer)
     for offer in new_offers:
         key = (offer[0], offer[2])
-        merged[key] = offer
+        new_padded = _pad_legacy(offer)
+        if key in merged:
+            old_padded = merged[key]
+            merged[key] = _preserve_closing(old_padded, new_padded)
+        else:
+            merged[key] = new_padded
     return list(merged.values())
+
+
+def _pad_legacy(offer):
+    """Return ``offer`` padded to the canonical 9-field shape with NaN."""
+    if isinstance(offer, tuple | list) and len(offer) == 6:
+        return (*tuple(offer), np.nan, np.nan, np.nan)
+    return tuple(offer)
+
+
+def _preserve_closing(old_offer, new_offer):
+    """Carry old closing-trio values forward when ``new_offer`` lacks them."""
+    merged = list(new_offer)
+    for idx in (6, 7, 8):  # CloseBooksP, MarketCLV, ModelCLV
+        if idx < len(merged) and pd.isna(merged[idx]) and idx < len(old_offer):
+            merged[idx] = old_offer[idx]
+    return tuple(merged)
 
 
 def explode_offers(history):
     """Expand Offers column into one row per offer, inheriting prediction-level cols.
 
     Returns DataFrame with columns: all prediction-level cols + Line, Boost,
-    Platform, Bet, Model P, Books P, Result, Hit.
+    Platform, Bet, Model P, Books P, Close Books P, Market CLV, Model CLV,
+    Result, Hit. Legacy 6-tuples are read transparently — the closing trio
+    surfaces as NaN.
     """
     if "Offers" not in history.columns:
         return history
@@ -250,7 +282,8 @@ def explode_offers(history):
             continue
         actual = pred.get("Actual")
         for offer in offers:
-            line, boost, platform, bet, model_p, books_p = offer
+            offer = _pad_legacy(offer)
+            line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv = offer
             # Derive result from actual vs line
             if pd.notna(actual) and pd.notna(line):
                 if " vs. " in str(pred.get("Player", "")):
@@ -273,6 +306,9 @@ def explode_offers(history):
                     "Bet": bet,
                     "Model P": model_p,
                     "Books P": books_p,
+                    "Close Books P": close_p,
+                    "Market CLV": market_clv,
+                    "Model CLV": model_clv,
                     "Result": result,
                 }
             )
@@ -544,13 +580,15 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     ud_parlays = parlays.loc[parlays["Platform"] == "Underdog"].copy()
     if len(ud_parlays) > 0:
         ud_parlays["Profit"] = ud_parlays.apply(
-            lambda x: np.clip(
-                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
-                * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
-                None,
-                100,
-            )
-            - 1,
+            lambda x: (
+                np.clip(
+                    PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
+                    * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
+                    None,
+                    100,
+                )
+                - 1
+            ),
             axis=1,
         )
         ud_parlays["Profit"] = ud_parlays["Profit"] * np.round(ud_parlays["Rec Bet"] * 2) / 2
@@ -646,9 +684,9 @@ def compute_parlay_metrics(parlays, stats, stat_map):
                     row["Independent Rate"] = round(size_df["Indep P"].mean(), 4)
                 elif "Leg Probs" in parlays.columns and size_df["Leg Probs"].notna().any():
                     indep = size_df["Leg Probs"].apply(
-                        lambda lp: np.prod(lp)
-                        if isinstance(lp, list | tuple) and len(lp) > 0
-                        else np.nan
+                        lambda lp: (
+                            np.prod(lp) if isinstance(lp, list | tuple) and len(lp) > 0 else np.nan
+                        )
                     )
                     row["Independent Rate"] = round(indep.mean(), 4)
                 size_rows.append(row)
