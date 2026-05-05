@@ -64,37 +64,46 @@ MIN_DECILE_SAMPLES: int = 20
 DOCS_DIR: Path = Path(__file__).resolve().parents[3] / "docs"
 
 
-def _recover_joint_prob(row: pd.Series) -> float:
-    """Recover the predicted joint probability from a stored parlay row.
-
-    ``beam_search_parlays`` stores ``Model EV = payout * mvn.cdf(...)``
-    where ``payout = clip(payout_base * boost, 1, 100)``. Inverting gives
-    ``joint_prob = Model EV / payout``.
-
-    Args:
-        row: One row of ``parlay_hist.dat``.
-
-    Returns:
-        Joint probability in ``[0, 1]``, or ``np.nan`` if the platform or
-        bet size is unknown.
-    """
+def _recovered_payout(row: pd.Series) -> float:
+    """Reconstruct ``clip(payout_base * boost, 1, 100)`` for a stored row."""
     platform = row.get("Platform")
     bet_size = row.get("Bet Size")
     boost = row.get("Boost", 1.0)
-    model_ev = row.get("Model EV")
-
-    if platform not in PAYOUT_TABLE or pd.isna(bet_size) or pd.isna(model_ev):
+    if platform not in PAYOUT_TABLE or pd.isna(bet_size):
         return float("nan")
-
     idx = int(bet_size) - 2
     table = PAYOUT_TABLE[platform]
     if idx < 0 or idx >= len(table):
         return float("nan")
+    return float(np.clip(table[idx] * float(boost or 1.0), PAYOUT_FLOOR, PAYOUT_CEIL))
 
-    payout = float(np.clip(table[idx] * float(boost or 1.0), PAYOUT_FLOOR, PAYOUT_CEIL))
-    if payout == 0:
+
+def _recover_joint_prob(row: pd.Series) -> float:
+    """Recover the copula-based predicted joint probability.
+
+    ``beam_search_parlays`` stores ``Model EV = payout * mvn.cdf(...)``
+    where ``payout = clip(payout_base * boost, 1, 100)``. Inverting gives
+    ``joint_prob = Model EV / payout``.
+    """
+    payout = _recovered_payout(row)
+    model_ev = row.get("Model EV")
+    if pd.isna(payout) or payout == 0 or pd.isna(model_ev):
         return float("nan")
     return float(model_ev) / payout
+
+
+def _recover_indep_joint_prob(row: pd.Series) -> float:
+    """Recover the independence-assumption joint probability.
+
+    ``Indep P = prod(p_model_legs) * payout`` is also stored on each row.
+    Comparing this against the copula-based ``Joint P`` shows whether the
+    correlation modeling is improving or hurting calibration.
+    """
+    payout = _recovered_payout(row)
+    indep_p = row.get("Indep P")
+    if pd.isna(payout) or payout == 0 or pd.isna(indep_p):
+        return float("nan")
+    return float(indep_p) / payout
 
 
 def _wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -134,6 +143,10 @@ def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
     df = df.loc[df["Legs"].notna() & df["Misses"].notna()]
     df["Joint P"] = df.apply(_recover_joint_prob, axis=1)
     df = df.loc[df["Joint P"].between(0.0, 1.0, inclusive="both")]
+    if "Indep P" in df.columns:
+        df["Indep Joint P"] = df.apply(_recover_indep_joint_prob, axis=1)
+    else:
+        df["Indep Joint P"] = float("nan")
     df["Hit"] = ((df["Misses"] == 0) & (df["Legs"] == df["Bet Size"])).astype(int)
     return df
 
@@ -168,12 +181,16 @@ def _bucket_by_decile(df: pd.DataFrame) -> pd.DataFrame:
         n = len(grp)
         hits = int(grp["Hit"].sum())
         ci_low, ci_high = _wilson_bounds(hits, n)
+        indep_pred = (
+            float(grp["Indep Joint P"].mean()) if "Indep Joint P" in grp.columns else float("nan")
+        )
         rows.append(
             {
                 "decile": int(decile) + 1,
                 "p_low": float(edges[int(decile)]),
                 "p_high": float(edges[int(decile) + 1]),
                 "predicted": float(grp["Joint P"].mean()),
+                "predicted_indep": indep_pred,
                 "empirical": hits / n,
                 "n": n,
                 "hits": hits,
@@ -183,6 +200,52 @@ def _bucket_by_decile(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     return pd.DataFrame(rows).sort_values("decile").reset_index(drop=True)
+
+
+def _per_size_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate predicted-vs-empirical at each ``Bet Size`` level.
+
+    Localizes calibration damage. The audit revealed top-decile overconfidence
+    is concentrated where ``mvn.cdf`` is least reliable (large ``Bet Size``
+    with tight correlations), so per-size MACE separates "code path noise"
+    from "single-leg model miscalibration".
+    """
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "bet_size",
+                "n",
+                "hits",
+                "predicted_copula",
+                "predicted_indep",
+                "empirical",
+                "gap_copula",
+                "gap_indep",
+            ]
+        )
+
+    rows = []
+    for bet_size, grp in df.groupby("Bet Size", dropna=True):
+        n = len(grp)
+        hits = int(grp["Hit"].sum())
+        emp = hits / n
+        pred_cop = float(grp["Joint P"].mean())
+        pred_ind = (
+            float(grp["Indep Joint P"].mean()) if "Indep Joint P" in grp.columns else float("nan")
+        )
+        rows.append(
+            {
+                "bet_size": int(bet_size),
+                "n": n,
+                "hits": hits,
+                "predicted_copula": pred_cop,
+                "predicted_indep": pred_ind,
+                "empirical": emp,
+                "gap_copula": pred_cop - emp,
+                "gap_indep": pred_ind - emp,
+            }
+        )
+    return pd.DataFrame(rows).sort_values("bet_size").reset_index(drop=True)
 
 
 def _plot_calibration(buckets: pd.DataFrame, png_path: Path, n_total: int) -> None:
@@ -260,12 +323,15 @@ def main(days: int, out_dir: Path) -> None:
     stamp = today.strftime("%Y-%m-%d")
     png_path = out_dir / f"PARLAY_CALIBRATION_{stamp}.png"
     csv_path = out_dir / f"PARLAY_CALIBRATION_{stamp}.csv"
+    by_size_path = out_dir / f"PARLAY_CALIBRATION_BY_SIZE_{stamp}.csv"
 
     df = _load_resolved_parlays(window_start)
     n_total = len(df)
     buckets = _bucket_by_decile(df)
+    by_size = _per_size_summary(df)
 
     buckets.to_csv(csv_path, index=False)
+    by_size.to_csv(by_size_path, index=False)
     _plot_calibration(buckets, png_path, n_total)
 
     if n_total == 0:
@@ -277,11 +343,23 @@ def main(days: int, out_dir: Path) -> None:
 
     overall = df["Hit"].mean()
     mean_pred = df["Joint P"].mean()
+    indep_mean = df["Indep Joint P"].mean()
     click.echo(
-        f"n={n_total} resolved parlays | mean predicted={mean_pred:.3f} "
-        f"| empirical={overall:.3f} | gap={overall - mean_pred:+.3f}"
+        f"n={n_total} resolved parlays | mean copula={mean_pred:.3f} "
+        f"| mean indep={indep_mean:.3f} | empirical={overall:.3f} "
+        f"| gap_copula={mean_pred - overall:+.3f} | gap_indep={indep_mean - overall:+.3f}"
     )
-    click.echo(f"Wrote {png_path} and {csv_path}.")
+    if not by_size.empty:
+        click.echo("Per bet size:")
+        for _, row in by_size.iterrows():
+            click.echo(
+                f"  size={int(row['bet_size'])} n={int(row['n']):>6} "
+                f"copula={row['predicted_copula']:.3f} "
+                f"indep={row['predicted_indep']:.3f} "
+                f"emp={row['empirical']:.3f} "
+                f"gap_cop={row['gap_copula']:+.3f} gap_ind={row['gap_indep']:+.3f}"
+            )
+    click.echo(f"Wrote {png_path}, {csv_path}, and {by_size_path}.")
 
 
 if __name__ == "__main__":

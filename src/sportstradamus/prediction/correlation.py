@@ -16,6 +16,7 @@ import warnings
 from itertools import combinations
 from math import comb
 from operator import itemgetter
+from typing import Literal
 
 import line_profiler
 import numpy as np
@@ -25,7 +26,7 @@ from scipy.stats import multivariate_normal, norm
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import banned, stat_cv, stat_map, stat_std
+from sportstradamus.helpers import banned, stat_cv, stat_map, stat_std, underdog_payouts
 from sportstradamus.spiderLogger import logger
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
@@ -33,6 +34,200 @@ from sportstradamus.spiderLogger import logger
 # team's view of the opposing team's same-team pairs.
 _OFFENSIVE_PAIR_WEIGHT: float = 0.75
 _DEFENSIVE_PAIR_WEIGHT: float = 1.0 - _OFFENSIVE_PAIR_WEIGHT
+
+# --- Beam-search constants (audit §2.3 — promoted from inline magic numbers) -
+
+# Beam width: max parlay candidates carried between sizes. Empirically large
+# enough that the survivors at sizes 5/6 don't get pruned by ranking jitter.
+_BEAM_WIDTH: int = 1000
+
+# Per-step pairwise-EV floor. Below this, the candidate is too noisy to keep.
+_PARLAY_GEO_MEAN_FLOOR: float = 1.05
+
+# Boost-product gates: drop entries whose modifier product implies hard-banned
+# pairs (low) or runaway promo stacking (high).
+_MIN_PRODUCT_BOOST: float = 0.7
+_MAX_BOOST_UNDERDOG: float = 2.5
+_MAX_BOOST_OTHER: float = 60.0
+
+# Final EV gates (post-copula evaluation).
+_BOOKS_EV_FLOOR: float = 0.9
+_MODEL_EV_PRECHECK_FLOOR: float = 1.5
+_MODEL_EV_FINAL_FLOOR: float = 2.0
+_KELLY_UNITS_FLOOR: float = 0.5
+
+# PSD repair: floor on minimum eigenvalue. Sub-floor matrices are projected
+# to the nearest PSD instead of dropped (audit §2.1, finding bullet 3).
+_PSD_EIG_TOLERANCE: float = 1e-4
+
+# Payout multiplier clip. Caps runaway boost products; matches legacy.
+_PAYOUT_CLIP_LO: float = 1.0
+_PAYOUT_CLIP_HI: float = 100.0
+
+# Push-handling thresholds.
+# Below this, a leg's push prob is treated as zero so the fast (analytical)
+# mvn.cdf path runs. Set just above floating-point noise from ``get_push_prob``.
+_PUSH_PROB_FLOOR: float = 1e-6
+# Monte-Carlo sample count for the push-aware copula (audit follow-up).
+_PUSH_MC_SAMPLES: int = 50_000
+
+# Kelly sizing denominator: 5% bankroll per unit. Legacy.
+_KELLY_BANKROLL_FRACTION: float = 0.05
+
+
+def _legacy_underdog_overwrite_payouts() -> dict[int, float]:
+    """Reproduce the audit §2.4 legacy line-498 overwrite table.
+
+    Mixes insurance multipliers for sizes 2-3 with power multipliers for sizes
+    4-6. Preserved verbatim so ``legacy=True`` runs match historical output.
+    """
+    return {2: 3.5, 3: 6.5, 4: 6.0, 5: 10.0, 6: 25.0}
+
+
+def _legacy_underdog_search_payouts() -> list[float]:
+    """Reproduce the audit §2.4 legacy in-search payout list (insurance line)."""
+    return [3.5, 6.5, 10.9, 20.2, 39.9]
+
+
+def _payout_curve_for(
+    platform: str,
+    contest_variant: Literal["power", "flex", "insurance", "rivals"],
+    legacy: bool,
+) -> tuple[list[float], dict[int, list[float]]]:
+    """Build the (per-size search list, per-(size,misses) payout table) for a platform.
+
+    The first return drives beam-search ranking (single multiplier per size,
+    indexed ``[bet_size - 2]``). The second drives push-aware EV and the
+    display ``Boost`` column (full payout curve indexed by miss count).
+
+    Underdog pulls from ``data/underdog_payouts.json`` per the chosen
+    ``contest_variant``. Other platforms (PrizePicks, Sleeper, ParlayPlay,
+    Chalkboard) keep the legacy single-payout table.
+    """
+    if legacy and platform == "Underdog":
+        search = _legacy_underdog_search_payouts()
+        # Display table mirrors the legacy line-498 overwrite (mixed regime).
+        legacy_overwrite = _legacy_underdog_overwrite_payouts()
+        full_curve = {sz: [legacy_overwrite[sz], 0.0] for sz in legacy_overwrite}
+        return search, full_curve
+
+    legacy_tables: dict[str, list[float]] = {
+        "PrizePicks": [3.0, 5.3, 10.0, 20.8, 38.8],
+        "Sleeper": [1.0, 1.0, 1.0, 1.0, 1.0],
+        "ParlayPlay": [1.0, 1.0, 1.0, 1.0, 1.0],
+        "Chalkboard": [1.0, 1.0, 1.0, 1.0, 1.0],
+    }
+    if platform != "Underdog":
+        lst = legacy_tables[platform]
+        full = {i + 2: [lst[i], 0.0] for i in range(len(lst))}
+        return lst, full
+
+    variant_table = underdog_payouts[contest_variant]
+    if contest_variant == "flex":
+        full_curve = {int(sz): [float(v) for v in row] for sz, row in variant_table.items()}
+    else:
+        full_curve = {int(sz): [float(variant_table[sz]), 0.0] for sz in variant_table}
+
+    sizes = sorted(full_curve.keys())
+    min_size = sizes[0]
+    max_size = sizes[-1]
+    search = [full_curve[sz][0] for sz in range(min_size, max_size + 1)]
+    return search, full_curve
+
+
+def _nearest_psd(sigma: np.ndarray, tol: float = _PSD_EIG_TOLERANCE) -> np.ndarray:
+    """Project a symmetric matrix to the nearest PSD via eigenvalue clipping.
+
+    Symmetrize, clip eigenvalues at ``tol``, then rescale the diagonal back to
+    1 so single-leg variances stay unit (the inputs are correlation matrices).
+
+    Args:
+        sigma: Symmetric ``(n, n)`` matrix from ``C[bet_id, bet_id]``.
+        tol: Eigenvalue floor; matches the PSD acceptance threshold elsewhere.
+
+    Returns:
+        np.ndarray: PSD ``(n, n)`` matrix with unit diagonal.
+    """
+    sigma = (sigma + sigma.T) / 2
+    eigvals, eigvecs = np.linalg.eigh(sigma)
+    eigvals = np.clip(eigvals, tol, None)
+    repaired = (eigvecs * eigvals) @ eigvecs.T
+    diag_scale = 1.0 / np.sqrt(np.diag(repaired))
+    return repaired * diag_scale[:, None] * diag_scale[None, :]
+
+
+def _expected_payout_with_pushes(
+    p_win: np.ndarray,
+    p_push: np.ndarray,
+    sigma: np.ndarray,
+    bet_size: int,
+    boost: float,
+    payout_curve: dict[int, list[float]],
+    rng: np.random.Generator | None = None,
+) -> float:
+    """Expected payout for a parlay where some legs may push.
+
+    Samples ``_PUSH_MC_SAMPLES`` draws from the multivariate normal copula,
+    classifies each leg as WIN / PUSH / LOSS via inverse-CDF cuts, and applies
+    the variant payout curve at the resulting (effective_size, misses) cell.
+    Pushes drop the parlay one leg per Underdog rules; an entry that pushes
+    below the minimum bet size with no losses is treated as a refund (×1).
+
+    Args:
+        p_win: Per-leg chosen-side probability (already direction-adjusted).
+        p_push: Per-leg push probability. Zeros where push is impossible.
+        sigma: PSD-repaired correlation matrix for the parlay's legs.
+        bet_size: Number of legs (``len(p_win)``).
+        boost: Modifier-product boost for this parlay.
+        payout_curve: ``{size: [mult_at_0_misses, mult_at_1_miss, ...]}``.
+        rng: Optional ``np.random.Generator`` for deterministic tests.
+
+    Returns:
+        float: Expected payout, ready to be compared against the EV floor.
+    """
+    rng = rng if rng is not None else np.random.default_rng()
+    samples = rng.multivariate_normal(np.zeros(bet_size), sigma, size=_PUSH_MC_SAMPLES)
+
+    # Per leg: cuts split the standard normal into LOSS / PUSH / WIN bands so
+    # the marginal probabilities match (p_lose, p_push, p_win) exactly.
+    p_lose = np.clip(1.0 - p_win - p_push, 0.0, 1.0)
+    cut_lose = norm.ppf(np.clip(p_lose, 1e-9, 1 - 1e-9))
+    cut_push_top = norm.ppf(np.clip(p_lose + p_push, 1e-9, 1 - 1e-9))
+
+    # Classification: 0 = LOSS, 1 = PUSH, 2 = WIN.
+    classification = np.where(
+        samples < cut_lose,
+        0,
+        np.where(samples < cut_push_top, 1, 2),
+    )
+
+    pushes = (classification == 1).sum(axis=1)
+    losses = (classification == 0).sum(axis=1)
+    eff_size = bet_size - pushes
+
+    # Flat lookup table: lookup[size, misses] → payout multiplier. Sizes below
+    # the parlay minimum are treated as refund (×1) iff there are no losses.
+    max_idx = bet_size + 1
+    lookup = np.zeros((max_idx, max_idx), dtype=float)
+    for sz in range(2, bet_size + 1):
+        curve = payout_curve.get(sz)
+        if curve is None:
+            continue
+        for miss_idx, mult in enumerate(curve):
+            if miss_idx < max_idx:
+                lookup[sz, miss_idx] = float(mult)
+
+    safe_size = np.clip(eff_size, 0, max_idx - 1)
+    safe_miss = np.clip(losses, 0, max_idx - 1)
+    payouts = lookup[safe_size, safe_miss]
+
+    # Special-case the "all pushes (no losses)" outcome: refund.
+    all_push_no_loss = (eff_size < 2) & (losses == 0)
+    payouts = np.where(all_push_no_loss, 1.0, payouts)
+    # Sub-minimum size with at least one loss → bust.
+    payouts = np.where((eff_size < 2) & (losses > 0), 0.0, payouts)
+
+    return float(np.clip(boost, 0.0, _PAYOUT_CLIP_HI) * payouts.mean())
 
 
 def _team_slice(corr_df: pd.DataFrame, team: str) -> pd.Series:
@@ -94,7 +289,14 @@ def _build_game_corr_map(
 
 
 @line_profiler.profile
-def find_correlation(offers, stats, platform):
+def find_correlation(
+    offers,
+    stats,
+    platform,
+    *,
+    contest_variant: Literal["power", "flex", "insurance", "rivals"] = "power",
+    legacy: bool = False,
+):
     """Annotate offers with correlation info and build parlay candidates.
 
     Groups scored offers by game, loads the league correlation CSV, computes
@@ -105,6 +307,14 @@ def find_correlation(offers, stats, platform):
         offers: List of scored offer dicts from :func:`process_offers`.
         stats: ``{league: Stats}`` dict for active leagues.
         platform: DFS platform name (e.g. ``"Underdog"``).
+        contest_variant: Underdog contest variant ("power", "flex",
+            "insurance", "rivals"). Ignored for non-Underdog platforms.
+            Default "power" matches the displayed Boost column historically;
+            ranking changes vs. legacy because legacy ranked at the insurance
+            line — use ``legacy=True`` for bit-for-bit historical behavior.
+        legacy: When True, reproduce the pre-2026.05 pipeline verbatim — no
+            PSD repair, no push-aware EV, mixed insurance/power Boost
+            overwrite at line 498. Removed next release.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
@@ -168,13 +378,12 @@ def find_correlation(offers, stats, platform):
         "NHL": ["C", "W", "D", "G"],
         "WNBA": ["G", "F", "C"],
     }
-    payout_table = {  # equivalent payouts when insured picks are better
-        "Underdog": [3.5, 6.5, 10.9, 20.2, 39.9],
-        "PrizePicks": [3, 5.3, 10, 20.8, 38.8],
-        "Sleeper": [1, 1, 1, 1, 1],
-        "ParlayPlay": [1, 1, 1, 1, 1],
-        "Chalkboard": [1, 1, 1, 1, 1],
-    }
+    # Search-list and full payout curve come from data/underdog_payouts.json
+    # (Underdog) or the per-platform legacy table. ``search_payouts`` is the
+    # single-multiplier-per-size list used inside the beam-search ranking;
+    # ``full_payouts`` is the per-(size, miss-count) lookup driving push-aware
+    # EV and the display Boost column.
+    search_payouts, full_payouts = _payout_curve_for(platform, contest_variant, legacy)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
@@ -339,6 +548,13 @@ def find_correlation(offers, stats, platform):
             M = np.zeros([len(game_dict), len(game_dict)])
             p_model = game_df["Model P"].to_numpy()
             p_books = game_df["Books P"].to_numpy()
+            # ``Push P`` is added by :func:`model_prob` for integer-line discrete
+            # markets; missing for combo legs etc. — fill 0.0 so the analytical
+            # mvn.cdf path still runs for those legs.
+            if "Push P" in game_df.columns:
+                p_push = game_df["Push P"].fillna(0.0).to_numpy()
+            else:
+                p_push = np.zeros(len(game_df), dtype=float)
             boosts = game_df["Boost"].to_numpy()
             V = p_model * (1 - p_model)
             V = V.reshape(len(game_dict), 1) * V
@@ -391,14 +607,14 @@ def find_correlation(offers, stats, platform):
                     np.multiply(np.exp(np.multiply(C, V)), P),
                     boosts.reshape(len(boosts), 1) * M * boosts,
                 )
-                * payout_table[platform][0]
+                * search_payouts[0]
             )
             EVb = (
                 np.multiply(
                     np.multiply(np.exp(np.multiply(C, Vb)), Pb),
                     boosts.reshape(len(boosts), 1) * M * boosts,
                 )
-                * payout_table[platform][0]
+                * search_payouts[0]
             )
 
             for i, offer in game_df.iterrows():
@@ -431,8 +647,7 @@ def find_correlation(offers, stats, platform):
             }
             best_bets = []
             if not (platform in ["Chalkboard", "ParlayPlay"] and league == "MLB"):
-                payouts = payout_table[platform]
-                max_boost = 2.5 if platform == "Underdog" else 60
+                max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
                 best_bets = beam_search_parlays(
                     idx,
                     EV,
@@ -440,13 +655,17 @@ def find_correlation(offers, stats, platform):
                     M,
                     p_model,
                     p_books,
+                    p_push,
                     boosts,
-                    payouts,
+                    search_payouts,
+                    full_payouts,
                     max_boost,
                     bet_df,
                     info,
                     team,
                     opp,
+                    contest_variant=contest_variant,
+                    legacy=legacy,
                 )
 
                 if len(best_bets) > 0:
@@ -494,20 +713,43 @@ def find_correlation(offers, stats, platform):
                         [parlay_df, df5.drop(columns="Bet ID")], ignore_index=True
                     )
 
-    if platform == "Underdog":
-        payouts = [0, 0, 3.5, 6.5, 6, 10, 25]
-        parlay_df["Boost"] = parlay_df["Bet Size"].apply(lambda x: payouts[x]) * parlay_df["Boost"]
+    if legacy and platform == "Underdog":
+        # Legacy line-498 overwrite (audit §2.4): mixed insurance/power
+        # multipliers indexed by bet size. Preserved verbatim under
+        # ``legacy=True`` so historical exports stay reproducible.
+        legacy_overwrite = _legacy_underdog_overwrite_payouts()
+        parlay_df["Boost"] = (
+            parlay_df["Bet Size"].apply(lambda x: legacy_overwrite.get(int(x), 0.0))
+            * parlay_df["Boost"]
+        )
 
     return df.dropna(subset="Model").sort_values("Model", ascending=False), parlay_df
 
 
 def beam_search_parlays(
-    idx, EV, C, M, p_model, p_books, boosts, payouts, max_boost, bet_df, info, team, opp
+    idx,
+    EV,
+    C,
+    M,
+    p_model,
+    p_books,
+    p_push,
+    boosts,
+    payouts,
+    full_payouts,
+    max_boost,
+    bet_df,
+    info,
+    team,
+    opp,
+    *,
+    contest_variant: Literal["power", "flex", "insurance", "rivals"] = "power",
+    legacy: bool = False,
 ):
     """Enumerate top parlay combinations via beam search.
 
     Extends parlays leg-by-leg up to ``len(payouts) + 1`` legs, keeping
-    only the top ``K=1000`` candidates at each size by geometric-mean EV.
+    only the top ``_BEAM_WIDTH`` candidates at each size by geometric-mean EV.
     Full correlated-probability evaluation runs on the survivors.
 
     Args:
@@ -515,20 +757,30 @@ def beam_search_parlays(
         EV: Pairwise EV matrix for the full game DataFrame.
         C: Pairwise correlation matrix.
         M: Pairwise boost-modifier matrix.
-        p_model: Model probability vector.
+        p_model: Model probability vector (chosen-side win probability).
         p_books: Books probability vector.
+        p_push: Per-leg push probability (P(stat == line)). Zero for
+            non-integer lines and for continuous-distribution markets.
         boosts: Boost multiplier vector.
-        payouts: Platform payout table list.
+        payouts: Search-list payout multipliers (length = max_size - 1),
+            indexed by ``bet_size - 2``. Drives the ranking heuristic and the
+            books-EV pre-check.
+        full_payouts: Per-(size, miss-count) payout curve. Drives push-aware
+            EV and the displayed ``Boost`` column.
         max_boost: Max allowed product boost for a parlay.
         bet_df: Dict of leg metadata keyed by DataFrame index.
         info: ``{Game, Date, League, Platform}`` metadata dict.
         team: Home team abbreviation.
         opp: Away team abbreviation.
+        contest_variant: Underdog contest variant. Affects payout curve
+            interpretation in :func:`_expected_payout_with_pushes`.
+        legacy: When True, reproduce pre-2026.05 scoring (no PSD repair, no
+            push-aware EV, bare modifier-product Boost in the output).
 
     Returns:
         list[dict]: Parlay candidate dicts ready for DataFrame construction.
     """
-    K = 1000
+    K = _BEAM_WIDTH
     max_bet_size = len(payouts) + 1
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
@@ -560,7 +812,7 @@ def beam_search_parlays(
                 n_pairs = target_size * (target_size - 1) // 2
                 ev_prod = np.prod(EV[np.ix_(extended, extended)][np.triu_indices(target_size, 1)])
                 geo_mean = ev_prod ** (1 / n_pairs)
-                if geo_mean < 1.05:
+                if geo_mean < _PARLAY_GEO_MEAN_FLOOR:
                     continue
 
                 next_candidates.append((extended, geo_mean))
@@ -582,36 +834,61 @@ def beam_search_parlays(
             boost = np.prod(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]) * np.prod(
                 boosts[np.ix_(bet_id)]
             )
-            if boost <= 0.7 or boost > max_boost:
+            if boost <= _MIN_PRODUCT_BOOST or boost > max_boost:
                 continue
 
             pb = p_books[np.ix_(bet_id)]
             prev_pb = np.prod(pb) * boost * payout_base
-            if prev_pb < 0.9:
+            if prev_pb < _BOOKS_EV_FLOOR:
                 continue
 
             p = p_model[np.ix_(bet_id)]
             prev_p = np.prod(p) * boost * payout_base
-            if prev_p < 1.5:
+            if prev_p < _MODEL_EV_PRECHECK_FLOOR:
                 continue
 
             SIG = C[np.ix_(bet_id, bet_id)]
-            if any(np.linalg.eigvalsh(SIG) < 0.0001):
-                continue
+            min_eig = np.min(np.linalg.eigvalsh(SIG))
+            if legacy:
+                # Legacy: drop non-PSD subsets instead of repairing.
+                if min_eig < _PSD_EIG_TOLERANCE:
+                    continue
+            elif min_eig < _PSD_EIG_TOLERANCE:
+                SIG = _nearest_psd(SIG)
 
-            payout = np.clip(payout_base * boost, 1, 100)
-            p = payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+            payout = np.clip(payout_base * boost, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
+
+            push_legs = p_push[np.ix_(bet_id)]
+            has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
+
+            if has_pushes and not legacy:
+                p = _expected_payout_with_pushes(
+                    p,
+                    push_legs,
+                    SIG,
+                    bet_size,
+                    boost=boost,
+                    payout_curve=full_payouts,
+                )
+            else:
+                p = payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+
             pb = p / prev_p * prev_pb
-            units = (p - 1) / (payout - 1) / 0.05
+            units = (p - 1) / (payout - 1) / _KELLY_BANKROLL_FRACTION
 
-            if units < 0.5 or p < 2 or pb < 0.9:
+            if units < _KELLY_UNITS_FLOOR or p < _MODEL_EV_FINAL_FLOOR or pb < _BOOKS_EV_FLOOR:
                 continue
 
             bet = itemgetter(*bet_id)(bet_df)
+            # Display Boost: under legacy, return the bare modifier product
+            # (the post-search line-498 overwrite multiplies by per-size
+            # payout). Under the new path, return the payout-inclusive value
+            # so the column reflects the same EV that drove ranking.
+            display_boost = boost if legacy else payout
             parlay_dict = info | {
                 "Model EV": p,
                 "Books EV": pb,
-                "Boost": boost,
+                "Boost": display_boost,
                 "Rec Bet": units,
                 "Leg 1": "",
                 "Leg 2": "",
