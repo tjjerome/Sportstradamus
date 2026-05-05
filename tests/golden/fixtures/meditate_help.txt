@@ -3,7 +3,10 @@ Usage: meditate [OPTIONS]
   Train or retrain LightGBMLSS models for each configured market.
 
 Options:
-  --force / --no-force            Force update of all models
+  --force / --no-force            Skip markets with fresh data (default). Pass
+                                  --force to rebuild the prior correlation CSV
+                                  cache and build markets whose models are
+                                  already up to date.
   --league [All|NFL|NBA|MLB|NHL|WNBA]
                                   Select league to train on
   --rebuild-filter / --no-rebuild-filter

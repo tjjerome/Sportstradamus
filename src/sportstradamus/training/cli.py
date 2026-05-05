@@ -21,7 +21,15 @@ np.seterr(divide="ignore", invalid="ignore")
 
 
 @click.command()
-@click.option("--force/--no-force", default=False, help="Force update of all models")
+@click.option(
+    "--force/--no-force",
+    default=False,
+    help=(
+        "Skip markets with fresh data (default). "
+        "Pass --force to rebuild the prior correlation CSV cache and build "
+        "markets whose models are already up to date."
+    ),
+)
 @click.option(
     "--league",
     type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]),
