@@ -273,39 +273,8 @@ header protocol and reintroduction process.
 - [ ] **TODO: reimplement Kelly bet sizing** (`opt_kelley_bet.py`) — stake
       optimization on +EV picks. Needs integration with `prophecize`'s sheet
       export or a new `kelly` subcommand.
-- [ ] **TODO: reimplement parlay search** (`unused_funcs.py::find_bets`,
-      `opt_parlay.py`) — combinatorial search over +EV legs. May have been
-      replaced by in-line parlay logic in `sportstradamus.py`; decide whether
-      to delete or rewire.
-- [ ] **TODO: reimplement BettingPros NFL ingest** (`get_lines.py`) —
-      redundant with `books.py` scrapers, but a useful fallback.
-- [ ] **TODO: reimplement team correlation generator** (`correlation.py`) —
-      produces `{LEAGUE}_corr.csv` consumed by `sportstradamus.py`'s parlay
-      logic. Those CSVs are currently stale; a script or CLI is needed.
-- [ ] **TODO: reimplement LightGBM feature-importance plot**
-      (`see_features.py`).
-- [ ] **TODO: reimplement testing utilities** (`test.py`) — ad-hoc
-      experimentation harness, not pytest tests. Decide whether to convert to
-      proper tests or delete.
-- [ ] **TODO: decide fate of orphaned `helpers.py` math utilities**
-      (`prob_diff`, `prob_sum`, `accel_asc`, `get_active_sports`) — preserved
-      in [`src/deprecated/helpers_orphans.py`](src/deprecated/helpers_orphans.py).
-- [ ] **TODO: orphan methods** (`Archive.add`, `Archive.clip`, `Archive.merge`,
-      `Archive.rename_market`, `Scrape.get_proxy`, `Scrape.post`) — preserved
-      in [`src/deprecated/helpers_orphans.py`](src/deprecated/helpers_orphans.py)
-      as de-methodized top-level functions. `Archive.add` looks like the
-      intended write path for the `confer` pipeline but was never wired in;
-      decide whether to wire it or delete.
-- [ ] **TODO: Stats orphan methods** (21 methods across all league subclasses) —
-      preserved in [`src/deprecated/stats_deprecated.py`](src/deprecated/stats_deprecated.py).
-      The `obs_*` family (`obs_get_stats`, `obs_get_training_matrix`, `obs_profile_market`,
-      `dvpoa`, `bucket_stats`) was an older per-observation prediction API superseded by
-      the current vectorized offer-based API. `get_fantasy` (StatsNFL) was unused NFL
-      fantasy scoring logic. Reintroduce if the obs_* API is revived for analysis tooling.
-- [ ] **TODO: deprecated sportsbook scrapers** (`get_dk`, `get_fd`,
-      `get_pinnacle`, `get_caesars`, `get_thrive`, `get_pp`, `get_parp`)
-      preserved in [`src/deprecated/books_deprecated.py`](src/deprecated/books_deprecated.py).
-      Superseded by `moneylines.get_props`. Reintroduce only if direct-book
-      scraping becomes preferable to the odds aggregator. The remaining live
-      scrapers (`get_ud` for Underdog, `get_sleeper` for Sleeper) stay in
-      `books.py`.
+
+The remaining archives in `src/deprecated/` were triaged in
+[`docs/DEPRECATED_TRIAGE.md`](docs/DEPRECATED_TRIAGE.md) and are slated for
+deletion in a follow-up session — each has a live replacement in the current
+package layout or is a stale scratchpad with no roadmap entry.
