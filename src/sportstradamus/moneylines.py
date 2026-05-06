@@ -12,6 +12,15 @@ Two internal workhorses:
 Both support a historical mode (``date != today``) that routes the request
 through ``the-odds-api.com``'s historical endpoints; that path uses the
 paid ``odds_api_plus`` key because the free tier doesn't include history.
+
+The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
+pass: it reads ``data/upcoming_events.json`` (refreshed by every broad
+``confer`` run) and only fires per-event endpoint calls for games starting
+within the closing window. If the window is empty, it exits before
+touching the archive or the network. The intended cron schedule —
+American-sports start hours only — is::
+
+    */5 11-23,0-1 * * * cd <repo> && poetry run confer --close-lines
 """
 
 import importlib.resources as pkg_resources
@@ -36,7 +45,16 @@ from sportstradamus.helpers import (
     remove_accents,
     stat_cv,
 )
+from sportstradamus.helpers.io import read_upcoming_events, write_upcoming_events
 from sportstradamus.spiderLogger import logger
+
+# Closing-line capture window. Run `confer --close-lines` every 5 minutes
+# during American-sports hours; only events commencing inside this window
+# get a per-event endpoint hit, so the worst-case token cost per tick is
+# bounded by `len(upcoming_events.json) * markets_per_event` and most ticks
+# are no-ops.
+CLOSING_LEAD_MIN = 5
+CLOSING_LEAD_MAX = 25
 
 # Leagues with live odds we care about. The Odds API also surfaces NHL / MLB
 # but their prop coverage is thin enough that we get those from the direct
@@ -70,21 +88,36 @@ def _get_with_retry(url, params=None):
 
 
 @click.command()
-def confer():
+@click.option(
+    "--close-lines",
+    "close_lines",
+    is_flag=True,
+    default=False,
+    help=(
+        "Targeted close-line scrape only. Reads data/upcoming_events.json and hits "
+        "per-event endpoints for games starting within the closing window. "
+        "Exits without touching archive or API when no events are due."
+    ),
+)
+def confer(close_lines: bool):
     """Fetch current odds and player props into the archive."""
     filepath = pkg_resources.files(creds) / "keys.json"
     with open(filepath) as infile:
         keys = json.load(infile)
+
+    filepath = pkg_resources.files(data) / "stat_map.json"
+    with open(filepath) as infile:
+        stat_map = json.load(infile)
+
+    if close_lines:
+        _close_lines_pass(keys["odds_api_plus"], stat_map["Odds API"])
+        return
 
     archive = Archive()
     logger.info("Archive loaded")
 
     archive = get_moneylines(archive, keys)
     logger.info("Game data complete")
-
-    filepath = pkg_resources.files(data) / "stat_map.json"
-    with open(filepath) as infile:
-        stat_map = json.load(infile)
 
     archive = get_props(archive, keys["odds_api_plus"], stat_map["Odds API"])
     logger.info("Player data complete, writing to file...")
@@ -267,6 +300,8 @@ def get_props(
         dayDelta = 6
         params = {"apiKey": apikey}
 
+    ledger = {(e["sport_key"], e["event_id"]): e for e in read_upcoming_events()}
+
     for sport, league in sports:
         params.update({"markets": ",".join(props[league].keys())})
         if league == "MLB":
@@ -283,7 +318,7 @@ def get_props(
             )
             if gameDate > date + timedelta(days=dayDelta):
                 continue
-            gameDate = gameDate.strftime("%Y-%m-%d")
+            gameDate_str = gameDate.strftime("%Y-%m-%d")
             event_params = {**params, "regions": "us"}
             res = _get_with_retry(
                 odds_url_template.format(sport=sport, eventId=event["id"]), params=event_params
@@ -294,105 +329,200 @@ def get_props(
                 continue
 
             game = res.json()["data"] if historical else res.json()
+            _archive_event_props(archive, game, league, props, gameDate_str)
 
-            odds = {}
-            totals = {}
-            spread_home = {}
-            spread_away = {}
+            if not historical:
+                ledger[(sport, event["id"])] = {
+                    "sport_key": sport,
+                    "event_id": event["id"],
+                    "league": league,
+                    "commence_time": event["commence_time"],
+                    "markets": list(props[league].keys()),
+                }
 
-            for book in game["bookmakers"]:
-                for market in book["markets"]:
-                    if "totals" in market["key"]:
-                        spread_name = " ".join(market["key"].split("_")[1:])
-                        outcomes = sorted(market["outcomes"], key=itemgetter("name"))
-                        sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-                        totals.setdefault(spread_name, {})
-                        totals[spread_name][book["key"]] = get_ev(outcomes[1]["point"], sub_odds[1])
-                        continue
-                    elif "spread" in market["key"]:
-                        spread_name = " ".join(market["key"].split("_")[1:])
-                        outcomes = sorted(market["outcomes"], key=itemgetter("point"))
-                        sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-                        spread = get_ev(outcomes[1]["point"], sub_odds[1])
-                        spread_home.setdefault(spread_name, {})
-                        spread_away.setdefault(spread_name, {})
-                        if outcomes[0]["name"] == game["home_team"]:
-                            spread_home[spread_name][book["key"]] = spread
-                            spread_away[spread_name][book["key"]] = -spread
-                        else:
-                            spread_home[spread_name][book["key"]] = -spread
-                            spread_away[spread_name][book["key"]] = spread
-                        continue
-
-                    market_name = props[league].get(market["key"])
-
-                    odds.setdefault(market_name, {})
-
-                    outcomes = [
-                        o
-                        for o in market["outcomes"]
-                        if "description" in o and "name" in o and o["price"] > 1
-                    ]
-                    outcomes = sorted(outcomes, key=itemgetter("description", "name"))
-
-                    for player, lines in groupby(outcomes, itemgetter("description")):
-                        player = remove_accents(player).replace(" Total", "")
-                        odds[market_name].setdefault(player, {"EV": {}, "Lines": []})
-                        lines = list(lines)
-                        for line in lines:
-                            line.setdefault("point", 0.5)
-                            line["name"] = {"Yes": "Over", "No": "Under"}.get(
-                                line["name"], line["name"]
-                            )
-
-                        lines = sorted(lines, key=itemgetter("name"))
-                        if len({line["point"] for line in lines}) > 1:
-                            trueline = sorted(lines, key=(lambda x: np.abs(x["price"] - 2)))[0][
-                                "point"
-                            ]
-                            lines = [line for line in lines if line["point"] == trueline]
-                        if len(lines) > 2:
-                            lines = [
-                                next(line for line in lines if line["name"] == "Over"),
-                                next(line for line in lines if line["name"] == "Under"),
-                            ]
-                        if len(lines) == 1 and lines[0]["name"] == "Under":
-                            lines[0]["name"] = "Over"
-                            under = lines[0]["price"]
-                            lines[0]["price"] = under / (under - 1)
-
-                        line = lines[0].get("point", 0.5)
-                        odds[market_name][player]["Lines"].append(line)
-                        price = no_vig_odds(*[x["price"] for x in lines])
-                        ev = get_ev(line, price[1], stat_cv[league].get(market_name, 1))
-
-                        odds[market_name][player]["EV"][book["key"]] = ev
-
-            for market in odds:
-                archive._mark_changed(league, market)
-                archive[league].setdefault(market, {}).setdefault(gameDate, {})
-                for player in odds[market]:
-                    archive[league][market][gameDate].setdefault(player, {"EV": {}, "Lines": []})
-                    archive[league][market][gameDate][player]["EV"].update(
-                        odds[market][player]["EV"]
-                    )
-
-                    line = np.median(odds[market][player]["Lines"])
-                    if line not in archive[league][market][gameDate][player]["Lines"]:
-                        archive[league][market][gameDate][player]["Lines"].append(line)
-
-            for market in totals:
-                archive._mark_changed(league, market)
-                archive[league].setdefault(market, {}).setdefault(gameDate, {})
-
-                archive[league][market][gameDate][
-                    abbreviations[league][remove_accents(game["home_team"])]
-                ] = {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals[market].items()}
-                archive[league][market][gameDate][
-                    abbreviations[league][remove_accents(game["away_team"])]
-                ] = {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()}
+    if not historical:
+        write_upcoming_events(_prune_upcoming_events(list(ledger.values())))
 
     return archive
+
+
+def _archive_event_props(archive, game, league, props, gameDate):
+    """Parse one Odds API event response and write its odds into ``archive``.
+
+    Splits markets into player props (per-player EV and consensus lines),
+    totals (game-total team buckets), and spreads (used to fold home/away
+    team-total adjustments back into the totals write). Mirrors the inline
+    logic that ``get_props`` previously ran, hoisted out so the
+    ``--close-lines`` pass can reuse it without duplicating the parser.
+    """
+    odds = {}
+    totals = {}
+    spread_home = {}
+    spread_away = {}
+
+    for book in game["bookmakers"]:
+        for market in book["markets"]:
+            if "totals" in market["key"]:
+                spread_name = " ".join(market["key"].split("_")[1:])
+                outcomes = sorted(market["outcomes"], key=itemgetter("name"))
+                sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
+                totals.setdefault(spread_name, {})
+                totals[spread_name][book["key"]] = get_ev(outcomes[1]["point"], sub_odds[1])
+                continue
+            elif "spread" in market["key"]:
+                spread_name = " ".join(market["key"].split("_")[1:])
+                outcomes = sorted(market["outcomes"], key=itemgetter("point"))
+                sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
+                spread = get_ev(outcomes[1]["point"], sub_odds[1])
+                spread_home.setdefault(spread_name, {})
+                spread_away.setdefault(spread_name, {})
+                if outcomes[0]["name"] == game["home_team"]:
+                    spread_home[spread_name][book["key"]] = spread
+                    spread_away[spread_name][book["key"]] = -spread
+                else:
+                    spread_home[spread_name][book["key"]] = -spread
+                    spread_away[spread_name][book["key"]] = spread
+                continue
+
+            market_name = props[league].get(market["key"])
+
+            odds.setdefault(market_name, {})
+
+            outcomes = [
+                o
+                for o in market["outcomes"]
+                if "description" in o and "name" in o and o["price"] > 1
+            ]
+            outcomes = sorted(outcomes, key=itemgetter("description", "name"))
+
+            for player, lines in groupby(outcomes, itemgetter("description")):
+                player = remove_accents(player).replace(" Total", "")
+                odds[market_name].setdefault(player, {"EV": {}, "Lines": []})
+                lines = list(lines)
+                for line in lines:
+                    line.setdefault("point", 0.5)
+                    line["name"] = {"Yes": "Over", "No": "Under"}.get(line["name"], line["name"])
+
+                lines = sorted(lines, key=itemgetter("name"))
+                if len({line["point"] for line in lines}) > 1:
+                    trueline = sorted(lines, key=(lambda x: np.abs(x["price"] - 2)))[0]["point"]
+                    lines = [line for line in lines if line["point"] == trueline]
+                if len(lines) > 2:
+                    lines = [
+                        next(line for line in lines if line["name"] == "Over"),
+                        next(line for line in lines if line["name"] == "Under"),
+                    ]
+                if len(lines) == 1 and lines[0]["name"] == "Under":
+                    lines[0]["name"] = "Over"
+                    under = lines[0]["price"]
+                    lines[0]["price"] = under / (under - 1)
+
+                line = lines[0].get("point", 0.5)
+                odds[market_name][player]["Lines"].append(line)
+                price = no_vig_odds(*[x["price"] for x in lines])
+                ev = get_ev(line, price[1], stat_cv[league].get(market_name, 1))
+
+                odds[market_name][player]["EV"][book["key"]] = ev
+
+    for market in odds:
+        archive._mark_changed(league, market)
+        archive[league].setdefault(market, {}).setdefault(gameDate, {})
+        for player in odds[market]:
+            archive[league][market][gameDate].setdefault(player, {"EV": {}, "Lines": []})
+            archive[league][market][gameDate][player]["EV"].update(odds[market][player]["EV"])
+
+            line = np.median(odds[market][player]["Lines"])
+            if line not in archive[league][market][gameDate][player]["Lines"]:
+                archive[league][market][gameDate][player]["Lines"].append(line)
+
+    for market in totals:
+        archive._mark_changed(league, market)
+        archive[league].setdefault(market, {}).setdefault(gameDate, {})
+
+        archive[league][market][gameDate][
+            abbreviations[league][remove_accents(game["home_team"])]
+        ] = {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals[market].items()}
+        archive[league][market][gameDate][
+            abbreviations[league][remove_accents(game["away_team"])]
+        ] = {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()}
+
+
+def _prune_upcoming_events(events):
+    """Drop events whose commence_time is in the past (UTC)."""
+    now = datetime.now(pytz.utc)
+    keep = []
+    for e in events:
+        try:
+            ts = datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+        except (ValueError, KeyError, AttributeError):
+            continue
+        if ts.astimezone(pytz.utc) > now:
+            keep.append(e)
+    return keep
+
+
+def _close_lines_pass(apikey, props):
+    """Per-event close-line scrape. Exits early when the window is empty.
+
+    Loads ``data/upcoming_events.json``, filters to events with a
+    ``commence_time`` between ``CLOSING_LEAD_MIN`` and ``CLOSING_LEAD_MAX``
+    minutes from now, and only then opens ``Archive`` and hits the per-event
+    Odds API endpoint for each. Past-commence entries are pruned on the way
+    out so the ledger stays small. The five-minute cron tick yields no
+    archive read, no API call, and no log noise on empty windows — the
+    intended common case.
+    """
+    ledger = read_upcoming_events()
+    ledger = _prune_upcoming_events(ledger)
+
+    now = datetime.now(pytz.utc)
+    window_start = now + timedelta(minutes=CLOSING_LEAD_MIN)
+    window_end = now + timedelta(minutes=CLOSING_LEAD_MAX)
+
+    due = []
+    for e in ledger:
+        try:
+            ts = datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+        except (ValueError, KeyError, AttributeError):
+            continue
+        ts_utc = ts.astimezone(pytz.utc)
+        if window_start <= ts_utc <= window_end:
+            due.append(e)
+
+    if not due:
+        write_upcoming_events(ledger)
+        return
+
+    logger.info(f"close-lines: {len(due)} event(s) due")
+    archive = Archive()
+    params = {"apiKey": apikey, "regions": "us"}
+
+    for e in due:
+        sport_key = e["sport_key"]
+        event_id = e["event_id"]
+        league = e["league"]
+        markets = e.get("markets") or list(props.get(league, {}).keys())
+        if not markets:
+            continue
+        event_params = {**params, "markets": ",".join(markets)}
+        res = _get_with_retry(
+            ODDS_API_EVENT_ODDS_URL.format(sport=sport_key, eventId=event_id),
+            params=event_params,
+        )
+        if res.status_code != 200:
+            logger.warning(f"close-lines: {league} {event_id} returned status {res.status_code}")
+            continue
+        game = res.json()
+        gameDate = (
+            datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
+            .astimezone(pytz.timezone("America/Chicago"))
+            .strftime("%Y-%m-%d")
+        )
+        _archive_event_props(archive, game, league, props, gameDate)
+
+    archive.write()
+    write_upcoming_events(_prune_upcoming_events(ledger))
+    logger.info("close-lines: archive updated")
 
 
 if __name__ == "__main__":

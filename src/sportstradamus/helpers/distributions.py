@@ -233,6 +233,57 @@ def get_odds(
         return cdf_high - push / 2
 
 
+def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=None, skew_alpha=None):
+    """Return P(stat == line) for a market.
+
+    Push probability is non-zero only when ``line`` is an integer **and** the
+    distribution family is discrete (NegBin / ZINB / Poisson). Continuous
+    families (Gamma, ZAGamma, SkewNormal, Normal) return 0 because the point
+    mass at any single value is zero. Used by parlay scoring to handle the
+    Underdog "push drops one leg" rule.
+
+    Args:
+        line: The bookmaker line. Push only fires for integer-valued lines.
+        ev: Base-distribution mean (post fused_loc / dispersion calibration).
+        dist: Distribution family ("NegBin", "ZINB", "Poisson", "Gamma",
+            "ZAGamma", "SkewNormal", "Normal"). Anything not recognized as
+            discrete returns 0.
+        cv: CV used as fallback when ``r`` is not supplied.
+        alpha: Unused; included so the call signature parallels ``get_odds``.
+        r: NegBin dispersion. Falls back to ``1/cv``.
+        gate: Zero-inflation gate; ZI shrinks the base pmf by ``(1 - gate)``.
+            For an integer line at 0, the gate contributes its full mass.
+        sigma: Unused; parallels ``get_odds``.
+        skew_alpha: Unused; parallels ``get_odds``.
+
+    Returns:
+        np.ndarray | float: Push probability, broadcast to the shape of
+            ``line`` / ``ev``.
+    """
+    del alpha, sigma, skew_alpha  # unused but accepted for parity with get_odds
+    line_arr = np.asarray(line, dtype=float)
+    ev_arr = np.asarray(ev, dtype=float)
+    is_integer = np.isclose(line_arr - np.round(line_arr), 0.0)
+    nonneg = line_arr >= 0
+
+    if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
+        pmf = poisson.pmf(np.round(line_arr), ev_arr)
+    elif dist in ("NegBin", "ZINB"):
+        r_val = r if r is not None else 1 / cv
+        p = r_val / (r_val + ev_arr)
+        pmf = nbinom.pmf(np.round(line_arr), r_val, p)
+        if gate is not None and dist == "ZINB":
+            # ZI shrinks the continuous part of the pmf; the gate adds mass at 0.
+            pmf = (1 - np.asarray(gate)) * pmf
+            zero_mask = np.isclose(line_arr, 0.0)
+            pmf = np.where(zero_mask, pmf + np.asarray(gate), pmf)
+    else:
+        # Continuous distributions have zero point mass at any single line.
+        return np.zeros_like(line_arr)
+
+    return np.where(is_integer & nonneg, pmf, 0.0)
+
+
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=0.1, upper_tol=0.001):
     """Solve for a scaling factor ``w`` that pulls (mean, std) into the bounds.
 

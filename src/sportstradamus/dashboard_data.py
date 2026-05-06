@@ -13,7 +13,12 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus import data
-from sportstradamus.analysis import check_bet, explode_offers, resolve_history
+from sportstradamus.analysis import (
+    _migrate_flat_history,
+    check_bet,
+    explode_offers,
+    resolve_history,
+)
 from sportstradamus.helpers.io import (
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
@@ -42,10 +47,22 @@ STATS_BANNER_COLOR = "#2d6a4f"  # forest green
 
 @st.cache_data(ttl=3600, show_spinner="Loading prediction history...")
 def load_history():
-    """Load prediction history from parquet (Offers round-trips as list[tuple])."""
+    """Load prediction history (parquet → legacy pickle fallback).
+
+    Migrates old flat schema (no Offers column) to the normalized one-row-per-
+    prediction shape with an Offers list, then writes the migrated frame back.
+    Offers round-trip as list[tuple] (CLV-aware 9-tuples; 6-tuples padded).
+    """
     history = read_history()
     if history.empty:
         return history
+
+    # Migrate old flat schema → normalized (one row per prediction, Offers list)
+    if "Offers" not in history.columns:
+        history = _migrate_flat_history(history)
+        write_history(history)
+
+    # Ensure prediction-level columns exist for backward compatibility
     for col in ["Dist", "CV", "Model Param", "Gate", "Temperature", "Disp Cal", "Step", "Actual"]:
         if col not in history.columns:
             history[col] = np.nan
@@ -54,10 +71,12 @@ def load_history():
 
 @st.cache_data(ttl=3600, show_spinner="Loading parlay history...")
 def load_parlays():
-    """Load parlay history from parquet."""
+    """Load parlay history (parquet → legacy pickle fallback)."""
     parlays = read_parlay_hist()
     if parlays.empty:
         return parlays
+
+    # Backward compat: ensure correlation/Indep columns exist for older runs.
     for col in ["Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"]:
         if col not in parlays.columns:
             parlays[col] = np.nan
