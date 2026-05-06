@@ -152,7 +152,13 @@ def main(progress, legacy_correlation, contest_variant):
         parlay_df.reset_index(drop=True, inplace=True)
         parlay_df[["Legs", "Misses", "Profit"]] = np.nan
 
-    write_current_offers(snapshot_offers, parlay_df, sports, platforms_run)
+    write_current_offers(
+        snapshot_offers,
+        parlay_df,
+        sports,
+        platforms_run,
+        contest_variant=contest_variant,
+    )
 
     # --- Append to rolling parlay history ---
     if not parlay_df.empty:

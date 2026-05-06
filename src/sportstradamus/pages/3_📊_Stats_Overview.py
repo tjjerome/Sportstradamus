@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from sklearn.metrics import brier_score_loss
 
+from sportstradamus import clv
 from sportstradamus.dashboard_data import (
     get_filtered_history,
     load_history,
@@ -150,3 +151,37 @@ if not volume_pivot.empty:
     )
     fig_heat.update_layout(height=300)
     st.plotly_chart(fig_heat, use_container_width=True)
+
+# --- Closing Line Value summary --------------------------------------------
+# Computed against the unfiltered history because CLV is a structural property
+# of the model, not of the user's current view.
+st.subheader("Closing Line Value")
+clv_summary = clv.summarize(history)
+
+if clv_summary["n"] == 0:
+    st.info(
+        "No legs with closing-line data yet. CLV populates after `reflect` "
+        "runs against archives that contain post-lock odds."
+    )
+else:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Resolved legs (with close)", f"{clv_summary['n']:,}")
+    c2.metric("Mean Market CLV", f"{clv_summary['market_clv_mean']:+.3f}")
+    c3.metric(
+        "Mean Model CLV",
+        f"{clv_summary['model_clv_mean']:+.3f}"
+        if pd.notna(clv_summary["model_clv_mean"])
+        else "—",
+    )
+    c4.metric("Beat-close rate", f"{clv_summary['frac_beat_close']:.1%}")
+
+    segments = clv_summary["segments"]
+    if not segments.empty:
+        st.caption(
+            f"Segments with at least {clv.CLV_SEGMENT_MIN_N} legs, sorted by mean Market CLV."
+        )
+        st.dataframe(
+            segments.style.format({"market_clv": "{:+.3f}"}),
+            use_container_width=True,
+            hide_index=True,
+        )

@@ -82,6 +82,7 @@ styled = filtered.style.apply(_highlight_hot, axis=1).format(
         "Model EV": "{:.3f}",
         "Model": "{:.3f}",
         "Books": "{:.3f}",
+        "Push P": "{:.3f}",
         "Line": "{:.2f}",
         "Boost": "{:.2f}",
         "Avg 5": "{:.2f}",

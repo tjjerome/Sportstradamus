@@ -24,7 +24,8 @@ from sportstradamus.helpers.io import (
 # Display columns kept in current_offers.parquet. Internal model-tuning cols
 # (`Model Param`, `Dist`, `CV`, `Gate`, `Temperature`, `Disp Cal`, `Step`,
 # `Model P`, `Books P`, `K`, `Player position`) are dropped — the dashboard
-# is a renderer, not a re-scorer.
+# is a renderer, not a re-scorer. `Push P` is kept so the parlay page can
+# show per-leg push probability for integer-line discrete markets.
 _OFFER_KEEP_COLS = [
     "League",
     "Date",
@@ -39,6 +40,7 @@ _OFFER_KEEP_COLS = [
     "Model EV",
     "Model",
     "Books",
+    "Push P",
     "Avg 5",
     "Avg H2H",
     "Moneyline",
@@ -47,8 +49,9 @@ _OFFER_KEEP_COLS = [
 ]
 
 # Internal correlation cols dropped from current_parlays.parquet — these are
-# scoring artifacts not useful for human review (matches the old Sheets path).
-_PARLAY_DROP_COLS = ["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"]
+# scoring artifacts not useful for human review. `Indep P` is kept (independence
+# joint probability) so users can compare against the correlation-aware joint.
+_PARLAY_DROP_COLS = ["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep PB"]
 
 
 def write_current_offers(
@@ -56,13 +59,16 @@ def write_current_offers(
     parlays: pd.DataFrame,
     leagues: Iterable[str],
     platforms: Iterable[str],
+    contest_variant: str = "power",
 ) -> None:
     """Write the current-run snapshot atomically.
 
     `offers` should be the concatenated post-`process_offers` per-platform
     DataFrames (with a `Platform` column already attached). `parlays` is the
-    deduped post-loop parlay_df. Empty inputs are still written so the
-    dashboard reflects the most recent run.
+    deduped post-loop parlay_df. `contest_variant` is the Underdog payout
+    variant the parlays were scored under, recorded in meta so the dashboard
+    can display which payout schedule the EV column reflects. Empty inputs
+    are still written so the dashboard reflects the most recent run.
     """
     offers_out = _normalize_offers(offers)
     parlays_out = _normalize_parlays(parlays)
@@ -74,6 +80,7 @@ def write_current_offers(
             "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
             "leagues": sorted(set(leagues)),
             "platforms": sorted(set(platforms)),
+            "contest_variant": contest_variant,
             "offer_rows": int(len(offers_out)),
             "parlay_rows": int(len(parlays_out)),
         },
