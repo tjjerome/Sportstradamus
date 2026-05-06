@@ -3,4 +3,8 @@ Usage: confer [OPTIONS]
   Fetch current odds and player props into the archive.
 
 Options:
-  --help  Show this message and exit.
+  --close-lines  Targeted close-line scrape only. Reads
+                 data/upcoming_events.json and hits per-event endpoints for
+                 games starting within the closing window. Exits without
+                 touching archive or API when no events are due.
+  --help         Show this message and exit.

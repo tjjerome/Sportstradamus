@@ -9,3 +9,6 @@ features_to_filter.json
 book_weights.json
 training_report.txt
 *_comps.json
+*_corr_same_team.csv
+*_corr_opposing.csv
+correlations/

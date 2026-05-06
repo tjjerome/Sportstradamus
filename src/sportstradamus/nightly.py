@@ -2,9 +2,10 @@
 
 Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
-2. Fill in Actual column in history.parquet
-3. Fill in Legs/Misses columns in parlay_hist.parquet
-4. Write resolve_meta.json with last-run timestamp
+2. Fill in Actual column in history (parquet primary, .dat fallback)
+3. Fill in Close Books P / Market CLV / Model CLV per offer
+4. Fill in Legs/Misses columns in parlay_hist
+5. Write resolve_meta.json with last-run timestamp
 
 Schedule with cron after games finish, e.g.:
     0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
@@ -19,8 +20,9 @@ import click
 import numpy as np
 from tqdm import tqdm
 
-from sportstradamus import data
+from sportstradamus import clv, data
 from sportstradamus.analysis import check_bet, resolve_history
+from sportstradamus.helpers import Archive
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
@@ -83,9 +85,18 @@ def run(league, skip_update, history_only):
         raise SystemExit(1)
 
     # ------------------------------------------------------------------
-    # 2. Resolve history.parquet (fill Actual column)
+    # 2. Resolve history (fill Actual column + CLV trio)
     # ------------------------------------------------------------------
     history = read_history()
+    if history.empty:
+        logger.error("history.parquet/.dat is empty or missing. Aborting.")
+        raise SystemExit(1)
+
+    if "Offers" not in history.columns:
+        from sportstradamus.analysis import _migrate_flat_history
+
+        logger.info("Migrating history to normalized schema")
+        history = _migrate_flat_history(history)
 
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -93,12 +104,34 @@ def run(league, skip_update, history_only):
     n_before_hist = int(history["Actual"].isna().sum())
     logger.info(f"Resolving {n_before_hist} pending history rows")
     history = resolve_history(history, stats)
-    write_history(history)
     n_resolved_hist = n_before_hist - int(history["Actual"].isna().sum())
     logger.info(f"History: resolved {n_resolved_hist} / {n_before_hist} pending rows")
 
+    # Load Archive once and fold closing-line values into every offer.
+    archive = Archive()
+    history = clv.fill_from_archive(history, archive)
+    write_history(history)
+
+    clv_summary = clv.summarize(history)
+    if clv_summary["n"]:
+        logger.info(
+            "CLV legs: %d  Market CLV mean: %+.3f  Model CLV mean: %+.3f  beat-close: %.1f%%",
+            clv_summary["n"],
+            clv_summary["market_clv_mean"],
+            clv_summary["model_clv_mean"],
+            100.0 * clv_summary["frac_beat_close"],
+        )
+        if not clv_summary["segments"].empty:
+            logger.info(
+                "CLV segments (n>=%d):\n%s",
+                clv.CLV_SEGMENT_MIN_N,
+                clv_summary["segments"].to_string(index=False),
+            )
+    else:
+        logger.info("CLV: no resolved legs with closing-line data")
+
     # ------------------------------------------------------------------
-    # 3. Resolve parlay_hist.parquet (fill Legs/Misses columns)
+    # 4. Resolve parlay_hist (fill Legs/Misses columns)
     # ------------------------------------------------------------------
     n_resolved_parl = 0
     if not history_only:
