@@ -1,0 +1,18 @@
+[
+    {
+        "id": "wnba-evt-001",
+        "sport_key": "basketball_wnba",
+        "sport_title": "WNBA",
+        "commence_time": "2026-05-08T00:00:00Z",
+        "home_team": "Las Vegas Aces",
+        "away_team": "New York Liberty"
+    },
+    {
+        "id": "wnba-evt-002",
+        "sport_key": "basketball_wnba",
+        "sport_title": "WNBA",
+        "commence_time": "2026-05-08T02:00:00Z",
+        "home_team": "Seattle Storm",
+        "away_team": "Phoenix Mercury"
+    }
+]

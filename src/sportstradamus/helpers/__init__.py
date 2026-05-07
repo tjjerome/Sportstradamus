@@ -54,6 +54,7 @@ from sportstradamus.helpers.distributions import (
     prob_to_odds,
     set_model_start_values,
 )
+from sportstradamus.helpers.logging import JsonFormatter, get_logger
 from sportstradamus.helpers.scraping import Scrape
 from sportstradamus.helpers.text import (
     get_mlb_pitchers,
@@ -65,6 +66,7 @@ from sportstradamus.helpers.text import (
 
 __all__ = [
     "Archive",
+    "JsonFormatter",
     "Scrape",
     "abbreviations",
     "banned",
@@ -76,6 +78,7 @@ __all__ = [
     "fit_distro",
     "fused_loc",
     "get_ev",
+    "get_logger",
     "get_mlb_pitchers",
     "get_odds",
     "get_push_prob",
