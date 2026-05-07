@@ -22,7 +22,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus.helpers import Archive, stat_map
+from sportstradamus import creds
+from sportstradamus.books import get_sleeper, get_ud
+from sportstradamus.helpers import Archive, get_logger, stat_map
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
@@ -64,9 +66,21 @@ _HISTORY_RETENTION_DAYS = 365
         "matches the legacy ranking line."
     ),
 )
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    help="Verbosity for the structured JSONL log.",
+)
 @line_profiler.profile
-def main(progress, legacy_correlation, contest_variant):
-    """Run the full prediction pipeline and snapshot results to parquet."""
+def main(progress, legacy_correlation, contest_variant, log_level):
+    """Run the full prediction pipeline and write results to Google Sheets."""
+    cli_log = get_logger("prophecize")
+    cli_log.setLevel(log_level)
+    cli_log.info(
+        "prophecize invoked",
+        extra={"contest_variant": contest_variant, "legacy_correlation": legacy_correlation},
+    )
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
     sports = []
