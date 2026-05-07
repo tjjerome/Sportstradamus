@@ -1,338 +1,338 @@
 ========================== NBA AST ===========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.1448
+ Historical Zero Rate: 0.1462
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.578793   0.605720    0.542582  0.751255   0.122067  0.685229
-Corrected   0.580786   0.612429    0.541783  0.770102   0.100928  0.683788
-Calibrated  0.588552   0.620222    0.550445  0.822318   0.087048  0.682502
- DIAG model_weight=0.900 DIAG model_calib=0.754
- DIAG start_scale=0.546 model_scale=1.855 empirical_scale=0.839 shape_ratio=2.2x
- DIAG start_mean=3.05 model_ev=3.28 mean_line=2.91 result_mean=3.24
- DIAG mean_ev_diff=+0.376 median_ev_diff=+0.413 frac_ev>line=76.7%
- DIAG Over%|ev>line=0.588 Over%|ev<line=0.450 CF_Over%(emp_shape)=nan
+Raw Model   0.570490   0.582857    0.549679  0.826953   0.123961  0.696408
+Corrected   0.573594   0.591051    0.546624  0.846377   0.101991  0.688238
+Calibrated  0.582550   0.598234    0.558219  0.900654   0.092697  0.686718
+ DIAG model_weight=0.900 DIAG model_calib=0.755
+ DIAG start_scale=0.545 model_scale=1.873 empirical_scale=0.830 shape_ratio=2.3x
+ DIAG start_mean=3.05 model_ev=3.31 mean_line=2.90 result_mean=3.21
+ DIAG mean_ev_diff=+0.414 median_ev_diff=+0.450 frac_ev>line=80.4%
+ DIAG Over%|ev>line=0.577 Over%|ev<line=0.431 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.428 result_meanyr_corr=-0.086
- HP rounds=302 leaves=37 lr=0.0215 min_child=126 L1=1.81e-05 L2=1.08e-01
+ DIAG ev_meanyr_corr=-0.453 result_meanyr_corr=-0.093
+ HP rounds=268 leaves=45 lr=0.0250 min_child=144 L1=2.39e-05 L2=2.09e-02
 
 ========================== NBA BLK ===========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.6271
+ Historical Zero Rate: 0.6280
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.682715   0.582090    0.689655  0.070076   0.130438  0.619777
-Corrected   0.677450   0.566038    0.683367  0.054123   0.128064  0.620975
-Calibrated  0.681489   0.572917    0.686771  0.050593   0.111101  0.615090
- DIAG model_weight=0.900 DIAG model_calib=0.785
- DIAG start_r=50.000 model_r=47.773 empirical_r=50.000 shape_ratio=1.0x
- DIAG start_mean=0.48 model_ev=0.74 mean_line=0.59 result_mean=0.53
- DIAG mean_ev_diff=+0.145 median_ev_diff=+0.082 frac_ev>line=69.8%
- DIAG Over%|ev>line=0.371 Over%|ev<line=0.242 CF_Over%(emp_shape)=0.057
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.000
- DIAG ev_meanyr_corr=0.037 result_meanyr_corr=-0.028
- HP rounds=57 leaves=10 lr=0.1292 min_child=39 L1=7.07e+00 L2=7.70e+00
+Raw Model   0.680697   0.503704    0.693064  0.070842   0.131072  0.622632
+Corrected   0.677926   0.500000    0.687375  0.053787   0.129755  0.624199
+Calibrated  0.680387   0.526316    0.687817  0.049948   0.112219  0.617033
+ DIAG model_weight=0.900 DIAG model_calib=0.783
+ DIAG start_r=50.000 model_r=47.388 empirical_r=50.000 shape_ratio=0.9x
+ DIAG start_mean=0.47 model_ev=0.73 mean_line=0.59 result_mean=0.51
+ DIAG mean_ev_diff=+0.143 median_ev_diff=+0.089 frac_ev>line=71.9%
+ DIAG Over%|ev>line=0.358 Over%|ev<line=0.238 CF_Over%(emp_shape)=0.058
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=0.989
+ DIAG ev_meanyr_corr=0.043 result_meanyr_corr=-0.062
+ HP rounds=85 leaves=8 lr=0.0965 min_child=48 L1=5.17e+00 L2=6.76e+00
 
 ========================== NBA BLST ==========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.3002
+ Historical Zero Rate: 0.3048
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.603598   0.696462    0.561551  0.403194   0.126206  0.685326
-Corrected   0.592681   0.699029    0.557769  0.330473   0.115114  0.688566
-Calibrated  0.594578   0.693122    0.563742  0.334962   0.101711  0.684899
- DIAG model_weight=0.900 DIAG model_calib=0.758
- DIAG start_r=18.823 model_r=44.443 empirical_r=50.000 shape_ratio=0.9x
- DIAG start_mean=1.33 model_ev=1.47 mean_line=1.30 result_mean=1.35
- DIAG mean_ev_diff=+0.174 median_ev_diff=+0.238 frac_ev>line=66.5%
- DIAG Over%|ev>line=0.590 Over%|ev<line=0.402 CF_Over%(emp_shape)=0.348
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.075
- DIAG ev_meanyr_corr=-0.733 result_meanyr_corr=-0.147
- HP rounds=107 leaves=8 lr=0.0521 min_child=31 L1=9.97e+00 L2=1.81e-06
+Raw Model   0.595972   0.716049    0.558067  0.311993   0.118888  0.686679
+Corrected   0.583585   0.731293    0.551724  0.235037   0.109066  0.690785
+Calibrated  0.580959   0.720930    0.552877  0.237553   0.089672  0.685118
+ DIAG model_weight=0.900 DIAG model_calib=0.754
+ DIAG start_r=18.888 model_r=44.570 empirical_r=50.000 shape_ratio=0.9x
+ DIAG start_mean=1.34 model_ev=1.51 mean_line=1.30 result_mean=1.35
+ DIAG mean_ev_diff=+0.206 median_ev_diff=+0.259 frac_ev>line=68.1%
+ DIAG Over%|ev>line=0.567 Over%|ev<line=0.404 CF_Over%(emp_shape)=0.259
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.108
+ DIAG ev_meanyr_corr=-0.696 result_meanyr_corr=-0.159
+ HP rounds=39 leaves=8 lr=0.1325 min_child=44 L1=6.50e+00 L2=3.32e+00
 
 ========================== NBA DREB ==========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.0842
+ Historical Zero Rate: 0.0880
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.620087   0.708029    0.548515  0.541269   0.153297  0.666135
-Corrected   0.612025   0.718881    0.539122  0.508386   0.136155  0.670802
-Calibrated  0.617819   0.723343    0.545455  0.526979   0.125428  0.669349
- DIAG model_weight=0.900 DIAG model_calib=0.764
- DIAG start_scale=0.543 model_scale=1.679 empirical_scale=0.653 shape_ratio=2.6x
- DIAG start_mean=3.02 model_ev=2.83 mean_line=2.83 result_mean=2.95
- DIAG mean_ev_diff=-0.005 median_ev_diff=+0.067 frac_ev>line=53.7%
- DIAG Over%|ev>line=0.714 Over%|ev<line=0.458 CF_Over%(emp_shape)=nan
+Raw Model   0.644796   0.719277    0.578891  0.556551   0.164954  0.650159
+Corrected   0.632137   0.730986    0.561173  0.515541   0.145854  0.659429
+Calibrated  0.633886   0.730878    0.564155  0.519339   0.142856  0.659092
+ DIAG model_weight=0.900 DIAG model_calib=0.770
+ DIAG start_scale=0.544 model_scale=1.627 empirical_scale=0.628 shape_ratio=2.6x
+ DIAG start_mean=2.94 model_ev=2.72 mean_line=2.74 result_mean=2.78
+ DIAG mean_ev_diff=-0.017 median_ev_diff=+0.068 frac_ev>line=54.2%
+ DIAG Over%|ev>line=0.727 Over%|ev<line=0.433 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.829 result_meanyr_corr=-0.354
- HP rounds=96 leaves=8 lr=0.1071 min_child=62 L1=3.74e-03 L2=2.88e-02
+ DIAG ev_meanyr_corr=-0.861 result_meanyr_corr=-0.423
+ HP rounds=252 leaves=9 lr=0.0363 min_child=102 L1=4.47e-03 L2=1.90e-05
 
 ========================== NBA FG3A ==========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.1118
+ Historical Zero Rate: 0.1180
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.626622   0.670038    0.591650  0.552324   0.160533  0.673321
-Corrected   0.634377   0.684831    0.600592  0.519984   0.132813  0.669491
-Calibrated  0.639175   0.689127    0.606426  0.527116   0.122977  0.668333
- DIAG model_weight=0.900 DIAG model_calib=0.763
- DIAG start_scale=0.503 model_scale=1.735 empirical_scale=0.676 shape_ratio=2.6x
- DIAG start_mean=3.49 model_ev=3.39 mean_line=3.39 result_mean=3.42
- DIAG mean_ev_diff=+0.003 median_ev_diff=+0.159 frac_ev>line=59.7%
- DIAG Over%|ev>line=0.630 Over%|ev<line=0.407 CF_Over%(emp_shape)=nan
+Raw Model   0.626943   0.639130    0.618911  0.475906   0.181058  0.670318
+Corrected   0.636474   0.666093    0.620301  0.446803   0.152849  0.663638
+Calibrated  0.638217   0.666052    0.623541  0.457585   0.135736  0.660549
+ DIAG model_weight=0.900 DIAG model_calib=0.766
+ DIAG start_scale=0.502 model_scale=1.637 empirical_scale=0.665 shape_ratio=2.5x
+ DIAG start_mean=3.41 model_ev=3.17 mean_line=3.30 result_mean=3.20
+ DIAG mean_ev_diff=-0.132 median_ev_diff=+0.097 frac_ev>line=55.6%
+ DIAG Over%|ev>line=0.601 Over%|ev<line=0.387 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.748 result_meanyr_corr=-0.348
- HP rounds=158 leaves=8 lr=0.0800 min_child=64 L1=1.84e-02 L2=2.02e-06
+ DIAG ev_meanyr_corr=-0.836 result_meanyr_corr=-0.410
+ HP rounds=160 leaves=8 lr=0.0800 min_child=64 L1=1.84e-02 L2=2.02e-06
 
 ========================== NBA FG3M ==========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.3341
+ Historical Zero Rate: 0.3370
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.654399   0.671446    0.638581  0.616931   0.173702  0.639200
-Corrected   0.650922   0.673575    0.632780  0.570989   0.182297  0.647026
-Calibrated  0.654862   0.678378    0.636069  0.594281   0.169708  0.643894
- DIAG model_weight=0.900 DIAG model_calib=0.777
- DIAG start_r=32.895 model_r=38.897 empirical_r=50.000 shape_ratio=0.8x
- DIAG start_mean=1.44 model_ev=1.84 mean_line=1.27 result_mean=1.50
- DIAG mean_ev_diff=+0.576 median_ev_diff=+0.481 frac_ev>line=82.0%
- DIAG Over%|ev>line=0.558 Over%|ev<line=0.323 CF_Over%(emp_shape)=0.609
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.004
- DIAG ev_meanyr_corr=-0.059 result_meanyr_corr=-0.134
- HP rounds=203 leaves=8 lr=0.0231 min_child=30 L1=9.91e+00 L2=5.29e-01
+Raw Model   0.671478   0.697236    0.649573  0.582441   0.181012  0.627753
+Corrected   0.672484   0.701473    0.650206  0.554885   0.189811  0.631911
+Calibrated  0.678571   0.707736    0.656587  0.580922   0.173722  0.629183
+ DIAG model_weight=0.900 DIAG model_calib=0.773
+ DIAG start_r=50.000 model_r=38.912 empirical_r=50.000 shape_ratio=0.8x
+ DIAG start_mean=1.40 model_ev=1.80 mean_line=1.22 result_mean=1.49
+ DIAG mean_ev_diff=+0.583 median_ev_diff=+0.483 frac_ev>line=82.5%
+ DIAG Over%|ev>line=0.555 Over%|ev<line=0.320 CF_Over%(emp_shape)=0.586
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=0.952
+ DIAG ev_meanyr_corr=-0.067 result_meanyr_corr=-0.094
+ HP rounds=265 leaves=8 lr=0.0231 min_child=30 L1=9.91e+00 L2=5.29e-01
 
 ========================== NBA FGA ===========================
  Distribution Model: SkewNormal
  Historical Zero Rate: 0.0000
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.669378   0.721627    0.607370  0.619021   0.213875  0.644496
-Corrected   0.657076   0.714761    0.592269  0.609840   0.192370  0.671410
-Calibrated  0.657076   0.714761    0.592269  0.609840   0.192369  0.660086
- DIAG model_weight=0.900 DIAG model_calib=0.785
- DIAG start_scale=0.454 model_scale=3.864 empirical_scale=0.492 shape_ratio=7.9x
- DIAG start_mean=9.02 model_ev=9.05 mean_line=9.15 result_mean=9.84
- DIAG mean_ev_diff=-0.099 median_ev_diff=+0.111 frac_ev>line=52.4%
- DIAG Over%|ev>line=0.715 Over%|ev<line=0.408 CF_Over%(emp_shape)=nan
+Raw Model   0.684368   0.735786    0.625160  0.608969   0.234033  0.633199
+Corrected   0.673123   0.732558    0.608586  0.600937   0.211372  0.656924
+Calibrated  0.676654   0.737095    0.611183  0.618972   0.185656  0.647832
+ DIAG model_weight=0.900 DIAG model_calib=0.775
+ DIAG start_scale=0.454 model_scale=3.805 empirical_scale=0.485 shape_ratio=7.8x
+ DIAG start_mean=9.14 model_ev=8.96 mean_line=9.21 result_mean=9.80
+ DIAG mean_ev_diff=-0.245 median_ev_diff=+0.086 frac_ev>line=51.5%
+ DIAG Over%|ev>line=0.733 Over%|ev<line=0.391 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.775 result_meanyr_corr=-0.376
- HP rounds=98 leaves=8 lr=0.0958 min_child=96 L1=4.59e-01 L2=9.50e+00
+ DIAG ev_meanyr_corr=-0.835 result_meanyr_corr=-0.392
+ HP rounds=381 leaves=16 lr=0.0225 min_child=84 L1=1.82e-05 L2=6.10e-03
 
 ========================== NBA FGM ===========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.0554
+ Historical Zero Rate: 0.0573
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.644041   0.698834    0.588362  0.592634   0.178005  0.650239
-Corrected   0.625485   0.686690    0.571130  0.573292   0.149155  0.663268
-Calibrated  0.631073   0.692771    0.576596  0.582847   0.139973  0.662250
- DIAG model_weight=0.900 DIAG model_calib=0.766
- DIAG start_scale=0.512 model_scale=2.053 empirical_scale=0.604 shape_ratio=3.4x
- DIAG start_mean=4.03 model_ev=4.02 mean_line=4.04 result_mean=4.08
- DIAG mean_ev_diff=-0.027 median_ev_diff=+0.095 frac_ev>line=54.2%
- DIAG Over%|ev>line=0.687 Over%|ev<line=0.429 CF_Over%(emp_shape)=nan
+Raw Model   0.659634   0.713287    0.610817  0.554700   0.185251  0.635154
+Corrected   0.646617   0.709424    0.596891  0.535922   0.156146  0.649526
+Calibrated  0.651586   0.710317    0.604651  0.547269   0.147078  0.649040
+ DIAG model_weight=0.900 DIAG model_calib=0.770
+ DIAG start_scale=0.512 model_scale=2.009 empirical_scale=0.586 shape_ratio=3.4x
+ DIAG start_mean=3.90 model_ev=3.78 mean_line=3.90 result_mean=3.86
+ DIAG mean_ev_diff=-0.116 median_ev_diff=+0.026 frac_ev>line=51.2%
+ DIAG Over%|ev>line=0.709 Over%|ev<line=0.403 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.759 result_meanyr_corr=-0.369
- HP rounds=115 leaves=8 lr=0.1072 min_child=47 L1=3.98e+00 L2=1.83e-05
+ DIAG ev_meanyr_corr=-0.804 result_meanyr_corr=-0.424
+ HP rounds=509 leaves=8 lr=0.0222 min_child=121 L1=3.28e-04 L2=5.92e+00
 
 ========================== NBA FTM ===========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.4334
+ Historical Zero Rate: 0.4496
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.605657   0.590909    0.607944  0.157596   0.130716  0.685926
-Corrected   0.603352   0.618280    0.601621  0.122893   0.117340  0.682058
-Calibrated  0.603316   0.585526    0.605075  0.112799   0.095712  0.673483
- DIAG model_weight=0.881 DIAG model_calib=0.758
- DIAG start_r=2.830 model_r=9.735 empirical_r=14.677 shape_ratio=0.7x
- DIAG start_mean=1.84 model_ev=1.87 mean_line=1.65 result_mean=1.74
- DIAG mean_ev_diff=+0.219 median_ev_diff=+0.310 frac_ev>line=69.5%
- DIAG Over%|ev>line=0.451 Over%|ev<line=0.369 CF_Over%(emp_shape)=0.249
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.343
- DIAG ev_meanyr_corr=-0.875 result_meanyr_corr=-0.257
- HP rounds=60 leaves=8 lr=0.0393 min_child=144 L1=4.73e-06 L2=2.07e-05
+Raw Model   0.611047   0.593750    0.613220  0.131812   0.128404  0.676797
+Corrected   0.606202   0.577181    0.608974  0.103612   0.116221  0.673295
+Calibrated  0.608379   0.576000    0.611038  0.093591   0.097894  0.666716
+ DIAG model_weight=0.896 DIAG model_calib=0.766
+ DIAG start_r=2.624 model_r=9.839 empirical_r=14.434 shape_ratio=0.7x
+ DIAG start_mean=1.75 model_ev=1.68 mean_line=1.52 result_mean=1.59
+ DIAG mean_ev_diff=+0.163 median_ev_diff=+0.260 frac_ev>line=66.7%
+ DIAG Over%|ev>line=0.440 Over%|ev<line=0.357 CF_Over%(emp_shape)=0.231
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.290
+ DIAG ev_meanyr_corr=-0.901 result_meanyr_corr=-0.217
+ HP rounds=74 leaves=8 lr=0.0317 min_child=78 L1=6.21e-02 L2=7.27e+00
 
 ========================== NBA MIN ===========================
  Distribution Model: SkewNormal
  Historical Zero Rate: 0.0000
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.698789   0.733981    0.652672  0.654944   0.222637  0.592661
-Corrected   0.691578   0.729353    0.643401  0.655547   0.204252  0.608143
-Calibrated  0.691578   0.729353    0.643401  0.655547   0.204251  0.603077
- DIAG model_weight=0.900 DIAG model_calib=0.796
- DIAG start_scale=0.328 model_scale=5.641 empirical_scale=0.240 shape_ratio=23.5x
- DIAG start_mean=23.53 model_ev=24.97 mean_line=24.39 result_mean=25.08
- DIAG mean_ev_diff=+0.573 median_ev_diff=+0.354 frac_ev>line=54.9%
- DIAG Over%|ev>line=0.729 Over%|ev<line=0.357 CF_Over%(emp_shape)=nan
+Raw Model   0.720047   0.758585    0.670667  0.642413   0.237418  0.615769
+Corrected   0.711924   0.758324    0.655308  0.634912   0.219833  0.641947
+Calibrated  0.711754   0.758324    0.654856  0.635662   0.218987  0.607725
+ DIAG model_weight=0.900 DIAG model_calib=0.797
+ DIAG start_scale=0.327 model_scale=5.590 empirical_scale=0.223 shape_ratio=25.0x
+ DIAG start_mean=23.42 model_ev=24.74 mean_line=24.21 result_mean=25.15
+ DIAG mean_ev_diff=+0.524 median_ev_diff=+0.298 frac_ev>line=54.7%
+ DIAG Over%|ev>line=0.758 Over%|ev<line=0.345 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.734 result_meanyr_corr=-0.599
- HP rounds=148 leaves=8 lr=0.0809 min_child=52 L1=1.19e+00 L2=5.95e-05
+ DIAG ev_meanyr_corr=-0.759 result_meanyr_corr=-0.644
+ HP rounds=146 leaves=8 lr=0.0809 min_child=52 L1=1.19e+00 L2=5.95e-05
 
 ========================== NBA OREB ==========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.4480
+ Historical Zero Rate: 0.4478
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.551913   0.615120    0.539961  0.190646   0.124902  0.714127
-Corrected   0.541712   0.603687    0.533456  0.139712   0.116706  0.714855
-Calibrated  0.549438   0.639752    0.539921  0.123824   0.088589  0.696243
+Raw Model   0.542935   0.574194    0.536601  0.199702   0.128569  0.708606
+Corrected   0.546386   0.593074    0.539741  0.146571   0.120169  0.710174
+Calibrated  0.545719   0.604278    0.538562  0.138343   0.091558  0.692577
  DIAG model_weight=0.900 DIAG model_calib=0.753
- DIAG start_r=16.928 model_r=43.429 empirical_r=50.000 shape_ratio=0.9x
- DIAG start_mean=0.96 model_ev=0.96 mean_line=0.88 result_mean=0.85
- DIAG mean_ev_diff=+0.090 median_ev_diff=+0.105 frac_ev>line=63.2%
- DIAG Over%|ev>line=0.501 Over%|ev<line=0.458 CF_Over%(emp_shape)=0.159
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.135
- DIAG ev_meanyr_corr=-0.836 result_meanyr_corr=-0.364
- HP rounds=141 leaves=54 lr=0.0548 min_child=81 L1=6.30e+00 L2=9.79e+00
+ DIAG start_r=17.881 model_r=43.168 empirical_r=50.000 shape_ratio=0.9x
+ DIAG start_mean=0.97 model_ev=0.96 mean_line=0.87 result_mean=0.86
+ DIAG mean_ev_diff=+0.087 median_ev_diff=+0.099 frac_ev>line=63.3%
+ DIAG Over%|ev>line=0.483 Over%|ev<line=0.468 CF_Over%(emp_shape)=0.169
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.134
+ DIAG ev_meanyr_corr=-0.854 result_meanyr_corr=-0.355
+ HP rounds=102 leaves=113 lr=0.0818 min_child=91 L1=9.94e+00 L2=5.98e+00
 
 =========================== NBA PA ===========================
  Distribution Model: SkewNormal
  Historical Zero Rate: 0.0049
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.575102   0.614108    0.524766  0.725094   0.160149  0.707574
-Corrected   0.564087   0.601293    0.516529  0.746955   0.144221  0.726706
-Calibrated  0.567017   0.603972    0.519520  0.813695   0.114770  0.702184
- DIAG model_weight=0.900 DIAG model_calib=0.752
- DIAG start_scale=0.505 model_scale=7.660 empirical_scale=0.566 shape_ratio=13.5x
- DIAG start_mean=15.42 model_ev=16.14 mean_line=16.10 result_mean=16.80
- DIAG mean_ev_diff=+0.047 median_ev_diff=+0.268 frac_ev>line=55.6%
- DIAG Over%|ev>line=0.601 Over%|ev<line=0.483 CF_Over%(emp_shape)=nan
+Raw Model   0.580589   0.612698    0.541985  0.689111   0.168904  0.694918
+Corrected   0.570665   0.600649    0.534211  0.711933   0.150368  0.714387
+Calibrated  0.573607   0.609697    0.530015  0.792689   0.119999  0.698532
+ DIAG model_weight=0.900 DIAG model_calib=0.753
+ DIAG start_scale=0.505 model_scale=7.408 empirical_scale=0.578 shape_ratio=12.8x
+ DIAG start_mean=15.28 model_ev=15.76 mean_line=15.75 result_mean=16.42
+ DIAG mean_ev_diff=+0.007 median_ev_diff=+0.221 frac_ev>line=54.1%
+ DIAG Over%|ev>line=0.601 Over%|ev<line=0.466 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.542 result_meanyr_corr=-0.244
- HP rounds=50 leaves=8 lr=0.1490 min_child=131 L1=2.79e-02 L2=9.86e-03
+ DIAG ev_meanyr_corr=-0.619 result_meanyr_corr=-0.234
+ HP rounds=431 leaves=9 lr=0.0221 min_child=146 L1=1.81e-06 L2=3.87e+00
 
 =========================== NBA PF ===========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.1636
+ Historical Zero Rate: 0.1638
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.628556   0.768029    0.516004  0.521623   0.153932  0.665190
-Corrected   0.617680   0.766578    0.511364  0.500810   0.134755  0.671585
-Calibrated  0.620168   0.768097    0.513956  0.509473   0.128533  0.670758
- DIAG model_weight=0.900 DIAG model_calib=0.765
- DIAG start_r=50.000 model_r=48.653 empirical_r=50.000 shape_ratio=1.0x
- DIAG start_mean=1.90 model_ev=1.84 mean_line=1.75 result_mean=1.88
- DIAG mean_ev_diff=+0.090 median_ev_diff=+0.122 frac_ev>line=56.7%
- DIAG Over%|ev>line=0.739 Over%|ev<line=0.480 CF_Over%(emp_shape)=0.504
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.167
- DIAG ev_meanyr_corr=-0.795 result_meanyr_corr=-0.257
- HP rounds=95 leaves=8 lr=0.1127 min_child=138 L1=8.00e+00 L2=9.81e-02
+Raw Model   0.650357   0.781100    0.539166  0.546256   0.153256  0.653647
+Corrected   0.640634   0.785808    0.530815  0.526947   0.134245  0.661806
+Calibrated  0.642774   0.788540    0.534079  0.538177   0.122086  0.661468
+ DIAG model_weight=0.900 DIAG model_calib=0.761
+ DIAG start_r=50.000 model_r=48.661 empirical_r=50.000 shape_ratio=1.0x
+ DIAG start_mean=1.90 model_ev=1.86 mean_line=1.75 result_mean=1.86
+ DIAG mean_ev_diff=+0.115 median_ev_diff=+0.134 frac_ev>line=58.9%
+ DIAG Over%|ev>line=0.751 Over%|ev<line=0.462 CF_Over%(emp_shape)=0.530
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.159
+ DIAG ev_meanyr_corr=-0.792 result_meanyr_corr=-0.292
+ HP rounds=85 leaves=8 lr=0.1127 min_child=138 L1=8.00e+00 L2=9.81e-02
 
 =========================== NBA PR ===========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.0034
+ Historical Zero Rate: 0.0035
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.571098   0.597322    0.537549  0.719271   0.155632  0.690824
-Corrected   0.570248   0.599169    0.532148  0.743987   0.140298  0.693316
-Calibrated  0.572733   0.602052    0.533537  0.827334   0.112547  0.685296
- DIAG model_weight=0.900 DIAG model_calib=0.753
- DIAG start_scale=0.495 model_scale=7.615 empirical_scale=0.529 shape_ratio=14.4x
- DIAG start_mean=17.00 model_ev=17.73 mean_line=17.53 result_mean=18.12
- DIAG mean_ev_diff=+0.203 median_ev_diff=+0.271 frac_ev>line=55.6%
- DIAG Over%|ev>line=0.599 Over%|ev<line=0.468 CF_Over%(emp_shape)=nan
+Raw Model   0.579882   0.602139    0.552318  0.719231   0.154138  0.687990
+Corrected   0.576107   0.597192    0.549101  0.748169   0.139644  0.696160
+Calibrated  0.579661   0.604240    0.546326  0.857341   0.111216  0.687379
+ DIAG model_weight=0.900 DIAG model_calib=0.752
+ DIAG start_scale=0.496 model_scale=7.702 empirical_scale=0.533 shape_ratio=14.5x
+ DIAG start_mean=16.98 model_ev=17.63 mean_line=17.42 result_mean=18.16
+ DIAG mean_ev_diff=+0.207 median_ev_diff=+0.273 frac_ev>line=55.3%
+ DIAG Over%|ev>line=0.597 Over%|ev<line=0.451 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.576 result_meanyr_corr=-0.246
- HP rounds=580 leaves=9 lr=0.0161 min_child=44 L1=1.35e-06 L2=4.07e-04
+ DIAG ev_meanyr_corr=-0.568 result_meanyr_corr=-0.231
+ HP rounds=545 leaves=9 lr=0.0161 min_child=44 L1=1.35e-06 L2=4.07e-04
 
 ========================== NBA PRA ===========================
  Distribution Model: SkewNormal
  Historical Zero Rate: 0.0029
-            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.536860   0.565566    0.500000  0.709610   0.153117  0.715907
-Corrected   0.538018   0.563691    0.503383  0.742036   0.138106  0.712679
-Calibrated  0.538816   0.572571    0.493023  0.849474   0.103414  0.698351
+            Accuracy  Over Prec  Under Prec    Over%  Sharpness       NLL
+Raw Model   0.530624   0.551323    0.506234  0.68986   0.152513  0.719671
+Corrected   0.526377   0.544492    0.504481  0.70682   0.137519  0.716299
+Calibrated  0.533854   0.559102    0.502899  0.79892   0.103417  0.701275
  DIAG model_weight=0.900 DIAG model_calib=0.748
- DIAG start_scale=0.478 model_scale=8.539 empirical_scale=0.516 shape_ratio=16.5x
- DIAG start_mean=19.71 model_ev=20.45 mean_line=20.26 result_mean=21.25
- DIAG mean_ev_diff=+0.189 median_ev_diff=+0.353 frac_ev>line=55.1%
- DIAG Over%|ev>line=0.564 Over%|ev<line=0.497 CF_Over%(emp_shape)=nan
+ DIAG start_scale=0.478 model_scale=8.551 empirical_scale=0.526 shape_ratio=16.3x
+ DIAG start_mean=19.60 model_ev=20.22 mean_line=20.11 result_mean=20.79
+ DIAG mean_ev_diff=+0.106 median_ev_diff=+0.308 frac_ev>line=54.9%
+ DIAG Over%|ev>line=0.544 Over%|ev<line=0.496 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.497 result_meanyr_corr=-0.229
- HP rounds=119 leaves=10 lr=0.0666 min_child=113 L1=4.11e-05 L2=6.00e-04
+ DIAG ev_meanyr_corr=-0.508 result_meanyr_corr=-0.222
+ HP rounds=128 leaves=10 lr=0.0666 min_child=113 L1=4.11e-05 L2=6.00e-04
 
 ========================== NBA PTS ===========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.0257
+ Historical Zero Rate: 0.0254
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.542323   0.570702    0.504110  0.752065   0.136029  0.703566
-Corrected   0.536791   0.560700    0.502915  0.793805   0.125328  0.712880
-Calibrated  0.541440   0.566705    0.504202  0.908658   0.097548  0.701137
- DIAG model_weight=0.900 DIAG model_calib=0.747
- DIAG start_scale=0.515 model_scale=7.135 empirical_scale=0.646 shape_ratio=11.0x
- DIAG start_mean=12.33 model_ev=12.64 mean_line=12.23 result_mean=13.01
- DIAG mean_ev_diff=+0.402 median_ev_diff=+0.510 frac_ev>line=61.9%
- DIAG Over%|ev>line=0.561 Over%|ev<line=0.497 CF_Over%(emp_shape)=nan
+Raw Model   0.529481   0.563147    0.484932  0.747904   0.143759  0.719574
+Corrected   0.525106   0.557054    0.480406  0.785691   0.129138  0.717771
+Calibrated  0.534145   0.569106    0.485437  0.876571   0.101277  0.704830
+ DIAG model_weight=0.900 DIAG model_calib=0.748
+ DIAG start_scale=0.515 model_scale=6.855 empirical_scale=0.641 shape_ratio=10.7x
+ DIAG start_mean=12.44 model_ev=12.71 mean_line=12.34 result_mean=13.31
+ DIAG mean_ev_diff=+0.374 median_ev_diff=+0.425 frac_ev>line=60.6%
+ DIAG Over%|ev>line=0.557 Over%|ev<line=0.520 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.446 result_meanyr_corr=-0.197
- HP rounds=121 leaves=9 lr=0.0533 min_child=54 L1=3.25e-04 L2=2.52e-04
+ DIAG ev_meanyr_corr=-0.485 result_meanyr_corr=-0.193
+ HP rounds=403 leaves=40 lr=0.0115 min_child=54 L1=1.89e-02 L2=5.93e-04
 
 =========================== NBA RA ===========================
  Distribution Model: SkewNormal
  Historical Zero Rate: 0.0048
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.557920   0.605418    0.510083  0.661913   0.148650  0.700090
-Corrected   0.560318   0.606930    0.511307  0.700563   0.131271  0.701095
-Calibrated  0.560078   0.610553    0.506649  0.741422   0.115779  0.691304
- DIAG model_weight=0.900 DIAG model_calib=0.760
- DIAG start_scale=0.497 model_scale=3.572 empirical_scale=0.546 shape_ratio=6.5x
- DIAG start_mean=7.54 model_ev=7.75 mean_line=7.76 result_mean=8.09
- DIAG mean_ev_diff=-0.015 median_ev_diff=+0.011 frac_ev>line=50.6%
- DIAG Over%|ev>line=0.607 Over%|ev<line=0.489 CF_Over%(emp_shape)=nan
+Raw Model   0.572397   0.596639    0.546835  0.695081   0.143977  0.701053
+Corrected   0.571156   0.597813    0.541944  0.730160   0.127354  0.703258
+Calibrated  0.574000   0.603275    0.541076  0.775650   0.111983  0.688853
+ DIAG model_weight=0.900 DIAG model_calib=0.759
+ DIAG start_scale=0.497 model_scale=3.662 empirical_scale=0.555 shape_ratio=6.6x
+ DIAG start_mean=7.59 model_ev=7.78 mean_line=7.77 result_mean=8.04
+ DIAG mean_ev_diff=+0.016 median_ev_diff=+0.041 frac_ev>line=51.5%
+ DIAG Over%|ev>line=0.598 Over%|ev<line=0.458 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.479 result_meanyr_corr=-0.199
- HP rounds=705 leaves=11 lr=0.0126 min_child=92 L1=2.88e-04 L2=9.02e-05
+ DIAG ev_meanyr_corr=-0.502 result_meanyr_corr=-0.188
+ HP rounds=508 leaves=11 lr=0.0126 min_child=92 L1=2.88e-04 L2=9.02e-05
 
 ========================== NBA REB ===========================
  Distribution Model: SkewNormal
- Historical Zero Rate: 0.0297
+ Historical Zero Rate: 0.0296
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.569658   0.609783    0.521964  0.718781   0.127494  0.685613
-Corrected   0.578883   0.614393    0.532775  0.768548   0.113506  0.686854
-Calibrated  0.586928   0.622970    0.540419  0.825582   0.099428  0.684429
- DIAG model_weight=0.900 DIAG model_calib=0.755
- DIAG start_scale=0.532 model_scale=2.710 empirical_scale=0.676 shape_ratio=4.0x
- DIAG start_mean=4.55 model_ev=4.63 mean_line=4.47 result_mean=4.79
- DIAG mean_ev_diff=+0.163 median_ev_diff=+0.189 frac_ev>line=60.8%
- DIAG Over%|ev>line=0.614 Over%|ev<line=0.467 CF_Over%(emp_shape)=nan
+Raw Model   0.570289   0.623362    0.502104  0.765968   0.126905  0.690866
+Corrected   0.564647   0.614316    0.494737  0.810309   0.113458  0.691535
+Calibrated  0.571522   0.622620    0.500000  0.845392   0.101728  0.688885
+ DIAG model_weight=0.900 DIAG model_calib=0.757
+ DIAG start_scale=0.531 model_scale=2.675 empirical_scale=0.686 shape_ratio=3.9x
+ DIAG start_mean=4.59 model_ev=4.66 mean_line=4.46 result_mean=4.84
+ DIAG mean_ev_diff=+0.193 median_ev_diff=+0.184 frac_ev>line=61.2%
+ DIAG Over%|ev>line=0.614 Over%|ev<line=0.505 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.317 result_meanyr_corr=-0.155
- HP rounds=117 leaves=8 lr=0.0754 min_child=76 L1=1.35e-06 L2=1.17e-06
+ DIAG ev_meanyr_corr=-0.319 result_meanyr_corr=-0.146
+ HP rounds=113 leaves=8 lr=0.0626 min_child=51 L1=4.60e+00 L2=6.81e-05
 
 ========================== NBA STL ===========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.4620
+ Historical Zero Rate: 0.4713
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.580055   0.571429    0.581191  0.142899   0.109661  0.690529
-Corrected   0.580240   0.588235    0.579512  0.101066   0.106928  0.693420
-Calibrated  0.582897   0.577236    0.583333  0.092282   0.084279  0.683620
+Raw Model   0.583333   0.589286    0.582716  0.114139   0.108440  0.695488
+Corrected   0.579632   0.661157    0.573913  0.077123   0.105174  0.695723
+Calibrated  0.586068   0.645833    0.582572  0.069108   0.084647  0.684777
  DIAG model_weight=0.900 DIAG model_calib=0.756
- DIAG start_r=50.000 model_r=47.343 empirical_r=50.000 shape_ratio=0.9x
- DIAG start_mean=0.84 model_ev=1.01 mean_line=0.86 result_mean=0.86
- DIAG mean_ev_diff=+0.152 median_ev_diff=+0.193 frac_ev>line=65.7%
- DIAG Over%|ev>line=0.463 Over%|ev<line=0.394 CF_Over%(emp_shape)=0.114
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.030
- DIAG ev_meanyr_corr=-0.423 result_meanyr_corr=-0.109
- HP rounds=85 leaves=93 lr=0.0634 min_child=32 L1=9.72e+00 L2=5.79e-01
+ DIAG start_r=39.006 model_r=47.356 empirical_r=50.000 shape_ratio=0.9x
+ DIAG start_mean=0.85 model_ev=1.05 mean_line=0.86 result_mean=0.86
+ DIAG mean_ev_diff=+0.188 median_ev_diff=+0.226 frac_ev>line=69.5%
+ DIAG Over%|ev>line=0.468 Over%|ev<line=0.394 CF_Over%(emp_shape)=0.088
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.027
+ DIAG ev_meanyr_corr=-0.378 result_meanyr_corr=-0.110
+ HP rounds=66 leaves=114 lr=0.0952 min_child=135 L1=1.00e+01 L2=4.53e-01
 
 ========================== NBA TOV ===========================
  Distribution Model: ZINB
- Historical Zero Rate: 0.3141
+ Historical Zero Rate: 0.3223
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.583239   0.722343    0.534100  0.324603   0.122943  0.696013
-Corrected   0.563520   0.726444    0.524874  0.245354   0.108230  0.700588
-Calibrated  0.564890   0.711744    0.533486  0.242559   0.087801  0.692477
- DIAG model_weight=0.900 DIAG model_calib=0.752
- DIAG start_r=50.000 model_r=47.398 empirical_r=50.000 shape_ratio=0.9x
- DIAG start_mean=1.38 model_ev=1.41 mean_line=1.32 result_mean=1.35
- DIAG mean_ev_diff=+0.098 median_ev_diff=+0.145 frac_ev>line=61.2%
- DIAG Over%|ev>line=0.595 Over%|ev<line=0.450 CF_Over%(emp_shape)=0.256
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.067
- DIAG ev_meanyr_corr=-0.779 result_meanyr_corr=-0.237
- HP rounds=93 leaves=34 lr=0.0625 min_child=120 L1=8.73e+00 L2=5.34e-02
+Raw Model   0.579606   0.683962    0.544294  0.322033   0.127320  0.700324
+Corrected   0.563842   0.684211    0.535107  0.245615   0.111987  0.703647
+Calibrated  0.570118   0.696970    0.543582  0.242156   0.091785  0.694292
+ DIAG model_weight=0.900 DIAG model_calib=0.753
+ DIAG start_r=50.000 model_r=47.276 empirical_r=50.000 shape_ratio=0.9x
+ DIAG start_mean=1.38 model_ev=1.38 mean_line=1.30 result_mean=1.36
+ DIAG mean_ev_diff=+0.084 median_ev_diff=+0.150 frac_ev>line=61.1%
+ DIAG Over%|ev>line=0.574 Over%|ev<line=0.439 CF_Over%(emp_shape)=0.255
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.077
+ DIAG ev_meanyr_corr=-0.794 result_meanyr_corr=-0.199
+ HP rounds=102 leaves=107 lr=0.0656 min_child=144 L1=9.85e+00 L2=3.07e-04
 
 =============== NBA fantasy points prizepicks ================
  Distribution Model: SkewNormal
  Historical Zero Rate: 0.0000
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.663948   0.701203    0.610818  0.661017   0.220425  0.663603
-Corrected   0.656079   0.697917    0.598701  0.654957   0.205191  0.701017
-Calibrated  0.662410   0.704023    0.605020  0.665616   0.191392  0.652995
- DIAG model_weight=0.900 DIAG model_calib=0.783
- DIAG start_scale=0.483 model_scale=9.819 empirical_scale=0.424 shape_ratio=23.2x
- DIAG start_mean=23.40 model_ev=24.14 mean_line=23.39 result_mean=25.34
- DIAG mean_ev_diff=+0.754 median_ev_diff=+0.960 frac_ev>line=57.2%
- DIAG Over%|ev>line=0.699 Over%|ev<line=0.399 CF_Over%(emp_shape)=nan
+Raw Model   0.670998   0.716720    0.614058  0.618520   0.242098  0.660982
+Corrected   0.670609   0.717042    0.613456  0.616022   0.225963  0.672311
+Calibrated  0.671446   0.717698    0.614874  0.620513   0.215610  0.633430
+ DIAG model_weight=0.900 DIAG model_calib=0.796
+ DIAG start_scale=0.483 model_scale=9.541 empirical_scale=0.399 shape_ratio=23.9x
+ DIAG start_mean=23.64 model_ev=24.20 mean_line=23.81 result_mean=25.55
+ DIAG mean_ev_diff=+0.391 median_ev_diff=+0.684 frac_ev>line=54.8%
+ DIAG Over%|ev>line=0.717 Over%|ev<line=0.387 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.847 result_meanyr_corr=-0.427
- HP rounds=172 leaves=8 lr=0.0597 min_child=82 L1=6.41e-03 L2=2.14e-06
+ DIAG ev_meanyr_corr=-0.896 result_meanyr_corr=-0.468
+ HP rounds=148 leaves=8 lr=0.0597 min_child=82 L1=6.41e-03 L2=2.14e-06
 
 ======================== NFL attempts ========================
  Distribution Model: SkewNormal
@@ -948,27 +948,27 @@ Calibrated  0.649915   0.676444    0.603715  0.757547   0.161421  0.662477
 ================================================================================
 Market           Dist      Over%  ShpR FracEV>  MedDiff  O%|EV>  O%|EV<  CF_O%
 --------------------------------------------------------------------------------
-AST              SkewNo    0.770  2.2x   76.7%   +0.413   0.588   0.450    nan
-BLK              ZINB      0.054  1.0x   69.8%   +0.082   0.371   0.242  0.057
-BLST             ZINB      0.330  0.9x   66.5%   +0.238   0.590   0.402  0.348
-DREB             SkewNo    0.508  2.6x   53.7%   +0.067   0.714   0.458    nan
-FG3A             SkewNo    0.520  2.6x   59.7%   +0.159   0.630   0.407    nan
-FG3M             ZINB      0.571  0.8x   82.0%   +0.481   0.558   0.323  0.609
-FGA              SkewNo    0.610  7.9x   52.4%   +0.111   0.715   0.408    nan
-FGM              SkewNo    0.573  3.4x   54.2%   +0.095   0.687   0.429    nan
-FTM              ZINB      0.123  0.7x   69.5%   +0.310   0.451   0.369  0.249
-MIN              SkewNo    0.656 23.5x   54.9%   +0.354   0.729   0.357    nan
-OREB             ZINB      0.140  0.9x   63.2%   +0.105   0.501   0.458  0.159
-PA               SkewNo    0.747 13.5x   55.6%   +0.268   0.601   0.483    nan
-PF               ZINB      0.501  1.0x   56.7%   +0.122   0.739   0.480  0.504
-PR               SkewNo    0.744 14.4x   55.6%   +0.271   0.599   0.468    nan
-PRA              SkewNo    0.742 16.5x   55.1%   +0.353   0.564   0.497    nan
-PTS              SkewNo    0.794 11.0x   61.9%   +0.510   0.561   0.497    nan
-RA               SkewNo    0.701  6.5x   50.6%   +0.011   0.607   0.489    nan
-REB              SkewNo    0.769  4.0x   60.8%   +0.189   0.614   0.467    nan
-STL              ZINB      0.101  0.9x   65.7%   +0.193   0.463   0.394  0.114
-TOV              ZINB      0.245  0.9x   61.2%   +0.145   0.595   0.450  0.256
-fantasy points prizepicks SkewNo    0.655 23.2x   57.2%   +0.960   0.699   0.399    nan
+AST              SkewNo    0.846  2.3x   80.4%   +0.450   0.577   0.431    nan
+BLK              ZINB      0.054  0.9x   71.9%   +0.089   0.358   0.238  0.058
+BLST             ZINB      0.235  0.9x   68.1%   +0.259   0.567   0.404  0.259
+DREB             SkewNo    0.516  2.6x   54.2%   +0.068   0.727   0.433    nan
+FG3A             SkewNo    0.447  2.5x   55.6%   +0.097   0.601   0.387    nan
+FG3M             ZINB      0.555  0.8x   82.5%   +0.483   0.555   0.320  0.586
+FGA              SkewNo    0.601  7.8x   51.5%   +0.086   0.733   0.391    nan
+FGM              SkewNo    0.536  3.4x   51.2%   +0.026   0.709   0.403    nan
+FTM              ZINB      0.104  0.7x   66.7%   +0.260   0.440   0.357  0.231
+MIN              SkewNo    0.635 25.0x   54.7%   +0.298   0.758   0.345    nan
+OREB             ZINB      0.147  0.9x   63.3%   +0.099   0.483   0.468  0.169
+PA               SkewNo    0.712 12.8x   54.1%   +0.221   0.601   0.466    nan
+PF               ZINB      0.527  1.0x   58.9%   +0.134   0.751   0.462  0.530
+PR               SkewNo    0.748 14.5x   55.3%   +0.273   0.597   0.451    nan
+PRA              SkewNo    0.707 16.3x   54.9%   +0.308   0.544   0.496    nan
+PTS              SkewNo    0.786 10.7x   60.6%   +0.425   0.557   0.520    nan
+RA               SkewNo    0.730  6.6x   51.5%   +0.041   0.598   0.458    nan
+REB              SkewNo    0.810  3.9x   61.2%   +0.184   0.614   0.505    nan
+STL              ZINB      0.077  0.9x   69.5%   +0.226   0.468   0.394  0.088
+TOV              ZINB      0.246  0.9x   61.1%   +0.150   0.574   0.439  0.255
+fantasy points prizepicks SkewNo    0.616 23.9x   54.8%   +0.684   0.717   0.387    nan
 
 
 ================================================================================

@@ -340,6 +340,37 @@ and commit the new fixture file alongside your code change.
 There are no unit tests for model behavior — the golden tests guard the CLI surface and
 the training report is the behavioral regression check.
 
+### Integration smoke test
+
+`tests/integration/test_end_to_end.py` exercises the
+`confer -> meditate -> prophecize` wiring against cached Odds API fixtures
+and stubbed external dependencies (`nba_api`, Optuna, Google Sheets, Underdog,
+Sleeper). It is marked `integration` and is excluded from the default
+`pytest` collection; opt in explicitly:
+
+```bash
+poetry run pytest -m integration         # fake mode (default; ~5s, no network)
+SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1 \
+  poetry run pytest -m integration       # live Stats loaders (manual / on-demand)
+```
+
+The fake-mode run is **mandatory on every commit** — the
+`integration-smoke` pre-commit hook in `.pre-commit-config.yaml` runs
+`pytest -m integration` with `SPORTSTRADAMUS_INTEGRATION_REAL_APIS`
+forcibly unset so the hook never hits the network. If your change touches
+any module the test imports (the three CLIs, `Stats`, `Archive`, scoring,
+parlay search, or sheet export), the smoke test will exercise the import
+graph before the commit lands. The hook is set up by
+`poetry run pre-commit install`.
+
+The test never writes data: `Archive.write`, model pickle writes, and
+prediction-history writes are all stubbed, and a `preserve_data_files`
+fixture snapshots/restores the JSON config files in `src/sportstradamus/data/`
+that ``meditate`` and ``confer`` would otherwise rewrite. Adding a new
+CLI flag, renaming a stubbed function, or moving a CLI entry point will
+likely break the smoke test — update its monkeypatches in lockstep with
+the production change.
+
 ---
 
 ## Archived / Deprecated Code
