@@ -19,4 +19,6 @@ Options:
                                   Rebuild only the per-league correlation
                                   matrices and exit; skip the per-market
                                   training loop
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
   --help                          Show this message and exit.

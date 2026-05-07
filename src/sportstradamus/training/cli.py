@@ -9,7 +9,7 @@ import click
 import numpy as np
 
 from sportstradamus import data
-from sportstradamus.helpers import Archive, book_weights, feature_filter
+from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
@@ -51,8 +51,25 @@ np.seterr(divide="ignore", invalid="ignore")
     default=False,
     help="Rebuild only the per-league correlation matrices and exit; skip the per-market training loop",
 )
-def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations):
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    help="Verbosity for the structured JSONL log.",
+)
+def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations, log_level):
     """Train or retrain LightGBMLSS models for each configured market."""
+    log = get_logger("meditate")
+    log.setLevel(log_level)
+    log.info(
+        "meditate invoked",
+        extra={
+            "force": force,
+            "league": league,
+            "rebuild_filter": rebuild_filter,
+            "rebuild_correlations": rebuild_correlations,
+        },
+    )
     np.random.seed(69)
 
     if reset_markets.strip():
@@ -68,7 +85,7 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations)
             ff.setdefault(lg, {}).setdefault("Filtered", {})
             if mk in ff[lg]["Filtered"]:
                 del ff[lg]["Filtered"][mk]
-                print(f"Reset filter for {lg}:{mk}")
+                log.info("Reset filter", extra={"league": lg, "market": mk})
         with open(ff_path, "w") as fh:
             json.dump(ff, fh, indent=4)
         # Reload module-level feature_filter so this run sees the change

@@ -13,7 +13,6 @@ Schedule with cron after games finish, e.g.:
 
 import importlib.resources as pkg_resources
 import json
-import logging
 from datetime import datetime
 
 import click
@@ -22,7 +21,7 @@ from tqdm import tqdm
 
 from sportstradamus import clv, data
 from sportstradamus.analysis import check_bet, resolve_history
-from sportstradamus.helpers import Archive
+from sportstradamus.helpers import Archive, get_logger
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
@@ -31,8 +30,7 @@ from sportstradamus.helpers.io import (
 )
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger("reflect")
 
 LEAGUE_CLASSES = {
     "NBA": StatsNBA,
@@ -54,8 +52,19 @@ LEAGUE_CLASSES = {
 @click.option(
     "--history-only", is_flag=True, default=False, help="Skip parlay resolution (much faster)."
 )
-def run(league, skip_update, history_only):
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    help="Verbosity for the structured JSONL log.",
+)
+def run(league, skip_update, history_only, log_level):
     """Nightly resolution: update stats, fill Actual/Legs/Misses, save."""
+    logger.setLevel(log_level)
+    logger.info(
+        "reflect invoked",
+        extra={"league": league, "skip_update": skip_update, "history_only": history_only},
+    )
     # ------------------------------------------------------------------
     # 1. Load league Stats objects (optionally with update)
     # ------------------------------------------------------------------
