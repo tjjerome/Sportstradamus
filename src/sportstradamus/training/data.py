@@ -32,12 +32,12 @@ def count_training_rows(stat_data, market, start_date, archive) -> int:
         return 0
 
     usage_cutoff = gamelog[stat_data.usage_stat].quantile(0.25)
-    league_archive = archive.archive.get(stat_data.league, {}).get(market, {})
+    archived_by_date = archive.archived_players_by_date(stat_data.league, market)
 
     total = 0
     for game_date, players in gamelog.groupby(stat_data.log_strings["date"]):
         date_str = game_date.strftime("%Y-%m-%d")
-        archived_players = set(league_archive.get(date_str, {}).keys())
+        archived_players = archived_by_date.get(date_str, set())
 
         played = set(players[stat_data.log_strings["player"]].unique())
         archived_count = len(archived_players & played)

@@ -1,3 +1,10 @@
+# ARCHIVED 2026-05-07 from src/sportstradamus/scripts/clean_archive.py
+# Reason: archive backend migrated klepto HDF -> DuckDB; this script's direct
+#   dict-mutation walk no longer applies. Cleanup is now handled by
+#   clean_archive() in helpers/archive.py via SQL.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   from sportstradamus.helpers import Archive, merge_dict, remove_accents
 import numpy as np
 from tqdm import tqdm
 

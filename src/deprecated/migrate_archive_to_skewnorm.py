@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# ARCHIVED 2026-05-07 from src/sportstradamus/scripts/migrate_archive_to_skewnorm.py
+# Reason: archive backend migrated klepto HDF -> DuckDB; this one-shot
+#   re-encoding script targeted the old nested-dict format and no longer runs.
+# Last live SHA: 871657e
+# Original imports (now unresolved here):
+#   from sportstradamus.helpers import Archive, get_ev, get_odds
 """
 Migrate archive EVs across the fix-compression merge.
 
