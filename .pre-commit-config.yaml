@@ -33,3 +33,16 @@ repos:
         # Skip on commit so slow type checks don't block local iteration;
         # CI runs the same check and surfaces warnings there.
         stages: [manual]
+
+  - repo: local
+    hooks:
+      # Smoke test: confer/meditate/prophecize wired through fixtures + stubs.
+      # Forced into fake-API mode so the hook never hits the network. Live-API
+      # mode (`SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1`) is opt-in for manual
+      # runs only.
+      - id: integration-smoke
+        name: integration smoke (no APIs)
+        entry: env -u SPORTSTRADAMUS_INTEGRATION_REAL_APIS poetry run pytest tests/integration/ -m integration -q
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

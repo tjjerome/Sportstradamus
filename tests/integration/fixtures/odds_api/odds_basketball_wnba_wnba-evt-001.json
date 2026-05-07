@@ -1,0 +1,349 @@
+{
+  "id": "wnba-evt-001",
+  "sport_key": "basketball_wnba",
+  "sport_title": "WNBA",
+  "commence_time": "2026-05-08T00:00:00Z",
+  "home_team": "Las Vegas Aces",
+  "away_team": "New York Liberty",
+  "bookmakers": [
+    {
+      "key": "fanduel",
+      "title": "FanDuel",
+      "last_update": "2026-05-07T12:00:00Z",
+      "markets": [
+        {
+          "key": "player_points",
+          "last_update": "2026-05-07T12:00:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "A'ja Wilson",
+              "price": 1.91,
+              "point": 22.5
+            },
+            {
+              "name": "Under",
+              "description": "A'ja Wilson",
+              "price": 1.91,
+              "point": 22.5
+            },
+            {
+              "name": "Over",
+              "description": "Jackie Young",
+              "price": 1.91,
+              "point": 16.5
+            },
+            {
+              "name": "Under",
+              "description": "Jackie Young",
+              "price": 1.91,
+              "point": 16.5
+            },
+            {
+              "name": "Over",
+              "description": "Kelsey Plum",
+              "price": 1.91,
+              "point": 18.5
+            },
+            {
+              "name": "Under",
+              "description": "Kelsey Plum",
+              "price": 1.91,
+              "point": 18.5
+            },
+            {
+              "name": "Over",
+              "description": "Chelsea Gray",
+              "price": 1.91,
+              "point": 13.5
+            },
+            {
+              "name": "Under",
+              "description": "Chelsea Gray",
+              "price": 1.91,
+              "point": 13.5
+            },
+            {
+              "name": "Over",
+              "description": "Sabrina Ionescu",
+              "price": 1.91,
+              "point": 19.5
+            },
+            {
+              "name": "Under",
+              "description": "Sabrina Ionescu",
+              "price": 1.91,
+              "point": 19.5
+            },
+            {
+              "name": "Over",
+              "description": "Breanna Stewart",
+              "price": 1.91,
+              "point": 20.5
+            },
+            {
+              "name": "Under",
+              "description": "Breanna Stewart",
+              "price": 1.91,
+              "point": 20.5
+            },
+            {
+              "name": "Over",
+              "description": "Jonquel Jones",
+              "price": 1.91,
+              "point": 14.5
+            },
+            {
+              "name": "Under",
+              "description": "Jonquel Jones",
+              "price": 1.91,
+              "point": 14.5
+            }
+          ]
+        },
+        {
+          "key": "totals",
+          "last_update": "2026-05-07T12:00:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "price": 1.91,
+              "point": 165.5
+            },
+            {
+              "name": "Under",
+              "price": 1.91,
+              "point": 165.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "draftkings",
+      "title": "DraftKings",
+      "last_update": "2026-05-07T12:00:00Z",
+      "markets": [
+        {
+          "key": "player_points",
+          "last_update": "2026-05-07T12:00:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "A'ja Wilson",
+              "price": 1.91,
+              "point": 22.5
+            },
+            {
+              "name": "Under",
+              "description": "A'ja Wilson",
+              "price": 1.91,
+              "point": 22.5
+            },
+            {
+              "name": "Over",
+              "description": "Jackie Young",
+              "price": 1.91,
+              "point": 16.5
+            },
+            {
+              "name": "Under",
+              "description": "Jackie Young",
+              "price": 1.91,
+              "point": 16.5
+            },
+            {
+              "name": "Over",
+              "description": "Kelsey Plum",
+              "price": 1.91,
+              "point": 18.5
+            },
+            {
+              "name": "Under",
+              "description": "Kelsey Plum",
+              "price": 1.91,
+              "point": 18.5
+            },
+            {
+              "name": "Over",
+              "description": "Chelsea Gray",
+              "price": 1.91,
+              "point": 13.5
+            },
+            {
+              "name": "Under",
+              "description": "Chelsea Gray",
+              "price": 1.91,
+              "point": 13.5
+            },
+            {
+              "name": "Over",
+              "description": "Sabrina Ionescu",
+              "price": 1.91,
+              "point": 19.5
+            },
+            {
+              "name": "Under",
+              "description": "Sabrina Ionescu",
+              "price": 1.91,
+              "point": 19.5
+            },
+            {
+              "name": "Over",
+              "description": "Breanna Stewart",
+              "price": 1.91,
+              "point": 20.5
+            },
+            {
+              "name": "Under",
+              "description": "Breanna Stewart",
+              "price": 1.91,
+              "point": 20.5
+            },
+            {
+              "name": "Over",
+              "description": "Jonquel Jones",
+              "price": 1.91,
+              "point": 14.5
+            },
+            {
+              "name": "Under",
+              "description": "Jonquel Jones",
+              "price": 1.91,
+              "point": 14.5
+            }
+          ]
+        },
+        {
+          "key": "totals",
+          "last_update": "2026-05-07T12:00:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "price": 1.91,
+              "point": 165.5
+            },
+            {
+              "name": "Under",
+              "price": 1.91,
+              "point": 165.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "betmgm",
+      "title": "BetMGM",
+      "last_update": "2026-05-07T12:00:00Z",
+      "markets": [
+        {
+          "key": "player_points",
+          "last_update": "2026-05-07T12:00:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "description": "A'ja Wilson",
+              "price": 1.91,
+              "point": 22.5
+            },
+            {
+              "name": "Under",
+              "description": "A'ja Wilson",
+              "price": 1.91,
+              "point": 22.5
+            },
+            {
+              "name": "Over",
+              "description": "Jackie Young",
+              "price": 1.91,
+              "point": 16.5
+            },
+            {
+              "name": "Under",
+              "description": "Jackie Young",
+              "price": 1.91,
+              "point": 16.5
+            },
+            {
+              "name": "Over",
+              "description": "Kelsey Plum",
+              "price": 1.91,
+              "point": 18.5
+            },
+            {
+              "name": "Under",
+              "description": "Kelsey Plum",
+              "price": 1.91,
+              "point": 18.5
+            },
+            {
+              "name": "Over",
+              "description": "Chelsea Gray",
+              "price": 1.91,
+              "point": 13.5
+            },
+            {
+              "name": "Under",
+              "description": "Chelsea Gray",
+              "price": 1.91,
+              "point": 13.5
+            },
+            {
+              "name": "Over",
+              "description": "Sabrina Ionescu",
+              "price": 1.91,
+              "point": 19.5
+            },
+            {
+              "name": "Under",
+              "description": "Sabrina Ionescu",
+              "price": 1.91,
+              "point": 19.5
+            },
+            {
+              "name": "Over",
+              "description": "Breanna Stewart",
+              "price": 1.91,
+              "point": 20.5
+            },
+            {
+              "name": "Under",
+              "description": "Breanna Stewart",
+              "price": 1.91,
+              "point": 20.5
+            },
+            {
+              "name": "Over",
+              "description": "Jonquel Jones",
+              "price": 1.91,
+              "point": 14.5
+            },
+            {
+              "name": "Under",
+              "description": "Jonquel Jones",
+              "price": 1.91,
+              "point": 14.5
+            }
+          ]
+        },
+        {
+          "key": "totals",
+          "last_update": "2026-05-07T12:00:00Z",
+          "outcomes": [
+            {
+              "name": "Over",
+              "price": 1.91,
+              "point": 165.5
+            },
+            {
+              "name": "Under",
+              "price": 1.91,
+              "point": 165.5
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
