@@ -41,6 +41,7 @@ from sportstradamus.helpers import (
     Archive,
     abbreviations,
     get_ev,
+    get_logger,
     no_vig_odds,
     remove_accents,
     stat_cv,
@@ -99,8 +100,17 @@ def _get_with_retry(url, params=None):
         "Exits without touching archive or API when no events are due."
     ),
 )
-def confer(close_lines: bool):
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+    help="Verbosity for the structured JSONL log.",
+)
+def confer(close_lines: bool, log_level: str):
     """Fetch current odds and player props into the archive."""
+    cli_log = get_logger("confer")
+    cli_log.setLevel(log_level)
+    cli_log.info("confer invoked", extra={"close_lines": close_lines})
     filepath = pkg_resources.files(creds) / "keys.json"
     with open(filepath) as infile:
         keys = json.load(infile)
