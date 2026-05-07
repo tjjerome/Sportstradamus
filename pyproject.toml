@@ -176,3 +176,9 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: end-to-end pipeline test (confer -> meditate -> prophecize) on cached fixtures. Skipped by default; opt in with `pytest -m integration`.",
+]
+# Default runs skip the integration suite. CI's `pytest tests/golden/` is
+# unaffected because golden tests are unmarked.
+addopts = "-m 'not integration'"
