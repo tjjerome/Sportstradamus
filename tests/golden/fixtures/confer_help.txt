@@ -8,6 +8,13 @@ Options:
                                   endpoints for games starting within the
                                   closing window. Exits without touching archive
                                   or API when no events are due.
+  --fixture-dir DIRECTORY         Read canned Odds API responses from this
+                                  directory instead of hitting the live API.
+                                  Used by the integration test suite. Skips
+                                  game-level moneyline fetches; player props are
+                                  loaded from <fixture_dir>/sports.json,
+                                  <fixture_dir>/events_<sport_key>.json, and <fi
+                                  xture_dir>/odds_<sport_key>_<event_id>.json.
   --log-level [DEBUG|INFO|WARNING|ERROR]
                                   Verbosity for the structured JSONL log.
   --help                          Show this message and exit.

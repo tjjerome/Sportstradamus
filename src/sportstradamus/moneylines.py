@@ -28,6 +28,7 @@ import json
 from datetime import datetime, timedelta
 from itertools import groupby
 from operator import itemgetter
+from pathlib import Path
 from time import sleep
 
 import click
@@ -101,16 +102,32 @@ def _get_with_retry(url, params=None):
     ),
 )
 @click.option(
+    "--fixture-dir",
+    "fixture_dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help=(
+        "Read canned Odds API responses from this directory instead of hitting the "
+        "live API. Used by the integration test suite. Skips game-level moneyline "
+        "fetches; player props are loaded from <fixture_dir>/sports.json, "
+        "<fixture_dir>/events_<sport_key>.json, and "
+        "<fixture_dir>/odds_<sport_key>_<event_id>.json."
+    ),
+)
+@click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
     help="Verbosity for the structured JSONL log.",
 )
-def confer(close_lines: bool, log_level: str):
+def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
     """Fetch current odds and player props into the archive."""
     cli_log = get_logger("confer")
     cli_log.setLevel(log_level)
-    cli_log.info("confer invoked", extra={"close_lines": close_lines})
+    cli_log.info(
+        "confer invoked",
+        extra={"close_lines": close_lines, "fixture_dir": str(fixture_dir)},
+    )
     filepath = pkg_resources.files(creds) / "keys.json"
     with open(filepath) as infile:
         keys = json.load(infile)
@@ -126,10 +143,13 @@ def confer(close_lines: bool, log_level: str):
     archive = Archive()
     logger.info("Archive loaded")
 
-    archive = get_moneylines(archive, keys)
-    logger.info("Game data complete")
+    if fixture_dir is None:
+        archive = get_moneylines(archive, keys)
+        logger.info("Game data complete")
 
-    archive = get_props(archive, keys["odds_api_plus"], stat_map["Odds API"])
+    archive = get_props(
+        archive, keys["odds_api_plus"], stat_map["Odds API"], fixture_dir=fixture_dir
+    )
     logger.info("Player data complete, writing to file...")
 
     archive.write()
@@ -272,11 +292,15 @@ def get_props(
     date=datetime.now().astimezone(pytz.timezone("America/Chicago")),
     sport="All",
     key=None,
+    fixture_dir: Path | None = None,
 ):
     """Fetch per-event player-prop markets and store book-level EVs."""
     stat_cv["NCAAB"] = stat_cv["NBA"]
     stat_cv["NCAAF"] = stat_cv["NFL"]
     historical = date.date() != datetime.today().date()
+
+    if fixture_dir is not None:
+        return _get_props_from_fixtures(archive, props, Path(fixture_dir), date)
 
     if sport == "All":
         if historical:
@@ -455,6 +479,70 @@ def _archive_event_props(archive, game, league, props, gameDate):
         archive[league][market][gameDate][
             abbreviations[league][remove_accents(game["away_team"])]
         ] = {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()}
+
+
+def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
+    """Replay canned Odds API responses from ``fixture_dir`` into ``archive``.
+
+    Mirrors the live ``get_props`` flow but swaps the three HTTP touchpoints
+    (sports index, per-sport events, per-event odds) for JSON files on disk.
+    The downstream pipeline — archive writes, ledger updates, prop parsing
+    via :func:`_archive_event_props` — is path-identical to a live run so
+    the integration test exercises the same code paths.
+
+    Expected fixture layout::
+
+        <fixture_dir>/sports.json
+        <fixture_dir>/events_<sport_key>.json
+        <fixture_dir>/odds_<sport_key>_<event_id>.json
+
+    ``sports.json`` filters which sport keys are processed; only entries
+    whose ``title`` is in :data:`LEAGUES_OF_INTEREST` and whose ``active``
+    flag is true are considered.
+    """
+    sports_path = fixture_dir / "sports.json"
+    with open(sports_path) as infile:
+        sports_payload = json.load(infile)
+    sports = [
+        (s["key"], s["title"])
+        for s in sports_payload
+        if s["title"] in LEAGUES_OF_INTEREST and s["active"]
+    ]
+
+    ledger = {(e["sport_key"], e["event_id"]): e for e in read_upcoming_events()}
+
+    for sport, league in sports:
+        events_path = fixture_dir / f"events_{sport}.json"
+        if not events_path.is_file():
+            continue
+        with open(events_path) as infile:
+            events = json.load(infile)
+
+        for event in events:
+            gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
+                pytz.timezone("America/Chicago")
+            )
+            if gameDate > date + timedelta(days=6):
+                continue
+            gameDate_str = gameDate.strftime("%Y-%m-%d")
+
+            odds_path = fixture_dir / f"odds_{sport}_{event['id']}.json"
+            if not odds_path.is_file():
+                continue
+            with open(odds_path) as infile:
+                game = json.load(infile)
+
+            _archive_event_props(archive, game, league, props, gameDate_str)
+            ledger[(sport, event["id"])] = {
+                "sport_key": sport,
+                "event_id": event["id"],
+                "league": league,
+                "commence_time": event["commence_time"],
+                "markets": list(props[league].keys()),
+            }
+
+    write_upcoming_events(_prune_upcoming_events(list(ledger.values())))
+    return archive
 
 
 def _prune_upcoming_events(events):
