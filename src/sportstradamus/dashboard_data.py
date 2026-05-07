@@ -5,7 +5,6 @@ All pages import from here to get cached DataFrames and filters.
 
 import importlib.resources as pkg_resources
 import json
-import os
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -18,6 +17,12 @@ from sportstradamus.analysis import (
     check_bet,
     explode_offers,
     resolve_history,
+)
+from sportstradamus.helpers.io import (
+    read_history,
+    read_parlay_hist,
+    write_history,
+    write_parlay_hist,
 )
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
@@ -37,15 +42,14 @@ def load_history():
     If old flat schema is detected (no Offers column), migrates automatically
     and saves the migrated data back to pickle.
     """
-    filepath = pkg_resources.files(data) / "history.dat"
-    if not os.path.isfile(filepath):
-        return pd.DataFrame()
-    history = pd.read_pickle(filepath)
+    history = read_history()
+    if history.empty:
+        return history
 
     # Migrate old flat schema → normalized (one row per prediction, Offers list)
     if "Offers" not in history.columns:
         history = _migrate_flat_history(history)
-        history.to_pickle(filepath)
+        write_history(history)
 
     # Ensure prediction-level columns exist for backward compatibility
     for col in ["Dist", "CV", "Model Param", "Gate", "Temperature", "Disp Cal", "Step", "Actual"]:
@@ -58,10 +62,9 @@ def load_history():
 @st.cache_data(ttl=3600, show_spinner="Loading parlay history...")
 def load_parlays():
     """Load parlay history."""
-    filepath = pkg_resources.files(data) / "parlay_hist.dat"
-    if not os.path.isfile(filepath):
-        return pd.DataFrame()
-    parlays = pd.read_pickle(filepath)
+    parlays = read_parlay_hist()
+    if parlays.empty:
+        return parlays
 
     # Backward compat
     for col in ["Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"]:
@@ -120,10 +123,7 @@ def resolve_and_save(history, stats):
         return history
 
     history = resolve_history(history, stats)
-
-    filepath = pkg_resources.files(data) / "history.dat"
-    history.to_pickle(filepath)
-
+    write_history(history)
     return history
 
 
@@ -143,10 +143,7 @@ def resolve_parlays_and_save(parlays, stats, stat_map):
         lambda bet: check_bet(bet, stats, stat_map), axis=1
     ).to_list()
     parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
-
-    filepath = pkg_resources.files(data) / "parlay_hist.dat"
-    parlays.to_pickle(filepath)
-
+    write_parlay_hist(parlays)
     return parlays
 
 

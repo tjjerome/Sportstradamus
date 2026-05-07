@@ -2,9 +2,10 @@
 
 Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
-2. Fill in Actual column in history.dat
-3. Fill in Legs/Misses columns in parlay_hist.dat
-4. Write resolve_meta.json with last-run timestamp
+2. Fill in Actual column in history (parquet primary, .dat fallback)
+3. Fill in Legs/Misses columns in parlay_hist
+4. Fill in Close Books P / Market CLV / Model CLV per offer
+5. Write resolve_meta.json with last-run timestamp
 
 Schedule with cron after games finish, e.g.:
     0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
@@ -17,11 +18,17 @@ from datetime import datetime
 
 import click
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import data
+from sportstradamus import clv, data
 from sportstradamus.analysis import check_bet, resolve_history
+from sportstradamus.helpers import Archive
+from sportstradamus.helpers.io import (
+    read_history,
+    read_parlay_hist,
+    write_history,
+    write_parlay_hist,
+)
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -78,16 +85,17 @@ def run(league, skip_update, history_only):
         raise SystemExit(1)
 
     # ------------------------------------------------------------------
-    # 2. Resolve history.dat (fill Actual column)
+    # 2. Resolve history (fill Actual column + CLV trio)
     # ------------------------------------------------------------------
-    history_path = pkg_resources.files(data) / "history.dat"
-    history = pd.read_pickle(history_path)
+    history = read_history()
+    if history.empty:
+        logger.error("history.parquet/.dat is empty or missing. Aborting.")
+        raise SystemExit(1)
 
     if "Offers" not in history.columns:
-        # Migrate old flat schema first
         from sportstradamus.analysis import _migrate_flat_history
 
-        logger.info("Migrating history.dat to normalized schema")
+        logger.info("Migrating history to normalized schema")
         history = _migrate_flat_history(history)
 
     if "Actual" not in history.columns:
@@ -96,17 +104,38 @@ def run(league, skip_update, history_only):
     n_before_hist = int(history["Actual"].isna().sum())
     logger.info(f"Resolving {n_before_hist} pending history rows")
     history = resolve_history(history, stats)
-    history.to_pickle(history_path)
     n_resolved_hist = n_before_hist - int(history["Actual"].isna().sum())
     logger.info(f"History: resolved {n_resolved_hist} / {n_before_hist} pending rows")
 
+    # Load Archive once and fold closing-line values into every offer.
+    archive = Archive()
+    history = clv.fill_from_archive(history, archive)
+    write_history(history)
+
+    clv_summary = clv.summarize(history)
+    if clv_summary["n"]:
+        logger.info(
+            "CLV legs: %d  Market CLV mean: %+.3f  Model CLV mean: %+.3f  beat-close: %.1f%%",
+            clv_summary["n"],
+            clv_summary["market_clv_mean"],
+            clv_summary["model_clv_mean"],
+            100.0 * clv_summary["frac_beat_close"],
+        )
+        if not clv_summary["segments"].empty:
+            logger.info(
+                "CLV segments (n>=%d):\n%s",
+                clv.CLV_SEGMENT_MIN_N,
+                clv_summary["segments"].to_string(index=False),
+            )
+    else:
+        logger.info("CLV: no resolved legs with closing-line data")
+
     # ------------------------------------------------------------------
-    # 3. Resolve parlay_hist.dat (fill Legs/Misses columns)
+    # 3. Resolve parlay_hist (fill Legs/Misses columns)
     # ------------------------------------------------------------------
     n_resolved_parl = 0
     if not history_only:
-        parlay_path = pkg_resources.files(data) / "parlay_hist.dat"
-        parlays = pd.read_pickle(parlay_path)
+        parlays = read_parlay_hist()
         stat_map = json.loads((pkg_resources.files(data) / "stat_map.json").read_text())
 
         unresolved = parlays.loc[parlays["Legs"].isna()]
@@ -119,7 +148,7 @@ def run(league, skip_update, history_only):
                 lambda bet: check_bet(bet, stats, stat_map), axis=1
             ).tolist()
             parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
-            parlays.to_pickle(parlay_path)
+            write_parlay_hist(parlays)
             n_resolved_parl = sum(
                 1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
             )

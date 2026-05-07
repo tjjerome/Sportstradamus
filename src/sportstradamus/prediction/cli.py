@@ -28,9 +28,15 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from tqdm import tqdm
 
-from sportstradamus import creds, data
+from sportstradamus import creds
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import Archive, stat_map
+from sportstradamus.helpers.io import (
+    read_history,
+    read_parlay_hist,
+    write_history,
+    write_parlay_hist,
+)
 from sportstradamus.prediction.scoring import process_offers
 from sportstradamus.prediction.sheets import save_data
 from sportstradamus.spiderLogger import logger
@@ -85,8 +91,27 @@ def _authorize_sheets():
 
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
+@click.option(
+    "--legacy-correlation/--no-legacy-correlation",
+    default=False,
+    help=(
+        "Reproduce the pre-2026.05 parlay pipeline verbatim — no PSD repair, "
+        "no push-aware EV, mixed insurance/power Boost overwrite. Removed "
+        "next release; provided as a one-cycle escape hatch."
+    ),
+)
+@click.option(
+    "--contest-variant",
+    type=click.Choice(["power", "flex", "insurance", "rivals"]),
+    default="power",
+    help=(
+        "Underdog contest variant for parlay scoring. Default 'power' "
+        "matches the displayed Boost column historically; 'insurance' "
+        "matches the legacy ranking line."
+    ),
+)
 @line_profiler.profile
-def main(progress):
+def main(progress, legacy_correlation, contest_variant):
     """Run the full prediction pipeline and write results to Google Sheets."""
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -122,7 +147,13 @@ def main(progress):
 
     try:
         ud_dict = get_ud()
-        ud_offers, ud5 = process_offers(ud_dict, "Underdog", stats)
+        ud_offers, ud5 = process_offers(
+            ud_dict,
+            "Underdog",
+            stats,
+            contest_variant=contest_variant,
+            legacy=legacy_correlation,
+        )
         save_data(
             ud_offers.drop(columns=_EXPORT_DROP_COLS, errors="ignore"),
             ud5.drop(columns=["P", "PB"]),
@@ -144,7 +175,13 @@ def main(progress):
 
     try:
         sl_dict = get_sleeper()
-        sl_offers, sl5 = process_offers(sl_dict, "Sleeper", stats)
+        sl_offers, sl5 = process_offers(
+            sl_dict,
+            "Sleeper",
+            stats,
+            contest_variant=contest_variant,
+            legacy=legacy_correlation,
+        )
         save_data(
             sl_offers.drop(
                 columns=[c for c in _EXPORT_DROP_COLS if c != "Player position"],
@@ -201,22 +238,20 @@ def main(progress):
         wks = gc.open("Sportstradamus").worksheet("Parlay Search")
         wks.batch_clear(["J7:J50"])
 
-        filepath = pkg_resources.files(data) / "parlay_hist.dat"
-        if os.path.isfile(filepath):
-            old5 = pd.read_pickle(filepath)
+        old5 = read_parlay_hist()
+        if not old5.empty:
             parlay_df = pd.concat([parlay_df, old5], ignore_index=True).drop_duplicates(
                 subset=["Model EV", "Books EV"], ignore_index=True
             )
 
-        parlay_df.to_pickle(filepath)
+        write_parlay_hist(parlay_df)
 
     archive.write()
     logger.info("Checking historical predictions")
     from sportstradamus.analysis import _merge_offers, _migrate_flat_history
 
-    filepath = pkg_resources.files(data) / "history.dat"
-    if os.path.isfile(filepath):
-        history = pd.read_pickle(filepath)
+    history = read_history()
+    if not history.empty:
         if "Offers" not in history.columns:
             history = _migrate_flat_history(history)
     else:
@@ -277,6 +312,11 @@ def main(progress):
                     str(r.get("Bet", "")),
                     float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
                     float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
+                    # Closing fields are filled by `reflect` once the game
+                    # locks; left NaN at prediction time.
+                    np.nan,
+                    np.nan,
+                    np.nan,
                 )
             )
         row = {"Player": player, "League": league, "Date": date, "Market": market, "Offers": offers}
@@ -314,7 +354,7 @@ def main(progress):
     history = history.loc[
         (datetime.datetime.today().date() - datetime.timedelta(days=365)) <= gameDates
     ]
-    history.to_pickle(filepath)
+    write_history(history)
 
     logger.info("Success!")
 
