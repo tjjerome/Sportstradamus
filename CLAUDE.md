@@ -110,8 +110,16 @@ Key methods:
 - `get_stats(offer, game_date)` — feature vector for a single prediction
 - `profile_market()` — aggregate stats for defense/offense profiling
 
-**`Archive`** (`helpers/archive.py`): klepto HDF wrapper persisting odds by
-`(date, league, market, player)`. Methods: `get_line()`, `get_ev()`, `write()`, `clip()`.
+**`Archive`** (`helpers/archive.py`): DuckDB singleton persisting odds at
+`archive/archive.duckdb`. Two tables — `odds(league, market, game_date, entity, book, ev)`
+and `lines(league, market, game_date, entity, line)` — no PRIMARY KEY (the PK index alone
+bloats the DB ~10× for this row count; sorted-on-disk data + zone-map pruning give
+~1 ms point lookups without it). Writes accumulate in in-memory buffers
+(`_pending_odds`, `_pending_lines`, `_replace_keys`) and flush bulk-deduped on
+`Archive().write()` — same in-memory-mutate-then-dump semantics as the old klepto
+backend. Public methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`,
+`get_team_market`, `to_pandas`, `add_dfs`, `merge_player_books`, `set_team_books`,
+`archived_players_by_date`, `write`, `clean_archive`.
 
 **`Scrape`** (`helpers/scraping.py`): HTTP client with ScrapeOps browser-header rotation
 and ScrapingFish proxy fallback.

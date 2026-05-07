@@ -26,7 +26,8 @@ MLB, NBA, NFL, NHL, and WNBA.
 The system runs a four-stage pipeline:
 
 1. **Collect** — `confer` fetches current player prop odds from the Odds API and supplemental
-   lines from Underdog and Sleeper. Results are stored in a klepto HDF archive on disk.
+   lines from Underdog and Sleeper. Results are stored in a DuckDB archive at
+   `archive/archive.duckdb`.
 2. **Enrich** — The `Stats` classes (`StatsNBA`, `StatsMLB`, `StatsNFL`, `StatsNHL`,
    `StatsWNBA`) pull game logs from official league APIs, compute rolling features, and build
    player-comparable (KNN) feature sets.

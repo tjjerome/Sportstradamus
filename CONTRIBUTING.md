@@ -67,7 +67,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `config.py` | Loads every JSON config file at import time; exposes `stat_cv`, `stat_dist`, `stat_map`, `stat_zi`, `stat_std`, `book_weights`, `books`, `feature_filter`, `banned`, `abbreviations`, `combo_props`, `nhl_goalies`, `name_map`, `odds_api` |
-| `archive.py` | `Archive` class — klepto HDF wrapper for persisting odds keyed by `(date, league, market, player)`. Methods: `get_line`, `get_ev`, `write`, `clip`. Also `clean_archive`. |
+| `archive.py` | `Archive` class — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev)` and `lines(...)` tables. Public read methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. Public write methods: `add_dfs`, `merge_player_books`, `set_team_books`, `write`. Module-level helper: `clean_archive`. |
 | `scraping.py` | `Scrape` class — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
 | `distributions.py` | `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds`, `set_model_start_values` |
 | `text.py` | `remove_accents`, `merge_dict`, `hmean`, `get_trends`, `get_mlb_pitchers` |
@@ -135,7 +135,7 @@ confer
   books.get_sleeper()          ← Sleeper API
         │
         ▼
-  Archive.write()  →  data/   (klepto HDF)
+  Archive.write()  →  archive/archive.duckdb
 
 meditate
   Stats{League}.load()         ← league APIs / cached CSVs in data/player_data/

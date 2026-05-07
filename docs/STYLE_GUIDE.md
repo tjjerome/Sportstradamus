@@ -227,10 +227,12 @@ grepping the codebase for meaning.
 - **Book (or sportsbook).** A source of odds: DraftKings, FanDuel, Pinnacle,
   Caesars, PrizePicks, Underdog, Sleeper, ParlayPlay. Reliability weights
   per book live in `book_weights.json`.
-- **Archive.** The `Archive` class in `helpers.py` (moving to
-  `helpers/archive.py`). A klepto HDF wrapper that persists odds history to
-  disk keyed by `(date, league, market, player)`. Methods: `get_line`,
-  `get_ev`, `write`, `clip`.
+- **Archive.** The `Archive` singleton in `helpers/archive.py`. A DuckDB
+  store at `archive/archive.duckdb` with `odds(league, market, game_date,
+  entity, book, ev)` and `lines(league, market, game_date, entity, line)`
+  tables. Writes are buffered in memory and flushed on `Archive().write()`.
+  Read methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`,
+  `to_pandas`.
 - **Stats.** The `Stats` ABC in `stats.py` (moving to `stats/base.py`) and
   its league subclasses (`StatsNBA`, `StatsMLB`, `StatsNFL`, `StatsNHL`,
   `StatsWNBA`). Responsible for loading league game logs, computing player

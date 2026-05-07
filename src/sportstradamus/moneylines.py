@@ -267,20 +267,22 @@ def get_moneylines(
                             spread_home[book["key"]] = -spread
                             spread_away[book["key"]] = spread
 
-            archive._mark_changed(league, "Moneyline")
-            archive._mark_changed(league, "Totals")
-            archive[league].setdefault("Moneyline", {}).setdefault(gameDate, {})
-            archive[league].setdefault("Totals", {}).setdefault(gameDate, {})
-
-            archive[league]["Moneyline"][gameDate][awayTeam] = moneyline_away
-            archive[league]["Moneyline"][gameDate][homeTeam] = moneyline_home
-
-            archive[league]["Totals"][gameDate][awayTeam] = {
-                k: (v + spread_away.get(k, 0)) / 2 for k, v in totals.items()
-            }
-            archive[league]["Totals"][gameDate][homeTeam] = {
-                k: (v + spread_home.get(k, 0)) / 2 for k, v in totals.items()
-            }
+            archive.set_team_books(league, "Moneyline", gameDate, awayTeam, moneyline_away)
+            archive.set_team_books(league, "Moneyline", gameDate, homeTeam, moneyline_home)
+            archive.set_team_books(
+                league,
+                "Totals",
+                gameDate,
+                awayTeam,
+                {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals.items()},
+            )
+            archive.set_team_books(
+                league,
+                "Totals",
+                gameDate,
+                homeTeam,
+                {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals.items()},
+            )
 
     return archive
 
@@ -459,26 +461,27 @@ def _archive_event_props(archive, game, league, props, gameDate):
                 odds[market_name][player]["EV"][book["key"]] = ev
 
     for market in odds:
-        archive._mark_changed(league, market)
-        archive[league].setdefault(market, {}).setdefault(gameDate, {})
-        for player in odds[market]:
-            archive[league][market][gameDate].setdefault(player, {"EV": {}, "Lines": []})
-            archive[league][market][gameDate][player]["EV"].update(odds[market][player]["EV"])
-
-            line = np.median(odds[market][player]["Lines"])
-            if line not in archive[league][market][gameDate][player]["Lines"]:
-                archive[league][market][gameDate][player]["Lines"].append(line)
+        for player, entry in odds[market].items():
+            line = np.median(entry["Lines"])
+            archive.merge_player_books(league, market, gameDate, player, entry["EV"], [line])
 
     for market in totals:
-        archive._mark_changed(league, market)
-        archive[league].setdefault(market, {}).setdefault(gameDate, {})
-
-        archive[league][market][gameDate][
-            abbreviations[league][remove_accents(game["home_team"])]
-        ] = {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals[market].items()}
-        archive[league][market][gameDate][
-            abbreviations[league][remove_accents(game["away_team"])]
-        ] = {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()}
+        home_team = abbreviations[league][remove_accents(game["home_team"])]
+        away_team = abbreviations[league][remove_accents(game["away_team"])]
+        archive.set_team_books(
+            league,
+            market,
+            gameDate,
+            home_team,
+            {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals[market].items()},
+        )
+        archive.set_team_books(
+            league,
+            market,
+            gameDate,
+            away_team,
+            {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals[market].items()},
+        )
 
 
 def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):

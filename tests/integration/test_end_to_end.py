@@ -28,7 +28,6 @@ from __future__ import annotations
 import datetime
 import os
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -53,14 +52,10 @@ def test_pipeline_smoke(
     ``--fixture-dir`` flag is the only fixture-mode hook in production.
     """
     # ----- shared scaffolding -----
-    (tmp_path / "archive" / "WNBA").mkdir(parents=True)
+    (tmp_path / "archive").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
 
     from sportstradamus.helpers.archive import Archive
-
-    # No-op archive write so we never touch disk. The in-memory dict that
-    # downstream readers rely on is unaffected.
-    monkeypatch.setattr(Archive, "write", lambda self: None)
 
     runner = CliRunner()
 
@@ -75,17 +70,14 @@ def test_pipeline_smoke(
     assert result.exit_code == 0, f"confer failed: {result.output}"
 
     archive_obj = Archive()
-    archive_obj._ensure_loaded("WNBA")
-    pts_by_date = dict(archive_obj.archive["WNBA"].get("PTS", {}))
-    offers_with_ev = sum(
-        1
-        for date_payload in pts_by_date.values()
-        for player_data in date_payload.values()
-        if player_data.get("EV")
+    pts_df = archive_obj.to_pandas("WNBA", "PTS")
+    book_cols = [c for c in pts_df.columns if c != "Line"]
+    offers_with_ev = (
+        int(pts_df[book_cols].notna().any(axis=1).sum()) if not pts_df.empty else 0
     )
     assert offers_with_ev >= 10, (
         f"confer wrote EV for only {offers_with_ev} player-prop offers; "
-        f"expected >= 10. archive contents: {pts_by_date!r}"
+        f"expected >= 10. archive contents: {pts_df!r}"
     )
 
     # ----- Phase 2: meditate (CLI invoked; ML stubbed; no writes) -----
@@ -123,12 +115,8 @@ def test_pipeline_smoke(
         f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
     )
 
-    # ----- Phase 3: prophecize (CLI invoked; sheets + scrapers mocked) -----
+    # ----- Phase 3: prophecize (CLI invoked; parquet snapshot + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
-
-    sheets_client = MagicMock(name="gspread_client")
-    sheets_client.open.return_value.worksheet.return_value = MagicMock(name="worksheet")
-    monkeypatch.setattr(prediction_cli, "_authorize_sheets", lambda: sheets_client)
 
     monkeypatch.setattr(prediction_cli, "get_ud", lambda: {})
     monkeypatch.setattr(prediction_cli, "get_sleeper", lambda: {})
@@ -143,10 +131,20 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "process_offers", stub_process_offers)
 
-    def stub_save_data(df, parlay_df, book, gc):
-        gc.open("Sportstradamus")  # exercise the mocked sheets handle
+    snapshot_calls: list[dict] = []
 
-    monkeypatch.setattr(prediction_cli, "save_data", stub_save_data)
+    def stub_write_current_offers(offers, parlays, leagues, platforms, contest_variant="power"):
+        snapshot_calls.append(
+            {
+                "offers": offers,
+                "parlays": parlays,
+                "leagues": list(leagues),
+                "platforms": list(platforms),
+                "contest_variant": contest_variant,
+            }
+        )
+
+    monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
 
     # Skip writing prediction history to data/history.dat.
     def _noop_write(_df):
@@ -168,8 +166,8 @@ def test_pipeline_smoke(
     result = runner.invoke(prophecize_main, [], catch_exceptions=False)
     assert result.exit_code == 0, f"prophecize failed: {result.output}"
 
-    # The mocked sheets client was reached but no live HTTP fired.
-    assert sheets_client.open.called, "save_data path never opened the sheets client"
+    # The parquet snapshot writer was reached but no real disk write fired.
+    assert snapshot_calls, "write_current_offers was never invoked"
 
     # The orchestration produced offers with EV and at least one parlay candidate.
     assert captured, "process_offers was never invoked"

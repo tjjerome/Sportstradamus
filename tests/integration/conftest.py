@@ -28,29 +28,29 @@ def fixtures_dir() -> Path:
 def reset_archive_singleton():
     """Force the next ``Archive()`` to re-initialize against the current cwd.
 
-    ``Archive`` is a process-singleton that scans ``./archive/`` once on
+    ``Archive`` is a process-singleton that opens its DuckDB file once on
     first instantiation. Because several production modules call
     ``Archive()`` at import time, the singleton is bound before our test
-    has a chance to ``chdir`` into a tmp working directory. Resetting
-    ``_initialized`` lets the next call rerun ``__init__`` against the new
-    cwd without breaking other module-level references.
+    has a chance to ``chdir`` into a tmp working directory. Closing the
+    existing connection and resetting ``_initialized`` lets the next call
+    rerun ``__init__`` against the new cwd.
     """
     from sportstradamus.helpers.archive import Archive
 
-    inst = Archive._instance
-    if inst is not None:
+    def _reset(inst):
+        if inst is None:
+            return
+        con = getattr(inst, "_connection", None)
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
         inst._initialized = False
-        inst.archive = {}
-        inst._loaded = set()
-        inst._changed_keys = {}
+
+    _reset(Archive._instance)
     yield
-    # Re-reset on the way out so the next test starts clean too.
-    inst = Archive._instance
-    if inst is not None:
-        inst._initialized = False
-        inst.archive = {}
-        inst._loaded = set()
-        inst._changed_keys = {}
+    _reset(Archive._instance)
 
 
 # Files in ``src/sportstradamus/data/`` that ``meditate`` rewrites mid-run.
