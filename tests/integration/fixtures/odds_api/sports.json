@@ -1,0 +1,18 @@
+[
+    {
+        "key": "basketball_wnba",
+        "group": "Basketball",
+        "title": "WNBA",
+        "description": "US Basketball",
+        "active": true,
+        "has_outrights": false
+    },
+    {
+        "key": "americanfootball_nfl",
+        "group": "American Football",
+        "title": "NFL",
+        "description": "US Football",
+        "active": false,
+        "has_outrights": false
+    }
+]

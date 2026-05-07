@@ -15,4 +15,6 @@ Options:
                                   Default 'power' matches the displayed Boost
                                   column historically; 'insurance' matches the
                                   legacy ranking line.
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
   --help                          Show this message and exit.
