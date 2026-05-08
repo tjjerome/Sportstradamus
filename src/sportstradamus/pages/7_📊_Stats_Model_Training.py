@@ -27,10 +27,7 @@ render_banner("stats", f"last meditated {mtime}")
 
 stats = load_model_stats()
 if stats.empty:
-    st.info(
-        "No model stats found. Run `poetry run meditate` to generate "
-        "`model_stats.parquet`."
-    )
+    st.info("No model stats found. Run `poetry run meditate` to generate " "`model_stats.parquet`.")
     st.stop()
 
 with st.sidebar:
@@ -56,7 +53,17 @@ st.caption(f"Showing **{len(view):,}** markets at row `{sel_metric_row}`")
 tab_acc, tab_diag, tab_hp = st.tabs(["Per-market accuracy", "Diagnostics", "Hyperparameters"])
 
 with tab_acc:
-    cols = ["league", "market", "distribution", "accuracy", "over_prec", "under_prec", "over_pct", "sharpness", "nll"]
+    cols = [
+        "league",
+        "market",
+        "distribution",
+        "accuracy",
+        "over_prec",
+        "under_prec",
+        "over_pct",
+        "sharpness",
+        "nll",
+    ]
     st.dataframe(
         view[cols].sort_values(["league", "market"]),
         use_container_width=True,
