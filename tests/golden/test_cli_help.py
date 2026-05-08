@@ -21,6 +21,7 @@ from sportstradamus.dashboard import run as dashboard_cli
 from sportstradamus.moneylines import confer as confer_cli
 from sportstradamus.nightly import run as reflect_cli
 from sportstradamus.prediction.cli import main as prophecize_cli
+from sportstradamus.strategies.kelly import _build_cli as _build_kelly_cli
 from sportstradamus.training.cli import meditate as meditate_cli
 from tests.golden.conftest import read_snapshot, write_snapshot
 
@@ -30,6 +31,7 @@ CLI_CASES = [
     ("reflect", reflect_cli, "reflect_help.txt"),
     ("dashboard", dashboard_cli, "dashboard_help.txt"),
     ("confer", confer_cli, "confer_help.txt"),
+    ("kelly", _build_kelly_cli(), "kelly_help.txt"),
 ]
 
 

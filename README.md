@@ -271,9 +271,6 @@ last live git SHA) and should be reintroduced if the corresponding feature
 returns. See [`src/deprecated/README.md`](src/deprecated/README.md) for the
 header protocol and reintroduction process.
 
-- [ ] **TODO: reimplement Kelly bet sizing** (`opt_kelley_bet.py`) — stake
-      optimization on +EV picks. Needs integration with `prophecize`'s sheet
-      export or a new `kelly` subcommand.
 - [ ] **TODO: reimplement parlay search** (`unused_funcs.py::find_bets`,
       `opt_parlay.py`) — combinatorial search over +EV legs. May have been
       replaced by in-line parlay logic in `sportstradamus.py`; decide whether

@@ -1,0 +1,10 @@
+Usage: kelly [OPTIONS]
+
+  Re-size stakes from a recommendations YAML and print a table.
+
+Options:
+  --bankroll TEXT   Bankroll in dollars.  [required]
+  --from FILE       Path to a recommendations YAML produced by pickem-build.
+                    [required]
+  --fraction FLOAT  Kelly fraction multiplier.  [default: 0.25]
+  --help            Show this message and exit.

@@ -42,6 +42,17 @@ If a feature returns:
    to `[x]` and remove it.
 3. Add caller(s). Run `ruff check` to confirm imports resolve.
 
+## `.archived/` — second-tier graveyard
+
+Files move into `.archived/` once their feature has been re-implemented in
+the live tree. They stay searchable but are clearly demoted: a reader who
+greps for the old function should see the file is no longer the
+canonical reference.
+
+| File | Replaced by |
+|---|---|
+| `opt_kelley_bet.py` | `sportstradamus.strategies.kelly` (Phase 3 §3.1). |
+
 ## Provenance
 
 The initial sweep landed on 2026-04-21 as Phase 2 of the maintainability
