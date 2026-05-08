@@ -3,10 +3,12 @@
 from sportstradamus.prediction.cli import main
 from sportstradamus.prediction.correlation import find_correlation
 from sportstradamus.prediction.model_prob import model_prob
+from sportstradamus.prediction.parlay import beam_search_parlays
 from sportstradamus.prediction.persist import write_current_offers
 from sportstradamus.prediction.scoring import match_offers, process_offers
 
 __all__ = [
+    "beam_search_parlays",
     "find_correlation",
     "main",
     "match_offers",
