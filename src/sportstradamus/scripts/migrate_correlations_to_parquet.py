@@ -95,9 +95,7 @@ def main(keep_csv: bool) -> None:
     intermediates = sorted(training_data_dir.glob("*_corr.csv"))
     same_team = sorted(data_dir.glob("*_corr_same_team.csv"))
     opposing = sorted(data_dir.glob("*_corr_opposing.csv"))
-    stale_unsuffixed = sorted(
-        p for p in data_dir.glob("*_corr.csv") if p.parent == data_dir
-    )
+    stale_unsuffixed = sorted(p for p in data_dir.glob("*_corr.csv") if p.parent == data_dir)
 
     plan: list[tuple[Path, str]] = []
     plan.extend((p, "intermediate") for p in intermediates)

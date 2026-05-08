@@ -113,8 +113,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     platforms_run: list[str] = []
 
     try:
-        from sportstradamus.books import get_ud
-
         ud_dict = get_ud()
         ud_offers, ud5 = process_offers(
             ud_dict,
@@ -138,8 +136,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         logger.exception("Failed to get Underdog")
 
     try:
-        from sportstradamus.books import get_sleeper
-
         sl_dict = get_sleeper()
         sl_offers, sl5 = process_offers(
             sl_dict,
@@ -262,7 +258,13 @@ def main(progress, legacy_correlation, contest_variant, log_level):
                         np.nan,
                     )
                 )
-            row = {"Player": player, "League": league, "Date": date, "Market": market, "Offers": offers}
+            row = {
+                "Player": player,
+                "League": league,
+                "Date": date,
+                "Market": market,
+                "Offers": offers,
+            }
             for col in pred_level_cols:
                 row[col] = latest.get(col, np.nan)
             new_preds.append(row)
