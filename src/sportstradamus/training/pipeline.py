@@ -53,9 +53,7 @@ _BRIER_SKILL_DENOM_FLOOR = 1e-9
 _PROBA_CLIP = 1e-6
 
 
-def _expected_calibration_error(
-    probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS
-) -> float:
+def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
     """10-bin equal-width ECE: weighted |avg_pred - avg_actual| across bins."""
     edges = np.linspace(0.0, 1.0, n_bins + 1)
     bin_idx = np.clip(np.digitize(probs, edges) - 1, 0, n_bins - 1)
