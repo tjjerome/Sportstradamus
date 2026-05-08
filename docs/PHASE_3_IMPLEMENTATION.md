@@ -13,8 +13,9 @@ Power, Flex, and Rivals.
   sufficient) and §2.4 (CLV reporting — monitor the implicit-close
   assumption).
 
-**Estimated time:** 4 weekends, sequenced so each step ships
+**Estimated time:** 4–5 weekends, sequenced so each step ships
 independently and respects CLAUDE.md's one-module-per-session rule.
+Step 4 expanded to a full weekend after the metric-migration scope.
 
 ---
 
@@ -142,9 +143,9 @@ the package-level re-export both work.
 
 ---
 
-## 4. Training Pipeline: Dedicated Kelly-Shrinkage Diagnostic (Step 4, ½ weekend)
+## 4. Training Pipeline: Migrate to Raw Data-Science Metrics + Kelly Shrinkage (Step 4, 1 weekend)
 
-### 4.a Why `model_calib` is the wrong field for Kelly
+### 4.a Why `model_calib` (and several siblings) are the wrong fields
 
 Verified at `src/sportstradamus/training/pipeline.py:688`:
 
@@ -154,60 +155,139 @@ model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
 ```
 
 That is `1 − Brier(temperature_calibrated_probs, actual)` on the
-validation set. It is a **calibration quality** score in roughly
-`[0.75, 1.0]` — even a useless model that always predicts 0.5 has
-Brier ≈ 0.25 → `model_calib ≈ 0.75`. Plugging it into
-`effective_p = 0.5 + (p − 0.5) * model_calibration` would barely
-shrink a useless model and barely modulate a great one.
+validation set — a "scaled-for-context" score in roughly `[0.75, 1.0]`
+where even a useless model that always predicts 0.5 lands at ~0.75.
+The transformation existed to give human readers an at-a-glance
+quality bar; it actively hurts dashboard analysis and any downstream
+consumer (Kelly, drift detection, model selection).
 
-What Kelly actually wants is a **discrimination / skill** score:
-how much better than the bookmaker baseline our calibrated
-probabilities are.
+The same pattern shows up across the report: per-row classification
+metrics in `model["stats"]` (`Accuracy`, `Over Prec`, `Under Prec`,
+`Over%`, `Sharpness`, `NLL`) are a mix of raw values and folded-up
+ratios. Now that the dashboard exists to provide context (Step 4.d),
+migrate to the raw metrics a data scientist would expect.
 
-### 4.b New diagnostic: `kelly_shrinkage`
+### 4.b Metric migration table
 
-Add alongside `model_calib`:
+Compute raw metrics in `pipeline.py` and emit them via `report.py`'s
+parquet (`model_stats.parquet`). Old fields stay in the parquet for
+one release as `legacy_*` aliases so consumers can migrate; remove on
+the following release after CONTRIBUTING.md callouts.
+
+| Old field | Replacement(s) | Type | Direction |
+|---|---|---|---|
+| `model_calib` (`1 − Brier`) | `brier_score`, `log_loss` | raw scoring rules | lower is better |
+| (none) | `brier_skill_score` (vs. book baseline) | skill | higher is better; 0 = matches book |
+| (none) | `roc_auc` | discrimination | higher is better; 0.5 = random |
+| (none) | `expected_calibration_error` (10-bin) | calibration | lower is better |
+| `Accuracy` | `accuracy` (kept; raw) | raw | higher is better |
+| `Over Prec` / `Under Prec` | `precision_over` / `precision_under` (renamed; raw) | raw | higher is better |
+| `Over%` | `predicted_over_rate` (renamed; raw) | rate | informational; compare to `empirical_over_rate` |
+| (none) | `empirical_over_rate` | rate | informational; the actual hit rate of legs |
+| `Sharpness` | `prediction_std` (renamed; raw) | raw | informational |
+| `NLL` | `nll` (kept; raw) | raw | lower is better |
+| (none, derived) | `kelly_shrinkage` = `clip(brier_skill_score, 0, 1)` | derived | higher = trust the model more |
+
+`kelly_shrinkage` is now derived from `brier_skill_score` rather than
+duplicated math, and the dashboard surfaces both.
+
+### 4.c Pinned book-baseline row
+
+The dashboard requires a baseline-of-comparison row pinned to the top
+of the diagnostic table: the same metrics computed if the model
+**were** the bookmaker (i.e., predicting `book_implied_prob` for every
+validation example). Concretely, in `pipeline.py`'s validation block:
 
 ```python
-brier_model = np.mean((val_calibrated - y_class_val) ** 2)
-brier_book  = np.mean((val_book_proba - y_class_val) ** 2)
-bss = 1.0 - (brier_model / max(brier_book, 1e-9))
-kelly_shrinkage = float(np.clip(bss, 0.0, 1.0))
+def compute_metrics(probs, y):
+    return {
+        "brier_score":               brier(probs, y),
+        "log_loss":                  log_loss(probs, y),
+        "roc_auc":                   roc_auc(probs, y),
+        "expected_calibration_error": ece(probs, y, n_bins=10),
+        "accuracy":                  accuracy(probs > 0.5, y),
+        "precision_over":            precision(probs > 0.5, y, pos=1),
+        "precision_under":           precision(probs < 0.5, y, pos=0),
+        "predicted_over_rate":       float(np.mean(probs > 0.5)),
+        "empirical_over_rate":       float(np.mean(y)),
+        "prediction_std":            float(np.std(probs)),
+        "nll":                       nll(probs, y),
+    }
+
+model_metrics = compute_metrics(val_calibrated, y_class_val)
+book_metrics  = compute_metrics(val_book_proba, y_class_val)
+brier_skill_score = 1 - (model_metrics["brier_score"]
+                         / max(book_metrics["brier_score"], 1e-9))
 ```
 
-Brier Skill Score against the bookmaker baseline, clamped to `[0, 1]`:
-`0.0` = no better than the book (Kelly degenerates to half-Kelly on
-book-implied prob), `1.0` = perfect discrimination on the holdout
-(no shrink).
+Both metric dicts are written to `model_stats.parquet`. Add a
+`row_kind` column with values `"book_baseline"` and `"model"` (the
+existing `metric_row` column is repurposed or kept beside it; favor
+keeping `metric_row` for `raw / corrected / calibrated` and
+introducing a new `row_kind` sibling for `book_baseline / model`).
 
-If the validation set has no book-implied probability column, log a
-WARNING and store `kelly_shrinkage = nan`; Kelly's resolution chain
-(Step 5.c) handles `nan` by falling through to the next source.
+If `val_book_proba` is unavailable for a (league, market), skip the
+book row for that segment with a logged WARNING. Skill score → `nan`.
 
-### 4.c Where the diagnostic surfaces
+### 4.d Dashboard updates — `pages/7_📊_Stats_Model_Training.py`
 
-Two sinks already exist — no JSON refactor needed:
+1. **Higher/lower-is-better column annotations.** Streamlit's
+   `st.dataframe` accepts a `column_config` dict that supports
+   custom help-text per column. Add a help string to every metric
+   column reading `"↑ higher is better"` or `"↓ lower is better"` or
+   `"informational"`. Define the direction map next to the rendered
+   `cols` list so the source of truth is one place.
+2. **Pin the book-baseline row.** Filter the dataframe to the active
+   `(league, market)` selection plus the `row_kind == "book_baseline"`
+   row for the same scope. Render the baseline row as a styled
+   pinned row above the model rows (Streamlit dataframes do not
+   natively pin; either render the baseline as a separate one-row
+   `st.dataframe` immediately above the main table with a caption
+   "Book-only baseline (what taking the book's odds gets you):", or
+   `pd.concat` the baseline on top and use a row-styler to highlight
+   it). Recommend the separate-table approach; it survives column
+   reorders and sort interactions.
+3. **Tab restructure.** Split the existing "Per-market accuracy" and
+   "Diagnostics" tabs into:
+   - **Scoring rules:** `brier_score`, `log_loss`, `nll`,
+     `expected_calibration_error`.
+   - **Discrimination:** `roc_auc`, `accuracy`, `precision_over`,
+     `precision_under`, `prediction_std`.
+   - **Rates:** `predicted_over_rate`, `empirical_over_rate`,
+     `frac_ev_gt_line`, `over_pct_ev_gt`, `over_pct_ev_lt`.
+   - **Kelly & blending:** `brier_skill_score`, `kelly_shrinkage`,
+     `model_weight`.
+   - **Dispersion:** `shape_ratio`, `dispersion_cal`,
+     `model_shape`, `empirical_shape`.
+   - **EV & lines:** `model_ev`, `mean_line`, `result_mean`,
+     `mean_ev_diff`, `median_ev_diff`, `cf_over_pct`.
+   - **Hyperparameters:** unchanged.
+4. **Captions.** Each tab gets a one-line caption explaining what the
+   pinned baseline represents and how to read the column directions.
 
-1. **Human-readable** `data/training_report.txt` — extend the DIAG
-   block in `report.py:write_report` to print
-   `kelly_shrinkage=0.43` next to `model_calib=0.82`.
-2. **Machine-readable** `data/model_stats.parquet` — add a
-   `kelly_shrinkage` column in `report.py:write_model_stats` (line
-   227-ish, alongside `model_weight` and `model_calib`).
+### 4.e `training_report.txt` (human-readable companion)
 
-The dashboard already reads `model_stats.parquet` via
-`dashboard_data.load_model_stats` and renders it in
-`pages/7_📊_Stats_Model_Training.py`. Extending the parquet adds the
-column transparently; the page renders it because it auto-discovers
-columns. Update the page only to include `kelly_shrinkage` in any
-explicit column list it constructs (verify on read).
+Update the DIAG block to print raw metrics and the baseline:
 
-### 4.d Thin getter
+```
+================ NFL player_pass_yds ================
+ Distribution: Gamma | Historical Zero Rate: 0.0124
+ BOOK BASELINE  brier=0.218 logloss=0.682 auc=0.557 ece=0.041
+ MODEL          brier=0.197 logloss=0.628 auc=0.628 ece=0.018
+ SKILL          brier_skill_score=+0.096  kelly_shrinkage=0.10
+ ...
+```
+
+The baseline row makes the human-readable report self-contained for
+non-dashboard consumers (e.g., reviewing on a remote box without
+Streamlit running).
+
+### 4.f Thin getter for Kelly
 
 ```python
 # in training/report.py
 def get_market_calibration(league: str, market: str) -> dict[str, float]:
-    """Return {'kelly_shrinkage', 'model_calib', 'model_weight'} for one (league, market).
+    """Return {'kelly_shrinkage', 'brier_skill_score', 'model_weight'} for one (league, market).
 
     Reads model_stats.parquet. Returns NaNs when the row is missing.
     """
@@ -215,15 +295,29 @@ def get_market_calibration(league: str, market: str) -> dict[str, float]:
 
 Kelly imports this getter — never reaches into the parquet directly.
 
+### 4.g Backwards compatibility
+
+- Keep the legacy `model_calib` column in the parquet for one release
+  as `legacy_model_calib` to avoid breaking anyone who pinned to it.
+  Drop it the release after this one.
+- `nightly.py:reflect` and `clv.summarize` do not consume any of the
+  migrated fields, so their behavior is unchanged.
+
 **Files touched:** `src/sportstradamus/training/pipeline.py`,
 `src/sportstradamus/training/report.py`,
-`src/sportstradamus/pages/7_📊_Stats_Model_Training.py` (only if it
-hard-codes a column allowlist).
-**Tests:** `tests/golden/test_training_kelly_shrinkage.py`:
-- BSS computation matches a hand-worked example.
-- Useless model (Brier matching book) → `kelly_shrinkage = 0`.
-- Missing book column → `nan` and WARNING logged.
+`src/sportstradamus/dashboard_data.py` (only if it exposes a column
+allowlist; today it just `read_parquet`-s),
+`src/sportstradamus/pages/7_📊_Stats_Model_Training.py`.
+**Tests:** `tests/golden/test_training_metrics.py`:
+- Each metric in the table matches a hand-worked example on a
+  3-sample fixture.
+- Useless model (Brier matching book) → `brier_skill_score = 0`,
+  `kelly_shrinkage = 0`.
+- Missing book column → both = `nan` and WARNING logged.
+- Book-baseline row written to parquet with `row_kind="book_baseline"`.
 - Getter returns NaNs when (league, market) absent.
+- Streamlit-page smoke test: page renders without exception against a
+  parquet containing both row kinds.
 
 ---
 
@@ -417,8 +511,12 @@ big). Updates:
   rest of §3.5 as removed/deferred.
 - **`README.md` (top-level):** if it lists CLI scripts, add
   `kelly` and `pickem-build`.
-- **Training-report glossary in CLAUDE.md:** add a line for
-  `kelly_shrinkage` next to the existing `model_calib` line.
+- **Training-report glossary in CLAUDE.md:** rewrite the §Training
+  Report Diagnostics section to reflect the migrated raw-metric
+  schema. Cover all new fields, the `row_kind` column, the book
+  baseline, and the higher/lower-is-better convention. Note the
+  one-release `legacy_model_calib` retention so onboarding readers
+  understand why both names appear briefly.
 
 Documentation completeness is checked into the done criteria (§9 below).
 
@@ -439,9 +537,9 @@ foundation.
 | 4 | `prediction/correlation.py` — magic-number purge only | 2 | session 3 | No file moves yet. Behavior must be byte-identical (re-run audit script). |
 | 5 | `prediction/parlay.py` — new module + `beam_search_parlays` move | 3 | session 4 | This session edits two files (source + new), but both are within the single-module file-split semantics CLAUDE.md envisions. |
 | 6 | `prediction/__init__.py` + `prediction/scoring.py` — re-exports & import fix | 3 | session 5 | Tiny adjustment-only session. |
-| 7 | `training/pipeline.py` — compute `kelly_shrinkage` next to `model_calib` | 4.b | session 6 | Pipeline is the heart of training; isolate the change. |
-| 8 | `training/report.py` — emit `kelly_shrinkage` to txt + parquet + add `get_market_calibration` getter | 4.c, 4.d | session 7 | |
-| 9 | `pages/7_📊_Stats_Model_Training.py` — surface new column if needed | 4.c | session 8 | Verify the page; no-op if it auto-discovers columns. |
+| 7 | `training/pipeline.py` — compute raw metrics + book-baseline metrics + `brier_skill_score` + `kelly_shrinkage` | 4.a-c | session 6 | Pipeline is the heart of training; isolate the change. Validation block grows by `compute_metrics()` helper applied to model and book probs. |
+| 8 | `training/report.py` — emit raw metrics + book-baseline row to parquet + txt; add `get_market_calibration` getter | 4.c, 4.e, 4.f, 4.g | session 7 | New `row_kind` column. Legacy `model_calib` retained as `legacy_model_calib` for one release. |
+| 9 | `pages/7_📊_Stats_Model_Training.py` — restructured tabs, column-direction annotations, pinned book-baseline row | 4.d | session 8 | Largest dashboard change in the plan. Keep ≤300 lines per CLAUDE.md hard rule; if it exceeds, split tab renderers into `dashboard_data.py` helpers. |
 | 10 | `strategies/kelly.py` — new module + CLI registration | 5 | session 9 | Adds cvxpy under `[strategy]` group in `pyproject.toml`; this is a one-line dependency edit done in the same session. |
 | 11 | `src/deprecated/opt_kelley_bet.py` archive move + README update | 5.h | session 10 | Tiny housekeeping. |
 | 12 | `strategies/underdog_pickem.py` — orchestrator + Sheets tab + YAML | 6 | session 11 | The largest session in this plan; keep ≤300 lines per CLAUDE.md hard rule. If it grows, split rank/emit helpers into a `strategies/_pickem_emit.py` sibling and continue in a follow-up session. |
@@ -508,8 +606,15 @@ Phase 3 is complete when:
 3. `clv.summarize` continues to surface segments with no regressions,
    the new close-timestamp sanity warning fires in tests, and
    `data/clv_segments.parquet` is written by `reflect`.
-4. `data/training_report.txt` and `data/model_stats.parquet` both
-   contain the new `kelly_shrinkage` column. Dashboard renders it.
+4. `data/training_report.txt` and `data/model_stats.parquet` carry
+   the migrated raw-metric set (`brier_score`, `log_loss`, `roc_auc`,
+   `expected_calibration_error`, `precision_over`, `precision_under`,
+   `predicted_over_rate`, `empirical_over_rate`, `prediction_std`,
+   `nll`, `brier_skill_score`, `kelly_shrinkage`) plus a book-baseline
+   row (`row_kind="book_baseline"`). Legacy `model_calib` is retained
+   as `legacy_model_calib` for one release. Dashboard page 7 renders
+   the metric tabs with higher/lower-is-better column annotations and
+   pins the book-baseline row above each table.
 5. `prediction/parlay.py` exists with `beam_search_parlays` and its
    helpers; `prediction/correlation.py` retains `find_correlation`
    only; CONTRIBUTING.md §Package Map matches reality.
@@ -528,6 +633,19 @@ Phase 3 is complete when:
   fallback (CLV-segment > training > 1.0) keeps a noisy retrain from
   destabilizing Kelly, but consider a minimum validation-set size
   before trusting the value.
+- **Metric-migration breakage.** Anything that reads `model_calib`
+  from `model_stats.parquet` directly will see `legacy_model_calib`
+  for one release and then nothing. Audit consumers before merging
+  PR `3-train`: at minimum the dashboard page 7 (covered in this
+  plan), `nightly.py:reflect` (does not read this field — confirmed),
+  and any user notebooks under `docs/` or scripts/ that may have
+  pinned to the old name. Add the audit checklist to PR `3-train`'s
+  description.
+- **Streamlit pinned-row UX.** `st.dataframe` does not natively pin
+  rows; the plan recommends a separate one-row `st.dataframe` above
+  the main table. If review prefers a single table, the alternative
+  is a row-styler with sticky CSS — works but is more fragile across
+  Streamlit upgrades.
 - **Rivals payout multipliers.** Verify
   `data/underdog_payouts.json` reflects current Rivals product before
   PR `3-build`. Bad multipliers silently miscalibrate Rivals EV.
