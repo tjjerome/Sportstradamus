@@ -108,10 +108,24 @@ Sportstradamus/
 | `cli.py` | `main` click command — Google auth, stats init, fetch offers, score, write sheet. Also `_get_sheets_client` |
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for every offer |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
-| `correlation.py` | `find_correlation` — loads correlation CSVs, scores parlay legs |
-| `parlay.py` | `beam_search_parlays`, `save_data` |
-| `sheets.py` | `write_to_sheet`, `format_sheet` — gspread write paths |
-| `__init__.py` | Re-exports the public API |
+| `correlation.py` | `find_correlation` — loads correlation CSVs, scores parlay legs (calls `parlay.beam_search_parlays`) |
+| `parlay.py` | `beam_search_parlays` plus its helpers `_payout_curve_for`, `_expected_payout_with_pushes`, `_nearest_psd`, and the per-search constants. Re-exported at the package level. |
+| `persist.py` | `save_data` — writes scored offers to disk |
+| `__init__.py` | Re-exports the public API (including `beam_search_parlays` from `parlay.py`) |
+
+> `prediction/sheets.py` was deprecated on `devel`; the live path is
+> `data/recommendations/{date}.yaml` (written by
+> `strategies/underdog_pickem.py`) which the dashboard reads directly.
+
+### `strategies/` — Underdog-native decision engine
+
+| Module | What's in it |
+|---|---|
+| `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio`, `KellyCandidate`, the resolution chain (explicit > live CLV-segment BSS > training BSS > fallback `1.0`), and the `kelly` CLI. cvxpy / pyyaml / tabulate are lazy-imported from `[tool.poetry.group.strategy]`. |
+| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `pickem-build` CLI. Pure orchestrator — no math. Covers Power, Flex, and Rivals (Rivals restricted to 2/3-leg sizes). |
+| `_pickem_emit.py` | YAML-emit helpers split out so `underdog_pickem.py` stays under the 300-line cap. |
+| `__init__.py` | Re-exports `kelly` and `underdog_pickem`. |
+| `README.md` | Module-level docs: resolution chain, blending ramp, contest variants. |
 
 ### Other top-level modules
 
@@ -159,7 +173,18 @@ prophecize
   prediction/parlay.beam_search_parlays()
         │
         ▼
-  prediction/sheets.write_to_sheet()  →  Google Sheets
+  prediction/persist.save_data()  →  scored-offer cache
+
+pickem-build (Phase 3)
+  prediction/parlay.beam_search_parlays(contest_variant=...)
+  strategies/kelly.fractional_kelly_stake(...)
+        │
+        ▼
+  data/recommendations/{date}.yaml
+        │
+        ▼
+  poetry run kelly --from <yaml>           ← offline re-sizing
+  dashboard "Today's Recommendations" tab  ← live review
 ```
 
 ---
@@ -172,7 +197,9 @@ prophecize
 | Change which distribution a stat uses | `src/sportstradamus/data/stat_dist.json` |
 | Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/prop_books.json` |
 | Add a player name alias | `src/sportstradamus/data/name_map.json` |
-| Understand a training report metric | [CLAUDE.md](CLAUDE.md) §Training Report Diagnostics |
+| Understand a training report metric | [CLAUDE.md](CLAUDE.md) §Training Report Diagnostics — covers the raw-metric schema (`brier_score`, `log_loss`, `roc_auc`, `expected_calibration_error`, `brier_skill_score`, `kelly_shrinkage`, etc.) and the pinned `row_kind="book_baseline"` row |
+| Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → returns `{kelly_shrinkage, brier_skill_score, model_weight}` for a `(league, market)` from `data/model_stats.parquet` |
+| Tune the Kelly resolution chain | `strategies/kelly.py` constants `LIVE_BLEND_FLOOR=25`, `LIVE_BLEND_FULL=100`, `DEFAULT_KELLY_FRACTION=0.25`, `MAX_FRACTION_OF_BANKROLL=0.005` |
 | Change the confidence cutoff for picks | `prediction/scoring.py` → `MIN_CONFIDENCE` |
 | Change the Optuna hyperparameter search space | `training/pipeline.py` → `train_market` objective |
 | Change how distributions are blended with bookmaker lines | `helpers/distributions.py` → `fused_loc` |

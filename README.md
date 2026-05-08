@@ -205,6 +205,40 @@ poetry run dashboard
 
 ---
 
+### `poetry run pickem-build`
+
+Underdog-native orchestrator covering Power, Flex, and Rivals contest
+variants. Loads today's offers, filters by edge / disagreement / EV
+thresholds, runs `beam_search_parlays` once per `(entry_size, variant)`
+cross, sizes each candidate via `strategies/kelly.py`, and writes
+`data/recommendations/{date}.yaml`.
+
+```bash
+poetry run pickem-build --date today --bankroll 500
+```
+
+Bankroll is a CLI flag only — there is no `data/bankroll.json`. Rivals
+is restricted to 2- and 3-leg sizes regardless of `--entry-sizes`.
+
+---
+
+### `poetry run kelly`
+
+Re-sizes a recommendations YAML offline. Reads the file produced by
+`pickem-build`, applies fractional Kelly with the resolution chain
+(explicit kwarg > live CLV-segment BSS > training BSS > fallback `1.0`),
+and prints a tabulated stake table.
+
+```bash
+poetry run kelly --bankroll 500 --from data/recommendations/2026-05-08.yaml
+```
+
+cvxpy / pyyaml / tabulate are lazy-imported from
+`[tool.poetry.group.strategy]`; install with
+`poetry install --with strategy` if the group is not active.
+
+---
+
 ## Daily Workflow
 
 ```
