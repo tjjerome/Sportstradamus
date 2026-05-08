@@ -1259,7 +1259,6 @@ class StatsNBA(Stats):
         # Save the updated player data
         write_gamelog("nba", self.gamelog, self.teamlog, self.players)
 
-
     def get_volume_stats(self, offers, date=datetime.today().date()):
         market = "MIN"
         flat_offers = {}
@@ -1519,4 +1518,3 @@ class StatsNBA(Stats):
             ev = 0
 
         return 0 if np.isnan(ev) else ev
-
