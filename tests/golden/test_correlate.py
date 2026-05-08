@@ -59,9 +59,9 @@ def test_residualization_breaks_shared_trends() -> None:
     assert valid.sum() >= n_games - ROLLING_WINDOW_GAMES, "too many residuals are NaN"
 
     resid_corr = float(np.corrcoef(a_resid[valid], b_resid[valid])[0, 1])
-    assert abs(resid_corr) < 0.4, (
-        f"residual correlation should be much smaller than raw ({raw_corr:.2f}), got {resid_corr:.2f}"
-    )
+    assert (
+        abs(resid_corr) < 0.4
+    ), f"residual correlation should be much smaller than raw ({raw_corr:.2f}), got {resid_corr:.2f}"
 
 
 def test_low_overlap_pairs_shrink_toward_zero() -> None:

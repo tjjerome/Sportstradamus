@@ -47,7 +47,6 @@ clean_data = False
 pd.set_option("future.no_silent_downcasting", True)
 
 
-
 class Stats:
     """A parent class for handling and analyzing sports statistics.
 
@@ -162,7 +161,6 @@ class Stats:
                 "distances": [round(float(dist), 4) for _, dist in sorted_pairs],
             }
         return comps
-
 
     def update_player_comps(self, year=None):
         return
@@ -1114,4 +1112,3 @@ class Stats:
         ].copy()
 
         return last_training_day
-
