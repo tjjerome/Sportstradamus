@@ -44,6 +44,18 @@ confer = "sportstradamus.moneylines:confer"
 meditate = "sportstradamus.training.cli:meditate"
 dashboard = "sportstradamus.dashboard:run"
 reflect = "sportstradamus.nightly:run"
+kelly = "sportstradamus.strategies.kelly:main"
+
+[tool.poetry.group.strategy]
+optional = true
+
+[tool.poetry.group.strategy.dependencies]
+# cvxpy + SCS power joint_kelly_portfolio; PyYAML and tabulate drive the
+# `kelly` CLI's recommendations-YAML I/O. All three are lazy-imported so
+# core users do not have to install them.
+cvxpy = ">=1.4"
+pyyaml = ">=6.0"
+tabulate = ">=0.9"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"
