@@ -16,13 +16,20 @@ from scipy.optimize import minimize_scalar
 from scipy.special import beta as beta_fn
 from scipy.special import expit, logit
 from scipy.stats import gamma, nbinom, norm, skewnorm
-from sklearn.metrics import accuracy_score, log_loss, precision_score
+from sklearn.metrics import (
+    accuracy_score,
+    brier_score_loss,
+    log_loss,
+    precision_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 
 from sportstradamus import data
 from sportstradamus.helpers import (
     fused_loc,
     get_ev,
+    get_logger,
     get_odds,
     set_model_start_values,
     stat_cv,
@@ -35,6 +42,63 @@ from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, warm_start_hyper_opt
 from sportstradamus.training.report import report
 from sportstradamus.training.shap import _scouting_shap_and_filter
+
+logger = get_logger(__name__)
+
+# Equal-width bins for expected_calibration_error per Phase 3 §4.b.
+_ECE_BINS = 10
+# Avoid divide-by-zero when the bookmaker baseline Brier is degenerate.
+_BRIER_SKILL_DENOM_FLOOR = 1e-9
+# Probability clip used so log_loss / Brier never see exact 0 or 1.
+_PROBA_CLIP = 1e-6
+
+
+def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
+    """10-bin equal-width ECE: weighted |avg_pred - avg_actual| across bins."""
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_idx = np.clip(np.digitize(probs, edges) - 1, 0, n_bins - 1)
+    total = len(probs)
+    if total == 0:
+        return float("nan")
+    ece = 0.0
+    for b in range(n_bins):
+        mask = bin_idx == b
+        n = int(mask.sum())
+        if n == 0:
+            continue
+        ece += (n / total) * abs(float(probs[mask].mean()) - float(y[mask].mean()))
+    return float(ece)
+
+
+def _compute_metrics(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
+    """Raw classification metrics for binary over/under predictions."""
+    probs = np.clip(np.asarray(probs, dtype=float), _PROBA_CLIP, 1 - _PROBA_CLIP)
+    y = np.asarray(y).astype(int)
+    pred = (probs > 0.5).astype(int)
+    n_classes = len(np.unique(y))
+    over_n = int((pred == 1).sum())
+    under_n = int((pred == 0).sum())
+    return {
+        "brier_score": float(brier_score_loss(y, probs)),
+        "log_loss": float(log_loss(y, probs, labels=[0, 1])),
+        "roc_auc": float(roc_auc_score(y, probs)) if n_classes > 1 else float("nan"),
+        "expected_calibration_error": _expected_calibration_error(probs, y),
+        "accuracy": float(accuracy_score(y, pred)),
+        "precision_over": (
+            float(precision_score(y, pred, pos_label=1, zero_division=0))
+            if over_n
+            else float("nan")
+        ),
+        "precision_under": (
+            float(precision_score(y, pred, pos_label=0, zero_division=0))
+            if under_n
+            else float("nan")
+        ),
+        "predicted_over_rate": float(pred.mean()),
+        "empirical_over_rate": float(y.mean()),
+        "prediction_std": float(probs.std()),
+        "nll": float(log_loss(y, probs, labels=[0, 1])),
+    }
 
 
 def train_market(
@@ -675,6 +739,29 @@ def train_market(
     val_calibrated = expit(val_logits / T_opt)
     model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
 
+    val_book_proba = B_validation["Odds"].to_numpy(dtype=float)
+    book_proba_available = np.isfinite(val_book_proba).all()
+    model_metrics = _compute_metrics(val_calibrated, y_class_val)
+    if book_proba_available:
+        book_metrics = _compute_metrics(val_book_proba, y_class_val)
+        brier_skill_score = 1 - (
+            model_metrics["brier_score"]
+            / max(book_metrics["brier_score"], _BRIER_SKILL_DENOM_FLOOR)
+        )
+    else:
+        logger.warning(
+            "book baseline unavailable for %s/%s; skill score set to nan",
+            league,
+            market,
+        )
+        book_metrics = None
+        brier_skill_score = float("nan")
+    kelly_shrinkage = (
+        float(np.clip(brier_skill_score, 0.0, 1.0))
+        if np.isfinite(brier_skill_score)
+        else float("nan")
+    )
+
     test_raw_over = y_proba_no_filt[:, 1]
     test_raw_over_clipped = np.clip(test_raw_over, 1e-6, 1 - 1e-6)
     test_calibrated_over = expit(logit(test_raw_over_clipped) / T_opt)
@@ -820,9 +907,17 @@ def train_market(
             "Sharpness": sharp,
             "NLL": ll,
         },
+        "metrics": {
+            "model": model_metrics,
+            "book_baseline": book_metrics,
+            "brier_skill_score": float(brier_skill_score),
+            "kelly_shrinkage": kelly_shrinkage,
+        },
         "diagnostics": {
             "model_weight": model_weight,
             "model_calib": model_calib,
+            "brier_skill_score": float(brier_skill_score),
+            "kelly_shrinkage": kelly_shrinkage,
             "shape_label": diag_shape_label,
             "start_shape": diag_start_shape,
             "model_shape": diag_model_shape,
