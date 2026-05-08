@@ -122,6 +122,7 @@ def run(league, skip_update, history_only, log_level):
     write_history(history)
 
     clv_summary = clv.summarize(history)
+    clv.persist_segments(clv_summary.get("all_segments"))
     if clv_summary["n"]:
         logger.info(
             "CLV legs: %d  Market CLV mean: %+.3f  Model CLV mean: %+.3f  beat-close: %.1f%%",
