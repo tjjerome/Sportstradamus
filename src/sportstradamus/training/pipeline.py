@@ -87,10 +87,10 @@ def train_market(
 
     print(f"Training {league} - {market}")
     cv = stat_cv[league].get(market, 1)
-    filepath = pkg_resources.files(data) / (f"training_data/{filename}.csv")
+    filepath = pkg_resources.files(data) / (f"training_data/{filename}.parquet")
 
     if os.path.isfile(filepath):
-        M = pd.read_csv(filepath, index_col=0)
+        M = pd.read_parquet(filepath)
         cutoff_date = pd.to_datetime(M["Date"]).max().date()
         M = M.loc[
             (pd.to_datetime(M.Date).dt.date <= cutoff_date)
@@ -133,7 +133,7 @@ def train_market(
             M.loc[i, "Odds_synthetic"] = False
 
     M = trim_matrix(M, 15000)
-    M.to_csv(filepath)
+    M.to_parquet(filepath, compression="zstd", index=True)
 
     stat_data.save_comps()
 

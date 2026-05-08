@@ -6,16 +6,16 @@ reproducibility.
 
 Outputs (per league):
 
-* ``data/{LEAGUE}_corr_same_team.csv`` — within-team pair correlations
+* ``data/{LEAGUE}_corr_same_team.parquet`` — within-team pair correlations
   indexed by ``(team, market_a, market_b)``.
-* ``data/{LEAGUE}_corr_opposing.csv`` — cross-team pair correlations
+* ``data/{LEAGUE}_corr_opposing.parquet`` — cross-team pair correlations
   indexed by ``(team, team_market, opp_market)``. Both sides keyed by their
   raw (un-prefixed) market names; the file structure encodes the
   team-vs-opponent relationship.
 * ``data/correlations/{LEAGUE}_corr_metadata.json`` — date range covered,
   per-team observation counts, generation timestamp, git SHA.
 
-The intermediate per-game record at ``data/training_data/{LEAGUE}_corr.csv``
+The intermediate per-game record at ``data/training_data/{LEAGUE}_corr.parquet``
 is still written (warm-start cache) but no longer used by the prediction
 pipeline.
 """
@@ -706,9 +706,9 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
 
     training_data_dir = pkg_resources.files(data) / "training_data"
     training_data_dir.mkdir(parents=True, exist_ok=True)
-    raw_filepath = training_data_dir / f"{league}_corr.csv"
+    raw_filepath = training_data_dir / f"{league}_corr.parquet"
     if raw_filepath.is_file() and not force:
-        matrix = pd.read_csv(raw_filepath, index_col=0)
+        matrix = pd.read_parquet(raw_filepath)
         if "DATE" in matrix.columns:
             matrix["DATE"] = pd.to_datetime(matrix["DATE"], format="mixed")
             latest_date = matrix["DATE"].max()
@@ -722,7 +722,7 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
 
     new_records = _build_team_game_records(league, log, latest_date)
     matrix = pd.concat([matrix, pd.json_normalize(new_records)], ignore_index=True)
-    matrix.to_csv(raw_filepath)
+    matrix.to_parquet(raw_filepath, compression="zstd")
 
     matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
 
@@ -759,16 +759,16 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
         if not opposing.empty:
             opposing_blocks[team] = opposing
 
-    same_path = pkg_resources.files(data) / f"{league}_corr_same_team.csv"
-    opposing_path = pkg_resources.files(data) / f"{league}_corr_opposing.csv"
+    same_path = pkg_resources.files(data) / f"{league}_corr_same_team.parquet"
+    opposing_path = pkg_resources.files(data) / f"{league}_corr_opposing.parquet"
     if same_team_blocks:
-        pd.concat(same_team_blocks).to_csv(same_path)
+        pd.concat(same_team_blocks).to_frame("R").to_parquet(same_path, compression="zstd")
     else:
-        pd.DataFrame(columns=["R"]).to_csv(same_path)
+        pd.DataFrame(columns=["R"]).to_parquet(same_path, compression="zstd")
     if opposing_blocks:
-        pd.concat(opposing_blocks).to_csv(opposing_path)
+        pd.concat(opposing_blocks).to_frame("R").to_parquet(opposing_path, compression="zstd")
     else:
-        pd.DataFrame(columns=["R"]).to_csv(opposing_path)
+        pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
 
     metadata_dir = pkg_resources.files(data) / "correlations"
     metadata_dir.mkdir(parents=True, exist_ok=True)

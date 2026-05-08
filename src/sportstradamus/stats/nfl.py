@@ -34,6 +34,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 
@@ -312,17 +313,14 @@ class StatsNFL(Stats):
 
     def load(self):
         """Load data from files."""
-        filepath = pkg_resources.files(data) / "nfl_data.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                pdata = pickle.load(infile)
-                if type(pdata) is dict:
-                    self.gamelog = pdata["gamelog"]
-                    self.teamlog = pdata["teamlog"]
-                    if "players" in pdata:
-                        self.players = pdata["players"]
-                else:
-                    self.gamelog = pdata
+        nfl_data = read_gamelog("nfl")
+        self.gamelog = nfl_data["gamelog"]
+        self.teamlog = nfl_data["teamlog"]
+        players = nfl_data["players"]
+        if (isinstance(players, pd.DataFrame) and not players.empty) or (
+            isinstance(players, dict) and players
+        ):
+            self.players = players
 
     def update(self):
         """Update data from the web API."""
@@ -666,13 +664,7 @@ class StatsNFL(Stats):
             )
 
         # Save the updated player data
-        filepath = pkg_resources.files(data) / "nfl_data.dat"
-        with open(filepath, "wb") as outfile:
-            pickle.dump(
-                {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog},
-                outfile,
-                -1,
-            )
+        write_gamelog("nfl", self.gamelog, self.teamlog, self.players)
 
     def parse_pbp(self, week, team, year, playerName=""):
         if self.need_pbp:

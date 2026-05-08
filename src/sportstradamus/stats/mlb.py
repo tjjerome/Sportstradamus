@@ -33,6 +33,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 
@@ -771,13 +772,10 @@ class StatsMLB(Stats):
 
     def load(self):
         """Loads MLB player statistics from a file."""
-        filepath = pkg_resources.files(data) / "mlb_data.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                mlb_data = pickle.load(infile)
-                self.gamelog = mlb_data["gamelog"]
-                self.teamlog = mlb_data["teamlog"]
-                self.players = mlb_data["players"]
+        mlb_data = read_gamelog("mlb")
+        self.gamelog = mlb_data["gamelog"]
+        self.teamlog = mlb_data["teamlog"]
+        self.players = mlb_data["players"]
 
         filepath = pkg_resources.files(data) / "park_factor.json"
         if os.path.isfile(filepath):
@@ -928,12 +926,7 @@ class StatsMLB(Stats):
             )
 
         # Write to file
-        with open(pkg_resources.files(data) / "mlb_data.dat", "wb") as outfile:
-            pickle.dump(
-                {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog},
-                outfile,
-                -1,
-            )
+        write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
 
 
     def profile_market(self, market, date=datetime.today().date()):

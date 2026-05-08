@@ -2,8 +2,6 @@
 
 import importlib.resources as pkg_resources
 import json
-import os.path
-import pickle
 import warnings
 from datetime import datetime, timedelta
 from io import StringIO
@@ -33,6 +31,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 from sportstradamus.stats.nba import StatsNBA
@@ -53,13 +52,10 @@ class StatsWNBA(StatsNBA):
 
     def load(self):
         """Load data from files."""
-        filepath = pkg_resources.files(data) / "wnba_data.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                wnba_data = pickle.load(infile)
-                self.players = wnba_data["players"]
-                self.gamelog = wnba_data["gamelog"]
-                self.teamlog = wnba_data["teamlog"]
+        wnba_data = read_gamelog("wnba")
+        self.players = wnba_data["players"]
+        self.gamelog = wnba_data["gamelog"]
+        self.teamlog = wnba_data["teamlog"]
 
     def update(self):
         team_abbr_map = {
@@ -451,10 +447,7 @@ class StatsWNBA(StatsNBA):
             self.teamlog["GAME_DATE"] = self.teamlog["GAME_DATE"].astype(str)
 
         # Save the updated player data
-        with open(pkg_resources.files(data) / "wnba_data.dat", "wb") as outfile:
-            pickle.dump(
-                {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog}, outfile
-            )
+        write_gamelog("wnba", self.gamelog, self.teamlog, self.players)
 
     def build_comp_profile(self, playerList=None):
         """Build merged player profile DataFrame for comp computation.

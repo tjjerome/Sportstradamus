@@ -32,6 +32,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 
@@ -127,13 +128,10 @@ class StatsNHL(Stats):
         Returns:
             None
         """
-        filepath = pkg_resources.files(data) / "nhl_data.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                nhl_data = pickle.load(infile)
-                self.players = nhl_data.get("players", {})
-                self.gamelog = nhl_data.get("gamelog", {})
-                self.teamlog = nhl_data.get("teamlog", {})
+        nhl_data = read_gamelog("nhl")
+        self.players = nhl_data["players"]
+        self.gamelog = nhl_data["gamelog"]
+        self.teamlog = nhl_data["teamlog"]
 
     def build_comp_profile(self, playerDict=None):
         """Build NHL player comp profile from loaded player data.
@@ -767,12 +765,7 @@ class StatsNHL(Stats):
             )
 
         # Write to file
-        with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
-            pickle.dump(
-                {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog},
-                outfile,
-                -1,
-            )
+        write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
 
     def dump_goalie_list(self):
         filepath = pkg_resources.files(data) / "goalies.json"

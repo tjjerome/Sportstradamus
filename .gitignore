@@ -169,6 +169,7 @@ docs/build
 *refactor.py
 *test.py
 *.txt
+logs/*
 
 # Tests are tracked; the broad globs above don't apply inside tests/.
 !tests/**/*.py
@@ -185,6 +186,7 @@ src/sportstradamus/data/most_important_features.json
 src/sportstradamus/data/features_to_filter.json
 src/sportstradamus/data/book_weights.json
 src/sportstradamus/data/goalies.json
+src/sportstradamus/data/*_players.json
 src/profile_output.lprof
 profile_output.lprof
 poetry.lock
