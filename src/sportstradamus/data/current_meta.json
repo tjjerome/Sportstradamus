@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-03T19:18:49.190797Z",
+  "generated_at": "2026-05-08T02:54:50.432179Z",
   "leagues": [
     "NBA"
   ],
@@ -7,6 +7,7 @@
     "Sleeper",
     "Underdog"
   ],
-  "offer_rows": 1604,
-  "parlay_rows": 8366
+  "contest_variant": "power",
+  "offer_rows": 834,
+  "parlay_rows": 1255
 }
