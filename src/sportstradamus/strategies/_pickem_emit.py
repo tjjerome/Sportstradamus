@@ -25,8 +25,7 @@ def rank_and_dedupe(
     """Sort by EV-per-dollar, drop near-duplicate entries by leg overlap."""
     ranked = sorted(
         entries,
-        key=lambda e: (e.ev * e.joint_prob)
-        / float(max(e.recommended_stake, Decimal("0.01"))),
+        key=lambda e: (e.ev * e.joint_prob) / float(max(e.recommended_stake, Decimal("0.01"))),
         reverse=True,
     )
     kept: list[RecommendedEntry] = []
