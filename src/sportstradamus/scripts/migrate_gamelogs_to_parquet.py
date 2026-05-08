@@ -67,8 +67,7 @@ def _migrate(league: str) -> bool:
 
     if not _frames_match(rt["gamelog"], gamelog):
         click.echo(
-            f"[{league}] gamelog round-trip mismatch: "
-            f"{rt['gamelog'].shape} vs {gamelog.shape}",
+            f"[{league}] gamelog round-trip mismatch: " f"{rt['gamelog'].shape} vs {gamelog.shape}",
             err=True,
         )
         return False
@@ -102,9 +101,7 @@ def _migrate(league: str) -> bool:
         sizes.append(("players.parquet", _human_size(Path(str(paths["players_parquet"])))))
     else:
         sizes.append(("players.json", _human_size(Path(str(paths["players_json"])))))
-    click.echo(
-        f"[{league}] sizes: " + " ".join(f"{lbl}={sz}" for lbl, sz in sizes)
-    )
+    click.echo(f"[{league}] sizes: " + " ".join(f"{lbl}={sz}" for lbl, sz in sizes))
     return True
 
 

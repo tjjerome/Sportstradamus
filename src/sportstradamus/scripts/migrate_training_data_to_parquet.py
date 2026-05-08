@@ -59,11 +59,7 @@ def _migrate_one(csv_path: Path) -> tuple[bool, int, int]:
 )
 def main(keep_csv: bool) -> None:
     training_data_dir = Path(str(resources.files(data) / "training_data"))
-    csvs = sorted(
-        p
-        for p in training_data_dir.glob("*.csv")
-        if not p.name.endswith("_corr.csv")
-    )
+    csvs = sorted(p for p in training_data_dir.glob("*.csv") if not p.name.endswith("_corr.csv"))
     if not csvs:
         click.echo("No training_data/*.csv files to migrate.")
         return

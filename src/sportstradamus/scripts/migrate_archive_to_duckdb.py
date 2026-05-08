@@ -65,9 +65,7 @@ def _is_skip_entity(entity: str) -> bool:
     return " + " in entity or " vs. " in entity
 
 
-def _iter_league(
-    archive_root: Path, league: str, cutoff: datetime.date
-):
+def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
     """Yield (odds_rows, lines_rows) batches for one league."""
     league_dir = archive_root / league
     if not league_dir.is_dir():
@@ -160,12 +158,8 @@ def _bulk_insert_lines(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> int
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--archive-root", default="archive", help="Source klepto archive directory"
-    )
-    parser.add_argument(
-        "--db-path", default="archive/archive.duckdb", help="Target DuckDB file"
-    )
+    parser.add_argument("--archive-root", default="archive", help="Source klepto archive directory")
+    parser.add_argument("--db-path", default="archive/archive.duckdb", help="Target DuckDB file")
     parser.add_argument(
         "--cutoff-years",
         type=int,

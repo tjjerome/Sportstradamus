@@ -72,9 +72,7 @@ def test_pipeline_smoke(
     archive_obj = Archive()
     pts_df = archive_obj.to_pandas("WNBA", "PTS")
     book_cols = [c for c in pts_df.columns if c != "Line"]
-    offers_with_ev = (
-        int(pts_df[book_cols].notna().any(axis=1).sum()) if not pts_df.empty else 0
-    )
+    offers_with_ev = int(pts_df[book_cols].notna().any(axis=1).sum()) if not pts_df.empty else 0
     assert offers_with_ev >= 10, (
         f"confer wrote EV for only {offers_with_ev} player-prop offers; "
         f"expected >= 10. archive contents: {pts_df!r}"
@@ -111,9 +109,9 @@ def test_pipeline_smoke(
 
     result = runner.invoke(meditate, ["--league", "WNBA"], catch_exceptions=False)
     assert result.exit_code == 0, f"meditate failed: {result.output}"
-    assert ("WNBA", "PTS") in train_market_calls, (
-        f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
-    )
+    assert (
+        ("WNBA", "PTS") in train_market_calls
+    ), f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
 
     # ----- Phase 3: prophecize (CLI invoked; parquet snapshot + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
@@ -173,9 +171,9 @@ def test_pipeline_smoke(
     assert captured, "process_offers was never invoked"
     underdog_offers, _ = captured.get("Underdog", (pd.DataFrame(), pd.DataFrame()))
     assert len(underdog_offers) >= 10, f"expected >= 10 offers with EV, got {len(underdog_offers)}"
-    assert underdog_offers["Model EV"].notna().sum() >= 10, (
-        "fewer than 10 offers had a populated Model EV column"
-    )
+    assert (
+        underdog_offers["Model EV"].notna().sum() >= 10
+    ), "fewer than 10 offers had a populated Model EV column"
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
 
