@@ -169,9 +169,7 @@ else:
     c2.metric("Mean Market CLV", f"{clv_summary['market_clv_mean']:+.3f}")
     c3.metric(
         "Mean Model CLV",
-        f"{clv_summary['model_clv_mean']:+.3f}"
-        if pd.notna(clv_summary["model_clv_mean"])
-        else "—",
+        f"{clv_summary['model_clv_mean']:+.3f}" if pd.notna(clv_summary["model_clv_mean"]) else "—",
     )
     c4.metric("Beat-close rate", f"{clv_summary['frac_beat_close']:.1%}")
 

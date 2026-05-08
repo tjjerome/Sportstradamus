@@ -573,4 +573,3 @@ class StatsWNBA(StatsNBA):
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
 
         self.comps = comps
-
