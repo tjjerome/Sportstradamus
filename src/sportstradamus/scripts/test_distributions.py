@@ -50,30 +50,30 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "training_data"
 
 MARKETS = {
     # NBA
-    "NBA_PTS": {"file": "NBA_PTS.csv", "dist": "ZAGamma", "zi": 0.065, "continuous": True},
-    "NBA_PRA": {"file": "NBA_PRA.csv", "dist": "Gamma", "zi": 0.026, "continuous": True},
-    "NBA_BLK": {"file": "NBA_BLK.csv", "dist": "NegBin", "zi": 0.007, "continuous": False},
-    "NBA_AST": {"file": "NBA_AST.csv", "dist": "NegBin", "zi": 0.013, "continuous": False},
+    "NBA_PTS": {"file": "NBA_PTS.parquet", "dist": "ZAGamma", "zi": 0.065, "continuous": True},
+    "NBA_PRA": {"file": "NBA_PRA.parquet", "dist": "Gamma", "zi": 0.026, "continuous": True},
+    "NBA_BLK": {"file": "NBA_BLK.parquet", "dist": "NegBin", "zi": 0.007, "continuous": False},
+    "NBA_AST": {"file": "NBA_AST.parquet", "dist": "NegBin", "zi": 0.013, "continuous": False},
     # NFL
     "NFL_pass_yds": {
-        "file": "NFL_passing-yards.csv",
+        "file": "NFL_passing-yards.parquet",
         "dist": "ZAGamma",
         "zi": 0.066,
         "continuous": True,
     },
     "NFL_fantasy-points-underdog": {
-        "file": "NFL_fantasy-points-underdog.csv",
+        "file": "NFL_fantasy-points-underdog.parquet",
         "dist": "Gamma",
         "zi": 0.0289,
         "continuous": True,
     },
     "NFL_receptions": {
-        "file": "NFL_receptions.csv",
+        "file": "NFL_receptions.parquet",
         "dist": "NegBin",
         "zi": 0.0098,
         "continuous": False,
     },
-    "NFL_tds": {"file": "NFL_tds.csv", "dist": "NegBin", "zi": 0.006, "continuous": False},
+    "NFL_tds": {"file": "NFL_tds.parquet", "dist": "NegBin", "zi": 0.006, "continuous": False},
 }
 
 EPSILON = 0.01  # Clip value for zeros in continuous distributions
@@ -113,8 +113,8 @@ def preprocess_zi(y, zi_gate, is_continuous_base, rng=None):
 
 
 def load_market(market_file, zi_gate, is_continuous_base):
-    """Load training CSV, apply ZI preprocessing, split data."""
-    df = pd.read_csv(DATA_DIR / market_file, index_col=0)
+    """Load training parquet, apply ZI preprocessing, split data."""
+    df = pd.read_parquet(DATA_DIR / market_file)
 
     meta_cols = ["Line", "Odds", "EV", "Result", "Player", "Date", "Archived"]
     feature_cols = [c for c in df.columns if c not in meta_cols]

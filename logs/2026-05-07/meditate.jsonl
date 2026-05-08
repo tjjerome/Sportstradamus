@@ -1,1 +1,5 @@
 {"ts": "2026-05-07T07:53:11.180534", "level": "INFO", "module": "cli", "message": "meditate invoked", "force": false, "league": "NBA", "rebuild_filter": false, "rebuild_correlations": true}
+{"ts": "2026-05-07T09:32:35.886454", "level": "INFO", "module": "cli", "message": "meditate invoked", "force": false, "league": "NBA", "rebuild_filter": false, "rebuild_correlations": true}
+{"ts": "2026-05-07T18:53:53.306925", "level": "INFO", "module": "cli", "message": "meditate invoked", "force": false, "league": "NBA", "rebuild_filter": false, "rebuild_correlations": true}
+{"ts": "2026-05-07T19:08:34.867813", "level": "INFO", "module": "cli", "message": "meditate invoked", "force": false, "league": "NBA", "rebuild_filter": false, "rebuild_correlations": true}
+{"ts": "2026-05-07T19:16:29.093829", "level": "INFO", "module": "cli", "message": "meditate invoked", "force": false, "league": "All", "rebuild_filter": false, "rebuild_correlations": false}

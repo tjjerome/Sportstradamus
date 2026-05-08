@@ -33,6 +33,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 
@@ -377,13 +378,10 @@ class StatsNBA(Stats):
 
     def load(self):
         """Load data from files."""
-        filepath = pkg_resources.files(data) / "nba_data.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                nba_data = pickle.load(infile)
-                self.players = nba_data["players"]
-                self.gamelog = nba_data["gamelog"]
-                self.teamlog = nba_data["teamlog"]
+        nba_data = read_gamelog("nba")
+        self.players = nba_data["players"]
+        self.gamelog = nba_data["gamelog"]
+        self.teamlog = nba_data["teamlog"]
 
     def build_comp_profile(self, playerList=None):
         """Build merged player profile DataFrame for comp computation.
@@ -1259,10 +1257,7 @@ class StatsNBA(Stats):
             )
 
         # Save the updated player data
-        with open(pkg_resources.files(data) / "nba_data.dat", "wb") as outfile:
-            pickle.dump(
-                {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog}, outfile
-            )
+        write_gamelog("nba", self.gamelog, self.teamlog, self.players)
 
 
     def get_volume_stats(self, offers, date=datetime.today().date()):

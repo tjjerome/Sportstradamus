@@ -265,7 +265,7 @@ def model_path(league: str, market: str):
 
 def training_path(league: str, market: str):
     fn = f"{league}_{market}".replace(" ", "-")
-    return pkg_resources.files(data) / f"training_data/{fn}.csv"
+    return pkg_resources.files(data) / f"training_data/{fn}.parquet"
 
 
 def _score_features(
@@ -345,7 +345,7 @@ def filter_market_features(
     # Load training data + target
     tpath = training_path(league, market)
     if os.path.isfile(tpath):
-        train_df = pd.read_csv(tpath, index_col=0)
+        train_df = pd.read_parquet(tpath)
         if "Date" in train_df.columns:
             train_df = train_df.sort_values("Date").reset_index(drop=True)
         target = (

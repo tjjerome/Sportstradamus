@@ -110,7 +110,7 @@ def evaluate_market(
     # ── Load training data ──
     tpath = training_path(league, market)
     if os.path.isfile(tpath):
-        train_df = pd.read_csv(tpath, index_col=0)
+        train_df = pd.read_parquet(tpath)
         train_df = train_df.sort_values("Date").reset_index(drop=True)
         target = pd.to_numeric(train_df["Result"], errors="coerce").fillna(0)
         train_df = train_df.drop(

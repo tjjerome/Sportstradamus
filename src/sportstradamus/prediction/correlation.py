@@ -2,8 +2,8 @@
 
 :func:`find_correlation` takes the flat list of scored offers produced by
 :func:`process_offers`, groups them by game, looks up the pre-computed
-stratified correlation matrices (``{LEAGUE}_corr_same_team.csv`` and
-``{LEAGUE}_corr_opposing.csv``), and annotates each offer with its most
+stratified correlation matrices (``{LEAGUE}_corr_same_team.parquet`` and
+``{LEAGUE}_corr_opposing.parquet``), and annotates each offer with its most
 correlated team-mate and opponent legs.  It also calls
 :func:`beam_search_parlays` to enumerate the top parlay combinations.
 """
@@ -394,15 +394,13 @@ def find_correlation(
         league_df = df.loc[df["League"] == league]
         if league_df.empty:
             continue
-        c_same = pd.read_csv(
-            pkg_resources.files(data) / f"{league}_corr_same_team.csv",
-            index_col=[0, 1, 2],
+        c_same = pd.read_parquet(
+            pkg_resources.files(data) / f"{league}_corr_same_team.parquet",
         )
         c_same.rename_axis(["team", "market", "correlation"], inplace=True)
         c_same.columns = ["R"]
-        c_opp = pd.read_csv(
-            pkg_resources.files(data) / f"{league}_corr_opposing.csv",
-            index_col=[0, 1, 2],
+        c_opp = pd.read_parquet(
+            pkg_resources.files(data) / f"{league}_corr_opposing.parquet",
         )
         c_opp.rename_axis(["team", "market", "correlation"], inplace=True)
         c_opp.columns = ["R"]
