@@ -38,16 +38,23 @@ sub-phase below; this section is the executive summary.
 - 1.6 Deprecated triage ❌ doc not produced; `src/deprecated/` still carries
   TODOs that reference replaced modules.
 
-**Phase 2 — Bet Logger and CLV Tracker: ~40% complete.**
+**Phase 2 — CLV Tracker: ✅ done for this package's scope.**
 
 - CLV computation exists (`src/sportstradamus/clv.py`) and is wired into
   `nightly.reflect`, including segmented summaries with a `CLV_SEGMENT_MIN_N`
-  threshold. This handles the *retrospective* CLV pipeline against
-  system-recommended history.
-- ❌ The user-placed bet logger (`tracking/` package, `tracking.db`,
-  `track place|close|settle|report` CLIs) does not exist. CLV is computed for
-  what the system *would have* done, not what the user actually bet.
-- 2.1 reflect audit doc not produced; superseded by the live `clv.py` design.
+  threshold. The retrospective CLV pipeline against system-recommended
+  history is the right scope for this project.
+- **Placed-bet logging is explicitly out of scope.** Tracking which entries
+  a user actually placed is a personal-bookkeeping concern, not a package
+  concern; users handle that themselves. The roadmap's original
+  `tracking/` package (Phase 2.2 / 2.3) and the dashboard tabs that
+  depended on `tracking.db` (Phase 4.2) are dropped, not deferred.
+- Keep an eye on the existing CLV pipeline: revisit if segment sample
+  sizes stay below `CLV_SEGMENT_MIN_N=20` for too long, if the implicit
+  "last sample before kickoff = close" assumption in
+  `clv.fill_from_archive` starts diverging from sharp closes (e.g.,
+  Odds API behavior changes), or if `frac_beat_close` drifts away from
+  ~50% on no-edge segments.
 
 **Phase 3 — Underdog-Specific Decision Engine: ~25% complete.**
 
@@ -61,13 +68,19 @@ sub-phase below; this section is the executive summary.
 - 3.5 Streaks / Ladders / Rivals strategies ❌ not started (Rivals payout
   table exists in JSON; no decision engine).
 
-**Phase 4 — Real-Time Alerts and Dashboard Extensions: ~10% complete.**
+**Phase 4 — Real-Time Alerts and Dashboard Extensions: scope-reduced.**
 
-- 4.1 Alerts package ❌ no `alerts/` directory.
+- 4.1 Alerts package ❌ no `alerts/` directory. Useful subset (high-edge
+  appearance, scraper failure, model staleness, CLV drift on system
+  history) is still in scope; the rules that needed the placed-bet log
+  (open-entry exposure, bankroll drawdown) are dropped with the bet
+  logger.
 - 4.2 Dashboard ✅ baseline `dashboard.py`, `dashboard_app.py`,
-  `dashboard_data.py`, and a `pages/` multi-page set exist; the new tabs
-  (Today's Recommendations, Open Entries, Settled History, Bankroll) all
-  depend on the missing `tracking.db`.
+  `dashboard_data.py`, and a `pages/` multi-page set exist. The
+  proposed Open Entries / Settled History / Bankroll tabs are dropped
+  (they depended on `tracking.db`); a Today's Recommendations tab built
+  off `data/recommendations/{today}.yaml` is still worthwhile if Phase
+  3.3 lands.
 
 **Phase 5 — Best Ball / Battle Royale: ~15% complete (different shape).**
 
@@ -272,15 +285,16 @@ Both exist and run today. Open questions:
 >
 > When done: ruff clean, golden tests pass, calibration plot shows tighter decile alignment than the audit baseline. Summarize.
 
-### 1.3 Closing-line freeze — ❌ NOT DONE (workaround in place)
+### 1.3 Closing-line freeze — ⚠️ DROPPED (workaround is sufficient)
 
 **Status:** no `Archive.freeze_close`, no `data/closing_lines/`, no
-`freeze-close` CLI. `clv.fill_from_archive` instead treats the last
-archived sample before kickoff as the close (the Odds API stops surfacing
-prematch odds for in-progress games, so this is correct in practice but
-implicit). Recommended: still build the explicit freeze step before
-Phase 2.2 lands so the user-bet logger has a stable, queryable close
-snapshot independent of the live archive evolving.
+`freeze-close` CLI. `clv.fill_from_archive` treats the last archived
+sample before kickoff as the close, and the Odds API stops surfacing
+prematch odds for in-progress games, so this is correct in practice.
+The original motivation for the explicit freeze step was the placed-bet
+logger (Phase 2.2, now out of scope). Without that consumer, the
+implicit close is good enough; revisit only if the CLV monitoring in
+2.4 shows the assumption is breaking.
 
 
 
@@ -423,15 +437,20 @@ This phase extends `reflect` rather than building a parallel system, since `refl
 
 **Estimated time:** 1–2 weekends
 
-### 2.1 Audit `nightly.py:reflect` — ⚠️ SUPERSEDED
+### 2.1 Audit `nightly.py:reflect` — ✅ SUPERSEDED
 
 **Status:** the audit doc was never produced because `clv.py` was built
 directly. `reflect` now (a) resolves history, (b) calls
 `clv.fill_from_archive`, (c) prints `clv.summarize` + per-segment results
-honoring `CLV_SEGMENT_MIN_N=20`. Functionally Phase 2.1 + 2.4 are partly
-complete *for the system-recommended history*. What's missing is the
-*placed-bet* layer (2.2/2.3 below) and a written audit so future agents
-don't re-derive the design.
+honoring `CLV_SEGMENT_MIN_N=20`. Adequate for this package's scope.
+
+### Phase 2.2 / 2.3 — Placed-bet logger and per-bet CLV — ❌ OUT OF SCOPE
+
+Tracking which entries the user actually placed is a personal-bookkeeping
+concern. Users own that themselves. The remainder of this Phase 2 section
+(the SQLAlchemy schema, `track place|close|settle` CLIs, the bet-history
+dashboard tabs) is intentionally not built. Original prompts retained
+below for historical reference only — do not implement.
 
 
 
@@ -447,7 +466,7 @@ don't re-derive the design.
 >
 > No code changes. The audit informs whether Phase 2.2 extends `reflect` or builds alongside it.
 
-### 2.2 Bet logger schema — ❌ NOT DONE (highest-value missing module)
+### 2.2 Bet logger schema — ❌ OUT OF SCOPE (see note above)
 
 
 
@@ -529,11 +548,11 @@ Build the placed-bet logger as a sibling to `reflect`, not a replacement. `refle
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Verify `poetry run track place --from examples/sample_entry.yaml` works against a fresh DB. Summarize.
 
-### 2.3 CLV computation and settlement — ⚠️ HALF DONE
+### 2.3 CLV computation and settlement — ✅ DONE for in-scope work
 
 **Status:** retrospective CLV exists for system-recommended history
 (`clv.fill_from_archive` + `_signed_clv`). The placed-bet `track close` /
-`track settle` flow is gated on Phase 2.2 and 1.3.
+`track settle` flow is dropped (see 2.2 note).
 
 
 
@@ -569,12 +588,32 @@ Build the placed-bet logger as a sibling to `reflect`, not a replacement. `refle
 >
 > When done: ruff clean, golden tests pass. Summarize.
 
-### 2.4 CLV reporting — ⚠️ HALF DONE
+### 2.4 CLV reporting — ✅ DONE for in-scope work; monitor
 
-**Status:** `clv.summarize` already produces per-(League × Market × Platform)
-segment tables logged by `reflect`. Missing: bootstrap CIs, CSV/JSON
-export flags, color-coded terminal output, `--csv`/`--json` flags. Add
-these to `clv.summarize` rather than building a parallel report module.
+**Status:** `clv.summarize` produces per-(League × Market × Platform)
+segment tables logged by `reflect`. Bootstrap CIs and CSV/JSON exports
+are nice-to-haves but not blockers — defer until the existing summary
+shows it can't answer a real question.
+
+**Things to keep an eye on:**
+
+- `frac_beat_close` should hover near 50% on segments with no real edge
+  and >50% on segments where the model is sharp. Persistent <50% on a
+  segment is either an archive/close-snapshot bug or a model bug.
+- `Market CLV mean` and `Model CLV mean` drift apart only when
+  bookmakers move toward (or away from) our model after open. Big
+  divergence on a market is a signal to retrain or to investigate the
+  feature set.
+- Segment counts hitting `CLV_SEGMENT_MIN_N=20` — if a segment never
+  accumulates 20 legs in a season, either it's not surfacing in the
+  recommendation pipeline or the threshold is too high for low-volume
+  markets.
+- The implicit "last archive sample before kickoff = close"
+  assumption: if Odds API behavior changes (they start surfacing
+  prematch lines into in-play, or stop providing some sharp books
+  prematch), `clv.fill_from_archive` silently breaks. Add a sanity
+  check that the close timestamp is within N minutes of `commence_time`
+  and warn otherwise.
 
 
 
@@ -934,11 +973,13 @@ I'm leaving Ladders and Rivals as follow-up sessions — same shape of work but 
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Demonstrate by triggering a fake event against a Telegram test chat. Summarize.
 
-### 4.2 Dashboard extensions — ⚠️ BLOCKED on 2.2
+### 4.2 Dashboard extensions — ⚠️ SCOPE-REDUCED
 
 **Status:** baseline `dashboard.py`, `dashboard_app.py`, `dashboard_data.py`,
-and `pages/` exist. The four new tabs all read from `tracking.db` which
-doesn't exist yet — Phase 2.2 unblocks this entire section.
+and `pages/` exist. The Open Entries / Settled History / Bankroll tabs
+are dropped along with the placed-bet logger. A Today's Recommendations
+tab reading `data/recommendations/{today}.yaml` (produced by Phase 3.3)
+is still worth building once that module lands.
 
 
 
@@ -1378,27 +1419,31 @@ I added basic push handling in Phase 1.2, but a more thorough version models the
 
 ## Pacing Recommendation
 
+> **Note (2026-05-08):** original pacing assumed a placed-bet logger and
+> per-bet CLV. With those out of scope, the table below is the
+> scope-reduced version.
+
 | Month | Focus |
 |---|---|
-| 1 | Phase 1 audit (1.1–1.6) — most of this is reading and reporting. The actual fixes happen in month 2. |
-| 2 | Phase 1 fixes (correlate methodology, parlay calibration, closing-line freeze, logging, tests) + start Phase 2 |
-| 3 | Finish Phase 2 (bet log + CLV) + Phase 3.1 (Kelly) + 3.2 (variants) |
-| 4 | Phase 3.3 (Underdog-native), 3.4 (Champions), play Pick'em at scale, collect 200+ entries of CLV data |
-| 5 | Phase 4 (alerts + dashboard). Review CLV. |
-| 6–9 | Phase 5 (Best Ball + Battle Royale), aligned with NFL season |
-| 10–12 | Phase 6 refinements as edge erodes |
+| 1 | Phase 1.2 follow-ups + Phase 1.6 deprecated triage. CLV monitoring on existing `clv.summarize` output. |
+| 2 | Phase 3.1 (Kelly) + Phase 3.3 (Underdog-native `pickem-build`). |
+| 3 | Phase 4.1 alerts (in-scope subset) + Phase 4.2 Today's Recommendations dashboard tab. Review CLV on accumulated segments. |
+| 4–5 | Phase 3.4 (Champions) + 3.5 (Streaks/Ladders/Rivals) as appetite allows. |
+| 6–9 | Phase 5 (Best Ball + Battle Royale rebuild), aligned with NFL season. |
+| 10–12 | Phase 6 refinements (conformal first, Bayesian after) as edge erodes. |
 
 Phase 1 audit work is undramatic but it's where most of the actual edge correction happens. The existing modeling is already solid; the gains come from confirming the correlation methodology is sound, the parlay search is well-calibrated, push handling is correct, and contest-variant payouts are right. Skipping it to jump to Phase 3 means building the strategy module on a foundation you haven't verified.
 
-A realistic minimum-viable path if you want to start placing real bets sooner: **Phase 1.1 (correlate audit + fix) + Phase 1.2 (parlay audit + fix) + Phase 1.3 (closing-line freeze) + Phase 2 (bet log + CLV) + Phase 3.1 (Kelly) + Phase 3.3 (Underdog-native module)**. That's roughly 8 weeks of focused work and gets you to a real, accountable, Kelly-sized Underdog Pick'em pipeline. Everything else is multipliers on that core.
+A realistic minimum-viable path was: **Phase 1.1 (correlate) + 1.2 (parlay) + 2 (CLV) + 3.1 (Kelly) + 3.3 (Underdog-native)**. With the placed-bet logger dropped, only **3.1 + 3.3 + the Phase 1.2 follow-ups** remain on that path. Roughly 3–4 weekends of focused work to reach a ranked-and-sized recommendation pipeline; everything else is multipliers on that core.
 
 ---
 
-## Updated Critical Path (post-2026-05-08 audit)
+## Updated Critical Path (post-2026-05-08 audit, scope-reduced)
 
-The minimum-viable path above is largely complete on the modeling side
-(1.1 + 1.2 + 3.2). The new bottleneck is **decision-engine + tracking**,
-not modeling. Recommended next 8 weeks, in order:
+The modeling and CLV foundations are in place (1.1 + 1.2 + 2.x + 3.2).
+With placed-bet tracking explicitly out of scope, the remaining work is
+narrower: close out Phase 1 follow-ups, ship Kelly + Underdog-native
+recommendation, and add useful alerts. Recommended order:
 
 1. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the
    `find_correlation` pairwise-EV unbounded score, replace inline magic
@@ -1407,33 +1452,29 @@ not modeling. Recommended next 8 weeks, in order:
    `correlation.py:498` so the displayed multiplier matches the EV that
    ranked the parlay. Re-run `audit_parlay_calibration.py` on production
    archive data and commit a real plot.
-2. **Phase 1.3 — closing-line freeze (1 weekend).** Even with the implicit
-   "last sample before kickoff" working today, an explicit
-   `Archive.freeze_close` + `data/closing_lines/` snapshot is a
-   prerequisite for clean placed-bet CLV in Phase 2.3.
-3. **Phase 1.6 — deprecated triage (½ weekend).** `correlation.py` and
+2. **Phase 1.6 — deprecated triage (½ weekend).** `correlation.py` and
    `opt_parlay.py` in `src/deprecated/` can be deleted; `opt_kelley_bet.py`
    should be marked REVIVE for the next session. Cheap and unblocks
    confusion for future agents.
-4. **Phase 3.1 — Kelly module (1 weekend).** Genuinely missing. The
+3. **Phase 3.1 — Kelly module (1 weekend).** Genuinely missing. The
    parlay search produces ranked candidates that nothing currently sizes.
-5. **Phase 2.2 — `tracking/` package (1–2 weekends).** Bet logger schema,
-   `track place`. Without this, Phase 4.2 dashboard tabs cannot land.
-6. **Phase 2.3/2.4 — CLV close + settle + report (1 weekend).** Extend
-   the existing `clv.py` (don't duplicate); add bootstrap CIs and `--csv` /
-   `--json` exports.
-7. **Phase 3.3 — Underdog-native strategy CLI (1 weekend).** Wires the
-   above into a single `pickem-build` CLI that produces today's ranked,
-   Kelly-sized recommendations as YAML for `track place`.
-8. **Phase 4.1 alerts (1 weekend).** Once the placed-bet log exists, the
-   Telegram/Discord drift, drawdown, and CLV-anomaly rules become
-   testable.
+   Output is a recommendation, not a placed-bet trigger — users decide
+   whether to actually wager.
+4. **Phase 3.3 — Underdog-native strategy CLI (1 weekend).** Single
+   `pickem-build` CLI that produces today's ranked, Kelly-sized
+   recommendations as YAML / Sheets export.
+5. **Phase 4.1 alerts (in-scope subset only, 1 weekend).** High-edge
+   appearance, scraper failure, model staleness, and CLV drift on
+   system history. Drop the rules that depended on placed-bet state
+   (open-entry exposure, bankroll drawdown).
+6. **Phase 4.2 dashboard — Today's Recommendations tab only.** Reads
+   `data/recommendations/{today}.yaml`. Skip the Open Entries / Settled
+   History / Bankroll tabs.
 
-That sequence gets the system from "good models that print numbers to a
-spreadsheet" to "good models that surface ranked, sized, accountable
-entries with measurable CLV per placed bet" — which is the Phase 1
-target of `underdog_edge_suite.md` (de-vig vs sharp + fractional Kelly +
-bet log + CLV) finally fully implemented.
+That sequence finishes the package's actual mandate — surface ranked,
+sized, EV-positive Underdog recommendations with measurable CLV — and
+then stops. Personal bet tracking is a downstream concern users own
+themselves.
 
 ---
 
@@ -1480,10 +1521,10 @@ handful of items that aren't in any phase but matter for long-term health.
   the live tree (`correlation.py`, `opt_parlay.py`). Phase 1.6 was meant
   to fix this; until it lands, the README actively misleads new agents
   reading the repo.
-- **Move `clv.py` into a `tracking/` namespace.** When Phase 2.2 lands,
-  the natural home for `clv.py` is alongside `tracking/place.py` and
-  `tracking/report.py`. Plan the move now so you don't end up with two
-  CLV modules.
+- **`clv.py` location is fine.** Originally this would have moved into
+  a `tracking/` namespace alongside placed-bet logging; with the bet
+  logger out of scope, leaving `clv.py` at the package root next to
+  `nightly.py` is the right shape.
 - **`book_weights.json` provenance.** It's referenced in the prediction
   pipeline and in Phase 2.3 of this roadmap but the source of the
   weights and how often they're refit is undocumented. Add a provenance
@@ -1509,17 +1550,15 @@ handful of items that aren't in any phase but matter for long-term health.
 
 ### Operational
 
-- **Single-source-of-truth bankroll.** Phase 3 references
-  `data/bankroll.json` and Phase 4 references `tracking.db`. Pick one;
-  the bankroll history *is* a series of (placed_at, stake, payout) rows
-  that already live in the bet log. A bankroll JSON file is redundant
-  state that will drift.
+- **Bankroll input is a CLI flag, not state.** With the placed-bet
+  logger out of scope, "bankroll" is just a parameter the user passes
+  to `kelly` and `pickem-build`. No `data/bankroll.json`, no DB row —
+  one less piece of state to drift.
 - **`pyproject.toml` script registration.** Currently 5 scripts wired
   (`prophecize`, `confer`, `meditate`, `dashboard`, `reflect`).
-  Future-proof: when adding `track`, `kelly`, `pickem-build`,
-  `freeze-close`, `alert-watch`, register them all in one batch with
-  consistent naming (verb-noun, dash-separated) rather than a slow drift
-  toward inconsistency.
+  Future-proof: when adding `kelly`, `pickem-build`, `alert-watch`,
+  register them in one batch with consistent naming (verb-noun,
+  dash-separated) rather than a slow drift toward inconsistency.
 - **`creds/keys.json` schema doc.** The repo references `keys.json`
   several places (Odds API, Telegram, Discord, OpenWeatherMap) but
   there's no canonical schema. A single `docs/CREDS_SCHEMA.md` with
