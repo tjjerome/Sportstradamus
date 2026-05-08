@@ -68,13 +68,14 @@ sub-phase below; this section is the executive summary.
 - 3.5 Streaks / Ladders / Rivals strategies ❌ not started (Rivals payout
   table exists in JSON; no decision engine).
 
-**Phase 4 — Real-Time Alerts and Dashboard Extensions: scope-reduced.**
+**Phase 4 — Real-Time Alerts and Dashboard Extensions: deferred / scope-reduced.**
 
-- 4.1 Alerts package ❌ no `alerts/` directory. Useful subset (high-edge
-  appearance, scraper failure, model staleness, CLV drift on system
-  history) is still in scope; the rules that needed the placed-bet log
-  (open-entry exposure, bankroll drawdown) are dropped with the bet
-  logger.
+- 4.1 Alerts package ❌ **deferred to the end of the roadmap.** Update
+  frequency on Underdog/Odds API lines isn't high enough today to make
+  push notifications meaningfully time-sensitive — by the time an alert
+  fires, the user has already seen the line on the next dashboard
+  refresh. Revisit only if polling cadence increases or a real
+  websocket-grade feed lands.
 - 4.2 Dashboard ✅ baseline `dashboard.py`, `dashboard_app.py`,
   `dashboard_data.py`, and a `pages/` multi-page set exist. The
   proposed Open Entries / Settled History / Bankroll tabs are dropped
@@ -915,7 +916,15 @@ I'm leaving Ladders and Rivals as follow-up sessions — same shape of work but 
 
 **Estimated time:** 2 weekends
 
-### 4.1 Alerts package — ❌ NOT DONE
+### 4.1 Alerts package — ⚠️ DEFERRED to end of roadmap
+
+**Status:** dropped from the active critical path. Line-update cadence
+in this package today (60s+ polls, manual Underdog observation) makes
+push alerts low-value: by the time a Telegram message arrives, the user
+has already seen the line on the next dashboard refresh. Revisit if
+polling cadence drops below ~10s, a real websocket feed lands, or the
+user reports they're missing high-edge windows. Original prompt retained
+below for future reference.
 
 
 
@@ -1427,10 +1436,11 @@ I added basic push handling in Phase 1.2, but a more thorough version models the
 |---|---|
 | 1 | Phase 1.2 follow-ups + Phase 1.6 deprecated triage. CLV monitoring on existing `clv.summarize` output. |
 | 2 | Phase 3.1 (Kelly) + Phase 3.3 (Underdog-native `pickem-build`). |
-| 3 | Phase 4.1 alerts (in-scope subset) + Phase 4.2 Today's Recommendations dashboard tab. Review CLV on accumulated segments. |
+| 3 | Phase 4.2 Today's Recommendations dashboard tab. Review CLV on accumulated segments. |
 | 4–5 | Phase 3.4 (Champions) + 3.5 (Streaks/Ladders/Rivals) as appetite allows. |
 | 6–9 | Phase 5 (Best Ball + Battle Royale rebuild), aligned with NFL season. |
 | 10–12 | Phase 6 refinements (conformal first, Bayesian after) as edge erodes. |
+| Last | Phase 4.1 alerts/push notifications, only if polling cadence justifies it (see 4.1 trigger conditions). |
 
 Phase 1 audit work is undramatic but it's where most of the actual edge correction happens. The existing modeling is already solid; the gains come from confirming the correlation methodology is sound, the parlay search is well-calibrated, push handling is correct, and contest-variant payouts are right. Skipping it to jump to Phase 3 means building the strategy module on a foundation you haven't verified.
 
@@ -1463,13 +1473,13 @@ recommendation, and add useful alerts. Recommended order:
 4. **Phase 3.3 — Underdog-native strategy CLI (1 weekend).** Single
    `pickem-build` CLI that produces today's ranked, Kelly-sized
    recommendations as YAML / Sheets export.
-5. **Phase 4.1 alerts (in-scope subset only, 1 weekend).** High-edge
-   appearance, scraper failure, model staleness, and CLV drift on
-   system history. Drop the rules that depended on placed-bet state
-   (open-entry exposure, bankroll drawdown).
-6. **Phase 4.2 dashboard — Today's Recommendations tab only.** Reads
+5. **Phase 4.2 dashboard — Today's Recommendations tab only.** Reads
    `data/recommendations/{today}.yaml`. Skip the Open Entries / Settled
-   History / Bankroll tabs.
+   History / Bankroll tabs. The dashboard refresh covers the alerting
+   role at current polling cadence.
+
+(Phase 4.1 alerts/push notifications are deferred to the very end of
+the roadmap — see section 4.1 for the trigger conditions to revisit.)
 
 That sequence finishes the package's actual mandate — surface ranked,
 sized, EV-positive Underdog recommendations with measurable CLV — and
