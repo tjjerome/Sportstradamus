@@ -7,9 +7,10 @@ consistent across the scrape/predict pipeline.
 
 Schema (created on first connect):
 
-* ``odds(league, market, game_date, entity, book, ev)`` — one row per
+* ``odds(league, market, game_date, entity, book, ev, sample_ts)`` — one row per
   (slate-entry, book). ``entity`` is a player name for player props or a
-  team name for moneyline / totals / spreads / team markets.
+  team name for moneyline / totals / spreads / team markets. ``sample_ts``
+  tracks when the odds were captured (nullable for backward compat).
 * ``lines(league, market, game_date, entity, line)`` — distinct lines
   quoted by any book for a player prop. Skipped for moneyline / totals /
   spreads / team-only markets, which are pure EV.
@@ -20,6 +21,7 @@ combo / matchup pseudo-entities (``" + "``, ``" vs. "``).
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import os
 from pathlib import Path
@@ -29,8 +31,26 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.config import book_weights, stat_cv, stat_dist, stat_zi
-from sportstradamus.helpers.distributions import get_ev, no_vig_odds
+from sportstradamus.helpers.distributions import get_ev, get_odds, no_vig_odds
 from sportstradamus.helpers.text import remove_accents
+
+
+@dataclasses.dataclass
+class ClosingLine:
+    """Consensus line and implied probability from the latest pre-kickoff odds snapshot.
+
+    Attributes:
+        line: Consensus line (median of all book lines).
+        devig_over: Implied probability of outcome exceeding the line (no-vig).
+        sample_ts: Timestamp of the latest odds snapshot (None if unavailable).
+        book_set: Set of books that quoted this entry.
+    """
+
+    line: float
+    devig_over: float
+    sample_ts: datetime.datetime | None
+    book_set: frozenset[str]
+
 
 # Markets whose value schema is per-book EV only (no Lines table rows).
 _TEAM_ONLY_MARKETS = frozenset({"Moneyline", "Totals", "1st 1 innings"})
@@ -47,7 +67,8 @@ CREATE TABLE IF NOT EXISTS odds (
     game_date   DATE NOT NULL,
     entity      TEXT NOT NULL,
     book        TEXT NOT NULL,
-    ev          DOUBLE
+    ev          DOUBLE,
+    sample_ts   TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS lines (
     league      TEXT NOT NULL,
@@ -285,6 +306,78 @@ class Archive:
             out.setdefault(d.isoformat(), set()).add(entity)
         return out
 
+    def get_closing_line(
+        self, league: str, market: str, date: str | datetime.date, entity: str
+    ) -> ClosingLine | None:
+        """Return consensus line and implied probability from the latest pre-kickoff snapshot.
+
+        Wraps ``get_line`` and ``get_ev`` to return a dataclass with the consensus
+        line, the no-vig implied over probability, the timestamp of the latest
+        snapshot, and the set of books that provided data.
+
+        Args:
+            league: League code (e.g., 'NBA', 'MLB').
+            market: Market name (e.g., 'player_pass_yds').
+            date: Game date.
+            entity: Player or team name.
+
+        Returns:
+            ClosingLine with (line, devig_over, sample_ts, book_set) or None if no
+            data exists for this entry.
+        """
+        d = _safe_date(date)
+        if d is None:
+            return None
+
+        # Get consensus line.
+        line = self.get_line(league, market, d, entity)
+
+        # Get all books and their EVs.
+        rows = self._book_rows(league, market, d, entity)
+        if not rows:
+            return None
+
+        books = [row[0] for row in rows]
+        evs = [row[1] for row in rows]
+        book_set = frozenset(books)
+
+        # Get distribution and coefficient of variation.
+        dist = stat_dist.get(league, {}).get(market, "Gamma")
+        cv = stat_cv.get(league, {}).get(market, 1)
+
+        # Convert EVs to under probabilities, then to over probabilities.
+        over_probs = []
+        for ev in evs:
+            if ev is None or np.isnan(ev):
+                continue
+            try:
+                under_prob = get_odds(line, ev, dist, cv=cv)
+                over_prob = 1.0 - under_prob
+                over_probs.append(over_prob)
+            except (ValueError, RuntimeError):
+                # If we can't compute the probability, skip this book.
+                continue
+
+        devig_over = np.nan if not over_probs else float(np.mean(over_probs))
+
+        # Get the latest sample timestamp.
+        sample_rows = self._connection.execute(
+            "SELECT sample_ts FROM odds WHERE league=? AND market=? AND game_date=? AND entity=? "
+            "ORDER BY sample_ts DESC LIMIT 1",
+            [league, market, d, entity],
+        ).fetchall()
+
+        sample_ts = None
+        if sample_rows and sample_rows[0][0] is not None:
+            sample_ts = sample_rows[0][0]
+
+        return ClosingLine(
+            line=line,
+            devig_over=devig_over,
+            sample_ts=sample_ts,
+            book_set=book_set,
+        )
+
     # ------------------------------------------------------------------ #
     # Write API
     # ------------------------------------------------------------------ #
@@ -297,9 +390,16 @@ class Archive:
         entity: str,
         book: str,
         ev: float,
+        sample_ts: datetime.datetime | None = None,
     ) -> None:
-        """Buffer a per-book EV update; flushed by :meth:`write`."""
-        self._pending_odds.append((league, market, date, entity, book, float(ev)))
+        """Buffer a per-book EV update; flushed by :meth:`write`.
+
+        Args:
+            sample_ts: Timestamp of the odds snapshot. Defaults to current UTC time.
+        """
+        if sample_ts is None:
+            sample_ts = datetime.datetime.now(datetime.UTC)
+        self._pending_odds.append((league, market, date, entity, book, float(ev), sample_ts))
 
     def _stage_line(
         self, league: str, market: str, date: datetime.date, entity: str, line: float
@@ -449,7 +549,7 @@ class Archive:
         if self._pending_odds:
             odds_df = pd.DataFrame(  # noqa: F841 — referenced via DuckDB DataFrame replacement
                 self._pending_odds,
-                columns=["league", "market", "game_date", "entity", "book", "ev"],
+                columns=["league", "market", "game_date", "entity", "book", "ev", "sample_ts"],
             ).drop_duplicates(
                 subset=["league", "market", "game_date", "entity", "book"], keep="last"
             )
