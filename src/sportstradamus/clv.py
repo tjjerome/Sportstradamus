@@ -175,23 +175,25 @@ def summarize(history: pd.DataFrame) -> dict:
         "market_clv", ascending=False
     )
 
-    _persist_segments(grouped)
-
     return {
         "n": len(df),
         "market_clv_mean": market_mean,
         "model_clv_mean": model_mean,
         "frac_beat_close": frac_beat,
         "segments": segments,
+        "all_segments": grouped,
     }
 
 
-def _persist_segments(grouped: pd.DataFrame) -> None:
+def persist_segments(grouped: pd.DataFrame) -> None:
     """Write the full per-segment frame to ``data/clv_segments.parquet``.
 
     All segments are persisted (not just the reportable ones) so the Kelly
     shrinkage getter can reason about sample size for low-n segments too.
+    Called explicitly from ``reflect`` after :func:`summarize`.
     """
+    if grouped is None or grouped.empty:
+        return
     path = _segments_parquet_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     grouped.to_parquet(path, index=False)
