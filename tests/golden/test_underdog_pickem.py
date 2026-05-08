@@ -111,6 +111,7 @@ def test_filter_parlays_rivals_overrides_entry_sizes():
 
 def test_rivals_one_sided_dropped(caplog):
     import logging
+
     target = logging.getLogger("sportstradamus.cli.pickem-build")
     target.addHandler(caplog.handler)
     target.setLevel(logging.WARNING)
@@ -133,9 +134,7 @@ def test_rivals_both_sides_kept():
             ("Sabrina Ionescu", "NY", "PTS", "Under", 0.55, 0.54),
         ]
     )
-    df = pd.DataFrame(
-        [_parlay(["Caitlin Clark vs. Sabrina Ionescu"], bet_size=2, model_ev=1.5)]
-    )
+    df = pd.DataFrame([_parlay(["Caitlin Clark vs. Sabrina Ionescu"], bet_size=2, model_ev=1.5)])
     out = _validate_rivals_coverage(df, offers)
     assert len(out) == 1
 
@@ -173,13 +172,14 @@ def test_construct_entries_all_three_variants(fake_market_calibration):
     parlay_dfs = {
         "power": pd.DataFrame([_parlay(["P1", "P2", "P3"], model_ev=1.4)]),
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3)]),
-        "rivals": pd.DataFrame(
-            [_parlay(["Clark vs. Ionescu"], bet_size=2, model_ev=1.5)]
-        ),
+        "rivals": pd.DataFrame([_parlay(["Clark vs. Ionescu"], bet_size=2, model_ev=1.5)]),
     }
     out = construct_entries(
-        datetime.date(2026, 5, 8), Decimal("500"), cfg,
-        parlay_dfs=parlay_dfs, offers_df=offers,
+        datetime.date(2026, 5, 8),
+        Decimal("500"),
+        cfg,
+        parlay_dfs=parlay_dfs,
+        offers_df=offers,
     )
     variants = {e.contest_variant for e in out}
     assert variants == {"power", "flex", "rivals"}
@@ -197,8 +197,11 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path, fake_market_calibratio
     offers = _offers([("Clark", "IND", "PTS", "Over", 0.6, 0.58)])
     parlay_dfs = {"power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5)])}
     entries = construct_entries(
-        datetime.date(2026, 5, 8), Decimal("500"), cfg,
-        parlay_dfs=parlay_dfs, offers_df=offers,
+        datetime.date(2026, 5, 8),
+        Decimal("500"),
+        cfg,
+        parlay_dfs=parlay_dfs,
+        offers_df=offers,
     )
     assert len(entries) == 1
 
@@ -217,9 +220,14 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path, fake_market_calibratio
 
 def test_dedupe_max_overlap(fake_market_calibration):
     cfg = PickemConfig(
-        min_model_edge=0.0, min_sharp_edge=0.0, disagreement_threshold=1.0,
-        min_ev=0.0, entry_sizes=(3,), contest_variants=("power",),
-        top_k=10, max_overlap=2,
+        min_model_edge=0.0,
+        min_sharp_edge=0.0,
+        disagreement_threshold=1.0,
+        min_ev=0.0,
+        entry_sizes=(3,),
+        contest_variants=("power",),
+        top_k=10,
+        max_overlap=2,
     )
     parlay_dfs = {
         "power": pd.DataFrame(
@@ -230,6 +238,9 @@ def test_dedupe_max_overlap(fake_market_calibration):
         )
     }
     out = construct_entries(
-        datetime.date(2026, 5, 8), Decimal("500"), cfg, parlay_dfs=parlay_dfs,
+        datetime.date(2026, 5, 8),
+        Decimal("500"),
+        cfg,
+        parlay_dfs=parlay_dfs,
     )
     assert len(out) == 1

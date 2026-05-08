@@ -1,11 +1,9 @@
-"""Underdog Pick'em entry-construction orchestrator (Phase 3 §3.3 + §3.5 Rivals).
+"""Underdog Pick'em orchestrator (Phase 3 §3.3 + §3.5 Rivals).
 
-Pure orchestrator: re-scores Underdog offers via
-:func:`prediction.scoring.process_offers`, re-runs
-:func:`prediction.correlation.find_correlation` per contest variant, then
-applies the Pick'em-specific filters, Kelly sizing, ranking, and YAML emit.
-Rank/dedupe and YAML emit live in :mod:`strategies._pickem_emit` to keep
-this module under the CLAUDE.md 300-line ceiling.
+Pure orchestrator over ``prediction.scoring.process_offers`` and
+``prediction.correlation.find_correlation`` (one search per contest
+variant). Rank/dedupe and YAML emit live in :mod:`._pickem_emit` to keep
+this file under the CLAUDE.md 300-line ceiling.
 """
 
 from __future__ import annotations
@@ -103,9 +101,7 @@ def _filter_parlays(
     return df.reset_index(drop=True)
 
 
-def _validate_rivals_coverage(
-    parlay_df: pd.DataFrame, offers: pd.DataFrame
-) -> pd.DataFrame:
+def _validate_rivals_coverage(parlay_df: pd.DataFrame, offers: pd.DataFrame) -> pd.DataFrame:
     """Drop Rivals candidates where one matchup side is missing from offers."""
     if parlay_df.empty or offers.empty:
         return parlay_df
@@ -119,8 +115,7 @@ def _validate_rivals_coverage(
                 continue
             sides = [s.strip() for s in str(desc).split("vs.")[:2]]
             covered = sum(
-                1 for side in sides
-                if any(side and side.split()[0] in p for p in players)
+                1 for side in sides if any(side and side.split()[0] in p for p in players)
             )
             if covered < 2:
                 _logger.warning("rivals candidate dropped: one-sided (%s)", desc)
@@ -276,16 +271,21 @@ def _build_cli() -> Any:
     @click.command()
     @click.option("--date", default="today", help="Slate date (YYYY-MM-DD or 'today').")
     @click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
-    @click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None,
-                  help="Override output YAML path.")
+    @click.option(
+        "--out",
+        "out_path",
+        type=click.Path(dir_okay=False),
+        default=None,
+        help="Override output YAML path.",
+    )
     def pickem_build(date: str, bankroll: str, out_path: str | None) -> None:
         """Build today's Underdog Pick'em entries and emit recommendations YAML."""
-        slate_date = (
-            datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
-        )
+        slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
         config = PickemConfig()
         entries = construct_entries(slate_date, Decimal(bankroll), config)
-        target = Path(out_path) if out_path else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}.yaml"
+        target = (
+            Path(out_path) if out_path else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}.yaml"
+        )
         path = emit_yaml(entries, slate_date, Decimal(bankroll), config, target)
         click.echo(f"wrote {len(entries)} entries -> {path}")
 
