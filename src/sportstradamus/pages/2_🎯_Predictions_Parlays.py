@@ -50,7 +50,9 @@ with col3:
     )
     contest_variant = st.selectbox("Contest variant", CONTEST_VARIANTS, index=default_idx)
 with col4:
-    top_n = st.number_input("Show top N parlays", min_value=10, max_value=500, value=TOP_PARLAY_DEFAULT, step=10)
+    top_n = st.number_input(
+        "Show top N parlays", min_value=10, max_value=500, value=TOP_PARLAY_DEFAULT, step=10
+    )
 
 if contest_variant != scored_variant:
     st.warning(
