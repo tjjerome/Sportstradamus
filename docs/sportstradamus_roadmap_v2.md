@@ -56,17 +56,29 @@ sub-phase below; this section is the executive summary.
   Odds API behavior changes), or if `frac_beat_close` drifts away from
   ~50% on no-edge segments.
 
-**Phase 3 — Underdog-Specific Decision Engine: ~25% complete.**
+**Phase 3 — Underdog-Specific Decision Engine: shipped (Power/Flex/Rivals).**
+See [docs/PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md) for the
+session-by-session implementation plan that landed this work.
 
-- 3.1 Kelly sizing ❌ no `strategies/kelly.py`. The only Kelly logic is in
-  `src/deprecated/opt_kelley_bet.py` and an unrelated Streamlit page.
+- 3.1 Kelly sizing ✅ DONE — `src/sportstradamus/strategies/kelly.py` with
+  `fractional_kelly_stake`, `joint_kelly_portfolio`, the resolution chain
+  (explicit > live CLV-segment BSS > training BSS > fallback `1.0`), and
+  the `kelly` CLI. `src/deprecated/opt_kelley_bet.py` moved to
+  `src/deprecated/.archived/`.
 - 3.2 Contest-variant payouts ✅ done — `data/underdog_payouts.json` covers
   power/flex/insurance/rivals; `beam_search_parlays` honors them and Flex's
   miss-one tier is integrated into push-aware EV.
-- 3.3 Underdog-native strategy module ❌ no `strategies/` package at all.
-- 3.4 Champions ❌ not started.
-- 3.5 Streaks / Ladders / Rivals strategies ❌ not started (Rivals payout
-  table exists in JSON; no decision engine).
+- 3.3 Underdog-native strategy module ✅ DONE —
+  `src/sportstradamus/strategies/underdog_pickem.py` with `PickemConfig`,
+  `construct_entries`, and the `pickem-build` CLI emitting
+  `data/recommendations/{date}.yaml`.
+- 3.4 Champions ❌ **REMOVED** — pari-mutuel optimization is a different
+  problem shape; revisit only after Phase 3 has measurable CLV. See
+  [PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md) §0.
+- 3.5 Streaks / Ladders / Rivals:
+  - **Rivals ✅ DONE** — folded into `pickem-build` (2- and 3-leg sizes
+    only, both sides of the matchup required for the same market).
+  - **Streaks / Ladders ❌ DEFERRED** — each warrants its own design pass.
 
 **Phase 4 — Real-Time Alerts and Dashboard Extensions: deferred / scope-reduced.**
 
@@ -652,9 +664,13 @@ shows it can't answer a real question.
 
 **Estimated time:** 4–5 weekends
 
-### 3.1 Kelly sizing module — ❌ NOT DONE (still in deprecated/)
+### 3.1 Kelly sizing module — ✅ DONE
 
-
+Shipped as `src/sportstradamus/strategies/kelly.py` per
+[PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md) §5. The kwarg was
+renamed `model_calibration` → `model_shrinkage` to match the migrated
+training-report schema. `opt_kelley_bet.py` was moved to
+`src/deprecated/.archived/`. Original prompt retained below for context.
 
 `opt_kelley_bet.py` is in `src/deprecated/`. Revive and modernize it.
 
@@ -768,9 +784,15 @@ Underdog has five variants with different payouts. The existing parlay system tr
 >
 > When done: ruff clean, golden tests pass. Summarize.
 
-### 3.3 Underdog-native strategy module — ❌ NOT DONE
+### 3.3 Underdog-native strategy module — ✅ DONE
 
-
+Shipped as `src/sportstradamus/strategies/underdog_pickem.py` plus the
+`pickem-build` CLI per [PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md)
+§6. Sheets export was deprecated on `devel`, so the only sink is
+`data/recommendations/{date}.yaml`; the dashboard reads that YAML directly.
+Bankroll is a CLI flag only (no `data/bankroll.json`). Rivals is folded
+into the same orchestrator (2- and 3-leg sizes only, both sides of the
+matchup required). Original prompt retained below for context.
 
 Pull everything together into a CLI that produces ranked, Kelly-sized recommendations.
 
@@ -825,9 +847,12 @@ Pull everything together into a CLI that produces ranked, Kelly-sized recommenda
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Summarize.
 
-### 3.4 Pick'em Champions — ❌ NOT DONE
+### 3.4 Pick'em Champions — ❌ REMOVED
 
-
+Dropped from Phase 3 per [PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md)
+§0. Pari-mutuel optimization is a different problem shape; revisit only
+after Phase 3 has measurable CLV. Original prompt retained below for
+future reference.
 
 In Champions, the static-line-vs-sharp arbitrage doesn't apply because you're playing other users, not the house. Different optimization.
 
@@ -866,9 +891,15 @@ In Champions, the static-line-vs-sharp arbitrage doesn't apply because you're pl
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Summarize.
 
-### 3.5 Streaks, Ladders, Rivals — ❌ NOT DONE
+### 3.5 Streaks, Ladders, Rivals — partial: Rivals ✅ DONE; Streaks/Ladders ❌ DEFERRED
 
+**Rivals** shipped folded into `pickem-build` per
+[PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md) §6 — restricted to
+2- and 3-leg sizes; both sides of the matchup must be covered for the
+same market or the entry is dropped with a logged WARNING.
 
+**Streaks** and **Ladders** are deferred — each warrants its own design
+pass. Original prompts retained below for future reference.
 
 These three contest variants have very different payout structures and require their own logic. Streaks especially is a sequential decision problem.
 
