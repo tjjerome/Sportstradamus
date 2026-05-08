@@ -45,6 +45,7 @@ meditate = "sportstradamus.training.cli:meditate"
 dashboard = "sportstradamus.dashboard:run"
 reflect = "sportstradamus.nightly:run"
 kelly = "sportstradamus.strategies.kelly:main"
+pickem-build = "sportstradamus.strategies.underdog_pickem:main"
 
 [tool.poetry.group.strategy]
 optional = true
