@@ -16,14 +16,31 @@ Definitions, in no-vig probability units:
 
 from __future__ import annotations
 
+import importlib.resources as pkg_resources
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+from sportstradamus import data as _data_pkg
+from sportstradamus.helpers.logging import get_logger
 
 # Per-(League, Market, Platform) CLV summary segments require this many legs
 # to be reported. Smaller segments are statistical noise.
 CLV_SEGMENT_MIN_N = 20
 
+# An archive snapshot taken more than this many minutes before kickoff is too
+# stale to credibly stand in for the closing line; warn once per segment.
+CLOSE_LOOKBACK_WARN_MINUTES = 90
+
 _OVER_BETS = {"Over", "Higher", "over", "higher"}
+
+_logger = get_logger("reflect")
+
+
+def _segments_parquet_path() -> Path:
+    """Return the persistence path for the per-segment CLV parquet."""
+    return Path(str(pkg_resources.files(_data_pkg) / "clv_segments.parquet"))
 
 
 def _signed_clv(open_p: float, close_p: float, bet: str) -> float:
@@ -146,15 +163,19 @@ def summarize(history: pd.DataFrame) -> dict:
     model_mean = float(model_series.mean()) if not model_series.empty else np.nan
     frac_beat = float((df["Market CLV"] > 0).mean())
 
+    df["_beat"] = (df["Market CLV"] > 0).astype(float)
     grouped = (
-        df.groupby(["League", "Market", "Platform"], dropna=False)["Market CLV"]
-        .agg(["count", "mean"])
+        df.groupby(["League", "Market", "Platform"], dropna=False)
+        .agg(n=("Market CLV", "count"),
+             market_clv=("Market CLV", "mean"),
+             frac_beat_close=("_beat", "mean"))
         .reset_index()
-        .rename(columns={"count": "n", "mean": "market_clv"})
     )
     segments = grouped.loc[grouped["n"] >= CLV_SEGMENT_MIN_N].sort_values(
         "market_clv", ascending=False
     )
+
+    _persist_segments(grouped)
 
     return {
         "n": len(df),
@@ -163,6 +184,110 @@ def summarize(history: pd.DataFrame) -> dict:
         "frac_beat_close": frac_beat,
         "segments": segments,
     }
+
+
+def _persist_segments(grouped: pd.DataFrame) -> None:
+    """Write the full per-segment frame to ``data/clv_segments.parquet``.
+
+    All segments are persisted (not just the reportable ones) so the Kelly
+    shrinkage getter can reason about sample size for low-n segments too.
+    """
+    path = _segments_parquet_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    grouped.to_parquet(path, index=False)
+
+
+def get_segment_calibration(league: str, market: str) -> tuple[float, int]:
+    """Return ``(shrinkage, n)`` for one ``(league, market)`` segment.
+
+    Reads ``data/clv_segments.parquet`` (written by :func:`summarize`).
+    The shrinkage weight is ``frac_beat_close`` linearly remapped from
+    ``[0.5, 1.0]`` onto ``[0.0, 1.0]`` and clamped — a segment that beats
+    the close 50% of the time gets no credit; one that beats it every
+    time gets full credit. ``n`` is the number of resolved legs in the
+    segment, surfaced for the Kelly blending ramp.
+
+    Returns ``(1.0, 0)`` when the segment has fewer than
+    :data:`CLV_SEGMENT_MIN_N` legs or no parquet exists. The
+    ``shrinkage=1.0`` fallback means "no information, don't shrink".
+    """
+    path = _segments_parquet_path()
+    if not path.exists():
+        return 1.0, 0
+    try:
+        seg_df = pd.read_parquet(path)
+    except (OSError, ValueError):
+        return 1.0, 0
+    rows = seg_df.loc[(seg_df["League"] == league) & (seg_df["Market"] == market)]
+    if rows.empty:
+        return 1.0, 0
+    n = int(rows["n"].sum())
+    if n < CLV_SEGMENT_MIN_N:
+        return 1.0, n
+    weighted_beat = float((rows["frac_beat_close"] * rows["n"]).sum() / n)
+    shrinkage = float(np.clip(2.0 * (weighted_beat - 0.5), 0.0, 1.0))
+    return shrinkage, n
+
+
+def check_close_sample_freshness(
+    samples: pd.DataFrame,
+    *,
+    logger=None,
+) -> pd.DataFrame:
+    """Warn when archive close-snapshots lag too far behind ``commence_time``.
+
+    Iterates the supplied ``samples`` frame — one row per offer — and emits
+    one WARNING per ``(league, market, date)`` segment when any snapshot's
+    ``sample_ts`` precedes ``commence_time`` by more than
+    :data:`CLOSE_LOOKBACK_WARN_MINUTES`. Rows missing either timestamp are
+    skipped silently.
+
+    Args:
+        samples: DataFrame with columns ``league``, ``market``, ``date``,
+            ``sample_ts``, ``commence_time``. The latter two must be
+            timezone-aware datetimes (or NaT).
+        logger: Optional override for the structured ``reflect`` logger;
+            tests pass a captured logger to assert on warnings.
+
+    Returns:
+        A frame of the segments that produced warnings, with columns
+        ``league``, ``market``, ``date``, ``max_lag_minutes``, ``n``.
+        Empty when nothing was stale.
+    """
+    log = logger if logger is not None else _logger
+    required = {"league", "market", "date", "sample_ts", "commence_time"}
+    if samples.empty or not required.issubset(samples.columns):
+        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
+
+    df = samples.copy()
+    df["sample_ts"] = pd.to_datetime(df["sample_ts"], utc=True, errors="coerce")
+    df["commence_time"] = pd.to_datetime(df["commence_time"], utc=True, errors="coerce")
+    df = df.dropna(subset=["sample_ts", "commence_time"])
+    if df.empty:
+        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
+
+    df["lag_minutes"] = (df["commence_time"] - df["sample_ts"]).dt.total_seconds() / 60.0
+    stale = df.loc[df["lag_minutes"] > CLOSE_LOOKBACK_WARN_MINUTES]
+    if stale.empty:
+        return pd.DataFrame(columns=["league", "market", "date", "max_lag_minutes", "n"])
+
+    grouped = (
+        stale.groupby(["league", "market", "date"], dropna=False)["lag_minutes"]
+        .agg(["max", "count"])
+        .reset_index()
+        .rename(columns={"max": "max_lag_minutes", "count": "n"})
+    )
+    for _, seg in grouped.iterrows():
+        log.warning(
+            "stale close snapshot (lag=%.0fmin > %dmin) for %s/%s on %s across %d legs",
+            seg["max_lag_minutes"],
+            CLOSE_LOOKBACK_WARN_MINUTES,
+            seg["league"],
+            seg["market"],
+            seg["date"],
+            int(seg["n"]),
+        )
+    return grouped
 
 
 def _normalize_date(date) -> str:
