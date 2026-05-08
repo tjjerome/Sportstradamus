@@ -74,6 +74,37 @@ _PUSH_MC_SAMPLES: int = 50_000
 # Kelly sizing denominator: 5% bankroll per unit. Legacy.
 _KELLY_BANKROLL_FRACTION: float = 0.05
 
+# Underdog "Boost" column on raw offers is pre-multiplied by a 1.78 platform
+# baseline; divide it out so per-game boost arithmetic operates on a pure modifier.
+_UNDERDOG_BOOST_BASELINE: float = 1.78
+
+# Pre-filter gates for offers entering the per-game beam search. Hand-tuned to
+# keep only book-supported, model-favored legs out of the cartesian explosion.
+_OFFER_BOOKS_EV_FLOOR: float = 0.85
+_OFFER_BOOKS_PROB_FLOOR: float = 0.25
+_OFFER_MODEL_EV_FLOOR: float = 1.0
+_OFFER_MODEL_PROB_FLOOR: float = 0.3
+
+# Per-grouping caps that bound the candidate set fed to beam search.
+_MAX_OFFERS_PER_PLAYER: int = 6
+_MAX_OFFERS_PER_TEAM: int = 30
+_MAX_OFFERS_PER_GAME: int = 40
+
+# Display-correlation gates: when annotating an offer with top correlated legs,
+# surface only partners whose EV / correlation clear these display thresholds.
+_DISPLAY_MODEL_EV_FLOOR: float = 0.95
+_DISPLAY_CORR_FLOOR: float = 0.05
+_DISPLAY_BOOKS_EV_FLOOR: float = 0.9
+
+# Family clustering on parlay survivors: number of clusters and the upper clamp
+# on cross-bet correlation so 1 - rho is strictly positive for Ward linkage.
+_PARLAY_FAMILY_CLUSTERS: int = 3
+_PARLAY_RHO_CLIP_HI: float = 0.999
+
+# Top-N retained per sort key (Model EV / Rec Bet / Fun) before family
+# clustering. Three sort views deduped → up to ~3× this many survivors.
+_PARLAY_TOP_N_PER_SORT: int = 300
+
 
 def _legacy_underdog_overwrite_payouts() -> dict[int, float]:
     """Reproduce the audit §2.4 legacy line-498 overwrite table.
@@ -408,7 +439,7 @@ def find_correlation(
         team_mod_map = banned[platform][league]["team"]
         opp_mod_map = banned[platform][league]["opponent"]
         if platform == "Underdog":
-            league_df["Boost"] = league_df["Boost"] / 1.78
+            league_df["Boost"] = league_df["Boost"] / _UNDERDOG_BOOST_BASELINE
 
         if league != "MLB":
             league_df["Player position"] = league_df["Player position"].apply(
@@ -527,22 +558,22 @@ def find_correlation(
             game_dict = game_df.to_dict("index")
 
             idx = game_df.loc[
-                (game_df["Books"] > 0.85)
-                & (game_df["Books P"] >= 0.25)
-                & (game_df["Model"] > 1)
-                & (game_df["Model P"] >= 0.3)
+                (game_df["Books"] > _OFFER_BOOKS_EV_FLOOR)
+                & (game_df["Books P"] >= _OFFER_BOOKS_PROB_FLOOR)
+                & (game_df["Model"] > _OFFER_MODEL_EV_FLOOR)
+                & (game_df["Model P"] >= _OFFER_MODEL_PROB_FLOOR)
             ].sort_values("K", ascending=False)
             idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
-            idx = idx.groupby("Player").head(6)
+            idx = idx.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
             idx = (
                 idx.sort_values(["Model", "Books"], ascending=False)
                 .groupby("Team")
-                .head(30)
+                .head(_MAX_OFFERS_PER_TEAM)
                 .sort_values(["Team", "Player"])
             )
             idx = (
                 idx.sort_values(["Model", "Books"], ascending=False)
-                .head(40)
+                .head(_MAX_OFFERS_PER_GAME)
                 .sort_values(["Team", "Player"])
             )
             bet_df = idx.to_dict("index")
@@ -621,7 +652,11 @@ def find_correlation(
             )
 
             for i, offer in game_df.iterrows():
-                indices = (EV[:, i] > 0.95) & (C[:, i] > 0.05) & (EVb[:, i] > 0.9)
+                indices = (
+                    (EV[:, i] > _DISPLAY_MODEL_EV_FLOOR)
+                    & (C[:, i] > _DISPLAY_CORR_FLOOR)
+                    & (EVb[:, i] > _DISPLAY_BOOKS_EV_FLOOR)
+                )
                 corr = game_df.loc[indices].copy()
                 corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
                 corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
@@ -677,9 +712,15 @@ def find_correlation(
                     df5 = (
                         pd.concat(
                             [
-                                bets.sort_values("Model EV", ascending=False).head(300),
-                                bets.sort_values("Rec Bet", ascending=False).head(300),
-                                bets.sort_values("Fun", ascending=False).head(300),
+                                bets.sort_values("Model EV", ascending=False).head(
+                                    _PARLAY_TOP_N_PER_SORT
+                                ),
+                                bets.sort_values("Rec Bet", ascending=False).head(
+                                    _PARLAY_TOP_N_PER_SORT
+                                ),
+                                bets.sort_values("Fun", ascending=False).head(
+                                    _PARLAY_TOP_N_PER_SORT
+                                ),
                             ]
                         )
                         .drop_duplicates()
@@ -702,12 +743,14 @@ def find_correlation(
                             rho_bet2 = np.mean(C[np.ix_(bet2, bet2)])
 
                             rho_matrix[i, j] = np.clip(
-                                rho_cross / np.sqrt(rho_bet1) / np.sqrt(rho_bet2), -1, 0.999
+                                rho_cross / np.sqrt(rho_bet1) / np.sqrt(rho_bet2),
+                                -1,
+                                _PARLAY_RHO_CLIP_HI,
                             )
 
                         X = np.concatenate([row[i + 1 :] for i, row in enumerate(1 - rho_matrix)])
                         Z = linkage(X, "ward")
-                        df5["Family"] = fcluster(Z, 3, criterion="maxclust")
+                        df5["Family"] = fcluster(Z, _PARLAY_FAMILY_CLUSTERS, criterion="maxclust")
 
                     else:
                         df5["Family"] = 1
