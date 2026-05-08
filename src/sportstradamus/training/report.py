@@ -221,7 +221,9 @@ def write_model_stats(league_models: dict, stat_cv: dict, stat_std: dict) -> Non
                 }
                 for src, dst in _STATS_COL_MAP.items():
                     vals = stats_block.get(src)
-                    row[dst] = float(vals[i]) if vals is not None and i < len(vals) else float("nan")
+                    row[dst] = (
+                        float(vals[i]) if vals is not None and i < len(vals) else float("nan")
+                    )
                 row.update(
                     {
                         "model_weight": diag.get("model_weight", float("nan")),

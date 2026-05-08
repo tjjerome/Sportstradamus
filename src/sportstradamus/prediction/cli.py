@@ -262,7 +262,13 @@ def main(progress, legacy_correlation, contest_variant, log_level):
                         np.nan,
                     )
                 )
-            row = {"Player": player, "League": league, "Date": date, "Market": market, "Offers": offers}
+            row = {
+                "Player": player,
+                "League": league,
+                "Date": date,
+                "Market": market,
+                "Offers": offers,
+            }
             for col in pred_level_cols:
                 row[col] = latest.get(col, np.nan)
             new_preds.append(row)
