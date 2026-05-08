@@ -91,7 +91,7 @@ def test_check_close_sample_freshness_handles_empty_frame():
     assert out.empty
 
 
-def test_summarize_persists_segment_parquet(_isolated_segments_parquet):
+def test_persist_segments_writes_parquet(_isolated_segments_parquet):
     rows = []
     # 25 over-rate-1 legs in NBA/points (segment beats close every time).
     for _ in range(25):
@@ -109,15 +109,17 @@ def test_summarize_persists_segment_parquet(_isolated_segments_parquet):
     df = pd.DataFrame(rows)
     summary = clv.summarize(df)
     assert summary["n"] == 25
+    # summarize does not auto-persist; reflect calls persist_segments
+    # explicitly with the full per-segment frame.
+    assert not _isolated_segments_parquet.exists()
+    clv.persist_segments(summary["all_segments"])
     assert _isolated_segments_parquet.exists()
 
     seg_df = pd.read_parquet(_isolated_segments_parquet)
     assert {"League", "Market", "Platform", "n", "market_clv", "frac_beat_close"} <= set(
         seg_df.columns
     )
-    row = seg_df.loc[
-        (seg_df["League"] == "NBA") & (seg_df["Market"] == "points")
-    ].iloc[0]
+    row = seg_df.loc[(seg_df["League"] == "NBA") & (seg_df["Market"] == "points")].iloc[0]
     assert int(row["n"]) == 25
     assert row["frac_beat_close"] == pytest.approx(1.0)
 
