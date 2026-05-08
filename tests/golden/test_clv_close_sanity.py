@@ -119,9 +119,7 @@ def test_persist_segments_writes_parquet(_isolated_segments_parquet):
     assert {"League", "Market", "Platform", "n", "market_clv", "frac_beat_close"} <= set(
         seg_df.columns
     )
-    row = seg_df.loc[
-        (seg_df["League"] == "NBA") & (seg_df["Market"] == "points")
-    ].iloc[0]
+    row = seg_df.loc[(seg_df["League"] == "NBA") & (seg_df["Market"] == "points")].iloc[0]
     assert int(row["n"]) == 25
     assert row["frac_beat_close"] == pytest.approx(1.0)
 

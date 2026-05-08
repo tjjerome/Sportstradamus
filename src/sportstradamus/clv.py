@@ -166,9 +166,11 @@ def summarize(history: pd.DataFrame) -> dict:
     df["_beat"] = (df["Market CLV"] > 0).astype(float)
     grouped = (
         df.groupby(["League", "Market", "Platform"], dropna=False)
-        .agg(n=("Market CLV", "count"),
-             market_clv=("Market CLV", "mean"),
-             frac_beat_close=("_beat", "mean"))
+        .agg(
+            n=("Market CLV", "count"),
+            market_clv=("Market CLV", "mean"),
+            frac_beat_close=("_beat", "mean"),
+        )
         .reset_index()
     )
     segments = grouped.loc[grouped["n"] >= CLV_SEGMENT_MIN_N].sort_values(
