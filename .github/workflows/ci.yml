@@ -60,6 +60,12 @@ jobs:
       - name: Golden tests
         run: poetry run pytest tests/golden/ -v
 
+      - name: Integration smoke test
+        # Fake mode (default): odds API, nba_api, scrapers, and Sheets are
+        # all stubbed/canned. Live network calls only fire when
+        # SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1, which CI never sets.
+        run: poetry run pytest tests/integration/ -m integration -v
+
       - name: Type check (mypy, advisory)
         # Does not gate merges; surfaces warnings only.
         continue-on-error: true
