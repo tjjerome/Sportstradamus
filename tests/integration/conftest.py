@@ -7,6 +7,7 @@ pipeline on cached fixtures. It is opt-in via ``pytest -m integration``;
 
 from __future__ import annotations
 
+import contextlib
 import importlib.resources as pkg_resources
 from pathlib import Path
 
@@ -42,10 +43,8 @@ def reset_archive_singleton():
             return
         con = getattr(inst, "_connection", None)
         if con is not None:
-            try:
+            with contextlib.suppress(Exception):
                 con.close()
-            except Exception:
-                pass
         inst._initialized = False
 
     _reset(Archive._instance)
