@@ -1,36 +1,48 @@
 # Phase 3 Implementation Plan — Underdog-Specific Decision Engine
 
 **Status target:** turn the existing parlay candidate stream into ranked,
-Kelly-sized, contest-variant-aware Underdog recommendations.
+Kelly-sized, contest-variant-aware Underdog recommendations covering
+Power, Flex, and Rivals.
 
 **Source documents:**
-- `docs/sportstradamus_roadmap_v2.md` §Phase 3 (3.1–3.5) and §Updated Critical
-  Path (post-2026-05-08).
-- `docs/underdog_edge_suite.md` §4 (Decision Engines) and §5 (Execution & Risk).
-- Audit notes in §1.3 (closing-line freeze — dropped, workaround sufficient)
-  and §2.4 (CLV reporting — monitor the implicit-close assumption).
+- `docs/sportstradamus_roadmap_v2.md` §Phase 3 (3.1, 3.3, 3.5 Rivals
+  only) and §Updated Critical Path (post-2026-05-08).
+- `docs/underdog_edge_suite.md` §4 (Decision Engines) and §5 (Execution
+  & Risk).
+- Audit notes in §1.3 (closing-line freeze — dropped, workaround
+  sufficient) and §2.4 (CLV reporting — monitor the implicit-close
+  assumption).
 
-**Estimated time:** 4–5 weekends, sequenced so each step ships independently.
+**Estimated time:** 4 weekends, sequenced so each step ships
+independently and respects CLAUDE.md's one-module-per-session rule.
 
 ---
 
 ## 0. Scope and Non-Goals
 
-**In scope (this plan delivers):**
+**In scope:**
 
-1. CLV-side bring-up needed before Kelly can lean on `model_calib` numbers
+1. CLV-side bring-up needed before Kelly can lean on calibration data
    (Step 1).
-2. Kelly sizing module (§3.1).
-3. Underdog-native `pickem-build` orchestrator (§3.3).
-4. Pick'em Champions strategy (§3.4).
-5. Streaks recommender + smaller Ladders / Rivals follow-ups (§3.5).
+2. Magic-number purge in `prediction/correlation.py` (Step 2).
+3. `prediction/parlay.py` split per CONTRIBUTING.md contract (Step 3).
+4. Training pipeline: dedicated Kelly-shrinkage diagnostic (Step 4).
+5. Kelly sizing module (Step 5, roadmap §3.1).
+6. Underdog-native `pickem-build` orchestrator covering Power, Flex,
+   and Rivals (Step 6, roadmap §3.3 + §3.5 Rivals folded in).
+7. Documentation refresh (Step 7).
 
-**Explicitly out of scope:**
+**Out of scope:**
 
-- Placed-bet logger (`tracking/`) and per-bet CLV. Roadmap §2.2/2.3 dropped.
-- Phase 4.1 alerts (deferred).
-- Best Ball / Battle Royale (Phase 5).
-- Bayesian / conformal modeling (Phase 6).
+- **Pick'em Champions (§3.4) — removed.** Pari-mutuel optimization is a
+  different problem shape; revisit only after Phase 3 has measurable
+  CLV.
+- **Streaks and Ladders (§3.5) — deferred.** Each warrants a dedicated
+  design pass.
+- Placed-bet logger (`tracking/`) and per-bet CLV. Roadmap §2.2/2.3
+  dropped.
+- Phase 4.1 alerts. Best Ball / Battle Royale (Phase 5). Bayesian /
+  conformal modeling (Phase 6).
 
 **Roadmap §3.2 (contest payouts) is already DONE.** This plan consumes
 `data/underdog_payouts.json` and the `contest_variant` arg on
@@ -38,165 +50,281 @@ Kelly-sized, contest-variant-aware Underdog recommendations.
 
 ---
 
-## 1. CLV Bring-Up Required Before Kelly (≈½ weekend)
+## 1. CLV Bring-Up (Step 1, ≈½ weekend)
 
-Roadmap §1.3 dropped the explicit `freeze_close` pipeline because the only
-consumer was the placed-bet logger. Phase 3 has two new consumers:
+Roadmap §1.3 dropped the explicit `freeze_close` pipeline. Phase 3 has
+two new consumers that need a narrower bring-up — not the full freeze
+system.
 
-- Kelly's `model_calibration` shrink factor wants per-(league, market) CLV
-  segment quality, not just the global mean.
-- The recommendation YAML wants a `closing_devig_prob` field so that, if a
-  user later imports the YAML into a personal tracking sheet, CLV can be
-  back-filled per-leg without rerunning prediction.
+### 1.a Close-timestamp sanity check
 
-We do **not** rebuild the dropped `freeze_close` system. Instead:
+Per §2.4 monitor note: warn when the archive snapshot used as "close"
+is more than `CLOSE_LOOKBACK_WARN_MINUTES = 90` from `commence_time`.
+One log per (league, market, date) segment via
+`helpers.logging.get_logger`.
 
-### 1.a Close-timestamp sanity check in `clv.fill_from_archive`
-
-Per §2.4 monitoring note: warn when the archive snapshot used as "close"
-is more than `N` minutes from `commence_time`. Cheap insurance against a
-silent Odds API behavior change.
-
-**Touchpoints:** `src/sportstradamus/clv.py:fill_from_archive`,
-`src/sportstradamus/clv.py:_safe_get_ev`.
-
-**Spec:**
-
-- Add a constant `CLOSE_LOOKBACK_WARN_MINUTES = 90` at module scope with a
-  one-line reason comment per STYLE_GUIDE.md §8.
-- Have `_safe_get_ev` (or its caller) record the timestamp of the archive
-  row it pulled. Compare to `commence_time` if available on the row.
-- Log a single WARNING per (league, market, date) segment via
-  `helpers.logging.get_logger`. Do not warn per leg — that floods.
-- Test: synthetic archive where the latest pre-kickoff sample is 4h old
-  triggers the warning; one within 30m does not.
+**Files touched:** `src/sportstradamus/clv.py`.
+**Tests:** `tests/golden/test_clv_close_sanity.py`.
 
 ### 1.b Per-segment CLV getter for Kelly
 
-Add `clv.get_segment_calibration(league: str, market: str) -> float`. Reads
-the most recent `reflect`-produced CLV summary (already logged; persist
-the segment table to `data/clv_segments.parquet` on each `reflect` run as
-a side effect). Returns `frac_beat_close` clamped to `[0.45, 0.65]` and
-remapped to `[0.0, 1.0]` calibration weight, with a documented fallback
-of `1.0` when the segment has fewer than `CLV_SEGMENT_MIN_N=20` legs.
+Add `clv.get_segment_calibration(league: str, market: str) -> float`.
+Reads `data/clv_segments.parquet` (newly persisted at end of `reflect`
+as a side effect of `clv.summarize`). Returns `frac_beat_close`
+remapped to a `[0.0, 1.0]` shrinkage weight; documented fallback of
+`1.0` when the segment has fewer than `CLV_SEGMENT_MIN_N=20` legs.
 
-This is the **only** CLV-side change that is genuinely required for
-Phase 3. Step 2 (Kelly) consumes it.
+**Files touched:** `src/sportstradamus/clv.py`,
+`src/sportstradamus/nightly.py` (just persists the segments parquet at
+the end of `reflect`; no behavior change).
 
-**Touchpoints:** `src/sportstradamus/clv.py`, `src/sportstradamus/nightly.py`
-(persist segments parquet at end of `reflect`).
+### 1.c Read-only `Archive.get_closing_line` shim
 
-**Tests:** `tests/golden/test_clv_segment_calibration.py` — small, large,
-and missing-segment cases.
+Wraps `Archive.get_line` + `Archive.get_ev` for the latest pre-kickoff
+sample. Returns a small dataclass `(line, devig_over, sample_ts,
+book_set)`. Used by 1.a and consumed by Step 6's recommendation YAML.
 
-### 1.c Lightweight `Archive.get_closing_line` shim
-
-Not the freeze pipeline. Just a read-only helper that wraps
-`Archive.get_line(...)` + `Archive.get_ev(...)` for the latest pre-kickoff
-sample, returning a small dataclass `(line, devig_over, sample_ts, book_set)`.
-Useful inside the strategy module (Step 3) when writing recommendation
-YAML, and inside Step 1.a's sanity check.
-
-**Touchpoints:** `src/sportstradamus/helpers/archive.py`.
+**Files touched:** `src/sportstradamus/helpers/archive.py`.
 
 ---
 
-## 2. Kelly Sizing Module — §3.1 (1 weekend)
+## 2. Magic-Number Purge in `prediction/correlation.py` (Step 2, ½ weekend)
+
+Roadmap §1.2 follow-up. Inline literals like `0.95`, `0.05`, `0.9`,
+`1.78`, `0.54`, the historical Boost-overwrite payout array, and
+several EV/correlation cutoffs at `correlation.py:624` and `:411`
+ride alongside the already-named `_BEAM_WIDTH` and
+`_KELLY_BANKROLL_FRACTION`. Promote them to module-level constants per
+STYLE_GUIDE §8 (named, ALL_CAPS, single-line "why" comment).
+
+**Constraint:** behavior must be unchanged. This is a rename pass, not
+a tune.
+
+**Files touched:** `src/sportstradamus/prediction/correlation.py`.
+**Tests:** existing `tests/golden/test_correlation*.py` and parlay
+calibration audit must produce byte-identical output (re-run
+`scripts/audit_parlay_calibration.py` and diff the plot).
+
+This step lands **before** Step 3 to avoid carrying unexplained
+literals across the file split.
+
+---
+
+## 3. `prediction/parlay.py` Split (Step 3, ½ weekend)
+
+CONTRIBUTING.md §Package Map advertises that `find_correlation` lives
+in `prediction/correlation.py` and `beam_search_parlays` lives in
+`prediction/parlay.py`, but today both live in `correlation.py`. Split
+to match the contract.
+
+**Move to `prediction/parlay.py`:** `beam_search_parlays` (line 732+),
+its helpers `_payout_curve_for`, `_expected_payout_with_pushes`,
+`_nearest_psd`, plus the constants those helpers consume.
+
+**Stays in `prediction/correlation.py`:** `find_correlation`,
+`_team_slice`, `_build_game_corr_map`, plus the
+`_legacy_underdog_overwrite_payouts` / `_legacy_underdog_search_payouts`
+shims (find_correlation calls `beam_search_parlays`, so it imports
+from `parlay.py`).
+
+**`prediction/__init__.py`:** re-export `beam_search_parlays` from the
+new module so external imports keep working.
+
+**Files touched:** `src/sportstradamus/prediction/correlation.py`,
+`src/sportstradamus/prediction/parlay.py` (new),
+`src/sportstradamus/prediction/__init__.py`,
+`src/sportstradamus/prediction/scoring.py` (one import line).
+
+**Tests:** existing tests must pass unchanged. Add a thin
+`tests/golden/test_prediction_imports.py` asserting
+`from sportstradamus.prediction.parlay import beam_search_parlays` and
+the package-level re-export both work.
+
+---
+
+## 4. Training Pipeline: Dedicated Kelly-Shrinkage Diagnostic (Step 4, ½ weekend)
+
+### 4.a Why `model_calib` is the wrong field for Kelly
+
+Verified at `src/sportstradamus/training/pipeline.py:688`:
+
+```python
+val_calibrated = expit(val_logits / T_opt)
+model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
+```
+
+That is `1 − Brier(temperature_calibrated_probs, actual)` on the
+validation set. It is a **calibration quality** score in roughly
+`[0.75, 1.0]` — even a useless model that always predicts 0.5 has
+Brier ≈ 0.25 → `model_calib ≈ 0.75`. Plugging it into
+`effective_p = 0.5 + (p − 0.5) * model_calibration` would barely
+shrink a useless model and barely modulate a great one.
+
+What Kelly actually wants is a **discrimination / skill** score:
+how much better than the bookmaker baseline our calibrated
+probabilities are.
+
+### 4.b New diagnostic: `kelly_shrinkage`
+
+Add alongside `model_calib`:
+
+```python
+brier_model = np.mean((val_calibrated - y_class_val) ** 2)
+brier_book  = np.mean((val_book_proba - y_class_val) ** 2)
+bss = 1.0 - (brier_model / max(brier_book, 1e-9))
+kelly_shrinkage = float(np.clip(bss, 0.0, 1.0))
+```
+
+Brier Skill Score against the bookmaker baseline, clamped to `[0, 1]`:
+`0.0` = no better than the book (Kelly degenerates to half-Kelly on
+book-implied prob), `1.0` = perfect discrimination on the holdout
+(no shrink).
+
+If the validation set has no book-implied probability column, log a
+WARNING and store `kelly_shrinkage = nan`; Kelly's resolution chain
+(Step 5.c) handles `nan` by falling through to the next source.
+
+### 4.c Where the diagnostic surfaces
+
+Two sinks already exist — no JSON refactor needed:
+
+1. **Human-readable** `data/training_report.txt` — extend the DIAG
+   block in `report.py:write_report` to print
+   `kelly_shrinkage=0.43` next to `model_calib=0.82`.
+2. **Machine-readable** `data/model_stats.parquet` — add a
+   `kelly_shrinkage` column in `report.py:write_model_stats` (line
+   227-ish, alongside `model_weight` and `model_calib`).
+
+The dashboard already reads `model_stats.parquet` via
+`dashboard_data.load_model_stats` and renders it in
+`pages/7_📊_Stats_Model_Training.py`. Extending the parquet adds the
+column transparently; the page renders it because it auto-discovers
+columns. Update the page only to include `kelly_shrinkage` in any
+explicit column list it constructs (verify on read).
+
+### 4.d Thin getter
+
+```python
+# in training/report.py
+def get_market_calibration(league: str, market: str) -> dict[str, float]:
+    """Return {'kelly_shrinkage', 'model_calib', 'model_weight'} for one (league, market).
+
+    Reads model_stats.parquet. Returns NaNs when the row is missing.
+    """
+```
+
+Kelly imports this getter — never reaches into the parquet directly.
+
+**Files touched:** `src/sportstradamus/training/pipeline.py`,
+`src/sportstradamus/training/report.py`,
+`src/sportstradamus/pages/7_📊_Stats_Model_Training.py` (only if it
+hard-codes a column allowlist).
+**Tests:** `tests/golden/test_training_kelly_shrinkage.py`:
+- BSS computation matches a hand-worked example.
+- Useless model (Brier matching book) → `kelly_shrinkage = 0`.
+- Missing book column → `nan` and WARNING logged.
+- Getter returns NaNs when (league, market) absent.
+
+---
+
+## 5. Kelly Sizing Module (Step 5, 1 weekend, roadmap §3.1)
 
 Revive `src/deprecated/opt_kelley_bet.py` into
 `src/sportstradamus/strategies/kelly.py`.
 
-### 2.a Module layout
+### 5.a Module layout
 
 ```
 src/sportstradamus/strategies/
-├── __init__.py        # re-exports kelly + future pickem
+├── __init__.py          # re-exports kelly
 ├── kelly.py
-└── README.md          # one-paragraph orientation
+└── README.md
 ```
 
-### 2.b Public API (matches roadmap §3.1 prompt verbatim)
+### 5.b Public API
 
 ```python
 def fractional_kelly_stake(
     bankroll: Decimal,
     win_prob: float,
     payout_multiplier: Decimal,
-    fraction: float = 0.25,
-    model_calibration: float = 1.0,
-    max_fraction_of_bankroll: float = 0.005,
+    fraction: float = DEFAULT_KELLY_FRACTION,
+    model_shrinkage: float = 1.0,
+    max_fraction_of_bankroll: float = MAX_FRACTION_OF_BANKROLL,
 ) -> Decimal: ...
 
 def joint_kelly_portfolio(
     bankroll: Decimal,
     candidates: list[KellyCandidate],
-    fraction: float = 0.25,
+    fraction: float = DEFAULT_KELLY_FRACTION,
 ) -> dict[str, Decimal]: ...
 ```
 
-### 2.c Constants (no magic numbers — STYLE_GUIDE §8)
+Note: kwarg renamed from `model_calibration` to `model_shrinkage`
+because Step 4 demonstrated those names mean different things. Keep
+the value semantics: `1.0` = no shrink, `0.0` = degenerate to
+no-information.
+
+### 5.c Constants (STYLE_GUIDE §8)
 
 | Name | Value | Reason |
 |---|---|---|
-| `DEFAULT_KELLY_FRACTION` | `0.25` | Quarter-Kelly; standard recreational hedge against estimate variance. |
-| `MAX_FRACTION_OF_BANKROLL` | `0.005` | Hard 0.5%-per-entry cap from edge-suite §5.1. |
-| `CALIBRATION_FLOOR` | `0.5` | Below this we treat the model as uncalibrated and degenerate to `effective_p = 0.5`. |
+| `DEFAULT_KELLY_FRACTION` | `0.25` | Quarter-Kelly hedge against estimate variance. |
+| `MAX_FRACTION_OF_BANKROLL` | `0.005` | 0.5%-per-entry hard cap from edge-suite §5.1. |
+| `SHRINKAGE_FLOOR` | `0.0` | Below this, treat as no-information (no Kelly stake). |
 
-### 2.d Effective probability shrinkage
+### 5.d Shrinkage resolution chain
 
 ```
-effective_p = 0.5 + (win_prob - 0.5) * model_calibration
+effective_p = 0.5 + (win_prob - 0.5) * shrinkage
 ```
 
-`model_calibration` resolved in this order:
+`shrinkage` resolved in this order, first non-NaN wins:
 
-1. Explicit kwarg.
-2. Per-(league, market) value from
-   `clv.get_segment_calibration` (Step 1.b).
-3. Per-market `model_calib` from `training/report.py` via the new thin
-   getter `training.report.get_market_calibration(league, market)`.
-4. Fallback `1.0` (no shrinkage) if all of the above return None.
+1. Explicit `model_shrinkage` kwarg.
+2. `clv.get_segment_calibration(league, market)` (Step 1.b) — recent
+   season-long sharpness signal.
+3. `training.report.get_market_calibration(league, market)`
+   `['kelly_shrinkage']` (Step 4.b) — training-time skill on holdout.
+4. Fallback `1.0` (no shrinkage). Logged at DEBUG.
 
-Resolution is intentional: CLV-derived calibration is more recent than
-training-time calibration and should win when both exist.
+CLV-segment value wins over training-time when both exist because it
+reflects current-season market conditions. Document this priority
+explicitly in the kelly.py module docstring.
 
-### 2.e Portfolio variant
+### 5.e Portfolio variant
 
-Convex problem solved with cvxpy SCS. Add cvxpy under
-`[tool.poetry.group.strategy]`, keep core deps untouched. Module imports
-cvxpy lazily so that `kelly.fractional_kelly_stake` works without it.
+cvxpy SCS solver, lazy import. Add cvxpy under
+`[tool.poetry.group.strategy]` so core deps stay untouched.
 
-### 2.f CLI
+### 5.f CLI
 
 `poetry run kelly --bankroll 500 --from data/recommendations/{date}.yaml`
 
-Reads the YAML produced in Step 3, prints a Rich/tabulate table of
-`(candidate_id, EV, win_prob, eff_p, recommended_stake)`. Register in
-`pyproject.toml`.
+Reads the YAML produced in Step 6, prints a tabulate table.
 
-### 2.g Tests — `tests/golden/test_kelly.py`
+### 5.g Tests — `tests/golden/test_kelly.py`
 
-- −EV bet returns `Decimal("0")`.
+- −EV bet → `Decimal("0")`.
 - +EV closed-form expected stake matches analytical fractional Kelly.
 - Hard cap kicks in when uncapped Kelly exceeds 0.5%.
 - Two-bet portfolio sums to ≤ `fraction × bankroll`.
-- Calibration shrinkage: `(win_prob=0.6, calib=0.5)` ≡ `(win_prob=0.55, calib=1.0)`.
+- Resolution chain: explicit > CLV > training > fallback, with each
+  source mocked.
 
-### 2.h Deprecated cleanup
+### 5.h Deprecated cleanup
 
-After tests green, move `src/deprecated/opt_kelley_bet.py` to
-`src/deprecated/.archived/` per the deprecated README protocol. Update
-the README's TODO list to remove the entry.
+Move `src/deprecated/opt_kelley_bet.py` → `src/deprecated/.archived/`.
+Update `src/deprecated/README.md` TODO list.
 
 ---
 
-## 3. Underdog-Native Strategy — §3.3 (1 weekend)
+## 6. Underdog-Native Strategy — `pickem-build` (Step 6, 1 weekend, roadmap §3.3 + Rivals)
 
-`src/sportstradamus/strategies/underdog_pickem.py` is the orchestrator. No
-math lives here — it composes `prediction/correlation.beam_search_parlays`,
-`strategies/kelly`, and `clv` helpers.
+`src/sportstradamus/strategies/underdog_pickem.py`. Pure orchestrator —
+no math.
 
-### 3.a Public API
+### 6.a Public API
 
 ```python
 @dataclass
@@ -207,7 +335,7 @@ class PickemConfig:
     min_correlation: float = 0.10
     min_ev: float = 0.05
     entry_sizes: tuple[int, ...] = (3, 5)
-    contest_variants: tuple[str, ...] = ('power', 'flex')
+    contest_variants: tuple[str, ...] = ('power', 'flex', 'rivals')
     top_k: int = 20
     max_overlap: int = 2
     kelly_fraction: float = 0.25
@@ -220,217 +348,190 @@ def construct_entries(
 ) -> list[RecommendedEntry]: ...
 ```
 
-### 3.b Pipeline
+### 6.b Pipeline
 
-1. **Load offers** — reuse the loader `prophecize` already calls; do not
-   duplicate.
-2. **Filter legs** — Underdog markets only, model coverage present, sharp
-   devig present, |model − sharp| ≤ `disagreement_threshold`, both edges
-   above their thresholds.
-3. **Search** — call `beam_search_parlays(..., contest_variant=v)` once
-   per `(entry_size, variant)` cross. Power and Flex by default.
-4. **Size** — call `fractional_kelly_stake` per candidate. Resolve
-   `model_calibration` via Step 1.b.
-5. **Rank** — sort by EV-per-dollar, dedupe by leg overlap (≤
-   `max_overlap` shared legs across recommendations), cut to `top_k`.
-6. **Emit two sinks:**
-   - Append "Pickem Recommendations" tab to the existing Sheets export
-     (`prediction/sheets.py`). Add a `Variant` column.
-   - Write `data/recommendations/{date}.yaml`. Schema below.
+1. **Load offers** — reuse the loader `prophecize` already calls.
+2. **Filter legs** — Underdog-only, model & sharp coverage,
+   `|model − sharp| ≤ disagreement_threshold`, edge thresholds.
+3. **Search** — `beam_search_parlays(..., contest_variant=v)` once per
+   `(entry_size, variant)` cross. Power and Flex honor user
+   `entry_sizes`; **Rivals is restricted to 2- and 3-leg sizes** and
+   requires both sides of the matchup covered for the same market —
+   drop with logged WARNING when only one side is covered.
+4. **Size** — `fractional_kelly_stake` per candidate, resolution chain
+   per Step 5.d.
+5. **Rank** — sort by EV-per-dollar, dedupe by leg overlap, cut to
+   `top_k`.
+6. **Emit:**
+   - "Pickem Recommendations" tab in Sheets export with `Variant`
+     column.
+   - `data/recommendations/{date}.yaml`.
 
-### 3.c YAML schema
-
-Stable enough for downstream consumers (CLV back-fill, future tracking).
+### 6.c YAML schema
 
 ```yaml
 generated_at: 2026-09-12T15:30:00-04:00
 date: 2026-09-12
 bankroll: 500
-config: {model_calibration_source: clv_segment, ...}
+config: {shrinkage_source: clv_segment, ...}
 entries:
   - id: <hash of legs>
-    contest_variant: power
-    entry_size: 3
-    legs:
-      - sport: NFL
-        player_id: "00-0036442"
-        player_name: "Josh Allen"
-        market: player_pass_yds
-        line: 248.5
-        side: over
-        model_prob: 0.582
-        sharp_devig: 0.561
-        closing_devig: null    # populated post-lock by reflect
+    contest_variant: rivals       # power | flex | rivals
+    entry_size: 2
+    legs: [...]
     joint_prob: 0.276
-    payout_multiplier: 6.0
-    ev: 0.656
+    payout_multiplier: 3.0
+    ev: 0.276 * 3 - 1
     recommended_stake: 1.25
-    notes: []
 ```
 
-### 3.d CLI
+### 6.d CLI
 
-`poetry run pickem-build --date today --bankroll 500`. Defaults pulled
-from `data/pickem_config.json`. **Bankroll is a CLI flag only** — no
-`data/bankroll.json` per roadmap §Operational note "one less piece of
-state to drift".
+`poetry run pickem-build --date today --bankroll 500`. Bankroll is a
+CLI flag only (no `data/bankroll.json` per roadmap §Operational).
 
-### 3.e Tests — `tests/golden/test_underdog_pickem.py`
+### 6.e Tests — `tests/golden/test_underdog_pickem.py`
 
 - Filtering excludes legs failing each threshold.
-- Disagreement threshold catches a divergence and skips the leg.
-- Both Power and Flex appear when both enabled.
-- End-to-end on the existing WNBA fixture
-  (`tests/integration/fixtures/`) produces a non-empty YAML.
+- Disagreement threshold catches a divergence.
+- Power, Flex, Rivals each appear when enabled.
+- Rivals matchup with one-sided coverage → dropped + WARNING.
+- Rivals respects 2/3-leg-only constraint regardless of `entry_sizes`.
+- E2E on the existing WNBA fixture produces non-empty YAML.
 - YAML round-trips via `yaml.safe_load`.
 
-### 3.f CLI snapshot
+---
 
-Regenerate `tests/golden/test_cli_help.py` snapshots after pin.
+## 7. Documentation Refresh (Step 7, ≈¼ weekend)
+
+Lands in the same PR as Step 6 (or a sibling doc-only PR if the diff is
+big). Updates:
+
+- **`CLAUDE.md`:** add `kelly` and `pickem-build` to the CLI entry list.
+- **`CONTRIBUTING.md`:** §Package Map row for `prediction/parlay.py`
+  changes from "(advertised, not yet split)" to actual contents; add
+  `strategies/` package row; add `kelly_shrinkage` to the training
+  diagnostic glossary.
+- **`docs/sportstradamus_roadmap_v2.md`:** flip §3.1, §3.3, and §3.5
+  Rivals to ✅ DONE with a cross-link to this plan; mark §3.4 and the
+  rest of §3.5 as removed/deferred.
+- **`README.md` (top-level):** if it lists CLI scripts, add
+  `kelly` and `pickem-build`.
+- **Training-report glossary in CLAUDE.md:** add a line for
+  `kelly_shrinkage` next to the existing `model_calib` line.
+
+Documentation completeness is checked into the done criteria (§9 below).
 
 ---
 
-## 4. Pick'em Champions — §3.4 (1 weekend)
+## 8. Module-by-Module Execution Plan (one module per session)
 
-`src/sportstradamus/strategies/underdog_champions.py`. Different
-optimization target than `underdog_pickem.py` — pari-mutuel against the
-field, not arb against a static line.
+CLAUDE.md mandates one module per session, with commit and fresh start
+between modules. This plan groups the work above into single-module
+sessions and orders them so each session lands on a clean, tested
+foundation.
 
-### 4.a Field-pick-rate input
+| # | Session focus (one module / file) | Step refs | Depends on | Notes |
+|---|---|---|---|---|
+| 1 | `helpers/archive.py` — add `get_closing_line` shim | 1.c | – | Smallest possible starter; unblocks others. |
+| 2 | `clv.py` — close-timestamp sanity warn + segment getter | 1.a, 1.b | session 1 | Also persists `clv_segments.parquet` from `reflect`'s call site, but no logic changes in `nightly.py`. |
+| 3 | `nightly.py` — call segment-persist hook | 1.b | session 2 | One-line edit; tiny session, but kept separate to respect the rule and allow a clean revert if it perturbs `reflect`. |
+| 4 | `prediction/correlation.py` — magic-number purge only | 2 | session 3 | No file moves yet. Behavior must be byte-identical (re-run audit script). |
+| 5 | `prediction/parlay.py` — new module + `beam_search_parlays` move | 3 | session 4 | This session edits two files (source + new), but both are within the single-module file-split semantics CLAUDE.md envisions. |
+| 6 | `prediction/__init__.py` + `prediction/scoring.py` — re-exports & import fix | 3 | session 5 | Tiny adjustment-only session. |
+| 7 | `training/pipeline.py` — compute `kelly_shrinkage` next to `model_calib` | 4.b | session 6 | Pipeline is the heart of training; isolate the change. |
+| 8 | `training/report.py` — emit `kelly_shrinkage` to txt + parquet + add `get_market_calibration` getter | 4.c, 4.d | session 7 | |
+| 9 | `pages/7_📊_Stats_Model_Training.py` — surface new column if needed | 4.c | session 8 | Verify the page; no-op if it auto-discovers columns. |
+| 10 | `strategies/kelly.py` — new module + CLI registration | 5 | session 9 | Adds cvxpy under `[strategy]` group in `pyproject.toml`; this is a one-line dependency edit done in the same session. |
+| 11 | `src/deprecated/opt_kelley_bet.py` archive move + README update | 5.h | session 10 | Tiny housekeeping. |
+| 12 | `strategies/underdog_pickem.py` — orchestrator + Sheets tab + YAML | 6 | session 11 | The largest session in this plan; keep ≤300 lines per CLAUDE.md hard rule. If it grows, split rank/emit helpers into a `strategies/_pickem_emit.py` sibling and continue in a follow-up session. |
+| 13 | Documentation refresh (`CLAUDE.md`, `CONTRIBUTING.md`, roadmap, README) | 7 | session 12 | Doc-only, but qualifies as "one module" worth of work. |
 
-Two-tier sourcing:
+**Sequencing constraints:**
 
-1. **Preferred:** extend `books.get_ud()` to capture the per-leg
-   popularity indicator the Champions board exposes. Stored on the offer
-   dict as `field_pick_rate_higher ∈ [0, 1]`.
-2. **Fallback (when missing):** ADP-style heuristic — bias toward
-   Higher when line < season average, Lower when line > season average,
-   with a documented base rate of 0.58 for Higher. Comment the fallback
-   with a TODO referencing 4.a.1.
+- Steps 1.a/b/c can happen in any order internally; sessions 1–3 just
+  pick the smallest first.
+- The magic-number purge (session 4) must precede the parlay split
+  (session 5) — moving constants while also moving code multiplies
+  diff review pain.
+- The training diagnostic (sessions 7–8) must precede Kelly (session
+  10) so Kelly's resolution chain has a real value to read.
+- Documentation (session 13) must be the last session so it can
+  describe what actually shipped, not what was planned.
 
-### 4.b Optimization
+**Per-session ritual (from CLAUDE.md):**
 
-For each candidate entry:
-
-1. Sample 100 000 opponent rosters by drawing each leg according to
-   `field_pick_rate`. Reuse the existing sim infra; no new RNG.
-2. Score every roster (yours + opponents') via the model's joint sample
-   counts of legs hit.
-3. Compute your candidate's percentile rank distribution.
-4. Map percentile to expected prize equity using `champions` payout
-   curve in `data/underdog_payouts.json` (extend the JSON if missing —
-   keep §3.2 schema).
-
-EV is `prize_equity - entry_cost`.
-
-### 4.c CLI
-
-`poetry run champions-build --date today --bankroll 500`.
-
-### 4.d Tests
-
-- Contrarian entries score higher than chalky entries when both have
-  equal model EV.
-- Fallback `field_pick_rate` produces non-empty output.
-- Fixture round-trip → YAML, schema matches `pickem-build`'s with an
-  extra `prize_equity` column.
-
-Constraint: do **not** merge with `underdog_pickem.py`.
+1. Pull latest `claude/phase-3-impl-<step>` working branch.
+2. Edit exactly the module listed above.
+3. `poetry run ruff check src/sportstradamus/`
+4. `poetry run pytest tests/golden/`
+5. Commit with the step ref in the message.
+6. Push and stop the session — do not start the next module in the
+   same context.
 
 ---
 
-## 5. Streaks, Ladders, Rivals — §3.5 (½–1 weekend)
+## 9. Sequencing and PR Plan
 
-### 5.a Streaks (`underdog_streaks.py`)
+Phase 3 lands as four PRs, each holding several of the per-module
+sessions above. Each PR ships ruff-clean, golden-tests-green, and CLI
+snapshots regenerated only on intentional flag changes.
 
-Sequential decision: at streak length `n`, continue or cash out.
-Threshold derived from the geometric payout structure.
-
-```python
-def recommend_streak_action(
-    current_streak: int,
-    used_team_ids: list[str],
-    available_offers: list[Offer],
-    config: StreaksConfig,
-) -> StreakRecommendation: ...
-```
-
-CLI: `poetry run streaks-recommend --streak 4 --used-teams KC,SF`.
-
-Tests:
-- Streak 1, 60% available pick → `continue`.
-- Streak 8, 52% best available → `cash_out`.
-- Two-different-teams rule enforced for picks 1 and 2.
-
-### 5.b Ladders (`underdog_ladders.py`)
-
-Lowest-shared-rung expected-payout calc. Smaller; one weekend day. Reuse
-joint sampling from `prediction/correlation.py` — no new copula code.
-
-### 5.c Rivals (`underdog_rivals.py`)
-
-Essentially 2-pick / 3-pick Power on player-vs-player matchups.
-Critical-path check: model must cover **both** players for the same
-market; if not, skip the matchup with a logged WARNING.
-
-These three are independent — each ships its own PR.
-
----
-
-## 6. Sequencing and PR Plan
-
-| PR | Scope | Branch off |
+| PR | Sessions | Scope |
 |---|---|---|
-| 3-pre | Step 1 (CLV bring-up: sanity warn, segment getter, archive shim) | `devel` |
-| 3-1 | Step 2 (Kelly module + CLI + cvxpy group) | merges after 3-pre |
-| 3-3 | Step 3 (`pickem-build`) | merges after 3-1 |
-| 3-4 | Step 4 (`champions-build`) | merges after 3-3 |
-| 3-5a | Step 5.a (Streaks) | parallel with 3-5b/c after 3-3 |
-| 3-5b | Step 5.b (Ladders) | parallel |
-| 3-5c | Step 5.c (Rivals) | parallel |
+| 3-pre | 1–6 | CLV bring-up, magic-number purge, parlay.py split |
+| 3-train | 7–9 | Training-pipeline `kelly_shrinkage` diagnostic |
+| 3-kelly | 10–11 | Kelly module + deprecated cleanup |
+| 3-build | 12–13 | `pickem-build` (Power/Flex/Rivals) + docs |
 
-Each PR ships with: ruff clean, golden tests pass, regenerated CLI
-snapshot if the CLI changed.
-
-## 7. Quality Gates
-
-Per PR, in order:
+## 10. Quality Gates (per PR)
 
 1. `poetry run ruff check src/sportstradamus/`
 2. `poetry run pytest tests/golden/`
 3. `poetry run pytest tests/integration -m integration` if the change
-   crosses module boundaries (Steps 3, 4, 5).
+   crosses module boundaries (PRs `3-pre`, `3-build`).
 4. `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
-   on intentional CLI flag changes only.
+   on intentional CLI flag changes only (`3-kelly`, `3-build`).
+5. For PR `3-pre`: re-run `scripts/audit_parlay_calibration.py` and
+   diff the resulting plot — must be byte-identical pre/post the
+   magic-number purge and the parlay split.
 
-## 8. Risks and Open Questions
-
-- **Calibration source priority (Step 2.d).** If CLV-segment counts are
-  thin early in a season, the shrink will fall through to training-time
-  `model_calib`. Confirm this is desired before implementation; an
-  alternative is to weight-average the two sources by sample size.
-- **Champions popularity scrape (Step 4.a).** Depends on `books.get_ud()`
-  surface; if the field isn't reliably exposed, Step 4 ships with the
-  fallback only and 4.a.1 becomes a follow-up.
-- **Magic-number purge in `prediction/correlation.py`** (roadmap §1.2
-  follow-up) is not formally part of Phase 3 but blocks confidence in
-  the Step 3 EV ranking. Recommend bundling that purge into PR 3-pre or
-  a sibling PR before PR 3-3 lands.
-- **`prediction/parlay.py` split** is advertised in `CONTRIBUTING.md` but
-  the live functions live in `prediction/correlation.py`. Decide before
-  PR 3-3: split the module, or update `CONTRIBUTING.md`. Don't carry the
-  inconsistency into Phase 3 imports.
-
-## 9. Done Criteria
+## 11. Done Criteria
 
 Phase 3 is complete when:
 
 1. `poetry run pickem-build --date today --bankroll 500` produces a
-   ranked, sized YAML and updates the Sheets tab.
-2. `poetry run kelly --from <yaml>` re-sizes from the same YAML offline.
-3. `champions-build`, `streaks-recommend`, plus Ladders and Rivals CLIs
-   all run end-to-end on fixtures.
-4. `clv.summarize` continues to surface segments with no regressions,
-   and the new close-timestamp sanity warning fires in tests.
-5. `src/deprecated/opt_kelley_bet.py` has moved to `.archived/` and the
-   deprecated README's TODO list is shorter by one entry.
+   ranked, sized YAML covering Power, Flex, and Rivals and updates the
+   Sheets tab.
+2. `poetry run kelly --from <yaml>` re-sizes from the same YAML
+   offline.
+3. `clv.summarize` continues to surface segments with no regressions,
+   the new close-timestamp sanity warning fires in tests, and
+   `data/clv_segments.parquet` is written by `reflect`.
+4. `data/training_report.txt` and `data/model_stats.parquet` both
+   contain the new `kelly_shrinkage` column. Dashboard renders it.
+5. `prediction/parlay.py` exists with `beam_search_parlays` and its
+   helpers; `prediction/correlation.py` retains `find_correlation`
+   only; CONTRIBUTING.md §Package Map matches reality.
+6. `src/deprecated/opt_kelley_bet.py` has moved to `.archived/` and
+   the deprecated README's TODO list is shorter by one entry.
+7. **Documentation reflects the shipped state:** `CLAUDE.md`,
+   `CONTRIBUTING.md`, `docs/sportstradamus_roadmap_v2.md`, and the
+   top-level `README.md` are updated per Step 7. Roadmap §3.1, §3.3,
+   and §3.5 (Rivals only) are marked ✅ DONE; §3.4 and the rest of
+   §3.5 are marked removed/deferred with a link to this plan.
+
+## 12. Risks and Open Questions
+
+- **`kelly_shrinkage` early-season noise.** BSS on a small validation
+  set is itself noisy. The clamp to `[0, 1]` plus the resolution-chain
+  fallback (CLV-segment > training > 1.0) keeps a noisy retrain from
+  destabilizing Kelly, but consider a minimum validation-set size
+  before trusting the value.
+- **Rivals payout multipliers.** Verify
+  `data/underdog_payouts.json` reflects current Rivals product before
+  PR `3-build`. Bad multipliers silently miscalibrate Rivals EV.
+- **Sheets tab churn.** Adding a `Variant` column to the
+  recommendation tab may break downstream sheet consumers if the user
+  has linked cells. Surface in the PR description so they can adjust
+  before merge.
