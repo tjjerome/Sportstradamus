@@ -8,6 +8,95 @@ The result: **Phase 1 is no longer about reviving missing code; it's about audit
 
 ---
 
+## Current Status Snapshot (audited 2026-05-08)
+
+A walk through the live tree against this roadmap. Status markers are inlined per
+sub-phase below; this section is the executive summary.
+
+**Phase 1 — Audit and Strengthen the Foundation: ~80% complete.**
+
+- 1.1 Correlate audit ✅ landed (`docs/CORRELATE_AUDIT.md`). Correlate fixes ✅ shipped:
+  `training/correlate.py` now residualizes on a rolling 8-game window
+  (`_residualize_gamelog`, line 404), produces *stratified* matrices, and
+  `meditate` exposes `--rebuild-correlations` (`training/cli.py:50`).
+- 1.2 Parlay audit ✅ landed (`docs/PARLAY_AUDIT.md`, `PARLAY_CALIBRATION_*.png/csv`,
+  `scripts/audit_parlay_calibration.py`). Parlay fixes ✅ mostly shipped:
+  `beam_search_parlays` is Gaussian-copula-based (`correlation.py:603`), takes a
+  `contest_variant: Literal['power','flex','insurance','rivals']` parameter,
+  reads `data/underdog_payouts.json`, and applies push-aware EV via
+  `_expected_payout_with_pushes`. **Note**: `prediction/parlay.py` does not
+  exist; both functions live in `prediction/correlation.py`. Several audit
+  findings remain open (PSD repair, magic-number cleanup, `banned_combos`
+  semantics, `Boost`-column inconsistency).
+- 1.3 Closing-line freeze ❌ not built as a discrete step. Functionally,
+  `clv.fill_from_archive` uses the last archived sample before kickoff as the
+  "close" because the Odds API stops surfacing prematch odds for in-progress
+  games. That works for the existing CLV summary but doesn't give us an
+  explicit, queryable `closing_lines/` snapshot for downstream tracking.
+- 1.4 Structured logging ✅ shipped (`helpers/logging.py`).
+- 1.5 Integration tests ✅ shipped (`tests/integration/test_end_to_end.py`).
+- 1.6 Deprecated triage ❌ doc not produced; `src/deprecated/` still carries
+  TODOs that reference replaced modules.
+
+**Phase 2 — Bet Logger and CLV Tracker: ~40% complete.**
+
+- CLV computation exists (`src/sportstradamus/clv.py`) and is wired into
+  `nightly.reflect`, including segmented summaries with a `CLV_SEGMENT_MIN_N`
+  threshold. This handles the *retrospective* CLV pipeline against
+  system-recommended history.
+- ❌ The user-placed bet logger (`tracking/` package, `tracking.db`,
+  `track place|close|settle|report` CLIs) does not exist. CLV is computed for
+  what the system *would have* done, not what the user actually bet.
+- 2.1 reflect audit doc not produced; superseded by the live `clv.py` design.
+
+**Phase 3 — Underdog-Specific Decision Engine: ~25% complete.**
+
+- 3.1 Kelly sizing ❌ no `strategies/kelly.py`. The only Kelly logic is in
+  `src/deprecated/opt_kelley_bet.py` and an unrelated Streamlit page.
+- 3.2 Contest-variant payouts ✅ done — `data/underdog_payouts.json` covers
+  power/flex/insurance/rivals; `beam_search_parlays` honors them and Flex's
+  miss-one tier is integrated into push-aware EV.
+- 3.3 Underdog-native strategy module ❌ no `strategies/` package at all.
+- 3.4 Champions ❌ not started.
+- 3.5 Streaks / Ladders / Rivals strategies ❌ not started (Rivals payout
+  table exists in JSON; no decision engine).
+
+**Phase 4 — Real-Time Alerts and Dashboard Extensions: ~10% complete.**
+
+- 4.1 Alerts package ❌ no `alerts/` directory.
+- 4.2 Dashboard ✅ baseline `dashboard.py`, `dashboard_app.py`,
+  `dashboard_data.py`, and a `pages/` multi-page set exist; the new tabs
+  (Today's Recommendations, Open Entries, Settled History, Bankroll) all
+  depend on the missing `tracking.db`.
+
+**Phase 5 — Best Ball / Battle Royale: ~15% complete (different shape).**
+
+- A `drafts/` package exists but contains the *legacy* Best Ball pipeline
+  (`data_merge.py`, `data_process.py`, `forecast.py`, `train.py`,
+  `update_ez_adp.py`), not the new modules the roadmap proposed.
+- ❌ No `drafts/adp.py`, `drafts/projections.py`, `drafts/battle_royale.py`,
+  `drafts/advance_equity.py`, `drafts/best_ball_optimizer.py`, or
+  `drafts/exposure.py`. The roadmap effectively asks to replace this
+  package; do that as a Phase 5 sub-phase rather than additively.
+
+**Phase 6 — Modeling Refinements: 0% complete.**
+
+- 6.1 Bayesian hierarchical, 6.2 NFL game sim, 6.3 News/weather feeds,
+  6.4 Conformal prediction, 6.5 Push refinement audit — none started.
+  Push handling itself is in production via 1.2; the *per-market support
+  audit* and discrete-PMF refinement are not.
+
+**Other landings worth noting (off-roadmap):**
+
+- `helpers/archive.py` migrated from klepto to DuckDB (with bulk-deduped
+  flush semantics) — see CLAUDE.md.
+- Migration scripts under `scripts/` for archive, training data, gamelogs,
+  correlations, and pickles → parquet.
+- `tests/golden/` covers correlate, parlay search, CLV explode, pipeline
+  snapshots, and CLI-help snapshots.
+
+---
+
 ## How to use the prompts in this document
 
 Every prompt is written for a Claude Code or GitHub Copilot Chat session inside the repo. Each one:
@@ -36,7 +125,13 @@ This is mostly *audit work* — for each existing module the agent reads the cod
 
 **Estimated time:** 3–4 weekends
 
-### 1.1 Audit `training/correlate.py`
+### 1.1 Audit `training/correlate.py` — ✅ DONE (audit + fix shipped)
+
+**Status:** audit at `docs/CORRELATE_AUDIT.md`. Improvements shipped:
+8-game rolling residualization (`_residualize_gamelog`), stratified
+per-team matrices, `--rebuild-correlations` flag on `meditate`. Original
+audit prompts retained below for traceability.
+
 
 The function exists and is called automatically as part of `meditate`'s "league setup" stage (per the package map in `CONTRIBUTING.md`). What we don't know without reading it:
 
@@ -89,7 +184,37 @@ The audit prompt asks the agent to read the code, answer those questions, and wr
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots since `--rebuild-correlations` is new. Run `poetry run meditate --rebuild-correlations --league NBA` end-to-end and confirm the new CSVs appear. Summarize the methodological changes and any audit findings that turned out not to need a fix.
 
-### 1.2 Audit `prediction/correlation.py:find_correlation` and `prediction/parlay.py:beam_search_parlays`
+### 1.2 Audit `prediction/correlation.py:find_correlation` and `beam_search_parlays` — ✅ AUDIT + ⚠️ FIXES PARTIAL
+
+**Status:** audit at `docs/PARLAY_AUDIT.md`; calibration plot/CSV at
+`docs/PARLAY_CALIBRATION_*`. **Note:** `prediction/parlay.py` was never split
+out — `beam_search_parlays` lives in `prediction/correlation.py:504+`.
+Shipped: Gaussian copula, `contest_variant` parameter (power/flex/insurance/
+rivals), `data/underdog_payouts.json`, push-aware EV via
+`_expected_payout_with_pushes`. **Open audit findings (Phase 1.2.x
+follow-ups):**
+
+- `find_correlation`'s pairwise EV `exp(C * sqrt(V_i V_j)) * p_i p_j` is
+  not a probability and is unbounded. Wrap or replace with a bounded score.
+- The Σ matrix passed to `multivariate_normal.cdf` is built pair-by-pair;
+  singular submatrices are dropped rather than nearest-PSD-projected.
+- Beam width 1000, EV cutoff 1.05, boost bands, and final EV floors are
+  inline magic numbers — violates STYLE_GUIDE.md §8.
+- `data/banned_combos.json` is a soft modifier; no pair is hard-banned.
+  Decide whether banlist semantics are desired and add a hard-ban path.
+- Same-player guarding is fragile substring matching. Switch to canonical
+  `player_id` joins.
+- The `Boost` column displayed downstream is overwritten with a *different*
+  payout table than the one that drove ranking (`correlation.py:498`).
+- `Sleeper`/`ParlayPlay`/`Chalkboard` payout tables are stub `1`s; either
+  fill them in or gate Model EV on platform support.
+- Dedup is by exact bet-id; overlap-aware dedup uses a 3-cluster Ward
+  linkage but does not enforce one-per-family selection.
+- Calibration plot in repo is a placeholder (no `parlay_hist.dat`); rerun
+  `scripts/audit_parlay_calibration.py` on a production host with archive
+  data and commit the result.
+
+
 
 Both exist and run today. Open questions:
 
@@ -147,7 +272,17 @@ Both exist and run today. Open questions:
 >
 > When done: ruff clean, golden tests pass, calibration plot shows tighter decile alignment than the audit baseline. Summarize.
 
-### 1.3 Closing-line freeze
+### 1.3 Closing-line freeze — ❌ NOT DONE (workaround in place)
+
+**Status:** no `Archive.freeze_close`, no `data/closing_lines/`, no
+`freeze-close` CLI. `clv.fill_from_archive` instead treats the last
+archived sample before kickoff as the close (the Odds API stops surfacing
+prematch odds for in-progress games, so this is correct in practice but
+implicit). Recommended: still build the explicit freeze step before
+Phase 2.2 lands so the user-bet logger has a stable, queryable close
+snapshot independent of the live archive evolving.
+
+
 
 CLV tracking (Phase 2) requires a clean answer to the question "what was the line at game lock?" The archive captures everything but doesn't explicitly mark a snapshot as the closing line. Add an explicit freeze step.
 
@@ -183,7 +318,12 @@ CLV tracking (Phase 2) requires a clean answer to the question "what was the lin
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Summarize.
 
-### 1.4 Structured logging
+### 1.4 Structured logging — ✅ DONE
+
+**Status:** `src/sportstradamus/helpers/logging.py` is in place and used
+across the CLI entry points (`reflect` log lines visible in `nightly.py`).
+
+
 
 Right now scraper failures and pipeline issues are visible only in stdout if you happen to be watching. Add structured logging.
 
@@ -206,7 +346,13 @@ Right now scraper failures and pipeline issues are visible only in stdout if you
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Verify a sample run of `poetry run confer` produces a `logs/` file. Summarize.
 
-### 1.5 Integration tests
+### 1.5 Integration tests — ✅ DONE
+
+**Status:** `tests/integration/test_end_to_end.py` plus fixtures live in
+`tests/integration/`. Confirm coverage matches the original spec
+(WNBA points, 10+ scored offers, ≥1 parlay candidate) when revisiting.
+
+
 
 Golden tests cover CLI surface; integration tests catch wiring breaks. Add one end-to-end fixture-based test.
 
@@ -226,7 +372,14 @@ Golden tests cover CLI surface; integration tests catch wiring breaks. Add one e
 >
 > When done: ruff clean, golden tests pass, integration test passes. Summarize.
 
-### 1.6 Audit `src/deprecated/`
+### 1.6 Audit `src/deprecated/` — ❌ NOT DONE
+
+**Status:** no `docs/DEPRECATED_TRIAGE.md`. `src/deprecated/` still
+contains `correlation.py`, `opt_parlay.py` (both superseded by live code),
+`opt_kelley_bet.py` (REVIVE candidate for Phase 3.1), and the rest of
+the 2026-04 sweep. The triage decisions are still owed.
+
+
 
 The deprecated directory has TODOs that are partly outdated (the correlation generator and parlay search are no longer missing — they were replaced). Make explicit decisions for each.
 
@@ -270,7 +423,17 @@ This phase extends `reflect` rather than building a parallel system, since `refl
 
 **Estimated time:** 1–2 weekends
 
-### 2.1 Audit `nightly.py:reflect`
+### 2.1 Audit `nightly.py:reflect` — ⚠️ SUPERSEDED
+
+**Status:** the audit doc was never produced because `clv.py` was built
+directly. `reflect` now (a) resolves history, (b) calls
+`clv.fill_from_archive`, (c) prints `clv.summarize` + per-segment results
+honoring `CLV_SEGMENT_MIN_N=20`. Functionally Phase 2.1 + 2.4 are partly
+complete *for the system-recommended history*. What's missing is the
+*placed-bet* layer (2.2/2.3 below) and a written audit so future agents
+don't re-derive the design.
+
+
 
 **Prompt:**
 
@@ -284,7 +447,9 @@ This phase extends `reflect` rather than building a parallel system, since `refl
 >
 > No code changes. The audit informs whether Phase 2.2 extends `reflect` or builds alongside it.
 
-### 2.2 Bet logger schema
+### 2.2 Bet logger schema — ❌ NOT DONE (highest-value missing module)
+
+
 
 Build the placed-bet logger as a sibling to `reflect`, not a replacement. `reflect` analyzes "what would the system have done"; the new tracker analyzes "what did I actually do."
 
@@ -364,7 +529,13 @@ Build the placed-bet logger as a sibling to `reflect`, not a replacement. `refle
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Verify `poetry run track place --from examples/sample_entry.yaml` works against a fresh DB. Summarize.
 
-### 2.3 CLV computation and settlement
+### 2.3 CLV computation and settlement — ⚠️ HALF DONE
+
+**Status:** retrospective CLV exists for system-recommended history
+(`clv.fill_from_archive` + `_signed_clv`). The placed-bet `track close` /
+`track settle` flow is gated on Phase 2.2 and 1.3.
+
+
 
 **Prompt:**
 
@@ -398,7 +569,14 @@ Build the placed-bet logger as a sibling to `reflect`, not a replacement. `refle
 >
 > When done: ruff clean, golden tests pass. Summarize.
 
-### 2.4 CLV reporting
+### 2.4 CLV reporting — ⚠️ HALF DONE
+
+**Status:** `clv.summarize` already produces per-(League × Market × Platform)
+segment tables logged by `reflect`. Missing: bootstrap CIs, CSV/JSON
+export flags, color-coded terminal output, `--csv`/`--json` flags. Add
+these to `clv.summarize` rather than building a parallel report module.
+
+
 
 **Prompt:**
 
@@ -434,7 +612,9 @@ Build the placed-bet logger as a sibling to `reflect`, not a replacement. `refle
 
 **Estimated time:** 4–5 weekends
 
-### 3.1 Kelly sizing module (genuinely new)
+### 3.1 Kelly sizing module — ❌ NOT DONE (still in deprecated/)
+
+
 
 `opt_kelley_bet.py` is in `src/deprecated/`. Revive and modernize it.
 
@@ -483,7 +663,13 @@ Build the placed-bet logger as a sibling to `reflect`, not a replacement. `refle
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Summarize. Move `src/deprecated/opt_kelley_bet.py` to `src/deprecated/.archived/` per the deprecated README protocol once the new code is shipped.
 
-### 3.2 Underdog contest-variant payouts
+### 3.2 Underdog contest-variant payouts — ✅ DONE
+
+**Status:** `data/underdog_payouts.json` covers power/flex/insurance/rivals;
+`beam_search_parlays(contest_variant=...)` consumes it. Verify multipliers
+against the current Underdog product on each major release.
+
+
 
 Underdog has five variants with different payouts. The existing parlay system treats Power as the default. Make all five first-class.
 
@@ -542,7 +728,9 @@ Underdog has five variants with different payouts. The existing parlay system tr
 >
 > When done: ruff clean, golden tests pass. Summarize.
 
-### 3.3 Underdog-native strategy module
+### 3.3 Underdog-native strategy module — ❌ NOT DONE
+
+
 
 Pull everything together into a CLI that produces ranked, Kelly-sized recommendations.
 
@@ -597,7 +785,9 @@ Pull everything together into a CLI that produces ranked, Kelly-sized recommenda
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Summarize.
 
-### 3.4 Pick'em Champions (peer-to-peer)
+### 3.4 Pick'em Champions — ❌ NOT DONE
+
+
 
 In Champions, the static-line-vs-sharp arbitrage doesn't apply because you're playing other users, not the house. Different optimization.
 
@@ -636,7 +826,9 @@ In Champions, the static-line-vs-sharp arbitrage doesn't apply because you're pl
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Summarize.
 
-### 3.5 Streaks, Ladders, Rivals (the under-supported variants)
+### 3.5 Streaks, Ladders, Rivals — ❌ NOT DONE
+
+
 
 These three contest variants have very different payout structures and require their own logic. Streaks especially is a sequential decision problem.
 
@@ -684,7 +876,9 @@ I'm leaving Ladders and Rivals as follow-up sessions — same shape of work but 
 
 **Estimated time:** 2 weekends
 
-### 4.1 Alerts package
+### 4.1 Alerts package — ❌ NOT DONE
+
+
 
 **Prompt:**
 
@@ -740,7 +934,13 @@ I'm leaving Ladders and Rivals as follow-up sessions — same shape of work but 
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Demonstrate by triggering a fake event against a Telegram test chat. Summarize.
 
-### 4.2 Dashboard extensions
+### 4.2 Dashboard extensions — ⚠️ BLOCKED on 2.2
+
+**Status:** baseline `dashboard.py`, `dashboard_app.py`, `dashboard_data.py`,
+and `pages/` exist. The four new tabs all read from `tracking.db` which
+doesn't exist yet — Phase 2.2 unblocks this entire section.
+
+
 
 **Prompt:**
 
@@ -771,7 +971,14 @@ I'm leaving Ladders and Rivals as follow-up sessions — same shape of work but 
 
 **Estimated time:** 8–12 weekends, season-aligned
 
-### 5.1 ADP ingestion
+### 5.1 ADP ingestion — ❌ NOT DONE (legacy `update_ez_adp.py` exists)
+
+**Status:** `drafts/update_ez_adp.py` is a legacy ADP fetcher that does
+not match this spec (no parquet, no stochastic ADP, no contest-aware
+output). Decide whether to retire and replace, or evolve in place. The
+roadmap target presupposes replacement.
+
+
 
 **Prompt:**
 
@@ -795,7 +1002,12 @@ I'm leaving Ladders and Rivals as follow-up sessions — same shape of work but 
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots. Run against today's live ADP and report player count.
 
-### 5.2 Season-long projection distributions
+### 5.2 Season-long projection distributions — ❌ NOT DONE
+
+**Status:** legacy `drafts/forecast.py` exists but is structured around
+the older training pipeline. The new `drafts/projections.py` is unbuilt.
+
+
 
 **Prompt:**
 
@@ -1179,3 +1391,155 @@ I added basic push handling in Phase 1.2, but a more thorough version models the
 Phase 1 audit work is undramatic but it's where most of the actual edge correction happens. The existing modeling is already solid; the gains come from confirming the correlation methodology is sound, the parlay search is well-calibrated, push handling is correct, and contest-variant payouts are right. Skipping it to jump to Phase 3 means building the strategy module on a foundation you haven't verified.
 
 A realistic minimum-viable path if you want to start placing real bets sooner: **Phase 1.1 (correlate audit + fix) + Phase 1.2 (parlay audit + fix) + Phase 1.3 (closing-line freeze) + Phase 2 (bet log + CLV) + Phase 3.1 (Kelly) + Phase 3.3 (Underdog-native module)**. That's roughly 8 weeks of focused work and gets you to a real, accountable, Kelly-sized Underdog Pick'em pipeline. Everything else is multipliers on that core.
+
+---
+
+## Updated Critical Path (post-2026-05-08 audit)
+
+The minimum-viable path above is largely complete on the modeling side
+(1.1 + 1.2 + 3.2). The new bottleneck is **decision-engine + tracking**,
+not modeling. Recommended next 8 weeks, in order:
+
+1. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the
+   `find_correlation` pairwise-EV unbounded score, replace inline magic
+   numbers with named constants, swap substring same-player guarding for
+   `player_id` joins, and reconcile the `Boost`-column overwrite at
+   `correlation.py:498` so the displayed multiplier matches the EV that
+   ranked the parlay. Re-run `audit_parlay_calibration.py` on production
+   archive data and commit a real plot.
+2. **Phase 1.3 — closing-line freeze (1 weekend).** Even with the implicit
+   "last sample before kickoff" working today, an explicit
+   `Archive.freeze_close` + `data/closing_lines/` snapshot is a
+   prerequisite for clean placed-bet CLV in Phase 2.3.
+3. **Phase 1.6 — deprecated triage (½ weekend).** `correlation.py` and
+   `opt_parlay.py` in `src/deprecated/` can be deleted; `opt_kelley_bet.py`
+   should be marked REVIVE for the next session. Cheap and unblocks
+   confusion for future agents.
+4. **Phase 3.1 — Kelly module (1 weekend).** Genuinely missing. The
+   parlay search produces ranked candidates that nothing currently sizes.
+5. **Phase 2.2 — `tracking/` package (1–2 weekends).** Bet logger schema,
+   `track place`. Without this, Phase 4.2 dashboard tabs cannot land.
+6. **Phase 2.3/2.4 — CLV close + settle + report (1 weekend).** Extend
+   the existing `clv.py` (don't duplicate); add bootstrap CIs and `--csv` /
+   `--json` exports.
+7. **Phase 3.3 — Underdog-native strategy CLI (1 weekend).** Wires the
+   above into a single `pickem-build` CLI that produces today's ranked,
+   Kelly-sized recommendations as YAML for `track place`.
+8. **Phase 4.1 alerts (1 weekend).** Once the placed-bet log exists, the
+   Telegram/Discord drift, drawdown, and CLV-anomaly rules become
+   testable.
+
+That sequence gets the system from "good models that print numbers to a
+spreadsheet" to "good models that surface ranked, sized, accountable
+entries with measurable CLV per placed bet" — which is the Phase 1
+target of `underdog_edge_suite.md` (de-vig vs sharp + fractional Kelly +
+bet log + CLV) finally fully implemented.
+
+---
+
+## Suggestions for Further Improvement (beyond the roadmap)
+
+The original v2 roadmap covered the structural gaps. The audit surfaced a
+handful of items that aren't in any phase but matter for long-term health.
+
+### Modeling hygiene
+
+- **Closing-line bias check.** Once Phase 1.3 freeze is in place, build a
+  diagnostic that compares the *open* line at scrape time vs the close.
+  Markets where open consistently moves toward your model's prediction
+  are markets where you're sharper than the market opens; markets where
+  the close moves *away* from your model are model bugs hiding behind
+  momentary mis-pricing.
+- **Per-market shape ratio dashboard.** `training_report.txt` exposes
+  `shape_ratio` per market but only as a snapshot. A historical CSV per
+  retrain would surface drift (a market trending from 1.0 to 1.3 over six
+  months means dispersion is creeping). Cheap to add to `training/report.py`.
+- **Parquet-everything migration.** Migration scripts under `scripts/`
+  exist for archive, training data, gamelogs, correlations, and pickles.
+  Confirm none of the production paths still read CSV or pickle. The
+  archive itself is DuckDB now, but `data/{LEAGUE}_corr.csv` is still a
+  CSV (per CORRELATE_AUDIT.md) — convert to parquet to save read time
+  and to carry typed metadata columns.
+- **Continuity correction audit.** Phase 6.5 asks for a per-market
+  support audit (continuous vs integer vs hybrid). This is a 2-hour task
+  that would catch mis-applied push probabilities for markets like
+  anytime-TD, NHL goals, NBA 3PM. Worth promoting to Phase 1.
+
+### Engineering hygiene
+
+- **Magic-number purge in `correlation.py`.** Roadmap mentions this in
+  passing for Phase 1.2 follow-up; the audit's lit list (`K=1000`, EV
+  cutoffs, boost bands, `[0, 0, 3.5, 6.5, 6, 10, 25]` payout array) is
+  long enough that it deserves its own commit per STYLE_GUIDE.md §8.
+- **`prediction/parlay.py` split.** CONTRIBUTING.md advertises this
+  module; in practice both `find_correlation` and `beam_search_parlays`
+  live in `correlation.py`. Either split per the contract or update
+  CONTRIBUTING.md. Don't leave the inconsistency.
+- **`src/deprecated/` README cleanup.** The TODO list at the bottom of
+  `src/deprecated/README.md` references items that have replacements in
+  the live tree (`correlation.py`, `opt_parlay.py`). Phase 1.6 was meant
+  to fix this; until it lands, the README actively misleads new agents
+  reading the repo.
+- **Move `clv.py` into a `tracking/` namespace.** When Phase 2.2 lands,
+  the natural home for `clv.py` is alongside `tracking/place.py` and
+  `tracking/report.py`. Plan the move now so you don't end up with two
+  CLV modules.
+- **`book_weights.json` provenance.** It's referenced in the prediction
+  pipeline and in Phase 2.3 of this roadmap but the source of the
+  weights and how often they're refit is undocumented. Add a provenance
+  note + a `scripts/refit_book_weights.py` so the next refit is one
+  command, not a memory exercise.
+
+### New diagnostics worth building
+
+- **CLV-by-day-of-week × time-to-lock heatmap.** `clv.py` already has
+  the data; one plot would tell you whether your edge is lock-window
+  specific (it usually is — early-week NFL lines have more error than
+  Sunday-morning lines).
+- **Parlay-shape ablation.** `audit_parlay_calibration.py` produces
+  decile calibration. Add a sister script that holds out individual
+  shape constraints (min_correlation, max-per-game, beam_width) and
+  reports calibration delta per ablation. Tells you which knob actually
+  matters before you tune it.
+- **Model-vs-market disagreement log.** When the Gaussian copula joint
+  estimate and the per-leg sharp devig disagree by more than a
+  configurable threshold, log to `data/disagreements/{date}.jsonl` for
+  retrospective analysis. Currently a model-bug detector; eventually a
+  potential-edge surfacer.
+
+### Operational
+
+- **Single-source-of-truth bankroll.** Phase 3 references
+  `data/bankroll.json` and Phase 4 references `tracking.db`. Pick one;
+  the bankroll history *is* a series of (placed_at, stake, payout) rows
+  that already live in the bet log. A bankroll JSON file is redundant
+  state that will drift.
+- **`pyproject.toml` script registration.** Currently 5 scripts wired
+  (`prophecize`, `confer`, `meditate`, `dashboard`, `reflect`).
+  Future-proof: when adding `track`, `kelly`, `pickem-build`,
+  `freeze-close`, `alert-watch`, register them all in one batch with
+  consistent naming (verb-noun, dash-separated) rather than a slow drift
+  toward inconsistency.
+- **`creds/keys.json` schema doc.** The repo references `keys.json`
+  several places (Odds API, Telegram, Discord, OpenWeatherMap) but
+  there's no canonical schema. A single `docs/CREDS_SCHEMA.md` with
+  example keys and which module reads each would avoid the
+  next-onboarding bug.
+
+### Bigger swings (optional, multi-week)
+
+- **Replace beam search with beam-search-by-shape.** Currently the search
+  ranks all parlays jointly. Splitting by `(contest_variant, entry_size)`
+  upstream and running separate beams lets you tune cutoffs per shape
+  without cross-contamination. Cheap refactor, real win.
+- **Conformal *before* Bayesian (swap 6.4 and 6.1).** Conformal is a
+  wrapper around the existing LightGBMLSS pickles; PyMC introduces a new
+  dependency, a new sampler, and new infrastructure. Conformal gives you
+  a calibrated uncertainty knob immediately; Bayesian hierarchical
+  delivers value mostly for low-sample players. Conformal is the
+  higher-EV-per-engineer-week swing.
+- **Streamlit → simple FastAPI + Vue dashboard.** Streamlit is fine until
+  it isn't; the moment you need real-time push (Phase 4.1 alerts feeding
+  the dashboard), Streamlit's rerun model fights you. Consider a
+  one-weekend FastAPI + WebSocket prototype before investing more in
+  Streamlit pages.
