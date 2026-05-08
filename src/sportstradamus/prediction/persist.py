@@ -81,8 +81,8 @@ def write_current_offers(
             "leagues": sorted(set(leagues)),
             "platforms": sorted(set(platforms)),
             "contest_variant": contest_variant,
-            "offer_rows": int(len(offers_out)),
-            "parlay_rows": int(len(parlays_out)),
+            "offer_rows": len(offers_out),
+            "parlay_rows": len(parlays_out),
         },
         CURRENT_META_PATH,
     )
