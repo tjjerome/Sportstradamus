@@ -15,11 +15,41 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install system build deps
+        # python-snappy compiles a C extension against libsnappy headers.
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
+
       - name: Install Poetry
         run: pipx install poetry
 
+      - name: Patch torch source for restricted networks
+        # The pytorch_cpu source in pyproject.toml points at download.pytorch.org,
+        # which sandboxed CI environments cannot always reach. Resolve torch from
+        # PyPI instead — the wheel runs CPU-only just fine.
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          path = Path("pyproject.toml")
+          patched = re.sub(
+              r'torch = \{version = "([^"]+)", source = "pytorch_cpu"\}',
+              r'torch = "\1"',
+              path.read_text(),
+          )
+          path.write_text(patched)
+          PY
+
       - name: Install dependencies
         run: poetry install --no-interaction --with dev
+
+      - name: Stage CI test fixtures (data + creds stubs)
+        # Live config files are gitignored because they hold secrets or large
+        # learned outputs. The committed stubs in tests/ci_fixtures/ have the
+        # keys callers expect at import time, with placeholder values.
+        run: |
+          cp tests/ci_fixtures/data/*.json src/sportstradamus/data/
+          cp tests/ci_fixtures/creds/keys.json src/sportstradamus/creds/keys.json
 
       - name: Lint (ruff check)
         run: poetry run ruff check src/ tests/
