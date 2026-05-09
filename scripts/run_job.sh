@@ -16,6 +16,13 @@
 #   HEALTHCHECK_URL         fallback URL used if the per-job one is unset
 #   SPORTSTRADAMUS_DIR      project root (default: parent of this script)
 #   LOG_DIR                 log directory (default: $SPORTSTRADAMUS_DIR/logs)
+#   ARCHIVE_LOCK_TIMEOUT    seconds to wait for the shared archive lock (default: 900)
+#
+# Concurrency model:
+#   - Per-job flock (-n): a second invocation of the *same* job is skipped.
+#   - Shared archive flock (-w): all jobs serialize on the DuckDB archive so
+#     they don't fight over the single-writer lock. A queued job waits up to
+#     ARCHIVE_LOCK_TIMEOUT seconds, then logs FAIL_LOCK and exits 75 (EX_TEMPFAIL).
 #
 # Exit codes: propagates the wrapped command's exit code.
 
@@ -51,6 +58,8 @@ CMD+=("$@")
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/${JOB}.log"
 LOCK_FILE="$LOCK_DIR/sportstradamus-${JOB}.lock"
+ARCHIVE_LOCK_FILE="$LOCK_DIR/sportstradamus-archive.lock"
+ARCHIVE_LOCK_TIMEOUT="${ARCHIVE_LOCK_TIMEOUT:-900}"
 
 # Resolve the healthcheck URL: per-job override wins, fall back to the shared one.
 job_upper="$(echo "$JOB" | tr '[:lower:]-' '[:upper:]_')"
@@ -102,5 +111,20 @@ if ! flock -n 9; then
     log "SKIP job=$JOB reason=already_running"
     exit 0
 fi
+
+# Shared archive lock: serialize against any other job touching the DuckDB
+# archive so we don't crash on DuckDB's single-writer constraint. Wait up to
+# ARCHIVE_LOCK_TIMEOUT seconds for the holder to finish.
+exec 8>"$ARCHIVE_LOCK_FILE"
+wait_start=$(date +%s)
+if ! flock -w "$ARCHIVE_LOCK_TIMEOUT" 8; then
+    waited=$(( $(date +%s) - wait_start ))
+    log "FAIL_LOCK job=$JOB reason=archive_lock_timeout waited=${waited}s"
+    ping_hc "/fail"
+    exit 75  # EX_TEMPFAIL
+fi
+wait_end=$(date +%s)
+wait_duration=$((wait_end - wait_start))
+[[ $wait_duration -gt 1 ]] && log "WAIT job=$JOB archive_lock_wait=${wait_duration}s"
 
 run
