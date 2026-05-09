@@ -1,11 +1,12 @@
 """Closing-line value (CLV) computation for resolved predictions.
 
-Reads the post-lock archive snapshot (whatever ``Archive.get_ev`` returns by
-the time ``reflect`` runs — the Odds API stops surfacing prematch odds for
-in-progress games, so the last sample before kickoff is the close) and
-folds it into each offer in ``history`` as ``Close Books P``,
-``Market CLV``, and ``Model CLV``. Two helpers and a one-shot summary
-printer are all that's needed; ``reflect`` orchestrates the call.
+Reads the closing snapshot from the time-series archive — the latest
+observation per book at-or-before the row's nominal kickoff — and folds
+it into each offer in ``history`` as ``Close Books P``, ``Market CLV``,
+and ``Model CLV``. The ``commence_time`` used as the ``at=`` cutoff is
+derived from the row date; until per-row kickoff timestamps are wired in
+the default sits at game-day evening UTC, which guarantees the cutoff is
+after every league's kickoff window.
 
 Definitions, in no-vig probability units:
 
@@ -17,6 +18,7 @@ Definitions, in no-vig probability units:
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -32,6 +34,11 @@ CLV_SEGMENT_MIN_N = 20
 # An archive snapshot taken more than this many minutes before kickoff is too
 # stale to credibly stand in for the closing line; warn once per segment.
 CLOSE_LOOKBACK_WARN_MINUTES = 90
+
+# Stand-in for true commence_time when the offer row carries only a date.
+# Evening UTC is comfortably past every league's typical kickoff window so
+# `at=commence_time` cuts off after every pre-game observation has landed.
+_COMMENCE_DEFAULT_OFFSET = timedelta(hours=20)
 
 _OVER_BETS = {"Over", "Higher", "over", "higher"}
 
@@ -65,10 +72,12 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     """Populate the closing trio in each ``Offers`` tuple from ``archive``.
 
     For every offer in every history row, query
-    ``archive.get_ev(league, market, date, player)`` once and rewrite the
-    9-tuple in-place with ``Close Books P``, ``Market CLV``, and
-    ``Model CLV``. Offers whose archive lookup returns NaN are left with
-    NaN closing fields and excluded from CLV aggregates downstream.
+    ``archive.get_ev(league, market, date, player, at=commence_time)`` once
+    and rewrite the 9-tuple in-place with ``Close Books P``, ``Market CLV``,
+    and ``Model CLV``. Pinning ``at=commence_time`` makes the closing read
+    reproducible regardless of when ``reflect`` runs. Offers whose archive
+    lookup returns NaN are left with NaN closing fields and excluded from
+    CLV aggregates downstream.
 
     Skips offers that already carry a non-NaN ``Close Books P`` so a
     re-run doesn't redundantly hit archive.
@@ -95,7 +104,8 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
             continue
 
         date_str = _normalize_date(date)
-        close_p = _safe_get_ev(archive, league, market, date_str, player)
+        commence_at = _commence_time(date_str)
+        close_p = _safe_get_ev(archive, league, market, date_str, player, at=commence_at)
 
         new_offers = []
         for offer in offers:
@@ -119,32 +129,62 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     return history
 
 
-def summarize(history: pd.DataFrame) -> dict:
+def summarize(history: pd.DataFrame, archive=None) -> dict:
     """Return aggregate CLV stats for logging by ``reflect``.
 
     Iterates exploded offers and computes overall n / mean Market CLV /
     mean Model CLV / fraction of legs that beat the close. Drops legs
     with NaN closing values from the count.
+
+    When ``archive`` is supplied, augments segments with
+    ``frac_lines_moved_toward_model`` — fraction of legs where the line
+    movement direction matches the model's lean (model_p vs 0.5 × bet
+    direction). Looked up per row via :meth:`Archive.get_movement` and
+    reused across all offers on the row.
     """
     legs = []
+    movement_cache: dict = {}
     for _, row in history.iterrows():
         offers = row.get("Offers")
         if not isinstance(offers, list):
             continue
         platform_default = row.get("Platform")
+        league_val = row.get("League")
+        market_val = row.get("Market")
+        date_val = _normalize_date(row.get("Date"))
+        player_val = row.get("Player")
+
+        movement = None
+        if archive is not None and date_val and isinstance(player_val, str):
+            cache_key = (league_val, market_val, date_val, player_val)
+            if cache_key not in movement_cache:
+                try:
+                    movement_cache[cache_key] = archive.get_movement(
+                        league_val,
+                        market_val,
+                        date_val,
+                        player_val,
+                        until=_commence_time(date_val),
+                    )
+                except (KeyError, ValueError, TypeError):
+                    movement_cache[cache_key] = None
+            movement = movement_cache[cache_key]
+
         for offer in offers:
             if not (isinstance(offer, tuple | list) and len(offer) >= 9):
                 continue
-            _, _, platform, _, _, _, close_p, market_clv, _model_clv = offer[:9]
+            _, _, platform, bet, model_p, _, close_p, market_clv, _model_clv = offer[:9]
             if pd.isna(close_p) or pd.isna(market_clv):
                 continue
+            aligned = _movement_alignment(movement, model_p, bet)
             legs.append(
                 {
-                    "League": row.get("League"),
-                    "Market": row.get("Market"),
+                    "League": league_val,
+                    "Market": market_val,
                     "Platform": platform or platform_default,
                     "Market CLV": float(market_clv),
                     "Model CLV": float(_model_clv) if not pd.isna(_model_clv) else np.nan,
+                    "MoveAligned": aligned,
                 }
             )
 
@@ -164,14 +204,15 @@ def summarize(history: pd.DataFrame) -> dict:
     frac_beat = float((df["Market CLV"] > 0).mean())
 
     df["_beat"] = (df["Market CLV"] > 0).astype(float)
+    agg_dict: dict = {
+        "n": ("Market CLV", "count"),
+        "market_clv": ("Market CLV", "mean"),
+        "frac_beat_close": ("_beat", "mean"),
+    }
+    if archive is not None:
+        agg_dict["frac_lines_moved_toward_model"] = ("MoveAligned", "mean")
     grouped = (
-        df.groupby(["League", "Market", "Platform"], dropna=False)
-        .agg(
-            n=("Market CLV", "count"),
-            market_clv=("Market CLV", "mean"),
-            frac_beat_close=("_beat", "mean"),
-        )
-        .reset_index()
+        df.groupby(["League", "Market", "Platform"], dropna=False).agg(**agg_dict).reset_index()
     )
     segments = grouped.loc[grouped["n"] >= CLV_SEGMENT_MIN_N].sort_values(
         "market_clv", ascending=False
@@ -296,19 +337,69 @@ def check_close_sample_freshness(
 
 def _normalize_date(date) -> str:
     """Return ``date`` as ``YYYY-MM-DD`` for archive lookup."""
+    if date is None:
+        return ""
     if isinstance(date, str):
         return date
     try:
         return pd.to_datetime(date).strftime("%Y-%m-%d")
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return ""
 
 
-def _safe_get_ev(archive, league: str, market: str, date: str, player) -> float:
+def _commence_time(date_str: str) -> datetime | None:
+    """Best-effort kickoff timestamp for ``date_str``.
+
+    Until offer rows carry an explicit kickoff timestamp this is the
+    midnight-of-game-date plus :data:`_COMMENCE_DEFAULT_OFFSET`, which
+    guarantees the resulting ``at=`` snapshot includes every pre-game
+    observation regardless of league.
+    """
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str[:10], "%Y-%m-%d") + _COMMENCE_DEFAULT_OFFSET
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_get_ev(
+    archive,
+    league: str,
+    market: str,
+    date: str,
+    player,
+    *,
+    at: datetime | None = None,
+) -> float:
     """Wrap ``archive.get_ev`` so any lookup miss surfaces as NaN."""
     if not date or not isinstance(player, str):
         return np.nan
     try:
-        return float(archive.get_ev(league, market, date, player))
+        return float(archive.get_ev(league, market, date, player, at=at))
     except (KeyError, ValueError, TypeError):
         return np.nan
+
+
+def _movement_alignment(movement: dict | None, model_p, bet) -> float:
+    """Return 1.0 if line moved toward the model's lean, 0.0 if away, NaN when undefined.
+
+    "Toward the model" = sign(close_line − open_line) matches the
+    direction the model implicitly predicts via ``(model_p − 0.5) × sign(bet)``.
+    """
+    if not movement:
+        return np.nan
+    open_line = movement.get("open_line")
+    close_line = movement.get("close_line")
+    if open_line is None or close_line is None or pd.isna(open_line) or pd.isna(close_line):
+        return np.nan
+    if pd.isna(model_p):
+        return np.nan
+    line_delta = float(close_line) - float(open_line)
+    if line_delta == 0:
+        return np.nan
+    bet_sign = 1.0 if bet in _OVER_BETS else -1.0
+    model_lean = (float(model_p) - 0.5) * bet_sign  # >0 = model thinks line is too low
+    if model_lean == 0:
+        return np.nan
+    return 1.0 if (line_delta > 0) == (model_lean > 0) else 0.0

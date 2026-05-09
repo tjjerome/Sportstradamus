@@ -31,6 +31,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.spiderLogger import logger
 
 archive = Archive()
@@ -1039,14 +1040,22 @@ class Stats:
 
             date = gameDate.strftime("%Y-%m-%d")
 
+            # 8 PM UTC stand-in for true commence_time. Per-league actual
+            # start times can be wired in later; this default sits well
+            # after every league's typical kickoff window so target_at
+            # below stays >= the legacy single-point archive sentinel
+            # (game_date midnight) and back-compat lookups never miss.
+            game_time = datetime.combine(gameDate, datetime.min.time()) + timedelta(hours=20)
+            target_at = game_time - TRAINING_LOOKBACK
+
             evs = []
             lines = []
             odds = []
             archived = []
             for player in stats.index:
                 a = True
-                ev = archive.get_ev(self.league, market, date, player)
-                line = archive.get_line(self.league, market, date, player)
+                ev = archive.get_ev(self.league, market, date, player, at=target_at)
+                line = archive.get_line(self.league, market, date, player, at=target_at)
                 if np.isnan(ev):
                     ev = self.check_combo_markets(market, player, date)
                 if line <= 0:
@@ -1073,6 +1082,7 @@ class Stats:
             stats = stats.join(offers_df["Result"])
             stats["Player"] = stats.index
             stats["Date"] = date
+            stats["GameTime"] = game_time
             stats["Archived"] = archived
 
             if stats["Home"].dtype == bool:

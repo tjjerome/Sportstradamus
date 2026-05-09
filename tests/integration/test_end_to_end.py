@@ -86,6 +86,34 @@ def test_pipeline_smoke(
         f"expected >= 10. archive contents: {pts_df!r}"
     )
 
+    # Re-run confer to confirm the archive append-only property: a second
+    # poll should add new ``observed_at`` rows rather than overwrite the
+    # first poll's rows.
+    first_poll_rows = int(
+        archive_obj._connection.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
+    )
+    result = runner.invoke(
+        confer,
+        ["--fixture-dir", str(fixtures_dir / "odds_api")],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, f"second confer failed: {result.output}"
+    second_poll_rows = int(
+        archive_obj._connection.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
+    )
+    assert second_poll_rows > first_poll_rows, (
+        f"second confer poll did not append new rows: "
+        f"{first_poll_rows} -> {second_poll_rows}"
+    )
+
+    sample_player = next(iter(pts_df.index))[1] if not pts_df.empty else None
+    if sample_player is not None:
+        history = archive_obj.get_ev_history("WNBA", "PTS", "2026-05-08", sample_player)
+        if not history.empty:
+            assert history["observed_at"].is_monotonic_increasing, (
+                "get_ev_history must return rows ordered by observed_at"
+            )
+
     # ----- Phase 2: meditate (CLI invoked; ML stubbed; no writes) -----
     from sportstradamus.training import cli as training_cli
     from sportstradamus.training import markets as markets_module
