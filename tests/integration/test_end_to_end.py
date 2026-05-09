@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -53,6 +54,13 @@ def test_pipeline_smoke(
     """
     # ----- shared scaffolding -----
     (tmp_path / "archive").mkdir(parents=True)
+    # Seed a pre-sample_ts archive so Archive.__init__ exercises the
+    # ALTER TABLE migration path on top of an existing on-disk DB. A
+    # greenfield CREATE TABLE IF NOT EXISTS hides schema-migration bugs.
+    shutil.copy(
+        fixtures_dir / "legacy_archive.duckdb",
+        tmp_path / "archive" / "archive.duckdb",
+    )
     monkeypatch.chdir(tmp_path)
 
     from sportstradamus.helpers.archive import Archive

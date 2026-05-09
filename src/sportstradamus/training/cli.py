@@ -70,6 +70,10 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
             "rebuild_correlations": rebuild_correlations,
         },
     )
+    click.echo(
+        f"meditate starting: league={league} force={force} "
+        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations}"
+    )
     np.random.seed(69)
 
     if reset_markets.strip():
@@ -105,19 +109,25 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
     if (
         league == "All" and datetime.today().date() > (nba.season_start - timedelta(days=7))
     ) or league == "NBA":
+        click.echo("[NBA] loading cached gamelogs...")
         nba.load()
+        click.echo("[NBA] updating from league API (this hits stats.nba.com - may take 30-60s)...")
         nba.update()
         stat_structs.update({"NBA": nba})
     if (
         league == "All" and datetime.today().date() > (nfl.season_start - timedelta(days=7))
     ) or league == "NFL":
+        click.echo("[NFL] loading cached gamelogs...")
         nfl.load()
+        click.echo("[NFL] updating from league API...")
         nfl.update()
         stat_structs.update({"NFL": nfl})
     if (
         league == "All" and datetime.today().date() > (wnba.season_start - timedelta(days=7))
     ) or league == "WNBA":
+        click.echo("[WNBA] loading cached gamelogs...")
         wnba.load()
+        click.echo("[WNBA] updating from league API...")
         wnba.update()
         stat_structs.update({"WNBA": wnba})
     # if datetime.today().date() > (mlb.season_start - timedelta(days=7)) or league == "MLB":
