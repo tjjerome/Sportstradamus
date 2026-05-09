@@ -231,6 +231,16 @@ class StatsWNBA(StatsNBA):
             "date_to_nullable": today.strftime("%m/%d/%Y"),
         }
 
+        # Pre-init so a fully-failed retry loop falls through to the empty-list
+        # guard at line 296 instead of raising UnboundLocalError. Mirrors the
+        # NBA pattern in stats/nba.py around the identical retry loop.
+        nba_gamelog: list = []
+        adv_gamelog: list = []
+        usg_gamelog: list = []
+        teamlog: list = []
+        sco_teamlog: list = []
+        adv_teamlog: list = []
+
         i = 0
 
         while i < 10:

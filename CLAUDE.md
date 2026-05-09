@@ -72,6 +72,31 @@ REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py
 
 Python 3.11 required. PyTorch CPU-only (2.1.2) via custom Poetry source.
 
+## Production deployment
+
+* **The remote server tracks `devel`, not `main`.** Cron pulls run against the
+  `devel` branch — `main` is allowed to lag. Don't assume the production code
+  matches `main`; check `devel` HEAD when reasoning about server behavior.
+* **All cron jobs go through `scripts/run_job.sh`.** The wrapper adds:
+  - per-job `flock -n` (a second invocation of the same job is skipped),
+  - a shared archive `flock -w 900` (serializes against DuckDB's
+    single-writer lock so jobs don't collide on `archive.duckdb`),
+  - Healthchecks.io `/start` / `/fail` / success pings,
+  - structured `START` / `OK` / `FAIL` / `WAIT` log lines per job.
+* **Production crontab** (run as `sportstradamus@<host>`):
+
+  ```cron
+  50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
+  30 8,12 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
+  0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
+  0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
+  */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
+  ```
+
+  `prophecize` and `close-lines` both fire at `:50` during peak hours; the
+  `run_job.sh` archive flock serializes them, so the second-to-acquire just
+  waits and emits a `WAIT job=… archive_lock_wait=Ns` line.
+
 ## Package structure (canonical paths)
 
 The old single-file modules no longer exist. Use these paths:
