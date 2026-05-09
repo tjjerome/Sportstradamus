@@ -35,19 +35,21 @@ _TEAM_ONLY_MARKETS = frozenset({"Moneyline", "Totals", "1st 1 innings"})
 # this row count; zone-map pruning on naturally sorted data is fast enough.
 _SCHEMA_DDL = """
 CREATE TABLE IF NOT EXISTS odds (
-    league      TEXT NOT NULL,
-    market      TEXT NOT NULL,
-    game_date   DATE NOT NULL,
-    entity      TEXT NOT NULL,
-    book        TEXT NOT NULL,
-    ev          DOUBLE
+    league       TEXT NOT NULL,
+    market       TEXT NOT NULL,
+    game_date    DATE NOT NULL,
+    entity       TEXT NOT NULL,
+    book         TEXT NOT NULL,
+    ev           DOUBLE,
+    observed_at  TIMESTAMP NOT NULL
 );
 CREATE TABLE IF NOT EXISTS lines (
-    league      TEXT NOT NULL,
-    market      TEXT NOT NULL,
-    game_date   DATE NOT NULL,
-    entity      TEXT NOT NULL,
-    line        DOUBLE NOT NULL
+    league       TEXT NOT NULL,
+    market       TEXT NOT NULL,
+    game_date    DATE NOT NULL,
+    entity       TEXT NOT NULL,
+    line         DOUBLE NOT NULL,
+    observed_at  TIMESTAMP NOT NULL
 );
 """
 
@@ -66,7 +68,13 @@ def _is_skip_entity(entity: str) -> bool:
 
 
 def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
-    """Yield (odds_rows, lines_rows) batches for one league."""
+    """Yield (odds_rows, lines_rows) batches for one league.
+
+    Legacy klepto rows have no observation timestamp; we emit
+    ``observed_at = game_date`` midnight as a single-point sentinel. The
+    time-series read path treats this as one observation at the start of
+    game day so post-rework queries with ``at >= midnight`` still resolve.
+    """
     league_dir = archive_root / league
     if not league_dir.is_dir():
         return
@@ -83,6 +91,7 @@ def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
             d = _parse_date(date_str)
             if d is None or d < cutoff or not isinstance(entities, dict):
                 continue
+            sentinel_ts = datetime.datetime.combine(d, datetime.time.min)
             for entity, value in entities.items():
                 if _is_skip_entity(entity):
                     continue
@@ -97,7 +106,15 @@ def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
                             continue
                         try:
                             odds_rows.append(
-                                (league, market, d, clean_entity, str(book), float(ev))
+                                (
+                                    league,
+                                    market,
+                                    d,
+                                    clean_entity,
+                                    str(book),
+                                    float(ev),
+                                    sentinel_ts,
+                                )
                             )
                         except (TypeError, ValueError):
                             continue
@@ -110,7 +127,15 @@ def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
                                 continue
                             try:
                                 odds_rows.append(
-                                    (league, market, d, clean_entity, str(book), float(ev))
+                                    (
+                                        league,
+                                        market,
+                                        d,
+                                        clean_entity,
+                                        str(book),
+                                        float(ev),
+                                        sentinel_ts,
+                                    )
                                 )
                             except (TypeError, ValueError):
                                 continue
@@ -123,13 +148,13 @@ def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
                         if not f or f in seen_lines:
                             continue
                         seen_lines.add(f)
-                        lines_rows.append((league, market, d, clean_entity, f))
+                        lines_rows.append((league, market, d, clean_entity, f, sentinel_ts))
 
     return odds_rows, lines_rows
 
 
-_ODDS_COLS = ["league", "market", "game_date", "entity", "book", "ev"]
-_LINES_COLS = ["league", "market", "game_date", "entity", "line"]
+_ODDS_COLS = ["league", "market", "game_date", "entity", "book", "ev", "observed_at"]
+_LINES_COLS = ["league", "market", "game_date", "entity", "line", "observed_at"]
 
 
 def _bulk_insert_odds(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> int:
@@ -137,7 +162,7 @@ def _bulk_insert_odds(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> int:
     if not rows:
         return 0
     df = pd.DataFrame(rows, columns=_ODDS_COLS).drop_duplicates(  # noqa: F841 — DuckDB DF replacement
-        subset=["league", "market", "game_date", "entity", "book"], keep="last"
+        subset=["league", "market", "game_date", "entity", "book", "observed_at"], keep="last"
     )
     before = con.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
     con.execute("INSERT INTO odds SELECT * FROM df")
@@ -221,13 +246,13 @@ def main():
     print("Sorting and compacting...")
     con.execute(
         "CREATE TABLE odds_sorted AS SELECT * FROM odds "
-        "ORDER BY league, market, game_date, entity, book"
+        "ORDER BY league, market, game_date, entity, book, observed_at"
     )
     con.execute("DROP TABLE odds")
     con.execute("ALTER TABLE odds_sorted RENAME TO odds")
     con.execute(
         "CREATE TABLE lines_sorted AS SELECT * FROM lines "
-        "ORDER BY league, market, game_date, entity, line"
+        "ORDER BY league, market, game_date, entity, line, observed_at"
     )
     con.execute("DROP TABLE lines")
     con.execute("ALTER TABLE lines_sorted RENAME TO lines")

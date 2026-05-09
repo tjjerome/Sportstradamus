@@ -17,7 +17,8 @@ class _StubArchive:
     def __init__(self, table):
         self._table = table
 
-    def get_ev(self, league, market, date, player):
+    def get_ev(self, league, market, date, player, *, at=None):
+        del at  # the stub ignores the time-series cutoff
         return self._table.get((league, market, date, player), float("nan"))
 
 
