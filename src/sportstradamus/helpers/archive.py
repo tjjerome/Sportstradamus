@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import os
+import warnings
 from pathlib import Path
 
 import duckdb
@@ -121,6 +122,31 @@ class Archive:
 
     _instance: Archive | None = None
 
+    @staticmethod
+    def _connect_with_wal_recovery(db_path: Path) -> duckdb.DuckDBPyConnection:
+        # DuckDB <=1.1.x can leave a .wal that replays a bare CREATE TABLE
+        # against an already-checkpointed catalog after a hard kill — the
+        # connection then refuses to open at all. Quarantine the stale WAL
+        # so the next run heals itself; the schema DDL below is idempotent.
+        try:
+            return duckdb.connect(str(db_path))
+        except duckdb.CatalogException as exc:
+            if "Failure while replaying WAL" not in str(exc):
+                raise
+            wal = Path(str(db_path) + ".wal")
+            if not wal.exists():
+                raise
+            ts = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+            quarantined = wal.with_name(wal.name + f".corrupt-{ts}")
+            wal.rename(quarantined)
+            warnings.warn(
+                f"Discarded stale DuckDB WAL: moved {wal} -> {quarantined}. "
+                "Any uncheckpointed odds writes from the previous run are lost; "
+                "re-run the affected pipeline to repopulate.",
+                stacklevel=2,
+            )
+            return duckdb.connect(str(db_path))
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -135,8 +161,14 @@ class Archive:
         db_path = Path(os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", _DEFAULT_DB_PATH))
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = db_path
-        self._connection = duckdb.connect(str(db_path))
+        self._connection = self._connect_with_wal_recovery(db_path)
         self._connection.execute(_SCHEMA_DDL)
+        # Migrate pre-sample_ts databases (column added after the table shipped).
+        existing_cols = {
+            row[1] for row in self._connection.execute("PRAGMA table_info('odds')").fetchall()
+        }
+        if "sample_ts" not in existing_cols:
+            self._connection.execute("ALTER TABLE odds ADD COLUMN sample_ts TIMESTAMP")
 
         self.default_totals = {
             "MLB": 4.671,
