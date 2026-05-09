@@ -20,8 +20,9 @@ to redo the work.
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
 * One module per session. Commit and start fresh before moving to the next file.
-* Before claiming anything is "done", run `poetry run pytest tests/golden/` and
-  `poetry run ruff check src/sportstradamus/`. Both must be clean.
+* Before claiming anything is "done", run `poetry run pytest tests/golden/`,
+  `poetry run pytest -m integration` (fake-mode, no network), and
+  `poetry run ruff check src/sportstradamus/`. All three must be clean.
 
 ## Hard rules — these caused the last major refactor
 
@@ -60,9 +61,10 @@ poetry run dashboard         # Streamlit dashboard
 poetry run pickem-build      # Underdog Power/Flex/Rivals recommendations YAML
 poetry run kelly             # re-size a recommendations YAML offline
 
-# Quality gates — both must pass before committing
+# Quality gates — all three must pass before committing
 poetry run ruff check src/sportstradamus/
 poetry run pytest tests/golden/
+poetry run pytest -m integration            # fake-mode end-to-end, no network
 
 # Regenerate CLI help snapshots after an intentional flag change
 REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py
