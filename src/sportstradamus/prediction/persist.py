@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.io import (
+    CURRENT_HISTORY_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
@@ -51,6 +52,14 @@ _OFFER_KEEP_COLS = [
     "DVPOA",
     "Team Correlation",
     "Opp Correlation",
+    "Stat",
+    "Dist",
+    "CV",
+    "Gate",
+    "Model R",
+    "Model Alpha",
+    "Model Sigma",
+    "Model Skew",
 ]
 
 # A row with no boost, no model edge, and no book edge carries no signal —
@@ -63,12 +72,76 @@ _OFFER_SIGNAL_COLS = ["Boost", "Model", "Books"]
 _PARLAY_DROP_COLS = ["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep PB"]
 
 
+def write_player_history(offers_df: pd.DataFrame, stats_dict: dict) -> None:
+    """Write per-game player stat history for offers in the current run.
+
+    For each unique (Player, League, Stat) in offers_df, extract all game-level
+    stat values from the Stats object's short_gamelog (full season window).
+    Writes a long-format parquet with columns: Player, League, Market, GameDate,
+    Opponent, StatValue, GameNum (1=oldest).
+
+    Silent guards: skips players/stats that don't exist in stats_dict or gamelog.
+    """
+    history_rows = []
+    for (player, league, stat), group in offers_df.groupby(
+        ["Player", "League", "Stat"], dropna=False
+    ):
+        if not isinstance(stat, str) or pd.isna(stat):
+            continue
+        stat_obj = stats_dict.get(league)
+        if stat_obj is None or not hasattr(stat_obj, "short_gamelog"):
+            continue
+
+        player_col = stat_obj.log_strings.get("player")
+        date_col = stat_obj.log_strings.get("date")
+        opp_col = stat_obj.log_strings.get("opponent")
+        if not all([player_col, date_col, opp_col, stat in stat_obj.short_gamelog.columns]):
+            continue
+
+        player_games = stat_obj.short_gamelog[stat_obj.short_gamelog[player_col] == player]
+        if player_games.empty:
+            continue
+
+        for game_num, (_, row) in enumerate(player_games.iterrows(), 1):
+            history_rows.append(
+                {
+                    "Player": player,
+                    "League": league,
+                    "Market": stat,
+                    "GameDate": row[date_col],
+                    "Opponent": row[opp_col],
+                    "StatValue": row[stat],
+                    "GameNum": game_num,
+                }
+            )
+
+    if history_rows:
+        history_df = pd.DataFrame(history_rows)
+        _atomic_write_parquet(history_df, CURRENT_HISTORY_PATH)
+    else:
+        _atomic_write_parquet(
+            pd.DataFrame(
+                columns=[
+                    "Player",
+                    "League",
+                    "Market",
+                    "GameDate",
+                    "Opponent",
+                    "StatValue",
+                    "GameNum",
+                ]
+            ),
+            CURRENT_HISTORY_PATH,
+        )
+
+
 def write_current_offers(
     offers: pd.DataFrame,
     parlays: pd.DataFrame,
     leagues: Iterable[str],
     platforms: Iterable[str],
     contest_variant: str = "pooled",
+    stats_dict: dict | None = None,
 ) -> None:
     """Write the current-run snapshot atomically.
 
@@ -78,6 +151,9 @@ def write_current_offers(
     variant the parlays were scored under, recorded in meta so the dashboard
     can display which payout schedule the EV column reflects. Empty inputs
     are still written so the dashboard reflects the most recent run.
+
+    If `stats_dict` is provided, also writes current_history.parquet with
+    per-game stat values for each player+stat combo in the offers.
     """
     offers_out = _normalize_offers(offers)
     parlays_out = _normalize_parlays(parlays)
@@ -95,6 +171,9 @@ def write_current_offers(
         },
         CURRENT_META_PATH,
     )
+
+    if stats_dict:
+        write_player_history(offers_out, stats_dict)
 
 
 def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
