@@ -377,11 +377,24 @@ ag = AgGrid(
 )
 
 selected = ag.selected_rows
-if selected:
-    player = selected[0]["Player"]
-    idx = filtered.loc[filtered["Player"] == player].index[0]
-    if not st.session_state.detail_stack or st.session_state.detail_stack[-1] != idx:
-        st.session_state.detail_stack = [idx]
+# Newer streamlit-aggrid returns a DataFrame; older versions return a list.
+if isinstance(selected, pd.DataFrame):
+    selected_rows = selected.to_dict("records")
+else:
+    selected_rows = selected or []
+
+if selected_rows:
+    row_data = selected_rows[0]
+    player = row_data["Player"]
+    market = row_data.get("Market")
+    mask = filtered["Player"] == player
+    if market:
+        mask &= filtered["Market"] == market
+    matches = filtered.loc[mask]
+    if not matches.empty:
+        idx = matches.index[0]
+        if not st.session_state.detail_stack or st.session_state.detail_stack[-1] != idx:
+            st.session_state.detail_stack = [idx]
 
 if st.session_state.detail_stack:
     row_idx = st.session_state.detail_stack[-1]
