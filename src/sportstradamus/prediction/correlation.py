@@ -167,7 +167,7 @@ def find_correlation(
     stats,
     platform,
     *,
-    contest_variant: Literal["power", "flex", "insurance", "rivals"] = "power",
+    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
 ):
     """Annotate offers with correlation info and build parlay candidates.
@@ -180,11 +180,10 @@ def find_correlation(
         offers: List of scored offer dicts from :func:`process_offers`.
         stats: ``{league: Stats}`` dict for active leagues.
         platform: DFS platform name (e.g. ``"Underdog"``).
-        contest_variant: Underdog contest variant ("power", "flex",
-            "insurance", "rivals"). Ignored for non-Underdog platforms.
-            Default "power" matches the displayed Boost column historically;
-            ranking changes vs. legacy because legacy ranked at the insurance
-            line — use ``legacy=True`` for bit-for-bit historical behavior.
+        contest_variant: Underdog payout pool. Default ``"pooled"`` combines
+            ``power`` (sizes 2-3) and ``flex`` (sizes 4+) into one pool;
+            the single-variant names are accepted for the ``pickem-build``
+            path. Ignored for non-Underdog platforms.
         legacy: When True, reproduce the pre-2026.05 pipeline verbatim — no
             PSD repair, no push-aware EV, mixed insurance/power Boost
             overwrite at line 498. Removed next release.

@@ -35,7 +35,7 @@ nflreadpy = "^0.1.2"
 polars = "^1.33.1"
 pyarrow = "^21.0.0"
 scrapeops-python-requests = "^0.4.7"
-streamlit = ">=1.30"
+streamlit = ">=1.38"
 plotly = ">=5.18"
 
 [tool.poetry.scripts]
