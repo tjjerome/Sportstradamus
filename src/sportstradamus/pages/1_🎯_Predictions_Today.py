@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard_data import (
+    format_ts,
     load_current_meta,
     load_current_offers,
     render_banner,
@@ -59,7 +60,7 @@ st.set_page_config(page_title="Predictions — Today", layout="wide")
 st.title("Today's Predictions")
 
 meta = load_current_meta()
-generated = meta.get("generated_at", "no run on record")
+generated = format_ts(meta.get("generated_at", "no run on record"))
 render_banner("predictions", f"generated {generated}")
 
 offers = load_current_offers()

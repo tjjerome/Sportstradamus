@@ -24,6 +24,7 @@ from sportstradamus.analysis import (
     murphy_decomposition,
 )
 from sportstradamus.dashboard_data import (
+    format_ts,
     get_filtered_history,
     get_prediction_history,
     load_history,
@@ -52,7 +53,7 @@ if history.empty:
 
 meta = load_resolve_meta()
 if meta.get("last_run"):
-    st.caption(f"Data last resolved: {meta['last_run']}")
+    st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 
 # --- Sidebar filters (time window first, then league/platform) ---
 st.sidebar.header("Filters")
