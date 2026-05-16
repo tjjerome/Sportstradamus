@@ -13,6 +13,7 @@ from sklearn.metrics import brier_score_loss
 
 from sportstradamus import clv
 from sportstradamus.dashboard_data import (
+    format_ts,
     get_filtered_history,
     load_history,
     load_parlays,
@@ -34,7 +35,7 @@ if history.empty:
 
 meta = load_resolve_meta()
 if meta.get("last_run"):
-    st.caption(f"Data last resolved: {meta['last_run']}")
+    st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 else:
     st.warning(
         "Nightly resolution has not run yet. Run `poetry run reflect` to resolve prediction outcomes."

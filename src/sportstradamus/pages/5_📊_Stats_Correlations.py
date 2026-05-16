@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.dashboard_data import (
+    format_ts,
     load_history,
     load_parlays,
     load_resolve_meta,
@@ -42,7 +43,7 @@ if parlays.empty:
 
 meta = load_resolve_meta()
 if meta.get("last_run"):
-    st.caption(f"Data last resolved: {meta['last_run']}")
+    st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 
 # --- Sidebar: time window first, then league/platform ---
 st.sidebar.header("Filters")

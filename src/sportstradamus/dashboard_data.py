@@ -45,6 +45,26 @@ PRED_BANNER_COLOR = "#1f4e79"  # deep teal
 STATS_BANNER_COLOR = "#2d6a4f"  # forest green
 
 
+def format_ts(ts: str) -> str:
+    """Convert a raw timestamp string to a friendly local-time label.
+
+    Handles UTC ISO strings (with Z suffix), naive local strings, and fallback values.
+    Returns a human-readable format like "May 15 at 10:42 PM".
+    """
+    if not ts or ts in ("no run on record", "no meditate run on record"):
+        return ts
+    ts_norm = ts.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(ts_norm)
+    except ValueError:
+        try:
+            dt = datetime.strptime(ts_norm, "%Y-%m-%d %H:%M")
+        except ValueError:
+            return ts
+    local_dt = dt.astimezone()
+    return local_dt.strftime("%b %-d at %-I:%M %p")
+
+
 @st.cache_data(ttl=3600, show_spinner="Loading prediction history...")
 def load_history():
     """Load prediction history (parquet → legacy pickle fallback).
