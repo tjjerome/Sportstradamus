@@ -122,6 +122,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             legacy=legacy_correlation,
         )
         parlay_df = pd.concat([parlay_df, ud5])
+        ud_offers["Stat"] = ud_offers["Market"]  # preserve gamelog key before remap
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"] = (
             1.78 * ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"]
@@ -145,6 +146,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             legacy=legacy_correlation,
         )
         parlay_df = pd.concat([parlay_df, sl5])
+        sl_offers["Stat"] = sl_offers["Market"]  # preserve gamelog key before remap
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"] = (
             1.78 * 1.78 / sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"]
@@ -162,12 +164,20 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         parlay_df.reset_index(drop=True, inplace=True)
         parlay_df[["Legs", "Misses", "Profit"]] = np.nan
 
+    # Overwrite O/U percentage with raw game total from Archive
+    if not snapshot_offers.empty and "O/U" in snapshot_offers.columns:
+        snapshot_offers["O/U"] = snapshot_offers.apply(
+            lambda r: archive.get_total(r["League"], r["Date"], r["Team"]) or r["O/U"],
+            axis=1,
+        )
+
     write_current_offers(
         snapshot_offers,
         parlay_df,
         sports,
         platforms_run,
         contest_variant=contest_variant,
+        stats_dict=stats,
     )
 
     # --- Append to rolling parlay history ---
