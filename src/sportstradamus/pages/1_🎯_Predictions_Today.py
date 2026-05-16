@@ -153,7 +153,7 @@ def _show_detail(row: pd.Series) -> None:
         cols = st.columns(4)
         for i, c in enumerate(detail):
             val = row[c]
-            cols[i % 4].metric(c, f"{val:.3f}" if isinstance(val, (int, float)) else str(val))
+            cols[i % 4].metric(c, f"{val:.3f}" if isinstance(val, int | float) else str(val))
 
     team_corr = row.get("Team Correlation")
     opp_corr = row.get("Opp Correlation")
