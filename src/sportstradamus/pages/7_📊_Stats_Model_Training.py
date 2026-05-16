@@ -17,7 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard_data import load_model_stats, render_banner
+from sportstradamus.dashboard_data import format_ts, load_model_stats, render_banner
 from sportstradamus.helpers.io import MODEL_STATS_PATH
 
 # The "calibrated" row carries the post-correction performance the model
@@ -196,7 +196,9 @@ st.set_page_config(page_title="Stats — Model Training", layout="wide")
 st.title("Model Training Diagnostics")
 
 mtime = (
-    dt.datetime.fromtimestamp(MODEL_STATS_PATH.stat().st_mtime).isoformat(timespec="seconds")
+    format_ts(
+        dt.datetime.fromtimestamp(MODEL_STATS_PATH.stat().st_mtime).isoformat(timespec="seconds")
+    )
     if MODEL_STATS_PATH.is_file()
     else "no meditate run on record"
 )
