@@ -16,6 +16,7 @@ from sportstradamus.dashboard_data import (
     load_current_history,
     load_current_meta,
     load_current_offers,
+    load_stats,
     render_banner,
 )
 from sportstradamus.helpers.distributions import get_odds
@@ -120,6 +121,8 @@ st.caption(f"Showing **{len(filtered):,}** of {len(offers):,} offers")
 # --- Session state for detail popup navigation ---
 if "detail_stack" not in st.session_state:
     st.session_state.detail_stack = []
+if "corr_nav" not in st.session_state:
+    st.session_state.corr_nav = False
 
 
 # --- Helper functions for charts ---
@@ -215,6 +218,7 @@ def _render_corr_cards(
             idx = _find_corr_row_idx(desc, filtered)
             if idx is not None:
                 st.session_state.detail_stack.append(idx)
+                st.session_state.corr_nav = True
                 st.rerun()
 
 
@@ -264,6 +268,23 @@ def _show_detail(row: pd.Series, history: pd.DataFrame, filtered: pd.DataFrame) 
             & (history["Market"] == stat_key)
         ].sort_values("GameDate")
 
+        if player_hist.empty:
+            # current_history.parquet is populated by prophecize; fall back to
+            # the cached Stats gamelog until the next run generates it.
+            stats_objs = load_stats()
+            stat_obj = stats_objs.get(row.get("League", ""))
+            stat_key = row.get("Stat")
+            if stat_obj and stat_key and hasattr(stat_obj, "short_gamelog"):
+                pcol = stat_obj.log_strings.get("player")
+                dcol = stat_obj.log_strings.get("date")
+                ocol = stat_obj.log_strings.get("opponent")
+                gl = stat_obj.short_gamelog
+                if all([pcol, dcol, ocol]) and stat_key in gl.columns:
+                    pg = gl[gl[pcol] == row["Player"]]
+                    player_hist = pg[[dcol, ocol, stat_key]].rename(
+                        columns={dcol: "GameDate", ocol: "Opponent", stat_key: "StatValue"}
+                    ).sort_values("GameDate")
+
         if not player_hist.empty:
             recent = player_hist.tail(15)
             st.altair_chart(_history_chart(recent, line, "Last 15 games"), use_container_width=True)
@@ -291,11 +312,18 @@ def _show_detail(row: pd.Series, history: pd.DataFrame, filtered: pd.DataFrame) 
             step = 0.5 if dist in ("Gamma", "ZAGamma", "SkewNormal") else 1.0
             xs = np.arange(lo, hi + step, step)
 
-            kw = {
-                k: row.get(k)
-                for k in ("Model R", "Model Alpha", "Model Sigma", "Model Skew", "Gate")
+            _PARAM_MAP = {
+                "Model R": "r",
+                "Model Alpha": "alpha",
+                "Model Sigma": "sigma",
+                "Model Skew": "skew_alpha",
+                "Gate": "gate",
             }
-            kw = {k: v for k, v in kw.items() if pd.notna(v) or (not isinstance(v, float))}
+            kw = {
+                param: row.get(col)
+                for col, param in _PARAM_MAP.items()
+                if pd.notna(row.get(col))
+            }
 
             try:
                 cdf_vals = [get_odds(x, ev, dist, cv, **kw) for x in xs]
@@ -383,7 +411,10 @@ if isinstance(selected, pd.DataFrame):
 else:
     selected_rows = selected or []
 
-if selected_rows:
+if st.session_state.corr_nav:
+    # This rerun was triggered by a "View →" button — keep the stack as-is.
+    st.session_state.corr_nav = False
+elif selected_rows:
     row_data = selected_rows[0]
     player = row_data["Player"]
     market = row_data.get("Market")
