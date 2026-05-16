@@ -305,9 +305,7 @@ def test_legacy_single_point_row_visible_to_at_queries_after_midnight(archive):
     )
 
     # Any at >= midnight returns the legacy observation.
-    assert archive.get_ev(
-        "WNBA", "PTS", "2026-05-08", "P", at=midnight
-    ) == pytest.approx(0.55)
+    assert archive.get_ev("WNBA", "PTS", "2026-05-08", "P", at=midnight) == pytest.approx(0.55)
     assert archive.get_ev(
         "WNBA", "PTS", "2026-05-08", "P", at=midnight + timedelta(hours=12)
     ) == pytest.approx(0.55)
@@ -343,13 +341,9 @@ def test_two_polls_accrue_distinct_observations(archive):
 
 def test_set_team_books_is_append_only(archive):
     """set_team_books no longer wipes prior rows; both observations survive."""
-    archive.set_team_books(
-        "MLB", "Moneyline", "2026-05-08", "NYY", {"pinnacle": 0.62}
-    )
+    archive.set_team_books("MLB", "Moneyline", "2026-05-08", "NYY", {"pinnacle": 0.62})
     archive.write()
-    archive.set_team_books(
-        "MLB", "Moneyline", "2026-05-08", "NYY", {"pinnacle": 0.65}
-    )
+    archive.set_team_books("MLB", "Moneyline", "2026-05-08", "NYY", {"pinnacle": 0.65})
     archive.write()
 
     history = archive.get_ev_history("MLB", "Moneyline", "2026-05-08", "NYY")
@@ -383,9 +377,7 @@ def test_archive_auto_migrates_pre_observed_at_schema(tmp_path, monkeypatch):
         "('WNBA', 'PTS', DATE '2026-05-08', 'P', 'fanduel', 0.52, "
         "  TIMESTAMP '2026-05-08 12:00:00')"
     )
-    con.execute(
-        "INSERT INTO lines VALUES ('WNBA', 'PTS', DATE '2026-05-08', 'P', 22.5)"
-    )
+    con.execute("INSERT INTO lines VALUES ('WNBA', 'PTS', DATE '2026-05-08', 'P', 22.5)")
     con.close()
 
     monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_DB", str(db_path))
