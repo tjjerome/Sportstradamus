@@ -196,7 +196,9 @@ st.set_page_config(page_title="Stats — Model Training", layout="wide")
 st.title("Model Training Diagnostics")
 
 mtime = (
-    format_ts(dt.datetime.fromtimestamp(MODEL_STATS_PATH.stat().st_mtime).isoformat(timespec="seconds"))
+    format_ts(
+        dt.datetime.fromtimestamp(MODEL_STATS_PATH.stat().st_mtime).isoformat(timespec="seconds")
+    )
     if MODEL_STATS_PATH.is_file()
     else "no meditate run on record"
 )
