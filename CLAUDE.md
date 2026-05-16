@@ -23,6 +23,8 @@ to redo the work.
 * Before claiming anything is "done", run `poetry run pytest tests/golden/`,
   `poetry run pytest -m integration` (fake-mode, no network), and
   `poetry run ruff check src/sportstradamus/`. All three must be clean.
+* Dashboard banner/caption timestamp lines show only the timestamp. Do not append
+  feature descriptions, announcements, or other text to them.
 
 ## Hard rules — these caused the last major refactor
 

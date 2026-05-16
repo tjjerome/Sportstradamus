@@ -30,10 +30,7 @@ st.title("Today's Parlay Candidates")
 
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
-render_banner(
-    "predictions",
-    f"generated {generated} · pooled payouts (power 2-3 legs, flex 4+ legs)",
-)
+render_banner("predictions", f"generated {generated}")
 
 parlays = load_current_parlays()
 if parlays.empty:
