@@ -33,7 +33,7 @@ archive = Archive()
 
 
 @line_profiler.profile
-def process_offers(offer_dict, book, stats, *, contest_variant="power", legacy=False):
+def process_offers(offer_dict, book, stats, *, contest_variant="pooled", legacy=False):
     """Score all offers from one platform and return annotated DataFrames.
 
     Iterates every league/market pair in ``offer_dict``, adds DFS lines to

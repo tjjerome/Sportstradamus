@@ -10,11 +10,11 @@ Options:
                                   mixed insurance/power Boost overwrite. Removed
                                   next release; provided as a one-cycle escape
                                   hatch.
-  --contest-variant [power|flex|insurance|rivals]
-                                  Underdog contest variant for parlay scoring.
-                                  Default 'power' matches the displayed Boost
-                                  column historically; 'insurance' matches the
-                                  legacy ranking line.
+  --contest-variant [pooled|power|flex|insurance|rivals]
+                                  Underdog payout pool for parlay scoring.
+                                  Default 'pooled' combines power (2-3 legs) and
+                                  flex (4+ legs) into one pool; single-variant
+                                  names are kept for the pickem-build path.
   --log-level [DEBUG|INFO|WARNING|ERROR]
                                   Verbosity for the structured JSONL log.
   --help                          Show this message and exit.

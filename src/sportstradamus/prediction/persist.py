@@ -23,9 +23,10 @@ from sportstradamus.helpers.io import (
 
 # Display columns kept in current_offers.parquet. Internal model-tuning cols
 # (`Model Param`, `Dist`, `CV`, `Gate`, `Temperature`, `Disp Cal`, `Step`,
-# `Model P`, `Books P`, `K`, `Player position`) are dropped — the dashboard
-# is a renderer, not a re-scorer. `Push P` is kept so the parlay page can
-# show per-leg push probability for integer-line discrete markets.
+# `Books P`, `K`, `Player position`) are dropped — the dashboard is a
+# renderer, not a re-scorer. `Model P` (hit probability), `Model STD`, and
+# the correlation strings are kept so the dashboard can show them in the
+# main table and the per-row detail popup.
 _OFFER_KEEP_COLS = [
     "League",
     "Date",
@@ -37,16 +38,24 @@ _OFFER_KEEP_COLS = [
     "Bet",
     "Line",
     "Boost",
-    "Model EV",
+    "Model P",
     "Model",
     "Books",
+    "Model EV",
+    "Model STD",
     "Push P",
     "Avg 5",
     "Avg H2H",
     "Moneyline",
     "O/U",
     "DVPOA",
+    "Team Correlation",
+    "Opp Correlation",
 ]
+
+# A row with no boost, no model edge, and no book edge carries no signal —
+# it is a scoring artifact and is dropped before the snapshot is written.
+_OFFER_SIGNAL_COLS = ["Boost", "Model", "Books"]
 
 # Internal correlation cols dropped from current_parlays.parquet — these are
 # scoring artifacts not useful for human review. `Indep P` is kept (independence
@@ -59,7 +68,7 @@ def write_current_offers(
     parlays: pd.DataFrame,
     leagues: Iterable[str],
     platforms: Iterable[str],
-    contest_variant: str = "power",
+    contest_variant: str = "pooled",
 ) -> None:
     """Write the current-run snapshot atomically.
 
@@ -93,10 +102,14 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=_OFFER_KEEP_COLS)
     df = offers.copy()
     df = df.replace([np.inf, -np.inf], np.nan)
+    signal_cols = [c for c in _OFFER_SIGNAL_COLS if c in df.columns]
+    if signal_cols:
+        signal = df[signal_cols].fillna(0)
+        df = df.loc[(signal != 0).any(axis=1)]
     keep = [c for c in _OFFER_KEEP_COLS if c in df.columns]
     df = df[keep]
-    if "Model EV" in df.columns:
-        df = df.sort_values("Model EV", ascending=False, ignore_index=True)
+    if "Model" in df.columns:
+        df = df.sort_values("Model", ascending=False, ignore_index=True)
     return df
 
 

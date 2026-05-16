@@ -207,23 +207,29 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         # Book-side probability
         if dist == "SkewNormal":
             offer_df["Books"] = offer_df.apply(
-                lambda x: 1
-                - get_odds(
-                    x["Line"],
-                    x["Books EV"],
-                    dist,
-                    cv=cv,
-                    step=step,
-                    sigma=x["Books EV"] * cv,
-                    skew_alpha=0,
-                    gate=hist_gate or None,
+                lambda x: (
+                    1
+                    - get_odds(
+                        x["Line"],
+                        x["Books EV"],
+                        dist,
+                        cv=cv,
+                        step=step,
+                        sigma=x["Books EV"] * cv,
+                        skew_alpha=0,
+                        gate=hist_gate or None,
+                    )
                 ),
                 axis=1,
             )
         else:
             offer_df["Books"] = offer_df.apply(
-                lambda x: 1
-                - get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None),
+                lambda x: (
+                    1
+                    - get_odds(
+                        x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None
+                    )
+                ),
                 axis=1,
             )
 
@@ -405,9 +411,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             0
         ).infer_objects(copy=False) * (1.78 if platform == "Underdog" else 1)
         offer_df["Boost"] = offer_df.apply(
-            lambda x: (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
-            if not np.isnan(x["Boost_Over"])
-            else x["Boost"],
+            lambda x: (
+                (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
+                if not np.isnan(x["Boost_Over"])
+                else x["Boost"]
+            ),
             axis=1,
         )
 
@@ -448,6 +456,28 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         else:
             offer_df["Model Param"] = offer_df["Model Alpha"]
 
+        # Display-only standard deviation of the blended model distribution.
+        # Approximations on the overall mean are sufficient for the dashboard
+        # detail popup; they do not feed any scoring path.
+        _m = offer_df["Model EV"].to_numpy(dtype=float)
+        if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+            _r = offer_df["Model R"].to_numpy(dtype=float)
+            offer_df["Model STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
+        elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+            _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
+            _sk = (
+                offer_df["Model Skew"].to_numpy(dtype=float)
+                if "Model Skew" in offer_df.columns
+                else np.zeros_like(_sg)
+            )
+            _delta = _sk / np.sqrt(1 + _sk**2)
+            offer_df["Model STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
+        elif "Model Alpha" in offer_df.columns:
+            _a = offer_df["Model Alpha"].to_numpy(dtype=float)
+            offer_df["Model STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
+        else:
+            offer_df["Model STD"] = np.nan
+
         offer_df["Dist"] = dist
         offer_df["CV"] = cv
         offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
@@ -476,6 +506,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 "Player position",
                 "Model EV",
                 "Model Param",
+                "Model STD",
                 "Model P",
                 "Push P",
                 "Books EV",

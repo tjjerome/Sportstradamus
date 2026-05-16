@@ -58,12 +58,12 @@ _HISTORY_RETENTION_DAYS = 365
 )
 @click.option(
     "--contest-variant",
-    type=click.Choice(["power", "flex", "insurance", "rivals"]),
-    default="power",
+    type=click.Choice(["pooled", "power", "flex", "insurance", "rivals"]),
+    default="pooled",
     help=(
-        "Underdog contest variant for parlay scoring. Default 'power' "
-        "matches the displayed Boost column historically; 'insurance' "
-        "matches the legacy ranking line."
+        "Underdog payout pool for parlay scoring. Default 'pooled' "
+        "combines power (2-3 legs) and flex (4+ legs) into one pool; "
+        "single-variant names are kept for the pickem-build path."
     ),
 )
 @click.option(
