@@ -55,10 +55,38 @@ _PUSH_MC_SAMPLES: int = 50_000
 # Kelly sizing denominator: 5% bankroll per unit. Legacy.
 _KELLY_BANKROLL_FRACTION: float = 0.05
 
+# Pooled-variant split: slips of this size or smaller pay on the all-or-nothing
+# ``power`` schedule; larger slips pay on the partial-hit ``flex`` schedule.
+_POWER_MAX_SIZE: int = 3
+
+
+def _pooled_underdog_curve() -> dict[int, list[float]]:
+    """Build the single combined Underdog payout pool keyed by bet size.
+
+    Underdog entries are not separate interchangeable contests: a 2- or
+    3-leg slip pays out on the all-or-nothing ``power`` schedule, while a
+    4+-leg slip pays out on the partial-hit ``flex`` schedule. ``rivals``
+    legs carry no special schedule — they sit in the same pool as any
+    other leg. The legacy ``insurance`` table is an old alias of ``flex``
+    and is intentionally not consulted here.
+    """
+    power = underdog_payouts["power"]
+    flex = underdog_payouts["flex"]
+    curve: dict[int, list[float]] = {}
+    for sz_str, mult in power.items():
+        sz = int(sz_str)
+        if sz <= _POWER_MAX_SIZE:
+            curve[sz] = [float(mult), 0.0]
+    for sz_str, row in flex.items():
+        sz = int(sz_str)
+        if sz > _POWER_MAX_SIZE:
+            curve[sz] = [float(v) for v in row]
+    return curve
+
 
 def _payout_curve_for(
     platform: str,
-    contest_variant: Literal["power", "flex", "insurance", "rivals"],
+    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
     legacy: bool,
 ) -> tuple[list[float], dict[int, list[float]]]:
     """Build the (per-size search list, per-(size,misses) payout table) for a platform.
@@ -67,9 +95,11 @@ def _payout_curve_for(
     indexed ``[bet_size - 2]``). The second drives push-aware EV and the
     display ``Boost`` column (full payout curve indexed by miss count).
 
-    Underdog pulls from ``data/underdog_payouts.json`` per the chosen
-    ``contest_variant``. Other platforms (PrizePicks, Sleeper, ParlayPlay,
-    Chalkboard) keep the legacy single-payout table.
+    Underdog pulls from ``data/underdog_payouts.json``. The default
+    ``"pooled"`` variant builds one combined pool (``power`` for sizes 2-3,
+    ``flex`` for sizes 4+); the legacy single-variant names are still
+    accepted for the ``pickem-build`` path. Other platforms (PrizePicks,
+    Sleeper, ParlayPlay, Chalkboard) keep the legacy single-payout table.
     """
     # Deferred import: legacy shims live in ``correlation.py`` per
     # CONTRIBUTING.md §Package Map; importing at module scope would create a
@@ -97,6 +127,14 @@ def _payout_curve_for(
         lst = legacy_tables[platform]
         full = {i + 2: [lst[i], 0.0] for i in range(len(lst))}
         return lst, full
+
+    if contest_variant == "pooled":
+        full_curve = _pooled_underdog_curve()
+        max_size = max(full_curve.keys())
+        for sz in range(2, max_size + 1):
+            full_curve.setdefault(sz, [0.0])
+        search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
+        return search, full_curve
 
     variant_table = underdog_payouts[contest_variant]
     if contest_variant in ("flex", "insurance"):
@@ -227,7 +265,7 @@ def beam_search_parlays(
     team,
     opp,
     *,
-    contest_variant: Literal["power", "flex", "insurance", "rivals"] = "power",
+    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
 ):
     """Enumerate top parlay combinations via beam search.

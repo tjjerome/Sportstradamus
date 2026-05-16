@@ -675,9 +675,7 @@ class StatsNBA(Stats):
                     pbar.update(1)
                 break
             except Exception as e:
-                logger.warning(
-                    "NBA league endpoint fetch failed (attempt %d/10): %s", i + 1, e
-                )
+                logger.warning("NBA league endpoint fetch failed (attempt %d/10): %s", i + 1, e)
                 playerBios = []
                 shotData = {"rowSet": [], "headers": [{}, {"columnNames": []}]}
                 postup = {"rowSet": [], "headers": []}
@@ -923,9 +921,9 @@ class StatsNBA(Stats):
                     leave=False,
                 ) as pbar:
                     pbar.set_postfix_str("PlayerGameLogs:Base")
-                    nba_gamelog = nba.playergamelogs.PlayerGameLogs(
-                        **params
-                    ).get_normalized_dict()["PlayerGameLogs"]
+                    nba_gamelog = nba.playergamelogs.PlayerGameLogs(**params).get_normalized_dict()[
+                        "PlayerGameLogs"
+                    ]
                     pbar.update(1)
 
                     pbar.set_postfix_str("PlayerGameLogs:Advanced")
@@ -941,9 +939,9 @@ class StatsNBA(Stats):
                     pbar.update(1)
 
                     pbar.set_postfix_str("TeamGameLogs:Base")
-                    teamlog = nba.teamgamelogs.TeamGameLogs(
-                        **(params)
-                    ).get_normalized_dict()["TeamGameLogs"]
+                    teamlog = nba.teamgamelogs.TeamGameLogs(**(params)).get_normalized_dict()[
+                        "TeamGameLogs"
+                    ]
                     pbar.update(1)
 
                     pbar.set_postfix_str("TeamGameLogs:Scoring")
@@ -1050,9 +1048,7 @@ class StatsNBA(Stats):
 
                 break
             except Exception as e:
-                logger.warning(
-                    "NBA gamelog fetch failed (attempt %d/10): %s", i + 1, e
-                )
+                logger.warning("NBA gamelog fetch failed (attempt %d/10): %s", i + 1, e)
                 sleep(0.2)
                 i += 1
 

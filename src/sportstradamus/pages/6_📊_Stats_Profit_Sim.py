@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.dashboard_data import (
+    format_ts,
     get_filtered_history,
     load_history,
     load_resolve_meta,
@@ -30,7 +31,7 @@ if history.empty:
 
 meta = load_resolve_meta()
 if meta.get("last_run"):
-    st.caption(f"Data last resolved: {meta['last_run']}")
+    st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 
 # --- Explode offers and filter to resolved, non-push ---
 df = get_filtered_history(history)

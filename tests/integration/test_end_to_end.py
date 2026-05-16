@@ -102,17 +102,16 @@ def test_pipeline_smoke(
         archive_obj._connection.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
     )
     assert second_poll_rows > first_poll_rows, (
-        f"second confer poll did not append new rows: "
-        f"{first_poll_rows} -> {second_poll_rows}"
+        f"second confer poll did not append new rows: " f"{first_poll_rows} -> {second_poll_rows}"
     )
 
     sample_player = next(iter(pts_df.index))[1] if not pts_df.empty else None
     if sample_player is not None:
         history = archive_obj.get_ev_history("WNBA", "PTS", "2026-05-08", sample_player)
         if not history.empty:
-            assert history["observed_at"].is_monotonic_increasing, (
-                "get_ev_history must return rows ordered by observed_at"
-            )
+            assert history[
+                "observed_at"
+            ].is_monotonic_increasing, "get_ev_history must return rows ordered by observed_at"
 
     # ----- Phase 2: meditate (CLI invoked; ML stubbed; no writes) -----
     from sportstradamus.training import cli as training_cli
@@ -167,7 +166,9 @@ def test_pipeline_smoke(
 
     snapshot_calls: list[dict] = []
 
-    def stub_write_current_offers(offers, parlays, leagues, platforms, contest_variant="power"):
+    def stub_write_current_offers(
+        offers, parlays, leagues, platforms, contest_variant="power", stats_dict=None
+    ):
         snapshot_calls.append(
             {
                 "offers": offers,
