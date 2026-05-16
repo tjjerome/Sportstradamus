@@ -212,9 +212,7 @@ class Archive:
         for table in ("odds", "lines"):
             cols = self._table_columns(table)
             if "observed_at" not in cols:
-                self._connection.execute(
-                    f"ALTER TABLE {table} ADD COLUMN observed_at TIMESTAMP"
-                )
+                self._connection.execute(f"ALTER TABLE {table} ADD COLUMN observed_at TIMESTAMP")
                 if "sample_ts" in cols:
                     self._connection.execute(
                         f"UPDATE {table} SET observed_at = sample_ts "
@@ -294,9 +292,7 @@ class Archive:
             return np.nan
         return self._weighted_book_ev(league, market, rows)
 
-    def get_team_market(
-        self, league, market, date, team, *, at: datetime.datetime | None = None
-    ):
+    def get_team_market(self, league, market, date, team, *, at: datetime.datetime | None = None):
         """Weighted-average team-market EV (non-player, non-moneyline)."""
         rows = self._book_rows(league, market, date, team, at=at)
         if not rows:
