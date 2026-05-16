@@ -37,6 +37,7 @@ pyarrow = "^21.0.0"
 scrapeops-python-requests = "^0.4.7"
 streamlit = ">=1.38"
 plotly = ">=5.18"
+streamlit-aggrid = "^1.2.1.post2"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.prediction.cli:main"

@@ -167,7 +167,7 @@ def test_pipeline_smoke(
 
     snapshot_calls: list[dict] = []
 
-    def stub_write_current_offers(offers, parlays, leagues, platforms, contest_variant="power"):
+    def stub_write_current_offers(offers, parlays, leagues, platforms, contest_variant="power", stats_dict=None):
         snapshot_calls.append(
             {
                 "offers": offers,
