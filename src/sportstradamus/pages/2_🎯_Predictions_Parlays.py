@@ -24,7 +24,9 @@ from sportstradamus.dashboard_detail import (
 )
 
 LEG_COLS = [f"Leg {i}" for i in range(1, 7)]
-TOP_PARLAY_DEFAULT = 50
+# Parlays shown per family cluster per game (no global cap, so every game
+# stays visible regardless of sort order).
+TOP_PER_FAMILY_DEFAULT = 15
 
 # User-facing parlay sort options → (column, ascending).
 SORT_OPTIONS = {
@@ -71,7 +73,15 @@ with col3:
     sort_label = st.selectbox("Sort parlays by", list(SORT_OPTIONS), index=0)
 with col4:
     top_n = st.number_input(
-        "Show top N parlays", min_value=10, max_value=500, value=TOP_PARLAY_DEFAULT, step=10
+        "Top N per family",
+        min_value=5,
+        max_value=100,
+        value=TOP_PER_FAMILY_DEFAULT,
+        step=5,
+        help=(
+            "Caps parlays shown per family cluster within each game. There is "
+            "no global cap, so every game stays visible whatever the sort."
+        ),
     )
 
 view = parlays
@@ -83,8 +93,10 @@ if selected_platforms and "Platform" in view:
 sort_col, ascending = SORT_OPTIONS[sort_label]
 if sort_col in view.columns:
     view = view.sort_values(sort_col, ascending=ascending)
-view = view.head(int(top_n))
-st.caption(f"Showing **{len(view):,}** of {len(parlays):,} parlays")
+st.caption(
+    f"Showing top **{int(top_n)}** parlays per family across "
+    f"{view['Game'].nunique():,} games ({len(parlays):,} total)."
+)
 
 
 def _render_parlay(row: pd.Series, offers: pd.DataFrame) -> None:
@@ -136,9 +148,10 @@ for game, group in view.groupby("Game", sort=False):
                 ["All"] + [labels[f] for f in families],
                 key=f"family_{game}",
                 help=(
-                    "The backend clusters this game's parlays into up to three "
-                    "families by how independent they are from each other. Each "
-                    "name highlights the player who sets that family apart."
+                    "The backend clusters this game's parlays into up to four "
+                    "independence families (auto-selected; one when they aren't "
+                    "separable). Each name highlights the player who most "
+                    "drives that family."
                 ),
             )
         else:
@@ -148,9 +161,13 @@ for game, group in view.groupby("Game", sort=False):
             if fam_choice != "All" and fam_choice != labels[fam]:
                 continue
             fam_group = group.loc[group["Family"] == fam]
-            if len(families) > 1:
-                st.markdown(f"**{labels[fam]}** — {len(fam_group)} parlays")
-            for _, row in fam_group.iterrows():
+            shown = fam_group.head(int(top_n))
+            # Always show the family name — single-family games included.
+            st.markdown(
+                f"**{labels[fam]}** — showing {len(shown)} of "
+                f"{len(fam_group)} parlays"
+            )
+            for _, row in shown.iterrows():
                 _render_parlay(row, offers)
 
 if st.session_state.detail_stack:

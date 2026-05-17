@@ -23,6 +23,82 @@ from sportstradamus.prediction.correlation import (
     _nearest_psd,
     _payout_curve_for,
 )
+from sportstradamus.prediction.parlay import assign_parlay_families
+
+
+def _grouped_c(groups: list[list[int]], intra: float, cross: float) -> np.ndarray:
+    """Leg correlation matrix: ``intra`` within a group, ``cross`` between."""
+    n = sum(len(g) for g in groups)
+    of_group = {leg: gi for gi, g in enumerate(groups) for leg in g}
+    c = np.eye(n)
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                c[i, j] = intra if of_group[i] == of_group[j] else cross
+    return c
+
+
+def test_assign_families_splits_two_independent_groups() -> None:
+    """Two leg blocks with ~0 cross-correlation → exactly two families."""
+    c = _grouped_c([[0, 1, 2], [3, 4, 5]], intra=0.8, cross=0.0)
+    bet_ids = [
+        (0, 1), (0, 2), (1, 2), (0, 1, 2),  # group A
+        (3, 4), (3, 5), (4, 5), (3, 4, 5),  # group B
+    ]
+    labels = assign_parlay_families(bet_ids, c)
+
+    assert len(labels) == 8
+    assert len(set(labels)) == 2
+    assert len(set(labels[:4])) == 1  # all A parlays together
+    assert len(set(labels[4:])) == 1  # all B parlays together
+    assert set(labels[:4]).isdisjoint(set(labels[4:]))
+
+
+def test_assign_families_collapses_when_unseparable() -> None:
+    """No separable structure (every parlay mutually identical) → one family.
+
+    All parlays share the same legs, so every pairwise distance is 0 and the
+    best silhouette cannot clear ``_PARLAY_MIN_SILHOUETTE`` — the honest
+    answer is a single family, the exact degeneracy the audit flagged.
+    """
+    c = _grouped_c([[0, 1, 2]], intra=0.8, cross=0.8)
+    bet_ids = [(0, 1, 2)] * 8
+    labels = assign_parlay_families(bet_ids, c)
+    assert len(labels) == 8
+    assert set(labels) == {1}
+
+
+def test_assign_families_handles_non_psd_without_nan() -> None:
+    """Indefinite C (negative off-diagonals) yields valid labels, no nan."""
+    c = _grouped_c([[0, 1, 2], [3, 4, 5]], intra=0.6, cross=0.0)
+    c[2, 5] = c[5, 2] = -0.95
+    c[1, 4] = c[4, 1] = -0.9
+    assert np.min(np.linalg.eigvalsh(c)) < 0, "test setup invalid"
+    bet_ids = [(0, 1), (0, 2), (1, 2), (3, 4), (3, 5), (4, 5), (0, 3), (2, 5)]
+
+    labels = assign_parlay_families(bet_ids, c)
+    assert len(labels) == 8
+    assert np.all(np.isfinite(labels))
+    assert labels.min() >= 1
+    assert 1 <= len(set(labels)) <= 4
+
+
+def test_assign_families_tiny_input_is_single_family() -> None:
+    """At/under the clustering minimum (5), everything is family 1."""
+    c = np.eye(3)
+    bet_ids = [(0, 1), (1, 2), (0, 2), (0, 1), (1, 2)]
+    labels = assign_parlay_families(bet_ids, c)
+    assert len(labels) == 5
+    assert set(labels) == {1}
+
+
+def test_assign_families_is_deterministic() -> None:
+    """Identical inputs produce identical labels across calls."""
+    c = _grouped_c([[0, 1, 2], [3, 4, 5]], intra=0.8, cross=0.0)
+    bet_ids = [(0, 1), (0, 2), (1, 2), (0, 1, 2), (3, 4), (3, 5), (4, 5), (3, 4, 5)]
+    a = assign_parlay_families(bet_ids, c)
+    b = assign_parlay_families(bet_ids, c)
+    assert np.array_equal(a, b)
 
 
 def test_nearest_psd_repairs_negative_eigenvalue() -> None:
