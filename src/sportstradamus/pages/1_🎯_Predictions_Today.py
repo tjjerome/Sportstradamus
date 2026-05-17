@@ -9,6 +9,7 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy import stats
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from sportstradamus.dashboard_data import (
@@ -19,8 +20,6 @@ from sportstradamus.dashboard_data import (
     load_gamelog,
     render_banner,
 )
-
-from sportstradamus.helpers.distributions import get_odds
 
 st.set_page_config(page_title="Predictions — Today", layout="wide")
 st.title("Today's Predictions")
@@ -367,13 +366,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
         _ZERO_INFLATED = ("ZAGamma", "ZINB")
 
         if pd.notna(dist) and pd.notna(ev) and pd.notna(cv):
-            std = row.get("Model STD") or ev * 0.3
-            lo = max(0.0, ev - 4 * std)
-            hi = ev + 4 * std
             is_continuous = dist in _CONTINUOUS
-            # Use linspace for smooth curves; fine resolution for continuous, coarser for discrete
-            n_points = 300 if is_continuous else 100
-            xs = np.linspace(lo, hi, n_points)
 
             _PARAM_MAP = {
                 "Model R": "r",
@@ -382,57 +375,88 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                 "Model Skew": "skew_alpha",
                 "Gate": "gate",
             }
-            kw = {
+            params = {
                 param: row.get(col)
                 for col, param in _PARAM_MAP.items()
                 if pd.notna(row.get(col))
             }
 
             try:
-                cdf_vals = np.array([get_odds(x, ev, dist, cv, **kw) for x in xs])
-                step = (hi - lo) / (n_points - 1) if n_points > 1 else 1.0
-
                 if is_continuous:
-                    # Use central differences for smooth PDF: pdf[i] = (cdf[i+1] - cdf[i-1]) / (2*step)
-                    pdf_vals = np.zeros_like(cdf_vals)
-                    pdf_vals[1:-1] = (cdf_vals[2:] - cdf_vals[:-2]) / (2 * step) if step > 0 else 0
-                    # Boundary: forward/backward differences
-                    pdf_vals[0] = (cdf_vals[1] - cdf_vals[0]) / step if step > 0 else 0
-                    pdf_vals[-1] = (cdf_vals[-1] - cdf_vals[-2]) / step if step > 0 else 0
-                else:
-                    # Forward difference for discrete PMF
-                    pdf_vals = np.diff(cdf_vals, prepend=0) / step if step > 0 else np.zeros_like(cdf_vals)
+                    # Continuous: use 300 linspace points and scipy PDF
+                    std = row.get("Model STD") or ev * 0.3
+                    lo = max(0.0, ev - 4 * std)
+                    hi = ev + 4 * std
+                    xs = np.linspace(lo, hi, 300)
 
-                y_title = "Density" if is_continuous else "Probability"
+                    if dist == "Gamma":
+                        alpha = params.get("alpha")
+                        scale = ev / alpha if alpha and alpha > 0 else 1
+                        pdf_vals = stats.gamma.pdf(xs, alpha, scale=scale)
+                    elif dist == "ZAGamma":
+                        alpha = params.get("alpha")
+                        gate = params.get("gate", 0)
+                        scale = ev / alpha if alpha and alpha > 0 else 1
+                        pdf_vals = (1 - gate) * stats.gamma.pdf(xs, alpha, scale=scale)
+                    elif dist == "SkewNormal":
+                        sigma = params.get("sigma") or ev * 0.3
+                        skew = params.get("skew_alpha", 0)
+                        pdf_vals = stats.skewnorm.pdf(xs, skew, loc=ev, scale=sigma)
+                    else:
+                        raise ValueError(f"Unknown continuous dist: {dist}")
+
+                    y_title = "Density"
+                else:
+                    # Discrete: only evaluate at integer values
+                    std = row.get("Model STD") or ev * 0.3
+                    hi = int(np.ceil(ev + 4 * std)) + 1
+                    xs = np.arange(0, hi + 1, dtype=int)
+
+                    if dist == "Poisson":
+                        pdf_vals = stats.poisson.pmf(xs, ev)
+                    elif dist == "NegBin":
+                        r = params.get("r")
+                        if r and r > 0:
+                            p = r / (r + ev)
+                            pdf_vals = stats.nbinom.pmf(xs, r, p)
+                        else:
+                            pdf_vals = np.zeros_like(xs, dtype=float)
+                    elif dist == "ZINB":
+                        r = params.get("r")
+                        gate = params.get("gate", 0)
+                        if r and r > 0:
+                            p = r / (r + ev)
+                            pmf = stats.nbinom.pmf(xs, r, p)
+                            pdf_vals = np.where(xs == 0, gate + (1 - gate) * pmf, (1 - gate) * pmf)
+                        else:
+                            pdf_vals = np.zeros_like(xs, dtype=float)
+                    else:
+                        raise ValueError(f"Unknown discrete dist: {dist}")
+
+                    y_title = "Probability"
 
                 df_pdf = pd.DataFrame(
                     {
                         "x": xs,
                         "P": pdf_vals,
-                        "Side": ["Over" if x >= line else "Under" for x in xs],
                     }
                 )
 
-                color_enc = alt.Color(
-                    "Side:N",
-                    scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
-                    legend=alt.Legend(orient="top"),
-                )
                 x_enc = alt.X("x:Q", title=row["Market"])
                 y_enc = alt.Y("P:Q", title=y_title)
 
                 if is_continuous:
+                    # Smooth PDF curve with line and area
                     chart = alt.layer(
                         alt.Chart(df_pdf)
-                        .mark_area(opacity=0.35)
-                        .encode(x=x_enc, y=y_enc, color=color_enc,
-                                tooltip=["x:Q", "P:Q", "Side:N"]),
+                        .mark_area(opacity=0.3, color="#2196F3")
+                        .encode(x=x_enc, y=y_enc, tooltip=["x:Q", "P:Q"]),
                         alt.Chart(df_pdf)
-                        .mark_line(strokeWidth=2)
-                        .encode(x=x_enc, y=y_enc, color=color_enc),
+                        .mark_line(color="#2196F3", strokeWidth=2)
+                        .encode(x=x_enc, y=y_enc),
                     )
                 else:
-                    # Discrete: single color, integer x-axis ticks, wider bars
+                    # Discrete: bars at integer values only
                     x_enc_discrete = alt.X("x:Q", title=row["Market"],
                                            axis=alt.Axis(tickMinStep=1))
                     chart = (
