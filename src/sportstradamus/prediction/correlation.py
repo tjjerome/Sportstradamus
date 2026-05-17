@@ -15,13 +15,11 @@ import importlib.resources as pkg_resources
 import re
 import warnings
 from itertools import combinations
-from math import comb
 from typing import Literal
 
 import line_profiler
 import numpy as np
 import pandas as pd
-from scipy.cluster.hierarchy import fcluster, linkage
 from tqdm import tqdm
 
 from sportstradamus import data
@@ -31,6 +29,7 @@ from sportstradamus.prediction.parlay import (
     _expected_payout_with_pushes,
     _nearest_psd,
     _payout_curve_for,
+    assign_parlay_families,
     beam_search_parlays,
 )
 from sportstradamus.spiderLogger import logger
@@ -79,13 +78,9 @@ _DISPLAY_MODEL_EV_FLOOR: float = 0.95
 _DISPLAY_CORR_FLOOR: float = 0.05
 _DISPLAY_BOOKS_EV_FLOOR: float = 0.9
 
-# Family clustering on parlay survivors: number of clusters and the upper clamp
-# on cross-bet correlation so 1 - rho is strictly positive for Ward linkage.
-_PARLAY_FAMILY_CLUSTERS: int = 3
-_PARLAY_RHO_CLIP_HI: float = 0.999
-
 # Top-N retained per sort key (Model EV / Rec Bet / Fun) before family
 # clustering. Three sort views deduped → up to ~3× this many survivors.
+# (Family clustering itself lives in ``parlay.assign_parlay_families``.)
 _PARLAY_TOP_N_PER_SORT: int = 300
 
 
@@ -563,33 +558,9 @@ def find_correlation(
                         .sort_values("Model EV", ascending=False)
                     )
 
-                    if len(df5) > 5:
-                        rho_matrix = np.zeros([len(df5), len(df5)])
-                        bets = df5["Bet ID"].to_list()
-                        for i, j in tqdm(
-                            combinations(range(len(df5)), 2),
-                            desc="Filtering...",
-                            leave=False,
-                            total=comb(len(df5), 2),
-                        ):
-                            bet1 = bets[i]
-                            bet2 = bets[j]
-                            rho_cross = np.mean(C[np.ix_(bet1, bet2)])
-                            rho_bet1 = np.mean(C[np.ix_(bet1, bet1)])
-                            rho_bet2 = np.mean(C[np.ix_(bet2, bet2)])
-
-                            rho_matrix[i, j] = np.clip(
-                                rho_cross / np.sqrt(rho_bet1) / np.sqrt(rho_bet2),
-                                -1,
-                                _PARLAY_RHO_CLIP_HI,
-                            )
-
-                        X = np.concatenate([row[i + 1 :] for i, row in enumerate(1 - rho_matrix)])
-                        Z = linkage(X, "ward")
-                        df5["Family"] = fcluster(Z, _PARLAY_FAMILY_CLUSTERS, criterion="maxclust")
-
-                    else:
-                        df5["Family"] = 1
+                    df5["Family"] = assign_parlay_families(
+                        df5["Bet ID"].to_list(), C
+                    )
 
                     parlay_df = pd.concat(
                         [parlay_df, df5.drop(columns="Bet ID")], ignore_index=True
