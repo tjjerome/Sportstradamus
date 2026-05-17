@@ -7,7 +7,6 @@ heuristic — all token-free, derived at render time from data already on disk.
 """
 
 import hashlib
-import math
 from collections import Counter, defaultdict
 
 import altair as alt
@@ -17,6 +16,7 @@ import streamlit as st
 from scipy import stats
 
 from sportstradamus.dashboard_data import GAMELOG_SCHEMA, load_gamelog
+from sportstradamus.helpers import stat_map
 
 # Distribution families, mirrored from the prediction pipeline.
 _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
@@ -24,11 +24,16 @@ _ZERO_INFLATED = ("ZAGamma", "ZINB")
 
 # Map a market name to a coarse stat category so the phrase bank can pick a
 # verb that fits the stat ("dominates the glass" only makes sense for boards).
+# Needles cover every leg vocabulary in play: pretty names ("3-Pointers
+# Made"), Sleeper snake keys ("threes_made"), and canonical codes ("FG3M").
 _STAT_CATEGORY = {
-    "scoring": ("point", "3-pt", "3pt", "three", "pass yd", "pass tds", "rush yd", "rec yd", "goal"),
-    "boards": ("rebound", "board"),
-    "playmaking": ("assist", "playmak"),
-    "k's": ("strikeout", "pitcher k", "ks"),
+    "scoring": (
+        "point", "pts", "3-p", "3pt", "three", "fg3", "fg ", "fga", "fgm",
+        "pass yd", "pass td", "rush yd", "rec yd", "goal", "shots",
+    ),
+    "boards": ("rebound", "reb", "board", "glass"),
+    "playmaking": ("assist", "ast", "playmak"),
+    "k's": ("strikeout", "pitcher k", "ks", "_k", "saves"),
 }
 
 # Deterministic, offline phrase bank keyed by (direction, stat_category).
@@ -47,9 +52,6 @@ _PHRASES = {
     ("Under", "production"): ["{p} struggles", "{p} no-shows", "{p} quiet night"],
 }
 
-# Neutral fallbacks when a family has no player that distinguishes it from the
-# other families of the same game.
-_NEUTRAL_PHRASES = ["Mixed bag", "Long-shot stack", "Spread-out value", "Grab bag"]
 
 
 def init_detail_state() -> None:
@@ -196,14 +198,40 @@ def parse_leg(leg: str) -> dict | None:
     return None
 
 
-def find_offer_idx(parsed: dict, offers: pd.DataFrame) -> int | None:
-    """Find the offers-frame index for a parsed leg, or ``None`` if it moved."""
+def _candidate_markets(market: str, platform: str | None) -> set[str]:
+    """Canonical-code aliases for a leg's display market under a platform.
+
+    Parlay legs carry the platform's source/display market label (Underdog
+    "Pts + Rebs + Asts", Sleeper "pts_reb_ast") while ``current_offers.parquet``
+    stores the canonical code ("PRA"). ``stat_map[platform]`` is the codebase's
+    display→code table; the space-stripped lookup covers Underdog's spaced
+    names ("Pts + Rebs + Asts" vs the table key "Pts+Rebs+Asts").
+    """
+    out = {market}
+    pmap = stat_map.get(platform, {}) if platform else {}
+    if market in pmap:
+        out.add(pmap[market])
+    nospace = market.replace(" ", "")
+    if nospace in pmap:
+        out.add(pmap[nospace])
+    return out
+
+
+def find_offer_idx(
+    parsed: dict, offers: pd.DataFrame, platform: str | None = None
+) -> int | None:
+    """Find the offers-frame index for a parsed leg, or ``None`` if it moved.
+
+    ``platform`` is the parlay's book; it lets the leg's display market be
+    translated to the canonical code stored in the offers snapshot.
+    """
     if not parsed or offers.empty:
         return None
+    markets = _candidate_markets(parsed["Market"], platform)
     mask = (
         (offers["Player"] == parsed["Player"])
         & (offers["Bet"] == parsed["Bet"])
-        & (offers["Market"] == parsed["Market"])
+        & (offers["Market"].isin(markets))
         & (pd.to_numeric(offers["Line"], errors="coerce") == parsed["Line"])
     )
     matches = offers.index[mask]
@@ -228,66 +256,92 @@ def _phrase(player: str, family: float, direction: str, category: str) -> str:
 
 
 def family_labels_for_game(game_group: pd.DataFrame) -> dict[float, str]:
-    """Map each family in one game's parlays to a distinctive headline.
+    """Map each family in one game's parlays to a fun, distinct headline.
 
-    The headliner is the player most *distinctive* to a family relative to the
-    game's other families (TF-IDF over families), so a player who appears in
-    every family scores ``log(1) = 0`` and is never chosen.  Headliners are
-    assigned greedily and uniquely so each family gets its own name.
+    "Star carousel": rank the game's players by stardom — number of distinct
+    stat markets they're offered in (stars get props everywhere), tie-broken by
+    how big their biggest line is relative to that market (stars carry high
+    lines).  Hand the #1 star to the family they most drive (most legs), the
+    #2 star to the next family, and so on, so every family gets a recognizable,
+    different headliner.  Families left after the stars are exhausted fall
+    through to their own next-best player — never a neutral placeholder.
     """
     leg_cols = [c for c in game_group.columns if c.startswith("Leg ")]
     families = sorted(game_group["Family"].dropna().unique())
     if not families:
         return {}
 
-    # Per family: player -> count, and player -> [(bet, market), ...].
-    fam_counts: dict[float, Counter] = {f: Counter() for f in families}
-    fam_player_legs: dict[float, dict[str, list]] = {
-        f: defaultdict(list) for f in families
-    }
-    players_in: dict[str, set] = defaultdict(set)
+    # Per (family, player): list of (bet, market, line) legs.
+    fam_legs: dict[float, dict[str, list]] = {f: defaultdict(list) for f in families}
+    player_markets: dict[str, set] = defaultdict(set)
+    player_total: Counter = Counter()
+    market_lines: dict[str, list] = defaultdict(list)
 
     for _, row in game_group.iterrows():
         fam = row["Family"]
-        if fam not in fam_counts:
+        if fam not in fam_legs:
             continue
         for col in leg_cols:
-            parsed = parse_leg(row.get(col))
-            if not parsed:
+            p = parse_leg(row.get(col))
+            if not p:
                 continue
-            player = parsed["Player"]
-            fam_counts[fam][player] += 1
-            fam_player_legs[fam][player].append((parsed["Bet"], parsed["Market"]))
-            players_in[player].add(fam)
+            fam_legs[fam][p["Player"]].append((p["Bet"], p["Market"], p["Line"]))
+            player_markets[p["Player"]].add(p["Market"])
+            player_total[p["Player"]] += 1
+            market_lines[p["Market"]].append(p["Line"])
 
-    n_fam = len(families)
+    if not player_total:
+        return dict.fromkeys(families, "Mixed bag")
 
-    # Candidate (score, family, player) tuples; idf zeroes out ubiquitous players.
-    candidates = []
-    for fam in families:
-        for player, freq in fam_counts[fam].items():
-            idf = math.log(n_fam / len(players_in[player])) if players_in[player] else 0.0
-            score = freq * idf
-            if score > 0:
-                candidates.append((score, fam, player))
-    candidates.sort(key=lambda t: (-t[0], str(t[1]), t[2]))
+    def line_pct(market: str, line: float) -> float:
+        vals = market_lines[market]
+        return sum(1 for v in vals if v <= line) / len(vals) if vals else 0.0
+
+    # Stardom: distinct-market breadth, then biggest line vs its market,
+    # then raw volume — all free proxies for "this is a featured player".
+    def stardom(player: str) -> tuple:
+        best_pct = max(
+            (
+                line_pct(mk, ln)
+                for fam in families
+                for _, mk, ln in fam_legs[fam].get(player, [])
+            ),
+            default=0.0,
+        )
+        return (len(player_markets[player]), best_pct, player_total[player], player)
+
+    ranked = sorted(player_total, key=stardom, reverse=True)
 
     labels: dict[float, str] = {}
     taken: set[str] = set()
-    for score, fam, player in candidates:
-        if fam in labels or player in taken:
-            continue
-        legs = fam_player_legs[fam][player]
-        over = sum(1 for b, _ in legs if b == "Over")
+
+    def name(fam: float, player: str) -> str:
+        legs = fam_legs[fam][player]
+        over = sum(1 for b, _, _ in legs if b == "Over")
         direction = "Over" if over * 2 >= len(legs) else "Under"
-        category = Counter(_stat_category(m) for _, m in legs).most_common(1)[0][0]
-        labels[fam] = _phrase(player, fam, direction, category)
+        category = Counter(_stat_category(m) for _, m, _ in legs).most_common(1)[0][0]
+        return _phrase(player, fam, direction, category)
+
+    # #1 star → family they most drive, #2 → next family, ...
+    for player in ranked:
+        if len(labels) == len(families):
+            break
+        cands = [f for f in families if f not in labels and player in fam_legs[f]]
+        if not cands:
+            continue
+        fam = max(cands, key=lambda f: (len(fam_legs[f][player]), -f))
+        labels[fam] = name(fam, player)
         taken.add(player)
 
-    # Families with no distinctive player fall back to neutral phrases.
-    for i, fam in enumerate(families):
-        if fam not in labels:
-            labels[fam] = _NEUTRAL_PHRASES[i % len(_NEUTRAL_PHRASES)]
+    # Stars exhausted: give the family its own best remaining (then any) player.
+    for fam in families:
+        if fam in labels:
+            continue
+        pool = sorted(fam_legs[fam], key=stardom, reverse=True)
+        pick = next((p for p in pool if p not in taken), pool[0] if pool else None)
+        labels[fam] = name(fam, pick) if pick else "Mixed bag"
+        if pick:
+            taken.add(pick)
     return labels
 
 

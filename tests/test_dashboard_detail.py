@@ -52,32 +52,72 @@ def test_find_offer_idx_hit_and_miss():
     assert find_offer_idx(None, offers) is None
 
 
-def test_family_labels_distinct_and_deterministic():
-    # "Common Star" appears in BOTH families and must never be the headliner.
-    # Each family has its own distinctive player.
+def test_find_offer_idx_resolves_platform_market_codes():
+    # Real data: parlay legs carry the platform's display label, but
+    # current_offers.parquet stores the canonical code. find_offer_idx must
+    # translate via stat_map[platform], including the spaced-name fallback.
+    offers = pd.DataFrame(
+        {
+            "Player": ["Ayo Dosunmu", "Victor Wembanyama", "Jokic"],
+            "Bet": ["Over", "Under", "Over"],
+            "Market": ["PRA", "FGA", "FG3M"],
+            "Line": [16.5, 17.5, 2.5],
+        }
+    )
+    # Underdog: spaced display name -> "Pts+Rebs+Asts" -> PRA
+    assert find_offer_idx(
+        parse_leg("Ayo Dosunmu Over 16.5 Pts + Rebs + Asts - 75%, 1.0x"),
+        offers,
+        "Underdog",
+    ) == 0
+    # Underdog: "FG Attempted" -> FGA
+    assert find_offer_idx(
+        parse_leg("Victor Wembanyama Under 17.5 FG Attempted - 83%, 1.0x"),
+        offers,
+        "Underdog",
+    ) == 1
+    # Sleeper: snake key "threes_made" -> FG3M
+    assert find_offer_idx(
+        parse_leg("Jokic Over 2.5 threes_made - 50%, 1.0x"),
+        offers,
+        "Sleeper",
+    ) == 2
+
+
+def test_family_labels_star_carousel_distinct_and_deterministic():
+    # Stars appear in BOTH families (they're the high-edge core). The scheme
+    # must headline real stars — not the lone-prop benchwarmer — and give each
+    # family a different star. Star Wing has the most markets (3) and biggest
+    # lines, Other Star has 2 markets; Bench Guy has one tiny prop.
     game = pd.DataFrame(
         {
             "Family": [1.0, 1.0, 2.0, 2.0],
             "Leg 1": [
-                "Common Star Over 25.5 Points - 60%, 1.0x",
-                "Common Star Over 25.5 Points - 60%, 1.0x",
-                "Common Star Over 25.5 Points - 60%, 1.0x",
-                "Common Star Over 25.5 Points - 60%, 1.0x",
+                "Star Wing Over 28.5 Points - 60%, 1.0x",
+                "Star Wing Over 9.5 Rebounds - 58%, 1.0x",
+                "Star Wing Over 28.5 Points - 60%, 1.0x",
+                "Star Wing Over 6.5 Assists - 57%, 1.0x",
             ],
             "Leg 2": [
-                "Alpha Guard Over 8.5 Assists - 58%, 1.0x",
-                "Alpha Guard Over 8.5 Assists - 58%, 1.0x",
-                "Beta Big Under 7.5 Rebounds - 57%, 1.0x",
-                "Beta Big Under 7.5 Rebounds - 57%, 1.0x",
+                "Other Star Over 22.5 Points - 59%, 1.0x",
+                "Other Star Over 7.5 Assists - 55%, 1.0x",
+                "Other Star Over 22.5 Points - 59%, 1.0x",
+                "Other Star Over 7.5 Assists - 55%, 1.0x",
+            ],
+            "Leg 3": [
+                "Bench Guy Under 3.5 Rebounds - 70%, 1.0x",
+                "Bench Guy Under 3.5 Rebounds - 70%, 1.0x",
+                None,
+                None,
             ],
         }
     )
     labels = family_labels_for_game(game)
     assert set(labels) == {1.0, 2.0}
-    assert "Common Star" not in labels[1.0]
-    assert "Common Star" not in labels[2.0]
-    assert "Alpha Guard" in labels[1.0]
-    assert "Beta Big" in labels[2.0]
-    assert labels[1.0] != labels[2.0]
+    blob = " ".join(labels.values())
+    assert "Star Wing" in blob
+    assert "Other Star" in blob
+    assert "Bench Guy" not in blob  # benchwarmer must never headline
+    assert labels[1.0] != labels[2.0]  # each family distinct
     # Deterministic across calls.
     assert family_labels_for_game(game) == labels
