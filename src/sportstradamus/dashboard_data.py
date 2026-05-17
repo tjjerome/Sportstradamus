@@ -41,6 +41,16 @@ LEAGUE_CLASSES = {
     "NHL": StatsNHL,
 }
 
+# Column names that differ across league gamelog parquets.
+# Keys: player, date, opp (None if not available), home (None if not available).
+GAMELOG_SCHEMA = {
+    "NBA":  {"file": "nba_gamelog.parquet",  "player": "PLAYER_NAME",         "date": "GAME_DATE", "opp": "OPP",      "home": "HOME"},
+    "WNBA": {"file": "wnba_gamelog.parquet", "player": "PLAYER_NAME",         "date": "GAME_DATE", "opp": "OPP",      "home": "HOME"},
+    "MLB":  {"file": "mlb_gamelog.parquet",  "player": "playerName",          "date": "gameDate",  "opp": "opponent", "home": "home"},
+    "NHL":  {"file": "nhl_gamelog.parquet",  "player": "playerName",          "date": "gameDate",  "opp": "opponent", "home": "home"},
+    "NFL":  {"file": "nfl_gamelog.parquet",  "player": "player display name", "date": None,        "opp": None,       "home": None},
+}
+
 # Banner accent colors used by the two visual sections.
 PRED_BANNER_COLOR = "#1f4e79"  # deep teal
 STATS_BANNER_COLOR = "#2d6a4f"  # forest green
@@ -120,6 +130,20 @@ def load_current_parlays() -> pd.DataFrame:
 def load_current_history() -> pd.DataFrame:
     """Per-game player stat history for today's offers, written by `prophecize`."""
     return read_parquet_safe(CURRENT_HISTORY_PATH)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_gamelog(league: str) -> pd.DataFrame:
+    """Load the full season gamelog parquet for a league.
+
+    Returns an empty DataFrame if the league is unrecognised or the file is
+    missing.  Callers are responsible for filtering to the relevant player and
+    stat column.
+    """
+    schema = GAMELOG_SCHEMA.get(league)
+    if schema is None:
+        return pd.DataFrame()
+    return read_parquet_safe(pkg_resources.files(data) / schema["file"])
 
 
 @st.cache_data(ttl=3600)

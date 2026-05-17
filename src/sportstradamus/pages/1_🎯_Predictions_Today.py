@@ -12,13 +12,14 @@ import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from sportstradamus.dashboard_data import (
+    GAMELOG_SCHEMA,
     format_ts,
-    load_current_history,
     load_current_meta,
     load_current_offers,
-    load_stats,
+    load_gamelog,
     render_banner,
 )
+
 from sportstradamus.helpers.distributions import get_odds
 
 st.set_page_config(page_title="Predictions — Today", layout="wide")
@@ -35,8 +36,6 @@ if offers.empty:
         "generate `current_offers.parquet`."
     )
     st.stop()
-
-history = load_current_history()
 
 # Hot-row highlight thresholds
 EV_HOT_THRESHOLD = 1.02
@@ -128,24 +127,28 @@ if "corr_nav" not in st.session_state:
 # --- Helper functions for charts ---
 
 
-def _history_chart(df: pd.DataFrame, line: float, title: str) -> alt.Chart:
-    """Render bar chart of game history with dotted line at betting threshold."""
+def _history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
+    """Bar chart of recent games with a dotted betting-line rule.
+
+    ``df`` must have columns ``Label`` (ordered x-axis string),
+    ``StatValue`` (y), and ``Hit`` (bool).  The most-recent game should be
+    last so the bars read left-to-right chronologically.
+    """
     df = df.copy()
-    df["color"] = np.where(df["StatValue"] >= line, "Over", "Under")
+    df["color"] = np.where(df["Hit"], "Hit", "Miss")
     bars = (
         alt.Chart(df)
         .mark_bar()
         .encode(
-            x=alt.X("GameDate:T", title="Date", axis=alt.Axis(labelAngle=-45)),
+            x=alt.X("Label:N", sort=None, title="", axis=alt.Axis(labelAngle=-40)),
             y=alt.Y("StatValue:Q", title=""),
             color=alt.Color(
                 "color:N",
-                scale=alt.Scale(domain=["Over", "Under"], range=["#4CAF50", "#F44336"]),
+                scale=alt.Scale(domain=["Hit", "Miss"], range=["#4CAF50", "#F44336"]),
                 legend=None,
             ),
-            tooltip=["GameDate:T", "Opponent:N", "StatValue:Q"],
+            tooltip=["Label:N", "StatValue:Q"],
         )
-        .properties(title=title)
     )
     rule = (
         alt.Chart(pd.DataFrame({"Line": [line]}))
@@ -223,7 +226,7 @@ def _render_corr_cards(
 
 
 @st.dialog("Offer detail", width="large")
-def _show_detail(row: pd.Series, history: pd.DataFrame, filtered: pd.DataFrame) -> None:
+def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     """Render detailed view of a single offer with charts and correlations."""
     # Back button for navigation stack
     if len(st.session_state.detail_stack) > 1:
@@ -260,56 +263,83 @@ def _show_detail(row: pd.Series, history: pd.DataFrame, filtered: pd.DataFrame) 
     tab1, tab2, tab3 = st.tabs(["📈 History", "〜 Model", "🔗 Correlated"])
 
     with tab1:
-        stat_key = row.get("Stat", row.get("Market"))
+        stat_key = row.get("Market")
         line = row.get("Line")
-        player_hist = history.loc[
-            (history["Player"] == row["Player"])
-            & (history["League"] == row["League"])
-            & (history["Market"] == stat_key)
-        ].sort_values("GameDate")
+        league = row.get("League", "")
+        opponent = row.get("Opponent", "")
+        schema = GAMELOG_SCHEMA.get(league, {})
 
-        if player_hist.empty:
-            # current_history.parquet is populated by prophecize; fall back to
-            # the cached Stats gamelog until the next run generates it.
-            stats_objs = load_stats()
-            stat_obj = stats_objs.get(row.get("League", ""))
-            stat_key = row.get("Stat")
-            if stat_obj and stat_key and hasattr(stat_obj, "short_gamelog"):
-                pcol = stat_obj.log_strings.get("player")
-                dcol = stat_obj.log_strings.get("date")
-                ocol = stat_obj.log_strings.get("opponent")
-                gl = stat_obj.short_gamelog
-                if all([pcol, dcol, ocol]) and stat_key in gl.columns:
-                    pg = gl[gl[pcol] == row["Player"]]
-                    player_hist = pg[[dcol, ocol, stat_key]].rename(
-                        columns={dcol: "GameDate", ocol: "Opponent", stat_key: "StatValue"}
-                    ).sort_values("GameDate")
+        hist_df = pd.DataFrame()
+        if stat_key and schema:
+            gl = load_gamelog(league)
+            pcol = schema["player"]
+            dcol = schema.get("date")
+            ocol = schema.get("opp")
+            hcol = schema.get("home")
 
-        if not player_hist.empty:
-            recent = player_hist.tail(15)
-            st.altair_chart(_history_chart(recent, line, "Last 15 games"), use_container_width=True)
+            if not gl.empty and pcol in gl.columns and stat_key in gl.columns:
+                pg = gl[gl[pcol] == row["Player"]].copy()
+                if dcol and dcol in pg.columns:
+                    pg = pg.sort_values(dcol)
+                pg = pg.tail(10)
 
-            h2h = player_hist.loc[player_hist["Opponent"] == row["Opponent"]]
-            if not h2h.empty:
-                st.altair_chart(
-                    _history_chart(h2h, line, f"vs {row['Opponent']}"), use_container_width=True
-                )
-            else:
-                st.caption(f"No H2H games vs {row['Opponent']} in current season window.")
-        else:
-            st.caption("No history available.")
+                # Build x-axis label: "@OPP, MM/DD" away, "OPP, MM/DD" home
+                if ocol and hcol and ocol in pg.columns and hcol in pg.columns:
+                    opp_prefix = np.where(pg[hcol].astype(bool), "", "@")
+                    labels = opp_prefix + pg[ocol].astype(str)
+                elif ocol and ocol in pg.columns:
+                    labels = pg[ocol].astype(str)
+                else:
+                    labels = pd.Series(
+                        [f"Wk {w}" for w in pg["week"]] if "week" in pg.columns
+                        else [str(i + 1) for i in range(len(pg))],
+                        index=pg.index,
+                    )
+
+                if dcol and dcol in pg.columns:
+                    dates = pd.to_datetime(pg[dcol]).dt.strftime("%m/%d")
+                    labels = labels + ", " + dates
+
+                hist_df = pd.DataFrame({
+                    "Label": labels.values,
+                    "StatValue": pg[stat_key].values,
+                    "Hit": pg[stat_key].values >= line,
+                    "Opponent": pg[ocol].values if ocol and ocol in pg.columns else "",
+                })
+
+        # Radio filter for H2H if not NFL and opponent data exists
+        display_df = hist_df
+        if not hist_df.empty and league != "NFL" and "Opponent" in hist_df.columns and opponent:
+            filter_opt = st.radio(
+                "Filter by opponent:",
+                options=["All games", f"vs {opponent}"],
+                horizontal=True,
+                key=f"h2h_filter_{id(row)}",
+            )
+            if filter_opt == f"vs {opponent}":
+                display_df = hist_df[hist_df["Opponent"] == opponent]
+                if display_df.empty:
+                    st.caption(f"No history vs {opponent} in recent games.")
+
+        if not display_df.empty:
+            st.altair_chart(_history_chart(display_df, line), use_container_width=True)
+        elif hist_df.empty:
+            st.caption("No history available for this player/stat.")
 
     with tab2:
         dist = row.get("Dist")
         ev = row.get("Model EV")
         cv = row.get("CV")
         line = row.get("Line")
+        _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
+        _ZERO_INFLATED = ("ZAGamma", "ZINB")
 
         if pd.notna(dist) and pd.notna(ev) and pd.notna(cv):
             std = row.get("Model STD") or ev * 0.3
             lo = max(0.0, ev - 4 * std)
             hi = ev + 4 * std
-            step = 0.5 if dist in ("Gamma", "ZAGamma", "SkewNormal") else 1.0
+            is_continuous = dist in _CONTINUOUS
+            step = 0.1 if is_continuous else 1.0
             xs = np.arange(lo, hi + step, step)
 
             _PARAM_MAP = {
@@ -329,35 +359,68 @@ def _show_detail(row: pd.Series, history: pd.DataFrame, filtered: pd.DataFrame) 
                 cdf_vals = [get_odds(x, ev, dist, cv, **kw) for x in xs]
                 pmf_vals = np.diff([0.0, *cdf_vals])
                 xs_mid = xs[: len(pmf_vals)]
+                # Normalise continuous values to probability density
+                y_vals = pmf_vals / step if is_continuous else pmf_vals
+                y_title = "Density" if is_continuous else "Probability"
 
                 df_pdf = pd.DataFrame(
                     {
                         "x": xs_mid,
-                        "P": pmf_vals,
+                        "P": y_vals,
                         "Side": ["Over" if x >= line else "Under" for x in xs_mid],
                     }
                 )
 
-                chart = (
-                    alt.Chart(df_pdf)
-                    .mark_bar(size=max(4, 400 // max(len(xs_mid), 1)))
-                    .encode(
-                        x=alt.X("x:Q", title=row["Market"]),
-                        y=alt.Y("P:Q", title="Probability"),
-                        color=alt.Color(
-                            "Side:N",
-                            scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
-                            legend=alt.Legend(orient="top"),
-                        ),
-                        tooltip=["x:Q", "P:Q", "Side:N"],
-                    )
+                color_enc = alt.Color(
+                    "Side:N",
+                    scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
+                    legend=alt.Legend(orient="top"),
                 )
-                rule = (
+                x_enc = alt.X("x:Q", title=row["Market"])
+                y_enc = alt.Y("P:Q", title=y_title)
+
+                if is_continuous:
+                    chart = alt.layer(
+                        alt.Chart(df_pdf)
+                        .mark_area(opacity=0.35)
+                        .encode(x=x_enc, y=y_enc, color=color_enc,
+                                tooltip=["x:Q", "P:Q", "Side:N"]),
+                        alt.Chart(df_pdf)
+                        .mark_line(strokeWidth=2)
+                        .encode(x=x_enc, y=y_enc, color=color_enc),
+                    )
+                else:
+                    chart = (
+                        alt.Chart(df_pdf)
+                        .mark_bar(size=max(4, 400 // max(len(xs_mid), 1)))
+                        .encode(x=x_enc, y=y_enc, color=color_enc,
+                                tooltip=["x:Q", "P:Q", "Side:N"])
+                    )
+
+                betting_line = (
                     alt.Chart(pd.DataFrame({"Line": [line]}))
                     .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
                     .encode(x="Line:Q")
                 )
-                st.altair_chart(chart + rule, use_container_width=True)
+                combined = chart + betting_line
+
+                # For zero-inflated dists show a vertical rule at x=0 annotated
+                # with the zero-mass probability so the point mass is visible.
+                gate = kw.get("gate")
+                if dist in _ZERO_INFLATED and gate and gate > 0:
+                    zero_rule = (
+                        alt.Chart(pd.DataFrame({"x": [0], "label": [f"P(0)={gate:.1%}"]}))
+                        .mark_rule(color="#FFC107", strokeWidth=1.5)
+                        .encode(x="x:Q")
+                    )
+                    zero_label = (
+                        alt.Chart(pd.DataFrame({"x": [0], "label": [f"P(0)={gate:.1%}"]}))
+                        .mark_text(align="left", dx=4, dy=-8, color="#FFC107", fontSize=11)
+                        .encode(x="x:Q", y=alt.value(0), text="label:N")
+                    )
+                    combined = combined + zero_rule + zero_label
+
+                st.altair_chart(combined, use_container_width=True)
             except Exception as e:
                 st.error(f"Error computing distribution: {e}")
         else:
@@ -429,7 +492,7 @@ elif selected_rows:
 
 if st.session_state.detail_stack:
     row_idx = st.session_state.detail_stack[-1]
-    _show_detail(filtered.loc[row_idx], history, filtered)
+    _show_detail(filtered.loc[row_idx], filtered)
 else:
     st.caption("Click a row to see charts and correlated bets.")
 
