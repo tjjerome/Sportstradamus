@@ -391,16 +391,22 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
 
                     if dist == "Gamma":
                         alpha = params.get("alpha")
-                        scale = ev / alpha if alpha and alpha > 0 else 1
+                        if not alpha or alpha <= 0:
+                            raise ValueError("Gamma requires Model Alpha > 0")
+                        scale = ev / alpha
                         pdf_vals = stats.gamma.pdf(xs, alpha, scale=scale)
                     elif dist == "ZAGamma":
                         alpha = params.get("alpha")
-                        gate = params.get("gate", 0)
-                        scale = ev / alpha if alpha and alpha > 0 else 1
+                        if not alpha or alpha <= 0:
+                            raise ValueError("ZAGamma requires Model Alpha > 0")
+                        gate = params.get("gate") or 0
+                        scale = ev / alpha
                         pdf_vals = (1 - gate) * stats.gamma.pdf(xs, alpha, scale=scale)
                     elif dist == "SkewNormal":
-                        sigma = params.get("sigma") or ev * 0.3
-                        skew = params.get("skew_alpha", 0)
+                        sigma = params.get("sigma")
+                        if not sigma or sigma <= 0:
+                            sigma = ev * 0.3
+                        skew = params.get("skew_alpha") or 0
                         pdf_vals = stats.skewnorm.pdf(xs, skew, loc=ev, scale=sigma)
                     else:
                         raise ValueError(f"Unknown continuous dist: {dist}")
@@ -416,20 +422,18 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                         pdf_vals = stats.poisson.pmf(xs, ev)
                     elif dist == "NegBin":
                         r = params.get("r")
-                        if r and r > 0:
-                            p = r / (r + ev)
-                            pdf_vals = stats.nbinom.pmf(xs, r, p)
-                        else:
-                            pdf_vals = np.zeros_like(xs, dtype=float)
+                        if not r or r <= 0:
+                            raise ValueError("NegBin requires Model R > 0")
+                        p = r / (r + ev)
+                        pdf_vals = stats.nbinom.pmf(xs, r, p)
                     elif dist == "ZINB":
                         r = params.get("r")
-                        gate = params.get("gate", 0)
-                        if r and r > 0:
-                            p = r / (r + ev)
-                            pmf = stats.nbinom.pmf(xs, r, p)
-                            pdf_vals = np.where(xs == 0, gate + (1 - gate) * pmf, (1 - gate) * pmf)
-                        else:
-                            pdf_vals = np.zeros_like(xs, dtype=float)
+                        if not r or r <= 0:
+                            raise ValueError("ZINB requires Model R > 0")
+                        gate = params.get("gate") or 0
+                        p = r / (r + ev)
+                        pmf = stats.nbinom.pmf(xs, r, p)
+                        pdf_vals = np.where(xs == 0, gate + (1 - gate) * pmf, (1 - gate) * pmf)
                     else:
                         raise ValueError(f"Unknown discrete dist: {dist}")
 
