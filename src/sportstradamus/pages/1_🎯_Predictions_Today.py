@@ -443,6 +443,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     {
                         "x": xs,
                         "P": pdf_vals,
+                        "Side": ["Over" if x >= line else "Under" for x in xs],
                     }
                 )
 
@@ -450,24 +451,33 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                 y_enc = alt.Y("P:Q", title=y_title)
 
                 if is_continuous:
-                    # Smooth PDF curve with line and area
+                    # Smooth PDF curve with line and area, colored by side of betting line
+                    color_enc = alt.Color("Side:N",
+                        scale=alt.Scale(domain=["Over","Under"], range=["#2196F3","#FF7043"]),
+                        legend=alt.Legend(orient="top"))
                     chart = alt.layer(
                         alt.Chart(df_pdf)
-                        .mark_area(opacity=0.3, color="#2196F3")
-                        .encode(x=x_enc, y=y_enc, tooltip=["x:Q", "P:Q"]),
+                        .mark_area(opacity=0.3)
+                        .encode(x=x_enc, y=y_enc, color=color_enc, tooltip=["x:Q", "P:Q", "Side:N"]),
                         alt.Chart(df_pdf)
-                        .mark_line(color="#2196F3", strokeWidth=2)
-                        .encode(x=x_enc, y=y_enc),
+                        .mark_line(strokeWidth=2)
+                        .encode(x=x_enc, y=y_enc, color=color_enc),
                     )
                 else:
-                    # Discrete: bars at integer values only
-                    x_enc_discrete = alt.X("x:Q", title=row["Market"],
-                                           axis=alt.Axis(tickMinStep=1))
+                    # Discrete: bars at integer values, touching each other using explicit boundaries
+                    df_pdf["x_start"] = df_pdf["x"] - 0.5
+                    df_pdf["x_end"] = df_pdf["x"] + 0.5
+                    color_enc = alt.Color("Side:N",
+                        scale=alt.Scale(domain=["Over","Under"], range=["#2196F3","#FF7043"]),
+                        legend=alt.Legend(orient="top"))
                     chart = (
                         alt.Chart(df_pdf)
-                        .mark_bar(color="#2196F3")
-                        .encode(x=x_enc_discrete, y=y_enc,
-                                tooltip=["x:Q", "P:Q"])
+                        .mark_rect()
+                        .encode(x=alt.X("x_start:Q", title=row["Market"], axis=alt.Axis(tickMinStep=1)),
+                                x2="x_end:Q",
+                                y=alt.Y("P:Q", title=y_title),
+                                color=color_enc,
+                                tooltip=["x:Q", "P:Q", "Side:N"])
                     )
 
                 betting_line = (
