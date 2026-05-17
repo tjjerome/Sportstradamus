@@ -262,7 +262,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     tab1, tab2, tab3 = st.tabs(["📈 History", "〜 Model", "🔗 Correlated"])
 
     with tab1:
-        stat_key = row.get("Market")
+        stat_key = row.get("Stat") or row.get("Market")
         line = row.get("Line")
         league = row.get("League", "")
         opponent = row.get("Opponent", "")
