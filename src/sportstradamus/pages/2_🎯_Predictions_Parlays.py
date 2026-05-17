@@ -11,8 +11,16 @@ import streamlit as st
 from sportstradamus.dashboard_data import (
     format_ts,
     load_current_meta,
+    load_current_offers,
     load_current_parlays,
     render_banner,
+)
+from sportstradamus.dashboard_detail import (
+    _show_detail,
+    family_labels_for_game,
+    find_offer_idx,
+    init_detail_state,
+    parse_leg,
 )
 
 LEG_COLS = [f"Leg {i}" for i in range(1, 7)]
@@ -43,6 +51,15 @@ if parlays.empty:
 if "Family" not in parlays.columns:
     parlays["Family"] = 1
 
+# Full scored offers back the per-leg detail dialog; stable integer index
+# because the detail-navigation stack stores these positions.
+offers = load_current_offers().reset_index(drop=True)
+
+init_detail_state()
+if st.session_state.corr_nav:
+    # Rerun came from a "View →" button inside the dialog — keep the stack.
+    st.session_state.corr_nav = False
+
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     leagues = sorted(parlays["League"].dropna().unique())
@@ -70,7 +87,7 @@ view = view.head(int(top_n))
 st.caption(f"Showing **{len(view):,}** of {len(parlays):,} parlays")
 
 
-def _render_parlay(row: pd.Series) -> None:
+def _render_parlay(row: pd.Series, offers: pd.DataFrame) -> None:
     with st.container(border=True):
         indep_p = row.get("Indep P")
         show_indep = pd.notna(indep_p)
@@ -92,8 +109,18 @@ def _render_parlay(row: pd.Series) -> None:
                 help="Correlation-aware joint P vs independence-assumption Indep P.",
             )
         legs = [row.get(c) for c in LEG_COLS if isinstance(row.get(c), str) and row.get(c)]
-        for leg in legs:
-            st.text(f"  • {leg}")
+        for leg_i, leg in enumerate(legs):
+            if st.button(
+                f"  • {leg}",
+                key=f"plyleg::{row.name}::{leg_i}",
+                use_container_width=True,
+            ):
+                idx = find_offer_idx(parse_leg(leg), offers)
+                if idx is not None:
+                    st.session_state.detail_stack = [idx]
+                    st.rerun()
+                else:
+                    st.toast("Detail unavailable — line moved since this parlay was built.")
         if pd.notna(row.get("Rec Bet")):
             st.caption(f"Recommended bet: {row['Rec Bet']:.2f} units")
 
@@ -102,27 +129,33 @@ for game, group in view.groupby("Game", sort=False):
     top_ev = group["Model EV"].max()
     with st.expander(f"{game} — {len(group)} parlays, top EV {top_ev:.2f}"):
         families = sorted(group["Family"].dropna().unique())
+        labels = family_labels_for_game(group)
         if len(families) > 1:
             fam_choice = st.selectbox(
-                "Family (independence cluster)",
-                ["All"] + [f"Family {int(f)}" for f in families],
+                "Bet family",
+                ["All"] + [labels[f] for f in families],
                 key=f"family_{game}",
                 help=(
                     "The backend clusters this game's parlays into up to three "
-                    "families by how independent they are from each other."
+                    "families by how independent they are from each other. Each "
+                    "name highlights the player who sets that family apart."
                 ),
             )
         else:
             fam_choice = "All"
 
         for fam in families:
-            if fam_choice != "All" and fam_choice != f"Family {int(fam)}":
+            if fam_choice != "All" and fam_choice != labels[fam]:
                 continue
             fam_group = group.loc[group["Family"] == fam]
             if len(families) > 1:
-                st.markdown(f"**Family {int(fam)}** — {len(fam_group)} parlays")
+                st.markdown(f"**{labels[fam]}** — {len(fam_group)} parlays")
             for _, row in fam_group.iterrows():
-                _render_parlay(row)
+                _render_parlay(row, offers)
+
+if st.session_state.detail_stack:
+    row_idx = st.session_state.detail_stack[-1]
+    _show_detail(offers.loc[row_idx], offers)
 
 with st.expander("Snapshot info"):
     st.json(meta)
