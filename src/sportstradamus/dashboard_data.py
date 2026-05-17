@@ -20,7 +20,6 @@ from sportstradamus.analysis import (
     resolve_history,
 )
 from sportstradamus.helpers.io import (
-    CURRENT_HISTORY_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
@@ -124,12 +123,6 @@ def load_current_offers() -> pd.DataFrame:
 def load_current_parlays() -> pd.DataFrame:
     """Today's parlay candidates, written by `prophecize`."""
     return read_parquet_safe(CURRENT_PARLAYS_PATH)
-
-
-@st.cache_data(ttl=3600, show_spinner="Loading player history...")
-def load_current_history() -> pd.DataFrame:
-    """Per-game player stat history for today's offers, written by `prophecize`."""
-    return read_parquet_safe(CURRENT_HISTORY_PATH)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)

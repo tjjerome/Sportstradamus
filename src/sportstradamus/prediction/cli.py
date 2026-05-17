@@ -177,7 +177,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         sports,
         platforms_run,
         contest_variant=contest_variant,
-        stats_dict=stats,
     )
 
     # --- Append to rolling parlay history ---
