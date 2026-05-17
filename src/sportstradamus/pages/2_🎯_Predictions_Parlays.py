@@ -115,7 +115,7 @@ def _render_parlay(row: pd.Series, offers: pd.DataFrame) -> None:
                 key=f"plyleg::{row.name}::{leg_i}",
                 use_container_width=True,
             ):
-                idx = find_offer_idx(parse_leg(leg), offers)
+                idx = find_offer_idx(parse_leg(leg), offers, row.get("Platform"))
                 if idx is not None:
                     st.session_state.detail_stack = [idx]
                     st.rerun()
