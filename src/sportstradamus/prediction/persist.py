@@ -185,6 +185,18 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
     if signal_cols:
         signal = df[signal_cols].fillna(0)
         df = df.loc[(signal != 0).any(axis=1)]
+
+    # Expand Model Param into specific distribution parameters based on Dist type.
+    # model_prob returns generic "Model Param", but the dashboard needs the specific
+    # parameter names (Model R, Model Alpha, Model Sigma, Model Skew) for scipy.
+    if "Model Param" in df.columns and "Dist" in df.columns:
+        df["Model R"] = np.where(df["Dist"].isin(("NegBin", "ZINB")), df["Model Param"], np.nan)
+        df["Model Alpha"] = np.where(df["Dist"].isin(("Gamma", "ZAGamma")), df["Model Param"], np.nan)
+        df["Model Sigma"] = np.where(df["Dist"] == "SkewNormal", df["Model Param"], np.nan)
+        # Model Skew is a separate parameter for SkewNormal; if not in df, leave as NaN.
+        if "Model Skew" not in df.columns:
+            df["Model Skew"] = np.nan
+
     keep = [c for c in _OFFER_KEEP_COLS if c in df.columns]
     df = df[keep]
     if "Model" in df.columns:
