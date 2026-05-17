@@ -391,8 +391,18 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
             try:
                 cdf_vals = np.array([get_odds(x, ev, dist, cv, **kw) for x in xs])
                 step = (hi - lo) / (n_points - 1) if n_points > 1 else 1.0
-                # Compute PDF as finite difference of CDF
-                pdf_vals = np.diff(cdf_vals, prepend=0) / step if step > 0 else np.zeros_like(cdf_vals)
+
+                if is_continuous:
+                    # Use central differences for smooth PDF: pdf[i] = (cdf[i+1] - cdf[i-1]) / (2*step)
+                    pdf_vals = np.zeros_like(cdf_vals)
+                    pdf_vals[1:-1] = (cdf_vals[2:] - cdf_vals[:-2]) / (2 * step) if step > 0 else 0
+                    # Boundary: forward/backward differences
+                    pdf_vals[0] = (cdf_vals[1] - cdf_vals[0]) / step if step > 0 else 0
+                    pdf_vals[-1] = (cdf_vals[-1] - cdf_vals[-2]) / step if step > 0 else 0
+                else:
+                    # Forward difference for discrete PMF
+                    pdf_vals = np.diff(cdf_vals, prepend=0) / step if step > 0 else np.zeros_like(cdf_vals)
+
                 y_title = "Density" if is_continuous else "Probability"
 
                 df_pdf = pd.DataFrame(
@@ -422,11 +432,14 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                         .encode(x=x_enc, y=y_enc, color=color_enc),
                     )
                 else:
+                    # Discrete: single color, integer x-axis ticks, wider bars
+                    x_enc_discrete = alt.X("x:Q", title=row["Market"],
+                                           axis=alt.Axis(tickMinStep=1))
                     chart = (
                         alt.Chart(df_pdf)
-                        .mark_bar(size=max(4, 400 // max(len(xs), 1)))
-                        .encode(x=x_enc, y=y_enc, color=color_enc,
-                                tooltip=["x:Q", "P:Q", "Side:N"])
+                        .mark_bar(color="#2196F3")
+                        .encode(x=x_enc_discrete, y=y_enc,
+                                tooltip=["x:Q", "P:Q"])
                     )
 
                 betting_line = (
