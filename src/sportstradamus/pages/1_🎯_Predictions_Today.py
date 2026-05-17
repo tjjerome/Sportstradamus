@@ -472,7 +472,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                         legend=alt.Legend(orient="top"))
                     chart = (
                         alt.Chart(df_pdf)
-                        .mark_rect()
+                        .mark_rect(stroke="#444", strokeWidth=1)
                         .encode(x=alt.X("x_start:Q", title=row["Market"], axis=alt.Axis(tickMinStep=1)),
                                 x2="x_end:Q",
                                 y=alt.Y("P:Q", title=y_title),
