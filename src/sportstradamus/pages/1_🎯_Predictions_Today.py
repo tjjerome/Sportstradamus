@@ -329,7 +329,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     # Build labels
                     if hcol and hcol in h2h_games.columns:
                         opp_prefix = np.where(h2h_games[hcol].astype(bool), "", "@")
-                        h2h_labels = opp_prefix + opponent
+                        h2h_labels = pd.Series([f"{p}{opponent}" for p in opp_prefix], index=h2h_games.index)
                     else:
                         h2h_labels = pd.Series([opponent] * len(h2h_games), index=h2h_games.index)
 
@@ -458,10 +458,12 @@ display_cols = [c for c in MAIN_COLS if c in filtered.columns]
 # Format numeric columns
 grid_df = filtered[display_cols].copy()
 format_cols = {"Boost": 2, "Model": 2, "Books": 2}
+
 if "Model P" in grid_df.columns:
-    # Convert Model P to percentage (multiply by 100) and round to 2 decimals
-    grid_df["Model P"] = (grid_df["Model P"] * 100).round(2)
-    format_cols["Model P"] = 2
+    # Convert Model P to percentage (multiply by 100) and format with % sign
+    grid_df["Model P"] = (grid_df["Model P"] * 100).apply(
+        lambda x: f"{x:.2f}%" if pd.notna(x) else ""
+    )
 
 for col, decimals in format_cols.items():
     if col in grid_df.columns:
