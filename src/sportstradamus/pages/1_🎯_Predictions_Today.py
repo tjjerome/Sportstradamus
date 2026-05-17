@@ -309,17 +309,49 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
 
         # Radio filter for H2H if not NFL and opponent data exists
         display_df = hist_df
-        if not hist_df.empty and league != "NFL" and "Opponent" in hist_df.columns and opponent:
+        h2h_df = pd.DataFrame()
+
+        if league != "NFL" and opponent and stat_key and schema:
+            # Precompute H2H data from full gamelog (not just last-10-games)
+            gl = load_gamelog(league)
+            pcol = schema["player"]
+            ocol = schema.get("opp")
+            dcol = schema.get("date")
+            hcol = schema.get("home")
+
+            if not gl.empty and all([pcol, ocol, stat_key]) and pcol in gl.columns:
+                h2h_games = gl[(gl[pcol] == row["Player"]) & (gl[ocol] == opponent)].copy()
+                if dcol and dcol in h2h_games.columns:
+                    h2h_games = h2h_games.sort_values(dcol)
+                h2h_games = h2h_games.tail(10)
+
+                if not h2h_games.empty:
+                    # Build labels
+                    if hcol and hcol in h2h_games.columns:
+                        opp_prefix = np.where(h2h_games[hcol].astype(bool), "", "@")
+                        h2h_labels = opp_prefix + opponent
+                    else:
+                        h2h_labels = pd.Series([opponent] * len(h2h_games), index=h2h_games.index)
+
+                    if dcol and dcol in h2h_games.columns:
+                        dates = pd.to_datetime(h2h_games[dcol]).dt.strftime("%m/%d")
+                        h2h_labels = h2h_labels + ", " + dates
+
+                    h2h_df = pd.DataFrame({
+                        "Label": h2h_labels.values,
+                        "StatValue": h2h_games[stat_key].values,
+                        "Hit": h2h_games[stat_key].values >= line,
+                        "Opponent": h2h_games[ocol].values if ocol in h2h_games.columns else opponent,
+                    })
+
+        if not hist_df.empty and league != "NFL" and not h2h_df.empty:
             filter_opt = st.radio(
                 "Filter by opponent:",
                 options=["All games", f"vs {opponent}"],
                 horizontal=True,
                 key=f"h2h_filter_{id(row)}",
             )
-            if filter_opt == f"vs {opponent}":
-                display_df = hist_df[hist_df["Opponent"] == opponent]
-                if display_df.empty:
-                    st.caption(f"No history vs {opponent} in recent games.")
+            display_df = h2h_df if filter_opt == f"vs {opponent}" else hist_df
 
         if not display_df.empty:
             st.altair_chart(_history_chart(display_df, line), use_container_width=True)
@@ -339,8 +371,9 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
             lo = max(0.0, ev - 4 * std)
             hi = ev + 4 * std
             is_continuous = dist in _CONTINUOUS
-            step = 0.1 if is_continuous else 1.0
-            xs = np.arange(lo, hi + step, step)
+            # Use linspace for smooth curves; fine resolution for continuous, coarser for discrete
+            n_points = 300 if is_continuous else 100
+            xs = np.linspace(lo, hi, n_points)
 
             _PARAM_MAP = {
                 "Model R": "r",
@@ -356,18 +389,17 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
             }
 
             try:
-                cdf_vals = [get_odds(x, ev, dist, cv, **kw) for x in xs]
-                pmf_vals = np.diff([0.0, *cdf_vals])
-                xs_mid = xs[: len(pmf_vals)]
-                # Normalise continuous values to probability density
-                y_vals = pmf_vals / step if is_continuous else pmf_vals
+                cdf_vals = np.array([get_odds(x, ev, dist, cv, **kw) for x in xs])
+                step = (hi - lo) / (n_points - 1) if n_points > 1 else 1.0
+                # Compute PDF as finite difference of CDF
+                pdf_vals = np.diff(cdf_vals, prepend=0) / step if step > 0 else np.zeros_like(cdf_vals)
                 y_title = "Density" if is_continuous else "Probability"
 
                 df_pdf = pd.DataFrame(
                     {
-                        "x": xs_mid,
-                        "P": y_vals,
-                        "Side": ["Over" if x >= line else "Under" for x in xs_mid],
+                        "x": xs,
+                        "P": pdf_vals,
+                        "Side": ["Over" if x >= line else "Under" for x in xs],
                     }
                 )
 
@@ -392,7 +424,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                 else:
                     chart = (
                         alt.Chart(df_pdf)
-                        .mark_bar(size=max(4, 400 // max(len(xs_mid), 1)))
+                        .mark_bar(size=max(4, 400 // max(len(xs), 1)))
                         .encode(x=x_enc, y=y_enc, color=color_enc,
                                 tooltip=["x:Q", "P:Q", "Side:N"])
                     )
@@ -403,23 +435,6 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     .encode(x="Line:Q")
                 )
                 combined = chart + betting_line
-
-                # For zero-inflated dists show a vertical rule at x=0 annotated
-                # with the zero-mass probability so the point mass is visible.
-                gate = kw.get("gate")
-                if dist in _ZERO_INFLATED and gate and gate > 0:
-                    zero_rule = (
-                        alt.Chart(pd.DataFrame({"x": [0], "label": [f"P(0)={gate:.1%}"]}))
-                        .mark_rule(color="#FFC107", strokeWidth=1.5)
-                        .encode(x="x:Q")
-                    )
-                    zero_label = (
-                        alt.Chart(pd.DataFrame({"x": [0], "label": [f"P(0)={gate:.1%}"]}))
-                        .mark_text(align="left", dx=4, dy=-8, color="#FFC107", fontSize=11)
-                        .encode(x="x:Q", y=alt.value(0), text="label:N")
-                    )
-                    combined = combined + zero_rule + zero_label
-
                 st.altair_chart(combined, use_container_width=True)
             except Exception as e:
                 st.error(f"Error computing distribution: {e}")
@@ -440,7 +455,19 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
 # --- AgGrid table ---
 display_cols = [c for c in MAIN_COLS if c in filtered.columns]
 
-gb = GridOptionsBuilder.from_dataframe(filtered[display_cols])
+# Format numeric columns
+grid_df = filtered[display_cols].copy()
+format_cols = {"Boost": 2, "Model": 2, "Books": 2}
+if "Model P" in grid_df.columns:
+    # Convert Model P to percentage (multiply by 100) and round to 2 decimals
+    grid_df["Model P"] = (grid_df["Model P"] * 100).round(2)
+    format_cols["Model P"] = 2
+
+for col, decimals in format_cols.items():
+    if col in grid_df.columns:
+        grid_df[col] = grid_df[col].round(decimals)
+
+gb = GridOptionsBuilder.from_dataframe(grid_df)
 gb.configure_selection(selection_mode="single", use_checkbox=False)
 gb.configure_grid_options(rowStyle={"cursor": "pointer"})
 
@@ -459,7 +486,7 @@ gb.configure_column(
 
 go = gb.build()
 ag = AgGrid(
-    filtered[display_cols],
+    grid_df,
     gridOptions=go,
     update_mode=GridUpdateMode.SELECTION_CHANGED,
     fit_columns_on_grid_load=True,
