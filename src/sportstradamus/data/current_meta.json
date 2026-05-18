@@ -1,13 +1,14 @@
 {
-  "generated_at": "2026-05-08T02:54:50.432179Z",
+  "generated_at": "2026-05-18T00:55:34.447627Z",
   "leagues": [
-    "NBA"
+    "NBA",
+    "WNBA"
   ],
   "platforms": [
     "Sleeper",
     "Underdog"
   ],
-  "contest_variant": "power",
-  "offer_rows": 834,
-  "parlay_rows": 1255
+  "contest_variant": "pooled",
+  "offer_rows": 278,
+  "parlay_rows": 1497
 }
