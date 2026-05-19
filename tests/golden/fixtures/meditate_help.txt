@@ -21,4 +21,11 @@ Options:
                                   training loop
   --log-level [DEBUG|INFO|WARNING|ERROR]
                                   Verbosity for the structured JSONL log.
+  --deterministic / --no-deterministic
+                                  DEBUG/EVAL ONLY: pin all RNGs, use fixed fast
+                                  hyperparameters, and freeze input to the
+                                  cached parquet so runs are bit-identical for
+                                  the compression eval harness. NEVER publish a
+                                  model trained with this flag — it is
+                                  deliberately low quality.
   --help                          Show this message and exit.

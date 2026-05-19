@@ -55,6 +55,9 @@ _BRIER_SKILL_DENOM_FLOOR = 1e-9
 _PROBA_CLIP = 1e-6
 
 
+# Fixed RNG seed for --deterministic runs (debug/eval only).
+DETERMINISTIC_SEED = 1234
+
 # P0.5: debugging/eval reproducibility only. A model trained under a pinned
 # seed + fixed params is NOT a production model — see seed_everything users.
 # P0.5 deterministic-mode hyperparameters. Replaces the Optuna search when
@@ -274,12 +277,19 @@ def train_market(
     rebuild_filter: bool,
     archive,
     league_start_date,
+    deterministic: bool = False,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
     Loads the training matrix, selects the distribution, runs Optuna hyperparameter
     search, fits the model, applies dispersion calibration and temperature scaling,
     evaluates on the held-out test set, and saves the model pickle + training report.
+
+    DEBUG / OFFLINE-EVAL ONLY when ``deterministic=True``: seeds all RNGs,
+    replaces the Optuna search with fixed fast hyperparameters, and freezes
+    input to the cached training parquet (no incremental fetch). Produces
+    bit-identical re-runs for the P0 compression harness. A model trained
+    with this flag MUST NEVER be published as a production model.
     """
     stat_dist = load_distribution_config()
     stat_dist.setdefault(league, {})
@@ -331,7 +341,8 @@ def train_market(
         cutoff_date = league_start_date
         M = pd.DataFrame()
 
-    new_M = stat_data.get_training_matrix(market, cutoff_date)
+    # Input freeze: deterministic mode skips the live fetch and uses cached parquet only.
+    new_M = pd.DataFrame() if deterministic else stat_data.get_training_matrix(market, cutoff_date)
 
     if new_M.empty and not force and not need_model:
         return
@@ -364,7 +375,8 @@ def train_market(
     M = trim_matrix(M, 15000)
     M.to_parquet(filepath, compression="zstd", index=True)
 
-    stat_data.save_comps()
+    if not deterministic:
+        stat_data.save_comps()
 
     if rebuild_filter:
         print("  Scouting pass for filter rebuild...")
@@ -532,7 +544,9 @@ def train_market(
         "bagging_freq": ["none", [1]],
     }
 
-    if opt_params is None or opt_params.get("opt_rounds") is None:
+    if deterministic:
+        opt_params = {**DETERMINISTIC_FIXED_PARAMS, "monotone_constraints": monotone}
+    elif opt_params is None or opt_params.get("opt_rounds") is None:
         opt_params = model.hyper_opt(
             hp_search_space,
             dtrain,
@@ -551,6 +565,7 @@ def train_market(
     model = fit_lss_model(
         dist_obj, dist, X_train, y_train_labels, opt_params,
         normalized=normalize, shape_ceiling=shape_ceiling,
+        seed=DETERMINISTIC_SEED if deterministic else None,
     )
 
     # Predictions and parameter extraction

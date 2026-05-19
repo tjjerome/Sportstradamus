@@ -57,7 +57,17 @@ np.seterr(divide="ignore", invalid="ignore")
     default="INFO",
     help="Verbosity for the structured JSONL log.",
 )
-def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations, log_level):
+@click.option(
+    "--deterministic/--no-deterministic",
+    default=False,
+    help=(
+        "DEBUG/EVAL ONLY: pin all RNGs, use fixed fast hyperparameters, and "
+        "freeze input to the cached parquet so runs are bit-identical for the "
+        "compression eval harness. NEVER publish a model trained with this "
+        "flag — it is deliberately low quality."
+    ),
+)
+def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations, log_level, deterministic):
     """Train or retrain LightGBMLSS models for each configured market."""
     log = get_logger("meditate")
     log.setLevel(log_level)
@@ -68,6 +78,7 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
             "league": league,
             "rebuild_filter": rebuild_filter,
             "rebuild_correlations": rebuild_correlations,
+            "deterministic": deterministic,
         },
     )
     click.echo(
@@ -186,4 +197,4 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
-            train_market(lg, market, stat_data, force, rebuild_filter, archive, league_start_date)
+            train_market(lg, market, stat_data, force, rebuild_filter, archive, league_start_date, deterministic=deterministic)
