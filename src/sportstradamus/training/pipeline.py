@@ -110,13 +110,21 @@ def seed_everything(seed: int) -> dict[str, int | bool]:
 
 
 def fit_lss_model(
-    dist_obj, dist, X_train, y_train_labels, params, *,
-    normalized, shape_ceiling, seed=None,
-):
+    dist_obj,
+    dist: str,
+    X_train: pd.DataFrame,
+    y_train_labels: np.ndarray,
+    params: dict,
+    *,
+    normalized: bool,
+    shape_ceiling: float,
+    seed: int | None = None,
+) -> LightGBMLSS:
     """Build + train a LightGBMLSS model. Pure (no disk writes).
 
     When ``seed`` is not None, RNGs are pinned and LightGBM determinism kwargs
     are merged into ``params`` (DEBUG/eval only — never a production model).
+    Builds its own ``lgb.Dataset`` from ``X_train``/``y_train_labels``; callers do not pre-construct one.
 
     Args:
         dist_obj: Distribution object (already shape-bounded by the caller).
@@ -144,8 +152,16 @@ def fit_lss_model(
     return model
 
 
-def predict_lss_params(model, dist, X, *, normalized):
+def predict_lss_params(
+    model: LightGBMLSS,
+    dist: str,
+    X: pd.DataFrame,
+    *,
+    normalized: bool,
+) -> pd.DataFrame:
     """Predict raw distribution parameters for X, preserving its index.
+
+    Safe to call on the same X that was just fit — ``set_model_start_values`` is idempotent.
 
     Args:
         model: A trained ``LightGBMLSS`` model.
@@ -163,9 +179,17 @@ def predict_lss_params(model, dist, X, *, normalized):
 
 
 def fit_predict_params(
-    dist_obj, dist, X_train, y_train_labels, X_predict, params, *,
-    normalized, shape_ceiling, seed=None,
-):
+    dist_obj,
+    dist: str,
+    X_train: pd.DataFrame,
+    y_train_labels: np.ndarray,
+    X_predict: pd.DataFrame,
+    params: dict,
+    *,
+    normalized: bool,
+    shape_ceiling: float,
+    seed: int | None = None,
+) -> pd.DataFrame:
     """Fit one LightGBMLSS model and return raw predicted params for X_predict.
 
     Pure: no disk writes, no Optuna. When ``seed`` is not None, RNGs are pinned
