@@ -3,7 +3,13 @@
 
 Runs the pure fit/predict core twice on a fixed subsample of the real cached
 NBA_FGA training matrix and asserts the test-split predicted distribution
-parameters are exactly equal. No network (cached parquet + offline columns).
+parameters are exactly equal. The gate locally overrides DETERMINISTIC_FIXED_PARAMS
+to enable real LightGBM stochasticity (feature/row subsampling); this way it
+genuinely tests that seed_everything + the merged LightGBM seed kwargs pin
+stochastic tree building. Production --deterministic mode uses the
+stochastic-free defaults, so this gate is intentionally stricter than
+production behavior — a true regression guard for the seeding mechanism.
+No network (cached parquet + offline columns).
 """
 import importlib.resources as pkg_resources
 
@@ -55,7 +61,21 @@ def test_deterministic_mode_is_bit_reproducible():
         dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
         return fit_predict_params(
             dist_obj, "SkewNormal", X_train, y_train_labels, X_test,
-            params={**DETERMINISTIC_FIXED_PARAMS, "monotone_constraints": [0] * X_train.shape[1]},
+            # Override DETERMINISTIC_FIXED_PARAMS to introduce real stochasticity
+            # (feature/row subsampling). This way the gate ACTUALLY tests that the
+            # seeding mechanism pins LightGBM's stochastic tree building, not that
+            # no-randomness is trivially deterministic. seed_everything + LightGBM
+            # seed kwargs (merged inside fit_lss_model) must yield bit-identical
+            # output across two runs at the same seed; different seeds must differ.
+            params=(
+                {
+                    **DETERMINISTIC_FIXED_PARAMS,
+                    "feature_fraction": 0.8,
+                    "bagging_fraction": 0.8,
+                    "bagging_freq": 1,
+                    "monotone_constraints": [0] * X_train.shape[1],
+                }
+            ),
             normalized=True, shape_ceiling=100.0, seed=DETERMINISTIC_SEED,
         )
 
