@@ -57,20 +57,26 @@ _PROBA_CLIP = 1e-6
 
 # P0.5: debugging/eval reproducibility only. A model trained under a pinned
 # seed + fixed params is NOT a production model — see seed_everything users.
-def seed_everything(seed: int) -> dict:
+def seed_everything(seed: int) -> dict[str, int | bool]:
     """Pin Python/NumPy/Torch RNGs and return LightGBM determinism kwargs.
 
     DEBUGGING / OFFLINE-EVAL USE ONLY. Never publish a model produced while
     these knobs are active — fixed seeds + fixed hyperparameters cripple model
     quality on purpose; the point is bit-identical re-runs, not accuracy.
 
-    Returns the LightGBM params to merge into the training params so tree
-    construction is deterministic.
+    Args:
+        seed: RNG seed applied to ``random``, ``numpy``, and ``torch``. Also
+            used as the value for all three LightGBM seed params.
+
+    Returns:
+        LightGBM training params to merge into the params dict: ``seed``,
+        ``bagging_seed``, ``feature_fraction_seed`` (all == ``seed``),
+        ``deterministic`` (True), ``force_row_wise`` (True).
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(True)
+    torch.use_deterministic_algorithms(True)  # NOTE: process-global; later non-deterministic torch ops in-process will raise
     return {
         "seed": seed,
         "bagging_seed": seed,

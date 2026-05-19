@@ -13,10 +13,13 @@ def test_seed_everything_returns_lgb_determinism_kwargs():
     assert kwargs["force_row_wise"] is True
 
 
-def test_seed_everything_pins_numpy_and_torch():
+def test_seed_everything_pins_python_numpy_and_torch():
+    import random
+
     seed_everything(7)
-    a = (np.random.rand(5), torch.randn(5))
+    a = (random.random(), np.random.rand(5), torch.randn(5))
     seed_everything(7)
-    b = (np.random.rand(5), torch.randn(5))
-    assert np.array_equal(a[0], b[0])
-    assert torch.equal(a[1], b[1])
+    b = (random.random(), np.random.rand(5), torch.randn(5))
+    assert a[0] == b[0]
+    assert np.array_equal(a[1], b[1])
+    assert torch.equal(a[2], b[2])
