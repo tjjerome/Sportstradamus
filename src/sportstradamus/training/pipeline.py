@@ -109,6 +109,91 @@ def seed_everything(seed: int) -> dict[str, int | bool]:
     }
 
 
+def fit_lss_model(
+    dist_obj, dist, X_train, y_train_labels, params, *,
+    normalized, shape_ceiling, seed=None,
+):
+    """Build + train a LightGBMLSS model. Pure (no disk writes).
+
+    When ``seed`` is not None, RNGs are pinned and LightGBM determinism kwargs
+    are merged into ``params`` (DEBUG/eval only — never a production model).
+
+    Args:
+        dist_obj: Distribution object (already shape-bounded by the caller).
+        dist: Distribution name string (e.g. ``"NegBin"``, ``"Gamma"``).
+        X_train: Training feature matrix.
+        y_train_labels: Training target labels for ``lgb.Dataset``.
+        params: LightGBM training params; ``opt_rounds`` is read as
+            ``num_boost_round``.
+        normalized: Whether start values are computed in normalized space.
+        shape_ceiling: Upper bound on the distribution shape parameter.
+        seed: If not None, pin RNGs and merge determinism kwargs into
+            ``params`` (DEBUG/offline-eval only).
+
+    Returns:
+        A trained ``LightGBMLSS`` model.
+    """
+    if seed is not None:
+        params = {**params, **seed_everything(seed)}
+    dtrain = lgb.Dataset(X_train, label=y_train_labels)
+    model = LightGBMLSS(dist_obj)
+    set_model_start_values(
+        model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalized
+    )
+    model.train(params, dtrain, num_boost_round=params["opt_rounds"])
+    return model
+
+
+def predict_lss_params(model, dist, X, *, normalized):
+    """Predict raw distribution parameters for X, preserving its index.
+
+    Args:
+        model: A trained ``LightGBMLSS`` model.
+        dist: Distribution name string.
+        X: Feature matrix to predict on.
+        normalized: Whether start values are computed in normalized space.
+
+    Returns:
+        DataFrame of raw predicted distribution parameters, indexed like ``X``.
+    """
+    set_model_start_values(model, dist, X, normalized=normalized)
+    preds = model.predict(X, pred_type="parameters")
+    preds.index = X.index
+    return preds
+
+
+def fit_predict_params(
+    dist_obj, dist, X_train, y_train_labels, X_predict, params, *,
+    normalized, shape_ceiling, seed=None,
+):
+    """Fit one LightGBMLSS model and return raw predicted params for X_predict.
+
+    Pure: no disk writes, no Optuna. When ``seed`` is not None, RNGs are pinned
+    and LightGBM determinism kwargs are merged into ``params`` (DEBUG/eval only).
+
+    Args:
+        dist_obj: Distribution object (already shape-bounded by the caller).
+        dist: Distribution name string.
+        X_train: Training feature matrix.
+        y_train_labels: Training target labels for ``lgb.Dataset``.
+        X_predict: Feature matrix to predict on after fitting.
+        params: LightGBM training params; ``opt_rounds`` is read as
+            ``num_boost_round``.
+        normalized: Whether start values are computed in normalized space.
+        shape_ceiling: Upper bound on the distribution shape parameter.
+        seed: If not None, pin RNGs and merge determinism kwargs into
+            ``params`` (DEBUG/offline-eval only).
+
+    Returns:
+        DataFrame of raw predicted distribution parameters for ``X_predict``.
+    """
+    model = fit_lss_model(
+        dist_obj, dist, X_train, y_train_labels, params,
+        normalized=normalized, shape_ceiling=shape_ceiling, seed=seed,
+    )
+    return predict_lss_params(model, dist, X_predict, normalized=normalized)
+
+
 def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
     """10-bin equal-width ECE: weighted |avg_pred - avg_actual| across bins."""
     edges = np.linspace(0.0, 1.0, n_bins + 1)
@@ -439,30 +524,15 @@ def train_market(
             model, hp_search_space, dtrain, opt_params, n_trials=150, max_minutes=5
         )
 
-    model.train(opt_params, dtrain, num_boost_round=opt_params["opt_rounds"])
+    model = fit_lss_model(
+        dist_obj, dist, X_train, y_train_labels, opt_params,
+        normalized=normalize, shape_ceiling=shape_ceiling,
+    )
 
     # Predictions and parameter extraction
-    prob_params_train = pd.DataFrame()
-    prob_params_validation = pd.DataFrame()
-    prob_params = pd.DataFrame()
-
-    idx = X_train.index
-    set_model_start_values(model, dist, X_train, normalized=normalize)
-    preds = model.predict(X_train, pred_type="parameters")
-    preds.index = idx
-    prob_params_train = pd.concat([prob_params_train, preds])
-
-    idx = X_validation.index
-    set_model_start_values(model, dist, X_validation, normalized=normalize)
-    preds = model.predict(X_validation, pred_type="parameters")
-    preds.index = idx
-    prob_params_validation = pd.concat([prob_params_validation, preds])
-
-    idx = X_test.index
-    set_model_start_values(model, dist, X_test, normalized=normalize)
-    preds = model.predict(X_test, pred_type="parameters")
-    preds.index = idx
-    prob_params = pd.concat([prob_params, preds])
+    prob_params_train = predict_lss_params(model, dist, X_train, normalized=normalize)
+    prob_params_validation = predict_lss_params(model, dist, X_validation, normalized=normalize)
+    prob_params = predict_lss_params(model, dist, X_test, normalized=normalize)
 
     prob_params_train.sort_index(inplace=True)
     prob_params_train["result"] = y_train["Result"]
