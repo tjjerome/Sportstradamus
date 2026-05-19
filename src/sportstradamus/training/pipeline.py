@@ -57,6 +57,29 @@ _PROBA_CLIP = 1e-6
 
 # P0.5: debugging/eval reproducibility only. A model trained under a pinned
 # seed + fixed params is NOT a production model — see seed_everything users.
+# P0.5 deterministic-mode hyperparameters. Replaces the Optuna search when
+# --deterministic is set. Deliberately small/fast: the goal is bit-identical
+# re-runs for the eval harness, NOT model quality. opt_rounds is read as
+# num_boost_round by model.train(...).
+DETERMINISTIC_FIXED_PARAMS = {
+    "opt_rounds": 30,
+    "num_leaves": 31,
+    "learning_rate": 0.1,
+    "min_child_samples": 50,
+    "min_child_weight": 1e-3,
+    "lambda_l1": 0.0,
+    "lambda_l2": 0.0,
+    "path_smooth": 0.0,
+    "feature_fraction": 1.0,
+    "bagging_fraction": 1.0,
+    "bagging_freq": 0,
+    "max_depth": -1,
+    "max_bin": 127,
+    "num_threads": 1,  # multi-thread LightGBM histogram reductions are not bit-reproducible even with deterministic=True
+    "feature_pre_filter": False,
+}
+
+
 def seed_everything(seed: int) -> dict[str, int | bool]:
     """Pin Python/NumPy/Torch RNGs and return LightGBM determinism kwargs.
 
