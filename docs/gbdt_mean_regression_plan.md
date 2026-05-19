@@ -14,16 +14,19 @@
 | Phase | State | Notes |
 |---|---|---|
 | **P0 — offline eval harness** | ✅ done (PR #46) | `src/sportstradamus/scripts/compression_eval.py` + `tests/golden/test_compression_eval.py`. ruff clean, 6 unit tests pass, CLI single+diff smoke-tested on synthetic data. Full `poetry` gates NOT run in the build env — network policy blocks the PyTorch CPU wheel source so `poetry install` fails on `torch`; needs a normal-network run before merge. |
-| **P0.5 — determinism gate** | ⬜ **NEW, now blocks P1** | Added from the overconfidence investigation: the harness scores CSVs but `meditate` that *produces* them is non-deterministic — the same config gave top-decile bias −0.48…−2.5…+0.12. No training-side strategy is verifiable until a "run twice → bit-identical predictions" gate passes. See new §"Determinism prerequisite". |
-| P1 — centered-target bridge (SkewNormal) | ⬜ blocked on P0.5 | This *is* the additive empirical-Bayes offset the overconfidence investigation already tried (Phase A). It was found **inconclusive due to non-reproducibility, not wrong** — deterministically it was well-calibrated (+0.12 bias). Proceed, but only behind P0.5. |
+| **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic` (debug-only, never publish) + `tests/integration/test_determinism_gate.py`. Pure helpers `seed_everything` / `fit_lss_model` / `predict_lss_params` / `fit_predict_params` in `pipeline.py`; under `--deterministic`: RNGs pinned (random/numpy/torch + `torch.use_deterministic_algorithms`), Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`, input frozen to cached parquet, and ALL persistent writes (model `.mdl`, test-set CSV, training parquet, report) are skipped so a `--deterministic` run can't corrupt production. Gate runs on real cached `NBA_FGA.parquet` (4000 rows, ~5s) with stochastic LightGBM (`feature_fraction=0.8`, `bagging_fraction=0.8`, `bagging_freq=1`) so it actually tests the seeding mechanism — different seed produces `loc` max-abs diff ~0.34, same seed bit-identical. Default `meditate` byte-identical. P1 unblocked. |
+| P1 — centered-target bridge (SkewNormal) | ⬜ next | This *is* the additive empirical-Bayes offset the overconfidence investigation already tried (Phase A). It was found **inconclusive due to non-reproducibility, not wrong** — deterministically it was well-calibrated (+0.12 bias). Proceed under `--deterministic` so the P0 harness diff verdict is trustworthy. |
 | P2 — `init_score` baseline (NegBin/ZINB) | ⬜ | Pair with the **confirmed, reproducible ZINB derived-π gate fix** (separate existing spec); see annotation in priority list. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
-**Start next session here:** P0.5 (determinism gate), then P1. Keep the default
-strategy = current production behavior; gate with the P0 harness diff mode.
-Per the overconfidence investigation, also confirm any training-side win
-actually propagates to the live `model_prob.py` output before declaring it
-fixed (see new §"Live-path confound").
+**Start next session here:** P1 (centered-target bridge, SkewNormal). Run the
+candidate strategy under `meditate --deterministic` (writes are suppressed —
+adapt the gate-test pattern or run a wrapper that calls `fit_predict_params`
+into a dedicated output dir) so the P0 harness diff verdict is trustworthy.
+Keep the default strategy = current production behavior. Per the
+overconfidence investigation, also confirm any training-side win actually
+propagates to the live `model_prob.py` output before declaring it fixed (see
+§"Live-path confound").
 
 ## Context
 
@@ -319,9 +322,10 @@ treat the prior negative result as the baseline to beat.
 - `poetry run pytest -m integration` (fake-mode, no network)
 - Regenerate CLI help snapshots if `meditate` flags change:
   `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
-- Determinism gate (P0.5): the candidate strategy's `meditate` run is
-  bit-reproducible (same config twice → identical test-set CSV) before its
-  scorecard delta is trusted.
+- Determinism gate (P0.5): `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`
+  must pass (proves seeded LightGBM under `--deterministic` is bit-reproducible).
+  Candidate strategies are A/B'd under `meditate --deterministic` so the
+  scorecard delta is trustworthy.
 - Functional gate: harness scorecard delta vs current strategy meets the P0
   threshold before a strategy is promoted to default.
 - Live-path gate: the promoted strategy is confirmed end-to-end through
