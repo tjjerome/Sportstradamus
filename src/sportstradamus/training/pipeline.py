@@ -4,11 +4,13 @@ import importlib.resources as pkg_resources
 import json
 import os
 import pickle
+import random
 import warnings
 
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+import torch
 from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.model import LightGBMLSS
@@ -51,6 +53,31 @@ _ECE_BINS = 10
 _BRIER_SKILL_DENOM_FLOOR = 1e-9
 # Probability clip used so log_loss / Brier never see exact 0 or 1.
 _PROBA_CLIP = 1e-6
+
+
+# P0.5: debugging/eval reproducibility only. A model trained under a pinned
+# seed + fixed params is NOT a production model — see seed_everything users.
+def seed_everything(seed: int) -> dict:
+    """Pin Python/NumPy/Torch RNGs and return LightGBM determinism kwargs.
+
+    DEBUGGING / OFFLINE-EVAL USE ONLY. Never publish a model produced while
+    these knobs are active — fixed seeds + fixed hyperparameters cripple model
+    quality on purpose; the point is bit-identical re-runs, not accuracy.
+
+    Returns the LightGBM params to merge into the training params so tree
+    construction is deterministic.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.use_deterministic_algorithms(True)
+    return {
+        "seed": seed,
+        "bagging_seed": seed,
+        "feature_fraction_seed": seed,
+        "deterministic": True,
+        "force_row_wise": True,
+    }
 
 
 def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
