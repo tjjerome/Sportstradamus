@@ -83,9 +83,11 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
     )
     click.echo(
         f"meditate starting: league={league} force={force} "
-        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations}"
+        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations} "
+        f"deterministic={deterministic}"
     )
-    np.random.seed(69)
+    if not deterministic:
+        np.random.seed(69)
 
     if reset_markets.strip():
         ff_path = pkg_resources.files(data) / "feature_filter.json"
