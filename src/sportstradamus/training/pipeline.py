@@ -58,8 +58,6 @@ _PROBA_CLIP = 1e-6
 # Fixed RNG seed for --deterministic runs (debug/eval only).
 DETERMINISTIC_SEED = 1234
 
-# P0.5: debugging/eval reproducibility only. A model trained under a pinned
-# seed + fixed params is NOT a production model — see seed_everything users.
 # P0.5 deterministic-mode hyperparameters. Replaces the Optuna search when
 # --deterministic is set. Deliberately small/fast: the goal is bit-identical
 # re-runs for the eval harness, NOT model quality. opt_rounds is read as
@@ -373,7 +371,8 @@ def train_market(
             M.loc[i, "Odds_synthetic"] = False
 
     M = trim_matrix(M, 15000)
-    M.to_parquet(filepath, compression="zstd", index=True)
+    if not deterministic:
+        M.to_parquet(filepath, compression="zstd", index=True)
 
     if not deterministic:
         stat_data.save_comps()
@@ -1143,14 +1142,16 @@ def train_market(
 
     X_test["P"] = y_proba_filt[:, 1]
 
-    filepath = pkg_resources.files(data) / f"test_sets/{filename}.csv"
-    with open(filepath, "w") as outfile:
-        X_test.to_csv(filepath)
+    if not deterministic:
+        filepath = pkg_resources.files(data) / f"test_sets/{filename}.csv"
+        with open(filepath, "w") as outfile:
+            X_test.to_csv(filepath)
 
-    filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-    with open(filepath, "wb") as outfile:
-        pickle.dump(filedict, outfile, -1)
-        del filedict
-        del model
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        with open(filepath, "wb") as outfile:
+            pickle.dump(filedict, outfile, -1)
 
-    report()
+        report()
+
+    del filedict
+    del model
