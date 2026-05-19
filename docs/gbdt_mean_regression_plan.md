@@ -4,18 +4,26 @@
 > attached source report lives in the originating session; this file is the
 > durable plan + progress log for the project on branch
 > `claude/fix-gbdt-mean-regression-GcY1g` (PR #46 → `devel`).
+>
+> **All phases of this plan are worked and documented in PR #46.** Each
+> phase's code, the harness run-log entries, and the status updates below land
+> as commits on that one PR; do not open separate PRs per phase.
 
 ## Status / progress log
 
 | Phase | State | Notes |
 |---|---|---|
 | **P0 — offline eval harness** | ✅ done (PR #46) | `src/sportstradamus/scripts/compression_eval.py` + `tests/golden/test_compression_eval.py`. ruff clean, 6 unit tests pass, CLI single+diff smoke-tested on synthetic data. Full `poetry` gates NOT run in the build env — network policy blocks the PyTorch CPU wheel source so `poetry install` fails on `torch`; needs a normal-network run before merge. |
-| P1 — centered-target bridge (SkewNormal) | ⬜ next | |
-| P2 — `init_score` baseline (NegBin/ZINB) | ⬜ | |
-| P3–P10 | ⬜ | see priority list |
+| **P0.5 — determinism gate** | ⬜ **NEW, now blocks P1** | Added from the overconfidence investigation: the harness scores CSVs but `meditate` that *produces* them is non-deterministic — the same config gave top-decile bias −0.48…−2.5…+0.12. No training-side strategy is verifiable until a "run twice → bit-identical predictions" gate passes. See new §"Determinism prerequisite". |
+| P1 — centered-target bridge (SkewNormal) | ⬜ blocked on P0.5 | This *is* the additive empirical-Bayes offset the overconfidence investigation already tried (Phase A). It was found **inconclusive due to non-reproducibility, not wrong** — deterministically it was well-calibrated (+0.12 bias). Proceed, but only behind P0.5. |
+| P2 — `init_score` baseline (NegBin/ZINB) | ⬜ | Pair with the **confirmed, reproducible ZINB derived-π gate fix** (separate existing spec); see annotation in priority list. |
+| P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
-**Start next session here:** P1. Keep the default strategy = current
-production behavior; gate with the P0 harness diff mode.
+**Start next session here:** P0.5 (determinism gate), then P1. Keep the default
+strategy = current production behavior; gate with the P0 harness diff mode.
+Per the overconfidence investigation, also confirm any training-side win
+actually propagates to the live `model_prob.py` output before declaring it
+fixed (see new §"Live-path confound").
 
 ## Context
 
@@ -58,6 +66,98 @@ pre-cached matrices. The harness itself needs no network.
 This is a multi-session project: build measurement infrastructure once, then work
 down a priority list of interventions, shipping the first that closes the gap.
 
+## Findings folded in from the overconfidence investigation
+
+`docs/OVERCONFIDENCE_INVESTIGATION.md` (and its hand-back) ran a parallel,
+deeper pass on two of the worst-compressed markets (NBA **FGA** SkewNormal,
+**FG3M** ZINB). Its conclusions directly change this plan's risk profile.
+Read both before resuming. The load-bearing ones:
+
+1. **Offline evaluation was non-reproducible — this is the dominant blocker.**
+   The same nominal SkewNormal config produced top-volume-quintile bias of
+   −0.48, −0.92, −1.3, −2.0, −2.5, **and +0.12** across runs. Suspected
+   sources: unpinned LightGBM/LightGBMLSS seeds, per-row `start_values`
+   broadcasting in LightGBMLSS predict, Optuna nondeterminism, and `meditate`
+   Optuna **starvation** in time-boxed offline runs (3–18 trials vs. the
+   deployed model's hundreds). The P0 harness scores the CSVs `meditate`
+   dumps, but `meditate` itself is the non-deterministic stage — so the
+   harness's ship/kill verdict is currently noise. **No P1+ strategy can be
+   validated until a determinism gate exists** (new §"Determinism prerequisite").
+
+2. **P1 was already attempted and is not refuted.** The "centered-target
+   bridge" (replace `y/MeanYr` with `y − baseline`, add baseline back to `loc`
+   only) is the additive empirical-Bayes per-player offset the investigation
+   built and reverted in its Phase A. It was **inconclusive, not wrong**: in a
+   clean *deterministic* harness the production-equivalent SkewNormal model
+   *with* the additive-EB offset was well-calibrated (predicted vol-quintile
+   spread 7.4 vs actual 8.3, meanAbsBias **+0.12**, tracked volume). So P1
+   remains the highest-leverage lever — but the +0.12 result also means the
+   SkewNormal *training* stage may not be the dominant source of the live
+   symptom (see #4). Treat P1 as "re-run under determinism and measure", not
+   "implement a known fix".
+
+3. **The `Result/MeanYr` slope artifact is corroborated but is not the level
+   cause.** corr(predicted loc, MeanYr) was −0.37…−0.87 across *all*
+   SkewNormal markets — a real multiplicative-amplification artifact, exactly
+   what P1 targets. But the investigation's decisive negative result says this
+   slope is "not the dominant level cause" of the live under-prediction. P1 is
+   still worth doing; do not expect it alone to close the live gap.
+
+4. **Live-path confound — the plan is purely training-side; the strongest
+   unexplained lead is in prediction.** `Model Skew` (SkewNormal `alpha`) is
+   **NaN for every live FGA row**, while offline replay proves the trained
+   model emits *valid* alpha on saved features. The defect is therefore in the
+   live path: `src/sportstradamus/prediction/model_prob.py` — feature/column
+   alignment, `set_model_start_values` seeding live vs. train, the `fused_loc`
+   `weight≈0.9` bookmaker blend, or `temperature≈1.37`. **A training-side
+   compression fix that never reaches the published EV is the FGA dead end
+   repeated.** Every shipped strategy must be verified end-to-end on the live
+   path, not just on the dumped test set (new §"Live-path confound").
+
+5. **ZINB gate under-fit is a confirmed, reproducible win adjacent to P2.**
+   Separate from mean compression: the jointly-fit ZINB `gate` head converges
+   to ≈ half the true structural-zero rate in every NBA ZINB market (FG3M 0.19
+   vs 0.33; PF 0.02 vs 0.14; …), inflating `P(over@line)` everywhere. The fix
+   (a derived-π two-stage ZINB, downstream code unchanged) is fully specced at
+   `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` (Phase B
+   "SUPERSEDED → derived-π"). It is the single highest-confidence item across
+   both projects. Fold it into P2.
+
+6. **GPBoost (P10) was already prototyped deterministically and failed** — did
+   not beat the EB offset, top-volume bias −2.5; its "flat fixed-effect" was a
+   GPBoost-internal FE/RE artifact, not a property of the production model. Do
+   not re-attempt P10 naively (annotation in priority list).
+
+## Determinism prerequisite (P0.5 — blocks P1+)
+
+Before any target/baseline strategy is A/B'd, make offline evaluation
+bit-reproducible, or the P0 ship/kill verdict is meaningless (finding #1):
+
+- Pin LightGBM and LightGBMLSS seeds; pin the train/test split seed.
+- Make `set_model_start_values` row-broadcasting deterministic (it is also a
+  suspected non-determinism source *and* the P1 `loc`-start change touches it).
+- Use fixed hyperparameters (or a controlled, seeded, non-starved Optuna) for
+  evaluation runs so a smoke retrain is comparable to the deployed model.
+- **Determinism gate:** run the same strategy/config through `meditate` twice
+  and assert bit-identical predicted parameters / test-set CSVs before any
+  decile-table comparison is trusted. (The investigation's GPBoost harness
+  already demonstrated bit-identical determinism is achievable here.)
+
+This is small, high-leverage, and strictly precedes P1. Add it as a gate the
+harness or a thin wrapper enforces, not a one-off manual check.
+
+## Live-path confound (verify every shipped strategy end-to-end)
+
+This plan optimizes the training stage; the overconfidence investigation shows
+the live symptom may originate downstream (finding #4). For any strategy that
+clears the P0 threshold on dumped test sets, before promoting it to default
+also confirm it survives the live `model_prob.py` path: raw distribution
+params → decode → `fused_loc` (`weight≈0.9` book blend) → `dispersion_cal` →
+`temperature`. In particular resolve why `Model Skew`=NaN live but valid on
+saved features — a strategy that fixes decile bias offline but is then
+flattened by the book blend or NaN-ed in decode has not fixed the user-visible
+problem.
+
 ## Critical files
 
 | File | Role | Key lines |
@@ -69,6 +169,8 @@ down a priority list of interventions, shipping the first that closes the gap.
 | `src/sportstradamus/helpers/distributions.py` | `set_model_start_values` (loc=1.0 in ratio space) | 425–504 |
 | `src/sportstradamus/skew_normal.py` | custom SkewNormal (location-scale, supports negatives) | 30–199 |
 | `src/sportstradamus/scripts/compression_eval.py` | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
+| `src/sportstradamus/prediction/model_prob.py` | **Live-path confound** — where the FGA symptom (Model Skew=NaN, EV≪line) actually appears; verify shipped strategies here | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
+| `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` | Existing task-by-task spec for the **ZINB derived-π gate** fix (pair with P2) | Phase B "SUPERSEDED → derived-π" |
 
 ## Architectural principle (applies to all phases)
 
@@ -108,6 +210,10 @@ for one high-mean (PTS) and one low-mean market in an env with normal network,
 confirm the decile table/scatter show the known top-decile under-diagonal cluster,
 and run the full `poetry` quality gates.
 
+**P0.5 (determinism gate) now sits between P0 and P1** — see §"Determinism
+prerequisite". It is the overconfidence investigation's #1 finding and is a
+hard precondition for trusting any P1+ diff verdict.
+
 ## Priority list of interventions (work down until threshold met)
 
 Mapped from the report's LightGBMLSS-specific order, adapted to both branches.
@@ -122,7 +228,15 @@ SkewNormal on the centered residual (location-scale family supports negatives �
 fits cleanly). At inference add `baseline` back to **`loc` only**; `scale`/`alpha`
 unchanged (kills the multiplicative amplification at pipeline.py:439–452). Update
 `set_model_start_values` (loc start → 0, not 1.0) and the `get_stats` mirror.
-*Expected: large.*
+*Expected: large.* **Investigation note:** this is the Phase-A additive-EB
+offset — inconclusive (non-reproducible), *not* refuted; deterministically it
+was well-calibrated (+0.12 bias). Blocked on P0.5. The `loc`-start change
+touches the same `start_values` broadcasting flagged as a non-determinism
+source — the investigation also found the offset-mode `loc=0` seeding was a
+confirmed regression bug (fixing toward the per-row prior halved bias in
+isolation); in centered space residual mean ≈ 0 so a 0 start is semantically
+right, but verify the broadcast is per-row and deterministic, not a degenerate
+global 0. Then verify it survives the live path (§"Live-path confound").
 
 **P2 — `init_score` player baseline (NegBin/ZINB branch).** Report's #4 — count
 families can't be centered. Inject the log-link of the player baseline as
@@ -131,6 +245,19 @@ pipeline.py:328; booster learns only the deviation. Verify LightGBMLSS supports
 per-parameter `init_score` on a small sample first; if fiddly, fall back to a
 strong leakage-safe target-encoded player-baseline feature (P5) plus reduced
 regularization (P6) for this branch. *Expected: large.*
+
+> **Pair P2 with the ZINB derived-π gate fix (confirmed, reproducible,
+> already specced).** The overconfidence investigation proved a *distinct*
+> ZINB defect from compression: the jointly-fit `gate` head learns ≈ half the
+> true structural-zero rate path-wide, inflating `P(over@line)` everywhere.
+> `init_score` on the count base does not fix the gate. The sound fix is a
+> derived-π two-stage ZINB (calibrated zero classifier `q`; `gate =
+> clip((q − NB(0))/(1 − NB(0)), 0, 1)`), keeping all downstream ZINB code
+> unchanged. Task-by-task spec:
+> `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
+> (Phase B "SUPERSEDED → derived-π"). It is the highest-confidence,
+> reproducible win across both projects and is independent of the
+> determinism blocker — consider doing it first within the count branch.
 
 **P3 — Rate decomposition (NBA + any league with a clean volume driver).** Report's
 #2. Center the *rate* (`stat / MIN` for NBA using `nba.py` `MIN`; analogous volume
@@ -166,7 +293,12 @@ convergence. More engineering; only if one-shot baseline proves too crude.
 **P10 — GPBoost / mixed-effects migration.** Report's last resort. Only if P9 is
 exhausted/unstable or LSS flexibility proves unnecessary. New dependency
 (`gpboost`); user pre-approved deps for a phase that needs it. Treat as a separate
-multi-session sub-project with its own plan.
+multi-session sub-project with its own plan. **Investigation note:** GPBoost
+was already prototyped deterministically for FGA and **failed** — it did not
+beat the additive-EB offset (top-volume bias −2.5), and its "flat
+fixed-effect" decomposition turned out to be a GPBoost-internal FE/RE artifact,
+not a property of the production model. Do not re-attempt naively; if revisited,
+treat the prior negative result as the baseline to beat.
 
 ## Session handoff
 
@@ -187,5 +319,11 @@ multi-session sub-project with its own plan.
 - `poetry run pytest -m integration` (fake-mode, no network)
 - Regenerate CLI help snapshots if `meditate` flags change:
   `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
+- Determinism gate (P0.5): the candidate strategy's `meditate` run is
+  bit-reproducible (same config twice → identical test-set CSV) before its
+  scorecard delta is trusted.
 - Functional gate: harness scorecard delta vs current strategy meets the P0
   threshold before a strategy is promoted to default.
+- Live-path gate: the promoted strategy is confirmed end-to-end through
+  `model_prob.py` (no `Model Skew`=NaN, EV not collapsed by the book blend),
+  not only on the dumped test set.
