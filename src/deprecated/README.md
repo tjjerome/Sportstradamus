@@ -56,4 +56,4 @@ canonical reference.
 ## Provenance
 
 The initial sweep landed on 2026-04-21 as Phase 2 of the maintainability
-refactor. See `docs/STYLE_GUIDE.md` §11 for the dead-code policy.
+refactor. See `docs/STYLE_GUIDE.md` §12 for the dead-code policy.

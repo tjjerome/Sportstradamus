@@ -182,7 +182,7 @@ Also extend `src/sportstradamus/scripts/migrate_archive_to_duckdb.py:_iter_leagu
 
 No changes needed in `moneylines.py`, `prediction/model_prob.py`, `prediction/scoring.py`, or `training/calibration.py` — they all route through `Archive` and the default `at=None` preserves their behavior.
 
-## Constants (per STYLE_GUIDE §8)
+## Constants (per STYLE_GUIDE §9)
 
 In `src/sportstradamus/helpers/archive.py`:
 

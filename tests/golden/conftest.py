@@ -1,7 +1,7 @@
 """Shared pytest fixtures for the golden-snapshot suite.
 
 These tests protect the public CLI surface during the readability refactor.
-See docs/STYLE_GUIDE.md §14 and the Phase 1 section of the refactor plan at
+See docs/STYLE_GUIDE.md §19 and the Phase 1 section of the refactor plan at
 /home/trevor/.claude/plans/my-codebase-has-gotten-toasty-bonbon.md.
 """
 

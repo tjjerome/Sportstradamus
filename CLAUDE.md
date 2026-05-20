@@ -45,7 +45,7 @@ Do not undo that work:
   call sites of the affected method. Zero-caller methods go to `src/deprecated/`, not
   into the next refactor's surprise pile.
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
-  See STYLE_GUIDE.md §8.
+  See STYLE_GUIDE.md §9.
 
 ## Commands
 
