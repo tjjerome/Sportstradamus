@@ -11,11 +11,35 @@ import pytest
 
 from sportstradamus.scripts.compression_eval import (
     MIN_TOP_DECILE_MAE_IMPROVEMENT,
+    Scorecard,
     decile_table,
     load_test_set,
     scorecard,
     verdict,
 )
+
+
+def _base_card(**overrides) -> Scorecard:
+    """Build a Scorecard with sensible defaults for verdict() unit tests."""
+    defaults = dict(
+        timestamp="2026-05-19T00:00:00+00:00",
+        git_sha="deadbeef",
+        strategy="t",
+        league="NBA",
+        market="PTS",
+        pred_col="EV",
+        n_rows=100,
+        global_mae=1.0,
+        top_decile_mae=2.0,
+        top_decile_bias=-0.5,
+        compression_ratio=0.5,
+        top_decile_compression_ratio=0.4,
+        pred_meanyr_corr=-0.5,
+        result_meanyr_corr=0.0,
+        brier_skill_score=None,
+    )
+    defaults.update(overrides)
+    return Scorecard(**defaults)
 
 
 def _compressed_frame(n: int = 2000, seed: int = 0) -> pd.DataFrame:
@@ -96,3 +120,133 @@ def test_load_test_set_drops_nonfinite_and_validates_columns(tmp_path):
     bad.to_csv(bp, index=False)
     with pytest.raises(ValueError, match="missing required columns"):
         load_test_set(bp, "EV")
+
+
+def test_load_test_set_keeps_optional_columns_when_present(tmp_path):
+    df = pd.DataFrame(
+        {
+            "MeanYr": [10.0, 12.0, 14.0],
+            "Result": [11.0, 13.0, 15.0],
+            "EV": [10.5, 12.5, 14.5],
+            "P": [0.55, 0.60, 0.50],
+            "Odds": [0.45, 0.40, 0.50],
+            "Line": [10.0, 12.0, 14.0],
+        }
+    )
+    p = tmp_path / "NBA_PTS.csv"
+    df.to_csv(p, index=False)
+    loaded = load_test_set(p, "EV")
+    assert {"P", "Odds", "Line"}.issubset(loaded.columns)
+    assert len(loaded) == 3
+
+
+def test_load_test_set_handles_missing_optional_columns(tmp_path):
+    df = pd.DataFrame(
+        {"MeanYr": [10.0, 12.0], "Result": [11.0, 13.0], "EV": [10.5, 12.5]}
+    )
+    p = tmp_path / "NBA_PTS.csv"
+    df.to_csv(p, index=False)
+    loaded = load_test_set(p, "EV")
+    card = scorecard(loaded, "EV", strategy="t", league="NBA", market="PTS")
+    assert card.brier_skill_score is None
+
+
+def test_brier_skill_score_positive_when_model_beats_book():
+    rng = np.random.default_rng(0)
+    n = 4000
+    meanyr = rng.uniform(2, 30, n)
+    line = meanyr.copy()
+    # True over rate aligned tightly with model probability; book is near-random.
+    p_true = rng.uniform(0.05, 0.95, n)
+    outcomes = rng.uniform(size=n) < p_true
+    result = np.where(outcomes, line + 1.0, line - 1.0)
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": meanyr,
+            "Line": line,
+            "P": p_true,  # model nails it
+            "Odds": np.full(n, 0.5),  # book is 50/50
+        }
+    )
+    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
+    assert card.brier_skill_score is not None
+    assert card.brier_skill_score > 0.1
+
+
+def test_brier_skill_score_negative_when_book_beats_model():
+    rng = np.random.default_rng(1)
+    n = 4000
+    meanyr = rng.uniform(2, 30, n)
+    line = meanyr.copy()
+    p_true = rng.uniform(0.05, 0.95, n)
+    outcomes = rng.uniform(size=n) < p_true
+    result = np.where(outcomes, line + 1.0, line - 1.0)
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": meanyr,
+            "Line": line,
+            # Model is anti-correlated noise; book is the true probability so
+            # book_over = 1 - Odds nails it.
+            "P": 1.0 - p_true,
+            "Odds": 1.0 - p_true,
+        }
+    )
+    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
+    assert card.brier_skill_score is not None
+    assert card.brier_skill_score < 0
+
+
+def test_verdict_kill_on_brier_skill_regression():
+    # MAE gates pass (candidate improves top-decile MAE and global MAE), but
+    # brier_skill_score regresses — third gate must fire.
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.10
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.05
+    )
+    ship, reason = verdict(base, cand)
+    assert not ship
+    assert "KILL" in reason
+    assert "brier_skill_score regressed" in reason
+
+
+def test_verdict_ship_includes_brier_skill_when_present():
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.05
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.10
+    )
+    ship, reason = verdict(base, cand)
+    assert ship, reason
+    assert "brier_skill" in reason
+
+
+def test_verdict_skips_brier_skill_gate_when_either_baseline_or_candidate_lacks_it():
+    # Baseline has no brier; candidate has a (worse) value — gate must skip,
+    # MAE gates alone decide. MAE improves so SHIP.
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=None
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=-0.50
+    )
+    ship, reason = verdict(base, cand)
+    assert ship, reason
+    assert "brier_skill" not in reason
+
+    # And symmetric: candidate None.
+    base2 = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.50
+    )
+    cand2 = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=None
+    )
+    ship2, reason2 = verdict(base2, cand2)
+    assert ship2, reason2
+    assert "brier_skill" not in reason2

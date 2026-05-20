@@ -46,6 +46,15 @@ from sportstradamus import data
 MIN_TOP_DECILE_MAE_IMPROVEMENT = 0.05
 MAX_GLOBAL_MAE_REGRESSION = 0.01
 
+# Brier-skill third gate (see CLAUDE.md "Kelly & blending" and the plan).
+# A strategy ships only if its brier_skill_score does not regress vs the
+# baseline (any worsening = KILL, even if the MAE gates pass).
+MAX_BRIER_SKILL_REGRESSION: float = 0.0
+
+# Probability clip mirrors training/pipeline.py:_PROBA_CLIP so Brier never sees
+# exact 0 or 1 from either model or book.
+_PROBA_CLIP: float = 1e-6
+
 # Default number of player-mean buckets. Deciles are the report's recommended
 # slicing granularity for surfacing the compression cluster.
 N_DECILES = 10
@@ -81,6 +90,9 @@ class Scorecard:
     top_decile_compression_ratio: float
     pred_meanyr_corr: float
     result_meanyr_corr: float
+    # Appended last so existing compression_eval_log.csv files (written before
+    # this field existed) keep appending without breaking pandas concat reads.
+    brier_skill_score: float | None
 
 
 def _git_sha() -> str:
@@ -116,8 +128,15 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"{path.name} missing required columns: {sorted(missing)}")
-    out = df[[DECILE_COL, ACTUAL_COL, pred_col]].copy()
-    out = out.replace([np.inf, -np.inf], np.nan).dropna()
+    # Opportunistically keep brier-skill inputs when present; older CSVs without
+    # them stay loadable and just skip the third gate downstream.
+    optional = {"P", "Odds", "Line"} & set(df.columns)
+    out = df[sorted(required | optional)].copy()
+    # Filter non-finite rows on required columns only — missing P/Odds/Line rows
+    # are filtered locally inside _brier_skill_score so older CSVs that lack
+    # those columns still pass the harness.
+    required_view = out[list(required)].replace([np.inf, -np.inf], np.nan)
+    out = out[required_view.notna().all(axis=1)]
     return out
 
 
@@ -168,6 +187,31 @@ def _corr(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.corrcoef(x, y)[0, 1])
 
 
+def _brier_skill_score(df: pd.DataFrame) -> float | None:
+    """1 - brier(model_P) / brier(book_over) on the test set, or None if cols absent.
+
+    Requires ``P`` (calibrated model over-probability), ``Odds`` (book
+    under-probability so book over = ``1 - Odds``), ``Line`` and
+    ``Result``. The binary outcome is ``Result >= Line``. Returns
+    ``None`` if any column is missing or has all-NaN values, so older
+    CSVs without these columns are handled gracefully.
+    """
+    needed = {"P", "Odds", "Line"}
+    if not needed.issubset(df.columns):
+        return None
+    sub = df[["P", "Odds", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
+    if len(sub) == 0:
+        return None
+    y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
+    p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
+    p_book = np.clip(1.0 - sub["Odds"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
+    brier_model = float(np.mean((p_model - y) ** 2))
+    brier_book = float(np.mean((p_book - y) ** 2))
+    if brier_book <= 0:
+        return None
+    return 1.0 - brier_model / brier_book
+
+
 def scorecard(
     df: pd.DataFrame,
     pred_col: str,
@@ -191,6 +235,7 @@ def scorecard(
     table = decile_table(df, pred_col, n_deciles)
     top = table.iloc[-1]
     top_mask = df[DECILE_COL] >= df[DECILE_COL].quantile(1 - 1 / n_deciles)
+    brier_skill = _brier_skill_score(df)
 
     return Scorecard(
         timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -209,6 +254,7 @@ def scorecard(
         ),
         pred_meanyr_corr=_corr(meanyr, pred - meanyr),
         result_meanyr_corr=_corr(meanyr, actual - meanyr),
+        brier_skill_score=brier_skill,
     )
 
 
@@ -235,8 +281,26 @@ def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
             f"KILL: global MAE regressed {global_reg:+.1%} "
             f"(max {MAX_GLOBAL_MAE_REGRESSION:.0%})"
         )
+    if (
+        baseline.brier_skill_score is not None
+        and candidate.brier_skill_score is not None
+    ):
+        delta = candidate.brier_skill_score - baseline.brier_skill_score
+        if delta < -MAX_BRIER_SKILL_REGRESSION:
+            return False, (
+                f"KILL: brier_skill_score regressed "
+                f"{baseline.brier_skill_score:+.3f} → "
+                f"{candidate.brier_skill_score:+.3f} (Δ {delta:+.3f})"
+            )
     return True, (
         f"SHIP: top-decile MAE {top_impr:+.1%}, global MAE {global_reg:+.1%}"
+        + (
+            f", brier_skill {baseline.brier_skill_score:+.3f} → "
+            f"{candidate.brier_skill_score:+.3f}"
+            if baseline.brier_skill_score is not None
+            and candidate.brier_skill_score is not None
+            else ""
+        )
     )
 
 
@@ -400,6 +464,8 @@ def main(
             f"result_meanyr_corr={card.result_meanyr_corr:+.3f}  "
             f"pred_meanyr_corr={card.pred_meanyr_corr:+.3f}"
         )
+        if card.brier_skill_score is not None:
+            click.echo(f"brier_skill_score={card.brier_skill_score:+.3f}")
         if scatter:
             out = SCATTER_DIR / f"compression_{stem}_{pred_col}.png"
             write_scatter(df, pred_col, out, f"{stem} — {strategy}")
