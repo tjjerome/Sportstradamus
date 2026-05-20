@@ -95,7 +95,7 @@ Roadmap §1.2 follow-up. Inline literals like `0.95`, `0.05`, `0.9`,
 several EV/correlation cutoffs at `correlation.py:624` and `:411`
 ride alongside the already-named `_BEAM_WIDTH` and
 `_KELLY_BANKROLL_FRACTION`. Promote them to module-level constants per
-STYLE_GUIDE §8 (named, ALL_CAPS, single-line "why" comment).
+STYLE_GUIDE §9 (named, ALL_CAPS, single-line "why" comment).
 
 **Constraint:** behavior must be unchanged. This is a rename pass, not
 a tune.
@@ -360,7 +360,7 @@ because Step 4 demonstrated those names mean different things. Keep
 the value semantics: `1.0` = no shrink, `0.0` = degenerate to
 no-information.
 
-### 5.c Constants (STYLE_GUIDE §8)
+### 5.c Constants (STYLE_GUIDE §9)
 
 | Name | Value | Reason |
 |---|---|---|
@@ -412,7 +412,7 @@ roadmap-aligned with `CLV_SEGMENT_MIN_N=20` (we use 25 here so the
 ramp starts above the bare reporting threshold).
 
 Document the blending rule and constants in the `kelly.py` module
-docstring with the same one-line "why" comment per STYLE_GUIDE §8.
+docstring with the same one-line "why" comment per STYLE_GUIDE §9.
 
 **Tests:** `tests/golden/test_kelly.py` (extends Step 5.g):
 - `n=10` → output equals `training_bss`.

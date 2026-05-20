@@ -206,7 +206,7 @@ The audit prompt asks the agent to read the code, answer those questions, and wr
 > - Metadata file is written and contains the right keys.
 > - The `--rebuild-correlations` flag runs without touching `data/models/`.
 >
-> Constraint: do not change the LightGBMLSS training pipeline. This work is confined to `training/correlate.py`, `training/cli.py`, `prediction/correlation.py`, and the new tests. Magic numbers go in named module-level constants per `STYLE_GUIDE.md` §8.
+> Constraint: do not change the LightGBMLSS training pipeline. This work is confined to `training/correlate.py`, `training/cli.py`, `prediction/correlation.py`, and the new tests. Magic numbers go in named module-level constants per `STYLE_GUIDE.md` §9.
 >
 > When done: ruff clean, golden tests pass, regenerate CLI snapshots since `--rebuild-correlations` is new. Run `poetry run meditate --rebuild-correlations --league NBA` end-to-end and confirm the new CSVs appear. Summarize the methodological changes and any audit findings that turned out not to need a fix.
 
@@ -225,7 +225,7 @@ follow-ups):**
 - The Σ matrix passed to `multivariate_normal.cdf` is built pair-by-pair;
   singular submatrices are dropped rather than nearest-PSD-projected.
 - Beam width 1000, EV cutoff 1.05, boost bands, and final EV floors are
-  inline magic numbers — violates STYLE_GUIDE.md §8.
+  inline magic numbers — violates STYLE_GUIDE.md §9.
 - `data/banned_combos.json` is a soft modifier; no pair is hard-banned.
   Decide whether banlist semantics are desired and add a hard-ban path.
 - Same-player guarding is fragile substring matching. Switch to canonical
@@ -1552,7 +1552,7 @@ handful of items that aren't in any phase but matter for long-term health.
 - **Magic-number purge in `correlation.py`.** Roadmap mentions this in
   passing for Phase 1.2 follow-up; the audit's lit list (`K=1000`, EV
   cutoffs, boost bands, `[0, 0, 3.5, 6.5, 6, 10, 25]` payout array) is
-  long enough that it deserves its own commit per STYLE_GUIDE.md §8.
+  long enough that it deserves its own commit per STYLE_GUIDE.md §9.
 - **`prediction/parlay.py` split.** CONTRIBUTING.md advertises this
   module; in practice both `find_correlation` and `beam_search_parlays`
   live in `correlation.py`. Either split per the contract or update

@@ -21,7 +21,40 @@ with `ruff`, fix whichever is wrong and make them agree.
 
 ---
 
-## 2. Standards We Adopt
+## 2. Core Principles
+
+These principles set the default posture for every change. Later sections
+spell out the mechanics; this section is the spirit.
+
+1. **Preserve behavior unless the task explicitly requests a behavior change.**
+   Refactors that change outputs are not refactors.
+2. **Prefer clarity over micro-optimization.** Readability is the
+   long-running cost driver in this codebase.
+3. **Make data flow and assumptions explicit.** Build named intermediate
+   variables for multi-step transformations rather than burying logic in
+   deeply nested expressions.
+4. **Keep numerically or logically sensitive areas stable and
+   well-documented.** Model training, calibration, EV blending, and the
+   Archive schema are this category — see §6 docstring rules for the
+   extra fields they need.
+5. **Add tests before or alongside structural refactors.** Characterization
+   tests come first, then the seam, then the next seam. See §14.
+6. **Prefer the simplest correct implementation over architectural
+   cleverness.** Three similar lines beat a premature abstraction. Extract
+   on the third concrete reuse, not the first.
+7. **Do not add hidden control logic** (fallbacks, retries, line searches,
+   damping, secondary loops) unless explicitly requested. Silent fallbacks
+   are how training reports start lying.
+8. **Keep top-level orchestrators flat and readable.** The CLI entry
+   points (`meditate`, `prophecize`, `confer`, `reflect`) should read like
+   a numbered list of workflow steps. Do not hide a core step behind
+   extra indirection just to shorten the orchestrator — the orchestrator
+   *is* the workflow. Extract a helper when a step has its own internal
+   branching, not to flatten the call count.
+
+---
+
+## 3. Standards We Adopt
 
 We deliberately pull from these sources. They are cited rather than copied
 wholesale.
@@ -29,7 +62,7 @@ wholesale.
 - **PEP 8** — layout, whitespace, naming. Enforced via `ruff`.
 - **PEP 257** — docstring conventions. Enforced via `ruff` (`D` rules).
 - **PEP 484 / 604** — type hints. Advisory `mypy` check; annotations
-  required on public APIs (see §7).
+  required on public APIs (see §8).
 - **PEP 20 (Zen of Python)** — readability beats cleverness; flat beats
   nested; explicit beats implicit.
 - **Google Python Style Guide** — docstring *format* (Args/Returns/Raises
@@ -45,7 +78,7 @@ wholesale.
 
 ---
 
-## 3. Formatting
+## 4. Formatting
 
 - **Formatter:** `ruff format`. Run it before committing; pre-commit enforces.
 - **Line length:** 100 characters.
@@ -54,10 +87,13 @@ wholesale.
 - **Trailing commas:** on multi-line collections and signatures.
 - **Blank lines:** 2 between top-level definitions, 1 between methods,
   0 inside functions unless separating logical sections.
+- Follow the existing style in each file touched (indentation, spacing,
+  quote style) when it disagrees with the above only for local consistency
+  within a tight block.
 
 ---
 
-## 4. Imports
+## 5. Imports
 
 - Three groups, separated by a blank line, each alphabetized:
   stdlib / third-party / first-party (`sportstradamus.*`). `ruff` sorts
@@ -67,10 +103,12 @@ wholesale.
   over importing many names from a module, unless the names are used many
   times or the source is a type or constant.
 - Relative imports inside a package are fine (`from .base import Stats`).
+- Remove unused imports in the same commit that orphans them. `ruff`'s
+  `F401` rule catches the obvious cases.
 
 ---
 
-## 5. Naming
+## 6. Naming
 
 - Modules and packages: `snake_case`.
 - Classes and type aliases: `PascalCase`.
@@ -78,16 +116,20 @@ wholesale.
 - Module-level constants: `UPPER_SNAKE_CASE`.
 - Private (module- or class-internal): leading underscore (`_helper`,
   `_CACHE`).
+- Use descriptive, purpose-revealing names. A reader landing in the middle
+  of a function should understand what each name means without scrolling.
 - Never use single-letter names in public APIs. Single letters are only
   acceptable inside a short block when they mirror a math formula (`mu`,
   `sigma`, `x`, `y`) and that formula is cited in a comment.
 - Don't use `l`, `O`, or `I` as names (visually confusable with digits).
 - Method names describe what the method *does* from the caller's view
   (`get_training_matrix`), not how it works internally.
+- Avoid numbering-based names (`step1`, `phase_2`, `eq4`) in identifiers
+  unless they cite a published equation or the user explicitly asks for them.
 
 ---
 
-## 6. Docstrings
+## 7. Docstrings
 
 - **Every module** in `src/sportstradamus/` has a module-level docstring:
   one line describing the purpose, then a paragraph on any non-obvious
@@ -99,6 +141,14 @@ wholesale.
 - **Format:** Google-style sections, in order: one-line summary, optional
   elaboration paragraph, `Args:`, `Returns:`, `Raises:`. Skip any section
   that does not apply.
+
+For numerical, statistical, or physics-facing functions (model training,
+calibration, EV blending, distribution fusion), also document:
+
+- The state-vector or data convention (column order, key names, shapes).
+- Units for inputs and outputs (probabilities, log-odds, dollars, EV cents).
+- Any numerical assumption or sensitivity (zero-inflation regime,
+  clip ranges, shape ceilings).
 
 ```python
 def fused_loc(model_loc, book_loc, model_weight, dist):
@@ -126,13 +176,13 @@ def fused_loc(model_loc, book_loc, model_weight, dist):
 ```
 
 - Reference domain terms in docstrings so readers can look them up in the
-  glossary (§12) without grepping the codebase.
+  glossary (§17) without grepping the codebase.
 - Math in docstrings: use plain ASCII or Unicode mathematical operators.
   LaTeX is overkill.
 
 ---
 
-## 7. Type Hints
+## 8. Type Hints
 
 - **Required** on every public function and class method signature,
   including the return type.
@@ -149,12 +199,15 @@ def fused_loc(model_loc, book_loc, model_weight, dist):
 
 ---
 
-## 8. Comments
+## 9. Comments
 
 - Explain **why**, not **what**. Well-named code already says what.
 - Good triggers for a comment: a hidden constraint, an invariant, a
-  workaround for a specific bug, a non-obvious reason for a value.
-- Avoid comments that restate the line below them.
+  workaround for a specific bug, a non-obvious reason for a value, a
+  numerical heuristic, a domain or physical assumption, a sequencing
+  dependency between two lines that otherwise look independent.
+- Avoid comments that restate the line below them or narrate straightforward
+  assignments and simple loops.
 - Do not leave `# TODO` without a name, date, or issue reference. Anonymous
   TODOs decay into permanent lies.
 - Do not comment out code. Delete it; `git log` keeps the history.
@@ -174,20 +227,31 @@ extraction.
 
 ---
 
-## 9. Functions
+## 10. Functions
 
 - **Target length:** ≤ 60 logical lines. Hard suggestion ~120.
+- **One clear purpose per function.** If the docstring reads "loads data,
+  fits a model, writes the report", that's three functions. Extract helpers
+  when branching becomes hard to follow.
+- **Build explicit intermediate variables** for multi-step transformations.
+  A named local that holds the result of one step makes the next step
+  reviewable without re-deriving the expression.
+- **Use early returns or guards** for parameter validation and impossible-
+  state shortcuts.
 - **Deep nesting** (> 4 levels of control flow) is a refactor signal,
   not a feature. Flatten with early returns or extracted helpers.
-- **One responsibility per function.** If the docstring reads "loads data,
-  fits a model, writes the report", that's three functions.
+- **Keep top-level orchestrators flat.** A CLI entry point should read as
+  a sequence of named steps. Don't hide a workflow step behind an extra
+  indirection layer just to shorten the orchestrator — that layer makes
+  the workflow harder to follow, not easier. Extract a helper when the
+  step has its own logic worth naming; inline it when it does not.
 - **Avoid boolean flag arguments** that switch behavior. Prefer two
   functions, or an enum, or polymorphism.
 - Default arguments must be immutable. Never `def f(x=[])`.
 
 ---
 
-## 10. Error Handling
+## 11. Error Handling
 
 - Validate at system boundaries: HTTP responses, file I/O, user input.
   Inside the package, trust your own types.
@@ -197,10 +261,13 @@ extraction.
 - Raise specific exception types (`ValueError`, `KeyError`,
   `FileNotFoundError`). Custom exceptions only when the caller needs to
   distinguish them.
+- Do **not** add error handling for scenarios that cannot happen. Trust
+  internal invariants. Boundary code validates; interior code does not
+  re-validate.
 
 ---
 
-## 11. Dead Code
+## 12. Dead Code
 
 - Delete unused code in the commit where it becomes unused. `git log` is the
   history.
@@ -209,10 +276,75 @@ extraction.
   and add a TODO to `README.md`. Do not leave it commented out in place.
 - Stale imports (a module imports `foo` but never uses it) are dead code.
   `ruff` catches them via the `F401` rule.
+- Dead helper layers — a function that only forwards to one other function
+  with no added clarity — count as dead code. Inline them.
 
 ---
 
-## 12. Domain Glossary
+## 13. Dependencies
+
+- Don't add a new dependency unless it pulls real weight. A 30-line helper
+  is cheaper than a new transitive tree.
+- Pin via Poetry (`pyproject.toml` + `poetry.lock`). Loose constraints in
+  the lockfile defeat the point of having one.
+- PyTorch is CPU-only and pulled from a custom Poetry source (see
+  `CLAUDE.md`). Don't replace that source without weighing the install-time
+  impact on the production server.
+
+---
+
+## 14. Testing Expectations
+
+- Run the full quality-gate suite from the repository root before claiming
+  any task is done:
+  - `poetry run ruff check src/sportstradamus/`
+  - `poetry run pytest tests/golden/`
+  - `poetry run pytest -m integration` (fake-mode, no network)
+- Add characterization tests for current behavior before deep structural
+  edits, especially around the training pipeline, Archive schema, and
+  Sheets export.
+- Keep all existing tests passing after changes. A flaky test is a real
+  test until proven otherwise.
+- Add tests for any new helper that affects outputs, contracts, or schemas.
+- Regenerate CLI help snapshots only when a flag change is intentional:
+  `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`.
+
+---
+
+## 15. Refactor Workflow
+
+The order matters. Skipping a step is how you ship a "behavior-preserving"
+refactor that quietly changes a metric.
+
+1. **Capture baseline behavior.** Run the full test suite and, where
+   relevant, record the script outputs you intend to keep stable
+   (training report numbers, golden-test snapshots, Sheets payload).
+2. **Add or extend tests** around weakly covered behavior touching the
+   seam.
+3. **Refactor one seam at a time.** One module per session per CLAUDE.md.
+4. **Re-run tests after each seam.** If something drifted, fix it before
+   moving on.
+5. **Review for contract drift** before committing: signatures, key names,
+   schemas, output formats, file paths, Sheet column order.
+
+---
+
+## 16. Documentation Updates
+
+Update documentation in the same commit that changes the contract or
+workflow it describes. At minimum, consider:
+
+- `README.md` — contributor-facing pointers and quickstart commands.
+- `CONTRIBUTING.md` — package map, where to add a league or market.
+- `CLAUDE.md` — diagnostic schemas, deployment notes, training report
+  fields. The Training Report Diagnostics section in particular must stay
+  in sync with `training/report.py`.
+- This guide (`docs/STYLE_GUIDE.md`) — when conventions change.
+- Tests — when contracts are clarified, freeze the new contract in a test.
+
+---
+
+## 17. Domain Glossary
 
 A paragraph each for the terms that appear everywhere. Skim this before
 grepping the codebase for meaning.
@@ -265,37 +397,69 @@ grepping the codebase for meaning.
 
 ---
 
-## 13. For Claude and Other LLM Contributors
+## 18. For Claude and Other LLM Contributors
 
-These rules exist because LLM edits are paid for per token. Violating them
-makes the refactor expensive.
+These rules exist because LLM edits are paid for per token, and because
+silent behavior changes from an automated contributor are harder to catch
+than the same change from a human. Violating them makes the refactor
+expensive *and* risky.
 
-- **Read this guide once per session.** After that, cite sections by number
-  instead of re-reading.
-- **Prefer `Edit` over `Write`.** `Write` sends the entire new file;
-  `Edit` sends only the diff. Use `Write` only for genuinely new files
-  or complete rewrites.
-- **Use `ruff format` and `ruff check --fix` before manually editing style.**
-  Mechanical fixes cost nothing; hand-editing the same issues costs
-  thousands of tokens.
-- **Refactor one module per session.** Don't carry full context for more
-  than one file at a time. Commit and start fresh.
-- **Consult the glossary (§12) before grepping.** The term you're looking
-  up is probably there.
-- **Preserve public APIs during splits.** When you split a module into a
-  package, re-export the old names from `__init__.py`. Callers don't change;
-  no cross-codebase grep-and-update needed.
-- **Dispatch parallel subagents for independent work.** Per-league stats
-  subclasses, per-book scrapers, etc. Each subagent gets one file.
-- **Subagent prompts should name this guide by path**
-  (`docs/STYLE_GUIDE.md`), not transmit its body. Subagents can read it
-  themselves.
-- **Do not speculatively abstract.** Three similar lines of code are better
-  than a premature abstraction. Extract only after the third concrete reuse.
+**Posture and scope:**
+
+1. **Assume no behavior changes by default.** If your patch alters an
+   output, a key name, a Sheet column, or a metric value, that is a
+   feature change. Either it was requested or you should stop and ask.
+2. **Preserve existing public interfaces, output keys, and file schemas.**
+   When you split a module into a package, re-export the old names from
+   `__init__.py` until callers are migrated. Don't break the world to
+   tidy a name.
+3. **Prefer small, reviewable patches.** One module per session, per
+   CLAUDE.md. Commit and start fresh.
+4. **Do not add features, refactors, or "improvements" beyond what was
+   asked.** Speculative cleanup is how scope grows quietly.
+5. **Do not add error handling for scenarios that cannot happen.** See §11.
+6. **Avoid speculative performance optimizations** unless requested and
+   validated against a baseline.
+7. **Remove or avoid dead helper layers** that do not improve clarity or
+   correctness. A one-line pass-through is not a helper.
+8. **Avoid backwards-compatibility bloat.** Trace changes through the
+   codebase and fix function signatures where necessary. If a change
+   forces regeneration of a large artifact (model pickle, training
+   matrix, archive snapshot), call it out explicitly in the patch
+   description.
+9. **If uncertain about numerical or behavioral impact, stop at structural
+   cleanup and call out the risk explicitly.** Don't guess at the training
+   pipeline.
+
+**Workflow:**
+
+10. **Read this guide once per session.** After that, cite sections by
+    number instead of re-reading.
+11. **Prefer `Edit` over `Write`.** `Write` sends the entire new file;
+    `Edit` sends only the diff. Use `Write` only for genuinely new files
+    or complete rewrites.
+12. **Use `ruff format` and `ruff check --fix` before manually editing
+    style.** Mechanical fixes cost nothing; hand-editing the same issues
+    costs thousands of tokens.
+13. **Add docstrings and only meaningful inline comments — do not pad.**
+    See §7 and §9.
+14. **Run or explicitly request validation** before claiming completion.
+    The three quality gates from §14 must pass; if you can't run them in
+    your environment, say so and ask the user to.
+15. **Consult the glossary (§17) before grepping.** The term you're
+    looking up is probably there.
+16. **Dispatch parallel subagents for independent work.** Per-league stats
+    subclasses, per-book scrapers, etc. Each subagent gets one file.
+17. **Subagent prompts should name this guide by path**
+    (`docs/STYLE_GUIDE.md`), not transmit its body. Subagents can read it
+    themselves.
+18. **Do not speculatively abstract.** Three similar lines of code are
+    better than a premature abstraction. Extract only after the third
+    concrete reuse.
 
 ---
 
-## 14. Enforcement
+## 19. Enforcement
 
 These tools run in CI and locally via `pre-commit`:
 
