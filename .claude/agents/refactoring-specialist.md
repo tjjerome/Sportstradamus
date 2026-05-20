@@ -42,16 +42,21 @@ Refuse to start if any of these are true:
 
 ### 1. Orchestrator flatness — STYLE_GUIDE §10, §2.8
 
-The CLI entry points are the workflow:
+The CLI entry points and the per-unit-of-work orchestrators they call ARE
+the workflow:
 
-- `meditate` → `sportstradamus.training`
-- `prophecize` → `sportstradamus.prediction`
+- `meditate` → `sportstradamus.training.cli` → `train_market` (per market)
+- `prophecize` → `sportstradamus.prediction` → `model_prob` (per offer)
 - `confer` → `sportstradamus.moneylines`
 - `reflect` → `nightly.py`
 - `dashboard` → `dashboard.py`
 
 A top-level orchestrator should read like a numbered list of named steps.
-Flag and fix:
+There are TWO failure modes — check for BOTH on every orchestrator you
+encounter. Missing either is how the workflow becomes unreadable.
+
+**Failure mode A — steps buried in wrappers (hides the workflow).** Flag
+and fix:
 
 - A workflow step buried inside another helper when it belongs at the top
   level. If a reader has to jump three files to find "score offers" or
@@ -60,6 +65,39 @@ Flag and fix:
   work. Inline the wrapper; the orchestrator should hold the steps itself.
 - A "main" function that ends in one call to a private `_run_everything`
   helper. That is hiding the workflow, not encapsulating it. Inline.
+
+**Failure mode B — everything inlined into one wall (drowns the workflow).**
+Equally bad: an orchestrator with no buried steps because every step is
+dumped inline. The workflow is technically "visible" but unreadable. STYLE_GUIDE
+§10 caps function length at ≤ 60 logical lines, hard suggestion ~120 —
+mandatory-flag any orchestrator above ~200 logical lines.
+
+Concrete signals you are looking at failure mode B:
+
+- Function length > ~200 logical lines. Run `wc -l` on the function range.
+- Docstring summary names ≥ 3 distinct phases ("loads, fits, calibrates,
+  evaluates, saves"). Each "and" in the summary is a missing helper.
+- Inline section-header comments ("# Step N", "# Dispersion calibration",
+  "# Build filedict"). Section comments are the author confessing the
+  function has multiple purposes — promote each section to a named
+  `_step_*` helper.
+- Inline lambdas / nested `def`s closing over many outer-scope variables
+  (`dispersion_loss(c)` closing over 6+ locals; `brier_loss(T)` closing
+  over the val logits). Promote to pure module-level helpers with
+  explicit kwargs — that's the testability win.
+- Five or more numpy / pandas computation blocks separated by blank lines
+  in the same function body. Each block is almost certainly a step.
+
+**Fix for failure mode B.** Extract `_step_*` private helpers above the
+orchestrator. Pass state via a mutable dict or a per-stage NamedTuple
+(dict is the lower-risk first pass). Preserve the bit-for-bit pickle key
+order and output schema — extraction must not reorder dict insertions
+that downstream consumers depend on. Run the determinism gate after
+EVERY extraction; if it goes red, revert that extraction immediately.
+
+The win for the user is testability: `_step_calibrate_dispersion` and
+`_dispersion_crps_loss` are independently unit-testable; an inline closure
+in a 990-line function is not.
 
 ### 2. Wrapper-function elimination — STYLE_GUIDE §12
 
@@ -168,7 +206,11 @@ Execute in this exact order. Do not interleave.
 For each file in scope, produce an internal punch list with the items
 below. Do not edit yet.
 
-- Orchestrator-flatness violations (§10).
+- Orchestrator-flatness violations (§10) — check BOTH failure modes:
+  (A) workflow steps buried in wrappers; (B) orchestrator inlining the
+  entire workflow into one >200-line wall. For (B), run `wc -l` on any
+  function suspected of being an orchestrator and read its docstring
+  summary — multiple "and"-joined phases are the giveaway.
 - Wrapper functions to inline (§12, §18.7).
 - Duplicate blocks at ≥ 3 occurrences (§2.6, §18.18).
 - Weird-loop rewrites.
