@@ -38,6 +38,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_zi,
 )
+from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights, fit_model_weight
@@ -241,6 +242,88 @@ def fit_predict_params(
     )
 
 
+def fit_hurdle_model(
+    X_train: pd.DataFrame,
+    y_train_labels: np.ndarray,
+    params: dict,
+    *,
+    shape_ceiling: float | None = None,
+    seed: int | None = None,
+) -> HurdleZINB:
+    """Build + train a HurdleZINB model. Pure (no disk writes).
+
+    Parallel to ``fit_lss_model`` for the ZINB-hurdle path. When ``seed`` is
+    not None, ``HurdleZINB.fit`` pins RNGs internally — caller doesn't merge
+    determinism kwargs into ``params``.
+
+    Args:
+        X_train: Training feature matrix.
+        y_train_labels: Training target labels (may contain zeros).
+        params: LightGBM training params; ``opt_rounds`` is read as
+            ``num_boost_round``.
+        shape_ceiling: Upper bound on NegBin ``total_count`` shape.
+        seed: If not None, pin RNGs for bit-reproducible training (DEBUG /
+            offline-eval only).
+
+    Returns:
+        A trained ``HurdleZINB``.
+    """
+    rounds = int(params["opt_rounds"])
+    model = HurdleZINB()
+    model.fit(X_train, y_train_labels, hp=params, rounds=rounds, shape_ceiling=shape_ceiling, seed=seed)
+    return model
+
+
+def predict_hurdle_params(model: HurdleZINB, X: pd.DataFrame) -> pd.DataFrame:
+    """Predict ZINB-compatible parameters from a HurdleZINB, preserving index.
+
+    Args:
+        model: A fitted ``HurdleZINB``.
+        X: Feature matrix to predict on.
+
+    Returns:
+        DataFrame with columns ``["total_count", "probs", "gate"]``,
+        indexed like ``X``.
+    """
+    preds = model.predict(X, pred_type="parameters")
+    preds.index = X.index
+    return preds
+
+
+def fit_predict_hurdle_params(
+    X_train: pd.DataFrame,
+    y_train_labels: np.ndarray,
+    X_predict: pd.DataFrame,
+    params: dict,
+    *,
+    shape_ceiling: float | None = None,
+    seed: int | None = None,
+) -> pd.DataFrame:
+    """Fit one HurdleZINB and return its predicted params for X_predict.
+
+    Convenience wrapper mirroring ``fit_predict_params`` for the hurdle path.
+
+    Args:
+        X_train: Training feature matrix.
+        y_train_labels: Training target labels.
+        X_predict: Feature matrix to predict on after fitting.
+        params: LightGBM training params; ``opt_rounds`` is read as rounds.
+        shape_ceiling: Upper bound on NegBin ``total_count`` shape.
+        seed: If not None, pin RNGs (DEBUG/eval only).
+
+    Returns:
+        DataFrame of predicted distribution parameters for ``X_predict``.
+    """
+    model = fit_hurdle_model(
+        X_train,
+        y_train_labels,
+        params,
+        shape_ceiling=shape_ceiling,
+        seed=seed,
+    )
+    return predict_hurdle_params(model, X_predict)
+
+
 def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
     """10-bin equal-width ECE: weighted |avg_pred - avg_actual| across bins."""
     edges = np.linspace(0.0, 1.0, n_bins + 1)
@@ -299,6 +382,7 @@ def train_market(
     league_start_date,
     deterministic: bool = False,
     target_strategy: str = "ratio_meanyr",
+    zinb_mode: str = "joint",
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -329,7 +413,18 @@ def train_market(
             the SkewNormal forward target transform and the matching decode.
             Default ``"ratio_meanyr"`` reproduces legacy production behavior
             byte-for-byte.
+        zinb_mode: Either ``"joint"`` (legacy LightGBMLSS ZINB; the default) or
+            ``"hurdle"`` (use ``HurdleZINB`` from ``sportstradamus.hurdle`` — a
+            two-stage model with a derived-π gate; see
+            docs/OVERCONFIDENCE_INVESTIGATION.md §2 and
+            docs/CENTERED_TARGET_NEGATIVE_RESULT.md for context). Only consulted
+            when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
+            byte-identical to pre-P2.B production behavior.
     """
+    if zinb_mode not in {"joint", "hurdle"}:
+        raise ValueError(
+            f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}"
+        )
     stat_dist = load_distribution_config()
     stat_dist.setdefault(league, {})
     stat_zi.setdefault(league, {})
@@ -518,8 +613,10 @@ def train_market(
             dist = "ZINB"
         if dist == "NegBin":
             dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
-        else:
+        elif zinb_mode == "joint":
+            # Legacy jointly-fit LightGBMLSS ZINB path — byte-identical to pre-P2.B.
             dist_obj = ZINB(stabilization="None", loss_fn="nll")
+        # else: hurdle path — dist_obj is not constructed; HurdleZINB is built at fit time.
 
         R_CAP = 50
         per_player_r = player_stats.mean() ** 2 / np.maximum(
@@ -550,25 +647,34 @@ def train_market(
     opt_params = None if rebuild_filter else filedict.get("params")
     dtrain = lgb.Dataset(X_train, label=y_train_labels)
 
-    # Bound shape response function (safety net)
-    if dist in ("NegBin", "ZINB"):
-        dist_obj.param_dict["total_count"] = _BoundedResponseFn(
-            dist_obj.param_dict["total_count"], shape_ceiling
-        )
-    elif dist in ("Gamma", "ZAGamma"):
-        dist_obj.param_dict["concentration"] = _BoundedResponseFn(
-            dist_obj.param_dict["concentration"], shape_ceiling
-        )
+    # use_hurdle: two-stage HurdleZINB instead of joint LightGBMLSS ZINB.
+    # Only active when the count branch selects ZINB and zinb_mode == "hurdle".
+    use_hurdle = dist == "ZINB" and zinb_mode == "hurdle"
 
-    model = LightGBMLSS(dist_obj)
-    set_model_start_values(
-        model,
-        dist,
-        X_train,
-        shape_ceiling=shape_ceiling,
-        normalized=normalize,
-        offset_mode=offset_mode,
-    )
+    if not use_hurdle:
+        # Bound shape response function (safety net) — hurdle applies it internally.
+        if dist in ("NegBin", "ZINB"):
+            dist_obj.param_dict["total_count"] = _BoundedResponseFn(
+                dist_obj.param_dict["total_count"], shape_ceiling
+            )
+        elif dist in ("Gamma", "ZAGamma"):
+            dist_obj.param_dict["concentration"] = _BoundedResponseFn(
+                dist_obj.param_dict["concentration"], shape_ceiling
+            )
+
+        model = LightGBMLSS(dist_obj)
+        set_model_start_values(
+            model,
+            dist,
+            X_train,
+            shape_ceiling=shape_ceiling,
+            normalized=normalize,
+            offset_mode=offset_mode,
+        )
+    else:
+        # Hurdle path: model is built+fit by fit_hurdle_model below.
+        # Placeholder None so the Optuna block can reference `model` safely.
+        model = None
 
     col_list = list(X_train.columns)
     monotone = [0] * len(col_list)
@@ -599,6 +705,17 @@ def train_market(
 
     if deterministic:
         opt_params = {**DETERMINISTIC_FIXED_PARAMS, "monotone_constraints": monotone}
+    elif use_hurdle:
+        # Hurdle skips Optuna (LightGBMLSS hyper_opt does not apply to the
+        # two-stage architecture). Reuse warm-start params from the pickle
+        # if present; otherwise use DETERMINISTIC_FIXED_PARAMS as a sane
+        # default but bump rounds to 200 for non-deterministic quality.
+        if opt_params is None or opt_params.get("opt_rounds") is None:
+            opt_params = {
+                **DETERMINISTIC_FIXED_PARAMS,
+                "monotone_constraints": monotone,
+                "opt_rounds": 200,
+            }
     elif opt_params is None or opt_params.get("opt_rounds") is None:
         opt_params = model.hyper_opt(
             hp_search_space,
@@ -615,23 +732,41 @@ def train_market(
             model, hp_search_space, dtrain, opt_params, n_trials=150, max_minutes=5
         )
 
-    model = fit_lss_model(
-        dist_obj, dist, X_train, y_train_labels, opt_params,
-        normalized=normalize, shape_ceiling=shape_ceiling,
-        seed=DETERMINISTIC_SEED if deterministic else None,
-        offset_mode=offset_mode,
-    )
+    if use_hurdle:
+        model = fit_hurdle_model(
+            X_train,
+            y_train_labels,
+            opt_params,
+            shape_ceiling=shape_ceiling,
+            seed=DETERMINISTIC_SEED if deterministic else None,
+        )
+    else:
+        model = fit_lss_model(
+            dist_obj, dist, X_train, y_train_labels, opt_params,
+            normalized=normalize, shape_ceiling=shape_ceiling,
+            seed=DETERMINISTIC_SEED if deterministic else None,
+            offset_mode=offset_mode,
+        )
 
     # Predictions and parameter extraction
-    prob_params_train = predict_lss_params(
-        model, dist, X_train, normalized=normalize, offset_mode=offset_mode
-    )
-    prob_params_validation = predict_lss_params(
-        model, dist, X_validation, normalized=normalize, offset_mode=offset_mode
-    )
-    prob_params = predict_lss_params(
-        model, dist, X_test, normalized=normalize, offset_mode=offset_mode
-    )
+    if getattr(model, "is_hurdle", False):
+        prob_params_train = predict_hurdle_params(model, X_train)
+    else:
+        prob_params_train = predict_lss_params(
+            model, dist, X_train, normalized=normalize, offset_mode=offset_mode
+        )
+    if getattr(model, "is_hurdle", False):
+        prob_params_validation = predict_hurdle_params(model, X_validation)
+    else:
+        prob_params_validation = predict_lss_params(
+            model, dist, X_validation, normalized=normalize, offset_mode=offset_mode
+        )
+    if getattr(model, "is_hurdle", False):
+        prob_params = predict_hurdle_params(model, X_test)
+    else:
+        prob_params = predict_lss_params(
+            model, dist, X_test, normalized=normalize, offset_mode=offset_mode
+        )
 
     prob_params_train.sort_index(inplace=True)
     prob_params_train["result"] = y_train["Result"]
@@ -1174,6 +1309,8 @@ def train_market(
         "normalized": normalize,
         "offset_meta": strategy.offset_meta(global_mean, denom_col),
         "target_strategy": target_strategy,
+        "zinb_mode": zinb_mode,
+        "is_hurdle": bool(getattr(model, "is_hurdle", False)),
         "expected_columns": list(X.columns),
     }
 
@@ -1211,7 +1348,11 @@ def train_market(
     # the whole-suite report() stay suppressed (input is unchanged under
     # input-freeze; report() is not per-market and would clobber the
     # production training_report.txt).
-    subdir = f"deterministic/{target_strategy}/" if deterministic else ""
+    if deterministic:
+        suffix = "_hurdle" if zinb_mode == "hurdle" else ""
+        subdir = f"deterministic/{target_strategy}{suffix}/"
+    else:
+        subdir = ""
     csv_filepath = pkg_resources.files(data) / f"test_sets/{subdir}{filename}.csv"
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)

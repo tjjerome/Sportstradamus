@@ -79,6 +79,19 @@ np.seterr(divide="ignore", invalid="ignore")
         "the default 'ratio_meanyr' is current production behavior."
     ),
 )
+@click.option(
+    "--zinb-mode",
+    type=click.Choice(["joint", "hurdle"]),
+    default="joint",
+    show_default=True,
+    help=(
+        "Model architecture for ZINB markets. 'joint' is the legacy "
+        "jointly-fit LightGBMLSS ZINB. 'hurdle' uses the two-stage "
+        "HurdleZINB (calibrated zero classifier + NegBin on positives + "
+        "derived-pi gate; see docs/OVERCONFIDENCE_INVESTIGATION.md §2). "
+        "Default 'joint' is byte-identical to pre-P2.B production."
+    ),
+)
 def meditate(
     force,
     league,
@@ -88,6 +101,7 @@ def meditate(
     log_level,
     deterministic,
     target_strategy,
+    zinb_mode,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # --deterministic implies --force: the input-freeze (new_M = empty)
@@ -107,6 +121,7 @@ def meditate(
             "rebuild_correlations": rebuild_correlations,
             "deterministic": deterministic,
             "target_strategy": target_strategy,
+            "zinb_mode": zinb_mode,
         },
     )
     click.echo(
@@ -242,4 +257,5 @@ def meditate(
                 league_start_date,
                 deterministic=deterministic,
                 target_strategy=target_strategy,
+                zinb_mode=zinb_mode,
             )
