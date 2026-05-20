@@ -128,7 +128,7 @@ session-by-session implementation plan that landed this work.
 Every prompt is written for a Claude Code or GitHub Copilot Chat session inside the repo. Each one:
 
 1. Tells the agent to read `CLAUDE.md` and `CONTRIBUTING.md` first. The repo has unusually strict rules (no monoliths, no commented-out code, no orphan methods, golden tests must pass) and surfacing those up front prevents rejected PRs.
-2. Is scoped to one module per session. The repo's own `CLAUDE.md` mandates this.
+2. Is scoped to one module per subagent (multi-module work dispatches subagents in parallel; single-module work stays in the main session). The repo's own `CLAUDE.md` mandates this scope discipline.
 3. Specifies canonical import paths (`sportstradamus.training`, `sportstradamus.prediction`, `sportstradamus.helpers`, `sportstradamus.stats`) so the agent doesn't recreate deleted shims.
 4. States acceptance criteria so the agent knows what "done" looks like.
 
@@ -136,7 +136,7 @@ Every prompt is written for a Claude Code or GitHub Copilot Chat session inside 
 
 - Open with: "Read `CLAUDE.md` and `CONTRIBUTING.md` first."
 - Close with: "Run `poetry run ruff check src/sportstradamus/` and `poetry run pytest tests/golden/`. Both must pass."
-- Scope to one module per session, then commit.
+- Scope to one module per subagent (dispatch in parallel for multi-module work), then commit.
 - When adding a CLI flag or command, regenerate snapshots: `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
 - When adding a dependency, specify the Poetry group (core, `[bayes]`, `[strategy]`, `[alerts]`) so it doesn't dump into core.
 - Money values are always `Decimal`, never `float`.

@@ -14,7 +14,7 @@ Power, Flex, and Rivals.
   assumption).
 
 **Estimated time:** 4 weekends, sequenced so each step ships
-independently and respects CLAUDE.md's one-module-per-session rule.
+independently and respects CLAUDE.md's one-module-per-subagent rule.
 
 ---
 
@@ -555,12 +555,13 @@ Documentation completeness is checked into the done criteria (§9 below).
 
 ---
 
-## 8. Module-by-Module Execution Plan (one module per session)
+## 8. Module-by-Module Execution Plan (one module per subagent)
 
-CLAUDE.md mandates one module per session, with commit and fresh start
-between modules. This plan groups the work above into single-module
-sessions and orders them so each session lands on a clean, tested
-foundation.
+CLAUDE.md mandates one module per subagent for multi-module work, with the
+main session orchestrating dispatch and review. This plan groups the work
+above into single-module units and orders them so each unit lands on a
+clean, tested foundation; dispatch can be parallelized where dependencies
+allow.
 
 | # | Session focus (one module / file) | Step refs | Depends on | Notes |
 |---|---|---|---|---|

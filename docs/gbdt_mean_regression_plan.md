@@ -346,8 +346,30 @@ treat the prior negative result as the baseline to beat.
 
 ## Session handoff
 
+### Tooling note: `gh` is a userspace install on this workstation
+
+PR #46 CI status and review-comment monitoring use the GitHub CLI. `gh` is
+**not a system package** — it lives at `~/.local/bin/gh` (installed
+2026-05-19 via the official static tarball release, since `sudo apt` would
+have required an interactive password). Future sessions must ensure
+`~/.local/bin` is on `PATH`; on this workstation it already is (set in
+`~/.profile` / `~/.bashrc`), but a sandboxed or non-login shell may not
+inherit it. If `gh --version` fails, run:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Authentication is also a one-time setup the user completes locally
+(`gh auth login` interactive, or `export GH_TOKEN=…` from a PAT with `repo`
+scope). Agent sessions don't have credentials by default — if `gh api …`
+returns `HTTP 401`, the user needs to re-auth.
+
+### Per-session rules
+
 - One strategy/experiment per session where feasible (aligns with CLAUDE.md
-  "one module per session"); commit + push to `claude/fix-gbdt-mean-regression-GcY1g`
+  "one module per subagent" — the per-strategy scope discipline, not the
+  serial execution); commit + push to `claude/fix-gbdt-mean-regression-GcY1g`
   and update the harness run log so the next session sees the scorecard history.
 - Keep the default strategy = current production behavior until an experiment
   clears the threshold, so `devel`-tracking production is never regressed
