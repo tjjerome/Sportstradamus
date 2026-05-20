@@ -293,3 +293,29 @@ def test_set_start_values_offset_mode_ignored_for_non_skewnormal():
     # for non-SkewNormal — the two start-value arrays must be identical.
     assert m_offset.start_values.shape == m_default.start_values.shape
     np.testing.assert_array_equal(m_offset.start_values, m_default.start_values)
+
+
+def test_meditate_accepts_target_strategy_flag():
+    """CLI surface: --target-strategy must accept registered slugs."""
+    from click.testing import CliRunner
+
+    from sportstradamus.training.cli import meditate
+
+    runner = CliRunner()
+    result = runner.invoke(meditate, ["--help"])
+    assert result.exit_code == 0
+    assert "--target-strategy" in result.output
+    assert "ratio_meanyr" in result.output
+    assert "centered_additive_eb_meanyr_k10" in result.output
+
+
+def test_meditate_rejects_unknown_target_strategy():
+    """Click validates against STRATEGY_SLUGS; unknown slug -> non-zero exit."""
+    from click.testing import CliRunner
+
+    from sportstradamus.training.cli import meditate
+
+    runner = CliRunner()
+    result = runner.invoke(meditate, ["--target-strategy", "not_a_real_strategy"])
+    assert result.exit_code != 0
+    assert "not_a_real_strategy" in result.output or "Invalid" in result.output

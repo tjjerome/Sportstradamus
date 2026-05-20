@@ -28,4 +28,10 @@ Options:
                                   the compression eval harness. NEVER publish a
                                   model trained with this flag — it is
                                   deliberately low quality.
+  --target-strategy [ratio_meanyr|centered_additive_eb_meanyr_k10]
+                                  Target/baseline strategy for SkewNormal
+                                  markets. Non-default values are A/B
+                                  experiments (run under --deterministic); the
+                                  default 'ratio_meanyr' is current production
+                                  behavior.  [default: ratio_meanyr]
   --help                          Show this message and exit.
