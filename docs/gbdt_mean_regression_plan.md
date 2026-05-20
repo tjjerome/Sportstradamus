@@ -317,6 +317,88 @@ manual dashboard inspection (slow, not programmatic, won't survive
 future sessions) or re-deriving the metric in an ad-hoc script (which is
 Stage 0 done badly).
 
+## Inference-path compatibility (applies to every shipped change)
+
+Every change in this plan must land its inference-side mirror in the
+**same PR** before promotion to production. Gate 1 above lets a change
+into the test-run window; the inference-path checklist below is what
+makes that window safe to enter.
+
+The architectural principle near the top of this plan already requires
+this for target/baseline transforms ("Centralize the forward transform,
+the inverse (de-norm) transform, and the inference-time mirror"). This
+section restates it as a hard requirement covering **every** change
+type, not just target transforms — and it names the concrete files and
+seams so the work is unambiguous.
+
+### Inference path (where things live)
+
+| Component | File / lines | Role |
+|---|---|---|
+| CLI entry | `prophecize` → `sportstradamus.prediction.cli` | Loads slate, dispatches per-market |
+| Model load | [prediction/__init__.py](../src/sportstradamus/prediction/__init__.py) `main()` | Reads pickle from `data/models/{LEAGUE}_{market}.mdl` |
+| Per-offer scoring | [model_prob.py:114](../src/sportstradamus/prediction/model_prob.py#L114) `model_prob()` | The function the user is asking about — runs once per offer |
+| Per-offer features | [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats()` | Builds the `playerStats` row consumed by `model_prob`. **Inference mirror of `get_training_matrix`** — any new training feature must be computed identically here (leakage-safe). |
+| Per-distribution decode | [model_prob.py:259-272](../src/sportstradamus/prediction/model_prob.py#L259-L272) (NegBin/ZINB/Gamma/ZAGamma) + [model_prob.py:276](../src/sportstradamus/prediction/model_prob.py#L276) (SkewNormal via `_decode_skewnormal`) | Per-`dist` block that turns `predict(pred_type="parameters")` output into `Model EV` + `Model Gate` + `Model R/Alpha` columns |
+| Hurdle dispatch | [model_prob.py:205](../src/sportstradamus/prediction/model_prob.py#L205) `getattr(model, "is_hurdle", False)` | The pattern P2.B introduced for opting a model into a non-default predict path. **Every new model class follows this pattern.** |
+| Distribution-specific blend | [helpers/distributions.py:69](../src/sportstradamus/helpers/distributions.py#L69) `get_ev`, [314](../src/sportstradamus/helpers/distributions.py#L314) `fused_loc`, [163](../src/sportstradamus/helpers/distributions.py#L163) `get_odds`, [425](../src/sportstradamus/helpers/distributions.py#L425) `set_model_start_values` | Every distribution name the plan introduces must round-trip through all four; the `dist` string is the dispatch key. |
+| Pickle schema | [pipeline.py:1940](../src/sportstradamus/training/pipeline.py#L1940) `_build_filedict` (writer) ↔ [model_prob.py](../src/sportstradamus/prediction/model_prob.py) + [training/pipeline.py](../src/sportstradamus/training/pipeline.py) (readers) | Any new pickle key must be added to the writer AND read back by every consumer. Legacy pickles must still load — use `filedict.get("new_key", legacy_default)`. |
+
+### Per-change-type inference checklist
+
+Use this table to identify what needs to land alongside each Track A / B
+method. The table is keyed on change type, not stage — many stages
+include multiple change types.
+
+| Change type | Inference-side work required | Reference precedent |
+|---|---|---|
+| **Training-only** (T6 FAGTB adversarial objective, T9 monotone constraint, B1 ZTNB likelihood, B4 per-parameter Optuna, B4 reduced regularization, B4 sample reweighting) | **None.** Output schema (the `(total_count, probs, gate)` triple for ZINB; `(loc, scale, alpha)` for SkewNormal; etc.) is unchanged. The pickle round-trips. | B1 ZTNB fix: only loss changes; `predict(pred_type="parameters")` still returns the same columns. |
+| **New target/baseline strategy** (P1-style — already done; future Track-A variants in the same family) | Inverse decode in `model_prob.py:_decode_skewnormal` via `baselines.STRATEGY_REGISTRY[strategy].decode_loc/decode_scale`; matching `*_Ratio` feature in `stats/base.py:get_stats`; `target_strategy` + `offset_meta` pickle keys round-trip. | P1 `centered_additive_*` strategies — registry entry, live-path test, pickle field, decode dispatch. |
+| **New distribution head** (T3 spliced/Pareto, T10 PGBM, B3 MZINB, B4 CMP, B4 quantile heads, T4 MEGB output, T7 gbex) | (a) New decode block in [model_prob.py:259-272](../src/sportstradamus/prediction/model_prob.py#L259-L272) that turns `predict(pred_type="parameters")` into `Model EV` columns; (b) [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) `get_ev`, `get_odds`, `fused_loc`, `set_model_start_values` each accept the new `dist` name; (c) `dist` string in `_build_filedict` + the legacy `dist=…` fallback in `model_prob`; (d) new live-path integration test mirroring [test_zinb_hurdle_live_path.py](../tests/integration/test_zinb_hurdle_live_path.py) asserting `Model EV` is finite, `Model Gate ∈ [0,1]` where applicable, and two runs identical under `DETERMINISTIC_SEED`. | P2.B HurdleZINB: `getattr(model, "is_hurdle", False)` gate, `zinb_mode` + `is_hurdle` pickle keys, identity-reconstruction test, determinism gate parallel assertion. |
+| **Post-hoc calibration object** (A3 isotonic on loc, T8 CQR/LCMQR, B4 isotonic on ZINB-mean) | Pickle the calibration object as a new key (`isotonic`, `cqr`, `temperature` already exists as precedent); load it in `model_prob` and apply after the distribution decode but before `fused_loc` (or after — depends on what's calibrated). Round-trip test asserts byte-identical predictions across save/load. | `temperature` field on the existing pickle dict ([pipeline.py:1958](../src/sportstradamus/training/pipeline.py#L1958)) and the calibrated proba path. |
+| **New player-level feature** (B2 leakage-safe target-encoded `expanding().mean().shift(1)` per player) | Feature column added to BOTH `Stats.get_training_matrix` (training) AND [stats/base.py:get_stats](../src/sportstradamus/stats/base.py#L597) (inference) — computed identically, leakage-safe at inference time (no peek at the current game). Same dtype + index across train/inference. Add the feature to `feature_filter.json` whitelist for affected markets. | `MeanYr` / `Mean10` / `*_Ratio` columns at `stats/base.py:676-702` and the leakage tests at `test_meanyr_mean10_leakage.py`. |
+| **Multi-head factorization** (T5-basketball, T5-NFL) | `prophecize` loads N pickles per market (one per factor in the factor tree); `model_prob` Monte Carlos: sample from each factor's predicted distribution at inference time, multiply, derive the marginal distribution of the composed target; `fused_loc` may need a multi-output blend variant that respects the joint distribution. New live-path test drives multi-head decode end-to-end. Pickle schema: new `factor_pickles: dict[str, Path]` field on the parent market pickle. | None in-repo. Closest analogue: the per-market book_weights handling. Expect this to be the largest inference-side change in the plan. |
+| **Different model class** (T2 CatBoost ordered TS, T4 MEGB native R, B3 GPBoost) | New `getattr(model, "is_catboost", False)` / `"is_gpboost", False` flag on the model class; `model_prob` dispatches accordingly. `prediction/__init__.py` model-load path branches on the new class. Determinism gate extended with the new class. If the alternative class doesn't have the LSS `predict(pred_type="parameters")` API, the dispatch must adapt. | P2.B `is_hurdle` pattern — identical structure, just a new attribute name. |
+
+### Inference-path test as a hard ship gate
+
+Any change requiring inference-side work must have a passing live-path
+integration test under `tests/integration/` **before promotion to
+production** (i.e. before Gate 1 from the lifecycle section is even
+checked — the test asserts the inference path doesn't blow up on cached
+real data). The test must assert:
+
+1. `Model EV` is finite for every offer.
+2. For ZI-class distributions: `Model Gate ∈ [0, 1]`.
+3. Two runs with `DETERMINISTIC_SEED` produce identical predictions.
+4. Legacy pickles (those without the new pickle keys) still load and
+   predict — the `filedict.get(key, default)` pattern from P2.B is the
+   contract.
+
+If the inference test does not exist, the change cannot ship. This is
+the lesson from OVERCONFIDENCE_INVESTIGATION §3.4 (the live-path
+confound): offline A/B verdicts are meaningless if the change crashes
+or silently drifts in `prophecize`.
+
+### Pickle-schema discipline (the seam where train/predict drift hides)
+
+The pickle dict written by [pipeline.py:1940 `_build_filedict`](../src/sportstradamus/training/pipeline.py#L1940)
+is the contract between training and inference. Every new field added
+during this plan **must** also have:
+
+1. A reader site in `model_prob.py` (or wherever the field is consumed).
+2. A legacy-default fallback so pre-change pickles still load:
+   `filedict.get("new_key", "joint")` — the P2.B `zinb_mode` pattern.
+3. A round-trip test in `tests/test_*.py` that pickles the new model,
+   re-loads, asserts byte-identical predictions.
+
+The list of fields written today (as of commit `77e4a41`): `model`,
+`step`, `stats`, `metrics`, `diagnostics`, `params`, `distribution`,
+`cv`, `std`, `temperature`, `dispersion_cal`, `weight`, `r_book`,
+`hist_gate`, `shape_ceiling`, `normalized`, `offset_meta`,
+`target_strategy`, `zinb_mode`, `is_hurdle`, `expected_columns`. Any
+addition lands in this list and gets the three-step contract above.
+
 ## Two-track next-session plan
 
 Work proceeds on two independent tracks. Stages within a track are sequential
@@ -386,6 +468,8 @@ Source: researcher T1 (Tier 0).
   out of EB centering by P1's verdict), Stage A2 should be skipped for
   those cells and the track-resumption discussion happens only if live
   metrics regress.
+- **Inference-path check:** Stage A1 ships no model change — diagnostic
+  only. No inference touchpoints.
 
 ### Stage A2 — Highest-leverage structural fixes (2–3 sprints)
 
@@ -415,6 +499,13 @@ Pick order based on Stage A1 ICCs.
   expected outcome: high-ICC markets graduate after T5; low-ICC
   heavy-tail markets graduate after T3; the remaining gap is what
   Stage A3 polish targets.
+- **Inference-path check:** Stage A2 is the largest inference-side change
+  in the plan. T5 needs `prophecize` to load N pickles per market and
+  Monte Carlo recompose; `model_prob` and `fused_loc` may need multi-head
+  variants. T3 introduces a new distribution name (spliced or
+  normalizing-flow) requiring decode + blend in `model_prob.py` and
+  `helpers/distributions.py`. Inference-path test must exist before Gate 1
+  is evaluated. Use the P2.B HurdleZINB pattern as the template.
 
 ### Stage A3 — Calibration polish (1 sprint, mostly orthogonal — stack them)
 
@@ -438,6 +529,12 @@ Pick order based on Stage A1 ICCs.
   reserved for cells that fail to graduate despite both structural fix
   (A2) and calibration polish (A3); if A3 fixes them, A4 is
   perfect-as-enemy-of-good.
+- **Inference-path check:** P7 (isotonic on loc) and T8 (CQR) are
+  post-hoc calibration objects — new pickle keys (`isotonic`, `cqr`)
+  loaded by `model_prob` and applied after the distribution decode but
+  before `fused_loc`. Round-trip test required. P6 (reduce regularization)
+  is training-only, no inference change. T9 (monotone constraint) is
+  training-only, no inference change.
 
 ### Stage A4 — Novel risky retries (only if Stage A2/A3 leave a gap)
 
@@ -464,6 +561,16 @@ Pick order based on Stage A1 ICCs.
   doesn't pass the strict 5% top-decile MAE bar on offline A/B is
   almost certainly NOT worth Stage A4 effort — file as "deprioritized:
   acceptable live performance, offline gap is academic."
+- **Inference-path check:** T4 MEGB (different model class, R-native —
+  needs Python wrapper and `is_megb` dispatch flag), T2 CatBoost
+  (different model class with `cat_features` + ordered TS — needs
+  `is_catboost` dispatch and a CatBoostLSS adapter or external objective
+  wrapper for SkewNormal NLL), T10 PGBM (different model class) all
+  require the most invasive inference work in Stage A4. T7 gbex (tail
+  model layered on body — multi-pickle Monte Carlo at inference). T6
+  FAGTB (training-only objective change, no inference touchpoint).
+  Inference cost is a tie-breaker: prefer T7 over T2/T4/T10 when
+  inference-engineering capacity is the constraint.
 
 ### What is dropped from the Track-A plan and why
 
@@ -518,6 +625,13 @@ Routing rule (precomputable from training data alone, survives temporal split):
   most ZINB cells to graduate. The bar for proceeding past Stage B1 is
   *unambiguous* live-data failure on specific cells — not "we could
   probably squeeze out more on FG3M with MZINB."
+- **Inference-path check:** ZTNB likelihood fix is **training-only** —
+  `HurdleZINB.predict()` returns the same `(total_count, probs, gate)`
+  triple, the derived-π formula is unchanged, downstream
+  `helpers/distributions.py` consumers are untouched. The existing
+  `tests/integration/test_zinb_hurdle_live_path.py` is sufficient
+  inference coverage. Per-market routing diagnostics (`zinb_routing_diagnostics.py`)
+  are read-only — no inference touchpoint.
 
 ### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
 
@@ -538,6 +652,15 @@ Routing rule (precomputable from training data alone, survives temporal split):
   diagnostics point clearly at one of MZINB or GPBoost. "We can probably
   do better than B2" without that evidence is the perfect-as-enemy-of-good
   trap.
+- **Inference-path check:** Per-(league, market) routing config is the
+  cleanest inference change in Track B — `model_prob` already dispatches
+  on `getattr(model, "is_hurdle", False)` (the P2.B pattern), so the
+  config just changes which pickle gets loaded per cell; per-cell pickle
+  already records `zinb_mode`. Leakage-safe target-encoded features
+  require the same `stats/base.py:get_stats` mirror as MeanYr/Mean10 —
+  feature column must be computed identically at inference with no peek
+  at the current game; leakage test pattern from
+  [test_meanyr_mean10_leakage.py](../tests/test_meanyr_mean10_leakage.py).
 
 ### Stage B3 — Strategic fork (4–6 weeks, pick ONE — not both)
 
@@ -584,6 +707,20 @@ evaluate the bigger structural change.
   cells but offline metrics still show top-decile gap, the right
   decision is "file MZINB as future research" and move to Stage B4 or
   a different project.
+- **Inference-path check:** Both options change the parameter contract.
+  MZINB heads return `(ν, ψ, α)` instead of `(total_count, probs, gate)`
+  — `model_prob.py` needs a new ZINB-MZINB decode block that derives
+  `Model EV = ν` directly (the marginal mean IS the boosted quantity)
+  and reconstructs the `Model Gate` from `ψ` for downstream `fused_loc`
+  compatibility. The `dist` string can stay `"ZINB"` (mode field
+  distinguishes), but a new `mzinb_mode` pickle key with a legacy
+  default of `"hurdle"` keeps existing pickles loadable. GPBoost is a
+  different model class entirely — `is_gpboost` dispatch flag in
+  `model_prob`, model-load path branches in `prediction/__init__.py`,
+  and a GPBoost-specific live-path test. **Inference-engineering cost
+  alone is enough reason to prefer one fork over the other when
+  residual diagnostics are ambiguous** — GPBoost's class change is
+  larger than MZINB's parameter-contract change.
 
 ### Stage B4 — Tuning, polish, specialized fixes (optional)
 
@@ -626,6 +763,18 @@ evaluate the bigger structural change.
   B3. But the *cumulative* time across all 6 items is multiple weeks. If
   per-parameter Optuna alone graduates the holdout cells, do not run the
   other 5 — file as deprioritized with the graduating metrics noted.
+- **Inference-path check:** Per-parameter Optuna and reduced
+  regularization are training-only — no inference change. Sample
+  reweighting is training-only — no inference change. CMP head is a new
+  distribution: `model_prob` decode + `helpers/distributions.py`
+  consumers all need to accept `dist == "CMP"`; live-path test required.
+  Isotonic on ZINB-mean is a post-hoc calibration object — new
+  `isotonic_zinb` pickle key + load + apply in `model_prob` after the
+  ZINB decode block; round-trip test. Quantile heads pickle alongside
+  the ZINB model with a new key (`quantile_heads`) and a new live-path
+  decode path. MERF-style iteration changes the model architecture
+  (alternating fit-residual / re-estimate-shrunken-baseline) — pickle
+  schema changes, `is_merf` dispatch flag, new live-path test.
 
 ---
 
@@ -758,11 +907,28 @@ config change):
   distribution branch (SkewNormal: 36 cells; ZINB: 23 cells).
 - Strategy SHIPs only if it clears the universal decision threshold on
   every cell, OR the per-cell routing config records the exceptions.
-- Live-path gate: the promoted strategy is confirmed end-to-end through
+- **Inference-path test** (required for any change that touches the
+  prediction-side schema — every change in the "Per-change-type
+  inference checklist" above except the training-only rows): live-path
+  integration test under `tests/integration/` that loads the new
+  pickle, runs `model_prob` on a cached 100-row fixture, asserts:
+  (a) `Model EV` finite for every offer; (b) `Model Gate ∈ [0, 1]` if
+  ZI-class; (c) two runs with `DETERMINISTIC_SEED` produce identical
+  predictions; (d) legacy pickles (without the new pickle keys) still
+  load and predict. The test exists **before promotion to test
+  production**, not after — Gate 1's "soak window" assumes the
+  inference path is structurally sound.
+- **Pickle round-trip test** (required for any new `_build_filedict`
+  key): save the new pickle, reload, assert byte-identical predictions
+  on a cached fixture. Mirrors the test pattern from
+  [tests/test_hurdle_zinb.py](../tests/test_hurdle_zinb.py) test 3
+  ("Pickle round-trip preserves predictions exactly").
+- Live-path gate (catches behaviors only visible end-to-end): the
+  promoted strategy is confirmed through
   [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py)
-  (no `Model Skew`=NaN, EV not collapsed by the book blend), not only on
-  the dumped test set. Run live-path verification on one representative
-  market per league per affected distribution branch.
+  end-to-end (no `Model Skew`=NaN, EV not collapsed by the book blend),
+  not only on the dumped test set. Run live-path verification on one
+  representative market per league per affected distribution branch.
 
 **Cross-league determinism additions** (needed before the full-verification
 phase is meaningful on WNBA + NFL):
