@@ -39,6 +39,7 @@ from sportstradamus.helpers import (
     stat_zi,
 )
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
+from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights, fit_model_weight
 from sportstradamus.training.config import load_distribution_config, save_zi_config
 from sportstradamus.training.data import trim_matrix
@@ -121,6 +122,7 @@ def fit_lss_model(
     normalized: bool,
     shape_ceiling: float,
     seed: int | None = None,
+    offset_mode: bool = False,
 ) -> LightGBMLSS:
     """Build + train a LightGBMLSS model. Pure (no disk writes).
 
@@ -139,6 +141,9 @@ def fit_lss_model(
         shape_ceiling: Upper bound on the distribution shape parameter.
         seed: If not None, pin RNGs and merge determinism kwargs into
             ``params`` (DEBUG/offline-eval only).
+        offset_mode: SkewNormal-only — targets are an additive centered
+            residual. Forwarded to ``set_model_start_values``; ignored for
+            other distributions.
 
     Returns:
         A trained ``LightGBMLSS`` model.
@@ -148,7 +153,12 @@ def fit_lss_model(
     dtrain = lgb.Dataset(X_train, label=y_train_labels)
     model = LightGBMLSS(dist_obj)
     set_model_start_values(
-        model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalized
+        model,
+        dist,
+        X_train,
+        shape_ceiling=shape_ceiling,
+        normalized=normalized,
+        offset_mode=offset_mode,
     )
     model.train(params, dtrain, num_boost_round=params["opt_rounds"])
     return model
@@ -160,6 +170,7 @@ def predict_lss_params(
     X: pd.DataFrame,
     *,
     normalized: bool,
+    offset_mode: bool = False,
 ) -> pd.DataFrame:
     """Predict raw distribution parameters for X, preserving its index.
 
@@ -170,11 +181,14 @@ def predict_lss_params(
         dist: Distribution name string.
         X: Feature matrix to predict on.
         normalized: Whether start values are computed in normalized space.
+        offset_mode: SkewNormal-only — targets are an additive centered
+            residual. Forwarded to ``set_model_start_values``; ignored for
+            other distributions.
 
     Returns:
         DataFrame of raw predicted distribution parameters, indexed like ``X``.
     """
-    set_model_start_values(model, dist, X, normalized=normalized)
+    set_model_start_values(model, dist, X, normalized=normalized, offset_mode=offset_mode)
     preds = model.predict(X, pred_type="parameters")
     preds.index = X.index
     return preds
@@ -191,6 +205,7 @@ def fit_predict_params(
     normalized: bool,
     shape_ceiling: float,
     seed: int | None = None,
+    offset_mode: bool = False,
 ) -> pd.DataFrame:
     """Fit one LightGBMLSS model and return raw predicted params for X_predict.
 
@@ -209,6 +224,9 @@ def fit_predict_params(
         shape_ceiling: Upper bound on the distribution shape parameter.
         seed: If not None, pin RNGs and merge determinism kwargs into
             ``params`` (DEBUG/offline-eval only).
+        offset_mode: SkewNormal-only — targets are an additive centered
+            residual. Forwarded to ``set_model_start_values``; ignored for
+            other distributions.
 
     Returns:
         DataFrame of raw predicted distribution parameters for ``X_predict``.
@@ -216,8 +234,11 @@ def fit_predict_params(
     model = fit_lss_model(
         dist_obj, dist, X_train, y_train_labels, params,
         normalized=normalized, shape_ceiling=shape_ceiling, seed=seed,
+        offset_mode=offset_mode,
     )
-    return predict_lss_params(model, dist, X_predict, normalized=normalized)
+    return predict_lss_params(
+        model, dist, X_predict, normalized=normalized, offset_mode=offset_mode
+    )
 
 
 def _expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
@@ -277,6 +298,7 @@ def train_market(
     archive,
     league_start_date,
     deterministic: bool = False,
+    target_strategy: str = "ratio_meanyr",
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -289,6 +311,24 @@ def train_market(
     input to the cached training parquet (no incremental fetch). Produces
     bit-identical re-runs for the P0 compression harness. A model trained
     with this flag MUST NEVER be published as a production model.
+
+    Args:
+        league: League slug (``"NBA"``, ``"NFL"``, etc.).
+        market: Market name (e.g. ``"FGA"``, ``"PTS"``).
+        stat_data: League-specific ``Stats`` instance.
+        force: Retrain even when no new training rows arrived.
+        rebuild_filter: Run the SHAP scouting pass and rebuild the feature
+            filter; invalidates any warm-start hyperparameters.
+        archive: ``Archive`` instance (passed through for book weights).
+        league_start_date: Earliest cutoff for training rows.
+        deterministic: Pin RNGs and replace Optuna with fixed hyperparams for
+            bit-identical re-runs. Writes go to ``deterministic/{strategy}/``
+            subdirs. Debug/offline-eval only — never publish such a model.
+        target_strategy: Slug from
+            :data:`sportstradamus.training.baselines.STRATEGY_SLUGS`. Selects
+            the SkewNormal forward target transform and the matching decode.
+            Default ``"ratio_meanyr"`` reproduces legacy production behavior
+            byte-for-byte.
     """
     stat_dist = load_distribution_config()
     stat_dist.setdefault(league, {})
@@ -438,11 +478,12 @@ def train_market(
 
     global_mean = y_train_labels.mean()
     normalize = False
+    offset_mode = False
     denom_col = "MeanYr"
+    strategy = baselines.get_strategy(target_strategy)
 
     if global_mean >= 2.0:
         dist = "SkewNormal"
-        normalize = True
         dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
 
         cv = (
@@ -463,9 +504,9 @@ def train_market(
         else:
             denom_col = "MeanYr"
 
-        meanyr_train = X_train[denom_col].clip(lower=0.5).to_numpy()
-        y_train_labels = y_train_labels / meanyr_train
-        y_train_labels = np.clip(y_train_labels, 0.01, None)
+        normalize = strategy.start_mode_flag == "normalized"
+        offset_mode = strategy.start_mode_flag == "offset"
+        y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
     else:
         dist = "NegBin"
         if hist_gate > 0.02:
@@ -515,7 +556,14 @@ def train_market(
         )
 
     model = LightGBMLSS(dist_obj)
-    set_model_start_values(model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalize)
+    set_model_start_values(
+        model,
+        dist,
+        X_train,
+        shape_ceiling=shape_ceiling,
+        normalized=normalize,
+        offset_mode=offset_mode,
+    )
 
     col_list = list(X_train.columns)
     monotone = [0] * len(col_list)
@@ -566,12 +614,19 @@ def train_market(
         dist_obj, dist, X_train, y_train_labels, opt_params,
         normalized=normalize, shape_ceiling=shape_ceiling,
         seed=DETERMINISTIC_SEED if deterministic else None,
+        offset_mode=offset_mode,
     )
 
     # Predictions and parameter extraction
-    prob_params_train = predict_lss_params(model, dist, X_train, normalized=normalize)
-    prob_params_validation = predict_lss_params(model, dist, X_validation, normalized=normalize)
-    prob_params = predict_lss_params(model, dist, X_test, normalized=normalize)
+    prob_params_train = predict_lss_params(
+        model, dist, X_train, normalized=normalize, offset_mode=offset_mode
+    )
+    prob_params_validation = predict_lss_params(
+        model, dist, X_validation, normalized=normalize, offset_mode=offset_mode
+    )
+    prob_params = predict_lss_params(
+        model, dist, X_test, normalized=normalize, offset_mode=offset_mode
+    )
 
     prob_params_train.sort_index(inplace=True)
     prob_params_train["result"] = y_train["Result"]
@@ -602,27 +657,25 @@ def train_market(
     sn_alpha_val = None
 
     if dist == "SkewNormal":
-        loc_norm = prob_params["loc"].to_numpy()
-        scale_norm = prob_params["scale"].to_numpy()
+        loc = prob_params["loc"].to_numpy()
+        scale = prob_params["scale"].to_numpy()
         alpha_sn = prob_params["alpha"].to_numpy()
-        loc_norm_val = prob_params_validation["loc"].to_numpy()
-        scale_norm_val = prob_params_validation["scale"].to_numpy()
+        loc_v = prob_params_validation["loc"].to_numpy()
+        scale_v = prob_params_validation["scale"].to_numpy()
         alpha_sn_val = prob_params_validation["alpha"].to_numpy()
 
-        meanyr_test = X_test[denom_col].clip(lower=0.5).to_numpy()
-        meanyr_val = X_validation[denom_col].clip(lower=0.5).to_numpy()
-        loc_abs = loc_norm * meanyr_test
-        scale_abs = scale_norm * meanyr_test
-        loc_abs_val = loc_norm_val * meanyr_val
-        scale_abs_val = scale_norm_val * meanyr_val
+        ev_loc = strategy.decode_loc(loc, X_test, global_mean, denom_col)
+        ev_scale = strategy.decode_scale(scale, X_test, denom_col)
+        ev_loc_val = strategy.decode_loc(loc_v, X_validation, global_mean, denom_col)
+        ev_scale_val = strategy.decode_scale(scale_v, X_validation, denom_col)
 
         delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
-        ev = loc_abs + scale_abs * delta * np.sqrt(2 / np.pi)
+        ev = ev_loc + ev_scale * delta * np.sqrt(2 / np.pi)
         delta_val = alpha_sn_val / np.sqrt(1 + alpha_sn_val**2)
-        ev_validation = loc_abs_val + scale_abs_val * delta_val * np.sqrt(2 / np.pi)
+        ev_validation = ev_loc_val + ev_scale_val * delta_val * np.sqrt(2 / np.pi)
 
-        sn_sigma_test = scale_abs
-        sn_sigma_val = scale_abs_val
+        sn_sigma_test = ev_scale
+        sn_sigma_val = ev_scale_val
         sn_alpha_test = alpha_sn
         sn_alpha_val = alpha_sn_val
 
@@ -1114,12 +1167,15 @@ def train_market(
         "hist_gate": hist_gate,
         "shape_ceiling": shape_ceiling,
         "normalized": normalize,
+        "offset_meta": strategy.offset_meta(global_mean, denom_col),
+        "target_strategy": target_strategy,
         "expected_columns": list(X.columns),
     }
 
     X_test["Result"] = y_test["Result"]
     X_test["Line"] = B_test["Line"].values
     X_test["Blended_EV"] = weighted_mean
+    X_test["Odds"] = B_test["Odds"].values
     if dist == "SkewNormal":
         X_test["EV"] = ev
         X_test["SN_Loc"] = prob_params["loc"]
@@ -1150,7 +1206,7 @@ def train_market(
     # the whole-suite report() stay suppressed (input is unchanged under
     # input-freeze; report() is not per-market and would clobber the
     # production training_report.txt).
-    subdir = "deterministic/" if deterministic else ""
+    subdir = f"deterministic/{target_strategy}/" if deterministic else ""
     csv_filepath = pkg_resources.files(data) / f"test_sets/{subdir}{filename}.csv"
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)
