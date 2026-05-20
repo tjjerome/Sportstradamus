@@ -20,6 +20,56 @@
 | **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
+## Scope — leagues this plan covers
+
+The training pipeline ships models for three leagues. Every method below is
+applicable to all three unless explicitly flagged as league-specific.
+Market counts (from `data/stat_dist.json`):
+
+| League | SkewNormal markets | ZINB markets | Games/season per player | EB K (current) |
+|---|---|---|---|---|
+| NBA | 13 (incl. PTS, REB, AST, PRA, FGA, MIN, PA, PR, FG3A, FGM, fantasy points) | 8 (FG3M, FTM, OREB, PF, STL, TOV, BLK, BLST) | ~82 | 10 |
+| WNBA | 11 | 7 (same names as NBA minus PF) | ~40 | 10 (likely fine) |
+| NFL | 12 (incl. passing/rushing/receiving yards, attempts, carries, targets) | 8 (passing tds, tds, rushing tds, receiving tds, qb tds, interceptions, sacks taken, passing first downs) | ~17 (regular season) | 10 (almost certainly wrong; see caveats) |
+
+NBA and WNBA share the same ZINB market names by construction — the same
+basketball stat universe with PF dropped on WNBA. NFL's ZINB markets are
+different names (touchdown counts, sacks, interceptions, etc.) but the same
+structural problem (low-mean count stats with zero inflation).
+
+`meditate --league {NBA,NFL,WNBA}` is already wired in
+[training/cli.py:36-38](../src/sportstradamus/training/cli.py#L36-L38); the
+per-league dispatch loop at
+[training/cli.py:218-261](../src/sportstradamus/training/cli.py#L218-L261)
+trains each market in each requested league through the same
+`train_market` orchestrator. The compression_eval harness itself is
+league-agnostic — it scores per-market CSVs and does not care which
+league they came from.
+
+## Cross-league testing policy (applies to every method below)
+
+Every change goes through two test phases before shipping:
+
+1. **Smoke phase (start of work):** pick 1–2 representative markets per
+   league. For Track A pick the canonical SkewNormal market of the league
+   (NBA: FGA + PTS; WNBA: FGA + PTS; NFL: passing yards + receiving
+   yards). For Track B pick a SHIP and a KILL from the existing P2.B
+   verdict where they exist (NBA: FG3M + FTM/STL; WNBA: FG3M + STL;
+   NFL: pick the highest-zero-rate ZINB market + the lowest). Smoke
+   phase must pass before further development.
+2. **Full-verification phase (before any default-flag flip):** run the
+   compression_eval A/B on **every market in every covered league** that
+   uses the affected distribution branch. SkewNormal-only changes touch
+   13 + 11 + 12 = 36 markets; ZINB-only changes touch 8 + 7 + 8 = 23
+   markets. SHIP requires the universal decision threshold below to be
+   met on every market in every league, or per-league/per-market
+   routing config that documents the exceptions.
+
+The deterministic test sets land under `data/test_sets/deterministic/{strategy}/`
+keyed by filename (`{LEAGUE}_{market}.csv` already), so the per-league
+output is already separable — no schema change needed to support the
+cross-league A/B.
+
 ## Research handoffs that fed this plan
 
 The next-session plan below integrates findings from two researcher passes that
@@ -98,12 +148,16 @@ new baseline must be computed there identically and leakage-safe. STYLE_GUIDE
 §9 (named constants), §18.9 (no orphan methods), and the CLAUDE.md
 "no new monoliths" rule all apply.
 
-**Universal decision threshold (every experiment):** ship a strategy only if
-it reduces **top-mean-decile MAE by ≥ 5%** vs the current production strategy
-without worsening **global MAE by > 1%** and without worsening
-`brier_skill_score` on the existing report. Otherwise kill it and move on.
-The harness — [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py)
-— is the ship/kill gate.
+**Universal decision threshold (every experiment, every market, every covered league):**
+ship a strategy only if it reduces **top-mean-decile MAE by ≥ 5%** vs the
+current production strategy without worsening **global MAE by > 1%** and
+without worsening `brier_skill_score` on the existing report. The threshold
+must hold on **every market in every covered league** — or the routing
+config records the per-market/per-league exceptions. Otherwise kill it
+and move on. The harness —
+[src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py)
+— is the ship/kill gate; the cross-league A/B is the
+full-verification phase from the testing policy above.
 
 ## Two-track next-session plan
 
@@ -125,29 +179,48 @@ not leaf-averaging — and that ICC per market predicts which strategies can wor
 
 ### Stage A1 — Diagnostic gate (~1 day)
 
-**T1. ICC per market.** Compute ICC₁ per market on three seasons of held-out
-data using a two-level ANOVA decomposition: σ²_between = Var(player season
-means), σ²_within = mean(Var(game logs within player)), ICC =
-σ²_between / (σ²_between + σ²_within). For highly skewed markets (STL/BLK)
-compute on `log(1+Y)` or rank-transformed target.
+**T1. ICC per league × per market.** Compute ICC₁ for every SkewNormal
+market in every covered league (NBA 13 + WNBA 11 + NFL 12 = 36 cells) on
+three seasons of held-out data using a two-level ANOVA decomposition:
+σ²_between = Var(player season means), σ²_within = mean(Var(game logs
+within player)), ICC = σ²_between / (σ²_between + σ²_within). For highly
+skewed markets (NBA STL/BLK; NFL interceptions/sacks) compute on
+`log(1+Y)` or rank-transformed target.
 
-Pre-register the routing cutoff before running A/Bs:
+Output a 36-row table keyed by (league, market). Pre-register the routing
+cutoff per cell before running A/Bs:
 - ICC ≥ 0.5 → EB-style centering can work (T5 four-stage factorization).
 - ICC ≤ 0.3 → needs distributional tail extension (T3/T7).
 - 0.3 < ICC < 0.5 → ambiguous; try both, route based on outcome.
 
-Expected: FGA > 0.6, PTS in 0.3–0.45, STL/BLK < 0.2. Implementation site:
-a new notebook or a one-shot CLI in `src/sportstradamus/scripts/`. No model
-changes. Source: researcher T1 (Tier 0).
+Expected (NBA): FGA > 0.6, PTS in 0.3–0.45, STL/BLK < 0.2. WNBA likely
+similar to NBA (same sport, fewer games per player so estimator is
+noisier). NFL likely *higher* than basketball for position-dependent
+stats (a top QB always passes for 250+ yds, a RB1 always rushes) but
+small-sample variance inflates the within-player term — net effect is
+empirical, not predicted.
+
+Implementation site: a new one-shot CLI in
+`src/sportstradamus/scripts/icc_diagnostics.py` that consumes
+`data/training_data/{LEAGUE}_{market}.parquet` for every cached league.
+Output to `data/icc/{LEAGUE}_icc.parquet` (per-league file keeps the diff
+trivial when only one league's gamelogs change). No model changes.
+Source: researcher T1 (Tier 0).
 
 **Decision points (gate logic for Stage A1):**
-- If ICC_PTS > 0.5 — entanglement hypothesis is wrong; leaf-averaging
-  hypothesis revives; T7 (extreme-tail boosting via gbex) jumps to Stage A2.
-- If ICC is uniformly low across the family — the family is form-driven and
-  T3 (heavy-tail / normalizing-flow head) takes priority over T5.
-- If ICC clusters bimodally (e.g. FGA/MIN/REB-for-bigs high, PTS/AST low) —
-  the path-wide negative result is fully explained; per-market routing in
-  Stage A2 is justified.
+- If ICC_PTS > 0.5 on any league — entanglement hypothesis is wrong for
+  that league; leaf-averaging hypothesis revives; T7 (extreme-tail
+  boosting via gbex) jumps to Stage A2 on that league.
+- If ICC is uniformly low across a family within a league — that league's
+  family is form-driven and T3 (heavy-tail / normalizing-flow head) takes
+  priority over T5 there.
+- If ICC clusters bimodally within a league (e.g. FGA/MIN high, PTS/AST
+  low) — per-market routing in Stage A2 is justified for that league.
+- **NFL-specific:** if ICC is high but EB shrinkage K=10 produces noisy
+  per-player MeanYr (small sample), re-derive K per the
+  Casella–Berger empirical-Bayes formula
+  `K = σ²_within / σ²_between` evaluated *per league*; record the per-league
+  K alongside the per-league ICC table.
 
 ### Stage A2 — Highest-leverage structural fixes (2–3 sprints)
 
@@ -156,7 +229,8 @@ Pick order based on Stage A1 ICCs.
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
-| **T5. Four-stage multiplicative factorization** *(replaces original P3)* | Tier 1 (Skew) | 2–3 weeks | Predict (a) P(plays), (b) MIN \| plays, (c) per-100-poss rate \| MIN, (d) for PTS: FGA-per-100 × FG% × points-per-make; recombine via Monte Carlo. Routes each factor to its own ICC-appropriate strategy. DFS-industry consensus approach. | New `src/sportstradamus/factorize/` package or extend [pipeline.py](../src/sportstradamus/training/pipeline.py); inference mirror in [stats/base.py](../src/sportstradamus/stats/base.py); per-market wiring via the existing strategy registry from P1. |
+| **T5-basketball. Four-stage multiplicative factorization (NBA + WNBA)** *(replaces original P3)* | Tier 1 (Skew) | 2–3 weeks | Predict (a) P(plays), (b) MIN \| plays, (c) per-100-poss rate \| MIN, (d) for PTS: FGA-per-100 × FG% × points-per-make; recombine via Monte Carlo. NBA and WNBA share this structure exactly. Routes each factor to its own ICC-appropriate strategy. DFS-industry consensus approach. | New `src/sportstradamus/factorize/` package or extend [pipeline.py](../src/sportstradamus/training/pipeline.py); inference mirror in [stats/base.py](../src/sportstradamus/stats/base.py); per-market wiring via the existing strategy registry from P1. |
+| **T5-NFL. Position-dependent factorization** | Tier 1 (Skew), adapted | 2–3 weeks (depends on T5-basketball landing first) | Football has no per-100-possession equivalent and stats are position-locked. Candidate factor trees: passing yards = P(plays) × Snaps × Attempts/snap × Yards/attempt; rushing yards = P(plays) × Snaps × Carries/snap × Yards/carry; receiving yards = P(plays) × Snaps × Targets/snap × Catch-rate × Yards/catch. The Stage A1 ICC table tells you whether each factor is high-ICC (route to EB centering) or low-ICC (route to T3 distributional tail). Position-locked features (`Player position` already a category in `X` per [pipeline.py](../src/sportstradamus/training/pipeline.py)) make per-position model variants cleanly separable if needed. | Same `src/sportstradamus/factorize/` package; NFL-specific factor definitions in a config file under `data/factorize_nfl.json`. **Defer until T5-basketball ships** — same architectural code, different factor lists. |
 | **T3. Spliced / Pareto-tail or normalizing-flow head** | Tier 1 (Skew) | 1–2 weeks per distribution | Body ~ SkewNormal up to learned threshold u, tail ~ Generalized Pareto above u, mixing weight per-row. LightGBMLSS v0.3.0 normalizing-flow head is the simplest production path. Direct attack on top-decile MAE without touching loc. | Custom PyTorch distribution alongside [skew_normal.py](../src/sportstradamus/skew_normal.py); dist selection in [pipeline.py:245-324](../src/sportstradamus/training/pipeline.py#L245). |
 
 **Decision points (gate logic for Stage A2):**
@@ -234,8 +308,8 @@ Two tasks in parallel. Tier 1 from the researcher.
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
-| **ZTNB Stage 2 likelihood fix** | Tier 1 (ZINB) #1 | hours | Replace `NegativeBinomial(μ, α).log_prob(y)` in the Stage-2 hurdle loss with `nb.log_prob(y) − log1p(−exp(nb.log_prob(zeros_like(y))))`. The optimizer recovers an unbiased μ; the derived-π identity then gives the correct ZINB marginal mean (1−ψ)·μ. Eliminates the +NB(0)·(1−q)·μ_pos/(1−NB(0)) over-prediction on FTM/STL **by construction**. | Wrap the existing NegBin loss in [hurdle.py](../src/sportstradamus/hurdle.py); PyTorch already has `torch.distributions.NegativeBinomial`. |
-| **Per-market routing diagnostics** | Tier 1 (ZINB) #2 | days | Build a one-page per-market dashboard with: observed mean, variance, zero-rate p₀; ziP and ziNB indices with bootstrap CIs (Blasco-Moreno et al. 2019); Wilson-Einbeck p-value (Stat Modelling 2019); Schwarz-corrected Vuong (HurdleNB vs ZINB) per Wilson 2015; var/mean ratio; conditional positive mean E[Y\|Y>0] vs μ. Routes each market to plain NB / HurdleNB(ZTNB) / MZINB / CMP. | New `src/sportstradamus/scripts/zinb_routing_diagnostics.py`; output to `data/zinb_routing/{LEAGUE}_diagnostics.parquet`. |
+| **ZTNB Stage 2 likelihood fix** | Tier 1 (ZINB) #1 | hours | Replace `NegativeBinomial(μ, α).log_prob(y)` in the Stage-2 hurdle loss with `nb.log_prob(y) − log1p(−exp(nb.log_prob(zeros_like(y))))`. The optimizer recovers an unbiased μ; the derived-π identity then gives the correct ZINB marginal mean (1−ψ)·μ. Eliminates the +NB(0)·(1−q)·μ_pos/(1−NB(0)) over-prediction on FTM/STL **by construction**. League-agnostic — applies to every ZINB market in every covered league. | Wrap the existing NegBin loss in [hurdle.py](../src/sportstradamus/hurdle.py); PyTorch already has `torch.distributions.NegativeBinomial`. |
+| **Per-league × per-market routing diagnostics** | Tier 1 (ZINB) #2 | days | Build a per-league × per-market dashboard with: observed mean, variance, zero-rate p₀; ziP and ziNB indices with bootstrap CIs (Blasco-Moreno et al. 2019); Wilson-Einbeck p-value (Stat Modelling 2019); Schwarz-corrected Vuong (HurdleNB vs ZINB) per Wilson 2015; var/mean ratio; conditional positive mean E[Y\|Y>0] vs μ. Routes each (league, market) cell to plain NB / HurdleNB(ZTNB) / MZINB / CMP. 23 cells total (NBA 8 + WNBA 7 + NFL 8). | New `src/sportstradamus/scripts/zinb_routing_diagnostics.py`; output to `data/zinb_routing/{LEAGUE}_diagnostics.parquet` (one file per league keeps diffs minimal when only one league updates). |
 
 Routing rule (precomputable from training data alone, survives temporal split):
 - ziNB CI contains 0 + low overdispersion → **plain NB**
@@ -256,8 +330,8 @@ Routing rule (precomputable from training data alone, survives temporal split):
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
-| **Per-market routing wiring** | Tier 1 (ZINB) #2 | days | Implement the routing logic from B1's table. `data/zinb_mode_per_market.json` config + per-market lookup in [pipeline.py](../src/sportstradamus/training/pipeline.py). The 6 SHIP markets under hurdle continue to use hurdle; FTM/STL route per Stage B1 diagnostic outcome. | `pipeline.py` per-market dispatch; new JSON config under `data/`. |
-| **Leakage-safe target-encoded player features** | Tier 2 (ZINB) #5; was original P5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. Orthogonal to architectural choice; ships regardless of which Stage B3 winner emerges. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as the MeanYr/Mean10 columns. |
+| **Per-league × per-market routing wiring** | Tier 1 (ZINB) #2 | days | Implement the routing logic from B1's table. `data/zinb_mode_per_market.json` config schema: `{LEAGUE: {market: "joint"|"hurdle"|"plain_nb"|"cmp"}}` (keyed by both league and market — NBA STL and WNBA STL may route differently). Per-cell lookup in [training/pipeline.py:1869](../src/sportstradamus/training/pipeline.py#L1869) `_step_select_distribution` consults the config; default `"joint"` for any unrouted cell keeps legacy production byte-identical. | `pipeline.py` per-cell dispatch; new JSON config under `data/`. |
+| **Leakage-safe target-encoded player features** | Tier 2 (ZINB) #5; was original P5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. Orthogonal to architectural choice; ships regardless of which Stage B3 winner emerges. League-agnostic — same expanding-mean recipe works for NBA/WNBA/NFL. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as the MeanYr/Mean10 columns. |
 
 **Decision points (gate logic for Stage B2):**
 - 8/8 ship under routing + encoded features → hold off on Stage B3 unless
@@ -383,6 +457,52 @@ evaluate the bigger structural change.
 
 ---
 
+## Cross-league caveats (read before running any cross-league A/B)
+
+1. **NFL sample sizes are an order of magnitude smaller than NBA.** ~17 games
+   per player per regular season vs ~82 for NBA. EB(MeanYr, K=10) is
+   aggressive shrinkage with that sample size — Stage A1 should re-derive
+   `K = σ²_within / σ²_between` per league. Expect NFL K to be much lower
+   (or for the EB target transform to fail outright on form-volatile NFL
+   markets — file as a Stage A1 finding, not a P1-style negative result).
+2. **NFL stats are position-locked in a way basketball isn't.** `Player
+   position` is already a categorical feature
+   ([pipeline.py](../src/sportstradamus/training/pipeline.py)
+   `_step_build_splits`). Researcher Track-A methods that train one
+   cross-player model per market may not transfer cleanly to NFL — a QB
+   and a WR don't share the same "passing yards" distribution. The Stage
+   A1 ICC table should be computed *within position* for NFL where
+   relevant (e.g. passing yards ICC computed across QBs only).
+3. **WNBA shares NBA's structure but has half the games/season.** EB K=10
+   is probably fine but should still be verified in Stage A1. The
+   per-100-possession factorization (T5-basketball) transfers
+   exactly — WNBA uses the same court geometry and stat universe.
+4. **The compression_eval A/B harness is league-agnostic but file paths
+   are league-specific.** Cached parquets live at
+   `data/training_data/{LEAGUE}_{market}.parquet`; deterministic test
+   sets at `data/test_sets/deterministic/{strategy}/{LEAGUE}_{market}.csv`.
+   The full-verification phase (cross-league A/B) iterates the existing
+   league loop — no harness rewrite needed.
+5. **Determinism gate currently covers NBA only.** The two
+   `test_deterministic_mode_*` integration tests use NBA_FGA + NBA_FG3M
+   parquets ([tests/integration/test_determinism_gate.py:37,102](../tests/integration/test_determinism_gate.py)).
+   Before shipping a cross-league change, add parallel determinism
+   assertions on WNBA_FGA + WNBA_FG3M + a representative NFL market.
+   Without them the cross-league A/B verdict is noise for the new leagues
+   (P1's hard-learned lesson — see `CENTERED_TARGET_NEGATIVE_RESULT.md`).
+6. **For low-mean NFL markets** (interceptions mean ~0.5, sacks ~1.5),
+   the ZINB diagnostic formulae in Stage B1 may need to compute on
+   `log(1+Y)` per the Blasco-Moreno et al. STL/BLK caveat — the
+   asymptotic Vuong test in particular degrades badly at very low means.
+   Wilson-Einbeck's non-asymptotic Poisson-binomial test handles this
+   better but should be the only test trusted for NFL interceptions/sacks
+   in Stage B1.
+7. **Two-track parallelism still holds across leagues.** Track A and
+   Track B touch different distribution branches and different markets;
+   they can be worked in parallel per league. They share no mutable
+   state — the only shared resource is the compression_eval harness,
+   which is read-only during scoring.
+
 ## Critical files
 
 | File | Role | Key lines |
@@ -400,18 +520,46 @@ evaluate the bigger structural change.
 
 ## Verification (every code session)
 
+**Always-on quality gates** (run on every commit, every session, every PR):
 - `poetry run ruff check src/sportstradamus/`
 - `poetry run pytest tests/golden/` (incl. `test_compression_eval.py`)
 - `poetry run pytest -m integration` (fake-mode, no network)
 - Regenerate CLI help snapshots if `meditate` flags change:
   `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
 - Determinism gate (P0.5): `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`
-- Functional gate: harness scorecard delta vs current strategy meets the P0
-  threshold before a strategy is promoted to default.
+
+**Smoke phase** (at the start of a new experiment, before full A/B):
+- Pick 1–2 representative markets per league (see "Cross-league testing
+  policy" above for the per-league smoke list).
+- Run `meditate --deterministic --league {NBA,WNBA,NFL} --market <smoke-market>`
+  per league × per smoke-market. Confirm the strategy doesn't immediately
+  blow up determinism, produces sensible `compression_eval` output, and
+  doesn't regress the smoke markets vs baseline.
+- A smoke regression is a hard stop — fix or revert before further work.
+
+**Full-verification phase** (before any default-flag flip or `--zinb-mode`
+config change):
+- Run the A/B on every market in every covered league for the affected
+  distribution branch (SkewNormal: 36 cells; ZINB: 23 cells).
+- Strategy SHIPs only if it clears the universal decision threshold on
+  every cell, OR the per-cell routing config records the exceptions.
 - Live-path gate: the promoted strategy is confirmed end-to-end through
   [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py)
-  (no `Model Skew`=NaN, EV not collapsed by the book blend), not only on the
-  dumped test set.
+  (no `Model Skew`=NaN, EV not collapsed by the book blend), not only on
+  the dumped test set. Run live-path verification on one representative
+  market per league per affected distribution branch.
+
+**Cross-league determinism additions** (needed before the full-verification
+phase is meaningful on WNBA + NFL):
+- Add `test_deterministic_mode_is_bit_reproducible_wnba` (analog of the
+  existing NBA test, on `WNBA_FGA.parquet`) to
+  [tests/integration/test_determinism_gate.py](../tests/integration/test_determinism_gate.py).
+- Add `test_deterministic_mode_is_bit_reproducible_nfl` on a representative
+  NFL SkewNormal market (`NFL_passing-yards.parquet`).
+- Add `test_deterministic_mode_hurdle_is_bit_reproducible_wnba` and
+  `_nfl` on WNBA FG3M + an NFL ZINB market (e.g. `NFL_interceptions.parquet`).
+- Without these, the cross-league A/B verdict is noise on the new
+  leagues — P1's hard-learned lesson, see `CENTERED_TARGET_NEGATIVE_RESULT.md`.
 
 ## Session handoff
 
