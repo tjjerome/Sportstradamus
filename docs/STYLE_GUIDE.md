@@ -278,8 +278,12 @@ makes the refactor expensive.
 - **Use `ruff format` and `ruff check --fix` before manually editing style.**
   Mechanical fixes cost nothing; hand-editing the same issues costs
   thousands of tokens.
-- **Refactor one module per session.** Don't carry full context for more
-  than one file at a time. Commit and start fresh.
+- **Multi-module work defaults to subagent-driven development —
+  one module per subagent, not one module per session.** Dispatch parallel
+  subagents (see superpowers:subagent-driven-development) when a task
+  touches two or more modules. The main session orchestrates and reviews;
+  subagents carry the per-module context. Single-module work stays in the
+  main session. See CLAUDE.md §"General Rules" — CLAUDE.md is authoritative.
 - **Consult the glossary (§12) before grepping.** The term you're looking
   up is probably there.
 - **Preserve public APIs during splits.** When you split a module into a
