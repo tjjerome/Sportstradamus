@@ -6,6 +6,7 @@ import os
 import pickle
 import random
 import warnings
+from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
@@ -1142,15 +1143,24 @@ def train_market(
 
     X_test["P"] = y_proba_filt[:, 1]
 
+    # Under --deterministic, redirect the test-set CSV and model pickle to a
+    # `deterministic/` subdir so the compression-eval harness can score them
+    # (via `compression_eval --test-sets-dir .../test_sets/deterministic`)
+    # without ever overwriting production artifacts. Training-data parquet and
+    # the whole-suite report() stay suppressed (input is unchanged under
+    # input-freeze; report() is not per-market and would clobber the
+    # production training_report.txt).
+    subdir = "deterministic/" if deterministic else ""
+    csv_filepath = pkg_resources.files(data) / f"test_sets/{subdir}{filename}.csv"
+    Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
+    X_test.to_csv(csv_filepath)
+
+    mdl_filepath = pkg_resources.files(data) / f"models/{subdir}{filename}.mdl"
+    Path(str(mdl_filepath.parent)).mkdir(parents=True, exist_ok=True)
+    with open(mdl_filepath, "wb") as outfile:
+        pickle.dump(filedict, outfile, -1)
+
     if not deterministic:
-        filepath = pkg_resources.files(data) / f"test_sets/{filename}.csv"
-        with open(filepath, "w") as outfile:
-            X_test.to_csv(filepath)
-
-        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        with open(filepath, "wb") as outfile:
-            pickle.dump(filedict, outfile, -1)
-
         report()
 
     del filedict
