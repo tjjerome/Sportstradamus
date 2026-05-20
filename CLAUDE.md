@@ -47,6 +47,32 @@ Do not undo that work:
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
   See STYLE_GUIDE.md §9.
 
+## MANDATORY: run refactoring-specialist before any push or PR update
+
+This is not a suggestion. Before you `git push`, before you call any GitHub MCP
+tool that creates or updates a PR, and before you reply "done" on a task that
+edited Python sources, you MUST invoke the `refactoring-specialist` subagent on
+every file you touched in the current session. No exceptions for "small"
+edits, "obvious" fixes, doc tweaks that grazed a `.py`, or tests-only changes.
+If you wrote to a `.py` file under `src/sportstradamus/`, the subagent runs.
+
+How to invoke:
+
+* Use the `Agent` tool with `subagent_type: "refactoring-specialist"`.
+* In the prompt, list every Python file you modified, created, or moved this
+  session. The subagent refuses to scan the whole repo on its own; you must
+  hand it the scope.
+* Wait for its report. Do not push while it is still running.
+* If it reverts any of your edits or flags a behavior risk per STYLE_GUIDE
+  §18.9, address the items it raised — re-invoke if needed — before pushing.
+
+Skipping this step is the single most common way Claude sessions ship code
+that violates the style guide. The PR review will catch it and you will redo
+the work. Just run the subagent.
+
+The subagent definition lives at `.claude/agents/refactoring-specialist.md`.
+Read it once per session so you know its scope and limits.
+
 ## Commands
 
 ```bash
