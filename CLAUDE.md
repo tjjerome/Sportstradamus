@@ -19,7 +19,14 @@ to redo the work.
 * Talk like caveman except when /writing-clearly-and-concisely overrides
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
-* One module per session. Commit and start fresh before moving to the next file.
+* **Multi-module work uses subagent-driven development by default.** When a
+  task touches two or more modules, dispatch one subagent per module rather
+  than serializing through the main session. The main session orchestrates,
+  reviews diffs, and runs the quality gates. **One module per subagent** —
+  the same scope discipline as the old "one module per session" rule, just
+  parallelized. Single-module work stays in the main session; deviating from
+  the per-subagent scope (e.g. one subagent touching two modules) needs an
+  explicit reason recorded in the plan.
 * Before claiming anything is "done", run `poetry run pytest tests/golden/`,
   `poetry run pytest -m integration` (fake-mode, no network), and
   `poetry run ruff check src/sportstradamus/`. All three must be clean.
