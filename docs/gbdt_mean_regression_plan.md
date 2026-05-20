@@ -227,22 +227,60 @@ Each is a new target/baseline strategy behind the configurable flag; each is
 gated by the harness.
 
 **P1 — Centered-target bridge (SkewNormal branch).** Report's #1, single highest
-leverage. Replace `y / MeanYr` with `y − baseline` where `baseline` is a
-leakage-safe player baseline (start with existing `MeanYr`/`Mean10`; verify it is
-prior-games-only — if it includes the current game, fix the leak first). Train
-SkewNormal on the centered residual (location-scale family supports negatives —
-fits cleanly). At inference add `baseline` back to **`loc` only**; `scale`/`alpha`
-unchanged (kills the multiplicative amplification at pipeline.py:439–452). Update
+leverage. Replace `y / MeanYr` with `y − baseline`. Train SkewNormal on the
+centered residual (location-scale family supports negatives — fits cleanly).
+At inference add `baseline` back to **`loc` only**; `scale`/`alpha` unchanged
+(kills the multiplicative amplification at pipeline.py:612–615). Update
 `set_model_start_values` (loc start → 0, not 1.0) and the `get_stats` mirror.
-*Expected: large.* **Investigation note:** this is the Phase-A additive-EB
-offset — inconclusive (non-reproducible), *not* refuted; deterministically it
-was well-calibrated (+0.12 bias). Blocked on P0.5. The `loc`-start change
-touches the same `start_values` broadcasting flagged as a non-determinism
-source — the investigation also found the offset-mode `loc=0` seeding was a
-confirmed regression bug (fixing toward the per-row prior halved bias in
-isolation); in centered space residual mean ≈ 0 so a 0 start is semantically
-right, but verify the broadcast is per-row and deterministic, not a degenerate
-global 0. Then verify it survives the live path (§"Live-path confound").
+*Expected: large.*
+
+**Baseline = the Phase-A EB prior, first cut.** The overconfidence
+investigation's Phase A used `baseline = EB(MeanYr, GamesPlayed, K=10)` where
+`EB_prior = (GamesPlayed·MeanYr + K·global_mean) / (GamesPlayed + K)` (a
+one-line James-Stein/empirical-Bayes shrinkage of season-to-date `MeanYr`
+toward the global mean — stops noisy low-sample players from blowing up the
+centered residual). `EB_SHRINKAGE_K = 10.0`. **Not raw `MeanYr`; not `Mean10`.**
+The Phase-A spec lives at `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
+(`compute_eb_prior` helper, `EB_SHRINKAGE_K`); replicate it as the first P1
+strategy under P0.5 determinism — this is the documented prior win and the
+cleanest single-variable re-validation.
+
+**Configurable baseline-source strategy.** Per the architectural principle,
+the baseline itself is a strategy value, not a hardcoded choice. Wire a
+`TargetBaseline` plug (e.g. enum / strategy object) with at least these
+candidates: `eb_meanyr_k10` (Phase-A, default for P1), `meanyr` (raw),
+`mean10` (raw trailing-10), `blended` (`α·Mean10 + (1−α)·EB(MeanYr)`). First
+P1 ship attempt uses `eb_meanyr_k10` only; the others are cheap A/B
+follow-ups through the same `compression_eval` harness if Phase-A clears the
+threshold (or if it doesn't — Mean10 is the obvious next try). Tune
+`EB_SHRINKAGE_K` only after baseline-source is settled.
+
+**Leakage audit is task zero.** [`stats/base.py:682`](src/sportstradamus/stats/base.py#L682)
+computes `stats["MeanYr"] = playergames.groupby(...).mean()`. Verify
+`playergames` is strictly `< game_date`, not `≤`. The audit applies more
+strictly to `Mean10` than to `MeanYr`: an off-by-one that includes the
+current game contaminates ~10% of a 10-game window vs ~1% of a season —
+add a regression test asserting `MeanYr`/`Mean10` at `game_date` equals the
+expected expanding-then-shifted aggregate.
+
+**Investigation notes** (don't rediscover these):
+1. Phase A was *inconclusive (non-reproducible)*, **not refuted** —
+   deterministically the production-equivalent additive-EB SkewNormal model
+   was well-calibrated (+0.12 top-quintile bias, vol-spread 7.4 vs actual
+   8.3). P0.5 is the determinism gate that makes the Phase-A re-run a
+   trustworthy A/B.
+2. The `loc`-start=0 change touches `set_model_start_values` — the
+   investigation flagged the offset-mode `loc=0` seeding as a confirmed
+   regression bug (fixing to `loc=mu` halved bias in isolation). In
+   centered space the residual mean ≈ 0 so `loc=0` is semantically right
+   *if* the per-row broadcast is deterministic, not a degenerate global 0.
+   Verify with a unit test on `set_model_start_values` under the centered
+   path (sized to `len(X)`, not scalar 0).
+3. After Phase-A's offline win, **confirm end-to-end through
+   `prediction/model_prob.py`** before declaring P1 done — the
+   user-published EV path is where the FGA symptom actually lives
+   (`Model Skew=NaN` live, w≈0.9 book blend, temperature). See
+   §"Live-path confound".
 
 **P2 — `init_score` player baseline (NegBin/ZINB branch).** Report's #4 — count
 families can't be centered. Inject the log-link of the player baseline as
