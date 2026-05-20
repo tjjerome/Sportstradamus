@@ -472,7 +472,12 @@ def train_market(
     hist_gate = zero_mask.sum() / len(y_train_labels) if len(y_train_labels) > 0 else 0
 
     stat_zi[league][market] = hist_gate
-    save_zi_config(stat_zi)
+    # In deterministic mode the in-memory update still flows downstream (so
+    # this run's branch selection sees the gate), but skip persisting to
+    # stat_zi.json — deterministic runs use crippled hyperparameters and
+    # must never mutate production config.
+    if not deterministic:
+        save_zi_config(stat_zi)
 
     player_stats = player_stats.apply(lambda x: x[x != 0]).groupby(level=0)
 

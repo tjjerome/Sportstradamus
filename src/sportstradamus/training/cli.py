@@ -90,6 +90,12 @@ def meditate(
     target_strategy,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
+    # --deterministic implies --force: the input-freeze (new_M = empty)
+    # otherwise short-circuits train_market when a prior model pickle exists,
+    # which is precisely when the eval harness needs a fresh deterministic
+    # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
+    if deterministic and not force:
+        force = True
     log = get_logger("meditate")
     log.setLevel(log_level)
     log.info(
@@ -125,8 +131,13 @@ def meditate(
             if mk in ff[lg]["Filtered"]:
                 del ff[lg]["Filtered"][mk]
                 log.info("Reset filter", extra={"league": lg, "market": mk})
-        with open(ff_path, "w") as fh:
-            json.dump(ff, fh, indent=4)
+        # In deterministic mode the in-memory clear still propagates (so this
+        # run sees the reset), but skip persisting to feature_filter.json —
+        # deterministic runs use crippled hyperparameters and must never
+        # mutate production config.
+        if not deterministic:
+            with open(ff_path, "w") as fh:
+                json.dump(ff, fh, indent=4)
         # Reload module-level feature_filter so this run sees the change
         from sportstradamus import helpers as _hp
 

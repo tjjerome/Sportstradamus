@@ -15,7 +15,7 @@
 |---|---|---|
 | **P0 — offline eval harness** | ✅ done (PR #46) | `src/sportstradamus/scripts/compression_eval.py` + `tests/golden/test_compression_eval.py`. ruff clean, 6 unit tests pass, CLI single+diff smoke-tested on synthetic data. Full `poetry` gates NOT run in the build env — network policy blocks the PyTorch CPU wheel source so `poetry install` fails on `torch`; needs a normal-network run before merge. |
 | **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic` (debug-only, never publish) + `tests/integration/test_determinism_gate.py`. Pure helpers `seed_everything` / `fit_lss_model` / `predict_lss_params` / `fit_predict_params` in `pipeline.py`; under `--deterministic`: RNGs pinned (random/numpy/torch + `torch.use_deterministic_algorithms`), Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`, input frozen to cached parquet. Persistent writes are **redirected to `data/{test_sets,models}/deterministic/`** (training parquet + whole-suite `report()` stay fully suppressed) so a `--deterministic` run produces consumable artifacts without ever overwriting production paths. Gate runs on real cached `NBA_FGA.parquet` (4000 rows, ~5s) with stochastic LightGBM (`feature_fraction=0.8`, `bagging_fraction=0.8`, `bagging_freq=1`) so it actually tests the seeding mechanism — different seed produces `loc` max-abs diff ~0.34, same seed bit-identical. Default `meditate` byte-identical. P1 unblocked. |
-| **P1 — centered-target bridge (SkewNormal)** | ✅ done (PR #46) | `--target-strategy=centered_additive_eb_meanyr_k10` ships. **NBA FGA offline A/B verdict (`compression_eval --baseline ... --candidate ...`): SHIP — top-decile MAE +5.3%, global MAE −2.0% (improved), brier_skill_score +0.096 → +0.112.** Top-decile bias −3.108 → −2.699 (13% reduction), exactly the multiplicative-amplification artifact the centered strategy targeted. Phase-A's inconclusive +0.12 result is now reproducible under P0.5. New module `src/sportstradamus/training/baselines.py` (strategy registry, `compute_eb_prior`, `EB_SHRINKAGE_K=10.0`); `set_model_start_values` gained `offset_mode` kwarg; `train_market`/`fit_predict_params` thread `target_strategy`; `model_prob.py` decodes via the same registry (single source of truth, train/predict can't drift); `compression_eval` adds a brier_skill_score third gate; `tests/integration/test_centered_target_live_path.py` asserts `Model Skew` is finite end-to-end through `model_prob.py` (guards the FGA NaN dead end). **Default `--target-strategy=ratio_meanyr` is unchanged production behavior** — centered strategy is opt-in until a non-deterministic confirmation run + manual review (deferred follow-up). |
+| **P1 — centered-target bridge (SkewNormal)** | ✅ done (PR #46), result: **FGA-only SHIP, path-wide KILL** | `--target-strategy=centered_additive_eb_meanyr_k10` is wired end-to-end (registry, pipeline dispatch, prediction-side mirror, brier_skill gate, live-path test). **Path-wide A/B under `meditate --deterministic --force` across every NBA market** revealed the win does NOT generalize: FGA SHIPS (+5.3% top-decile MAE, brier_skill +0.096→+0.112), every other SkewNormal market KILLs (PTS −3.5%, PA −4.1%, PR −2.9%, RA −2.2%, FG3A −3.8%, FGM −2.6%, MIN +3.7% (under bar), PRA +0.8%, REB +0.2%, fantasy-points-prizepicks brier_skill regressed). Count-family markets (FG3M, FTM, OREB, PF, STL, TOV) showed exactly 0% delta as expected — the strategy is a no-op for NegBin/ZINB. **This confirms the OVERCONFIDENCE_INVESTIGATION §3.2 "decisive negative result": the SkewNormal level bias is not the dominant compression cause path-wide.** FGA is genuinely special. The "promote centered_additive to default" follow-up is therefore dead — it would regress most markets. Default `--target-strategy=ratio_meanyr` stays. The infrastructure (`baselines.py`, the registry, the offset_meta pickle field, the brier_skill gate) is reusable for P2's `init_score`-shaped baselines and future per-market strategy work. |
 | P2 — `init_score` baseline (NegBin/ZINB) | ⬜ next | Pair with the **confirmed, reproducible ZINB derived-π gate fix** (separate existing spec); see annotation in priority list. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
@@ -26,33 +26,38 @@ Use the same `baselines.py` strategy-registry plumbing P1 introduced: a new
 `init_score_meanyr` (or similar) strategy that injects a per-row baseline as
 LightGBM `init_score` on the count parameter via `lgb.Dataset`.
 
-**Bug/gotcha to fix when convenient (flagged during P1 Task 8):**
-`meditate --deterministic` interacts badly with the cache short-circuit in
-`pipeline.py:387` — `new_M` is empty under input-freeze, so
-`if new_M.empty and not force and not need_model: return` causes the run to
-print "Training NBA - X" and immediately return without writing anything
-when a prior model pickle exists. Either auto-imply `--force` when
-`--deterministic` is set, or check `if not deterministic` in the condition.
-P1 Task 8 worked around it by passing `--force` explicitly; the next
-session running an A/B should either replicate that workaround or fix the
-condition.
+**Deterministic-mode hardening (fixed in PR #46 post-P1):**
+`meditate --deterministic` now auto-implies `--force` (in `cli.py:meditate`)
+because the input-freeze leaves `new_M` empty, which would otherwise
+short-circuit `train_market` at the `if new_M.empty and not force and not
+need_model: return` line whenever a prior model pickle exists. Also
+hardened: `stat_zi.json` and `feature_filter.json` writes are skipped under
+`--deterministic` — those configs flow in-memory through the current run
+but never get persisted, so the crippled deterministic hyperparameters
+can't mutate production config.
 
-**P1 follow-ups (queued, not blocking):**
-1. **Promote `centered_additive_eb_meanyr_k10` to default** after a
-   non-deterministic confirmation run on the production hyperparameter
-   search (P0.5's `DETERMINISTIC_FIXED_PARAMS` cripple model quality on
-   purpose). Compare deciles + brier_skill on real-Optuna models before
-   flipping the default.
-2. **Path-wide A/B**: run the same SHIP/KILL verdict on the other
-   SkewNormal markets (PTS, REB, AST, PR, PRA, PA, RA) to confirm the win
-   isn't FGA-specific.
-3. **Live-path NaN root cause**: `tests/integration/test_centered_target_live_path.py`
-   guards that Task 7's decode is finite, but the *original* FGA `Model Skew=NaN`
-   live-path bug (per `docs/OVERCONFIDENCE_INVESTIGATION.md` §3.4) was an
-   *existing model + live `model_prob.py`* failure, not the new strategy.
-   Re-check on a current production slate post-promotion.
-4. **`EB_SHRINKAGE_K` tuning** — only if path-wide A/B shows residual
-   mid-volume over-prediction (the Phase-A "Task A7" follow-up).
+**P1 follow-ups (closed or deferred):**
+1. ~~**Promote `centered_additive_eb_meanyr_k10` to default.**~~ **DEAD** —
+   the path-wide A/B shows the win is FGA-only; every other SkewNormal
+   market regresses. Default stays on `ratio_meanyr`. Centered strategy
+   remains available as an opt-in for FGA-specific runs (or future
+   per-market strategy selection if that's ever built).
+2. ~~**Path-wide A/B**~~ ✅ done (above): FGA SHIP, rest KILL.
+3. **Live-path NaN root cause (deferred — "diminishing-returns trigger")**:
+   `tests/integration/test_centered_target_live_path.py` guards that the
+   centered strategy's decode is finite, but the original FGA
+   `Model Skew=NaN` symptom (per
+   `docs/OVERCONFIDENCE_INVESTIGATION.md` §3.4) was an
+   *existing-model + live `model_prob.py`* failure, distinct from
+   anything P1 touched. **Tackle this when further model-improvement
+   work (P2 init_score baseline, P3 rate decomposition, etc.) starts
+   yielding diminishing returns** — the live-path NaN bug is likely
+   responsible for a chunk of the published-EV pathology that
+   training-side fixes can't reach. Don't lose track of it.
+4. **`EB_SHRINKAGE_K` tuning** — Phase-A "Task A7" follow-up. Only
+   relevant if a per-market FGA centered_additive deployment ships and
+   shows residual mid-volume over-prediction. Low priority now that the
+   path-wide A/B is closed.
 
 ## Context
 
