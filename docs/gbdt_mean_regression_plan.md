@@ -961,6 +961,26 @@ phase is meaningful on WNBA + NFL):
   fork in Stage B3 is the only place where a single decision blocks
   multiple downstream sessions.
 
+### Phase-to-phase handoff prompts
+
+Each completed phase produces the handoff prompt for the next phase as
+part of its Definition-of-Done. The repo ships a
+[prompt-engineer subagent](../.claude/agents/prompt-engineer.md) for
+this purpose — invoke it via the `Agent` tool with
+`subagent_type: "prompt-engineer"` at the end of each phase. The agent's
+project-specific addendum documents the required reading list, the
+standard 10-section structure (opener / reading list / scope / locked
+decisions / inference-path checklist / decision threshold / verification
+gates / branch state / out-of-scope / definition-of-done), and the
+`/tmp/{stage}_handoff_prompt.md` output convention.
+
+Handoff prompts are scratch artifacts until the next session accepts
+them; on acceptance they move to `docs/handoffs/{stage}.md` for durable
+git history. The handoff for **Stage 0** lives at
+`/tmp/stage0_handoff_prompt.md` after this plan revision (initial
+production by the prompt-engineer agent in commit
+`{stage0-handoff-commit}`).
+
 ### Tooling note: `gh` is a userspace install on this workstation
 
 PR #46 CI status and review-comment monitoring use the GitHub CLI. `gh` is
