@@ -14,15 +14,18 @@
 | Phase | State | Notes |
 |---|---|---|
 | **P0 — offline eval harness** | ✅ done (PR #46) | `src/sportstradamus/scripts/compression_eval.py` + `tests/golden/test_compression_eval.py`. ruff clean, 6 unit tests pass, CLI single+diff smoke-tested on synthetic data. Full `poetry` gates NOT run in the build env — network policy blocks the PyTorch CPU wheel source so `poetry install` fails on `torch`; needs a normal-network run before merge. |
-| **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic` (debug-only, never publish) + `tests/integration/test_determinism_gate.py`. Pure helpers `seed_everything` / `fit_lss_model` / `predict_lss_params` / `fit_predict_params` in `pipeline.py`; under `--deterministic`: RNGs pinned (random/numpy/torch + `torch.use_deterministic_algorithms`), Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`, input frozen to cached parquet, and ALL persistent writes (model `.mdl`, test-set CSV, training parquet, report) are skipped so a `--deterministic` run can't corrupt production. Gate runs on real cached `NBA_FGA.parquet` (4000 rows, ~5s) with stochastic LightGBM (`feature_fraction=0.8`, `bagging_fraction=0.8`, `bagging_freq=1`) so it actually tests the seeding mechanism — different seed produces `loc` max-abs diff ~0.34, same seed bit-identical. Default `meditate` byte-identical. P1 unblocked. |
+| **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic` (debug-only, never publish) + `tests/integration/test_determinism_gate.py`. Pure helpers `seed_everything` / `fit_lss_model` / `predict_lss_params` / `fit_predict_params` in `pipeline.py`; under `--deterministic`: RNGs pinned (random/numpy/torch + `torch.use_deterministic_algorithms`), Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`, input frozen to cached parquet. Persistent writes are **redirected to `data/{test_sets,models}/deterministic/`** (training parquet + whole-suite `report()` stay fully suppressed) so a `--deterministic` run produces consumable artifacts without ever overwriting production paths. Gate runs on real cached `NBA_FGA.parquet` (4000 rows, ~5s) with stochastic LightGBM (`feature_fraction=0.8`, `bagging_fraction=0.8`, `bagging_freq=1`) so it actually tests the seeding mechanism — different seed produces `loc` max-abs diff ~0.34, same seed bit-identical. Default `meditate` byte-identical. P1 unblocked. |
 | P1 — centered-target bridge (SkewNormal) | ⬜ next | This *is* the additive empirical-Bayes offset the overconfidence investigation already tried (Phase A). It was found **inconclusive due to non-reproducibility, not wrong** — deterministically it was well-calibrated (+0.12 bias). Proceed under `--deterministic` so the P0 harness diff verdict is trustworthy. |
 | P2 — `init_score` baseline (NegBin/ZINB) | ⬜ | Pair with the **confirmed, reproducible ZINB derived-π gate fix** (separate existing spec); see annotation in priority list. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
 **Start next session here:** P1 (centered-target bridge, SkewNormal). Run the
-candidate strategy under `meditate --deterministic` (writes are suppressed —
-adapt the gate-test pattern or run a wrapper that calls `fit_predict_params`
-into a dedicated output dir) so the P0 harness diff verdict is trustworthy.
+candidate strategy with `meditate --deterministic`; outputs land in
+`data/test_sets/deterministic/{LEAGUE}_{market}.csv` and
+`data/models/deterministic/{LEAGUE}_{market}.mdl`. Score with
+`compression_eval --test-sets-dir src/sportstradamus/data/test_sets/deterministic`
+(or diff-mode against the production baseline CSV) so the P0 harness verdict
+is trustworthy.
 Keep the default strategy = current production behavior. Per the
 overconfidence investigation, also confirm any training-side win actually
 propagates to the live `model_prob.py` output before declaring it fixed (see
