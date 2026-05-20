@@ -168,27 +168,72 @@ shows the deployed model is already calibrated and profitable on a given
 market or league, **stop that track for that market/league and redeploy
 the engineering effort elsewhere**. The plan is a backlog, not a queue.
 
-### Live-data stop conditions
+### Lifecycle: offline gate → production test → live gate → graduation
 
-At the end of each stage (after any ship lands on `devel` and is running
-in production for ≥ 14 days), compute the live-data analog of the offline
-ship gate using
-[reflect](../src/sportstradamus/nightly.py) settled-bet data and the
-Stats Profit Sim dashboard page. A (league, market) cell **graduates from
-the track** — no further stage work on it — if all of these hold:
+Every (league, market) cell moves through three states. Two gates control
+the transitions. Both gates appear in the same `check_graduation` table
+(Stage 0 deliverable 0.4) so a single view answers "what changed, what's
+in test, what's graduated."
+
+```
+not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  graduated
+   ▲                                       │                                │
+   └────── re-entry / revert ←─────────────┴────[live regression]───────────┘
+```
+
+### Gate 1 — Offline ship gate (qualifies a cell for production test run)
+
+Computed on the **held-out validation + test split** that `train_market`
+already produces (lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py)
+and the deterministic test_set CSVs under `data/test_sets/`). This is the
+existing universal decision threshold restated as a per-cell gate.
+
+| Offline metric | Threshold | Where it lives |
+|---|---|---|
+| Top-mean-decile MAE on the test split | ≥ 5% better than current default strategy on the same cell | `compression_eval --baseline ... --candidate ...` output |
+| Global MAE on the test split | not worse by > 1% vs current default | `compression_eval` global summary |
+| `brier_skill_score` on the validation split (book baseline) | not worse than current default | `model_stats.parquet` for the candidate run |
+| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
+
+If **all four** clear on every cell in every covered league (or the
+routing config records the exceptions), the strategy is allowed to
+promote: change becomes the new default for those cells on `devel`, runs
+in production for the **mandatory ≥ 14-day soak window** before the live
+gate is evaluated. During the soak, the previous version's pickle stays
+archived under `data/old_models/` so revert is one cron-pull away.
+
+### Gate 2 — Live graduation gate (cell graduates from the track)
+
+Computed on the **last 30 days of settled production offers** by the
+Stage 0 `compute_book_brier_skill_score` and rolling-window aggregator
+in `nightly.py`. A cell graduates from the track — no further stage work
+— if all four hold:
 
 | Live metric | Threshold | Where it lives |
 |---|---|---|
-| Settled `brier_skill_score` over the last 30 days | ≥ 0 (matches book) and ≥ training-set `brier_skill_score − 0.02` (no live regression) | `model_stats.parquet` (training) vs nightly reflect aggregate (live) |
-| Empirical over-rate vs predicted over-rate on settled bets | within ±0.03 over ≥ 200 settled offers | dashboard Stats Diagnostics page; computed in [training/report.py](../src/sportstradamus/training/report.py) for the training-set analog |
-| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | new harness mode on compression_eval that scores live settled bets (~1 day to add — points at archive/ duckdb instead of test_sets/ CSVs) |
-| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page |
+| Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
+| Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
+| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
+| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
 
 If a cell graduates, mark it ✅ in the Status table with the graduating
 stage and the live metrics that triggered graduation. The track continues
 on the non-graduating cells only. This is the live-data analog of P1's
 "FGA-only SHIP" verdict — FGA graduated at Stage A2 (effectively), the
 rest of the SkewNormal family did not.
+
+### Why both gates need to exist
+
+Gate 1 (offline) without Gate 2 (live) is the failure mode P1 actually
+hit — `centered_additive_eb_meanyr_k10` cleared the offline gate on FGA
+under deterministic mode, but the production-mode pipeline had different
+hyperparameters and the live data could have looked different from
+test-set CSVs. The 14-day soak window is what catches that drift.
+
+Gate 2 without Gate 1 is the inverse failure: shipping changes to
+production on live-data intuition alone, no offline ship verdict to
+revert to. The plan rejects both modes — every cell must clear Gate 1,
+soak, then clear Gate 2 before graduating.
 
 ### Track-wide stop condition
 
@@ -234,7 +279,7 @@ Stage 0 deliverables (in dependency order):
 | 0.1 | **Live brier_skill_score against the book baseline** — variant of [analysis.py:877](../src/sportstradamus/analysis.py#L877) that uses the bookmaker's implied prob (already stored per-offer in `history.parquet` as the original `Odds` column) as the reference, mirroring the training-side `brier_skill_score` exactly. Add as `compute_book_brier_skill_score(subset)` alongside the existing function — keep the chance-baseline version (some dashboards already rely on it). | ~2 hours | [analysis.py](../src/sportstradamus/analysis.py) |
 | 0.2 | **Rolling-window aggregation per (league, market)** — extend `reflect` to compute, for each (league, market) cell at the end of every nightly run: 7-day and 30-day rolling book-BSS, empirical-vs-predicted over-rate, total settled bets, and total profit-sim yield. Write to `data/live_metrics_per_market.parquet` keyed by (league, market, computed_at). | ~1 day | New `compute_live_metrics()` step at the tail of [nightly.py](../src/sportstradamus/nightly.py) `run()`. |
 | 0.3 | **Live top-decile MAE harness mode** — new `compression_eval --live-window N` flag that reads `history.parquet` instead of a test-set CSV, filters to the last N days of settled bets per (league, market), and runs the existing decile-bias scoring code path. Output schema matches the offline mode so the comparison "live vs offline top-decile MAE" is a parquet join. | ~1 day | [compression_eval.py](../src/sportstradamus/scripts/compression_eval.py); add unit tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py). |
-| 0.4 | **Graduation-status table view** — small CLI (`poetry run check-graduation`) or dashboard page that joins `data/live_metrics_per_market.parquet` against the four graduation thresholds and emits a 36-cell × 4-metric ✅ / ⚠️ / ❌ table per (league, market). This is what future sessions read to decide track continuation. | ~half day | New [src/sportstradamus/scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) or a new dashboard page. |
+| 0.4 | **Lifecycle-status table view** — small CLI (`poetry run check-graduation`) or dashboard page that joins `data/live_metrics_per_market.parquet` against **both gates** and emits a per-(league, market) status: not-shipped / in-test (days into soak) / graduated. Renders as a 36-cell × 8-metric table — 4 Gate 1 (offline) columns + 4 Gate 2 (live) columns + a state column. Future sessions read this to decide both "can this candidate ship to test?" (Gate 1) and "can this cell graduate?" (Gate 2). | ~half day | New [src/sportstradamus/scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) or a new dashboard page. |
 | 0.5 | **Backfill rolling metrics on existing history** — one-shot script that walks back through `history.parquet` and emits the rolling-window points for the last ~90 days so Stage 0's first publication of `live_metrics_per_market.parquet` has historical context to compare against. | ~half day | One-shot script under [src/sportstradamus/scripts/](../src/sportstradamus/scripts/). |
 
 **Total Stage 0 cost: ~3 days.** Modest — and the entire stop-the-track
@@ -250,7 +295,12 @@ infrastructure, not a model change):
   fixed history.parquet snapshot (frozen for the test) and the golden
   test asserts row-count + schema
 - A `check_graduation` invocation on the cached snapshot produces a
-  non-empty table covering NBA / WNBA / NFL × all distributions
+  non-empty table covering NBA / WNBA / NFL × all distributions, with
+  the lifecycle state column populated for every cell (not-shipped /
+  in-test with day count / graduated)
+- The 8-metric output (4 Gate 1 + 4 Gate 2) reads from the same
+  parquet on every invocation — no recomputation of Gate 1 from
+  `model_stats.parquet` and Gate 2 from a separate source
 
 **Stage 0 stop-the-track check:** there is no "we have enough live data
 already" exit for Stage 0 — it's the infrastructure that makes
