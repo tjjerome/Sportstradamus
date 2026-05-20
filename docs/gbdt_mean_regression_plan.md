@@ -159,6 +159,56 @@ and move on. The harness —
 — is the ship/kill gate; the cross-league A/B is the
 full-verification phase from the testing policy above.
 
+## Diminishing returns — stop-the-track principle
+
+Don't let perfect be the enemy of good. Each stage exists because the
+*previous* stage's verdict suggested more lift was available; if live data
+shows the deployed model is already calibrated and profitable on a given
+market or league, **stop that track for that market/league and redeploy
+the engineering effort elsewhere**. The plan is a backlog, not a queue.
+
+### Live-data stop conditions
+
+At the end of each stage (after any ship lands on `devel` and is running
+in production for ≥ 14 days), compute the live-data analog of the offline
+ship gate using
+[reflect](../src/sportstradamus/nightly.py) settled-bet data and the
+Stats Profit Sim dashboard page. A (league, market) cell **graduates from
+the track** — no further stage work on it — if all of these hold:
+
+| Live metric | Threshold | Where it lives |
+|---|---|---|
+| Settled `brier_skill_score` over the last 30 days | ≥ 0 (matches book) and ≥ training-set `brier_skill_score − 0.02` (no live regression) | `model_stats.parquet` (training) vs nightly reflect aggregate (live) |
+| Empirical over-rate vs predicted over-rate on settled bets | within ±0.03 over ≥ 200 settled offers | dashboard Stats Diagnostics page; computed in [training/report.py](../src/sportstradamus/training/report.py) for the training-set analog |
+| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | new harness mode on compression_eval that scores live settled bets (~1 day to add — points at archive/ duckdb instead of test_sets/ CSVs) |
+| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page |
+
+If a cell graduates, mark it ✅ in the Status table with the graduating
+stage and the live metrics that triggered graduation. The track continues
+on the non-graduating cells only. This is the live-data analog of P1's
+"FGA-only SHIP" verdict — FGA graduated at Stage A2 (effectively), the
+rest of the SkewNormal family did not.
+
+### Track-wide stop condition
+
+A whole track stops when **every cell has graduated**. At that point any
+remaining staged work (e.g. Stage B3 MZINB if Stage B1 ZTNB already
+graduated 8/8 ZINB cells across NBA/WNBA/NFL) is filed under "future
+research" — code in `src/deprecated/` if prototyped, otherwise just
+noted in the Status table as deprioritized with a one-line reason
+(e.g. "B3 not pursued: B1 graduated 23/23 cells; further structural
+change would be perfect-as-enemy-of-good").
+
+### Re-entry condition
+
+If a graduated cell *regresses* — settled brier_skill_score drops below
+the graduation threshold for two consecutive 7-day windows — it re-enters
+the track at the stage where it graduated. Track work resumes on that
+cell only. Re-entry is logged in the Status table with the regression
+metric so future sessions can read the pattern (e.g. "WNBA FG3M re-entered
+2026-09-12 after settled brier_skill dropped to −0.04 vs graduation 0.11
+— preseason rotations changed minutes patterns").
+
 ## Two-track next-session plan
 
 Work proceeds on two independent tracks. Stages within a track are sequential
@@ -221,6 +271,13 @@ Source: researcher T1 (Tier 0).
   Casella–Berger empirical-Bayes formula
   `K = σ²_within / σ²_between` evaluated *per league*; record the per-league
   K alongside the per-league ICC table.
+- **Stop-the-track check:** Stage A1 is a diagnostic — it does not by
+  itself ship a model change, so there are no live-data graduations here.
+  But if the ICC table reveals the family is *already* well-routed by the
+  existing `ratio_meanyr` default (e.g. low-ICC markets are already kept
+  out of EB centering by P1's verdict), Stage A2 should be skipped for
+  those cells and the track-resumption discussion happens only if live
+  metrics regress.
 
 ### Stage A2 — Highest-leverage structural fixes (2–3 sprints)
 
@@ -244,6 +301,12 @@ Pick order based on Stage A1 ICCs.
   (re-check T1) or the live-path confound (Model Skew=NaN, see
   `OVERCONFIDENCE_INVESTIGATION` §3.4) is consuming the gain. Stop and
   resolve the live path before more training-side work.
+- **Stop-the-track check:** after T5 or T3 ships and runs in production
+  for ≥ 14 days, compute the live-data graduation criteria above per
+  cell. Cells that graduate skip Stage A3 and A4 entirely. Common
+  expected outcome: high-ICC markets graduate after T5; low-ICC
+  heavy-tail markets graduate after T3; the remaining gap is what
+  Stage A3 polish targets.
 
 ### Stage A3 — Calibration polish (1 sprint, mostly orthogonal — stack them)
 
@@ -260,6 +323,13 @@ Pick order based on Stage A1 ICCs.
 - If T9 monotone constraint is violated by the trained model — feature set
   is missing a key volume driver; loop back to A1 ICC analysis with that
   feature included.
+- **Stop-the-track check:** Stage A3 is intentionally cheap calibration
+  polish. If P7+T8+P6 combined push live-data graduation across the
+  remaining cells (high probability — these target the residual loc/scale
+  miscalibration after A2), do NOT proceed to Stage A4. Stage A4 is
+  reserved for cells that fail to graduate despite both structural fix
+  (A2) and calibration polish (A3); if A3 fixes them, A4 is
+  perfect-as-enemy-of-good.
 
 ### Stage A4 — Novel risky retries (only if Stage A2/A3 leave a gap)
 
@@ -277,6 +347,15 @@ Pick order based on Stage A1 ICCs.
   Deprioritize the rest of Stage A4; MEGB and gbex become nice-to-have.
 - If MEGB ships on PTS but not on FG3M → confirms the high-ICC vs low-ICC
   dichotomy; route count markets to T3/T7 only and stop Track-A work there.
+- **Stop-the-track check:** Stage A4 is the last resort. If any cell is
+  still failing graduation here, *first* check whether it has crossed into
+  "live data shows we're already profitable on this market with the
+  current model" — the bar for justifying a novel risky retry (T4, T2,
+  T7, T6, T10) is much higher than for the cheap fixes earlier in the
+  track. A cell that has settled brier_skill ≥ 0 in production but
+  doesn't pass the strict 5% top-decile MAE bar on offline A/B is
+  almost certainly NOT worth Stage A4 effort — file as "deprioritized:
+  acceptable live performance, offline gap is academic."
 
 ### What is dropped from the Track-A plan and why
 
@@ -325,6 +404,12 @@ Routing rule (precomputable from training data alone, survives temporal split):
   (proceed to Stage B2).
 - If sample variance/mean ratio for STL is < 1.0 → pivot STL specifically to
   CMP (Stage B4) and run that A/B before any other Stage B3 work.
+- **Stop-the-track check:** the ZTNB fix is the cheapest single change
+  in the entire plan and the researcher's strongest claim ("likely resolves
+  FTM/STL by construction"). After it ships and runs ≥ 14 days, expect
+  most ZINB cells to graduate. The bar for proceeding past Stage B1 is
+  *unambiguous* live-data failure on specific cells — not "we could
+  probably squeeze out more on FG3M with MZINB."
 
 ### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
 
@@ -337,6 +422,14 @@ Routing rule (precomputable from training data alone, survives temporal split):
 - 8/8 ship under routing + encoded features → hold off on Stage B3 unless
   ROI is needed elsewhere. The system is in a good state.
 - <8/8 ship → proceed to Stage B3 on the markets that still kill.
+- **Stop-the-track check:** after Stage B2's routing config lands and
+  runs ≥ 14 days, expect the remaining ZINB cells (across NBA/WNBA/NFL)
+  to graduate. Stage B3 is a 4–6 week investment in a novel architecture
+  (MZINB) or a non-trivial dependency add (GPBoost); do not start it
+  unless ≥ 3 cells have *not* graduated AND their offline residual
+  diagnostics point clearly at one of MZINB or GPBoost. "We can probably
+  do better than B2" without that evidence is the perfect-as-enemy-of-good
+  trap.
 
 ### Stage B3 — Strategic fork (4–6 weeks, pick ONE — not both)
 
@@ -374,6 +467,15 @@ evaluate the bigger structural change.
   blowups across all SHIP markets → MZINB becomes much weaker as a
   recommendation; identifiability was hyperparameter-induced not
   parameterization-induced. Reroute Stage B3 effort to GPBoost-only.
+- **Stop-the-track check:** Stage B3 is the canonical "is it worth it"
+  decision. The researcher explicitly flags MZINB as "no GBDT precedent
+  — novel contribution." That implementation risk is only worth eating
+  if (a) live data shows specific cells still failing graduation after
+  B1+B2 AND (b) their residual structure clearly favors MZINB over the
+  cheaper GPBoost alternative. If live performance is acceptable on all
+  cells but offline metrics still show top-decile gap, the right
+  decision is "file MZINB as future research" and move to Stage B4 or
+  a different project.
 
 ### Stage B4 — Tuning, polish, specialized fixes (optional)
 
@@ -411,6 +513,11 @@ evaluate the bigger structural change.
   [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py),
   not in training. See OVERCONFIDENCE_INVESTIGATION §3.4 for the live-path
   confound playbook.
+- **Stop-the-track check:** Stage B4 items are individually cheap (hours
+  to days), so the perfect-as-enemy-of-good risk is lower than at Stage
+  B3. But the *cumulative* time across all 6 items is multiple weeks. If
+  per-parameter Optuna alone graduates the holdout cells, do not run the
+  other 5 — file as deprioritized with the graduating metrics noted.
 
 ---
 
