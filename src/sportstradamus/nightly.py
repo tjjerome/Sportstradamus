@@ -6,6 +6,7 @@ Runs after games finish to:
 3. Fill in Close Books P / Market CLV / Model CLV per offer
 4. Fill in Legs/Misses columns in parlay_hist
 5. Write resolve_meta.json with last-run timestamp
+6. Compute and persist per-(league, market) live metrics (Gate 2)
 
 Schedule with cron after games finish, e.g.:
     0 2 * * * cd /home/trevor/Sportstradamus && poetry run reflect
@@ -290,7 +291,9 @@ def run(league, skip_update, history_only, log_level):
     n_resolved_hist = n_before_hist - int(history["Actual"].isna().sum())
     logger.info(f"History: resolved {n_resolved_hist} / {n_before_hist} pending rows")
 
-    # Load Archive once and fold closing-line values into every offer.
+    # ------------------------------------------------------------------
+    # 3. Fill in Close Books P / Market CLV / Model CLV per offer
+    # ------------------------------------------------------------------
     archive = Archive()
     history = clv.fill_from_archive(history, archive)
     write_history(history)
@@ -339,7 +342,7 @@ def run(league, skip_update, history_only, log_level):
             logger.info(f"Parlays: resolved {n_resolved_parl} / {n_before_parl} pending rows")
 
     # ------------------------------------------------------------------
-    # 4. Write metadata
+    # 5. Write resolve_meta.json with last-run timestamp
     # ------------------------------------------------------------------
     meta = {
         "last_run": datetime.now().strftime("%Y-%m-%d %H:%M"),
