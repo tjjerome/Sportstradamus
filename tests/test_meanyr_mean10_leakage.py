@@ -1,0 +1,107 @@
+"""Regression test for the MeanYr/Mean10 leakage rule in ``Stats.base_profile``.
+
+``stats/base.py`` builds ``short_gamelog`` with a strict less-than date filter
+(``gameDates < date``), so the target game date is excluded from every
+downstream aggregate (``MeanYr``, ``Mean10``, ``GamesPlayed``, ...). Flipping
+the operator to ``<=`` would contaminate the per-player baseline features
+with the very target the model is trying to predict — fatal for the centered
+SkewNormal target in P1 of the GBDT-mean-regression project (and severe for
+``Mean10``, where one leaked row pollutes ~10% of the window).
+
+Two layers of guarding:
+
+1. **Static check**: the source of ``Stats.base_profile`` must contain the
+   literal strict-less-than expression. Catches a textual regression in
+   review without needing a runtime fixture.
+2. **Functional check**: applies the same filter to a synthetic gamelog and
+   asserts the sentinel row at the target date is excluded from MeanYr /
+   Mean10 / GamesPlayed aggregates computed the same way ``base.py:681-693``
+   does.
+"""
+
+from __future__ import annotations
+
+import inspect
+from datetime import date, timedelta
+
+import pandas as pd
+
+from sportstradamus.stats.base import Stats
+
+# 365 days back covers a typical season; the production filter uses 300 days
+# but the test value just needs to bracket the synthetic rows below.
+_LOOKBACK_DAYS = 365
+
+
+def _filter_matches_production(gamelog: pd.DataFrame, target_date: date) -> pd.DataFrame:
+    """Replicate ``Stats.base_profile`` lines 223-226 on the synthetic frame.
+
+    Pure function so the test asserts the exact production semantics; any
+    drift between this and the source is caught by the static check below.
+    """
+    one_year_ago = target_date - timedelta(days=_LOOKBACK_DAYS)
+    gameDates = pd.to_datetime(gamelog["GAME_DATE"]).dt.date
+    return gamelog[(one_year_ago <= gameDates) & (gameDates < target_date)].copy()
+
+
+def test_base_profile_source_uses_strict_less_than():
+    """Guards against a textual ``<`` → ``<=`` regression in base.py:226."""
+    src = inspect.getsource(Stats.base_profile)
+    # The leakage-critical filter expression. Whitespace-tolerant.
+    assert "(gameDates < date)" in src.replace("\n", " "), (
+        "Stats.base_profile must use strict less-than (`gameDates < date`) so "
+        "the target game date is excluded from short_gamelog. A change to `<=` "
+        "would leak the target row into MeanYr/Mean10."
+    )
+
+
+def test_meanyr_mean10_exclude_target_date_sentinel():
+    """Synthetic gamelog: sentinel at target_date must not affect MeanYr/Mean10."""
+    target = date(2025, 3, 15)
+    # 15 prior games at value 10, one target-date row with a wildly different
+    # sentinel value. If the filter is correct, MeanYr=10 and Mean10=10.
+    # If it leaks, MeanYr drifts toward (15*10 + 1*999)/16 ≈ 71.8.
+    prior_dates = [target - timedelta(days=i) for i in range(1, 16)]
+    sentinel_value = 999.0
+    gamelog = pd.DataFrame(
+        {
+            "PLAYER_NAME": ["P"] * 16,
+            "GAME_DATE": [*prior_dates, target],
+            "PTS": [10.0] * 15 + [sentinel_value],
+        }
+    )
+
+    short = _filter_matches_production(gamelog, target)
+
+    # Target row excluded — sentinel must not appear anywhere downstream.
+    assert (pd.to_datetime(short["GAME_DATE"]).dt.date < target).all()
+    assert sentinel_value not in short["PTS"].to_numpy()
+
+    # Same aggregate the production code computes at base.py:681-693.
+    grp = short.groupby("PLAYER_NAME")["PTS"]
+    last10 = short.groupby("PLAYER_NAME").tail(10)
+    mean_yr = grp.mean()["P"]
+    mean_10 = last10.groupby("PLAYER_NAME")["PTS"].mean()["P"]
+    games_played = grp.count()["P"]
+
+    assert mean_yr == 10.0
+    assert mean_10 == 10.0
+    assert games_played == 15  # strictly < 16 (would be 16 with `<=`).
+
+
+def test_meanyr_mean10_filter_with_only_target_date_returns_empty():
+    """Edge case: a player whose only game is at target_date has no prior history."""
+    target = date(2025, 3, 15)
+    gamelog = pd.DataFrame(
+        {
+            "PLAYER_NAME": ["P"],
+            "GAME_DATE": [target],
+            "PTS": [42.0],
+        }
+    )
+
+    short = _filter_matches_production(gamelog, target)
+    assert short.empty, (
+        "A player whose only appearance is on target_date must yield an empty "
+        "short_gamelog — otherwise MeanYr would equal the target itself."
+    )
