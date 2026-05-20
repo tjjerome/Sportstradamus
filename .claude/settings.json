@@ -1,5 +1,91 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "DISABLE_BUG_COMMAND": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "MAX_MCP_OUTPUT_TOKENS": "40000",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1",
+    "CLAUDE_CODE_NEW_INIT": "1",
+    "CLAUDE_CODE_NO_FLICKER": "1",
+    "ENABLE_PROMPT_CACHING_1H": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000",
+    "SLASH_COMMAND_TOOL_CHAR_BUDGET": "60000"
+  },
+  "permissions": {
+    "defaultMode": "plan",
+    "allow": [
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(echo:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "Bash(sed:*)",
+      "Bash(tree:*)",
+      "Bash(tail:*)",
+      "Bash(pgrep:*)",
+      "Bash(ps:*)",
+      "Bash(sort:*)",
+      "Bash(ruff:*)",
+      "Bash(poetry run ruff:*)",
+      "Bash(poetry run pytest:*)",
+      "Bash(poetry run pre-commit:*)",
+      "Bash(tmux ls:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(tmux list-sessions:*)",
+      "Bash(tmux list-windows:*)",
+      "Bash(tmux has-session:*)",
+      "Bash(tmux new-session:*)",
+      "Bash(git branch --show-current:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git log:*)",
+      "Bash(git fetch --prune:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git show:*)",
+      "Bash(python --version:*)",
+      "Bash(python -c:*)",
+      "Bash(python3 -c:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(jq:*)",
+      "Bash(mkdir -p:*)",
+      "WebSearch",
+      "WebFetch(domain:anthropic.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:pypi.org)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'CMD=$(jq -r \".tool_input.command\"); if ! echo \"$CMD\" | rg -qP \"(\\brm\\s+-|\\brm\\s+/|\\brmdir\\b|shutil\\.rmtree|os\\.remove|os\\.unlink|os\\.system|\\bopen\\(.*[\\x27\\\"]w|\\bcurl\\s|\\bwget\\s|\\bpip\\s+install|\\bkill\\s|\\bpkill\\b|\\bchmod\\b|\\bchown\\b|\\bdd\\s|\\bmkfs\\b|\\bgit\\s+stash|\\bgit\\s+rebase|\\bgit\\s+clean|\\bgit\\s+branch\\s+-[dD]|\\bgit\\s+reset\\s+--hard|\\bgit\\s+checkout\\s+\\.|\\bapt\\s|\\byum\\s|\\bbrew\\s+install|\\bnpm\\s+install|\\bsudo\\s|\\bdocker\\s|\\bkubectl\\s|>\\s+/|>>\\s+/)\"; then printf \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"allow\\\"}}\"; else printf \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"ask\\\",\\\"permissionDecisionReason\\\":\\\"contains destructive operation, review carefully\\\"}}\"; fi'"
+          }
+        ]
+      }
+    ]
+  },
+  "outputStyle": "Caveman",
+  "alwaysThinkingEnabled": true,
+  "showThinkingSummaries": true,
+  "autoDreamEnabled": true,
+  "spinnerTipsEnabled": false,
+  "autoScrollEnabled": false,
+  "showClearContextOnPlanAccept": false,
+  "cleanupPeriodDays": 9999,
+  "autoUpdatesChannel": "latest",
+  "skillListingBudgetFraction": 0.02,
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
       "source": {
