@@ -68,7 +68,8 @@ def _classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float)
         return "not-shipped"
     if gate1_bss < 0:
         return "not-shipped"
-    n_int = 0 if n_settled is None or (isinstance(n_settled, float) and math.isnan(n_settled)) else int(n_settled)
+    n_settled_nan = n_settled is None or (isinstance(n_settled, float) and math.isnan(n_settled))
+    n_int = 0 if n_settled_nan else int(n_settled)
     if n_int < _MIN_SETTLED_FOR_GRADUATION:
         return "in-test"
     if book_bss_30d is None or (isinstance(book_bss_30d, float) and math.isnan(book_bss_30d)):
