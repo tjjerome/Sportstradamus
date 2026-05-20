@@ -200,3 +200,96 @@ def test_strategy_slugs_publishes_both_p1_options():
     """CLI Click choice list will read STRATEGY_SLUGS — must include both."""
     assert "ratio_meanyr" in STRATEGY_SLUGS
     assert "centered_additive_eb_meanyr_k10" in STRATEGY_SLUGS
+
+
+# ---------------------------------------------------------------------------
+# set_model_start_values offset_mode (Task 2)
+# ---------------------------------------------------------------------------
+
+
+class _StubModel:
+    """Minimal stand-in for LightGBMLSS so we can capture ``start_values``."""
+
+    def __init__(self):
+        self.start_values = None
+
+
+def _start_values_x(n: int = 5) -> pd.DataFrame:
+    """Synthetic feature frame with the columns set_model_start_values reads."""
+    return pd.DataFrame(
+        {
+            "MeanYr": np.array([12.0, 8.0, 4.0, 20.0, 1.5]),
+            "STDYr": np.array([3.0, 2.5, 1.5, 5.0, 0.8]),
+            "ZeroYr": np.array([0.0, 0.05, 0.1, 0.0, 0.2]),
+        }
+    )
+
+
+def test_set_start_values_skewnormal_offset_mode_shape_n_by_3():
+    """Guards the (n, 3) broadcast — a scalar 0 here was a prior regression."""
+    from sportstradamus.helpers import set_model_start_values
+
+    X = _start_values_x(n=5)
+    m = _StubModel()
+    set_model_start_values(m, "SkewNormal", X, offset_mode=True)
+
+    assert m.start_values.shape == (5, 3)
+
+
+def test_set_start_values_skewnormal_offset_mode_loc_zero_per_row():
+    """Centered residual: loc starts at 0 PER ROW, not scalar 0."""
+    from sportstradamus.helpers import set_model_start_values
+
+    X = _start_values_x(n=5)
+    m = _StubModel()
+    set_model_start_values(m, "SkewNormal", X, offset_mode=True)
+    sv = m.start_values
+
+    # Col 0 = loc (identity response). All zeros, length n.
+    np.testing.assert_array_equal(sv[:, 0], np.zeros(5))
+    # Col 1 = log(scale). exp() must recover STDYr (within the 1e-6 clip).
+    np.testing.assert_allclose(np.exp(sv[:, 1]), X["STDYr"].to_numpy(), rtol=1e-9)
+    # Col 2 = alpha (start symmetric).
+    np.testing.assert_array_equal(sv[:, 2], np.zeros(5))
+
+
+def test_set_start_values_skewnormal_normalized_unchanged():
+    """Regression: normalized=True path still emits loc=ones (current production)."""
+    from sportstradamus.helpers import set_model_start_values
+
+    X = _start_values_x(n=5)
+    m = _StubModel()
+    set_model_start_values(m, "SkewNormal", X, normalized=True)
+    sv = m.start_values
+
+    assert sv.shape == (5, 3)
+    np.testing.assert_array_equal(sv[:, 0], np.ones(5))
+
+
+def test_set_start_values_skewnormal_raw_unchanged():
+    """Regression: default (no normalize, no offset) seeds loc=MeanYr."""
+    from sportstradamus.helpers import set_model_start_values
+
+    X = _start_values_x(n=5)
+    m = _StubModel()
+    set_model_start_values(m, "SkewNormal", X)
+    sv = m.start_values
+
+    assert sv.shape == (5, 3)
+    np.testing.assert_array_equal(sv[:, 0], X["MeanYr"].to_numpy())
+
+
+def test_set_start_values_offset_mode_ignored_for_non_skewnormal():
+    """offset_mode is SkewNormal-only — passing it for NegBin must not affect shape."""
+    from sportstradamus.helpers import set_model_start_values
+
+    X = _start_values_x(n=5)
+    m_offset = _StubModel()
+    m_default = _StubModel()
+    set_model_start_values(m_offset, "NegBin", X, offset_mode=True)
+    set_model_start_values(m_default, "NegBin", X)
+
+    # NegBin returns 2-col (r, logit(probs)); offset_mode kwarg is a no-op
+    # for non-SkewNormal — the two start-value arrays must be identical.
+    assert m_offset.start_values.shape == m_default.start_values.shape
+    np.testing.assert_array_equal(m_offset.start_values, m_default.start_values)
