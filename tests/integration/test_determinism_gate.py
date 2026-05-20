@@ -23,6 +23,7 @@ from sportstradamus.stats import StatsNBA
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
     DETERMINISTIC_SEED,
+    fit_predict_hurdle_params,
     fit_predict_params,
 )
 
@@ -77,6 +78,57 @@ def test_deterministic_mode_is_bit_reproducible():
                 }
             ),
             normalized=True, shape_ceiling=100.0, seed=DETERMINISTIC_SEED,
+        )
+
+    p1 = run()
+    p2 = run()
+    pd.testing.assert_frame_equal(p1, p2, check_exact=True)
+
+
+@pytest.mark.integration
+def test_deterministic_mode_hurdle_is_bit_reproducible():
+    """Parallel gate for the HurdleZINB path.
+
+    HurdleZINB has TWO LightGBM boosters (binary clf + NegBin) and its
+    internal ``fit`` calls ``seed_everything`` once. The compression_eval
+    A/B for ``meditate --deterministic --zinb-mode hurdle`` is meaningful
+    only if this two-run bit-identity holds; without it, the A/B verdict
+    would be noise (the lesson from
+    docs/CENTERED_TARGET_NEGATIVE_RESULT.md).
+
+    Uses NBA_FG3M as the canonical ZINB market (33% zero rate, the
+    overconfidence investigation's primary case study).
+    """
+    parquet = pkg_resources.files(data) / "training_data/NBA_FG3M.parquet"
+    if not parquet.is_file():
+        pytest.skip("cached NBA_FG3M.parquet not present in this environment")
+
+    M = pd.read_parquet(parquet)
+    M = M.sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
+
+    cols = StatsNBA().get_stat_columns("FG3M")
+    X = M[cols].copy()
+    for c in ("Home", "Player position"):
+        if c in X.columns:
+            X[c] = X[c].astype("category")
+    y = np.ravel(M[["Result"]].to_numpy()).astype(float)
+
+    n_train = int(len(M) * 0.7)
+    X_train, X_test = X.iloc[:n_train], X.iloc[n_train:].reset_index(drop=True)
+    y_train = y[:n_train]
+
+    params = {
+        **DETERMINISTIC_FIXED_PARAMS,
+        "feature_fraction": 0.8,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 1,
+        "monotone_constraints": [0] * X_train.shape[1],
+    }
+
+    def run() -> pd.DataFrame:
+        return fit_predict_hurdle_params(
+            X_train, y_train, X_test,
+            params=params, shape_ceiling=50.0, seed=DETERMINISTIC_SEED,
         )
 
     p1 = run()

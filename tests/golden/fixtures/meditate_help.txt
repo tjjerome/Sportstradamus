@@ -34,4 +34,12 @@ Options:
                                   experiments (run under --deterministic); the
                                   default 'ratio_meanyr' is current production
                                   behavior.  [default: ratio_meanyr]
+  --zinb-mode [joint|hurdle]      Model architecture for ZINB markets. 'joint'
+                                  is the legacy jointly-fit LightGBMLSS ZINB.
+                                  'hurdle' uses the two-stage HurdleZINB
+                                  (calibrated zero classifier + NegBin on
+                                  positives + derived-pi gate; see
+                                  docs/OVERCONFIDENCE_INVESTIGATION.md §2).
+                                  Default 'joint' is byte-identical to pre-P2.B
+                                  production.  [default: joint]
   --help                          Show this message and exit.
