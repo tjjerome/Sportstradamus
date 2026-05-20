@@ -36,6 +36,7 @@ CURRENT_OFFERS_PATH = pkg_resources.files(data) / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = pkg_resources.files(data) / "current_parlays.parquet"
 CURRENT_META_PATH = pkg_resources.files(data) / "current_meta.json"
 MODEL_STATS_PATH = pkg_resources.files(data) / "model_stats.parquet"
+LIVE_METRICS_PATH = pkg_resources.files(data) / "live_metrics_per_market.parquet"
 
 # Legacy pickle paths kept as read-only fallback until the parquet migration
 # has run on every install.
