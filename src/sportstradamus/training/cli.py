@@ -11,6 +11,7 @@ import numpy as np
 from sportstradamus import data
 from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
+from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS
@@ -67,7 +68,27 @@ np.seterr(divide="ignore", invalid="ignore")
         "flag — it is deliberately low quality."
     ),
 )
-def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations, log_level, deterministic):
+@click.option(
+    "--target-strategy",
+    type=click.Choice(list(baselines.STRATEGY_SLUGS)),
+    default="ratio_meanyr",
+    show_default=True,
+    help=(
+        "Target/baseline strategy for SkewNormal markets. "
+        "Non-default values are A/B experiments (run under --deterministic); "
+        "the default 'ratio_meanyr' is current production behavior."
+    ),
+)
+def meditate(
+    force,
+    league,
+    rebuild_filter,
+    reset_markets,
+    rebuild_correlations,
+    log_level,
+    deterministic,
+    target_strategy,
+):
     """Train or retrain LightGBMLSS models for each configured market."""
     log = get_logger("meditate")
     log.setLevel(log_level)
@@ -79,6 +100,7 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
             "rebuild_filter": rebuild_filter,
             "rebuild_correlations": rebuild_correlations,
             "deterministic": deterministic,
+            "target_strategy": target_strategy,
         },
     )
     click.echo(
@@ -199,4 +221,14 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
-            train_market(lg, market, stat_data, force, rebuild_filter, archive, league_start_date, deterministic=deterministic)
+            train_market(
+                lg,
+                market,
+                stat_data,
+                force,
+                rebuild_filter,
+                archive,
+                league_start_date,
+                deterministic=deterministic,
+                target_strategy=target_strategy,
+            )
