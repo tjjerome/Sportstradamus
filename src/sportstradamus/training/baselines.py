@@ -31,6 +31,14 @@ Registered strategies (more queued as A/B follow-ups in
   ``loc`` only at decode; ``scale`` left in absolute residual units. Targets
   the multiplicative-amplification artifact (corr(pred_loc, MeanYr) ≈ −0.6
   path-wide) identified in ``docs/OVERCONFIDENCE_INVESTIGATION.md``.
+  Path-wide A/B (PR #46) showed FGA SHIP, every other SkewNormal market
+  KILL — the long-horizon baseline only fits markets where production is
+  structural (e.g. shot volume).
+* ``centered_additive_mean10`` — same shape, swap the baseline to a
+  trailing-10-game per-player mean. More responsive to current form; the
+  hypothesis is that markets where production tracks recent role/rotation
+  (PTS, REB, AST, PR, …) benefit from a faster-moving prior than MeanYr.
+  Falls back to ``MeanYr`` / ``MeanYr_nonzero`` for sparse-history players.
 """
 
 from __future__ import annotations
@@ -198,6 +206,44 @@ def _centered_eb_offset_meta(global_mean: float, denom_col: str) -> dict:
     }
 
 
+def _mean10_baseline(X: pd.DataFrame, denom_col: str) -> np.ndarray:
+    """Trailing-10-game per-player mean, with denom_col fallback for sparse rows.
+
+    Mean10 captures recent form; it falls back to ``denom_col`` (typically
+    ``MeanYr`` / ``MeanYr_nonzero``) when missing so brand-new players with
+    no rolling-10 history don't blow up the residual. Floor mirrors the
+    ratio strategy's ``MeanYr`` floor.
+    """
+    return X["Mean10"].fillna(X[denom_col]).clip(lower=_MEANYR_FLOOR).to_numpy()
+
+
+def _centered_mean10_forward(
+    y: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    return np.asarray(y, dtype=float) - _mean10_baseline(X, denom_col)
+
+
+def _centered_mean10_decode_loc(
+    loc: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    return _mean10_baseline(X, denom_col) + np.asarray(loc, dtype=float)
+
+
+def _centered_mean10_decode_scale(
+    scale: np.ndarray, X: pd.DataFrame, denom_col: str
+) -> np.ndarray:
+    return np.asarray(scale, dtype=float)
+
+
+def _centered_mean10_offset_meta(global_mean: float, denom_col: str) -> dict:
+    return {
+        "method": "mean10_additive",
+        "global_mean": float(global_mean),
+        "prior_col": "Mean10",
+        "prior_fallback_col": denom_col,
+    }
+
+
 _STRATEGIES: dict[str, TargetStrategy] = {
     "ratio_meanyr": TargetStrategy(
         slug="ratio_meanyr",
@@ -214,6 +260,14 @@ _STRATEGIES: dict[str, TargetStrategy] = {
         _decode_loc=_centered_eb_decode_loc,
         _decode_scale=_centered_eb_decode_scale,
         _offset_meta=_centered_eb_offset_meta,
+    ),
+    "centered_additive_mean10": TargetStrategy(
+        slug="centered_additive_mean10",
+        start_mode_flag="offset",
+        _forward=_centered_mean10_forward,
+        _decode_loc=_centered_mean10_decode_loc,
+        _decode_scale=_centered_mean10_decode_scale,
+        _offset_meta=_centered_mean10_offset_meta,
     ),
 }
 

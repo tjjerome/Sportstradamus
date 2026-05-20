@@ -36,6 +36,7 @@ def _synth_x(n: int = 8, rng_seed: int = 0) -> pd.DataFrame:
         {
             "MeanYr": rng.uniform(2.0, 25.0, size=n),
             "MeanYr_nonzero": rng.uniform(2.0, 25.0, size=n),
+            "Mean10": rng.uniform(2.0, 25.0, size=n),
             "GamesPlayed": rng.integers(1, 80, size=n).astype(float),
             "STDYr": rng.uniform(0.5, 5.0, size=n),
             "ZeroYr": np.zeros(n),
@@ -191,15 +192,69 @@ def test_full_round_trip_with_skewnormal_mean_formula():
         np.testing.assert_allclose(ev, y, atol=1e-9, err_msg=f"round-trip failed for {slug}")
 
 
+def test_centered_mean10_forward_subtracts_mean10():
+    X = _synth_x()
+    X["Mean10"] = np.array([10.0, 8.0, 6.0, 4.0, 12.0, 14.0, 5.0, 9.0])
+    y = np.array([12.0, 8.0, 30.0, 5.5, 18.0, 22.0, 4.0, 11.0])
+    expected = y - X["Mean10"].clip(lower=0.5).to_numpy()
+    out = get_strategy("centered_additive_mean10").forward(y, X, global_mean=10.0)
+    np.testing.assert_allclose(out, expected, atol=1e-12)
+
+
+def test_centered_mean10_decode_round_trip():
+    """Train/predict mirror: decode must add back the same Mean10 baseline."""
+    X = _synth_x()
+    X["Mean10"] = np.array([10.0, 8.0, 6.0, 4.0, 12.0, 14.0, 5.0, 9.0])
+    y = np.array([12.0, 8.0, 30.0, 5.5, 18.0, 22.0, 4.0, 11.0])
+    strat = get_strategy("centered_additive_mean10")
+    y_t = strat.forward(y, X, global_mean=10.0)
+    decoded = strat.decode_loc(y_t, X, global_mean=10.0)
+    np.testing.assert_allclose(decoded, y, atol=1e-9)
+
+
+def test_centered_mean10_falls_back_to_denom_when_mean10_missing():
+    """Sparse-history players (Mean10 = NaN) must use the denom_col fallback."""
+    X = _synth_x(n=3)
+    X["Mean10"] = np.array([np.nan, 9.0, np.nan])
+    y = np.array([15.0, 11.0, 7.0])
+    out = get_strategy("centered_additive_mean10").forward(y, X, global_mean=10.0)
+    # Row 0 and 2 fall back to MeanYr; row 1 uses Mean10 directly.
+    fallback = X["MeanYr"].clip(lower=0.5).to_numpy()
+    expected = y.copy()
+    expected[0] = y[0] - fallback[0]
+    expected[1] = y[1] - 9.0
+    expected[2] = y[2] - fallback[2]
+    np.testing.assert_allclose(out, expected, atol=1e-12)
+
+
+def test_centered_mean10_offset_meta_records_mean10_baseline():
+    meta = get_strategy("centered_additive_mean10").offset_meta(
+        global_mean=8.69, denom_col="MeanYr"
+    )
+    assert meta is not None
+    assert meta["method"] == "mean10_additive"
+    assert meta["prior_col"] == "Mean10"
+    assert meta["prior_fallback_col"] == "MeanYr"
+
+
+def test_centered_mean10_scale_is_absolute():
+    X = _synth_x()
+    X["Mean10"] = np.full(len(X), 9.0)
+    scale = np.full(len(X), 2.5)
+    out = get_strategy("centered_additive_mean10").decode_scale(scale, X)
+    np.testing.assert_array_equal(out, scale)
+
+
 def test_get_strategy_unknown_slug_raises():
     with pytest.raises(ValueError, match="Unknown target strategy"):
         get_strategy("not_a_real_strategy")
 
 
-def test_strategy_slugs_publishes_both_p1_options():
-    """CLI Click choice list will read STRATEGY_SLUGS — must include both."""
+def test_strategy_slugs_publishes_registered_options():
+    """CLI Click choice list will read STRATEGY_SLUGS — must include all."""
     assert "ratio_meanyr" in STRATEGY_SLUGS
     assert "centered_additive_eb_meanyr_k10" in STRATEGY_SLUGS
+    assert "centered_additive_mean10" in STRATEGY_SLUGS
 
 
 # ---------------------------------------------------------------------------
