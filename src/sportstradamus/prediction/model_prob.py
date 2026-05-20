@@ -37,6 +37,79 @@ archive = Archive()
 # Maximum allowed model confidence before applying a boost.
 _MAX_CONFIDENCE = 0.90
 
+# Hist-gate threshold above which the ``MeanYr_nonzero`` denom column is used
+# instead of ``MeanYr`` when decoding SkewNormal predictions. Mirrors the
+# legacy decode constant; kept module-level per STYLE_GUIDE §8.
+_NONZERO_DENOM_GATE = 0.05
+
+# Hist-gate threshold above which ``Model Gate`` is materialized on the
+# SkewNormal prediction frame for downstream gate-aware blending.
+_GATE_PUBLISH_THRESHOLD = 0.02
+
+
+def _decode_skewnormal(
+    prob_params: pd.DataFrame,
+    playerStats: pd.DataFrame,
+    hist_gate: float,
+    offset_meta: dict | None,
+    target_strategy: str,
+) -> pd.DataFrame:
+    """Decode raw SkewNormal model outputs into absolute EV / sigma / skew.
+
+    Dispatches the ``loc`` and ``scale`` inverse transforms through the
+    :mod:`sportstradamus.training.baselines` registry so the prediction-side
+    decode mirrors the training-side forward transform exactly. Legacy
+    pickles without ``offset_meta`` / ``target_strategy`` keys decode
+    through the ``ratio_meanyr`` strategy, which is bit-identical to the
+    pre-Task-5 hand-rolled ``loc * MeanYr_clipped`` formula.
+
+    Args:
+        prob_params: LightGBMLSS ``predict(pred_type="parameters")`` frame
+            with ``loc``, ``scale``, and ``alpha`` columns.
+        playerStats: Feature DataFrame; supplies ``MeanYr`` /
+            ``MeanYr_nonzero`` (and ``GamesPlayed`` for the EB-centered
+            strategy).
+        hist_gate: Empirical zero-rate from ``stat_zi`` for the market.
+        offset_meta: Pickle-persisted baseline metadata, or ``None`` for
+            legacy / ratio-strategy models. The ``global_mean`` snapshot
+            inside drives the EB prior at decode time.
+        target_strategy: Slug of the baseline strategy the model was
+            trained against; defaults to ``"ratio_meanyr"``.
+
+    Returns:
+        The same ``prob_params`` frame, mutated in place with the absolute
+        ``Model EV``, ``Model Sigma``, ``Model Skew``, and optional
+        ``Model Gate`` columns set.
+    """
+    from sportstradamus.training.baselines import get_strategy
+
+    strategy = get_strategy(target_strategy)
+    denom_col = (
+        "MeanYr_nonzero"
+        if (hist_gate > _NONZERO_DENOM_GATE and "MeanYr_nonzero" in playerStats.columns)
+        else "MeanYr"
+    )
+    # global_mean snapshot lives in offset_meta for centered strategies; the
+    # ratio strategy ignores it (uses MeanYr from features directly).
+    global_mean = float((offset_meta or {}).get("global_mean", 0.0))
+
+    loc = prob_params["loc"].values
+    scale = prob_params["scale"].values
+    alpha_sn = prob_params["alpha"].values
+
+    ev_loc = strategy.decode_loc(loc, playerStats, global_mean, denom_col)
+    ev_scale = strategy.decode_scale(scale, playerStats, denom_col)
+
+    delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
+    base_ev = ev_loc + ev_scale * delta * np.sqrt(2 / np.pi)
+
+    prob_params["Model EV"] = base_ev
+    prob_params["Model Sigma"] = ev_scale
+    prob_params["Model Skew"] = alpha_sn
+    if hist_gate > _GATE_PUBLISH_THRESHOLD:
+        prob_params["Model Gate"] = hist_gate
+    return prob_params
+
 
 def model_prob(offers, league, market, platform, stat_data, playerStats):
     """Score a batch of offers with the trained distributional model.
@@ -98,6 +171,11 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         dist = filedict["distribution"]
         step = filedict["step"]
         normalized = filedict.get("normalized", False)
+        # Task 5: read baseline metadata. Defaults preserve byte-identical
+        # behavior for legacy pickles written before P1 (no offset_meta /
+        # target_strategy keys) — they decode through the ratio path.
+        offset_meta = filedict.get("offset_meta")
+        target_strategy = filedict.get("target_strategy", "ratio_meanyr")
         hist_gate = (
             stat_zi.get(league, {}).get(market, 0)
             if dist in ("ZINB", "ZAGamma", "SkewNormal")
@@ -124,7 +202,15 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype("category")
 
-            set_model_start_values(model, dist, playerStats, normalized=normalized)
+            set_model_start_values(
+                model,
+                dist,
+                playerStats,
+                normalized=normalized,
+                offset_mode=bool(
+                    offset_meta and offset_meta.get("method") == "eb_additive"
+                ),
+            )
 
             prob_params = model.predict(playerStats, pred_type="parameters")
             prob_params.index = playerStats.index
@@ -178,26 +264,16 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                 prob_params["Model Gate"] = prob_params["gate"]
             prob_params["Model Alpha"] = prob_params["concentration"]
 
-        # SkewNormal: denormalize loc/scale then compute EV = loc + scale * delta * sqrt(2/pi)
+        # SkewNormal: dispatch decode through the baselines registry so the
+        # train-side forward transform and predict-side inverse cannot drift.
         if dist == "SkewNormal" and "loc" in prob_params.columns:
-            denom_col = (
-                "MeanYr_nonzero"
-                if (hist_gate > 0.05 and "MeanYr_nonzero" in playerStats.columns)
-                else "MeanYr"
+            _decode_skewnormal(
+                prob_params,
+                playerStats,
+                hist_gate,
+                offset_meta,
+                target_strategy,
             )
-            meanyr_vals = playerStats[denom_col].clip(lower=0.5).values
-            loc_abs = prob_params["loc"].values * meanyr_vals
-            scale_abs = prob_params["scale"].values * meanyr_vals
-            alpha_sn = prob_params["alpha"].values
-
-            delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
-            base_ev = loc_abs + scale_abs * delta * np.sqrt(2 / np.pi)
-
-            prob_params["Model EV"] = base_ev
-            prob_params["Model Sigma"] = scale_abs
-            prob_params["Model Skew"] = alpha_sn
-            if hist_gate > 0.02:
-                prob_params["Model Gate"] = hist_gate
 
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
         offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
