@@ -54,14 +54,27 @@ Do not undo that work:
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
   See STYLE_GUIDE.md §9.
 
-## MANDATORY: run refactoring-specialist before any push or PR update
+## MANDATORY: run refactoring-specialist before any push, PR update, or review
 
-This is not a suggestion. Before you `git push`, before you call any GitHub MCP
-tool that creates or updates a PR, and before you reply "done" on a task that
-edited Python sources, you MUST invoke the `refactoring-specialist` subagent on
-every file you touched in the current session. No exceptions for "small"
-edits, "obvious" fixes, doc tweaks that grazed a `.py`, or tests-only changes.
-If you wrote to a `.py` file under `src/sportstradamus/`, the subagent runs.
+This is not a suggestion. You MUST invoke the `refactoring-specialist` subagent
+on every Python file you touched in the current session **before** any of:
+
+1. `git push` to any remote
+2. Calling any GitHub MCP tool that creates or updates a PR
+3. Replying "done" on a task that edited Python sources
+4. **Dispatching any code-review subagent** (`superpowers:code-reviewer`, the
+   spec-compliance reviewer or code-quality reviewer in the subagent-driven
+   development workflow, or any future review agent)
+5. **Asking the user for review feedback** on Python edits (e.g., "does this
+   look right?", "ready for your review", surfacing a diff for sign-off)
+
+Triggers 4 and 5 exist because reviewers — human or subagent — should spend
+their attention on substance, not style nits the refactoring-specialist
+would have caught. Running it first compresses the review loop.
+
+No exceptions for "small" edits, "obvious" fixes, doc tweaks that grazed a
+`.py`, or tests-only changes. If you wrote to a `.py` file under
+`src/sportstradamus/`, the subagent runs before any of the five gates above.
 
 How to invoke:
 

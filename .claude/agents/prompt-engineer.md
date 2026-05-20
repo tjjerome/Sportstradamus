@@ -335,8 +335,18 @@ no conversation context, so the handoff prompt is the entire briefing.
 8. **Branch state** — current HEAD, commits ahead of origin, push status.
 9. **Out-of-scope and "do not do" list** — keep the phase focused.
 10. **Definition of done** — what artifacts land (commit messages,
-    pickle keys, test files, plan-status updates). The handoff for the
-    *next* phase is itself a Definition-of-Done item.
+    pickle keys, test files, plan-status updates). Every DoD list must
+    include these workflow steps as explicit items:
+    - **Run `refactoring-specialist` on every modified Python file
+      before any review checkpoint** (dispatching a code-review
+      subagent, asking the user for review feedback, calling
+      "done"). Cite CLAUDE.md "MANDATORY: run refactoring-specialist
+      before any push, PR update, or review" — five-trigger rule.
+    - Update the master plan's Status table for the stage row.
+    - Produce the **next phase's handoff prompt** via the
+      prompt-engineer agent and save to
+      `/tmp/{next-stage}_handoff_prompt.md`.
+    - All three quality gates green (ruff / golden / integration).
 
 ### Style and length
 
