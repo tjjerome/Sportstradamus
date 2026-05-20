@@ -325,7 +325,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
 
         # Blend model and book distributions via fused_loc
         if dist == "SkewNormal":
-            _zi_kw = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+            _zi_kw = dict(gate_book=hist_gate) if hist_gate > _GATE_PUBLISH_THRESHOLD else {}
             blended_base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
