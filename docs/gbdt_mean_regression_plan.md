@@ -15,21 +15,44 @@
 |---|---|---|
 | **P0 — offline eval harness** | ✅ done (PR #46) | `src/sportstradamus/scripts/compression_eval.py` + `tests/golden/test_compression_eval.py`. ruff clean, 6 unit tests pass, CLI single+diff smoke-tested on synthetic data. Full `poetry` gates NOT run in the build env — network policy blocks the PyTorch CPU wheel source so `poetry install` fails on `torch`; needs a normal-network run before merge. |
 | **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic` (debug-only, never publish) + `tests/integration/test_determinism_gate.py`. Pure helpers `seed_everything` / `fit_lss_model` / `predict_lss_params` / `fit_predict_params` in `pipeline.py`; under `--deterministic`: RNGs pinned (random/numpy/torch + `torch.use_deterministic_algorithms`), Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`, input frozen to cached parquet. Persistent writes are **redirected to `data/{test_sets,models}/deterministic/`** (training parquet + whole-suite `report()` stay fully suppressed) so a `--deterministic` run produces consumable artifacts without ever overwriting production paths. Gate runs on real cached `NBA_FGA.parquet` (4000 rows, ~5s) with stochastic LightGBM (`feature_fraction=0.8`, `bagging_fraction=0.8`, `bagging_freq=1`) so it actually tests the seeding mechanism — different seed produces `loc` max-abs diff ~0.34, same seed bit-identical. Default `meditate` byte-identical. P1 unblocked. |
-| P1 — centered-target bridge (SkewNormal) | ⬜ next | This *is* the additive empirical-Bayes offset the overconfidence investigation already tried (Phase A). It was found **inconclusive due to non-reproducibility, not wrong** — deterministically it was well-calibrated (+0.12 bias). Proceed under `--deterministic` so the P0 harness diff verdict is trustworthy. |
-| P2 — `init_score` baseline (NegBin/ZINB) | ⬜ | Pair with the **confirmed, reproducible ZINB derived-π gate fix** (separate existing spec); see annotation in priority list. |
+| **P1 — centered-target bridge (SkewNormal)** | ✅ done (PR #46) | `--target-strategy=centered_additive_eb_meanyr_k10` ships. **NBA FGA offline A/B verdict (`compression_eval --baseline ... --candidate ...`): SHIP — top-decile MAE +5.3%, global MAE −2.0% (improved), brier_skill_score +0.096 → +0.112.** Top-decile bias −3.108 → −2.699 (13% reduction), exactly the multiplicative-amplification artifact the centered strategy targeted. Phase-A's inconclusive +0.12 result is now reproducible under P0.5. New module `src/sportstradamus/training/baselines.py` (strategy registry, `compute_eb_prior`, `EB_SHRINKAGE_K=10.0`); `set_model_start_values` gained `offset_mode` kwarg; `train_market`/`fit_predict_params` thread `target_strategy`; `model_prob.py` decodes via the same registry (single source of truth, train/predict can't drift); `compression_eval` adds a brier_skill_score third gate; `tests/integration/test_centered_target_live_path.py` asserts `Model Skew` is finite end-to-end through `model_prob.py` (guards the FGA NaN dead end). **Default `--target-strategy=ratio_meanyr` is unchanged production behavior** — centered strategy is opt-in until a non-deterministic confirmation run + manual review (deferred follow-up). |
+| P2 — `init_score` baseline (NegBin/ZINB) | ⬜ next | Pair with the **confirmed, reproducible ZINB derived-π gate fix** (separate existing spec); see annotation in priority list. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
-**Start next session here:** P1 (centered-target bridge, SkewNormal). Run the
-candidate strategy with `meditate --deterministic`; outputs land in
-`data/test_sets/deterministic/{LEAGUE}_{market}.csv` and
-`data/models/deterministic/{LEAGUE}_{market}.mdl`. Score with
-`compression_eval --test-sets-dir src/sportstradamus/data/test_sets/deterministic`
-(or diff-mode against the production baseline CSV) so the P0 harness verdict
-is trustworthy.
-Keep the default strategy = current production behavior. Per the
-overconfidence investigation, also confirm any training-side win actually
-propagates to the live `model_prob.py` output before declaring it fixed (see
-§"Live-path confound").
+**Start next session here:** P2 (`init_score` baseline for NegBin/ZINB), paired
+with the derived-π gate fix from
+`docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` Phase B.
+Use the same `baselines.py` strategy-registry plumbing P1 introduced: a new
+`init_score_meanyr` (or similar) strategy that injects a per-row baseline as
+LightGBM `init_score` on the count parameter via `lgb.Dataset`.
+
+**Bug/gotcha to fix when convenient (flagged during P1 Task 8):**
+`meditate --deterministic` interacts badly with the cache short-circuit in
+`pipeline.py:387` — `new_M` is empty under input-freeze, so
+`if new_M.empty and not force and not need_model: return` causes the run to
+print "Training NBA - X" and immediately return without writing anything
+when a prior model pickle exists. Either auto-imply `--force` when
+`--deterministic` is set, or check `if not deterministic` in the condition.
+P1 Task 8 worked around it by passing `--force` explicitly; the next
+session running an A/B should either replicate that workaround or fix the
+condition.
+
+**P1 follow-ups (queued, not blocking):**
+1. **Promote `centered_additive_eb_meanyr_k10` to default** after a
+   non-deterministic confirmation run on the production hyperparameter
+   search (P0.5's `DETERMINISTIC_FIXED_PARAMS` cripple model quality on
+   purpose). Compare deciles + brier_skill on real-Optuna models before
+   flipping the default.
+2. **Path-wide A/B**: run the same SHIP/KILL verdict on the other
+   SkewNormal markets (PTS, REB, AST, PR, PRA, PA, RA) to confirm the win
+   isn't FGA-specific.
+3. **Live-path NaN root cause**: `tests/integration/test_centered_target_live_path.py`
+   guards that Task 7's decode is finite, but the *original* FGA `Model Skew=NaN`
+   live-path bug (per `docs/OVERCONFIDENCE_INVESTIGATION.md` §3.4) was an
+   *existing model + live `model_prob.py`* failure, not the new strategy.
+   Re-check on a current production slate post-promotion.
+4. **`EB_SHRINKAGE_K` tuning** — only if path-wide A/B shows residual
+   mid-volume over-prediction (the Phase-A "Task A7" follow-up).
 
 ## Context
 
