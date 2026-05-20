@@ -198,9 +198,9 @@ class HurdleZINB:
         """
         if self.nb is None:
             return
-        from sportstradamus.helpers import set_model_start_values as _smv
+        from sportstradamus.helpers import set_model_start_values
 
-        _smv(self.nb, "NegBin", X, shape_ceiling=self._shape_ceiling)
+        set_model_start_values(self.nb, "NegBin", X, shape_ceiling=self._shape_ceiling)
 
     def predict(self, X: pd.DataFrame, pred_type: str = "parameters") -> pd.DataFrame:
         """Return distribution parameters indexed like X.

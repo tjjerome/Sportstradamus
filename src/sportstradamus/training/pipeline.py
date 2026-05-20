@@ -748,25 +748,19 @@ def train_market(
             offset_mode=offset_mode,
         )
 
-    # Predictions and parameter extraction
-    if getattr(model, "is_hurdle", False):
-        prob_params_train = predict_hurdle_params(model, X_train)
-    else:
-        prob_params_train = predict_lss_params(
-            model, dist, X_train, normalized=normalize, offset_mode=offset_mode
+    # Predictions and parameter extraction. Same dispatch repeats for
+    # train/validation/test so the model_prob/hurdle branching stays in one
+    # place (§2.6).
+    def _predict(X_part: pd.DataFrame) -> pd.DataFrame:
+        if getattr(model, "is_hurdle", False):
+            return predict_hurdle_params(model, X_part)
+        return predict_lss_params(
+            model, dist, X_part, normalized=normalize, offset_mode=offset_mode
         )
-    if getattr(model, "is_hurdle", False):
-        prob_params_validation = predict_hurdle_params(model, X_validation)
-    else:
-        prob_params_validation = predict_lss_params(
-            model, dist, X_validation, normalized=normalize, offset_mode=offset_mode
-        )
-    if getattr(model, "is_hurdle", False):
-        prob_params = predict_hurdle_params(model, X_test)
-    else:
-        prob_params = predict_lss_params(
-            model, dist, X_test, normalized=normalize, offset_mode=offset_mode
-        )
+
+    prob_params_train = _predict(X_train)
+    prob_params_validation = _predict(X_validation)
+    prob_params = _predict(X_test)
 
     prob_params_train.sort_index(inplace=True)
     prob_params_train["result"] = y_train["Result"]
