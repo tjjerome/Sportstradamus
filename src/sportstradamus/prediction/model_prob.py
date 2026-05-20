@@ -202,15 +202,22 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
             for c in categories:
                 playerStats[c] = playerStats[c].astype("category")
 
-            set_model_start_values(
-                model,
-                dist,
-                playerStats,
-                normalized=normalized,
-                offset_mode=bool(
-                    offset_meta and offset_meta.get("method") == "eb_additive"
-                ),
-            )
+            if getattr(model, "is_hurdle", False):
+                # HurdleZINB: composite of binary clf + NegBin LSS. The wrapper
+                # seeds the internal NegBin from its own X. Going through the
+                # external set_model_start_values would treat it as a plain LSS
+                # and fail since hurdle has no top-level start_values attribute.
+                model.set_model_start_values(playerStats)
+            else:
+                set_model_start_values(
+                    model,
+                    dist,
+                    playerStats,
+                    normalized=normalized,
+                    offset_mode=bool(
+                        offset_meta and offset_meta.get("method") == "eb_additive"
+                    ),
+                )
 
             prob_params = model.predict(playerStats, pred_type="parameters")
             prob_params.index = playerStats.index
