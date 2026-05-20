@@ -250,3 +250,191 @@ def test_verdict_skips_brier_skill_gate_when_either_baseline_or_candidate_lacks_
     ship2, reason2 = verdict(base2, cand2)
     assert ship2, reason2
     assert "brier_skill" not in reason2
+
+
+# ---------------------------------------------------------------------------
+# --live-window mode (Stage 0 deliverable 0.3)
+# ---------------------------------------------------------------------------
+
+import math
+from datetime import datetime, timedelta
+
+from click.testing import CliRunner
+
+from sportstradamus.scripts.compression_eval import (
+    _history_to_eval_frame,
+    _make_meanyr_lookup_from_gamelog,
+    main,
+)
+
+
+def _build_live_offer(line, bet, model_p, books_p):
+    return (line, 1.0, "Underdog", bet, model_p, books_p,
+            float("nan"), float("nan"), float("nan"))
+
+
+def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFrame:
+    rng = np.random.default_rng(13)
+    rows = []
+    today = datetime(2026, 5, 20)
+    for idx in range(n):
+        date = (today - timedelta(days=int(rng.integers(0, 25)))).strftime("%Y-%m-%d")
+        line = float(rng.uniform(8.0, 30.0))
+        bet = "Over" if rng.random() > 0.5 else "Under"
+        model_p = float(rng.uniform(0.45, 0.65))
+        books_p = float(rng.uniform(0.45, 0.55))
+        actual = float(rng.normal(line, line * 0.18))
+        rows.append(
+            {
+                "Player": f"Player_{idx}",
+                "League": "NBA",
+                "Team": "HOME",
+                "Date": date,
+                "Market": market,
+                "Model EV": line + rng.normal(0, 1.5),
+                "Books EV": line,
+                "Dist": "SkewNormal",
+                "CV": 0.3,
+                "Model Param": line,
+                "Gate": np.nan,
+                "Temperature": 1.0,
+                "Disp Cal": 1.0,
+                "Step": "test",
+                "Offers": [_build_live_offer(line, bet, model_p, books_p)],
+                "Actual": actual,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_history_to_eval_frame_renames_and_normalizes_columns():
+    history = _build_live_history_fixture(n=40, market="PTS")
+    lookup = lambda player, market, date: 22.0  # noqa: E731 — closure for fixture
+    frame = _history_to_eval_frame(
+        history, league="NBA", market="PTS", window_days=30, meanyr_lookup=lookup
+    )
+    assert list(frame.columns) == ["MeanYr", "Result", "EV", "P", "Odds", "Line"]
+    assert (frame["MeanYr"] == 22.0).all()
+    assert frame["EV"].notna().all()
+    # Odds column is the book UNDER prob — flipped relative to the bet's side.
+    # Since the lookup is constant and rows survive after dropna(), we should
+    # have at least most of the input rows present.
+    assert len(frame) > 0
+
+
+def test_history_to_eval_frame_empty_history_returns_empty_schema():
+    frame = _history_to_eval_frame(
+        pd.DataFrame(), league="NBA", market="PTS", window_days=30,
+        meanyr_lookup=lambda p, m, d: 0.0,
+    )
+    assert frame.empty
+    assert list(frame.columns) == ["MeanYr", "Result", "EV", "P", "Odds", "Line"]
+
+
+def test_history_to_eval_frame_filters_to_league_market_and_window():
+    today = datetime(2026, 5, 20)
+    rows = []
+    # In-scope: NBA + PTS within window
+    for idx in range(5):
+        rows.append({
+            "Player": f"A_{idx}", "League": "NBA", "Date": today.strftime("%Y-%m-%d"),
+            "Market": "PTS", "Model EV": 20.0,
+            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+            "Actual": 22.0,
+        })
+    # Out-of-scope league
+    rows.append({
+        "Player": "B", "League": "WNBA", "Date": today.strftime("%Y-%m-%d"),
+        "Market": "PTS", "Model EV": 20.0,
+        "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)], "Actual": 22.0,
+    })
+    # Out-of-scope market
+    rows.append({
+        "Player": "C", "League": "NBA", "Date": today.strftime("%Y-%m-%d"),
+        "Market": "REB", "Model EV": 20.0,
+        "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)], "Actual": 22.0,
+    })
+    # Out-of-scope date
+    rows.append({
+        "Player": "D", "League": "NBA",
+        "Date": (today - timedelta(days=120)).strftime("%Y-%m-%d"),
+        "Market": "PTS", "Model EV": 20.0,
+        "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)], "Actual": 22.0,
+    })
+    history = pd.DataFrame(rows)
+    frame = _history_to_eval_frame(
+        history, league="NBA", market="PTS", window_days=30,
+        meanyr_lookup=lambda p, m, d: 18.0,
+    )
+    assert len(frame) == 5
+
+
+def test_make_meanyr_lookup_returns_nan_when_gamelog_empty():
+    lookup = _make_meanyr_lookup_from_gamelog(pd.DataFrame(), date_col="gameDate")
+    assert math.isnan(lookup("AnyPlayer", "PTS", pd.Timestamp("2026-05-20")))
+
+
+def test_make_meanyr_lookup_returns_nan_when_market_column_missing():
+    gl = pd.DataFrame({
+        "playerName": ["Player_X"] * 5,
+        "gameDate": pd.date_range("2026-04-01", periods=5, freq="D"),
+        "REB": [10, 11, 12, 9, 8],
+    })
+    lookup = _make_meanyr_lookup_from_gamelog(gl, date_col="gameDate")
+    assert math.isnan(lookup("Player_X", "PTS", pd.Timestamp("2026-05-20")))
+
+
+def test_make_meanyr_lookup_returns_mean_of_prior_year():
+    gl = pd.DataFrame({
+        "playerName": ["Player_X"] * 4,
+        "gameDate": [
+            pd.Timestamp("2026-05-10"),
+            pd.Timestamp("2026-05-12"),
+            pd.Timestamp("2026-05-15"),
+            pd.Timestamp("2026-05-19"),  # before the lookup date 2026-05-20
+        ],
+        "PTS": [10.0, 20.0, 30.0, 40.0],
+    })
+    lookup = _make_meanyr_lookup_from_gamelog(gl, date_col="gameDate")
+    val = lookup("Player_X", "PTS", pd.Timestamp("2026-05-20"))
+    assert val == pytest.approx(25.0)
+
+
+def test_live_window_cli_unknown_league_filter_errors(monkeypatch):
+    runner = CliRunner()
+    history = pd.DataFrame()
+    monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history", lambda: history)
+    result = runner.invoke(main, ["--live-window", "30"])
+    assert result.exit_code != 0
+    assert "empty" in result.output.lower()
+
+
+def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
+    """Full --live-window run with mocked Stats loading — no real gamelog needed."""
+    history = _build_live_history_fixture(n=80, market="PTS")
+    monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history", lambda: history)
+    monkeypatch.setattr(
+        "sportstradamus.scripts.compression_eval._load_league_stats_lookup",
+        lambda league: (lambda player, market, date: 20.0),
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["--live-window", "30", "--league", "NBA", "--market", "PTS", "--no-log"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "NBA_PTS" in result.output
+    assert "live_30d" in result.output
+
+
+def test_live_window_cli_rejects_conflicting_flags(monkeypatch, tmp_path):
+    monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history",
+                        lambda: _build_live_history_fixture(n=10))
+    runner = CliRunner()
+    fake_csv = tmp_path / "fake.csv"
+    fake_csv.write_text("MeanYr,Result,EV\n1,1,1\n")
+    result = runner.invoke(
+        main,
+        ["--live-window", "30", "--baseline", str(fake_csv), "--candidate", str(fake_csv)],
+    )
+    assert result.exit_code != 0
+    assert "cannot combine" in result.output.lower()

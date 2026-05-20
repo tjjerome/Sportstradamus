@@ -28,10 +28,12 @@ Usage
 
 from __future__ import annotations
 
+import functools
 import importlib.resources as pkg_resources
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
@@ -39,6 +41,8 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus import data
+from sportstradamus.analysis import explode_offers
+from sportstradamus.helpers.io import read_history
 
 # Phase-0 ship gate (see plan): a strategy ships only if it cuts top-mean-decile
 # MAE by at least this fraction without regressing global MAE beyond the
@@ -70,6 +74,18 @@ DEFAULT_PRED_COL = "EV"
 
 RUN_LOG_PATH = pkg_resources.files(data) / "compression_eval_log.csv"
 SCATTER_DIR = Path("/tmp")
+
+# --live-window mode constants (Stage 0 deliverable 0.3).
+# Look-back window for MeanYr computation from the per-league gamelog. Matches
+# the deprecated stats path that used ~365 days as the season-to-date baseline.
+_MEANYR_LOOKBACK_DAYS = 365
+# CSV-shaped column set the existing scorecard() path consumes — preserved
+# verbatim so live-mode reuses the offline harness unchanged.
+_LIVE_EVAL_COLUMNS = ("MeanYr", "Result", "EV", "P", "Odds", "Line")
+
+# Lookup callable signature used by the live-window adapter. Production
+# implementation closes over Stats.gamelog; tests inject a deterministic mock.
+MeanYrLookup = Callable[[str, str, pd.Timestamp], float]
 
 
 @dataclass(frozen=True)
@@ -366,6 +382,149 @@ def _resolve_test_sets(
     return paths
 
 
+def _history_to_eval_frame(
+    history: pd.DataFrame,
+    league: str,
+    market: str,
+    window_days: int,
+    meanyr_lookup: MeanYrLookup,
+) -> pd.DataFrame:
+    """Project history.parquet rows into the offline scorecard()-shaped frame.
+
+    Filters to ``(league, market)`` settled offers within ``window_days`` and
+    constructs the CSV-shaped columns the existing harness expects:
+    ``MeanYr`` from the injected lookup; ``Result`` from ``Actual``; ``EV``
+    from prediction-level ``Model EV`` (raw-stat units); ``P`` normalized to
+    model OVER-probability and ``Odds`` normalized to book UNDER-probability
+    so the existing :func:`_brier_skill_score` semantics hold unchanged.
+    """
+    if history.empty:
+        return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
+    exploded = explode_offers(history)
+    if exploded.empty:
+        return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
+    cutoff = pd.Timestamp(datetime.now(UTC).date()) - pd.Timedelta(days=window_days)
+    exploded["_date"] = pd.to_datetime(exploded["Date"], errors="coerce")
+    mask = (
+        (exploded["League"] == league)
+        & (exploded["Market"] == market)
+        & exploded["Actual"].notna()
+        & exploded["_date"].notna()
+        & (exploded["_date"] >= cutoff)
+    )
+    subset = exploded.loc[mask].copy()
+    if subset.empty:
+        return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
+
+    over_mask = subset["Bet"].eq("Over").to_numpy()
+    model_p = subset["Model P"].to_numpy()
+    books_p = subset["Books P"].to_numpy()
+    out = pd.DataFrame(
+        {
+            "MeanYr": [
+                meanyr_lookup(player, market, date)
+                for player, date in zip(subset["Player"], subset["_date"], strict=False)
+            ],
+            "Result": subset["Actual"].astype(float).to_numpy(),
+            "EV": subset["Model EV"].astype(float).to_numpy(),
+            "P": np.where(over_mask, model_p, 1.0 - model_p),
+            "Odds": np.where(over_mask, 1.0 - books_p, books_p),
+            "Line": subset["Line"].astype(float).to_numpy(),
+        }
+    )
+    out = out.replace([np.inf, -np.inf], np.nan).dropna()
+    return out.reset_index(drop=True)
+
+
+def _make_meanyr_lookup_from_gamelog(gamelog: pd.DataFrame, date_col: str) -> MeanYrLookup:
+    """Closure that returns the player's prior-365-day mean of the market column.
+
+    ``date_col`` is the gamelog's date-column name (varies per league via
+    ``Stats.log_strings["date"]``). The closure returns NaN when the player is
+    absent, the market column is missing, or the look-back window is empty.
+    """
+    if gamelog is None or gamelog.empty:
+        return lambda player, market, date: float("nan")
+    gl = gamelog.copy()
+    gl[date_col] = pd.to_datetime(gl[date_col], errors="coerce")
+
+    def lookup(player: str, market: str, date: pd.Timestamp) -> float:
+        if market not in gl.columns:
+            return float("nan")
+        window_start = date - pd.Timedelta(days=_MEANYR_LOOKBACK_DAYS)
+        prior = gl[
+            (gl.get("playerName", gl.get("player display name", "")) == player)
+            & (gl[date_col] < date)
+            & (gl[date_col] >= window_start)
+        ]
+        if prior.empty:
+            return float("nan")
+        return float(prior[market].mean())
+
+    return lookup
+
+
+@functools.cache
+def _load_league_stats_lookup(league: str) -> MeanYrLookup:
+    """Load the league's Stats class once and return a MeanYr lookup callable.
+
+    Caches across calls within a process so multi-league --live-window runs pay
+    the gamelog load cost once per league. Returns a NaN-only lookup when the
+    league or gamelog is unavailable so the live-window mode degrades gracefully.
+    """
+    from sportstradamus.nightly import LEAGUE_CLASSES
+
+    stats_cls = LEAGUE_CLASSES.get(league)
+    if stats_cls is None:
+        return lambda player, market, date: float("nan")
+    obj = stats_cls()
+    try:
+        obj.load()
+    except Exception:
+        return lambda player, market, date: float("nan")
+    gamelog = getattr(obj, "gamelog", pd.DataFrame())
+    date_col = getattr(obj, "log_strings", {}).get("date", "gameDate")
+    return _make_meanyr_lookup_from_gamelog(gamelog, date_col)
+
+
+def _print_live_scorecard(card: object, stem: str, pred_col: str) -> None:
+    """Print the live-window scorecard summary in the same shape as offline mode."""
+    click.echo(f"\n=== {stem}  ({pred_col}, n={card.n_rows}) ===")
+    click.echo(
+        f"strategy={card.strategy}  "
+        f"global_mae={card.global_mae:.3f}  "
+        f"top_decile_mae={card.top_decile_mae:.3f}  "
+        f"top_decile_bias={card.top_decile_bias:+.3f}  "
+        f"compression_ratio={card.compression_ratio:.3f} "
+        f"(top {card.top_decile_compression_ratio:.3f})"
+    )
+    click.echo(
+        f"result_meanyr_corr={card.result_meanyr_corr:+.3f}  "
+        f"pred_meanyr_corr={card.pred_meanyr_corr:+.3f}"
+    )
+    if card.brier_skill_score is not None:
+        click.echo(f"brier_skill_score={card.brier_skill_score:+.3f}")
+
+
+def _resolve_live_cells(
+    history: pd.DataFrame, league: str | None, market: str | None
+) -> list[tuple[str, str]]:
+    """Return distinct ``(league, market)`` pairs present in history matching filters."""
+    if history.empty:
+        return []
+    exploded = explode_offers(history)
+    if exploded.empty:
+        return []
+    settled = exploded[exploded["Actual"].notna()]
+    if settled.empty:
+        return []
+    if league:
+        settled = settled[settled["League"] == league]
+    if market:
+        settled = settled[settled["Market"] == market]
+    return sorted({(row.League, row.Market) for row in settled.itertuples(index=False)})
+
+
 @click.command()
 @click.option("--league", default=None, help="Filter test sets by league (e.g. NBA).")
 @click.option("--market", default=None, help="Single market stem (requires --league).")
@@ -397,6 +556,16 @@ def _resolve_test_sets(
     help="Diff mode: candidate test-set CSV (compared against --baseline).",
 )
 @click.option("--no-log", is_flag=True, default=False, help="Skip appending to the run log.")
+@click.option(
+    "--live-window",
+    type=int,
+    default=None,
+    help=(
+        "Score the last N days of settled offers from history.parquet instead "
+        "of test_sets CSVs. Reuses the offline decile-bias path; strategy label "
+        "becomes `live_{N}d` unless --strategy is given."
+    ),
+)
 def main(
     league: str | None,
     market: str | None,
@@ -408,9 +577,43 @@ def main(
     baseline: Path | None,
     candidate: Path | None,
     no_log: bool,
+    live_window: int | None,
 ) -> None:
-    """Score compression on dumped test sets, or diff two strategies."""
+    """Score compression on dumped test sets, diff two strategies, or score live data."""
     log_path = Path(str(RUN_LOG_PATH))
+
+    if live_window is not None:
+        if baseline or candidate:
+            raise click.UsageError("--live-window cannot combine with --baseline/--candidate.")
+        if test_sets_dir is not None:
+            raise click.UsageError("--live-window does not use --test-sets-dir.")
+        live_strategy = strategy if strategy != "unlabeled" else f"live_{live_window}d"
+        history = read_history()
+        if history.empty:
+            raise click.UsageError("history.parquet is empty; nothing to score.")
+        cells = _resolve_live_cells(history, league, market)
+        if not cells:
+            raise click.UsageError("No settled offers match the --league/--market filters.")
+        for cell_league, cell_market in cells:
+            lookup = _load_league_stats_lookup(cell_league)
+            frame = _history_to_eval_frame(
+                history, cell_league, cell_market, live_window, lookup
+            )
+            if frame.empty:
+                click.echo(f"{cell_league}_{cell_market}: no offers in last {live_window}d.")
+                continue
+            card = scorecard(
+                frame,
+                pred_col,
+                strategy=live_strategy,
+                league=cell_league,
+                market=cell_market,
+                n_deciles=deciles,
+            )
+            _print_live_scorecard(card, f"{cell_league}_{cell_market}", pred_col)
+            if not no_log:
+                append_run_log(card, log_path)
+        return
 
     if baseline or candidate:
         if not (baseline and candidate):
