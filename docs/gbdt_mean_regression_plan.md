@@ -20,376 +20,417 @@
 | **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
-**Start next session here:** P2.A is dead and P2.B ships. Candidates queued
-for the next session, in priority order:
+## Research handoffs that fed this plan
 
-1. **Per-market routing decision for P2.B.** FTM and STL kill under hurdle;
-   the other 6 NBA ZINB markets ship. A simple `data/zinb_mode_per_market.json`
-   config plus a per-market lookup in `pipeline.py` would let us ship hurdle
-   only where it wins. Tractable, ~1 session.
-2. **P3 — rate decomposition.** Center `stat / MIN` for NBA and project
-   volume separately. The natural next experiment for SkewNormal
-   volume-shifting markets (PA/PR/PRA) per the
-   `CENTERED_TARGET_NEGATIVE_RESULT.md` discussion §5.
-3. **Live-path NaN root cause.** `Model Skew = NaN` for live FGA rows
-   despite valid offline replay (`OVERCONFIDENCE_INVESTIGATION.md` §3.4) —
-   "tackle when diminishing returns hit" criterion now met since P1+P2.A
-   are dead and P2.B ships.
+The next-session plan below integrates findings from two researcher passes that
+ran after P1 and P2.B landed. The reports themselves are not committed (they
+live at `/tmp/researcher_skewnormal.md` and `/tmp/researcher_zinb.md` in the
+originating session); the load-bearing citations and recommendations are
+copied below. Future sessions should treat this file as self-contained.
 
-The Phase B spec at
-`docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` (Phase B
-"SUPERSEDED → derived-π") was the source for the HurdleZINB design but
-needed one math correction: the gate returned by `.predict` is π_zi
-(derived from the ZINB identity), NOT `1 − p_nonzero`. Future readers of
-the Phase B spec should mentally swap that line.
+- **SkewNormal track** — surfaces 10 new methods (T1–T10) for top-decile bias
+  on SkewNormal markets (PTS/REB/AST/PRA/FGA/MIN/PA/PR/FG3A/FGM). Headline:
+  ICC₁ per-market routing comes first; the original P3 basic rate
+  decomposition / P5 target-encoded features / P10 GPBoost retry are all
+  KILLED in favor of T-method replacements.
+- **ZINB track** — focused on the FTM/STL kill markets from P2.B. Headline:
+  the current "fit on positives" Stage-2 NegBin is a misspecified ZTNB; a
+  single-line PyTorch fix likely resolves FTM/STL by construction. Per-market
+  routing diagnostics (ziNB index, Wilson-Einbeck, Schwarz-corrected Vuong)
+  are the second item; the Stage 3 architectural choice (MZINB vs GPBoost)
+  is a strategic fork chosen by residual analysis, not run in parallel.
 
-**Deterministic-mode hardening (fixed in PR #46 post-P1):**
-`meditate --deterministic` now auto-implies `--force` (in `cli.py:meditate`)
-because the input-freeze leaves `new_M` empty, which would otherwise
-short-circuit `train_market` at the `if new_M.empty and not force and not
-need_model: return` line whenever a prior model pickle exists. Also
-hardened: `stat_zi.json` and `feature_filter.json` writes are skipped under
-`--deterministic` — those configs flow in-memory through the current run
-but never get persisted, so the crippled deterministic hyperparameters
-can't mutate production config.
+Bibliography (DOIs preserved so the plan is self-contained):
 
-**P1 follow-ups (closed or deferred):**
-1. ~~**Promote `centered_additive_eb_meanyr_k10` to default.**~~ **DEAD** —
-   the path-wide A/B shows the win is FGA-only; every other SkewNormal
-   market regresses. Default stays on `ratio_meanyr`. Centered strategy
-   remains available as an opt-in for FGA-specific runs (or future
-   per-market strategy selection if that's ever built).
-2. ~~**Path-wide A/B**~~ ✅ done (above): FGA SHIP, rest KILL.
-3. **Live-path NaN root cause (deferred — "diminishing-returns trigger")**:
-   `tests/integration/test_centered_target_live_path.py` guards that the
-   centered strategy's decode is finite, but the original FGA
-   `Model Skew=NaN` symptom (per
-   `docs/OVERCONFIDENCE_INVESTIGATION.md` §3.4) was an
-   *existing-model + live `model_prob.py`* failure, distinct from
-   anything P1 touched. **Tackle this when further model-improvement
-   work (P2 init_score baseline, P3 rate decomposition, etc.) starts
-   yielding diminishing returns** — the live-path NaN bug is likely
-   responsible for a chunk of the published-EV pathology that
-   training-side fixes can't reach. Don't lose track of it.
-4. **`EB_SHRINKAGE_K` tuning** — Phase-A "Task A7" follow-up. Only
-   relevant if a per-market FGA centered_additive deployment ships and
-   shows residual mid-volume over-prediction. Low priority now that the
-   path-wide A/B is closed.
+| Tag | Citation |
+|---|---|
+| MEGB | Olaniran et al., *Scientific Reports* 15:30927, 22 Aug 2025, DOI 10.1038/s41598-025-16526-z (CRAN + github.com/rid4stat/MEGB). |
+| GBMixed | Prevett, Hui, Tho, Welsh, Westveld, ANU, arXiv 2511.00217, 31 Oct 2025. |
+| CatBoost ordered TS | Prokhorenkova et al., NeurIPS 2018, arXiv 1706.09516. |
+| DEGPD / ZIDEGPD | Ahmad & Hussain, arXiv 2510.27365, 2025. |
+| gbex | Velthoen, Dombry, Cai, Engelke, *Extremes* (Springer), 2023. |
+| FAGTB / M²FGB | Grari et al., arXiv 1911.05369; Cruz et al., arXiv 2504.12458, Apr 2025. |
+| CQR / LCMQR | Romano et al., NeurIPS 2019; LCMQR arXiv 2411.19523, late 2024. |
+| Normalizing-flow heads | LightGBMLSS v0.3.0, 20 Jul 2023. |
+| PGBM | Sprangers et al., KDD 2021, DOI 10.1145/3447548.3467278. |
+| MZINB foundations | Long, Preisser, Herring & Golin, *Stat Med* 2014, DOI 10.1002/sim.6293; Preisser, Das, Long, Divaris, *Stat Med* 2016, DOI 10.1002/sim.6804. |
+| MZINB Stata | Cummings & Hardin, *Stata J* 19(3) 2019, DOI 10.1177/1536867X19874209. |
+| MZINB spatial | Mutiso et al., *Biometrical Journal* 2024, DOI 10.1002/bimj.202300182. |
+| Marginalized hurdle | Kassahun et al., *Stat Med* 2014, DOI 10.1002/sim.6237; Liu, Zhang, Tang et al., *HSORM* 2018, DOI 10.1007/s10742-018-0183-6. |
+| ZTNB | Hilbe 2011 *Negative Binomial Regression*; UCLA-OARC ZTNB tutorial; Grodri notes on count moments. |
+| ziNB / Wilson-Einbeck | Blasco-Moreno et al., *Methods Ecol Evol* 2019, DOI 10.1111/2041-210X.13185; Wilson & Einbeck, *Statistical Modelling* 2019, DOI 10.1177/1471082X18762277. |
+| Corrected Vuong | Desmarais & Harden 2013; Wilson 2015, *Economics Letters*, DOI 10.1016/j.econlet.2014.12.029. |
+| Feng GOF framework | Feng, *J Stat Distrib Appl* 2021, DOI 10.1186/s40488-021-00121-4. |
+| CMP head | Philipson & Huang, *Statistics and Computing* 2023, DOI 10.1007/s11222-023-10244-0. |
+| cyc-GBM | Delong, Lindholm & Zakrisson, SSRN 4352505, 9 Feb 2023, DOI 10.2139/ssrn.4352505. |
+| CyclicBoosting | Wick et al., Blue Yonder, arXiv 2009.07052; *SN OR Forum* 2021, DOI 10.1007/s43069-021-00079-8. |
+| Balanced GAMLSS boosting | Daub et al., *Computational Statistics* 2025, DOI 10.1007/s00607-023-01224-3; arXiv 2602.17272, 2026. |
+| Multi-parametric GBM benchmark | Chevalier & Côté, *European Actuarial Journal* 2025, DOI 10.1007/s13385-025-00428-5. |
+| Arctan pinball | Sluijterman et al., *Int J Mach Learn Cybern* 2025, DOI 10.1007/s13042-025-02671-4. |
 
 ## Context
 
 LightGBMLSS predictions in this repo compress toward the global mean: high-volume
-players (e.g. NBA Anthony Edwards PTS) are systematically under-predicted, low-volume
-over-predicted. The source report explains this is structural to gradient-boosted
-trees (leaf averaging + shrinkage + no extrapolation), not a bug.
+players are systematically under-predicted, low-volume over-predicted. Two
+branches: the SkewNormal branch (`global_mean >= 2.0`, e.g. NBA PTS/FGA) uses a
+`Result/MeanYr` target and multiplicative denorm; the NegBin/ZINB branch
+(`global_mean < 2.0`) uses raw counts. P1 closed the centered-target question on
+SkewNormal markets (FGA-only ship); P2.B closed the joint-vs-hurdle question on
+ZINB markets (6/8 ship). The next-session plan attacks (a) the remaining
+SkewNormal top-decile bias path-wide and (b) the FTM/STL kill on the ZINB track.
 
-The repo **already implements the exact "season-mean ratio" workaround the report
-identifies as underperforming**, and only for one of two branches:
+For deeper context see [docs/OVERCONFIDENCE_INVESTIGATION.md](OVERCONFIDENCE_INVESTIGATION.md)
+(determinism, live-path confound, the original investigation) and
+[docs/CENTERED_TARGET_NEGATIVE_RESULT.md](CENTERED_TARGET_NEGATIVE_RESULT.md)
+(the path-wide P1 KILL verdict).
 
-- **SkewNormal branch** (`global_mean >= 2.0`, e.g. NBA PTS): target is
-  `Result / MeanYr` clipped to `[0.01, ∞)`; at inference `loc`/`scale` are multiplied
-  back by `MeanYr`. This is the multiplicative-amplification trap from report §5 /
-  Key Finding #2 — a small downward bias in ratio space becomes a large absolute
-  under-prediction for high-mean players.
-- **NegBin/ZINB branch** (`global_mean < 2.0`): **raw counts, no normalization at
-  all.** The user confirms compression is visible here too. Per report
-  "Implementing in LightGBMLSS" step #4, count families cannot be additively
-  centered — they need an `init_score`/baseline injection instead.
+## Architectural principle (applies to all phases)
 
-Neither branch uses `init_score`/`base_margin`, per-player centering, leakage-safe
-player target encoding, sample weighting, or post-hoc isotonic calibration.
-`player_id` is not a model feature. Diagnostics (`report.py`) already track
-`ev_meanyr_corr` / `result_meanyr_corr` / `shape_ratio` but there is **no
-per-player-mean-decile slicing**, which is the cleanest compression signature.
+Make the **target/baseline transform a single configurable strategy**, selected
+by a CLI flag on `meditate` (and a matching env var for the harness),
+defaulting to current behavior. Every experiment becomes a new strategy value,
+not a destructive rewrite. This is what makes the multi-session A/B tractable
+and keeps `devel` shippable between sessions. Centralize the forward
+transform, the inverse (de-norm) transform, and the inference-time mirror so
+train/predict cannot drift. The inference mirror lives in
+[stats/base.py:597](src/sportstradamus/stats/base.py#L597) (`get_stats`); any
+new baseline must be computed there identically and leakage-safe. STYLE_GUIDE
+§9 (named constants), §18.9 (no orphan methods), and the CLAUDE.md
+"no new monoliths" rule all apply.
 
-Scope (per user): **all leagues, all markets** — both branches must be addressed.
-New ML deps (gpboost/pymer4) are acceptable in later phases if needed. Gate every
-experiment with an **offline eval harness built first**.
+**Universal decision threshold (every experiment):** ship a strategy only if
+it reduces **top-mean-decile MAE by ≥ 5%** vs the current production strategy
+without worsening **global MAE by > 1%** and without worsening
+`brier_skill_score` on the existing report. Otherwise kill it and move on.
+The harness — [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py)
+— is the ship/kill gate.
 
-Constraint discovered: the build container is a fresh clone — `data/training_data/`,
-`data/test_sets/`, `data/models/`, `data/player_data/` do not exist, and
-`poetry install` fails because the network policy blocks the PyTorch CPU wheel
-source. The harness must therefore operate on artifacts a `meditate` run produces
-(it already writes `data/test_sets/{LEAGUE}_{market}.csv` with X_test features
-incl. `MeanYr`, predicted distribution params, `Result`, `Line`), not on
-pre-cached matrices. The harness itself needs no network.
+## Two-track next-session plan
 
-This is a multi-session project: build measurement infrastructure once, then work
-down a priority list of interventions, shipping the first that closes the gap.
+Work proceeds on two independent tracks. Stages within a track are sequential
+(later stages depend on diagnostics from earlier ones). The two tracks share
+infrastructure (the harness, the determinism gate, the per-strategy registry)
+but the diagnostics and method choices diverge.
 
-## Findings folded in from the overconfidence investigation
+---
 
-`docs/OVERCONFIDENCE_INVESTIGATION.md` (and its hand-back) ran a parallel,
-deeper pass on two of the worst-compressed markets (NBA **FGA** SkewNormal,
-**FG3M** ZINB). Its conclusions directly change this plan's risk profile.
-Read both before resuming. The load-bearing ones:
+## Track A — SkewNormal markets
 
-1. **Offline evaluation was non-reproducible — this is the dominant blocker.**
-   The same nominal SkewNormal config produced top-volume-quintile bias of
-   −0.48, −0.92, −1.3, −2.0, −2.5, **and +0.12** across runs. Suspected
-   sources: unpinned LightGBM/LightGBMLSS seeds, per-row `start_values`
-   broadcasting in LightGBMLSS predict, Optuna nondeterminism, and `meditate`
-   Optuna **starvation** in time-boxed offline runs (3–18 trials vs. the
-   deployed model's hundreds). The P0 harness scores the CSVs `meditate`
-   dumps, but `meditate` itself is the non-deterministic stage — so the
-   harness's ship/kill verdict is currently noise. **No P1+ strategy can be
-   validated until a determinism gate exists** (new §"Determinism prerequisite").
+Source: `/tmp/researcher_skewnormal.md`. Scope: PTS, REB, AST, PRA, FGA, MIN,
+PA, PR, FG3A, FGM, fantasy points. After P1, FGA ships with EB(MeanYr, K=10)
+centering; every other SkewNormal market killed under both EB-centered and
+Mean10-centered strategies. The researcher's hypothesis is that the dominant
+compression cause is **volume-efficiency entanglement** (PTS = FGA × eFG% × …),
+not leaf-averaging — and that ICC per market predicts which strategies can work.
 
-2. **P1 was already attempted and is not refuted.** The "centered-target
-   bridge" (replace `y/MeanYr` with `y − baseline`, add baseline back to `loc`
-   only) is the additive empirical-Bayes per-player offset the investigation
-   built and reverted in its Phase A. It was **inconclusive, not wrong**: in a
-   clean *deterministic* harness the production-equivalent SkewNormal model
-   *with* the additive-EB offset was well-calibrated (predicted vol-quintile
-   spread 7.4 vs actual 8.3, meanAbsBias **+0.12**, tracked volume). So P1
-   remains the highest-leverage lever — but the +0.12 result also means the
-   SkewNormal *training* stage may not be the dominant source of the live
-   symptom (see #4). Treat P1 as "re-run under determinism and measure", not
-   "implement a known fix".
+### Stage A1 — Diagnostic gate (~1 day)
 
-3. **The `Result/MeanYr` slope artifact is corroborated but is not the level
-   cause.** corr(predicted loc, MeanYr) was −0.37…−0.87 across *all*
-   SkewNormal markets — a real multiplicative-amplification artifact, exactly
-   what P1 targets. But the investigation's decisive negative result says this
-   slope is "not the dominant level cause" of the live under-prediction. P1 is
-   still worth doing; do not expect it alone to close the live gap.
+**T1. ICC per market.** Compute ICC₁ per market on three seasons of held-out
+data using a two-level ANOVA decomposition: σ²_between = Var(player season
+means), σ²_within = mean(Var(game logs within player)), ICC =
+σ²_between / (σ²_between + σ²_within). For highly skewed markets (STL/BLK)
+compute on `log(1+Y)` or rank-transformed target.
 
-4. **Live-path confound — the plan is purely training-side; the strongest
-   unexplained lead is in prediction.** `Model Skew` (SkewNormal `alpha`) is
-   **NaN for every live FGA row**, while offline replay proves the trained
-   model emits *valid* alpha on saved features. The defect is therefore in the
-   live path: `src/sportstradamus/prediction/model_prob.py` — feature/column
-   alignment, `set_model_start_values` seeding live vs. train, the `fused_loc`
-   `weight≈0.9` bookmaker blend, or `temperature≈1.37`. **A training-side
-   compression fix that never reaches the published EV is the FGA dead end
-   repeated.** Every shipped strategy must be verified end-to-end on the live
-   path, not just on the dumped test set (new §"Live-path confound").
+Pre-register the routing cutoff before running A/Bs:
+- ICC ≥ 0.5 → EB-style centering can work (T5 four-stage factorization).
+- ICC ≤ 0.3 → needs distributional tail extension (T3/T7).
+- 0.3 < ICC < 0.5 → ambiguous; try both, route based on outcome.
 
-5. **ZINB gate under-fit is a confirmed, reproducible win adjacent to P2.**
-   Separate from mean compression: the jointly-fit ZINB `gate` head converges
-   to ≈ half the true structural-zero rate in every NBA ZINB market (FG3M 0.19
-   vs 0.33; PF 0.02 vs 0.14; …), inflating `P(over@line)` everywhere. The fix
-   (a derived-π two-stage ZINB, downstream code unchanged) is fully specced at
-   `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` (Phase B
-   "SUPERSEDED → derived-π"). It is the single highest-confidence item across
-   both projects. Fold it into P2.
+Expected: FGA > 0.6, PTS in 0.3–0.45, STL/BLK < 0.2. Implementation site:
+a new notebook or a one-shot CLI in `src/sportstradamus/scripts/`. No model
+changes. Source: researcher T1 (Tier 0).
 
-6. **GPBoost (P10) was already prototyped deterministically and failed** — did
-   not beat the EB offset, top-volume bias −2.5; its "flat fixed-effect" was a
-   GPBoost-internal FE/RE artifact, not a property of the production model. Do
-   not re-attempt P10 naively (annotation in priority list).
+**Decision points (gate logic for Stage A1):**
+- If ICC_PTS > 0.5 — entanglement hypothesis is wrong; leaf-averaging
+  hypothesis revives; T7 (extreme-tail boosting via gbex) jumps to Stage A2.
+- If ICC is uniformly low across the family — the family is form-driven and
+  T3 (heavy-tail / normalizing-flow head) takes priority over T5.
+- If ICC clusters bimodally (e.g. FGA/MIN/REB-for-bigs high, PTS/AST low) —
+  the path-wide negative result is fully explained; per-market routing in
+  Stage A2 is justified.
 
-## Determinism prerequisite (P0.5 — blocks P1+)
+### Stage A2 — Highest-leverage structural fixes (2–3 sprints)
 
-Before any target/baseline strategy is A/B'd, make offline evaluation
-bit-reproducible, or the P0 ship/kill verdict is meaningless (finding #1):
+Two methods, both worth running because they attack different mechanisms.
+Pick order based on Stage A1 ICCs.
 
-- Pin LightGBM and LightGBMLSS seeds; pin the train/test split seed.
-- Make `set_model_start_values` row-broadcasting deterministic (it is also a
-  suspected non-determinism source *and* the P1 `loc`-start change touches it).
-- Use fixed hyperparameters (or a controlled, seeded, non-starved Optuna) for
-  evaluation runs so a smoke retrain is comparable to the deployed model.
-- **Determinism gate:** run the same strategy/config through `meditate` twice
-  and assert bit-identical predicted parameters / test-set CSVs before any
-  decile-table comparison is trusted. (The investigation's GPBoost harness
-  already demonstrated bit-identical determinism is achievable here.)
+| Method | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **T5. Four-stage multiplicative factorization** *(replaces original P3)* | Tier 1 (Skew) | 2–3 weeks | Predict (a) P(plays), (b) MIN \| plays, (c) per-100-poss rate \| MIN, (d) for PTS: FGA-per-100 × FG% × points-per-make; recombine via Monte Carlo. Routes each factor to its own ICC-appropriate strategy. DFS-industry consensus approach. | New `src/sportstradamus/factorize/` package or extend [pipeline.py](../src/sportstradamus/training/pipeline.py); inference mirror in [stats/base.py](../src/sportstradamus/stats/base.py); per-market wiring via the existing strategy registry from P1. |
+| **T3. Spliced / Pareto-tail or normalizing-flow head** | Tier 1 (Skew) | 1–2 weeks per distribution | Body ~ SkewNormal up to learned threshold u, tail ~ Generalized Pareto above u, mixing weight per-row. LightGBMLSS v0.3.0 normalizing-flow head is the simplest production path. Direct attack on top-decile MAE without touching loc. | Custom PyTorch distribution alongside [skew_normal.py](../src/sportstradamus/skew_normal.py); dist selection in [pipeline.py:245-324](../src/sportstradamus/training/pipeline.py#L245). |
 
-This is small, high-leverage, and strictly precedes P1. Add it as a gate the
-harness or a thin wrapper enforces, not a one-off manual check.
+**Decision points (gate logic for Stage A2):**
+- If T5 ships globally → make it the new baseline and re-run EB centering on
+  each factor independently (factor-specific ICCs dominate the decision).
+  Stage A3/A4 become polish.
+- If T3 ships on the high-ICC, heavy-tail markets but T5 doesn't → distribution
+  was the bottleneck; route those markets to T3 and continue T5 work on
+  low-ICC volume-driven markets only.
+- If neither ships → either ICCs are pathologically low across the family
+  (re-check T1) or the live-path confound (Model Skew=NaN, see
+  `OVERCONFIDENCE_INVESTIGATION` §3.4) is consuming the gain. Stop and
+  resolve the live path before more training-side work.
 
-## Live-path confound (verify every shipped strategy end-to-end)
+### Stage A3 — Calibration polish (1 sprint, mostly orthogonal — stack them)
 
-This plan optimizes the training stage; the overconfidence investigation shows
-the live symptom may originate downstream (finding #4). For any strategy that
-clears the P0 threshold on dumped test sets, before promoting it to default
-also confirm it survives the live `model_prob.py` path: raw distribution
-params → decode → `fused_loc` (`weight≈0.9` book blend) → `dispersion_cal` →
-`temperature`. In particular resolve why `Model Skew`=NaN live but valid on
-saved features — a strategy that fixes decile bias offline but is then
-flattened by the book blend or NaN-ed in decode has not fixed the user-visible
-problem.
+| Method | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **Original P7. Isotonic on loc** | Original plan | hours | Fixes residual average bias on the location parameter. Cheap, monotone. | Wrap predictions in `IsotonicRegression(out_of_bounds="clip")` post-fit in [pipeline.py](../src/sportstradamus/training/pipeline.py) before the test-set dump. |
+| **T8. CQR with player-decile-local conditioning (LCMQR)** | Tier 2 (Skew) | 2–3 days | Post-hoc per-player-decile calibration of *scale*. Complements P7 (loc) — they are orthogonal. Romano-Patterson-Candès CQR (NeurIPS 2019) and LCMQR (arXiv 2411.19523) give finite-sample marginal-coverage guarantees. | New module under `src/sportstradamus/calibration/` if it grows past 50 lines; otherwise an inline helper in the report path. |
+| **Original P6. Reduce tree regularization** | Original plan | ~1 day | Widen Optuna ranges: larger `num_leaves`/`max_depth`, smaller `min_child_samples`/`min_child_weight` at [pipeline.py:348-368](../src/sportstradamus/training/pipeline.py#L348). | Optuna search space dict in `pipeline.py`. |
+| **T9. Monotone constraint MeanYr → loc** | Tier 2 (Skew) | 1 day | Smoke test only — LightGBM `monotone_constraints` forces non-decreasing dependence of loc on MeanYr. If violated, that tells you something about the feature set. Diagnostic, not a primary fix. | `monotone_constraints` arg on the LightGBM call in [pipeline.py](../src/sportstradamus/training/pipeline.py); MeanYr feature column must be identified by index. |
+
+**Decision points (gate logic for Stage A3):**
+- If P7 + T8 combined ship ≥ 5% on top-decile MAE — calibration was the
+  bottleneck; Stage A4 (novel retries) becomes lower-ROI.
+- If T9 monotone constraint is violated by the trained model — feature set
+  is missing a key volume driver; loop back to A1 ICC analysis with that
+  feature included.
+
+### Stage A4 — Novel risky retries (only if Stage A2/A3 leave a gap)
+
+| Method | Source | Cost | Direct effect | Notes |
+|---|---|---|---|---|
+| **T4. MEGB / GBMixed** *(replaces original P10 GPBoost retry)* | Tier 3 (Skew) | 1–2 weeks (MEGB), more for GBMixed | EM/BLUP-based mixed-effects boosting that fixes the bias GPBoost was criticized for in Prevett et al. 2025. MEGB is on CRAN + github.com/rid4stat/MEGB; GBMixed has no public code. **Different mechanism from GPBoost** — prior failure does not predict failure here. | Point prediction only for MEGB; use for loc, keep LightGBMLSS for scale/shape. Port GBMixed from the paper if MEGB ships. |
+| **T2. CatBoost ordered TS** *(replaces original P5 leakage-safe target encoding)* | Tier 3 (Skew) | 3–5 days per market | Only published GBDT mechanism with a proof of unbiasedness for high-cardinality categoricals (`player_id`). Strictly dominates greedy mean encoding per Prokhorenkova et al. NeurIPS 2018. | Re-fit SkewNormal/NegBin LSS heads using CatBoost instead of LightGBM. CatBoostLSS forks exist; alternatively wire an external objective. **Caveat:** unbiasedness proof is for log-loss / squared-error, not SkewNormal NLL — validate empirically. |
+| **T7. gbex** | Tier 3 (Skew) | 1–2 weeks | Generalized Pareto tail boosting on exceedances. Layered on top of the existing LSS body model. Good parallel experiment to T3. | Velthoen et al. *Extremes* 2023. Published validation is on rainfall extremes, not sports data. |
+| **T6. FAGTB adversarial penalty against MeanYr decile** | Tier 3 (Skew) | 1 week | Quantile-bucket MeanYr (10 deciles); adversary tries to predict the decile from the residual; penalize the loc gradient by adversary loss. Principled "bias-by-group" penalty per Grari et al. (arXiv 1911.05369) and M²FGB (arXiv 2504.12458). | Custom LightGBM objective + one notebook. FAGTB was designed for binary protected attributes; for continuous MeanYr, quantile-bucket first. |
+| **T10. PGBM** | Tier 3 (Skew) | 1 week | Alternative scale predictor: mean + variance from a single ensemble without parametric distribution assumption. Avoids the SkewNormal shape bound. | Sprangers et al. KDD 2021. Per Chevalier & Côté 2025, NB-class targets do **not** uniformly benefit from probabilistic GBM over point-prediction GBM — validate per market. |
+
+**Decision points (gate logic for Stage A4):**
+- If CatBoost ordered TS alone ships > 5% on a low-ICC market → bias was
+  largely `player_id` encoding leakage, not structural compression.
+  Deprioritize the rest of Stage A4; MEGB and gbex become nice-to-have.
+- If MEGB ships on PTS but not on FG3M → confirms the high-ICC vs low-ICC
+  dichotomy; route count markets to T3/T7 only and stop Track-A work there.
+
+### What is dropped from the Track-A plan and why
+
+- **Original P3 basic rate decomposition** → folded into T5 four-stage
+  factorization. No reason to run the basic version when the industry-standard
+  four-stage version is the actual approach DFS shops use.
+- **Original P5 leakage-safe target-encoded player features** → replaced by
+  T2 CatBoost ordered TS. Ordered TS strictly dominates expanding-mean
+  encoding per the NeurIPS 2018 proof.
+- **Original P10 GPBoost retry** → replaced by T4 MEGB/GBMixed. Same goal
+  (mixed-effects boosting) but the EM-pseudo-residual mechanism fixes the
+  documented GPBoost bias. Already-failed GPBoost prototype stands as the
+  baseline to beat, not a reason to abandon mixed-effects entirely.
+
+---
+
+## Track B — ZINB markets (FTM, STL kill recovery + 6 SHIP hardening)
+
+Source: `/tmp/researcher_zinb.md`. Scope: FG3M, FTM, OREB, PF, STL, TOV, BLK,
+BLST. After P2.B, 6/8 ship under hurdle mode; FTM and STL kill. The
+researcher's hypothesis is that the FTM/STL kill is a **mathematical artifact
+of using "fit on positives" instead of a true zero-truncated NegBin (ZTNB)
+likelihood** in [hurdle.py:201](../src/sportstradamus/hurdle.py#L201). The
+hurdle Stage 2 is currently a misspecified ZTNB.
+
+### Stage B1 — Isolate and diagnose (1 week)
+
+Two tasks in parallel. Tier 1 from the researcher.
+
+| Method | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **ZTNB Stage 2 likelihood fix** | Tier 1 (ZINB) #1 | hours | Replace `NegativeBinomial(μ, α).log_prob(y)` in the Stage-2 hurdle loss with `nb.log_prob(y) − log1p(−exp(nb.log_prob(zeros_like(y))))`. The optimizer recovers an unbiased μ; the derived-π identity then gives the correct ZINB marginal mean (1−ψ)·μ. Eliminates the +NB(0)·(1−q)·μ_pos/(1−NB(0)) over-prediction on FTM/STL **by construction**. | Wrap the existing NegBin loss in [hurdle.py](../src/sportstradamus/hurdle.py); PyTorch already has `torch.distributions.NegativeBinomial`. |
+| **Per-market routing diagnostics** | Tier 1 (ZINB) #2 | days | Build a one-page per-market dashboard with: observed mean, variance, zero-rate p₀; ziP and ziNB indices with bootstrap CIs (Blasco-Moreno et al. 2019); Wilson-Einbeck p-value (Stat Modelling 2019); Schwarz-corrected Vuong (HurdleNB vs ZINB) per Wilson 2015; var/mean ratio; conditional positive mean E[Y\|Y>0] vs μ. Routes each market to plain NB / HurdleNB(ZTNB) / MZINB / CMP. | New `src/sportstradamus/scripts/zinb_routing_diagnostics.py`; output to `data/zinb_routing/{LEAGUE}_diagnostics.parquet`. |
+
+Routing rule (precomputable from training data alone, survives temporal split):
+- ziNB CI contains 0 + low overdispersion → **plain NB**
+- ziNB CI contains 0 + hurdle structurally appropriate → **HurdleNB with ZTNB Stage 2**
+- ziNB > 0 robustly → **MZINB** (after Stage B3) or stay on HurdleZINB-with-ZTNB
+- var/mean < 1.3 → **CMP**
+
+**Decision points (gate logic for Stage B1):**
+- FTM/STL flip to ship/neutral under ZTNB Stage 2 → bias was likelihood-level
+  only. Stop and harden; Tier 2 work becomes lower-ROI.
+- FTM/STL still kill → routing diagnostics tell you whether the problem is
+  structural (use plain HurdleNB instead of ZINB on those markets) or deeper
+  (proceed to Stage B2).
+- If sample variance/mean ratio for STL is < 1.0 → pivot STL specifically to
+  CMP (Stage B4) and run that A/B before any other Stage B3 work.
+
+### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
+
+| Method | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **Per-market routing wiring** | Tier 1 (ZINB) #2 | days | Implement the routing logic from B1's table. `data/zinb_mode_per_market.json` config + per-market lookup in [pipeline.py](../src/sportstradamus/training/pipeline.py). The 6 SHIP markets under hurdle continue to use hurdle; FTM/STL route per Stage B1 diagnostic outcome. | `pipeline.py` per-market dispatch; new JSON config under `data/`. |
+| **Leakage-safe target-encoded player features** | Tier 2 (ZINB) #5; was original P5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. Orthogonal to architectural choice; ships regardless of which Stage B3 winner emerges. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as the MeanYr/Mean10 columns. |
+
+**Decision points (gate logic for Stage B2):**
+- 8/8 ship under routing + encoded features → hold off on Stage B3 unless
+  ROI is needed elsewhere. The system is in a good state.
+- <8/8 ship → proceed to Stage B3 on the markets that still kill.
+
+### Stage B3 — Strategic fork (4–6 weeks, pick ONE — not both)
+
+This is the canonical decision point of the ZINB track. The researcher
+explicitly flags that running MZINB and GPBoost in parallel doubles cost
+without obvious gain. The decision criterion is **residual structure after
+Stage B2**.
+
+| Option | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **MZINB head in LightGBMLSS** | Tier 2 (ZINB) #4 | 2–4 weeks | Reparameterize so the marginal mean ν = E[Y] is boosted directly; the latent NB conditional mean μ = ν/(1−ψ) is reconstructed. Three heads: logit(ψ), log(ν), log(α). The boosted ν IS the quantity the downstream pipeline already consumes. Cleaner than current derived-π trick. Sidesteps the gate-vs-NB(0) trade-off as a side effect. **No published GBDT implementation — novel contribution.** | New `MZINB` class alongside the existing distributions in [skew_normal.py](../src/sportstradamus/skew_normal.py) or under [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py); foundational papers Long 2014 + Preisser 2016. Use Mutiso et al. 2024 (Pólya-gamma augmentation) as a likelihood-structure reference. |
+| **GPBoost with NegBin likelihood + player random intercept** | Tier 2 (ZINB) #3; was original P10 | 1–2 weeks | NegBin is one of GPBoost's native likelihoods, so the LSS-flexibility loss is smaller on counts than on SkewNormal. Sigrist's published benchmarks (~10pp gap vs LightGBM-Cat, ~93pp vs naive numeric ID) transfer to NB. The earlier GPBoost prototype failed on SkewNormal FGA, not on counts. | New GPBoost dependency (user pre-approved for a phase that needs it); custom training path branched off [pipeline.py](../src/sportstradamus/training/pipeline.py). Treat as a sub-project with its own task list. |
+
+**Decision criterion (researcher-specified):**
+- **Choose GPBoost** if residuals plotted by `player_id` (with bootstrap CIs)
+  show systematic per-player offsets statistically distinguishable from zero
+  — i.e. the problem is missing player effects. Trade-off: lose LSS-style
+  distributional flexibility for future markets that need exotic distributions
+  (CMP, mixtures, normalizing flows).
+- **Choose MZINB** if residuals are tail-driven or shape-driven
+  (heavy-tailed within-player residuals, not location-shifted) — i.e. the
+  problem is identifiability of the gate vs the count head, not missing
+  player effects. Trade-off: novel implementation, ~4 weeks of debugging,
+  no GBDT precedent.
+
+In either case, also implement **Per-parameter Optuna search** (Tier 3 #6,
+days of work, see Stage B4) — you want a fair tuned baseline against which to
+evaluate the bigger structural change.
+
+**Decision points (gate logic for Stage B3):**
+- If residuals after Stage B2 are ambiguous (no clear per-player pattern AND
+  no clear tail-driven pattern) → run a 2-week MZINB spike first (cheaper
+  exit if it fails); GPBoost is the fallback.
+- If Stage B4 per-parameter Optuna alone eliminates the deterministic-mode
+  blowups across all SHIP markets → MZINB becomes much weaker as a
+  recommendation; identifiability was hyperparameter-induced not
+  parameterization-induced. Reroute Stage B3 effort to GPBoost-only.
+
+### Stage B4 — Tuning, polish, specialized fixes (optional)
+
+| Method | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **Per-parameter Optuna search** | Tier 3 (ZINB) #6 | days | Separate `learning_rate` and `n_estimators` for gate vs NB heads inside the existing LightGBMLSS Optuna sweep. cyc-GBM-inspired without porting. May resolve the deterministic-30-round blowups without architectural change. Daub et al. 2026 ("balanced step length") provides theoretical justification. | Extend the Optuna search-space dict in [pipeline.py:348-368](../src/sportstradamus/training/pipeline.py#L348) to distinguish gate vs count hyperparameters. |
+| **CMP head for STL specifically** | Tier 4 (ZINB) #8 | 1–2 weeks | Only worth implementing if STL's empirical variance/mean ratio < 1.3 (per Stage B1 diagnostic). NB always has variance > mean for finite α; CMP corrects in either direction. Philipson & Huang 2023 provide a fast look-up-table mean-parameterized CMP. | New PyTorch custom distribution; pre-computed Z(λ, ν) lookup table at module load. |
+| **Reduced regularization on location parameter** | Tier 3 (ZINB) #7; was original P6 | hours | Larger `num_leaves`, smaller `min_data_in_leaf`, deeper `max_depth`. Marginal effect. Try only after Tier 1–2. | Optuna search-space dict. |
+| **MERF-style iteration with LightGBMLSS** | Tier 4 (ZINB) #9; was original P9/P10 fallback | 2–3 weeks | Alternating fit-residual / re-estimate-shrunken-per-player-baseline loop. Reserve as fallback if Stage B3 (both MZINB and GPBoost) prove infeasible. | New module under `src/sportstradamus/training/`. |
+| **Quantile / expectile heads alongside the ZINB** | Tier 5 (ZINB) #11; was original P7-equivalent | days | **Different use case** — DFS ceiling and over bets, not the bias fix. Add alongside, not instead of, Tier 1–2. Sluijterman et al. 2025 arctan pinball loss is a drop-in replacement for standard pinball with better-calibrated extremes. | New quantile head pickled alongside the ZINB pickle. |
+| **Isotonic post-hoc calibration on ZINB-mean** | Tier 5 (ZINB) #12; was original P8 | hours | Polish. Mops up residual average bias after architectural fixes. Don't lead with it. | Wrap predictions in `IsotonicRegression(out_of_bounds="clip")`. |
+| **Sample reweighting on high-scoring games** | Tier 5 (ZINB) #13; was original P9 | hours | Last resort. Increases variance in the upweighted region. | LightGBM `sample_weight` arg. |
+
+**What NOT to do (researcher-specified warnings):**
+- Do **not** lead with quantile/expectile heads as a bias fix — they change
+  which point of the distribution is predicted, not the underlying bias.
+- Do **not** lead with isotonic calibration. It's polish, not a primary fix.
+- Do **not** port to cyc-GBM or CyclicBoosting before trying per-parameter
+  Optuna inside the existing LightGBMLSS stack. Port cost is unjustified
+  until you've ruled out the cheap version of the same idea.
+- Do **not** pursue per-minute decomposition on count markets in parallel
+  with Track A — leverage is materially lower on counts (STL/BLK are
+  low-mean stochastic events, not rate-times-minutes phenomena) and the
+  engineering cost overlaps.
+- Do **not** commit to both MZINB and GPBoost. Pick based on Stage B2
+  residual diagnostics.
+
+**Decision points (gate logic for Stage B4):**
+- If per-parameter Optuna alone hits the threshold → declare done; don't
+  proceed to CMP/MERF.
+- If STL's var/mean ratio < 1.0 → CMP becomes a primary fix, not Stage B4
+  polish. Move it up to Stage B3.
+- If everything in B4 fails → loop back to a Track-A-style live-path audit:
+  the FTM/STL kill may actually originate downstream in
+  [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py),
+  not in training. See OVERCONFIDENCE_INVESTIGATION §3.4 for the live-path
+  confound playbook.
+
+---
+
+## Open questions (researcher-flagged, unresolved)
+
+1. **Feature-predictive-power asymmetry between zero-vs-count splits at the
+   market level is not in the published literature.** Your TOV-vs-STL puzzle
+   (similar surface stats, opposite hurdle outcomes) is not directly
+   addressed; the closest analogue is Feng (2021)'s finding that NB
+   outperforms ZINB at ~20% zero rates (STL at 48% is well above that
+   regime). You may be observing a genuine domain-specific phenomenon that
+   would be publishable in its own right. Capture data and patterns
+   discovered in this project for a possible write-up after Stage B
+   concludes. (ZINB researcher caveat #5.)
+2. **No GBDT precedent for MZINB.** First implementation in boosting will be
+   yours. Expect 3–5 cycles of debugging the gradient computation for
+   log(ν) → μ_implied = ν/(1−ψ) before the model trains stably. The
+   empirical case for boosted MZINB resolving the deterministic-mode
+   blowups would itself be a novel contribution. (ZINB researcher caveat #1.)
+3. **MEGB's headline 35–76% MSE improvement is from simulations**, not
+   from a real high-n low-p panel matching the NBA regime. Transfer is the
+   bet, not a confirmed result. (SkewNormal researcher caveat.)
+4. **DEGPD / ZIDEGPD count distributions** (Ahmad & Hussain 2025) are very
+   new with no production-grade Python implementation. Implementation from
+   the paper required if the routing diagnostic points there. Deliberately
+   not staged into Track B — too speculative for the current plan.
+5. **CMP normalizing-constant lookup table** implementation cost is non-trivial.
+   Worth it only if Stage B1 var/mean diagnostics strongly suggest under-dispersion
+   for at least one market.
+6. **CatBoost ordered TS unbiasedness was proven for log-loss / squared-error**;
+   the proof does not directly extend to a distributional SkewNormal NLL.
+   Mechanism should still help, but validate empirically. (SkewNormal
+   researcher caveat.)
+7. **The Chevalier & Côté (2025) benchmark warns that probabilistic GBM is
+   not uniformly better than point-prediction GBM on NB-class targets.**
+   Validate any architectural switch (MZINB, cyc-GBM, CMP) against the
+   current LightGBMLSS-ZINB baseline on probabilistic metrics (CRPS,
+   log-score) **and** on the downstream MAE metric, not just one of these.
+8. **None of these approaches solves "high-volume players get under-predicted"
+   if it is fundamentally a player-effect issue.** Best long-term architecture
+   probably combines (a) MZINB likelihood, (b) per-player random intercept
+   à la GPBoost, and (c) per-parameter early stopping à la cyc-GBM — but
+   each piece is an independent A/B and should be staged as above.
+
+---
 
 ## Critical files
 
 | File | Role | Key lines |
 |---|---|---|
-| `src/sportstradamus/training/pipeline.py` | target build, dist select, training, denorm, test_set dump | 245–324 (branch/target), 328 (`lgb.Dataset` — `init_score` injection point), 341/394–409 (`set_model_start_values`), 345–346 (MeanYr monotone), 439–452 (SkewNormal denorm), ~960/981 (test_set dump) |
-| `src/sportstradamus/training/report.py` | diagnostics → `training_report.txt`, `model_stats.parquet` | `ev_meanyr_corr`/`result_meanyr_corr` (~850), `write_model_stats` |
-| `src/sportstradamus/stats/base.py` | baseline features + target | 676–702 (`MeanYr`, `Mean10`, `*_Ratio`), 1005/1011/1082 (`Result`) |
-| `src/sportstradamus/stats/nba.py` | NBA `MIN`, `USG_PCT`, per-48 stats | 127–135, 359, 366 |
-| `src/sportstradamus/helpers/distributions.py` | `set_model_start_values` (loc=1.0 in ratio space) | 425–504 |
-| `src/sportstradamus/skew_normal.py` | custom SkewNormal (location-scale, supports negatives) | 30–199 |
-| `src/sportstradamus/scripts/compression_eval.py` | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
-| `src/sportstradamus/prediction/model_prob.py` | **Live-path confound** — where the FGA symptom (Model Skew=NaN, EV≪line) actually appears; verify shipped strategies here | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
-| `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` | Existing task-by-task spec for the **ZINB derived-π gate** fix (pair with P2) | Phase B "SUPERSEDED → derived-π" |
+| [src/sportstradamus/training/pipeline.py](../src/sportstradamus/training/pipeline.py) | target build, dist select, training, denorm, test_set dump | 245–324 (branch/target), 328 (`lgb.Dataset` — `init_score` injection point), 341/394–409 (`set_model_start_values`), 345–346 (MeanYr monotone), 348–368 (Optuna search space), 439–452 (SkewNormal denorm), ~960/981 (test_set dump) |
+| [src/sportstradamus/training/report.py](../src/sportstradamus/training/report.py) | diagnostics → `training_report.txt`, `model_stats.parquet` | `ev_meanyr_corr`/`result_meanyr_corr` (~850), `write_model_stats` |
+| [src/sportstradamus/stats/base.py](../src/sportstradamus/stats/base.py) | baseline features + target; inference-time mirror lives here | 597 (`get_stats`), 676–702 (`MeanYr`, `Mean10`, `*_Ratio`), 1005/1011/1082 (`Result`) |
+| [src/sportstradamus/stats/nba.py](../src/sportstradamus/stats/nba.py) | NBA `MIN`, `USG_PCT`, per-48 stats | 127–135, 359, 366 |
+| [src/sportstradamus/helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) | `set_model_start_values`; `fused_loc` (book blend) | 425–504 |
+| [src/sportstradamus/skew_normal.py](../src/sportstradamus/skew_normal.py) | custom SkewNormal (location-scale, supports negatives) | 30–199 |
+| [src/sportstradamus/hurdle.py](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here for Track-B Stage B1) | ~201 (NegBin loss for Stage 2) |
+| [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
+| [src/sportstradamus/prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py) | **Live-path confound** — where shipped strategies must survive end-to-end | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
+| [docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md](superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md) | Source spec for the **ZINB derived-π gate** fix (P2.B precursor) | Phase B "SUPERSEDED → derived-π" |
 
-## Architectural principle (applies to all phases)
+## Verification (every code session)
 
-Make the **target/baseline transform a single configurable strategy**, selected by
-a CLI flag on `meditate` (and a matching env var for the harness), defaulting to
-current behavior. Every experiment becomes a new strategy value, not a destructive
-rewrite. This is what makes the multi-session A/B tractable and keeps `devel`
-shippable between sessions. Centralize the forward transform, the inverse
-(de-norm) transform, and the inference-time mirror so train/predict cannot drift.
-The inference mirror lives in `stats/base.py:get_stats`; any new baseline must be
-computed there identically and leakage-safe.
-
-## Phase 0 — Offline eval harness (DONE)
-
-Delivered in `src/sportstradamus/scripts/compression_eval.py` (`click` CLI),
-reading `data/test_sets/{LEAGUE}_{market}.csv` (no network), emitting:
-
-1. **Per-player-mean-decile table**: bin rows by `MeanYr` decile; per decile
-   MAE, bias (mean signed error `pred − actual`), prediction-vs-actual mean.
-   Compression signature = monotone negative bias rising across top deciles.
-2. **Compression ratio**: `std(predicted_mean) / std(actual)` overall and top-decile
-   (report cites Wheeler's 7.7× as the pathological end; 1.0 = no compression).
-3. **`result_meanyr_corr` vs `pred_meanyr_corr`** (mirrors report.py definitions).
-4. **Scatter PNG**: predicted vs actual, colored by `MeanYr` decile, y=x reference.
-5. A **scorecard** appended to a run log (`data/compression_eval_log.csv`) keyed
-   by strategy name + git SHA, so cross-session comparison is mechanical.
-6. `--baseline`/`--candidate` **diff mode**: prints the delta + ship/kill verdict
-   and exits non-zero on KILL.
-
-**Universal decision threshold (every experiment):** ship a strategy only if it
-reduces **top-mean-decile MAE by ≥ 5%** vs the current production strategy without
-worsening **global MAE by > 1%** and without worsening `brier_skill_score` on the
-existing report. Otherwise kill it and move to the next priority.
-
-Outstanding for P0: real-data validation — run `poetry run meditate --league NBA`
-for one high-mean (PTS) and one low-mean market in an env with normal network,
-confirm the decile table/scatter show the known top-decile under-diagonal cluster,
-and run the full `poetry` quality gates.
-
-**P0.5 (determinism gate) now sits between P0 and P1** — see §"Determinism
-prerequisite". It is the overconfidence investigation's #1 finding and is a
-hard precondition for trusting any P1+ diff verdict.
-
-## Priority list of interventions (work down until threshold met)
-
-Mapped from the report's LightGBMLSS-specific order, adapted to both branches.
-Each is a new target/baseline strategy behind the configurable flag; each is
-gated by the harness.
-
-**P1 — Centered-target bridge (SkewNormal branch).** Report's #1, single highest
-leverage. Replace `y / MeanYr` with `y − baseline`. Train SkewNormal on the
-centered residual (location-scale family supports negatives — fits cleanly).
-At inference add `baseline` back to **`loc` only**; `scale`/`alpha` unchanged
-(kills the multiplicative amplification at pipeline.py:612–615). Update
-`set_model_start_values` (loc start → 0, not 1.0) and the `get_stats` mirror.
-*Expected: large.*
-
-**Baseline = the Phase-A EB prior, first cut.** The overconfidence
-investigation's Phase A used `baseline = EB(MeanYr, GamesPlayed, K=10)` where
-`EB_prior = (GamesPlayed·MeanYr + K·global_mean) / (GamesPlayed + K)` (a
-one-line James-Stein/empirical-Bayes shrinkage of season-to-date `MeanYr`
-toward the global mean — stops noisy low-sample players from blowing up the
-centered residual). `EB_SHRINKAGE_K = 10.0`. **Not raw `MeanYr`; not `Mean10`.**
-The Phase-A spec lives at `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
-(`compute_eb_prior` helper, `EB_SHRINKAGE_K`); replicate it as the first P1
-strategy under P0.5 determinism — this is the documented prior win and the
-cleanest single-variable re-validation.
-
-**Configurable baseline-source strategy.** Per the architectural principle,
-the baseline itself is a strategy value, not a hardcoded choice. Wire a
-`TargetBaseline` plug (e.g. enum / strategy object) with at least these
-candidates: `eb_meanyr_k10` (Phase-A, default for P1), `meanyr` (raw),
-`mean10` (raw trailing-10), `blended` (`α·Mean10 + (1−α)·EB(MeanYr)`). First
-P1 ship attempt uses `eb_meanyr_k10` only; the others are cheap A/B
-follow-ups through the same `compression_eval` harness if Phase-A clears the
-threshold (or if it doesn't — Mean10 is the obvious next try). Tune
-`EB_SHRINKAGE_K` only after baseline-source is settled.
-
-**Leakage audit is task zero.** [`stats/base.py:682`](src/sportstradamus/stats/base.py#L682)
-computes `stats["MeanYr"] = playergames.groupby(...).mean()`. Verify
-`playergames` is strictly `< game_date`, not `≤`. The audit applies more
-strictly to `Mean10` than to `MeanYr`: an off-by-one that includes the
-current game contaminates ~10% of a 10-game window vs ~1% of a season —
-add a regression test asserting `MeanYr`/`Mean10` at `game_date` equals the
-expected expanding-then-shifted aggregate.
-
-**Investigation notes** (don't rediscover these):
-1. Phase A was *inconclusive (non-reproducible)*, **not refuted** —
-   deterministically the production-equivalent additive-EB SkewNormal model
-   was well-calibrated (+0.12 top-quintile bias, vol-spread 7.4 vs actual
-   8.3). P0.5 is the determinism gate that makes the Phase-A re-run a
-   trustworthy A/B.
-2. The `loc`-start=0 change touches `set_model_start_values` — the
-   investigation flagged the offset-mode `loc=0` seeding as a confirmed
-   regression bug (fixing to `loc=mu` halved bias in isolation). In
-   centered space the residual mean ≈ 0 so `loc=0` is semantically right
-   *if* the per-row broadcast is deterministic, not a degenerate global 0.
-   Verify with a unit test on `set_model_start_values` under the centered
-   path (sized to `len(X)`, not scalar 0).
-3. After Phase-A's offline win, **confirm end-to-end through
-   `prediction/model_prob.py`** before declaring P1 done — the
-   user-published EV path is where the FGA symptom actually lives
-   (`Model Skew=NaN` live, w≈0.9 book blend, temperature). See
-   §"Live-path confound".
-
-**P2 — `init_score` player baseline (NegBin/ZINB branch).** Report's #4 — count
-families can't be centered. Inject the log-link of the player baseline as
-per-row `init_score` on the count/location parameter via the `lgb.Dataset` at
-pipeline.py:328; booster learns only the deviation. Verify LightGBMLSS supports
-per-parameter `init_score` on a small sample first; if fiddly, fall back to a
-strong leakage-safe target-encoded player-baseline feature (P5) plus reduced
-regularization (P6) for this branch. *Expected: large.*
-
-> **Pair P2 with the ZINB derived-π gate fix (confirmed, reproducible,
-> already specced).** The overconfidence investigation proved a *distinct*
-> ZINB defect from compression: the jointly-fit `gate` head learns ≈ half the
-> true structural-zero rate path-wide, inflating `P(over@line)` everywhere.
-> `init_score` on the count base does not fix the gate. The sound fix is a
-> derived-π two-stage ZINB (calibrated zero classifier `q`; `gate =
-> clip((q − NB(0))/(1 − NB(0)), 0, 1)`), keeping all downstream ZINB code
-> unchanged. Task-by-task spec:
-> `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
-> (Phase B "SUPERSEDED → derived-π"). It is the highest-confidence,
-> reproducible win across both projects and is independent of the
-> determinism blocker — consider doing it first within the count branch.
-
-**P3 — Rate decomposition (NBA + any league with a clean volume driver).** Report's
-#2. Center the *rate* (`stat / MIN` for NBA using `nba.py` `MIN`; analogous volume
-driver per league where one exists) and multiply by a separately projected volume
-at inference. Stack on P1/P2. Skip for leagues with no stable volume analog.
-*Expected: large where applicable.*
-
-**P4 — Verify distribution family per branch.** Report's #3. Confirm centered →
-SkewNormal/Student-t; raw count → NegBin/ZINB via init_score; rate → positive
-continuous. Cheap sanity gate before deeper work.
-
-**P5 — Leakage-safe target-encoded player features.** Report's #5. Expanding-window
-`groupby(player).expanding().mean().shift(1)` player (and player×opponent) encoding
-added in `stats/base.py`. Helps both branches; also the fallback for P2.
-*Expected: medium.*
-
-**P6 — Reduce tree regularization slightly.** Report's #6. Widen Optuna ranges:
-larger `num_leaves`/`max_depth`, smaller `min_child_samples`/`min_child_weight`
-(pipeline.py:348–368). Re-check decile bias. *Expected: small.*
-
-**P7 — Isotonic post-hoc calibration on the location parameter.** Report's #8.
-Fit `IsotonicRegression(out_of_bounds="clip")` of actual vs predicted location on
-the existing validation split; apply at inference. Cheap polish. *Expected: small.*
-
-**P8 — Sample weighting (upweight high-target games).** Report's #9. LightGBM
-`sample_weight`, ≤2× at top end. Last resort; re-check global calibration.
-*Expected: small, with tradeoff.*
-
-**P9 — MERF-style iteration (hand-rolled).** Report's #10. Wrap P1/P2 in an
-alternating fit-residual / re-estimate-shrunken-per-player-baseline loop to
-convergence. More engineering; only if one-shot baseline proves too crude.
-
-**P10 — GPBoost / mixed-effects migration.** Report's last resort. Only if P9 is
-exhausted/unstable or LSS flexibility proves unnecessary. New dependency
-(`gpboost`); user pre-approved deps for a phase that needs it. Treat as a separate
-multi-session sub-project with its own plan. **Investigation note:** GPBoost
-was already prototyped deterministically for FGA and **failed** — it did not
-beat the additive-EB offset (top-volume bias −2.5), and its "flat
-fixed-effect" decomposition turned out to be a GPBoost-internal FE/RE artifact,
-not a property of the production model. Do not re-attempt naively; if revisited,
-treat the prior negative result as the baseline to beat.
+- `poetry run ruff check src/sportstradamus/`
+- `poetry run pytest tests/golden/` (incl. `test_compression_eval.py`)
+- `poetry run pytest -m integration` (fake-mode, no network)
+- Regenerate CLI help snapshots if `meditate` flags change:
+  `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
+- Determinism gate (P0.5): `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`
+- Functional gate: harness scorecard delta vs current strategy meets the P0
+  threshold before a strategy is promoted to default.
+- Live-path gate: the promoted strategy is confirmed end-to-end through
+  [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py)
+  (no `Model Skew`=NaN, EV not collapsed by the book blend), not only on the
+  dumped test set.
 
 ## Session handoff
+
+### Per-session rules
+
+- One strategy/experiment per session where feasible (aligns with CLAUDE.md
+  "one module per subagent" — the per-strategy scope discipline, not the
+  serial execution); commit + push to `claude/fix-gbdt-mean-regression-GcY1g`
+  and update the harness run log so the next session sees the scorecard history.
+- Keep the default strategy = current production behavior until an experiment
+  clears the threshold, so `devel`-tracking production is never regressed
+  mid-project.
+- Record each experiment's scorecard verdict (ship/kill) in the run log committed
+  to the repo (not a scratch doc), and update the **Status / progress log** table
+  at the top of this file.
+- Track A and Track B can be worked in separate sessions / by separate
+  subagents; they share no mutable state beyond the harness. The strategic
+  fork in Stage B3 is the only place where a single decision blocks
+  multiple downstream sessions.
 
 ### Tooling note: `gh` is a userspace install on this workstation
 
@@ -410,32 +451,13 @@ Authentication is also a one-time setup the user completes locally
 scope). Agent sessions don't have credentials by default — if `gh api …`
 returns `HTTP 401`, the user needs to re-auth.
 
-### Per-session rules
+### Branch / PR / commit refs
 
-- One strategy/experiment per session where feasible (aligns with CLAUDE.md
-  "one module per subagent" — the per-strategy scope discipline, not the
-  serial execution); commit + push to `claude/fix-gbdt-mean-regression-GcY1g`
-  and update the harness run log so the next session sees the scorecard history.
-- Keep the default strategy = current production behavior until an experiment
-  clears the threshold, so `devel`-tracking production is never regressed
-  mid-project.
-- Record each experiment's scorecard verdict (ship/kill) in the run log committed
-  to the repo (not a scratch doc), and update the **Status / progress log** table
-  at the top of this file.
-
-## Verification (every code session)
-
-- `poetry run ruff check src/sportstradamus/`
-- `poetry run pytest tests/golden/` (incl. `test_compression_eval.py`)
-- `poetry run pytest -m integration` (fake-mode, no network)
-- Regenerate CLI help snapshots if `meditate` flags change:
-  `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
-- Determinism gate (P0.5): `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`
-  must pass (proves seeded LightGBM under `--deterministic` is bit-reproducible).
-  Candidate strategies are A/B'd under `meditate --deterministic` so the
-  scorecard delta is trustworthy.
-- Functional gate: harness scorecard delta vs current strategy meets the P0
-  threshold before a strategy is promoted to default.
-- Live-path gate: the promoted strategy is confirmed end-to-end through
-  `model_prob.py` (no `Model Skew`=NaN, EV not collapsed by the book blend),
-  not only on the dumped test set.
+- Branch: `claude/fix-gbdt-mean-regression-GcY1g`
+- PR: #46 (→ `devel`)
+- HEAD at this plan rewrite: `6e913b1` ("docs: add research handoff for
+  centered-target negative result")
+- Latest shipped: P2.B HurdleZINB (commit `cee5625` ships
+  `centered_additive_eb_meanyr_k10`; subsequent commits add the verdict and
+  the HurdleZINB landing); P1 follow-up `1d0e65e` adds
+  `centered_additive_mean10` as the path-wide A/B counterexample.
