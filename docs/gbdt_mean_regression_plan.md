@@ -18,6 +18,7 @@
 | **P1 — centered-target bridge (SkewNormal)** | ✅ done (PR #46), result: **FGA-only SHIP, family-wide KILL** | Two centered-target variants A/B'd path-wide under `meditate --deterministic` against the `ratio_meanyr` baseline. (a) `centered_additive_eb_meanyr_k10` (Phase-A's EB(MeanYr, K=10)): FGA SHIPS (+5.3% top-decile MAE, brier_skill +0.096→+0.112), every other SkewNormal market KILLs (PTS −3.5%, PA −4.1%, PR −2.9%, RA −2.2%, FG3A −3.8%, FGM −2.6%, MIN +3.7%, PRA +0.8%, REB +0.2%, fantasy-points-prizepicks brier_skill regressed). (b) `centered_additive_mean10` (trailing-10 baseline, more responsive to recent form — added post-Phase-A as the obvious "level shifts with form" hypothesis): **every SkewNormal market KILLs** including FGA (+4.6% — close but under the 5% bar), with PA −6.6% and PR −6.7% notably *worse* than Phase-A. Count-family markets (FG3M, FTM, OREB, PF, STL, TOV, BLK, BLST) showed exactly 0% delta under both strategies as expected — the centered-target transform is a no-op for NegBin/ZINB. **Both runs together confirm the OVERCONFIDENCE_INVESTIGATION §3.2 "decisive negative result", strengthened: the SkewNormal level bias is not the dominant compression cause path-wide, regardless of baseline horizon (long-term EB or short-term trailing-10).** FGA is genuinely special — its win comes from EB(MeanYr) capturing structural shot-volume; Mean10 is too noisy for FGA itself and not the right lever for volume-shifting markets either. Default `--target-strategy=ratio_meanyr` stays. The infrastructure (`baselines.py`, the registry, the offset_meta pickle field, the brier_skill gate, the live-path test) is reusable for P3 (rate decomposition) and P2 (init_score baseline for count markets) — the next levers worth trying based on the path-wide negative result. |
 | **P2.B — HurdleZINB (derived-π gate)** | ✅ done (PR #46), result: **6/8 NBA ZINB markets SHIP** | New `meditate --zinb-mode=hurdle` (orthogonal to `--target-strategy`; default `joint` stays byte-identical to pre-P2.B). `HurdleZINB` (in `src/sportstradamus/hurdle.py`) is a two-stage drop-in for joint ZINB: calibrated binary classifier estimates `q = P(Y=0)`; NegBin LightGBMLSS on `Y>0` supplies count shape; structural-inflation π derived from the ZINB identity `π = clip((q − NB(0))/(1 − NB(0)), 0, 1)` (NOT the simpler `gate = 1 − p_nonzero` from the original Phase B spec — corrected because downstream `fused_loc` in `helpers/distributions.py` explicitly treats `gate` as zero-inflation, not marginal P(Y=0)). Returned `total_count/probs/gate` columns match the LightGBMLSS ZINB contract so `model_prob` ZINB decode (lines 252-257) is untouched and legacy pickles still load via `getattr(model, "is_hurdle", False)`. Path-wide A/B under `meditate --deterministic --league NBA --zinb-mode hurdle` against the joint baseline: **SHIP** on FG3M (+9.7% top-decile MAE, brier_skill +0.115→+0.290), OREB (+44.9%, +0.019→+0.109), PF (+19.2%, −0.238→−0.002), TOV (+26.8%, −0.049→+0.058), BLK (+40.4%, +0.237→+0.299), BLST (+11.6%, −0.002→+0.093). **KILL** on FTM (+1.3%, under 5% bar) and STL (global MAE +14.1% regression). The joint ZINB had per-row catastrophic blowups in mid-deciles on BLK/OREB/PF/BLST under deterministic mode (compression_ratio 24–5357×; predicted means up to 1437) that the hurdle eliminates entirely — global MAE drops 60–99% on those markets. **Default stays `--zinb-mode=joint`** — shipping the infrastructure + verdict here; the per-market routing question (FTM/STL stay joint, the rest move to hurdle) is a follow-up. **Note on the verdict criterion**: the parent plan said "predicted gate mean ≈ hist_gate" — that criterion was mis-stated under derived-π semantics. Derived-π gate is π_zi (the inflation parameter), structurally ≤ q with equality only in the zero-truncated-NB limit. For FG3M (positives mean ≈ 2.2) NB(0) ≈ 0.20 even with a well-fit NB, so derived-π gate ≈ 0.17 (similar to joint's 0.18) but the *total reconstructed P(Y=0)* matches `q ≈ 0.33` exactly by construction. The meaningful SHIP/KILL signal is the downstream compression_eval verdict on `P(over@line)` proxies (top-decile MAE + brier_skill_score), not gate mean. New `tests/integration/test_zinb_hurdle_live_path.py` asserts the identity reconstruction `π + (1−π)·NB(0) ≈ q` per-row (mean tolerance 0.02) and two-run bit-identity under `DETERMINISTIC_SEED`. Determinism gate extended with a parallel hurdle assertion. |
 | **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
+| **Stage 0 — live-data instrumentation** | ⬜ | Prerequisite for the stop-the-track principle. Five deliverables in `analysis.py` / `nightly.py` / `compression_eval.py` / new `scripts/check_graduation.py`; persists `data/live_metrics_per_market.parquet`. ~3 days total. See "Stage 0 — Live-data instrumentation" section below. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
 ## Scope — leagues this plan covers
@@ -208,6 +209,63 @@ cell only. Re-entry is logged in the Status table with the regression
 metric so future sessions can read the pattern (e.g. "WNBA FG3M re-entered
 2026-09-12 after settled brier_skill dropped to −0.04 vs graduation 0.11
 — preseason rotations changed minutes patterns").
+
+### Stage 0 — Live-data instrumentation (prerequisite for everything else)
+
+**The graduation criteria above reference metrics that are not currently
+persisted in a usable form.** Before any track work that intends to use
+the stop-the-track principle, Stage 0 must ship. Without it, "settled
+brier_skill ≥ 0 over the last 30 days" is rhetorical, not actionable.
+
+What exists today:
+
+| Component | State |
+|---|---|
+| [analysis.py:877](../src/sportstradamus/analysis.py#L877) `compute_brier_skill_score(subset, base_rate=0.5)` | Computes BSS against base-rate 0.5 (chance), **not against the book** — different quantity than training-side `brier_skill_score` which uses the book baseline. Not directly comparable to the training metric the plan references. |
+| `history.parquet` with settled `Actual` column | Exists; filled by [nightly.py](../src/sportstradamus/nightly.py) on every `reflect` run. Per-offer granularity; not aggregated per (league, market) or over rolling windows. |
+| Dashboard pages 3/4/6 | Compute brier / BSS / profit-sim **on demand** from `history.parquet` when a user opens the page. Not persisted; future sessions cannot read these values programmatically. |
+| Live top-decile MAE on settled bets | **Does not exist.** [compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) only scores `data/test_sets/` CSVs (offline held-out test rows), not live settled offers. |
+| Per-(league, market) persistent metric store | **Does not exist.** No `data/live_metrics_per_market.parquet`. |
+
+Stage 0 deliverables (in dependency order):
+
+| # | Deliverable | Cost | Where it lives |
+|---|---|---|---|
+| 0.1 | **Live brier_skill_score against the book baseline** — variant of [analysis.py:877](../src/sportstradamus/analysis.py#L877) that uses the bookmaker's implied prob (already stored per-offer in `history.parquet` as the original `Odds` column) as the reference, mirroring the training-side `brier_skill_score` exactly. Add as `compute_book_brier_skill_score(subset)` alongside the existing function — keep the chance-baseline version (some dashboards already rely on it). | ~2 hours | [analysis.py](../src/sportstradamus/analysis.py) |
+| 0.2 | **Rolling-window aggregation per (league, market)** — extend `reflect` to compute, for each (league, market) cell at the end of every nightly run: 7-day and 30-day rolling book-BSS, empirical-vs-predicted over-rate, total settled bets, and total profit-sim yield. Write to `data/live_metrics_per_market.parquet` keyed by (league, market, computed_at). | ~1 day | New `compute_live_metrics()` step at the tail of [nightly.py](../src/sportstradamus/nightly.py) `run()`. |
+| 0.3 | **Live top-decile MAE harness mode** — new `compression_eval --live-window N` flag that reads `history.parquet` instead of a test-set CSV, filters to the last N days of settled bets per (league, market), and runs the existing decile-bias scoring code path. Output schema matches the offline mode so the comparison "live vs offline top-decile MAE" is a parquet join. | ~1 day | [compression_eval.py](../src/sportstradamus/scripts/compression_eval.py); add unit tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py). |
+| 0.4 | **Graduation-status table view** — small CLI (`poetry run check-graduation`) or dashboard page that joins `data/live_metrics_per_market.parquet` against the four graduation thresholds and emits a 36-cell × 4-metric ✅ / ⚠️ / ❌ table per (league, market). This is what future sessions read to decide track continuation. | ~half day | New [src/sportstradamus/scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) or a new dashboard page. |
+| 0.5 | **Backfill rolling metrics on existing history** — one-shot script that walks back through `history.parquet` and emits the rolling-window points for the last ~90 days so Stage 0's first publication of `live_metrics_per_market.parquet` has historical context to compare against. | ~half day | One-shot script under [src/sportstradamus/scripts/](../src/sportstradamus/scripts/). |
+
+**Total Stage 0 cost: ~3 days.** Modest — and the entire stop-the-track
+principle becomes empirically grounded instead of rhetorical.
+
+**Stage 0 ship gate** (separate from the universal threshold — Stage 0 is
+infrastructure, not a model change):
+- `live_metrics_per_market.parquet` exists and has ≥ 7 days of history at
+  publication
+- Live book-BSS computed by 0.1 matches a hand-computed reference within
+  1e-6 on a 100-row spot check from `history.parquet`
+- `compression_eval --live-window 30` produces a deterministic output on a
+  fixed history.parquet snapshot (frozen for the test) and the golden
+  test asserts row-count + schema
+- A `check_graduation` invocation on the cached snapshot produces a
+  non-empty table covering NBA / WNBA / NFL × all distributions
+
+**Stage 0 stop-the-track check:** there is no "we have enough live data
+already" exit for Stage 0 — it's the infrastructure that makes
+graduation decisions possible. Skip Stage 0 only if you also skip the
+stop-the-track principle (which means committing to running every
+remaining stage on every cell — exactly the perfect-as-enemy-of-good
+mode the principle is designed to prevent).
+
+**Why Stage 0 doesn't compete with the actual model work:** Stage 0 ships
+once. Every subsequent stage's graduation check is a 30-second parquet
+read. Across the remaining ~12 stages × 36+23 cells, the amortized cost
+is negligible. Without Stage 0, every graduation check requires either a
+manual dashboard inspection (slow, not programmatic, won't survive
+future sessions) or re-deriving the metric in an ad-hoc script (which is
+Stage 0 done badly).
 
 ## Two-track next-session plan
 
