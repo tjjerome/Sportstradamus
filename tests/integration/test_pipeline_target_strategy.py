@@ -13,6 +13,7 @@ Validates three load-bearing claims of the P1 plan:
 Uses the same cached NBA_FGA subsample as the determinism gate and skips
 when the parquet is not present (no network, no fresh fetch).
 """
+
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
@@ -131,9 +132,7 @@ def test_centered_strategy_diverges_from_ratio_strategy():
     X_train, y_raw, X_test = _load_fixture()
 
     ratio = _fit_with_strategy("ratio_meanyr", X_train, y_raw, X_test)
-    centered = _fit_with_strategy(
-        "centered_additive_eb_meanyr_k10", X_train, y_raw, X_test
-    )
+    centered = _fit_with_strategy("centered_additive_eb_meanyr_k10", X_train, y_raw, X_test)
 
     # Predicted raw loc must differ — that's the GBDT learning a different
     # target. Use any-not-equal rather than mean-shift, because the centered
@@ -155,9 +154,7 @@ def test_centered_loc_meanyr_correlation_differs_from_ratio_loc():
     X_train, y_raw, X_test = _load_fixture()
 
     ratio = _fit_with_strategy("ratio_meanyr", X_train, y_raw, X_test)
-    centered = _fit_with_strategy(
-        "centered_additive_eb_meanyr_k10", X_train, y_raw, X_test
-    )
+    centered = _fit_with_strategy("centered_additive_eb_meanyr_k10", X_train, y_raw, X_test)
 
     meanyr_test = X_test["MeanYr"].to_numpy()
     corr_ratio = float(np.corrcoef(ratio["loc"].to_numpy(), meanyr_test)[0, 1])
@@ -167,6 +164,5 @@ def test_centered_loc_meanyr_correlation_differs_from_ratio_loc():
     # ratio target builds in division by MeanYr, the centered target does
     # not, so the GBDT learns a structurally different mapping.
     assert abs(corr_ratio - corr_centered) > 0.05, (
-        f"corr(loc, MeanYr) barely moved: ratio={corr_ratio:.3f}, "
-        f"centered={corr_centered:.3f}"
+        f"corr(loc, MeanYr) barely moved: ratio={corr_ratio:.3f}, " f"centered={corr_centered:.3f}"
     )

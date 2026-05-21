@@ -190,9 +190,7 @@ def _centered_eb_decode_loc(
     return eb + np.asarray(loc, dtype=float)
 
 
-def _centered_eb_decode_scale(
-    scale: np.ndarray, X: pd.DataFrame, denom_col: str
-) -> np.ndarray:
+def _centered_eb_decode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
     return np.asarray(scale, dtype=float)
 
 
@@ -229,9 +227,7 @@ def _centered_mean10_decode_loc(
     return _mean10_baseline(X, denom_col) + np.asarray(loc, dtype=float)
 
 
-def _centered_mean10_decode_scale(
-    scale: np.ndarray, X: pd.DataFrame, denom_col: str
-) -> np.ndarray:
+def _centered_mean10_decode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
     return np.asarray(scale, dtype=float)
 
 

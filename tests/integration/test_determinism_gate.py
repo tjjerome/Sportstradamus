@@ -11,6 +11,7 @@ stochastic-free defaults, so this gate is intentionally stricter than
 production behavior — a true regression guard for the seeding mechanism.
 No network (cached parquet + offline columns).
 """
+
 import importlib.resources as pkg_resources
 
 import numpy as np
@@ -61,7 +62,11 @@ def test_deterministic_mode_is_bit_reproducible():
     def run():
         dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
         return fit_predict_params(
-            dist_obj, "SkewNormal", X_train, y_train_labels, X_test,
+            dist_obj,
+            "SkewNormal",
+            X_train,
+            y_train_labels,
+            X_test,
             # Override DETERMINISTIC_FIXED_PARAMS to introduce real stochasticity
             # (feature/row subsampling). This way the gate ACTUALLY tests that the
             # seeding mechanism pins LightGBM's stochastic tree building, not that
@@ -77,7 +82,9 @@ def test_deterministic_mode_is_bit_reproducible():
                     "monotone_constraints": [0] * X_train.shape[1],
                 }
             ),
-            normalized=True, shape_ceiling=100.0, seed=DETERMINISTIC_SEED,
+            normalized=True,
+            shape_ceiling=100.0,
+            seed=DETERMINISTIC_SEED,
         )
 
     p1 = run()
@@ -128,8 +135,12 @@ def _assert_hurdle_params_bit_reproducible(parquet_name: str, stats, market: str
 
     def run() -> pd.DataFrame:
         return fit_predict_hurdle_params(
-            X_train, y_train, X_test,
-            params=params, shape_ceiling=50.0, seed=DETERMINISTIC_SEED,
+            X_train,
+            y_train,
+            X_test,
+            params=params,
+            shape_ceiling=50.0,
+            seed=DETERMINISTIC_SEED,
         )
 
     pd.testing.assert_frame_equal(run(), run(), check_exact=True)
@@ -153,6 +164,4 @@ def test_deterministic_mode_hurdle_is_bit_reproducible_wnba():
 def test_deterministic_mode_hurdle_is_bit_reproducible_nfl():
     """NFL interceptions — cross-league ZINB determinism guard for Stage B1's
     zero-truncated NegBin, on a low-mean NFL count market."""
-    _assert_hurdle_params_bit_reproducible(
-        "NFL_interceptions.parquet", StatsNFL(), "interceptions"
-    )
+    _assert_hurdle_params_bit_reproducible("NFL_interceptions.parquet", StatsNFL(), "interceptions")

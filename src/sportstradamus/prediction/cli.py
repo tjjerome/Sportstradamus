@@ -123,7 +123,9 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         )
         parlay_df = pd.concat([parlay_df, ud5])
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
-        ud_offers["Stat"] = ud_offers["Market"]  # preserve gamelog key for dashboard history lookups
+        ud_offers["Stat"] = ud_offers[
+            "Market"
+        ]  # preserve gamelog key for dashboard history lookups
         ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"] = (
             1.78 * ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"]
         )
@@ -147,7 +149,9 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         )
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
-        sl_offers["Stat"] = sl_offers["Market"]  # preserve gamelog key for dashboard history lookups
+        sl_offers["Stat"] = sl_offers[
+            "Market"
+        ]  # preserve gamelog key for dashboard history lookups
         sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"] = (
             1.78 * 1.78 / sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"]
         )

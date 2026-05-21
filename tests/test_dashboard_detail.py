@@ -45,9 +45,7 @@ def test_find_offer_idx_hit_and_miss():
     )
     hit = find_offer_idx(parse_leg("Ayo Dosunmu Over 9.5 Points - 78%, 1.0x"), offers)
     assert hit == 0
-    miss = find_offer_idx(
-        parse_leg("Ayo Dosunmu Over 12.5 Points - 40%, 1.0x"), offers
-    )
+    miss = find_offer_idx(parse_leg("Ayo Dosunmu Over 12.5 Points - 40%, 1.0x"), offers)
     assert miss is None
     assert find_offer_idx(None, offers) is None
 
@@ -65,23 +63,32 @@ def test_find_offer_idx_resolves_platform_market_codes():
         }
     )
     # Underdog: spaced display name -> "Pts+Rebs+Asts" -> PRA
-    assert find_offer_idx(
-        parse_leg("Ayo Dosunmu Over 16.5 Pts + Rebs + Asts - 75%, 1.0x"),
-        offers,
-        "Underdog",
-    ) == 0
+    assert (
+        find_offer_idx(
+            parse_leg("Ayo Dosunmu Over 16.5 Pts + Rebs + Asts - 75%, 1.0x"),
+            offers,
+            "Underdog",
+        )
+        == 0
+    )
     # Underdog: "FG Attempted" -> FGA
-    assert find_offer_idx(
-        parse_leg("Victor Wembanyama Under 17.5 FG Attempted - 83%, 1.0x"),
-        offers,
-        "Underdog",
-    ) == 1
+    assert (
+        find_offer_idx(
+            parse_leg("Victor Wembanyama Under 17.5 FG Attempted - 83%, 1.0x"),
+            offers,
+            "Underdog",
+        )
+        == 1
+    )
     # Sleeper: snake key "threes_made" -> FG3M
-    assert find_offer_idx(
-        parse_leg("Jokic Over 2.5 threes_made - 50%, 1.0x"),
-        offers,
-        "Sleeper",
-    ) == 2
+    assert (
+        find_offer_idx(
+            parse_leg("Jokic Over 2.5 threes_made - 50%, 1.0x"),
+            offers,
+            "Sleeper",
+        )
+        == 2
+    )
 
 
 def test_family_labels_star_carousel_distinct_and_deterministic():

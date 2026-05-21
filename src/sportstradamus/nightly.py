@@ -167,8 +167,13 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     df["computed_at"] = pd.to_datetime(df["computed_at"])
     df["window_days"] = df["window_days"].astype("int16")
     df["n_settled"] = df["n_settled"].astype("int64")
-    for col in ("book_bss", "empirical_over_rate", "predicted_over_rate",
-                "top_decile_mae", "profit_sim_yield"):
+    for col in (
+        "book_bss",
+        "empirical_over_rate",
+        "predicted_over_rate",
+        "top_decile_mae",
+        "profit_sim_yield",
+    ):
         df[col] = df[col].astype("float64")
     return df
 

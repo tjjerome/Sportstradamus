@@ -104,9 +104,7 @@ def test_ratio_path_uses_meanyr_nonzero_when_hist_gate_exceeds_threshold():
     )
 
     np.testing.assert_array_equal(out["Model EV"].to_numpy(), expected_ev)
-    np.testing.assert_array_equal(
-        out["Model Gate"].to_numpy(), np.full(len(X), hist_gate)
-    )
+    np.testing.assert_array_equal(out["Model Gate"].to_numpy(), np.full(len(X), hist_gate))
 
 
 def test_centered_additive_decodes_through_eb_offset_path():
@@ -157,9 +155,7 @@ def test_centered_additive_model_skew_is_finite():
     # Realistic alpha range including small-magnitude values; delta divides by
     # sqrt(1 + alpha^2) which is always >= 1, so no zero-divide is possible —
     # but the test pins that contract explicitly.
-    prob_params["alpha"] = np.array(
-        [-3.0, -1.5, -0.5, -0.01, 0.0, 0.01, 0.5, 1.5, 3.0, 5.0]
-    )
+    prob_params["alpha"] = np.array([-3.0, -1.5, -0.5, -0.01, 0.0, 0.01, 0.5, 1.5, 3.0, 5.0])
     offset_meta = {
         "method": "eb_additive",
         "k": EB_SHRINKAGE_K,
@@ -188,9 +184,7 @@ def test_ratio_path_model_skew_is_finite():
     """Same finite-Skew guard for the default ratio path."""
     X = _synth_player_stats(n=10, rng_seed=5)
     prob_params = _synth_prob_params(n=10, rng_seed=6)
-    prob_params["alpha"] = np.array(
-        [-3.0, -1.5, -0.5, -0.01, 0.0, 0.01, 0.5, 1.5, 3.0, 5.0]
-    )
+    prob_params["alpha"] = np.array([-3.0, -1.5, -0.5, -0.01, 0.0, 0.01, 0.5, 1.5, 3.0, 5.0])
 
     out = _decode_skewnormal(
         prob_params.copy(),
@@ -233,6 +227,4 @@ def test_meanyr_floor_applied_in_ratio_path():
     )
 
     # loc=1 -> Model EV == MeanYr_clipped. First three should hit the 0.5 floor.
-    np.testing.assert_array_equal(
-        out["Model EV"].to_numpy(), np.array([0.5, 0.5, 0.5, 10.0])
-    )
+    np.testing.assert_array_equal(out["Model EV"].to_numpy(), np.array([0.5, 0.5, 0.5, 10.0]))

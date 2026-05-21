@@ -119,9 +119,9 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
         "Model Skew (alpha) must be finite under the centered strategy -- "
         "NaN here is the FGA dead end from OVERCONFIDENCE_INVESTIGATION.md 3.4."
     )
-    assert np.isfinite(decoded["Model Skew"].to_numpy()).all(), (
-        "Model Skew must be finite (no inf) for every row."
-    )
+    assert np.isfinite(
+        decoded["Model Skew"].to_numpy()
+    ).all(), "Model Skew must be finite (no inf) for every row."
 
     # Assertion 2: Model EV matches EB_prior + loc + scale*delta*sqrt(2/pi).
     eb = compute_eb_prior(
@@ -136,10 +136,7 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
         decoded["Model EV"].to_numpy(),
         expected_ev,
         atol=1e-9,
-        err_msg=(
-            "Live decode formula does not match the train-side "
-            "EB-additive transform."
-        ),
+        err_msg=("Live decode formula does not match the train-side " "EB-additive transform."),
     )
 
     # Assertion 3: top-quintile EV not collapsed (anti-amplification guard).

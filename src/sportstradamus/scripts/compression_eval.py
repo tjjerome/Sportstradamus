@@ -169,9 +169,7 @@ def decile_table(df: pd.DataFrame, pred_col: str, n_deciles: int = N_DECILES) ->
         (``pred - actual``), and mean predicted vs. actual.
     """
     work = df.copy()
-    work["decile"] = pd.qcut(
-        work[DECILE_COL].rank(method="first"), n_deciles, labels=False
-    )
+    work["decile"] = pd.qcut(work[DECILE_COL].rank(method="first"), n_deciles, labels=False)
     err = work[pred_col] - work[ACTUAL_COL]
     work["abs_err"] = err.abs()
     work["bias"] = err
@@ -297,10 +295,7 @@ def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
             f"KILL: global MAE regressed {global_reg:+.1%} "
             f"(max {MAX_GLOBAL_MAE_REGRESSION:.0%})"
         )
-    if (
-        baseline.brier_skill_score is not None
-        and candidate.brier_skill_score is not None
-    ):
+    if baseline.brier_skill_score is not None and candidate.brier_skill_score is not None:
         delta = candidate.brier_skill_score - baseline.brier_skill_score
         if delta < -MAX_BRIER_SKILL_REGRESSION:
             return False, (
@@ -313,8 +308,7 @@ def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
         + (
             f", brier_skill {baseline.brier_skill_score:+.3f} → "
             f"{candidate.brier_skill_score:+.3f}"
-            if baseline.brier_skill_score is not None
-            and candidate.brier_skill_score is not None
+            if baseline.brier_skill_score is not None and candidate.brier_skill_score is not None
             else ""
         )
     )
@@ -359,8 +353,7 @@ def write_scatter(df: pd.DataFrame, pred_col: str, out_path: Path, title: str) -
 def _print_table(table: pd.DataFrame) -> None:
     """Pretty-print the decile table to stdout."""
     click.echo(
-        f"{'decile':>6} {'meanyr':>8} {'n':>6} {'mae':>8} "
-        f"{'bias':>8} {'pred':>8} {'actual':>8}"
+        f"{'decile':>6} {'meanyr':>8} {'n':>6} {'mae':>8} " f"{'bias':>8} {'pred':>8} {'actual':>8}"
     )
     for _, r in table.iterrows():
         click.echo(
@@ -370,9 +363,7 @@ def _print_table(table: pd.DataFrame) -> None:
         )
 
 
-def _resolve_test_sets(
-    test_sets_dir: Path, league: str | None, market: str | None
-) -> list[Path]:
+def _resolve_test_sets(test_sets_dir: Path, league: str | None, market: str | None) -> list[Path]:
     """Resolve the CSV files to evaluate from --league/--market filters."""
     paths = sorted(test_sets_dir.glob("*.csv"))
     if league:
@@ -596,9 +587,7 @@ def main(
             raise click.UsageError("No settled offers match the --league/--market filters.")
         for cell_league, cell_market in cells:
             lookup = _load_league_stats_lookup(cell_league)
-            frame = _history_to_eval_frame(
-                history, cell_league, cell_market, live_window, lookup
-            )
+            frame = _history_to_eval_frame(history, cell_league, cell_market, live_window, lookup)
             if frame.empty:
                 click.echo(f"{cell_league}_{cell_market}: no offers in last {live_window}d.")
                 continue
@@ -640,9 +629,7 @@ def main(
 
     resolved_dir = test_sets_dir or Path(str(pkg_resources.files(data) / "test_sets"))
     if not resolved_dir.exists():
-        raise click.UsageError(
-            f"No test_sets directory at {resolved_dir}. Run `meditate` first."
-        )
+        raise click.UsageError(f"No test_sets directory at {resolved_dir}. Run `meditate` first.")
     paths = _resolve_test_sets(resolved_dir, league, market)
     if not paths:
         raise click.UsageError("No matching test-set CSVs found.")
@@ -651,9 +638,7 @@ def main(
         stem = path.stem
         lg, _, mkt = stem.partition("_")
         df = load_test_set(path, pred_col)
-        card = scorecard(
-            df, pred_col, strategy=strategy, league=lg, market=mkt, n_deciles=deciles
-        )
+        card = scorecard(df, pred_col, strategy=strategy, league=lg, market=mkt, n_deciles=deciles)
         click.echo(f"\n=== {stem}  ({pred_col}, n={card.n_rows}) ===")
         _print_table(decile_table(df, pred_col, deciles))
         click.echo(
