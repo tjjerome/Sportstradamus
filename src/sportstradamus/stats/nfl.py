@@ -38,6 +38,36 @@ from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 
+# Positions that actually accrue each market stat. Rows for other positions are
+# all-zero (or wrong-population) noise that depresses MeanYr and inflates the zero
+# fraction (Stage A1.6; passing-yards global mean read 38 vs 216 QB-only). Only the
+# fantasy-points composites are absent (genuinely all-position — every player has a
+# fantasy score). "qb yards"/"qb tds" are QB total-offense markets; "yards"/"tds"
+# are skill scrimmage markets.
+NFL_MARKET_POSITIONS = {
+    # Passing + QB total offense — QB only
+    "passing yards": {"QB"},
+    "attempts": {"QB"},  # passing attempts
+    "completions": {"QB"},
+    "passing tds": {"QB"},
+    "passing first downs": {"QB"},
+    "interceptions": {"QB"},
+    "sacks taken": {"QB"},
+    "qb yards": {"QB"},  # pass+rush yards — a QB market
+    "qb tds": {"QB"},  # pass+rush TDs — a QB market
+    # Rushing — QB + RB (QBs scramble; excluding them skews scramble games)
+    "rushing yards": {"QB", "RB"},
+    "carries": {"QB", "RB"},
+    "rushing tds": {"QB", "RB"},
+    # Receiving + skill scrimmage — WR + RB + TE (no QB)
+    "receiving yards": {"WR", "RB", "TE"},
+    "targets": {"WR", "RB", "TE"},
+    "receptions": {"WR", "RB", "TE"},
+    "receiving tds": {"WR", "RB", "TE"},
+    "yards": {"WR", "RB", "TE"},  # rush+rec scrimmage yards
+    "tds": {"WR", "RB", "TE"},  # rush+rec TDs
+}
+
 
 class StatsNFL(Stats):
     """A class for handling and analyzing NFL statistics.
@@ -310,6 +340,18 @@ class StatsNFL(Stats):
         self.usage_stat = "snap pct"
         self.tiebreaker_stat = "route participation short"
         self._volume_model_cache = None
+
+    def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
+        """Restrict the training gamelog to positions that accrue ``market``'s stat.
+
+        Overrides the base no-op hook. Markets absent from ``NFL_MARKET_POSITIONS``
+        (the fantasy-points composites) keep all four positions. See Stage A1.6 in
+        docs/gbdt_mean_regression_plan.md.
+        """
+        eligible = NFL_MARKET_POSITIONS.get(market)
+        if eligible is None:
+            return gamelog
+        return gamelog.loc[gamelog[self.log_strings["position"]].isin(eligible)]
 
     def load(self):
         """Load data from files."""

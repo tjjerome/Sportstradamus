@@ -893,6 +893,30 @@ def compute_brier_skill_score(subset, base_rate=0.5):
     return 1 - brier / brier_ref
 
 
+def compute_book_brier_skill_score(subset):
+    """Brier Skill Score with the bookmaker as the reference baseline.
+
+    Mirrors training-side ``brier_skill_score``: ``1 - brier(model)/brier(book)``.
+    Hits are ``(Bet == Result)``; the model probability column is ``Model P`` with
+    a fallback to ``Model``; the book probability column is ``Books P``. Returns
+    NaN if subset is empty, ``Books P`` is missing or all-NaN, or the book's
+    Brier is zero (degenerate baseline).
+    """
+    if len(subset) == 0:
+        return np.nan
+    if "Books P" not in subset.columns or subset["Books P"].isna().all():
+        return np.nan
+    hits = (subset["Bet"] == subset["Result"]).astype(int)
+    prob_col = (
+        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+    )
+    brier_model = brier_score_loss(hits, subset[prob_col].clip(0, 1))
+    brier_book = brier_score_loss(hits, subset["Books P"].clip(0, 1))
+    if brier_book == 0:
+        return np.nan
+    return 1 - brier_model / brier_book
+
+
 def murphy_decomposition(subset):
     """Decompose Brier score into Reliability, Resolution, and Uncertainty.
 

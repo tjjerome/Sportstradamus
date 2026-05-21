@@ -413,8 +413,13 @@ expensive *and* risky.
    When you split a module into a package, re-export the old names from
    `__init__.py` until callers are migrated. Don't break the world to
    tidy a name.
-3. **Prefer small, reviewable patches.** One module per session, per
-   CLAUDE.md. Commit and start fresh.
+3. **Prefer small, reviewable patches, one module at a time.** Single-module
+   work stays in the main session. Multi-module work defaults to
+   subagent-driven development — one module per subagent, not one module
+   per session — per CLAUDE.md §"General Rules" (authoritative). Dispatch
+   parallel subagents (see `superpowers:subagent-driven-development`) when
+   a task touches two or more modules; the main session orchestrates and
+   reviews.
 4. **Do not add features, refactors, or "improvements" beyond what was
    asked.** Speculative cleanup is how scope grows quietly.
 5. **Do not add error handling for scenarios that cannot happen.** See §11.

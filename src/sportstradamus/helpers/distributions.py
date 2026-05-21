@@ -422,7 +422,9 @@ def fused_loc(
         return blended_alpha, blended_beta, gate_blend
 
 
-def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=False):
+def set_model_start_values(
+    model, dist, X_data, shape_ceiling=None, normalized=False, offset_mode=False
+):
     """Initialize LightGBMLSS start values from per-player historical moments.
 
     Values live in the model's raw (pre-response-function) space. Response
@@ -444,6 +446,11 @@ def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=F
             a conservative default is used (50 for NegBin, 100 for Gamma).
         normalized: If ``True``, targets are already normalized to
             ``Result/MeanYr ≈ 1.0`` and start values are set for that space.
+        offset_mode: SkewNormal-only. If ``True``, targets are an additive
+            centered residual (``y − baseline``), so ``loc`` is seeded at
+            zero per row and ``scale`` at per-player STDYr (residual
+            dispersion ≈ per-player std). Mutually exclusive with
+            ``normalized``; ignored for non-SkewNormal distributions.
     """
     from scipy.special import logit
 
@@ -462,7 +469,16 @@ def set_model_start_values(model, dist, X_data, shape_ceiling=None, normalized=F
     _a_upper = shape_ceiling if shape_ceiling is not None else 100
 
     if dist == "SkewNormal":
-        if normalized:
+        if offset_mode:
+            # Additive centered residual target (y − baseline): residual mean
+            # ≈ 0 per row; scale starts at per-player STDYr. Explicit per-row
+            # broadcast — must be (n,) not scalar (a degenerate scalar 0 was
+            # a confirmed seeding regression in the overconfidence
+            # investigation; the (n, 3) shape guard in the unit test pins
+            # this).
+            loc = np.zeros(n)
+            scale = std.copy()
+        elif normalized:
             # Targets ≈ 1.0 for all players. Use global start values.
             cv_player = np.clip(std / mu, 0.01, 10)
             loc = np.ones(n)
