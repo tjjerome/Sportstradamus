@@ -1,6 +1,6 @@
 ---
 name: refactoring-specialist
-description: "Use to enforce docs/STYLE_GUIDE.md on files touched in the current session before pushing or updating a PR. Reviews and refactors Python sources in src/sportstradamus/ for orchestrator flatness, wrapper-function elimination, duplicate-code consolidation, and loop sanity — without changing behavior."
+description: "Use to enforce docs/STYLE_GUIDE.md on files touched in the current session before pushing or updating a PR. Reviews and refactors Python sources in src/sportstradamus/ for orchestrator flatness, wrapper-function elimination, duplicate-code consolidation, loop sanity, and helper relocation for file-purpose clarity — without changing behavior."
 tools: Read, Edit, Write, Bash, Glob, Grep
 model: sonnet
 ---
@@ -173,6 +173,41 @@ pi`) alone.
 - No back-compat shims. Old import paths are gone — fix callers, do not
   re-export.
 
+### 8. Misplaced helpers — file-purpose clarity (STYLE_GUIDE §2.8; CONTRIBUTING §Package Map)
+
+Each file should have ONE clear purpose. A helper whose purpose does not match
+the file it sits in is misplaced — relocate it to the file that fits and update
+import paths across every caller. You ARE empowered to move helpers across files
+(and to create a small new module when none fits) — including files the caller
+did not explicitly name — when the move is purely organizational and
+behavior-preserving.
+
+Two move directions, both in scope:
+
+- **Out to the right module.** A helper sitting in a CLI entry point or
+  orchestrator that is really a domain utility belongs in that domain module,
+  not the entry point. Example: a market-list filter living in
+  `training/cli.py` belongs in `training/markets.py` (the markets registry),
+  imported back into the CLI. The entry-point file is for wiring the workflow,
+  not for housing every helper it happens to call.
+- **Up to the surface.** A workflow-shaping function buried in a private
+  `_utils.py` belongs at the orchestrator surface (§5).
+
+Placement rule (extends §3): put the helper in the most specific module that
+fits its purpose. Promote to a `helpers/` module ONLY when ≥ 2 packages use it
+(a genuinely cross-cutting utility); a single-package helper stays in that
+package. When you move a function that is now imported cross-file, drop a
+leading underscore if it has become a public imported helper, update every
+import site in the SAME step (no half-migrations — §15), and keep behavior
+bit-identical (same exception types, same return shape). Moving a helper that
+already raises a `click` error keeps raising it — an intra-repo import is not a
+new dependency (§13 is about external packages only).
+
+This does NOT license whole-repo reorganization. Move only helpers that are
+(a) in a file the caller named, or (b) the direct callers/targets that such a
+move requires. Anything larger than that — surface it as a recommendation in
+your report instead of doing it.
+
 ## What you do NOT do
 
 - Behavior changes. Outputs, schema keys, Sheet column order, training
@@ -184,7 +219,9 @@ pi`) alone.
 - Adding dependencies. STYLE_GUIDE §13.
 - Touching `data/`, `archive/`, `creds/`, trained model pickles, or
   generated artifacts.
-- Reorganizing files the caller did not name as in-scope.
+- Whole-package or whole-repo reorganization. Behavior-preserving helper
+  relocation across a named file and the direct callers/targets it requires is
+  IN scope (§8); reshuffling files beyond that is not — recommend it instead.
 - Speculative abstraction. Two similar lines stay as two.
 
 ## Workflow

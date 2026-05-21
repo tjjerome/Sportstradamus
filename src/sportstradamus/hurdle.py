@@ -30,6 +30,8 @@ analysis.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -41,6 +43,11 @@ _NB0_DENOM_FLOOR: float = 1e-12
 # on the boundary and would collapse the gate formula.
 _Q_CLIP_LO: float = 1e-6
 _Q_CLIP_HI: float = 1.0 - 1e-6
+
+# Floor on (1 − p(0)) inside the zero-truncated NB loss so log() stays finite
+# when p(0) → 1 (degenerate total_count → 0 or probs → 0 mid-boosting). Same
+# guard role as _NB0_DENOM_FLOOR on the predict() side. STYLE_GUIDE §9.
+_ZTNB_P0_FLOOR: float = 1e-12
 
 # LightGBM param keys accepted by plain lgb.train. All LightGBMLSS-specific
 # keys (e.g. "opt_rounds") are excluded — passing them to lgb.train raises
@@ -71,6 +78,53 @@ _LGB_ALLOWED_KEYS: frozenset[str] = frozenset(
         "force_row_wise",
     }
 )
+
+
+class _ZeroTruncatedNB:
+    """torch ``NegativeBinomial`` whose ``log_prob`` is zero-truncated (ZTNB).
+
+    Validated building block for a future marginalized-ZINB (MZINB) head — it is
+    intentionally NOT wired into :meth:`HurdleZINB.fit`. Stage B1 found that
+    swapping the Stage-2 loss to this ZTNB does recover an unbiased count
+    component, but the resulting ``NB(0)`` then exceeds the calibrated zero rate
+    ``q`` on most rows, which the frozen derived-π identity cannot represent (it
+    clips π to 0, breaking the reconstruction). The joint/hurdle decode therefore
+    stays on the full-support NB; see the Stage-B1 outcome + Track-B rescope in
+    ``docs/gbdt_mean_regression_plan.md``.
+
+    Mechanics (for MZINB reuse): LightGBMLSS computes its loss as
+    ``-Σ distribution(**params).log_prob(y)``, so assigning this class to a
+    distribution's ``.distribution`` factory makes the optimizer maximize
+
+        log p_ZTNB(y) = log p_NB(y) − log(1 − p_NB(0))
+
+    on the strictly-positive subset. All non-loss attributes (``sample``,
+    ``rsample``, ``mean``, …) delegate to the wrapped NB. Module-level + picklable
+    by reference. Covered by ``tests/test_ztnb_loss.py``.
+    """
+
+    def __init__(self, total_count=None, probs=None, **kwargs: object) -> None:
+        # Lazy import: keep module import light (matches fit()'s lazy imports).
+        from torch.distributions import NegativeBinomial
+
+        self._nb = NegativeBinomial(total_count=total_count, probs=probs, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        # Delegate everything except loss to the wrapped NB. Guard ``_nb`` so a
+        # pre-init / unpickled access raises cleanly instead of recursing.
+        if name == "_nb":
+            raise AttributeError(name)
+        return getattr(self._nb, name)
+
+    def log_prob(self, value: Any) -> Any:
+        import torch
+
+        log_pk = self._nb.log_prob(value)
+        log_p0 = self._nb.log_prob(torch.zeros_like(value))
+        # 1 − p(0), floored away from 0 so log() stays finite (see _ZTNB_P0_FLOOR).
+        # expm1(log_p0) is the stable form of exp(log_p0) − 1.
+        one_minus_p0 = torch.clamp(-torch.expm1(log_p0), min=_ZTNB_P0_FLOOR)
+        return log_pk - torch.log(one_minus_p0)
 
 
 class HurdleZINB:

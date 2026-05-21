@@ -19,7 +19,7 @@ import pytest
 
 from sportstradamus import data
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.stats import StatsNBA
+from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
     DETERMINISTIC_SEED,
@@ -85,28 +85,29 @@ def test_deterministic_mode_is_bit_reproducible():
     pd.testing.assert_frame_equal(p1, p2, check_exact=True)
 
 
-@pytest.mark.integration
-def test_deterministic_mode_hurdle_is_bit_reproducible():
-    """Parallel gate for the HurdleZINB path.
+def _assert_hurdle_params_bit_reproducible(parquet_name: str, stats, market: str) -> None:
+    """Two seeded HurdleZINB fit/predicts on a cached parquet must match exactly.
 
-    HurdleZINB has TWO LightGBM boosters (binary clf + NegBin) and its
-    internal ``fit`` calls ``seed_everything`` once. The compression_eval
-    A/B for ``meditate --deterministic --zinb-mode hurdle`` is meaningful
-    only if this two-run bit-identity holds; without it, the A/B verdict
-    would be noise (the lesson from
-    docs/CENTERED_TARGET_NEGATIVE_RESULT.md).
+    Shared body for the per-league hurdle determinism gates. HurdleZINB has two
+    LightGBM boosters (binary clf + zero-truncated NegBin) and its internal
+    ``fit`` calls ``seed_everything`` once. The compression_eval A/B for
+    ``meditate --deterministic --zinb-mode hurdle`` is meaningful only if this
+    two-run bit-identity holds on every covered league; without it the A/B
+    verdict would be noise (the lesson from docs/CENTERED_TARGET_NEGATIVE_RESULT.md).
 
-    Uses NBA_FG3M as the canonical ZINB market (33% zero rate, the
-    overconfidence investigation's primary case study).
+    Args:
+        parquet_name: Cached training matrix filename under ``data/training_data``.
+        stats: League ``Stats`` instance providing ``get_stat_columns``.
+        market: Market stem to pull feature columns for.
     """
-    parquet = pkg_resources.files(data) / "training_data/NBA_FG3M.parquet"
+    parquet = pkg_resources.files(data) / f"training_data/{parquet_name}"
     if not parquet.is_file():
-        pytest.skip("cached NBA_FG3M.parquet not present in this environment")
+        pytest.skip(f"cached {parquet_name} not present in this environment")
 
     M = pd.read_parquet(parquet)
     M = M.sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
 
-    cols = StatsNBA().get_stat_columns("FG3M")
+    cols = stats.get_stat_columns(market)
     X = M[cols].copy()
     for c in ("Home", "Player position"):
         if c in X.columns:
@@ -131,6 +132,27 @@ def test_deterministic_mode_hurdle_is_bit_reproducible():
             params=params, shape_ceiling=50.0, seed=DETERMINISTIC_SEED,
         )
 
-    p1 = run()
-    p2 = run()
-    pd.testing.assert_frame_equal(p1, p2, check_exact=True)
+    pd.testing.assert_frame_equal(run(), run(), check_exact=True)
+
+
+@pytest.mark.integration
+def test_deterministic_mode_hurdle_is_bit_reproducible():
+    """NBA FG3M — canonical ZINB market (33% zero rate, the overconfidence
+    investigation's primary case study)."""
+    _assert_hurdle_params_bit_reproducible("NBA_FG3M.parquet", StatsNBA(), "FG3M")
+
+
+@pytest.mark.integration
+def test_deterministic_mode_hurdle_is_bit_reproducible_wnba():
+    """WNBA FG3M — ZTNB (Stage B1) is the first cross-league model change, so the
+    hurdle bit-identity must be proven on WNBA before the 23-cell A/B is trusted."""
+    _assert_hurdle_params_bit_reproducible("WNBA_FG3M.parquet", StatsWNBA(), "FG3M")
+
+
+@pytest.mark.integration
+def test_deterministic_mode_hurdle_is_bit_reproducible_nfl():
+    """NFL interceptions — cross-league ZINB determinism guard for Stage B1's
+    zero-truncated NegBin, on a low-mean NFL count market."""
+    _assert_hurdle_params_bit_reproducible(
+        "NFL_interceptions.parquet", StatsNFL(), "interceptions"
+    )

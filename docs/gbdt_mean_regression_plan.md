@@ -19,6 +19,7 @@
 | **P2.B — HurdleZINB (derived-π gate)** | ✅ done (PR #46), result: **6/8 NBA ZINB markets SHIP** | New `meditate --zinb-mode=hurdle` (orthogonal to `--target-strategy`; default `joint` stays byte-identical to pre-P2.B). `HurdleZINB` (in `src/sportstradamus/hurdle.py`) is a two-stage drop-in for joint ZINB: calibrated binary classifier estimates `q = P(Y=0)`; NegBin LightGBMLSS on `Y>0` supplies count shape; structural-inflation π derived from the ZINB identity `π = clip((q − NB(0))/(1 − NB(0)), 0, 1)` (NOT the simpler `gate = 1 − p_nonzero` from the original Phase B spec — corrected because downstream `fused_loc` in `helpers/distributions.py` explicitly treats `gate` as zero-inflation, not marginal P(Y=0)). Returned `total_count/probs/gate` columns match the LightGBMLSS ZINB contract so `model_prob` ZINB decode (lines 252-257) is untouched and legacy pickles still load via `getattr(model, "is_hurdle", False)`. Path-wide A/B under `meditate --deterministic --league NBA --zinb-mode hurdle` against the joint baseline: **SHIP** on FG3M (+9.7% top-decile MAE, brier_skill +0.115→+0.290), OREB (+44.9%, +0.019→+0.109), PF (+19.2%, −0.238→−0.002), TOV (+26.8%, −0.049→+0.058), BLK (+40.4%, +0.237→+0.299), BLST (+11.6%, −0.002→+0.093). **KILL** on FTM (+1.3%, under 5% bar) and STL (global MAE +14.1% regression). The joint ZINB had per-row catastrophic blowups in mid-deciles on BLK/OREB/PF/BLST under deterministic mode (compression_ratio 24–5357×; predicted means up to 1437) that the hurdle eliminates entirely — global MAE drops 60–99% on those markets. **Default stays `--zinb-mode=joint`** — shipping the infrastructure + verdict here; the per-market routing question (FTM/STL stay joint, the rest move to hurdle) is a follow-up. **Note on the verdict criterion**: the parent plan said "predicted gate mean ≈ hist_gate" — that criterion was mis-stated under derived-π semantics. Derived-π gate is π_zi (the inflation parameter), structurally ≤ q with equality only in the zero-truncated-NB limit. For FG3M (positives mean ≈ 2.2) NB(0) ≈ 0.20 even with a well-fit NB, so derived-π gate ≈ 0.17 (similar to joint's 0.18) but the *total reconstructed P(Y=0)* matches `q ≈ 0.33` exactly by construction. The meaningful SHIP/KILL signal is the downstream compression_eval verdict on `P(over@line)` proxies (top-decile MAE + brier_skill_score), not gate mean. New `tests/integration/test_zinb_hurdle_live_path.py` asserts the identity reconstruction `π + (1−π)·NB(0) ≈ q` per-row (mean tolerance 0.02) and two-run bit-identity under `DETERMINISTIC_SEED`. Determinism gate extended with a parallel hurdle assertion. |
 | **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
 | **Stage 0 — live-data instrumentation** | ✅ done (PR #46) | All five deliverables shipped: 0.1 `compute_book_brier_skill_score` in [analysis.py](../src/sportstradamus/analysis.py) (8 unit tests, hand-computed-reference within 1e-6); 0.2 `_compute_live_metrics` + Step 6 in [nightly.py](../src/sportstradamus/nightly.py) writing `data/live_metrics_per_market.parquet` with the locked 10-column / 2-window schema (6 round-trip tests including empty-window n_settled=0 case); 0.3 `compression_eval --live-window N` in [scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) using `_history_to_eval_frame` + per-league `_load_league_stats_lookup` (functools.cached) with Stats-backed MeanYr lookup, mockable via monkeypatch (8 new tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py)); 0.4 [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) CLI joining Gate 1 (model_stats.parquet) × Gate 2 (live_metrics_per_market.parquet, 30d window) with `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted}, colored stdout table (11 tests including 7 parametrized state-machine cases); 0.5 [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) walking history backwards with `--days/--step` controls + idempotent dedup on day-precision `computed_at` (5 tests). All three always-on gates green (ruff clean, 113 golden pass, 9 integration pass); 30 new Stage 0 tests added. refactoring-specialist sweep applied two minor fixes (nightly docstring step list, `_classify_lifecycle` line-length split). Two new console scripts registered in `pyproject.toml`: `check-graduation`, `backfill-live-metrics`. Default behavior of `meditate`/`prophecize`/`confer` byte-identical; `reflect` gains tail Step 6 only. **Track A / Track B graduation lookups are now a parquet read** — see "Stage 0 — Live-data instrumentation" section below for the lifecycle classifier rules. |
+| **Stage B1 — ZTNB likelihood fix + routing diagnostics** | ✅ done, result: **ZTNB hypothesis REFUTED; routing rescope delivered** | **B1.1 (ZTNB):** correct in isolation — the zero-truncated NB recovers an unbiased count component (`tests/test_ztnb_loss.py`, scipy-referenced) — but **incompatible with the frozen derived-π hurdle decode**. On FG3M the ZTNB count component implies `NB(0) ≈ 0.41` vs observed `q ≈ 0.31`, so on **65 % of rows `NB(0) > q`** → derived-π clips to 0 → the reconstruction identity breaks (`tests/integration/test_zinb_hurdle_live_path.py` diff **0.136** vs 0.02 tol). E[Y\|Y>0] is ~unchanged (old 2.2 vs ZTNB 2.12); ZTNB only re-decomposes the positive mean, which is exactly what breaks the decode. The fix would **regress the 6 P2.B SHIP markets**, not just fail FTM/STL. Wire-in **reverted**; `_ZeroTruncatedNB` kept as an unwired, test-covered building block for MZINB (B3). Smoke A/B not run (no stats.nba.com network in the build env) — analytical verdict is KILL; commands handed to the user. **B1.2 (routing):** new read-only `scripts/zinb_routing_diagnostics.py` + golden test + `statsmodels` dep; writes `data/zinb_routing/{LEAGUE}_diagnostics.parquet` for all 23 cells. Result: **0/23 route to `hurdle_nb_ztnb`; 13 → `cmp` (underdispersed, var/mean ≤ 1.3), 10 → `mzinb`.** The blanket ZINB label in `stat_dist.json` is wrong for ≥ 13 markets. **STL → cmp** (underdispersed, the kill's real cause), **FTM → mzinb** (genuinely inflated+overdispersed). Tooling: new `meditate --market` flag; `select_markets` relocated `cli.py → training/markets.py`. See "Stage B1 — outcome & Track-B rescope" below. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
 ## Scope — leagues this plan covers
@@ -632,6 +633,75 @@ Routing rule (precomputable from training data alone, survives temporal split):
   `tests/integration/test_zinb_hurdle_live_path.py` is sufficient
   inference coverage. Per-market routing diagnostics (`zinb_routing_diagnostics.py`)
   are read-only — no inference touchpoint.
+
+### Stage B1 — outcome & Track-B rescope
+
+**B1.1 — ZTNB likelihood fix: hypothesis REFUTED.** The zero-truncated NB
+(`_ZeroTruncatedNB` in `hurdle.py`, verified against scipy in
+`tests/test_ztnb_loss.py`) is correct in isolation but is **incompatible with the
+frozen derived-π hurdle decode**. Diagnostic on FG3M (a P2.B *SHIP*), 4000-row
+deterministic fit:
+
+| quantity | value |
+|---|---|
+| observed zero rate | 0.326 |
+| classifier `q` (pred P(Y=0)) | 0.311 |
+| ZTNB count-component `NB(0)` | **0.412** |
+| frac rows `NB(0) > q` → π clips to 0 | **0.652** |
+| ZTNB `μ_NB` (= base_ev) | 1.249 |
+| `E[Y\|Y>0]` under ZTNB = 1.249/(1−0.412) | 2.12 ≈ empirical 2.22 |
+
+The derived-π identity `q = π + (1−π)·NB(0)` requires `q ≥ NB(0)` per row. ZTNB
+correctly recovers a count component with a *higher* zero mass than the old
+full-support-NB-on-positives fit, so `NB(0)` exceeds `q` on most rows, π clips to
+0, and the reconstruction overshoots q (`test_zinb_hurdle_live_path` identity diff
+**0.136** ≫ 0.02 tol). Crucially `E[Y|Y>0]` is essentially unchanged (old ≈ 2.2,
+ZTNB ≈ 2.12) — ZTNB only re-decomposes the positive mean into (lower count mean,
+higher count-zero mass), which is precisely what breaks the decode. The fix would
+**regress the 6 markets P2.B shipped**, not just fail FTM/STL. Decision: revert the
+one-line wire-in; keep `_ZeroTruncatedNB` as an unwired, test-covered building
+block for the MZINB head (B3). The smoke A/B was not run (no stats.nba.com network
+in the build env); the analytical verdict is KILL.
+
+**B1.2 — routing diagnostics: the ZINB label is wrong for most cells.** The
+marginal diagnostics (`data/zinb_routing/{LEAGUE}_diagnostics.parquet`, 23 cells)
+split into two physical clusters:
+
+- **Underdispersed / near-Poisson → CMP (13 cells):** `var/mean ≤ 1.3`, ziNB ≈ 0
+  (three *negative* = zero-deflation). NBA STL, BLST, TOV, OREB, PF; WNBA BLK, STL,
+  BLST, TOV, OREB; NFL tds, rushing tds, receiving tds. NB/ZINB **cannot** fit
+  var < mean — it forces overdispersion these markets do not have; their high zero
+  rates are low-mean *sampling* zeros, not structural inflation.
+- **Overdispersed + mild inflation → MZINB (10 cells):** NBA FG3M, FTM, BLK; WNBA
+  FG3M, FTM; NFL passing tds, qb tds, interceptions, sacks taken, passing first
+  downs. Genuine overdispersion (var/mean 1.35–7.9), small-but-positive ziNB,
+  Vuong favors ZINB over the hurdle.
+
+**0/23 cells route to `hurdle_nb_ztnb`.** The two P2.B kills have *different* root
+causes: **STL** is underdispersed (var/mean 0.99–1.17) → mis-labeled ZINB → wants
+**CMP** (B4, as the parent plan's STL note anticipated); **FTM** is genuinely
+overdispersed+inflated (highest ziNB ≈ 0.063) → wants **MZINB** (B3). Neither wants
+the ZTNB hurdle.
+
+**Rescope recommendation (supersedes the original B2/B3/B4 ordering):**
+
+1. **Revisit `stat_dist.json` ZINB labeling.** ≥ 13 of the 23 "ZINB" cells are
+   underdispersed/near-Poisson and are being over-dispersed by the NB family — a
+   plausible source of the compression on those markets independent of the gate.
+2. **CMP track (was B4) is now first-class, not optional** — it owns the 13
+   underdispersed cells. Conway-Maxwell-Poisson (or plain Poisson) handles
+   var ≤ mean, which NB/ZINB structurally cannot.
+3. **MZINB (B3)** owns the 10 genuinely-inflated cells and is the consumer of the
+   `_ZeroTruncatedNB` building block (a marginalized ZINB estimates the count
+   component and the gate jointly, avoiding the derived-π `q ≥ NB(0)` constraint
+   that broke B1.1).
+4. **B2 routing wiring** is still the mechanism, but the routing config should be
+   seeded directly from `zinb_routing_diagnostics.py` output (cmp / mzinb), not
+   from a hurdle-vs-joint flag.
+
+Research-agent handoff: `/tmp/track_b_rescope_research_prompt.md` (regenerate with
+`poetry run zinb-routing-diagnostics` if the parquet is stale). Reproduce the B1.1
+diagnostic with the script archived at the same path's sibling notes.
 
 ### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
 
