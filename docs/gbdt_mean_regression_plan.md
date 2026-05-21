@@ -20,7 +20,10 @@
 | **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
 | **Stage 0 — live-data instrumentation** | ✅ done (PR #46) | All five deliverables shipped: 0.1 `compute_book_brier_skill_score` in [analysis.py](../src/sportstradamus/analysis.py) (8 unit tests, hand-computed-reference within 1e-6); 0.2 `_compute_live_metrics` + Step 6 in [nightly.py](../src/sportstradamus/nightly.py) writing `data/live_metrics_per_market.parquet` with the locked 10-column / 2-window schema (6 round-trip tests including empty-window n_settled=0 case); 0.3 `compression_eval --live-window N` in [scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) using `_history_to_eval_frame` + per-league `_load_league_stats_lookup` (functools.cached) with Stats-backed MeanYr lookup, mockable via monkeypatch (8 new tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py)); 0.4 [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) CLI joining Gate 1 (model_stats.parquet) × Gate 2 (live_metrics_per_market.parquet, 30d window) with `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted}, colored stdout table (11 tests including 7 parametrized state-machine cases); 0.5 [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) walking history backwards with `--days/--step` controls + idempotent dedup on day-precision `computed_at` (5 tests). All three always-on gates green (ruff clean, 113 golden pass, 9 integration pass); 30 new Stage 0 tests added. refactoring-specialist sweep applied two minor fixes (nightly docstring step list, `_classify_lifecycle` line-length split). Two new console scripts registered in `pyproject.toml`: `check-graduation`, `backfill-live-metrics`. Default behavior of `meditate`/`prophecize`/`confer` byte-identical; `reflect` gains tail Step 6 only. **Track A / Track B graduation lookups are now a parquet read** — see "Stage 0 — Live-data instrumentation" section below for the lifecycle classifier rules. |
 | **Stage B1 — ZTNB likelihood fix + routing diagnostics** | ✅ done, result: **ZTNB hypothesis REFUTED; routing rescope delivered** | **B1.1 (ZTNB):** correct in isolation — the zero-truncated NB recovers an unbiased count component (`tests/test_ztnb_loss.py`, scipy-referenced) — but **incompatible with the frozen derived-π hurdle decode**. On FG3M the ZTNB count component implies `NB(0) ≈ 0.41` vs observed `q ≈ 0.31`, so on **65 % of rows `NB(0) > q`** → derived-π clips to 0 → the reconstruction identity breaks (`tests/integration/test_zinb_hurdle_live_path.py` diff **0.136** vs 0.02 tol). E[Y\|Y>0] is ~unchanged (old 2.2 vs ZTNB 2.12); ZTNB only re-decomposes the positive mean, which is exactly what breaks the decode. The fix would **regress the 6 P2.B SHIP markets**, not just fail FTM/STL. Wire-in **reverted**; `_ZeroTruncatedNB` kept as an unwired, test-covered building block for MZINB (B3). Smoke A/B not run (no stats.nba.com network in the build env) — analytical verdict is KILL; commands handed to the user. **B1.2 (routing):** new read-only `scripts/zinb_routing_diagnostics.py` + golden test + `statsmodels` dep; writes `data/zinb_routing/{LEAGUE}_diagnostics.parquet` for all 23 cells. Result: **0/23 route to `hurdle_nb_ztnb`; 13 → `cmp` (underdispersed, var/mean ≤ 1.3), 10 → `mzinb`.** The blanket ZINB label in `stat_dist.json` is wrong for ≥ 13 markets. **STL → cmp** (underdispersed, the kill's real cause), **FTM → mzinb** (genuinely inflated+overdispersed). Tooling: new `meditate --market` flag; `select_markets` relocated `cli.py → training/markets.py`. See "Stage B1 — outcome & Track-B rescope" below. |
+| **Stage B1.5 — §7a likelihood-vs-features pre-check** | ✅ done, result: **FEATURES, not likelihood — family build DEFERRED** | Poisson-GBM pre-check (in-repo `research-analyst`) on 9 cells: NBA FTM/STL/TOV/FG3M, WNBA STL/FG3M/FTM, NFL interceptions/rushing-tds. Top-decile compression **persists under a plain Poisson mean head** (Poisson top-decile CR 0.16–0.35 vs NB/ZINB 0.12–0.37) → it is a family-INVARIANT GBT leaf-averaging bias (Belitz & Stackelberg 2021; Boulevard arXiv:1806.09762), not a likelihood problem; **no CMPμ/MZINB swap can fix it.** Conditional Dunn–Smyth RQR variance collapses the "underdispersed" reps to ~1.0–1.08 (STL/TOV/WNBA-STL equi-dispersed → fail `CMPμ iff cond<0.90`); **no CMPμ candidate among NBA/WNBA.** Only 2/9 clear ≥5% top-decile (FG3M +6.3%, rushing-tds +10.3%) and both are **upward mean-bias** (over-predict low-volume players — inverse of Track B's symptom); ~half the gain is pure bias-recentering. **Pivot Track B's next step to a ~1–2 wk feature/bias track** (post-hoc dynamic-range/mean-bias correction + B2 expanding-mean encoding + opponent-defense/blowout features); re-enter the 9–12 wk family build only on a cell that still kills after. No model pickle written. Brief `/tmp/researcher_track_b_precheck.md`. See "Stage B1.5 — §7a pre-check verdict" below. |
 | **Stage A1 — SkewNormal ICC diagnostic gate** | ✅ done, result: **family clusters AMBIGUOUS — ICC alone does not cleanly route the SkewNormal family** | New read-only `scripts/icc_diagnostics.py` (console script `icc-diagnostics`) + `tests/golden/test_icc_diagnostics.py` (15 tests). Computes ICC₁ via a two-level moment decomposition (σ²_between = Var(player-season means), σ²_within = mean within-(player-season) variance) over **(Player, season)** groups — season via the `stats/base.py:527-528` Aug-boundary rule, since the NFL/WNBA cached parquets are multi-season (NFL 2021–26, WNBA 2022–25; NBA single-season). Participation filter (nonzero-game fraction ≥ 0.5, **no position map**) resolves the NFL position-confound; skew-driven transform escalation raw→log1p→rank (all 36 cells landed `raw`). Writes `data/icc/{NBA,WNBA,NFL}_icc.parquet`, one row per (league, market); all 36 cells produced. **Routing verdict: 25 ambiguous, 10 eb_centering, 1 tail_extension.** NBA (ICC 0.27–0.51): only PA 0.514→eb_centering and DREB 0.274→tail_extension, other 11 ambiguous; **FGA 0.489 (NOT the predicted >0.6)**, **PTS 0.473** (just over the predicted 0.3–0.45 band). WNBA (0.37–0.57, slightly *higher* than NBA, not noisier — 4-season (player,season) pooling, n_player_seasons ≈ 480–530, is stable): 5 eb_centering (MIN/FGA/PRA/PA/PR). NFL (0.41–0.79, widest spread): qb-yards 0.790, carries 0.666, targets 0.507, rushing-yards 0.502 → eb_centering; the participation filter excluded ~1380–1391 non-QB player-seasons on passing-yards/attempts/completions (kept n_players ≈ 90–92 = QBs), confirming the position-confound fix. **Decision triggers:** "ICC_PTS > 0.5 on any league" did NOT fire (entanglement hypothesis stands; T7 does not jump to A2); there is NO bimodal split and the family is NOT uniformly-low → the 25 ambiguous cells sit in the plan's "try both, route on outcome" band, so A2 should run EB-centering *and* tail-extension per-market rather than route off ICC alone. **ICC does not predict the P1 EB ship/kill** — FGA SHIPPED at ICC 0.489 while PA (highest NBA ICC, 0.514) KILLED; caveat: ICC is unconditional and the production model already carries a wide feature matrix (~280 columns) that captures much between-player level, so unconditional ICC is necessary context, not a sufficient router. **eb_K** per-league median ≈ NBA 1.4 / WNBA 1.1 / NFL 1.2 — **NFL is NOT an outlier**, so the "K=10 is wrong for NFL *specifically*" suspicion is unconfirmed; further caveat: the moment eb_K = σ²_within/Var(player-season means) is a downward-biased estimate of the Casella–Berger EB constant (observed between-player variance is inflated by σ²_within/n̄), so the table cannot assert "K=10 too high" — re-derive K with a bias-corrected estimator before acting on it in A2. No model/inference/pickle change; default flags byte-identical. All three always-on gates green (ruff clean, golden 140 incl. 15 new, integration 11); refactoring-specialist run (added an `Args` block + test type hints, no logic change). |
+| **Stage A1.5 — factor-ICC de-risk (T5 fork gate)** | ✅ done, result: **T5 KILLED as a wholesale architecture; A2 pivots to T3 tail head** | research-analyst brief (`/tmp/researcher_factor_icc.md`) computed factor-level ICC read-only by reusing A1's tested engine — reference markets reproduce the A1 parquet ICCs to 1e-6 (NBA MIN 0.3468, FGA 0.4890), so factor ICCs inherit A1's 15-test coverage and sit on the same scale. **Per-league band verdict (median ICC(volume) − median ICC(efficiency), pre-registered bands 0.20/0.10):** NBA gap **+0.232** (vol 0.391 / eff 0.158) → **MIXED** — gap-confirmed but the volume clause FAILED (0/3 NBA volume factors ≥ 0.5: MIN 0.347, FGA 0.489, FGA-per-MIN 0.391 all ambiguous, the same band where P1 shipped EB on FGA yet KILLED PA); WNBA gap **+0.456** (vol 0.559 / eff 0.103) → **CONFIRMED but low-confidence** (single computable efficiency factor — WNBA has no `FGM`/`FG3A` *markets*, so true FG%/3P% are uncomputable; needs new efficiency test cases — see caveat #3); NFL gap **+0.291** (vol 0.507 / eff 0.216) → **CONFIRMED** (carries 0.666, targets 0.507 high; yards-per-* efficiency genuinely heavy-tailed, skew +2.9 to +4.4). Efficiency factors are low-ICC in all three leagues (**8/8 ≤ 0.30**, the A1 tail-extension ceiling) — the "efficiency = noise" half is strongly confirmed and matches Franks et al. 2016 (DOI 10.1515/jqas-2016-0098); the "volume = stable identity" half is FALSE for NBA. **Literature OVERRIDES the band-only CONFIRMED to a T5 KILL on the body of the stat:** Goodman's exact variance-of-products (DOI 10.1080/01621459.1960.10483369) gives CV²(XY) = CV²(X)+CV²(Y)+CV²(X)CV²(Y), and on the actual NBA top-mean-decile PTS data, recomposing FGA × (PTS/FGA) inflates the within-player-season CV to **0.423 vs 0.334 modeling PTS directly (+27%)** — independent Monte-Carlo recomposition discards the structural volume↔efficiency negative covariance and re-inflates the priced tail; the disaggregate-forecasting result (ECB WP 1365, 2011) says factorization wins only with known-DGP components, not estimated GBDT heads. The plan's line-492 "DFS-industry consensus" is practitioner **lore** (no peer-reviewed tail-bias validation). **A2 fork: build T3 (spliced/Pareto or normalizing-flow tail head, 1–2 wk) as the primary; do NOT build T5 (2–3 wk + the largest inference change in the plan, 36 cells).** T5's internal logic survives only as a narrow **NFL per-factor route** (carries/targets → EB, yards-per-* → T3) as an A3/A4 follow-on — routing, not Monte-Carlo recomposition, so it avoids the +27% penalty. No `src/` change; verdict-only gate. |
+| **Stage A1.6 — NFL position-split matrix cleanup + WNBA test-case fix** | ✅ done | Moved the NFL position confound from a read-side workaround (A1's `icc_diagnostics.py` nonzero-fraction filter) to a **write-side fix**: `NFL_MARKET_POSITIONS` constant + `_market_position_filter` hook (no-op default in [base.py](../src/sportstradamus/stats/base.py), NFL override in [nfl.py](../src/sportstradamus/stats/nfl.py)) called in `get_training_matrix` before the usage cutoff. Scoping: passing + QB total-offense (`passing yards`, `attempts`, `completions`, `passing tds`/`first downs`, `interceptions`, `sacks taken`, `qb yards`, `qb tds`) → **QB**; rushing (`rushing yards`, `carries`, `rushing tds`) → **QB+RB**; receiving + skill scrimmage (`receiving yards`/`tds`, `targets`, `receptions`, `yards`, `tds`) → **WR+RB+TE**; only the fantasy-points composites stay all-position. Existing cached parquets cleaned in-place via [scripts/prune_nfl_matrix_positions.py](../src/sportstradamus/scripts/prune_nfl_matrix_positions.py) (one source of truth — codes derived from `StatsNFL.positions`): **passing-yards 15000→2646 rows, mean 38.1→215.9**; attempts 5.4→30.4; qb-yards→QB-only 45.3→228.0. **ICC re-run (`icc-diagnostics`): NBA/WNBA value-identical (untouched); all NFL shifts downward and explained by exact scoping removing gadget players A1's nonzero-fraction proxy retained** — passing-yards 0.420→0.405, receiving/targets/receptions ≤0.001, but **qb-yards 0.790→0.423** (RB rows removed, 632→222 player-seasons — the 0.790 was a QB-vs-RB between-position artifact), yards 0.470→0.440, carries 0.666→0.627 / rushing-yards 0.502→0.475 (≈47 WR/TE gadget rushers like Deebo removed), attempts 0.458→0.436 / completions 0.451→0.429 (Taysom-Hill-type passers removed). New NFL ICCs are computed on the *correct modeled population* and supersede A1's for A2 routing. No pickle/inference/default-flag change; parquets gitignored ⇒ PR diff is code + script + plan only. WNBA efficiency test cases chosen: `FTM_per_FGA` + `FG3M_per_FGA` (distinct regimes) with `PTS_per_FGA` (0.103) anchor. **New Stage A4 entry T11: per-position model-split bias experiment** (selective, overfitting-guarded, gated behind A2/A3). Two flagged inference edges for A2: QB-only `qb yards` vs Underdog "Total Yards"; QB+RB `carries` excludes gadget WR-rushers. Gates green; determinism green; refactoring-specialist run. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
 ## Scope — leagues this plan covers
@@ -127,6 +130,10 @@ Bibliography (DOIs preserved so the plan is self-contained):
 | Balanced GAMLSS boosting | Daub et al., *Computational Statistics* 2025, DOI 10.1007/s00607-023-01224-3; arXiv 2602.17272, 2026. |
 | Multi-parametric GBM benchmark | Chevalier & Côté, *European Actuarial Journal* 2025, DOI 10.1007/s13385-025-00428-5. |
 | Arctan pinball | Sluijterman et al., *Int J Mach Learn Cybern* 2025, DOI 10.1007/s13042-025-02671-4. |
+| Goodman product variance | Goodman, *On the Exact Variance of Products*, JASA 55(292):708–713, 1960, DOI 10.1080/01621459.1960.10483369; K-variable generalization JASA 57(297):54–60, 1962, DOI 10.1080/01621459.1962.10482151. |
+| Meta-analytics / discrimination (≈ICC) | Franks, D'Amour, Cervone & Bornn, *J. Quantitative Analysis in Sports* 12(4):151–165, 2016, DOI 10.1515/jqas-2016-0098, arXiv:1609.09830. |
+| Basketball performance-modeling review | *Modeling Player and Team Performance in Basketball*, *Annual Review of Statistics and Its Application* 2021, DOI 10.1146/annurev-statistics-040720-015536, arXiv:2007.10550. |
+| Aggregate vs disaggregate forecasting | Hubrich et al., *Understanding and forecasting aggregate and disaggregate price dynamics*, European Central Bank Working Paper No. 1365, 2011. |
 
 ## Context
 
@@ -159,15 +166,51 @@ new baseline must be computed there identically and leakage-safe. STYLE_GUIDE
 "no new monoliths" rule all apply.
 
 **Universal decision threshold (every experiment, every market, every covered league):**
-ship a strategy only if it reduces **top-mean-decile MAE by ≥ 5%** vs the
-current production strategy without worsening **global MAE by > 1%** and
-without worsening `brier_skill_score` on the existing report. The threshold
-must hold on **every market in every covered league** — or the routing
+ship a strategy only if it (1) reduces **top-mean-decile MAE by ≥ 5%** vs the
+current production strategy, (2) does not worsen **global MAE by > 1%**, (3) does
+not worsen `brier_skill_score` on the existing report, and (4) does not buy the
+top-decile win with **low-volume over-prediction** — the **bottom-mean-decile
+signed bias** (mean predicted − mean actual, lowest decile) must not become more
+positive than the current default's, and its magnitude must stay ≤ 10% of that
+decile's empirical mean (absolute floor 0.05 for cells whose bottom-decile mean
+< 0.5). Condition (4) was added after the Stage B1.5 §7a pre-check found two cells
+whose only MAE "wins" came from over-predicting low-volume players (FG3M bottom
+decile predicted ~3.4× actual) — the inverse of the under-predicted-stars symptom
+this plan targets; the initial tolerances are tunable but the *direction* (a
+top-decile win must not be financed by bottom-decile over-prediction) is fixed. The
+threshold must hold on **every market in every covered league** — or the routing
 config records the per-market/per-league exceptions. Otherwise kill it
 and move on. The harness —
 [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py)
 — is the ship/kill gate; the cross-league A/B is the
 full-verification phase from the testing policy above.
+
+## Ship incrementally — per-market graduation (perfect is not the enemy of good)
+
+**The unit of shipping is the (league, market) cell — never the stage or the
+track.** The moment a cell clears Gate 1 offline, promote it to the 14-day live
+soak **immediately**; do not hold a market that already behaves well hostage to
+the markets that still fail. A well-calibrated STL today is worth more in
+production gathering live evidence than on a branch waiting for FG3M to catch up.
+Concretely:
+
+- A stage is "ready to ship" the instant **any** cell in it clears Gate 1 — ship
+  those cells and keep the stage open on the rest. There is no batch; cells
+  promote independently (this is exactly what the per-cell Gate 1 / Gate 2
+  lifecycle below already implements).
+- The struggling cells stay on the track and continue into the next stage **in
+  parallel** — their unfinished work never blocks a graduated cell from shipping.
+- Live data on the shipped cells is itself an input to the remaining work: a cell
+  that looks good offline but regresses live (Gate 2) teaches you more than
+  another offline iteration on the laggards would, and it does so while the good
+  cells are already earning.
+- Corollary for the Stage B1.5 pivot: ship the cells that pass the cheap
+  feature/bias fixes as soon as they clear Gate 1; reserve the expensive family
+  build for the specific cells that *still* kill after shipping the rest.
+
+This is the constructive half of the diminishing-returns rule that follows: **ship
+what is good now, stop when a cell is good live, and spend the freed effort only on
+cells that still fail.**
 
 ## Diminishing returns — stop-the-track principle
 
@@ -205,8 +248,9 @@ existing universal decision threshold restated as a per-cell gate.
 | Global MAE on the test split | not worse by > 1% vs current default | `compression_eval` global summary |
 | `brier_skill_score` on the validation split (book baseline) | not worse than current default | `model_stats.parquet` for the candidate run |
 | Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
+| Bottom-mean-decile signed bias on the test split | not more positive than current default; magnitude ≤ 10% of that decile's empirical mean (abs. floor 0.05 for sub-0.5-mean cells) | per-decile signed-bias column in `compression_eval` — proven in the Stage B1.5 harness (`/tmp/precheck_harness.py`); **to be promoted to a standard `compression_eval` output** (brief reality-check R4) |
 
-If **all four** clear on every cell in every covered league (or the
+If **all five** clear on every cell in every covered league (or the
 routing config records the exceptions), the strategy is allowed to
 promote: change becomes the new default for those cells on `devel`, runs
 in production for the **mandatory ≥ 14-day soak window** before the live
@@ -218,13 +262,14 @@ archived under `data/old_models/` so revert is one cron-pull away.
 Computed on the **last 30 days of settled production offers** by the
 Stage 0 `compute_book_brier_skill_score` and rolling-window aggregator
 in `nightly.py`. A cell graduates from the track — no further stage work
-— if all four hold:
+— if all five hold:
 
 | Live metric | Threshold | Where it lives |
 |---|---|---|
 | Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
 | Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
 | Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
+| Bottom-mean-decile signed bias on settled bets | within ±10% of that decile's empirical settled mean (abs. floor 0.05 for sub-0.5-mean cells) over ≥ 100 settled offers in the decile, AND not more positive than the prior version | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), per-decile bias column (live analog of the Gate 1 row) |
 | Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
 
 If a cell graduates, mark it ✅ in the Status table with the graduating
@@ -482,18 +527,122 @@ Source: researcher T1 (Tier 0).
 - **Inference-path check:** Stage A1 ships no model change — diagnostic
   only. No inference touchpoints.
 
+### Stage A1.5 — research verdict (factor-ICC de-risk of T5)
+
+The `research-analyst` reviewed the T5 factor-ICC question (brief at
+`/tmp/researcher_factor_icc.md`; conclusions copied here so the plan stays
+self-contained). It computed **factor-level ICC** read-only by reusing the Stage A1
+engine — reference markets reproduce the A1 parquet ICCs to 1e-6, so the factor ICCs
+inherit A1's 15-test coverage and sit on the same scale as the market ICCs. The verdict
+**KILLs T5 as a wholesale multiplicative architecture** and routes A2 to **T3** instead.
+
+**Headline.** The T5 premise is *half* true, and the wrong half is true for the lift.
+Efficiency factors are unambiguously low-ICC in all three leagues (8/8 ≤ 0.30), but that
+is exactly the half a tail head (T3) serves directly on the whole stat — without
+recomposition. The "volume = high-ICC stable identity" half holds only for WNBA/NFL, not
+NBA. And the variance algebra of multiplying separately-modeled factors inflates the
+priced tail. Build T3 (1–2 wk); do not build T5 (2–3 wk + the largest inference change in
+the plan).
+
+**1. Per-league band verdict (median ICC(volume) − median ICC(efficiency); pre-registered
+bands 0.20/0.10).**
+- **NBA — MIXED.** Gap **+0.232** (vol 0.391 / eff 0.158). Gap-confirmed, but the
+  CONFIRMED band's volume clause FAILED: 0/3 NBA volume factors reach the 0.5 EB floor
+  (MIN 0.347, FGA 0.489, FGA-per-MIN 0.391 — all ambiguous). These are the same ambiguous
+  band where P1 shipped EB on FGA (0.489) yet KILLED PA (0.514), so **decomposing PTS into
+  volume × efficiency does not explain the P1 ship/kill split** — FGA is itself an
+  ambiguous-ICC volume factor that happened to ship. Factor ICC inherits P1's lesson that
+  mid-band ICC is not a sufficient router; it does not resolve it.
+- **WNBA — CONFIRMED, low-confidence.** Gap **+0.456** (vol 0.559 / eff 0.103), but a
+  *single* computable efficiency factor (`PTS_per_FGA`; WNBA has no `FGM`/`FG3A`
+  *markets*, so true FG%/3P% are uncomputable), so the "median" is one point and the gap
+  is statistically fragile. A real WNBA efficiency verdict needs new test cases from
+  WNBA's actual markets (see Cross-league caveat #3).
+- **NFL — CONFIRMED.** Gap **+0.291** (vol 0.507 / eff 0.216); volume clause 0.67,
+  efficiency clause 1.00, and NFL efficiency factors are genuinely heavy-tailed
+  (yards-per-carry skew +4.43, yards-per-attempt +2.92, all `log1p`) — the tail a
+  Pareto/spliced T3 head is built to fit.
+
+The gap is robust to factor-classing (NBA 0.22–0.26, WNBA 0.37–0.46, NFL 0.29 across
+three classing variants). Efficiency-low-ICC matches the basketball reliability
+literature: Franks, D'Amour, Cervone & Bornn 2016 (DOI 10.1515/jqas-2016-0098,
+arXiv:1609.09830) find most observed 3P% differences are sampling variability, not skill —
+the FG3% ICC of 0.066 here is that finding measured on this cache (see also the *Annual
+Review of Statistics* basketball-modeling review, DOI 10.1146/annurev-statistics-040720-015536,
+arXiv:2007.10550).
+
+**2. The literature OVERRIDES the band-only CONFIRMED to a T5 KILL on the body of the stat
+— recomposition inflates the priced tail.** Goodman's exact variance-of-products (Goodman
+1960, JASA, DOI 10.1080/01621459.1960.10483369; K-variable generalization Goodman 1962,
+DOI 10.1080/01621459.1962.10482151) gives
+**CV²(XY) = CV²(X) + CV²(Y) + CV²(X)·CV²(Y) ≥ CV²(X) + CV²(Y)** — relative variances add
+super-additively under multiplication. Measured on the *actual* NBA top-mean-decile PTS
+player-seasons, PTS modeled directly has within-player-season CV **0.334**, but the
+recomposed FGA × (PTS/FGA) product has CV **0.423 — a +27% predictive-variance inflation
+on the cell we price.** Because PTS = FGA × (PTS/FGA) is an identity, the factors are
+*negatively* correlated within games (volume dilutes efficiency); modeling them as
+independent heads and Monte-Carlo recomposing **discards that negative covariance and
+re-inflates the tail toward the Goodman independent bound.** For top-decile MAE — set by
+tail mass around the line — T5 fixes the location and inflates the tail, the wrong trade.
+The aggregate-vs-disaggregate forecasting result (Hubrich et al., ECB Working Paper No.
+1365, 2011) says the same: the disaggregate forecast beats the direct one only when
+component DGPs are *known*; once they must be estimated (four–five GBDT heads, each with
+its own SkewNormal mis-specification) "the superiority of the disaggregate forecast is no
+longer assured."
+
+**3. The line-492 "DFS-industry consensus" claim is practitioner LORE, not published
+method.** The minutes × usage × efficiency funnel is genuine industry practice but has no
+peer-reviewed validation that it reduces top-decile bias or beats direct modeling on the
+tail; one practitioner source explicitly warns projections "are not some kind of simple
+multiplication problem." It is restated below as *convention*, not ship evidence — the
+only primary sources on products of separately-modeled components (Goodman; ECB WP 1365)
+point the other way for the tail.
+
+**Reality checks.**
+- **Projected T3 lift is single-digit percent**, best where the body model gets location
+  roughly right and the miss is tail mass — NFL yardage (heavy-tailed efficiency) is the
+  best regime, NBA scoring (near-symmetric efficiency noise) the worst. This mirrors the
+  Track-B CMP "3–8%, not 30%" reality; there is no published 30%+ tail-MAE result that
+  transfers, and T3's own validation is out-of-domain (gbex on rainfall; LightGBMLSS
+  normalizing-flow general-purpose). Treat any larger number as a bet. Neither T5 nor T3
+  is a ship until it clears the universal threshold on every covered cell via
+  `compression_eval`; this brief de-risks the *fork*, not the ship.
+- **What would revive T5:** (a) NFL per-factor *conditional* signal turning out large once
+  features are added (a SkewNormal-GBM residual pass per factor beats the whole-stat model
+  out-of-sample) — the ICCs here are unconditional and the ~280-column matrix already
+  absorbs much volume identity, so the marginal split overstates the residual gain (Open
+  question #10); (b) modeling the negative volume↔efficiency covariance jointly (copula /
+  joint multi-output head) instead of discarding it — which is *more* engineering than T5,
+  not less. Neither condition is met, so the KILL stands.
+- **If T5 is trialed anyway (NFL only, lowest-risk cell):** Gate 1 must verify
+  top-mean-decile MAE improves ≥5% **and** the recomposed predictive scale is not inflated
+  vs the direct SkewNormal baseline (the +27% CV is the thing to watch), on both metric
+  families (CRPS/log-score and top-decile MAE) — Open question #9.
+
 ### Stage A2 — Highest-leverage structural fixes (2–3 sprints)
 
-Two methods, both worth running because they attack different mechanisms.
-Pick order based on Stage A1 ICCs.
+**A2 fork decision (set by Stage A1.5 — see the verdict block above): build T3 as the
+primary structural fix; T5 is KILLED as a wholesale multiplicative architecture.** The
+factor-ICC de-risk found the low-ICC half of the volume/efficiency split is the
+*efficiency* half — exactly what a T3 tail head serves directly on the whole stat — while
+Goodman's variance-of-products algebra shows Monte-Carlo recomposition inflates the priced
+top-decile tail (+27% CV on NBA PTS). T3 captures the realizable lift for ~half the build
+cost and a fraction of the inference risk. T5's internal logic survives only as a narrow
+**NFL per-factor route** (carries/targets → EB, yards-per-* → T3) as an A3/A4 follow-on,
+never the full recomposed architecture. The original "two methods, pick order by ICC"
+framing is superseded by this fork.
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
-| **T5-basketball. Four-stage multiplicative factorization (NBA + WNBA)** *(replaces original P3)* | Tier 1 (Skew) | 2–3 weeks | Predict (a) P(plays), (b) MIN \| plays, (c) per-100-poss rate \| MIN, (d) for PTS: FGA-per-100 × FG% × points-per-make; recombine via Monte Carlo. NBA and WNBA share this structure exactly. Routes each factor to its own ICC-appropriate strategy. DFS-industry consensus approach. | New `src/sportstradamus/factorize/` package or extend [pipeline.py](../src/sportstradamus/training/pipeline.py); inference mirror in [stats/base.py](../src/sportstradamus/stats/base.py); per-market wiring via the existing strategy registry from P1. |
-| **T5-NFL. Position-dependent factorization** | Tier 1 (Skew), adapted | 2–3 weeks (depends on T5-basketball landing first) | Football has no per-100-possession equivalent and stats are position-locked. Candidate factor trees: passing yards = P(plays) × Snaps × Attempts/snap × Yards/attempt; rushing yards = P(plays) × Snaps × Carries/snap × Yards/carry; receiving yards = P(plays) × Snaps × Targets/snap × Catch-rate × Yards/catch. The Stage A1 ICC table tells you whether each factor is high-ICC (route to EB centering) or low-ICC (route to T3 distributional tail). Position-locked features (`Player position` already a category in `X` per [pipeline.py](../src/sportstradamus/training/pipeline.py)) make per-position model variants cleanly separable if needed. | Same `src/sportstradamus/factorize/` package; NFL-specific factor definitions in a config file under `data/factorize_nfl.json`. **Defer until T5-basketball ships** — same architectural code, different factor lists. |
-| **T3. Spliced / Pareto-tail or normalizing-flow head** | Tier 1 (Skew) | 1–2 weeks per distribution | Body ~ SkewNormal up to learned threshold u, tail ~ Generalized Pareto above u, mixing weight per-row. LightGBMLSS v0.3.0 normalizing-flow head is the simplest production path. Direct attack on top-decile MAE without touching loc. | Custom PyTorch distribution alongside [skew_normal.py](../src/sportstradamus/skew_normal.py); dist selection in [pipeline.py:245-324](../src/sportstradamus/training/pipeline.py#L245). |
+| **❌ T5-basketball — KILLED by A1.5. Four-stage multiplicative factorization (NBA + WNBA)** *(replaces original P3)* | Tier 1 (Skew) | 2–3 weeks | Predict (a) P(plays), (b) MIN \| plays, (c) per-100-poss rate \| MIN, (d) for PTS: FGA-per-100 × FG% × points-per-make; recombine via Monte Carlo. NBA and WNBA share this structure exactly. Routes each factor to its own ICC-appropriate strategy. The minutes × usage × efficiency funnel is DFS *practitioner convention*, not peer-reviewed tail-bias evidence (A1.5 Finding 5). | New `src/sportstradamus/factorize/` package or extend [pipeline.py](../src/sportstradamus/training/pipeline.py); inference mirror in [stats/base.py](../src/sportstradamus/stats/base.py); per-market wiring via the existing strategy registry from P1. |
+| **⚠️ T5-NFL — deferred by A1.5 to a narrow per-factor route (A3/A4 follow-on; run a conditional residual pass first). Position-dependent factorization** | Tier 1 (Skew), adapted | 2–3 weeks (depends on T5-basketball landing first) | Football has no per-100-possession equivalent and stats are position-locked. Candidate factor trees: passing yards = P(plays) × Snaps × Attempts/snap × Yards/attempt; rushing yards = P(plays) × Snaps × Carries/snap × Yards/carry; receiving yards = P(plays) × Snaps × Targets/snap × Catch-rate × Yards/catch. The Stage A1 ICC table tells you whether each factor is high-ICC (route to EB centering) or low-ICC (route to T3 distributional tail). Position-locked features (`Player position` already a category in `X` per [pipeline.py](../src/sportstradamus/training/pipeline.py)) make per-position model variants cleanly separable if needed. | Same `src/sportstradamus/factorize/` package; NFL-specific factor definitions in a config file under `data/factorize_nfl.json`. **Defer until T5-basketball ships** — same architectural code, different factor lists. |
+| **✅ T3 — A1.5 PRIMARY A2 BUILD. Spliced / Pareto-tail or normalizing-flow head** | Tier 1 (Skew) | 1–2 weeks per distribution | Body ~ SkewNormal up to learned threshold u, tail ~ Generalized Pareto above u, mixing weight per-row. LightGBMLSS v0.3.0 normalizing-flow head is the simplest production path. Direct attack on top-decile MAE without touching loc. | Custom PyTorch distribution alongside [skew_normal.py](../src/sportstradamus/skew_normal.py); dist selection in [pipeline.py:245-324](../src/sportstradamus/training/pipeline.py#L245). |
 
 **Decision points (gate logic for Stage A2):**
+- **[A1.5 fork: T3 is the primary build; T5 is killed wholesale. The "If T5 ships
+  globally" branch applies only to the narrow NFL per-factor route, not the full
+  Monte-Carlo recomposed architecture — and only after the conditional residual pass in
+  Open question #10.]**
 - If T5 ships globally → make it the new baseline and re-run EB centering on
   each factor independently (factor-specific ICCs dominate the decision).
   Stage A3/A4 become polish.
@@ -556,6 +705,7 @@ Pick order based on Stage A1 ICCs.
 | **T7. gbex** | Tier 3 (Skew) | 1–2 weeks | Generalized Pareto tail boosting on exceedances. Layered on top of the existing LSS body model. Good parallel experiment to T3. | Velthoen et al. *Extremes* 2023. Published validation is on rainfall extremes, not sports data. |
 | **T6. FAGTB adversarial penalty against MeanYr decile** | Tier 3 (Skew) | 1 week | Quantile-bucket MeanYr (10 deciles); adversary tries to predict the decile from the residual; penalize the loc gradient by adversary loss. Principled "bias-by-group" penalty per Grari et al. (arXiv 1911.05369) and M²FGB (arXiv 2504.12458). | Custom LightGBM objective + one notebook. FAGTB was designed for binary protected attributes; for continuous MeanYr, quantile-bucket first. |
 | **T10. PGBM** | Tier 3 (Skew) | 1 week | Alternative scale predictor: mean + variance from a single ensemble without parametric distribution assumption. Avoids the SkewNormal shape bound. | Sprangers et al. KDD 2021. Per Chevalier & Côté 2025, NB-class targets do **not** uniformly benefit from probabilistic GBM over point-prediction GBM — validate per market. |
+| **T11. Per-position model split** *(enabled by A1.6 position scoping)* | Stage A1.6 follow-on | 1–2 weeks (selective) | Train a separate model per (position, market) instead of one pooled cross-position model carrying `Player position` as a categorical. Removes the GBDT pooling bias where the *eligible* positions still diverge — e.g. rushing-yards QB-scramble (~19) vs RB-workhorse (~37). Attacks the mean-regression symptom on the location, complementary to T3's tail fix. | **Selective, not wholesale.** Split only where eligible-position marginals diverge materially (rushing QB-vs-RB is the prime candidate; tight receiving distributions stay pooled). NFL has ~17 games/player-season (caveat #1), so over-splitting **starves and overfits** each head — apply a min-row guard and fall back to pooled+categorical below threshold. A/B per (position, market) cell under the universal threshold. Prereq: A1.6's clean scoping (splitting contaminated rows is meaningless). Generalizes the A1.5 NFL per-factor route from factors to positions. |
 
 **Decision points (gate logic for Stage A4):**
 - If CatBoost ordered TS alone ships > 5% on a low-ICC market → bias was
@@ -563,6 +713,12 @@ Pick order based on Stage A1 ICCs.
   Deprioritize the rest of Stage A4; MEGB and gbex become nice-to-have.
 - If MEGB ships on PTS but not on FG3M → confirms the high-ICC vs low-ICC
   dichotomy; route count markets to T3/T7 only and stop Track-A work there.
+- If per-position split (T11) ships on rushing-yards (QB-vs-RB, the widest
+  within-market position gap) but not on the tighter receiving markets →
+  the bias is position-pooling only where marginals diverge; split those
+  cells and keep the rest pooled. If it overfits even on rushing-yards
+  (thin QB-rusher sample), the pooled+categorical model is already
+  near-optimal — drop T11.
 - **Stop-the-track check:** Stage A4 is the last resort. If any cell is
   still failing graduation here, *first* check whether it has crossed into
   "live data shows we're already profitable on this market with the
@@ -866,7 +1022,163 @@ underdispersion) CMPμ rises in priority — only CMPμ or generalized/double-Po
 if post-step-1 residuals show systematic per-player offsets rather than dispersion
 misfit.
 
+### Stage B1.5 — §7a pre-check verdict (likelihood vs features)
+
+The §7(a) Poisson-GBM compression pre-check was run by the in-repo `research-analyst`
+**before** paying for the family build; brief at `/tmp/researcher_track_b_precheck.md`
+(conclusions copied here so the plan stays self-contained). It covered **9 cells
+across all three covered leagues** — NBA FTM/STL/TOV/FG3M (the 4 mandatory: the two
+P2.B kills + one rep per cluster), WNBA STL/FG3M/FTM, NFL interceptions/rushing-tds —
+each fit with a throwaway in-memory Poisson GBM (LightGBM `objective="poisson"`, seed
+1729, **no pickle saved**) on the non-test rows and scored against the production
+NB/ZINB baseline via `compression_eval` on identical held-out rows.
+
+**Verdict: FEATURES, not likelihood — DEFER/CANCEL the 9–12-week CMPμ +
+marginalized-hurdle/MZINB build as Track B's next step.** The likelihood signature
+("Poisson tracks the top decile while NB compresses it") did not appear on any cell.
+
+| cell | cluster | marg var/mean | cond RQR var | top-MAE Δ (Pois vs NB) | §7a verdict |
+|---|---|---|---|---|---|
+| NBA FTM | inflated | 2.00 | 1.54 | +3.3% | KILL → features |
+| NBA STL | underdisp | 1.17 | 1.08 | +3.5% | KILL → features |
+| NBA TOV | underdisp | 1.16 | 1.04 | +1.4% | KILL → features |
+| NBA FG3M | inflated | 1.57 | 1.17 | +6.3% | KILL → **mean-bias** (SHIP is bias, not family) |
+| WNBA STL | underdisp | 0.99 | 1.00 | −0.9% | KILL → features |
+| WNBA FG3M | inflated | 1.58 | 1.12 | −0.6% | KILL → features |
+| WNBA FTM | inflated | 1.92 | 1.46 | +0.9% | KILL → features |
+| NFL interceptions | inflated | 1.60 | 1.04 | −1.1% | KILL → features (RQR≈1: low-count, not inflated cond.) |
+| NFL rushing-tds | underdisp | 0.96 | 0.96 | +10.3% | KILL → **mean-bias** (SHIP is bias, not family) |
+
+**1. Top-decile compression is distribution-family-INVARIANT — it persists under a
+Poisson mean head, so it cannot be a likelihood problem.** Poisson top-decile
+compression ratio `std(pred)/std(actual)` is 0.16–0.35 vs the production NB/ZINB
+0.12–0.37 — indistinguishable, both severely compressed; a model with **no
+over-dispersion freedom at all** compresses the high-mean tail just as hard. This is
+the textbook ensemble-tree dynamic-range bias (extreme values estimated by
+leaf-averages of neighbours; persists regardless of sample size or family) — Belitz &
+Stackelberg 2021 (doi:10.1016/j.envsoft.2021.105006), Zhang & Lu 2012
+(doi:10.1080/02664763.2011.578621); mechanism = the regularized leaf-average itself
+(Boulevard, Zhou & Hooker, arXiv:1806.09762). Neither CMPμ (re-parameterizes
+dispersion, leaves the boosted mean unchanged) nor MZINB/hurdle (re-parameterizes the
+zero gate) touches the mean head's leaf-averaging. **Load-bearing finding — it gates
+the entire family build.** Independently predicted by the plan's own bibliography:
+Chevalier & Côté 2025 (doi:10.1007/s13385-025-00428-5) find point ≡ probabilistic in
+Poisson, and a global dispersion parameter beat covariate-specific dispersion in their
+benchmark.
+
+**2. The 2 cells that pass the ≥5% gate are upward mean-bias, not dispersion, and not
+Track B's symptom.** NBA FG3M (+6.3%) and NFL rushing-tds (+10.3%) "SHIP," but the
+decile-bias tables show **uniform upward bias** — the production model over-predicts,
+worst at the *bottom* decile (low-volume players: FG3M predicts 0.68 threes where the
+actual is 0.20), the inverse of the under-prediction-of-stars compression Track B
+targets. A trivial bias re-centering (subtract mean signed bias, change nothing else)
+recovers 41% (FG3M) / 47% (rushing-tds) of the gain with **no family change**; the
+remainder is better mean-fit from a fresh GBM, not orthogonal dispersion. Under the
+bottom-mean-decile-bias ship gate (Universal decision threshold condition 4, added
+in response to this finding), both cells **fail Gate 1** — the low-volume
+over-prediction their top-decile wins rely on is exactly what that gate now blocks.
+
+**3. No CMPμ candidate among the NBA/WNBA cells.** Conditional Dunn–Smyth RQR variance
+(Dunn & Smyth 1996, doi:10.1080/10618600.1996.10474708; power for count GOF: Feng et
+al. 2020, doi:10.1186/s12874-020-01055-2) collapses the marginal var/mean toward 1
+once the ~280-col feature set conditions the mean: STL 1.17→1.08, TOV 1.16→1.04, WNBA
+STL 0.99→1.00 — **equi-dispersed, not underdispersed**, failing the verdict's own
+`CMPμ iff conditional < 0.90 AND marginal < 1.0` gate. At ν≈1 there is nothing for
+CMPμ to learn; its ~3–8% ceiling does not survive contact with conditional RQR ≈ 1.
+The inflated cells keep genuine conditional overdispersion (FTM 1.46–1.54, FG3M
+1.12–1.17 → NB is the right family there) but a Poisson/NB mean swap moves top-decile
+MAE < 5% on every inflated cell except the bias-driven FG3M, so the
+marginalized-hurdle/MZINB build is **not** justified by this pre-check either.
+
+**Pivot — Track B's next step is a ~1–2 week feature/bias track, not the family build
+(supersedes the §7-verdict B2/B3 sequencing above):**
+1. **Post-hoc mean-bias / dynamic-range correction** — cheapest of the six Belitz &
+   Stackelberg 2021 methods (ROE = regress-observed-on-estimated, or EDM =
+   empirical-distribution matching), fit on validation, applied before `fused_loc`. A
+   post-hoc calibration object on the inference checklist (one new pickle key + a
+   `model_prob` apply step + a round-trip test). **Days.** Directly attacks the
+   family-invariant dynamic-range compression; captures ~half the FG3M/rushing-tds gain
+   by construction.
+2. **The leakage-safe target-encoded player features already staged as B2**
+   (`groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent) — the
+   named "deficient feature set" items; league-agnostic; ship regardless of family.
+   **Days.**
+3. **Opponent-defense interaction + garbage-time/blowout flag** — the other named
+   feature-cause culprits; the FG3M bottom-decile overshoot (low-volume players
+   predicted ~3.4× actual) points at not conditioning on *whether the player attempts
+   threes at all* — an availability/role feature, far cheaper than a structural-zero
+   gate.
+
+**Cost the pre-check gates:** ~1–2 weeks (feature/bias) vs ~9–12 weeks (CMPμ +
+marginalized hurdle + the largest inference-path change in the plan + the
+Open-question-#2 "3–5 cycles debugging the MZINB gradient" risk). **Re-entry condition:**
+build the family only on a cell that **still kills after** the cheap feature/bias fixes
+— specifically conditional RQR variance < 0.70 AND the Poisson GBM tracking the top
+decile while NB compresses it. None of the 9 cells does. Caveat: this is a
+single-snapshot, single-fit pre-check (untuned Poisson, one HP set); a *tuned* Poisson
+would only strengthen the "features/fit, not family" read, and the brier_skill gate did
+not fire (see Open question #12). Per-cluster: the 13-cell `cmp` label and the 10-cell
+inflated label from Stage B1.2 are both unsupported as a *family-build* trigger by this
+evidence (see Open question #11).
+
+### Stage B1.6 — Feature/bias track (the §7a pivot — Track B's operative next step, ~1–2 weeks)
+
+Per the Stage B1.5 §7a verdict the top-decile compression is a **mean-head + feature**
+problem, not a likelihood problem, so this stage attacks those two layers
+cheapest-first and **ships per market the instant a cell clears Gate 1** (per the
+"Ship incrementally" principle). It **supersedes the family build (Stage B2 routing +
+Stage B3 fork) as the next step**; the family build is deferred behind the re-entry
+condition at the end of this stage. Lock the eval protocol before refitting (Campbell
+2021 selection-bias trap, doi:10.1111/2041-210X.13559).
+
+| Workstream | Source | Cost | Direct effect | Implementation site |
+|---|---|---|---|---|
+| **1. Post-hoc mean-bias / dynamic-range correction** (NEW — the only piece that targets the actual mechanism) | Belitz & Stackelberg 2021 (doi:10.1016/j.envsoft.2021.105006), ROE / EDM | days | Attacks the family-invariant leaf-averaging compression *directly* (B1.5 Finding 1). Fit `ŷ_corrected = f(ŷ)` on the validation split — ROE (regress observed-on-estimated) or EDM (empirical-distribution matching) — and apply to the predicted mean **before** `fused_loc`. Symmetric: pulls the bottom-decile over-prediction *down*, so it directly serves the new Gate-1/Gate-2 bias gates. Recovers ~half the FG3M/rushing-tds gain by construction. | Post-hoc calibration object: new pickle key (e.g. `bias_correction`) per the **Pickle-schema discipline** section; apply step in `model_prob` before [helpers/distributions.py:314](../src/sportstradamus/helpers/distributions.py#L314) `fused_loc` / `get_ev`; fit on validation only (leakage-safe); one inference-path round-trip test. |
+| **2. Leakage-safe target-encoded player features** (pulled forward from Stage B2) | Tier 2 (ZINB) #5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. League-agnostic; ships regardless of family. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as MeanYr/Mean10 ([test_meanyr_mean10_leakage.py](../tests/test_meanyr_mean10_leakage.py)). |
+| **3. Opponent-defense interaction + garbage-time/blowout flag** | B1.5 Finding 2 / dispatch feature-cause list | days–1 wk | The named "deficient feature set" items. Opponent-defense interaction (player stat × opponent defensive profile from `profile_market`); a blowout/garbage-time flag (projected point-differential bucket / minutes-at-risk). Addresses the FG3M low-volume overshoot — the model not conditioning on *whether the player attempts the stat at all*; an availability/role feature is far cheaper than a structural-zero gate. | New feature columns in the feature build + the [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats` inference mirror; leakage-safe, same audit. |
+
+**Sequencing (cheapest, highest-leverage first): (1) → (2) → (3).** Do the post-hoc
+correction first — days of work, directly attacks the family-invariant compression,
+and on its own is expected to clear the new bottom-decile-bias gate on FG3M/rushing-tds.
+Re-run `compression_eval` per cell after each workstream and **promote every cell that
+clears Gate 1's five conditions to the 14-day live soak immediately** — do not wait for
+later workstreams or for other cells.
+
+**Decision points (gate logic for Stage B1.6):**
+- After (1): any cell now clearing Gate 1 (incl. the new bottom-decile-bias condition)
+  ships to soak. Expect FG3M/rushing-tds to flip from "bias-driven nominal SHIP" to a
+  *legitimate* SHIP once the over-prediction is corrected rather than exploited.
+- After (1)+(2)+(3): cells that clear Gate 1 ship; cells that still kill carry to the
+  re-entry check below.
+- **Stop-the-track check:** if a cell graduates via Gate 2 after B1.6, stop track work
+  on it — do not reach for the family build "because we can" (diminishing-returns
+  principle).
+- **Inference-path check:** workstream (1) is the cleanest possible inference change —
+  strictly post-hoc on the mean: one pickle key + one `model_prob` apply step + a
+  round-trip test. Workstreams (2)/(3) need the `get_stats` train/inference mirror,
+  identical at both ends, leakage-tested like MeanYr/Mean10. **Validate (1) does not
+  worsen `brier_skill_score`** — a post-hoc mean shift must not distort the
+  probabilistic shape (Open question #12: check CRPS/log-score + brier_skill, not MAE
+  alone).
+
+**Re-entry to the family build (supersedes the B2/B3 sequencing below).** Build CMPμ or
+the marginalized hurdle **only** on a cell that *still* kills after B1.6 ships —
+specifically conditional Dunn–Smyth RQR variance **< 0.70** AND the Poisson GBM
+tracking the top decile while NB compresses it. None of the 9 §7a cells qualifies today
+(B1.5). The diagnostic that re-checks this is the conditional-RQR pass from Open
+question #11 (run it on the 11 untested `cmp`-labelled cells before any CMPμ build); if
+a re-entry cell appears, only then do Stage B2's routing wiring + the Stage B3 fork
+apply, scoped to that cell.
+
 ### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
+
+> **Status after the Stage B1.5 §7a verdict:** this stage is now **downstream of Stage
+> B1.6 and gated by the re-entry condition** — the family build (CMPμ /
+> marginalized-hurdle, Stage B3) and the routing wiring below are pursued **per cell,
+> only for cells that still kill after B1.6 ships.** The "leakage-safe target-encoded
+> player features" row is **pulled forward into Stage B1.6** (it ships regardless of
+> family choice); the routing-config wiring stays here for when a re-entry cell needs a
+> non-default family.
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
@@ -1052,6 +1364,39 @@ evaluate the bigger structural change.
    probably combines (a) MZINB likelihood, (b) per-player random intercept
    à la GPBoost, and (c) per-parameter early stopping à la cyc-GBM — but
    each piece is an independent A/B and should be staged as above.
+9. **The T5 recomposition-variance penalty must be checked at Gate 1 if T5 is ever
+   trialed.** Stage A1.5 measured **+27% within-player-season CV inflation** from
+   recomposing FGA × (PTS/FGA) vs modeling NBA PTS directly (Goodman 1960, DOI
+   10.1080/01621459.1960.10483369). The +27% is an identity-decomposition floor, not a
+   trained-model A/B — the *direction* (inflation) is robust because the
+   volume↔efficiency negative covariance is a structural identity, the *magnitude* is an
+   estimate. Any T5 trial (NFL only, per the A1.5 fork) must verify the recomposed
+   predictive scale is not inflated vs the direct SkewNormal baseline on **both** metric
+   families (CRPS/log-score and top-decile MAE per Open question #7), not MAE alone.
+   (Stage A1.5 research verdict.)
+10. **Marginal vs conditional, for the NFL per-factor route.** Every factor ICC in A1.5
+   is *unconditional*; the ~280-column production matrix already absorbs much
+   between-player volume identity, so the marginal volume/efficiency split overstates the
+   residual signal available to either T5 or T3. Before A2 commits engineering to the NFL
+   per-factor route, run a one-pass diagnostic — does a SkewNormal-GBM on each NFL factor
+   beat the whole-stat SkewNormal-GBM on held-out top-decile MAE? — to convert the
+   marginal verdict to a conditional one. Flagged, not blocking. (Stage A1.5 research
+   verdict.)
+11. **The marginal "underdispersed (CMP)" cluster label is mostly a mean-mixing
+   artifact for NBA/WNBA.** 13 cells were routed to `cmp` on marginal var/mean ≤ 1.3
+   (Stage B1.2); the two reps Poisson-GBM-checked in Stage B1.5 (STL, TOV) are
+   conditionally **equi-dispersed** (RQR ≈ 1.0–1.08). The other 11 underdispersed-
+   labelled cells (NBA BLST/OREB/PF, WNBA BLK/STL/BLST/TOV/OREB, NFL tds/receiving-tds)
+   were not individually checked — each needs the same conditional-RQR pass before any
+   CMPμ build, and the strong prior is that most land at RQR ≈ 1 (plain Poisson, not
+   CMPμ). (Stage B1.5 §7a pre-check verdict.)
+12. **The brier_skill_score third gate did not fire in the Stage B1.5 pre-check** — the
+   test CSVs carry no `Odds` column and the candidate left `P` unchanged (only `EV`
+   swapped), so the gate reduced to the two MAE conditions. Correct for a mean-head
+   pre-check, but it means the pre-check does not speak to probabilistic calibration:
+   any eventual family **or** bias-correction switch must still be validated on
+   CRPS/log-score **and** brier_skill on a report run that carries the book columns.
+   (Extends Open question #7; Stage B1.5 verdict.)
 
 ---
 
@@ -1075,6 +1420,23 @@ evaluate the bigger structural change.
    is probably fine but should still be verified in Stage A1. The
    per-100-possession factorization (T5-basketball) transfers
    exactly — WNBA uses the same court geometry and stat universe.
+   **Stage A1.5 update:** T5-basketball is KILLED (see the A1.5 verdict), so the
+   transfer point is moot. WNBA's own factor-ICC verdict is **low-confidence**: WNBA has
+   no `FGM` or `FG3A` *markets* (confirmed against `stat_dist.json` — the WNBA market set
+   is MIN/AST/FG3M/PA/PR/PTS/RA/REB/OREB/DREB/FGA/BLK/STL/BLST/TOV/FTM/PRA/fantasy), so
+   true FG% / 3P% are uncomputable and `PTS_per_FGA` (ICC 0.103) is the *only* clean
+   efficiency factor — the WNBA gap (+0.456) rests on a single point. There is **no regen
+   path** for FGM/FG3A (they are not markets here); a real WNBA efficiency verdict needs
+   **new test cases** computed from WNBA's actual markets. **Stage A1.6 update — chosen
+   replacement test cases:** `FTM_per_FGA` and `FG3M_per_FGA` (distinct ICC regimes —
+   free-throw-generation rate is a stable role trait → expected higher/ambiguous band;
+   3P make-rate is dominated by sampling variability per Franks et al. → expected
+   low/tail band), with `PTS_per_FGA` (0.103) retained as the anchor — a 3-point
+   efficiency median spanning tail and ambiguous bands instead of one fragile point.
+   All three are computable from existing WNBA markets (FTM/FGA/FG3M/PTS); **no code
+   change** — `icc_diagnostics.py` already factors them, and A2 runs it when the T3 build
+   needs the WNBA verdict. The NFL half of this prerequisite (position-split cleanup)
+   shipped in A1.6. The NBA/NFL fork does **not** depend on the WNBA gap.
 4. **The compression_eval A/B harness is league-agnostic but file paths
    are league-specific.** Cached parquets live at
    `data/training_data/{LEAGUE}_{market}.parquet`; deterministic test
@@ -1100,6 +1462,15 @@ evaluate the bigger structural change.
    they can be worked in parallel per league. They share no mutable
    state — the only shared resource is the compression_eval harness,
    which is read-only during scoring.
+8. **Low-mean conditional-dispersion diagnostics need a non-Pearson estimator —
+   trust the Dunn–Smyth RQR over Pearson at mean ≲ 0.11** (extends caveat #6). In
+   Stage B1.5 the df-corrected Pearson statistic and the RQR variance diverged at very
+   low NFL means (rushing-tds: Pearson 0.57 vs RQR 0.96; interceptions: Pearson 1.38 vs
+   RQR 1.04) — Pearson `(y−μ̂)²/μ̂` is unstable when many μ̂ ≈ 0 (a few rows dominate the
+   sum) and the RQR's discrete-CDF randomization is coarse when P(Y=0|x) ≈ 0.97. A
+   future low-mean NFL diagnostic pass should bootstrap the RQR variance and/or use
+   deviance-based dispersion, and lean on Wilson–Einbeck for the marginal
+   zero-modification call. (Stage B1.5 §7a pre-check verdict.)
 
 ## Critical files
 
