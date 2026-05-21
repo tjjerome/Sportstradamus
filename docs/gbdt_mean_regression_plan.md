@@ -9,6 +9,108 @@
 > phase's code, the harness run-log entries, and the status updates below land
 > as commits on that one PR; do not open separate PRs per phase.
 
+## Top priority — baseline breadth (≥ 75% of markets per league)
+
+**The North Star for this project is breadth, not depth: get a baseline *set* for
+at least three-quarters of the markets in every covered league (NBA ≥ 16/21,
+WNBA ≥ 14/18, NFL ≥ 15/20).** This
+supersedes the earlier framing where the only ship was a ≥ 5% top-decile-MAE
+*improvement*. The Stage B1.5 §7a verdict showed top-decile compression is
+family-invariant — a GBT leaf-averaging property no strategy or distribution swap
+removes — so gating the *first* ship on a ≥ 5% compression improvement blocks most
+cells from ever shipping (the NBA sweep set a baseline on only 2 of 21 markets
+under that bar). The objective is making money on as many markets as possible; the
+gate is reframed to measure that directly.
+
+### Two-tier ship model
+
+Every cell is in one of two regimes:
+
+**Tier 0 — set the first baseline (absolute gates only). This is the priority.** A
+cell with no baseline set gets one as soon as *any* candidate clears the
+**absolute** gates. Nothing relative is required, because there is no prior
+baseline to improve on:
+
+1. **Bench-warmer (bottom-quartile) absolute gate** — bottom-quartile signed bias
+   within the one-sided over-prediction bound (under-prediction tolerated).
+2. **Star (top-decile) absolute gate** — top-decile signed bias within the
+   bidirectional bound.
+3. **BSS in the tolerated range** — `brier_skill_score ≥ 0` (beats the book) on
+   the full-quality retrain. Phase-0 floor; this is the knob for reaching 75% — if
+   a league can't get three-quarters of its markets to ≥ 0, widen toward the
+   Gate-2 −0.02 tolerance rather than ship a book-losing cell.
+
+The **incumbent devel/default strategy is itself a candidate** in this test. Of
+*every* candidate that clears the absolute gates for a cell, the one with the
+highest `brier_skill_score` — after a full, non-deterministic retrain — is shipped
+as the baseline, because live production can only A/B one strategy per cell at a
+time (tiebreaker detail in [docs/ship_gate.md](ship_gate.md)).
+
+**Tier 1 — supersede an established baseline (absolute + relative gates).** Once a
+cell's baseline is set, a challenger must clear **both** the absolute gates **and**
+the relative gates — the full Universal decision threshold below: ≥ 5%
+top-decile-MAE improvement, global MAE not worse, BSS not worse, and
+bottom-quartile bias not more positive. The ≥ 5% compression bar's correct role is
+here — it prevents churning an established baseline without a real improvement, not
+blocking the first ship.
+
+**Gate 2 — live graduation** is unchanged: a newly-set baseline soaks ≥ 14 days,
+then graduates on settled-offer book-BSS, calibration, and profit-sim.
+
+### What "absolute gate" means here
+
+The bench-warmer and star absolute gates are the per-band signed-**bias**
+(calibration) bounds built this session — bottom-quartile one-sided on
+over-prediction, top-decile bidirectional — at the wide Phase-0 values (30% of the
+band's empirical mean, floor 0.10). Current numbers and the BSS tiebreaker live in
+[docs/ship_gate.md](ship_gate.md). (`compression_eval.verdict()` currently encodes
+only the Tier-1 path; the Tier-0 absolute-only mode is the immediate next code
+step.)
+
+### Roadmap to 75%
+
+1. **Audit (do first):** run the absolute-only Tier-0 gate over every cell ×
+   candidate (incl. the incumbent) in all three leagues; record per league how
+   many already clear it and on which strategy. That is the breadth baseline.
+2. **Fill the gap:** for cells that don't yet clear the absolute gates, apply the
+   Stage B1.6 feature/bias track (post-hoc bias correction, expanding-mean
+   encoding, opponent-defense / blowout features) until ≥ 75% per league can be
+   set. Post-hoc bias correction in particular pulls both bands toward zero, so it
+   serves the absolute gates directly.
+3. **Set + soak:** ship the highest-BSS passer per cell to `devel`; start the
+   14-day Gate-2 soak.
+
+**Step 1 result — breadth baseline (2026-05-21).** Tier-0 audit over all four
+candidate strategies (incumbent `ratio_meanyr`, `centered_additive_mean10`,
+`centered_additive_eb_meanyr_k10`, and `ratio_meanyr` + hurdle) on the
+deterministic A/B test sets, after the NFL gamelog numeric-coercion bug was fixed
+(NFL candidates were previously un-generatable). BSS here is on crippled-HP
+deterministic models — **conservative**; the final per-cell pick is the highest
+*full-retrain* BSS. The absolute bias gates are HP-robust.
+
+| League | passes bias gates | bias + BSS ≥ 0 | 75% target | gap |
+|---|---|---|---|---|
+| NBA | 14/21 | 13/21 | 16 | −3 |
+| WNBA | 10/18 | 10/18 | 14 | −4 |
+| NFL | 17/20 | 16/20 | 15 | **MEETS (+1)** |
+
+**The binding constraint is the absolute bias gates, not the BSS floor.** The
+failing cells are the low-mean count markets — NBA AST/BLK/BLST/FG3M/OREB/STL/TOV,
+WNBA those + FTM, NFL passing-tds/receiving-tds/rushing-tds — exactly the
+family-invariant-compression cells Stage B1.5 routed to the feature/bias track.
+The crippled-HP BSS floor excludes only one extra cell per league beyond the bias
+failures (NBA PF, NFL interceptions — both "bias-only"), so a full retrain should
+recover several. Winning strategy varies by cell: `ratio_meanyr` takes most NFL
+high-volume markets + every fantasy-points cell; `centered_additive_eb_meanyr_k10`
+takes the NBA/WNBA volume markets (FGA, MIN, DREB, PA, PR, PRA, REB); the hurdle
+wins once (NFL sacks-taken). Per-cell selection is material — no single strategy
+dominates. **Gap to close (Step 2):** NBA +3, WNBA +4 via the feature/bias track
+(post-hoc bias correction first, aimed at the bias-failing count cells); NFL
+already clears 75%.
+
+Depth work — superseding baselines via the ≥ 5% compression improvement, the Track
+A tail-head and Track B family builds — is **secondary** to reaching 75% breadth.
+
 ## Status / progress log
 
 | Phase | State | Notes |
@@ -165,19 +267,36 @@ new baseline must be computed there identically and leakage-safe. STYLE_GUIDE
 §9 (named constants), §18.9 (no orphan methods), and the CLAUDE.md
 "no new monoliths" rule all apply.
 
-**Universal decision threshold (every experiment, every market, every covered league):**
-ship a strategy only if it (1) reduces **top-mean-decile MAE by ≥ 5%** vs the
-current production strategy, (2) does not worsen **global MAE by > 1%**, (3) does
-not worsen `brier_skill_score` on the existing report, and (4) does not buy the
-top-decile win with **low-volume over-prediction** — the **bottom-mean-decile
-signed bias** (mean predicted − mean actual, lowest decile) must not become more
-positive than the current default's, and its magnitude must stay ≤ 10% of that
-decile's empirical mean (absolute floor 0.05 for cells whose bottom-decile mean
-< 0.5). Condition (4) was added after the Stage B1.5 §7a pre-check found two cells
-whose only MAE "wins" came from over-predicting low-volume players (FG3M bottom
-decile predicted ~3.4× actual) — the inverse of the under-predicted-stars symptom
-this plan targets; the initial tolerances are tunable but the *direction* (a
-top-decile win must not be financed by bottom-decile over-prediction) is fixed. The
+**Universal decision threshold — the Tier-1 gate that supersedes an established
+baseline (every market, every covered league):** once a cell's baseline is set
+(Tier 0, see "Top priority — baseline breadth" above), a challenger ships only if
+it (1) reduces **top-mean-decile MAE by ≥ 5%** vs the current baseline, (2) does not
+worsen **global MAE by > 1%**, (3) does not worsen `brier_skill_score` on the
+existing report, and (4) does not buy the top-decile win with **low-volume
+over-prediction**. The **Tier-0 first-baseline gate is the absolute subset of
+this**: condition (4)'s absolute bounds (bottom-quartile + top-decile bias) plus
+`brier_skill_score ≥ 0`; the relative conditions (1), (2), and (4)'s relative part
+are dropped, because there is no prior baseline to improve on. Condition (4) has a
+**relative** part and **absolute backstops on both ends**, gated *asymmetrically*
+by betting risk. For the **bottom quartile** (lowest 25% of players by season mean
+— the bench warmers) the failure mode is **over-prediction only**, so the
+**bottom-mean-quartile signed bias** (mean predicted − mean actual) must (a) not
+become more positive than the current default's (*relative*) and (b) not
+over-predict beyond a fraction of that quartile's empirical mean (*absolute,
+one-sided* — currently **+30%**, floor **0.10**); **under-prediction of bench
+warmers is tolerated for now** (it trips neither check). For the **top decile**
+(stars) the gate is **bidirectional**: the |signed bias| must stay within a
+fraction of that decile's mean (currently **30%**, floor **0.10**) — no systematic
+over- *or* under-prediction. The lowest quartile is pooled coarsely on purpose —
+bench warmers generalize more than stars, so a quartile aggregate is more
+representative than a single decile; the absolute bounds start **wide and tighten
+as the bias-correction track lands real improvements**. Condition (4) was added
+after the Stage B1.5 §7a pre-check found two cells whose only MAE "wins" came from
+over-predicting low-volume players (FG3M bottom buckets predicted ~3.4× actual) —
+the inverse of the under-predicted-stars symptom this plan targets; the bounds are
+tunable but the *direction* (a top-decile win must not be financed by
+bottom-quartile over-prediction) is fixed. A standalone quick-reference of the
+current values lives at [docs/ship_gate.md](ship_gate.md). The
 threshold must hold on **every market in every covered league** — or the routing
 config records the per-market/per-league exceptions. Otherwise kill it
 and move on. The harness —
@@ -239,23 +358,33 @@ not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  
 
 Computed on the **held-out validation + test split** that `train_market`
 already produces (lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py)
-and the deterministic test_set CSVs under `data/test_sets/`). This is the
-existing universal decision threshold restated as a per-cell gate.
+and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 has **two
+tiers** (see "Top priority — baseline breadth" above): **Tier 0** sets a cell's
+*first* baseline from the **absolute** rows only; **Tier 1** supersedes an
+*established* baseline and additionally requires the **relative** rows. The Tier
+column tags which rows apply when.
 
-| Offline metric | Threshold | Where it lives |
-|---|---|---|
-| Top-mean-decile MAE on the test split | ≥ 5% better than current default strategy on the same cell | `compression_eval --baseline ... --candidate ...` output |
-| Global MAE on the test split | not worse by > 1% vs current default | `compression_eval` global summary |
-| `brier_skill_score` on the validation split (book baseline) | not worse than current default | `model_stats.parquet` for the candidate run |
-| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
-| Bottom-mean-decile signed bias on the test split | not more positive than current default; magnitude ≤ 10% of that decile's empirical mean (abs. floor 0.05 for sub-0.5-mean cells) | per-decile signed-bias column in `compression_eval` — proven in the Stage B1.5 harness (`/tmp/precheck_harness.py`); **to be promoted to a standard `compression_eval` output** (brief reality-check R4) |
+| Offline metric | Threshold | Tier | Where it lives |
+|---|---|---|---|
+| Top-mean-decile MAE on the test split | ≥ 5% better than the current baseline on the same cell | Tier 1 only | `compression_eval --baseline ... --candidate ...` output |
+| Global MAE on the test split | not worse by > 1% vs current baseline | Tier 1 only | `compression_eval` global summary |
+| `brier_skill_score` (book baseline) | **Tier 0:** ≥ 0 (beats book); **Tier 1:** not worse than the established baseline | both | `model_stats.parquet` for the candidate run |
+| Bottom-quartile bias — **absolute** | over-prediction ≤ +30% of quartile mean (floor 0.10); under-prediction tolerated | both | `bottom_quartile_bias` / `bottom_quartile_mean` in `compression_eval` |
+| Bottom-quartile bias — **relative** | not more positive than the established baseline | Tier 1 only | `verdict()` condition 4a |
+| Top-decile bias — **absolute** | \|bias\| ≤ 30% of decile mean (floor 0.10), bidirectional | both | `top_decile_bias` / `top_decile_mean` in `compression_eval` |
+| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | both | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
 
-If **all five** clear on every cell in every covered league (or the
-routing config records the exceptions), the strategy is allowed to
-promote: change becomes the new default for those cells on `devel`, runs
-in production for the **mandatory ≥ 14-day soak window** before the live
-gate is evaluated. During the soak, the previous version's pickle stays
-archived under `data/old_models/` so revert is one cron-pull away.
+**Tier 0 — set the first baseline (the priority):** the "both" rows must clear —
+bottom-quartile + top-decile absolute bias and `brier_skill_score ≥ 0`. Of every
+candidate (incl. the incumbent default) that clears them on a cell, the
+highest-BSS full retrain is set as that cell's baseline and promoted to the
+**mandatory ≥ 14-day soak window**.
+
+**Tier 1 — supersede an established baseline:** all rows must clear — the absolute
+rows plus the relative ≥ 5% top-decile, global-MAE-not-worse, BSS-not-worse, and
+bottom-quartile-not-more-positive checks — on every cell in every covered league
+(or the routing config records the exceptions). On promotion the previous pickle
+stays archived under `data/old_models/` so revert is one cron-pull away.
 
 ### Gate 2 — Live graduation gate (cell graduates from the track)
 
@@ -269,7 +398,7 @@ in `nightly.py`. A cell graduates from the track — no further stage work
 | Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
 | Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
 | Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
-| Bottom-mean-decile signed bias on settled bets | within ±10% of that decile's empirical settled mean (abs. floor 0.05 for sub-0.5-mean cells) over ≥ 100 settled offers in the decile, AND not more positive than the prior version | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), per-decile bias column (live analog of the Gate 1 row) |
+| Bottom-quartile bias (one-sided) + top-decile bias (bidirectional) on settled bets | mirrors Gate 1 cond. 4 over ≥ 100 settled offers: bottom-quartile over-prediction ≤ +30% of band mean (floor 0.10) AND not more positive than prior; top-decile \|bias\| ≤ 30% (floor 0.10) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), `bottom_quartile_bias` column (live analog of the Gate 1 row) |
 | Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
 
 If a cell graduates, mark it ✅ in the Status table with the graduating
@@ -1146,9 +1275,10 @@ actual is 0.20), the inverse of the under-prediction-of-stars compression Track 
 targets. A trivial bias re-centering (subtract mean signed bias, change nothing else)
 recovers 41% (FG3M) / 47% (rushing-tds) of the gain with **no family change**; the
 remainder is better mean-fit from a fresh GBM, not orthogonal dispersion. Under the
-bottom-mean-decile-bias ship gate (Universal decision threshold condition 4, added
-in response to this finding), both cells **fail Gate 1** — the low-volume
-over-prediction their top-decile wins rely on is exactly what that gate now blocks.
+calibration ship gate (Universal decision threshold condition 4, added in response
+to this finding — now a bottom-quartile relative check + wide absolute backstops on
+both ends), both cells **fail Gate 1** — the low-volume over-prediction their
+top-decile wins rely on is exactly what that gate now blocks.
 
 **3. No CMPμ candidate among the NBA/WNBA cells.** Conditional Dunn–Smyth RQR variance
 (Dunn & Smyth 1996, doi:10.1080/10618600.1996.10474708; power for count GOF: Feng et
@@ -1211,14 +1341,15 @@ condition at the end of this stage. Lock the eval protocol before refitting (Cam
 
 **Sequencing (cheapest, highest-leverage first): (1) → (2) → (3).** Do the post-hoc
 correction first — days of work, directly attacks the family-invariant compression,
-and on its own is expected to clear the new bottom-decile-bias gate on FG3M/rushing-tds.
+and on its own is expected to clear the new calibration (bottom-quartile) gate on
+FG3M/rushing-tds.
 Re-run `compression_eval` per cell after each workstream and **promote every cell that
 clears Gate 1's five conditions to the 14-day live soak immediately** — do not wait for
 later workstreams or for other cells.
 
 **Decision points (gate logic for Stage B1.6):**
-- After (1): any cell now clearing Gate 1 (incl. the new bottom-decile-bias condition)
-  ships to soak. Expect FG3M/rushing-tds to flip from "bias-driven nominal SHIP" to a
+- After (1): any cell now clearing Gate 1 (incl. the new calibration / bottom-quartile
+  condition) ships to soak. Expect FG3M/rushing-tds to flip from "bias-driven nominal SHIP" to a
   *legitimate* SHIP once the over-prediction is corrected rather than exploited.
 - After (1)+(2)+(3): cells that clear Gate 1 ship; cells that still kill carry to the
   re-entry check below.
