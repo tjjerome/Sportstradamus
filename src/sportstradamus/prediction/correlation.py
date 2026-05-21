@@ -558,9 +558,7 @@ def find_correlation(
                         .sort_values("Model EV", ascending=False)
                     )
 
-                    df5["Family"] = assign_parlay_families(
-                        df5["Bet ID"].to_list(), C
-                    )
+                    df5["Family"] = assign_parlay_families(df5["Bet ID"].to_list(), C)
 
                     parlay_df = pd.concat(
                         [parlay_df, df5.drop(columns="Bet ID")], ignore_index=True

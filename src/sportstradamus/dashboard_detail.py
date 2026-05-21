@@ -28,8 +28,21 @@ _ZERO_INFLATED = ("ZAGamma", "ZINB")
 # Made"), Sleeper snake keys ("threes_made"), and canonical codes ("FG3M").
 _STAT_CATEGORY = {
     "scoring": (
-        "point", "pts", "3-p", "3pt", "three", "fg3", "fg ", "fga", "fgm",
-        "pass yd", "pass td", "rush yd", "rec yd", "goal", "shots",
+        "point",
+        "pts",
+        "3-p",
+        "3pt",
+        "three",
+        "fg3",
+        "fg ",
+        "fga",
+        "fgm",
+        "pass yd",
+        "pass td",
+        "rush yd",
+        "rec yd",
+        "goal",
+        "shots",
     ),
     "boards": ("rebound", "reb", "board", "glass"),
     "playmaking": ("assist", "ast", "playmak"),
@@ -51,7 +64,6 @@ _PHRASES = {
     ("Under", "k's"): ["{p} gets hit around", "{p} no swing-and-miss", "{p} laboring"],
     ("Under", "production"): ["{p} struggles", "{p} no-shows", "{p} quiet night"],
 }
-
 
 
 def init_detail_state() -> None:
@@ -217,9 +229,7 @@ def _candidate_markets(market: str, platform: str | None) -> set[str]:
     return out
 
 
-def find_offer_idx(
-    parsed: dict, offers: pd.DataFrame, platform: str | None = None
-) -> int | None:
+def find_offer_idx(parsed: dict, offers: pd.DataFrame, platform: str | None = None) -> int | None:
     """Find the offers-frame index for a parsed leg, or ``None`` if it moved.
 
     ``platform`` is the parlay's book; it lets the leg's display market be
@@ -301,11 +311,7 @@ def family_labels_for_game(game_group: pd.DataFrame) -> dict[float, str]:
     # then raw volume — all free proxies for "this is a featured player".
     def stardom(player: str) -> tuple:
         best_pct = max(
-            (
-                line_pct(mk, ln)
-                for fam in families
-                for _, mk, ln in fam_legs[fam].get(player, [])
-            ),
+            (line_pct(mk, ln) for fam in families for _, mk, ln in fam_legs[fam].get(player, [])),
             default=0.0,
         )
         return (len(player_markets[player]), best_pct, player_total[player], player)
@@ -416,7 +422,8 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     labels = pg[ocol].astype(str)
                 else:
                     labels = pd.Series(
-                        [f"Wk {w}" for w in pg["week"]] if "week" in pg.columns
+                        [f"Wk {w}" for w in pg["week"]]
+                        if "week" in pg.columns
                         else [str(i + 1) for i in range(len(pg))],
                         index=pg.index,
                     )
@@ -425,12 +432,14 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     dates = pd.to_datetime(pg[dcol]).dt.strftime("%m/%d")
                     labels = labels + ", " + dates
 
-                hist_df = pd.DataFrame({
-                    "Label": labels.values,
-                    "StatValue": pg[stat_key].values,
-                    "Hit": pg[stat_key].values >= line,
-                    "Opponent": pg[ocol].values if ocol and ocol in pg.columns else "",
-                })
+                hist_df = pd.DataFrame(
+                    {
+                        "Label": labels.values,
+                        "StatValue": pg[stat_key].values,
+                        "Hit": pg[stat_key].values >= line,
+                        "Opponent": pg[ocol].values if ocol and ocol in pg.columns else "",
+                    }
+                )
 
         # Radio filter for H2H if not NFL and opponent data exists
         display_df = hist_df
@@ -454,7 +463,9 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     # Build labels
                     if hcol and hcol in h2h_games.columns:
                         opp_prefix = np.where(h2h_games[hcol].astype(bool), "", "@")
-                        h2h_labels = pd.Series([f"{p}{opponent}" for p in opp_prefix], index=h2h_games.index)
+                        h2h_labels = pd.Series(
+                            [f"{p}{opponent}" for p in opp_prefix], index=h2h_games.index
+                        )
                     else:
                         h2h_labels = pd.Series([opponent] * len(h2h_games), index=h2h_games.index)
 
@@ -462,12 +473,16 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                         dates = pd.to_datetime(h2h_games[dcol]).dt.strftime("%m/%d")
                         h2h_labels = h2h_labels + ", " + dates
 
-                    h2h_df = pd.DataFrame({
-                        "Label": h2h_labels.values,
-                        "StatValue": h2h_games[stat_key].values,
-                        "Hit": h2h_games[stat_key].values >= line,
-                        "Opponent": h2h_games[ocol].values if ocol in h2h_games.columns else opponent,
-                    })
+                    h2h_df = pd.DataFrame(
+                        {
+                            "Label": h2h_labels.values,
+                            "StatValue": h2h_games[stat_key].values,
+                            "Hit": h2h_games[stat_key].values >= line,
+                            "Opponent": h2h_games[ocol].values
+                            if ocol in h2h_games.columns
+                            else opponent,
+                        }
+                    )
 
         if not hist_df.empty and league != "NFL" and not h2h_df.empty:
             filter_opt = st.radio(
@@ -500,9 +515,7 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                 "Gate": "gate",
             }
             params = {
-                param: row.get(col)
-                for col, param in _PARAM_MAP.items()
-                if pd.notna(row.get(col))
+                param: row.get(col) for col, param in _PARAM_MAP.items() if pd.notna(row.get(col))
             }
 
             try:
@@ -576,13 +589,17 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
 
                 if is_continuous:
                     # Smooth PDF curve with line and area, colored by side of betting line
-                    color_enc = alt.Color("Side:N",
-                        scale=alt.Scale(domain=["Over","Under"], range=["#2196F3","#FF7043"]),
-                        legend=alt.Legend(orient="top"))
+                    color_enc = alt.Color(
+                        "Side:N",
+                        scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
+                        legend=alt.Legend(orient="top"),
+                    )
                     chart = alt.layer(
                         alt.Chart(df_pdf)
                         .mark_area(opacity=0.3)
-                        .encode(x=x_enc, y=y_enc, color=color_enc, tooltip=["x:Q", "P:Q", "Side:N"]),
+                        .encode(
+                            x=x_enc, y=y_enc, color=color_enc, tooltip=["x:Q", "P:Q", "Side:N"]
+                        ),
                         alt.Chart(df_pdf)
                         .mark_line(strokeWidth=2)
                         .encode(x=x_enc, y=y_enc, color=color_enc),
@@ -591,17 +608,21 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
                     # Discrete: bars at integer values, touching each other using explicit boundaries
                     df_pdf["x_start"] = df_pdf["x"] - 0.5
                     df_pdf["x_end"] = df_pdf["x"] + 0.5
-                    color_enc = alt.Color("Side:N",
-                        scale=alt.Scale(domain=["Over","Under"], range=["#2196F3","#FF7043"]),
-                        legend=alt.Legend(orient="top"))
+                    color_enc = alt.Color(
+                        "Side:N",
+                        scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
+                        legend=alt.Legend(orient="top"),
+                    )
                     chart = (
                         alt.Chart(df_pdf)
                         .mark_rect(stroke="#444", strokeWidth=1)
-                        .encode(x=alt.X("x_start:Q", title=row["Market"], axis=alt.Axis(tickMinStep=1)),
-                                x2="x_end:Q",
-                                y=alt.Y("P:Q", title=y_title),
-                                color=color_enc,
-                                tooltip=["x:Q", "P:Q", "Side:N"])
+                        .encode(
+                            x=alt.X("x_start:Q", title=row["Market"], axis=alt.Axis(tickMinStep=1)),
+                            x2="x_end:Q",
+                            y=alt.Y("P:Q", title=y_title),
+                            color=color_enc,
+                            tooltip=["x:Q", "P:Q", "Side:N"],
+                        )
                     )
 
                 betting_line = (

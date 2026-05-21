@@ -968,6 +968,16 @@ class Stats:
 
         return cols
 
+    def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
+        """Hook: restrict per-gameday training rows to positions eligible for ``market``.
+
+        Base implementation keeps all rows. Position-locked leagues (NFL) override
+        this to drop players whose position never accrues the stat, which would
+        otherwise enter the matrix as all-zero rows that depress the marginal mean
+        and inflate the zero fraction (docs/gbdt_mean_regression_plan.md Stage A1.6).
+        """
+        return gamelog
+
     def get_training_matrix(self, market, cutoff_date=None):
         """Retrieves the training data matrix and target labels for a specified market.
 
@@ -993,6 +1003,7 @@ class Stats:
             (gamelog[self.log_strings["date"]] > cutoff_date)
             & (gamelog[self.log_strings["date"]] < datetime.today().date())
         ]
+        gamelog = self._market_position_filter(gamelog, market)
         if self.league != "MLB":
             usage_cutoff = gamelog[self.usage_stat].quantile(0.15)
 

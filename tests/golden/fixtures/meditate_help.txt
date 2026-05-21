@@ -21,4 +21,29 @@ Options:
                                   training loop
   --log-level [DEBUG|INFO|WARNING|ERROR]
                                   Verbosity for the structured JSONL log.
+  --deterministic / --no-deterministic
+                                  DEBUG/EVAL ONLY: pin all RNGs, use fixed fast
+                                  hyperparameters, and freeze input to the
+                                  cached parquet so runs are bit-identical for
+                                  the compression eval harness. NEVER publish a
+                                  model trained with this flag — it is
+                                  deliberately low quality.
+  --target-strategy [ratio_meanyr|centered_additive_eb_meanyr_k10|centered_additive_mean10]
+                                  Target/baseline strategy for SkewNormal
+                                  markets. Non-default values are A/B
+                                  experiments (run under --deterministic); the
+                                  default 'ratio_meanyr' is current production
+                                  behavior.  [default: ratio_meanyr]
+  --zinb-mode [joint|hurdle]      Model architecture for ZINB markets. 'joint'
+                                  is the legacy jointly-fit LightGBMLSS ZINB.
+                                  'hurdle' uses the two-stage HurdleZINB
+                                  (calibrated zero classifier + NegBin on
+                                  positives + derived-pi gate; see
+                                  docs/OVERCONFIDENCE_INVESTIGATION.md §2).
+                                  Default 'joint' is byte-identical to pre-P2.B
+                                  production.  [default: joint]
+  --market TEXT                   Comma-separated market stem(s) to train (e.g.
+                                  'FTM,STL'). When omitted, all markets for the
+                                  active league are trained. A stem absent from
+                                  every active league is an error.
   --help                          Show this message and exit.
