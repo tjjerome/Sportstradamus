@@ -37,6 +37,8 @@ def _base_card(**overrides) -> Scorecard:
         pred_meanyr_corr=-0.5,
         result_meanyr_corr=0.0,
         brier_skill_score=None,
+        bottom_decile_bias=0.0,
+        bottom_decile_mean=10.0,
     )
     defaults.update(overrides)
     return Scorecard(**defaults)
@@ -82,11 +84,31 @@ def test_perfect_predictions_have_unit_ratio():
     assert card.global_mae == pytest.approx(0.0, abs=1e-9)
 
 
+def test_scorecard_includes_bottom_decile_bias_and_mean():
+    # Bottom decile (10 lowest-MeanYr rows) over-predicted by a known +2.0; all
+    # other deciles predicted perfectly. The scorecard must surface the bottom-
+    # decile signed bias and that decile's empirical (actual) mean so the plan's
+    # bottom-decile ship gate is computable from the logged scorecard.
+    meanyr = np.arange(100, dtype=float)
+    result = meanyr.copy()
+    pred = result.copy()
+    pred[:10] += 2.0  # over-predict the lowest decile only
+    df = pd.DataFrame({"MeanYr": meanyr, "Result": result, "EV": pred})
+    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
+    assert card.bottom_decile_bias == pytest.approx(2.0)
+    assert card.bottom_decile_mean == pytest.approx(4.5)  # mean(0..9)
+
+
 def test_verdict_ships_when_top_decile_improves():
     base = scorecard(_compressed_frame(seed=0), "EV", strategy="base", league="NBA", market="PTS")
-    # Candidate: predictions much closer to actual (less compression).
+    # Candidate: well-calibrated predictions (track actual with small unbiased
+    # noise). This decompresses the top decile AND leaves the bottom decile
+    # unbiased, so it clears the full ship gate including the bottom-decile bias
+    # condition. A merely-less-compressed candidate (e.g. a 0.95 shrink toward
+    # the mean) still over-predicts the bottom decile and is correctly KILLed by
+    # that condition, so it cannot stand in for a legitimate SHIP here.
     df = _compressed_frame(seed=0)
-    df["EV"] = df["Result"].mean() + 0.95 * (df["Result"] - df["Result"].mean())
+    df["EV"] = df["Result"] + np.random.default_rng(0).normal(0, 0.5, len(df))
     cand = scorecard(df, "EV", strategy="cand", league="NBA", market="PTS")
     ship, reason = verdict(base, cand)
     assert ship, reason
@@ -98,6 +120,51 @@ def test_verdict_kills_when_no_top_decile_gain():
     assert not ship
     assert "KILL" in reason
     assert f"{MIN_TOP_DECILE_MAE_IMPROVEMENT:.0%}" in reason
+
+
+def test_verdict_kills_when_bottom_decile_bias_worsens():
+    # MAE gates pass (top-decile and global both improve), but the candidate
+    # over-predicts the low-volume bottom decile more than the baseline — the
+    # exact §7a failure (a top-decile win financed by bottom-decile over-bias).
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, bottom_decile_bias=0.0, bottom_decile_mean=10.0
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, bottom_decile_bias=0.5, bottom_decile_mean=10.0
+    )
+    ship, reason = verdict(base, cand)
+    assert not ship
+    assert "KILL" in reason
+    assert "bottom-decile bias" in reason
+
+
+def test_verdict_kills_when_bottom_decile_bias_exceeds_absolute_bound():
+    # Candidate bias is LESS positive than baseline (passes the relative check)
+    # but still exceeds the absolute calibration bound for a low-mean cell
+    # (max(10% * 0.2, 0.05) = 0.05). 0.5 >> 0.05 → KILL on the absolute bound.
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, bottom_decile_bias=0.8, bottom_decile_mean=0.2
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, bottom_decile_bias=0.5, bottom_decile_mean=0.2
+    )
+    ship, reason = verdict(base, cand)
+    assert not ship
+    assert "KILL" in reason
+    assert "bottom-decile bias" in reason
+
+
+def test_verdict_ships_when_bottom_decile_bias_within_bounds():
+    # Bottom-decile bias improves vs baseline and stays within the bound while
+    # the MAE gates pass — the candidate ships.
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, bottom_decile_bias=0.2, bottom_decile_mean=10.0
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, bottom_decile_bias=0.1, bottom_decile_mean=10.0
+    )
+    ship, reason = verdict(base, cand)
+    assert ship, reason
 
 
 def test_load_test_set_drops_nonfinite_and_validates_columns(tmp_path):

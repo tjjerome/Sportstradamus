@@ -291,6 +291,78 @@ production on live-data intuition alone, no offline ship verdict to
 revert to. The plan rejects both modes — every cell must clear Gate 1,
 soak, then clear Gate 2 before graduating.
 
+### Ship mechanism — per-cell strategy config on `devel`
+
+The gates decide *when* a cell ships; this is *how* it physically goes live on the
+production server (which tracks `devel`). Two invariants keep it safe:
+
+- **Training is config-driven.** A git-tracked map, `data/ship_config.json` (nested
+  `{league: {market: strategy}}`, mirroring `ALL_MARKETS`), assigns each cell one of
+  three states, and `meditate` trains accordingly:
+  - a real strategy slug (one of `baselines.STRATEGY_SLUGS`) → **shipped**: train
+    that cell with that strategy;
+  - the reserved value `"withheld"` → **under rework**: skip training **and delete**
+    the cell's production pickle (`data/models/{league}_{market}.mdl`) so it goes dark;
+  - **absent from the map** → **untouched**: train with the run's default strategy,
+    exactly as today. An empty/missing `ship_config.json` is therefore a strict no-op
+    — adopting this plumbing changes nothing until a cell is explicitly listed.
+- **Inference is pickle-driven.** `model_prob` never reads `ship_config.json`; it
+  decodes the strategy recorded *in the pickle it loaded* (pickles are
+  self-describing) and applies the matching step. A missing pickle already returns
+  `[]` (the market is skipped). Training config and inference therefore cannot drift
+  — the server runs only whatever strategy is physically baked into the pickle on disk.
+
+**Shipping a cell is a one-line PR to `ship_config.json` on `devel`.** Each transition
+is a config edit landed by the next weekly `meditate`:
+
+```
+absent ──(begin rework)──▶ "withheld" ──(Gate 1 pass)──▶ "<strategy>" ──(Gate 2 pass)──▶ graduated
+  ▲          (default,        │ (dark,                      │ (live,                          │
+  │           live)           │  pruned)                    │  new strategy)                  │
+  └──(back to default)────────┘                             └◀──(Gate 2 live regression)──────┘
+```
+
+- **Withhold is deliberate and scoped.** Only a cell you *explicitly* mark
+  `"withheld"` is pruned; the prune is inline in `meditate`'s per-cell loop, so a
+  scoped run (`meditate --market FG3M`) can only ever prune cells in its own scope — a
+  stray dev run cannot dark-out the rest of the book. Merging a `"withheld"` entry
+  stops betting that cell on the next `meditate`; it returns when flipped to a slug.
+- **New strategies are additive.** A new target strategy ships as (1) a slug in
+  `baselines.STRATEGY_SLUGS` with its forward/decode functions, (2) a `model_prob`
+  decode branch keyed on that slug, and (3) the `ship_config.json` line. The decode
+  branch lands *with* the strategy (Stage B1.6 workstream 1), since the strategy does
+  not exist before then. `load_ship_config` validates every value against
+  `STRATEGY_SLUGS ∪ {"withheld"}` at startup, so a typo or an unbuilt strategy fails
+  `meditate` fast rather than after hours of gamelog loading.
+
+End-to-end: Gate 1 SHIP → edit `ship_config.json` (`"withheld"` → strategy slug) →
+merge to `devel` → next weekly `meditate` retrains only that cell with the new
+strategy and leaves untouched cells alone → `prophecize` scores it live → 14-day soak
+→ Gate 2. Revert-archiving the prior shipped pickle under `data/old_models/` (the
+soak-window safety at the Gate 1 promotion note above) is orthogonal to the withhold
+prune and is not part of this plumbing.
+
+**Implementation note (this session):** the plumbing — `training/ship_config.py`
+(loader + `resolve_cell_strategy` + `WITHHELD`), `helpers/io.py`
+(`model_pickle_path` + `prune_model_pickle`, deduping the inline path currently
+copied in `model_prob.py` and `pipeline.py`), and the thin `meditate` wiring — was
+built in the main session rather than per-module subagents, because it is one
+tightly-coupled feature (a config loader, its sole consumer, and a shared path
+helper). The `refactoring-specialist` runs over every touched file before any push,
+per the mandate.
+
+**Shipping process (authoritative checklist + agent).** The production server
+tracks `devel` and pulls the whole branch, so a research branch is never merged
+wholesale. The two-phase model (one-time foundation, then production-delta-only
+per-market PRs) and the keep/drop denylist live in **CONTRIBUTING.md → "Shipping to
+Production (`devel`)"**. Every per-market ship PR (and any further foundation layer)
+**must be carved by the `devel-ship-curator` agent**
+(`.claude/agents/devel-ship-curator.md`), which enforces the denylist
+(no `compression_eval` / `zinb-routing-diagnostics` / `icc-diagnostics` /
+`statsmodels`), keeps the Gate-1 verdict as PR prose rather than committed code, and
+verifies the three gates. The initial Phase A foundation PR is carved by hand (the
+one exception).
+
 ### Track-wide stop condition
 
 A whole track stops when **every cell has graduated**. At that point any

@@ -9,16 +9,13 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 import os.path
 import pickle
 
 import numpy as np
 import pandas as pd
 from scipy.special import expit, logit
-from scipy.stats import gamma, norm
 
-from sportstradamus import data
 from sportstradamus.helpers import (
     Archive,
     fused_loc,
@@ -30,6 +27,7 @@ from sportstradamus.helpers import (
     stat_map,
     stat_zi,
 )
+from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 
 archive = Archive()
@@ -111,7 +109,14 @@ def _decode_skewnormal(
     return prob_params
 
 
-def model_prob(offers, league, market, platform, stat_data, playerStats):
+def model_prob(
+    offers: list[dict],
+    league: str,
+    market: str,
+    platform: str,
+    stat_data,
+    playerStats: pd.DataFrame,
+) -> list[dict]:
     """Score a batch of offers with the trained distributional model.
 
     Loads the model pickle for ``(league, market)``, runs LightGBMLSS
@@ -154,8 +159,8 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
         market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
     if league in ("NBA", "WNBA"):
         market = market.replace("underdog", "prizepicks")
-    filename = "_".join([league, market]).replace(" ", "-")
-    filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+    filename = market_file_slug(league, market)
+    filepath = model_pickle_path(league, market)
     offer_df = pd.DataFrame(offers)
     offer_df.index = offer_df.Player
     if "yards" in market:

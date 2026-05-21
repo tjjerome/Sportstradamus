@@ -10,12 +10,18 @@ import numpy as np
 
 from sportstradamus import data
 from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
+from sportstradamus.helpers.io import prune_model_pickle
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import train_market
+from sportstradamus.training.ship_config import (
+    WITHHELD,
+    load_ship_config,
+    resolve_cell_strategy,
+)
 
 warnings.simplefilter("ignore", UserWarning)
 np.seterr(divide="ignore", invalid="ignore")
@@ -147,6 +153,14 @@ def meditate(
     if not deterministic:
         np.random.seed(_RNG_SEED)
 
+    # Per-cell ship config (data/ship_config.json) governs which markets train
+    # with which strategy and which are withheld (skipped + pruned). Validated
+    # here so a bad entry fails before the expensive gamelog loads below.
+    # Deterministic A/B runs ignore it: they target an explicit --market with an
+    # explicit --target-strategy and must never mutate production pickles.
+    # See docs/gbdt_mean_regression_plan.md "Ship mechanism — per-cell strategy".
+    ship_config = {} if deterministic else load_ship_config()
+
     if reset_markets.strip():
         ff_path = pkg_resources.files(data) / "feature_filter.json"
         with open(ff_path) as fh:
@@ -253,6 +267,11 @@ def meditate(
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
+            cell_strategy = resolve_cell_strategy(lg, market, target_strategy, ship_config)
+            if cell_strategy == WITHHELD:
+                prune_model_pickle(lg, market)
+                click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
+                continue
             train_market(
                 lg,
                 market,
@@ -262,6 +281,6 @@ def meditate(
                 archive,
                 league_start_date,
                 deterministic=deterministic,
-                target_strategy=target_strategy,
+                target_strategy=cell_strategy,
                 zinb_mode=zinb_mode,
             )

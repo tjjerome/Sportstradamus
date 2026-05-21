@@ -55,6 +55,17 @@ MAX_GLOBAL_MAE_REGRESSION = 0.01
 # baseline (any worsening = KILL, even if the MAE gates pass).
 MAX_BRIER_SKILL_REGRESSION: float = 0.0
 
+# Bottom-decile over-prediction gate (Universal decision threshold condition 4 /
+# Gate 1). Added after the §7a pre-check found top-decile MAE "wins" that were
+# really low-volume over-prediction (FG3M bottom decile predicted ~3.4x actual).
+# A candidate KILLs if its bottom-mean-decile signed bias is more positive than
+# the baseline's, or if its magnitude exceeds this fraction of that decile's
+# empirical mean — floored so low-mean count cells aren't held to an impossibly
+# tight bound. Tolerances are tunable; the direction (a top-decile win must not
+# be financed by bottom-decile over-prediction) is fixed.
+BOTTOM_DECILE_BIAS_MAGNITUDE_FRAC: float = 0.10
+BOTTOM_DECILE_BIAS_ABS_FLOOR: float = 0.05
+
 # Probability clip mirrors training/pipeline.py:_PROBA_CLIP so Brier never sees
 # exact 0 or 1 from either model or book.
 _PROBA_CLIP: float = 1e-6
@@ -109,6 +120,12 @@ class Scorecard:
     # Appended last so existing compression_eval_log.csv files (written before
     # this field existed) keep appending without breaking pandas concat reads.
     brier_skill_score: float | None
+    # Bottom-mean-decile signed bias and that decile's empirical (actual) mean,
+    # appended last for the same CSV-back-compat reason. They make the plan's
+    # bottom-decile ship gate (Universal decision threshold condition 4 / Gate 1)
+    # computable directly from the logged scorecard, not just the printed table.
+    bottom_decile_bias: float
+    bottom_decile_mean: float
 
 
 def _git_sha() -> str:
@@ -241,6 +258,20 @@ def scorecard(
     ``ev_meanyr_corr`` / ``result_meanyr_corr`` definition
     (``corr(MeanYr, value - MeanYr)``) so the harness and the training report
     speak the same language.
+
+    Args:
+        df: Frame from :func:`load_test_set` (columns: ``MeanYr``, ``Result``,
+            ``pred_col``, and optionally ``P``, ``Odds``, ``Line``).
+        pred_col: Predicted-mean column to evaluate (``EV`` or ``Blended_EV``).
+        strategy: Label written to the run log (e.g. ``"ratio_baseline"``).
+        league: League tag written to the run log (e.g. ``"NBA"``).
+        market: Market tag written to the run log (e.g. ``"PTS"``).
+        n_deciles: Number of equal-frequency ``MeanYr`` buckets.
+
+    Returns:
+        A :class:`Scorecard` with global and per-decile compression metrics,
+        including ``bottom_decile_bias`` and ``bottom_decile_mean`` for the
+        bottom-mean-decile ship gate.
     """
     meanyr = df[DECILE_COL].to_numpy()
     actual = df[ACTUAL_COL].to_numpy()
@@ -248,6 +279,7 @@ def scorecard(
 
     table = decile_table(df, pred_col, n_deciles)
     top = table.iloc[-1]
+    bottom = table.iloc[0]
     top_mask = df[DECILE_COL] >= df[DECILE_COL].quantile(1 - 1 / n_deciles)
     brier_skill = _brier_skill_score(df)
 
@@ -269,16 +301,25 @@ def scorecard(
         pred_meanyr_corr=_corr(meanyr, pred - meanyr),
         result_meanyr_corr=_corr(meanyr, actual - meanyr),
         brier_skill_score=brier_skill,
+        bottom_decile_bias=float(bottom["bias"]),
+        bottom_decile_mean=float(bottom["actual_mean"]),
     )
 
 
 def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
-    """Apply the Phase-0 ship gate comparing a candidate to a baseline.
+    """Apply the offline ship gate comparing a candidate to a baseline.
 
     Returns:
-        ``(ship, reason)``. ``ship`` is True only if top-decile MAE improves by
-        at least :data:`MIN_TOP_DECILE_MAE_IMPROVEMENT` and global MAE does not
-        regress by more than :data:`MAX_GLOBAL_MAE_REGRESSION`.
+        ``(ship, reason)``. ``ship`` is True only if all four gate conditions
+        hold: (1) top-decile MAE improves by at least
+        :data:`MIN_TOP_DECILE_MAE_IMPROVEMENT`; (2) global MAE does not regress
+        by more than :data:`MAX_GLOBAL_MAE_REGRESSION`; (3) ``brier_skill_score``
+        does not regress (skipped if either card lacks it); (4) the bottom-mean-
+        decile signed bias is not more positive than the baseline's and its
+        magnitude stays within :data:`BOTTOM_DECILE_BIAS_MAGNITUDE_FRAC` of that
+        decile's empirical mean (floored at :data:`BOTTOM_DECILE_BIAS_ABS_FLOOR`).
+        Condition (4) blocks a top-decile win bought by low-volume
+        over-prediction — the §7a failure mode.
     """
     if baseline.top_decile_mae == 0:
         return False, "baseline top-decile MAE is zero; cannot compute improvement"
@@ -303,6 +344,22 @@ def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
                 f"{baseline.brier_skill_score:+.3f} → "
                 f"{candidate.brier_skill_score:+.3f} (Δ {delta:+.3f})"
             )
+    if candidate.bottom_decile_bias > baseline.bottom_decile_bias:
+        return False, (
+            f"KILL: bottom-decile bias worsened "
+            f"{baseline.bottom_decile_bias:+.3f} → {candidate.bottom_decile_bias:+.3f} "
+            f"(low-volume over-prediction must not increase)"
+        )
+    bias_bound = max(
+        BOTTOM_DECILE_BIAS_MAGNITUDE_FRAC * candidate.bottom_decile_mean,
+        BOTTOM_DECILE_BIAS_ABS_FLOOR,
+    )
+    if abs(candidate.bottom_decile_bias) > bias_bound:
+        return False, (
+            f"KILL: bottom-decile bias {candidate.bottom_decile_bias:+.3f} exceeds "
+            f"calibration bound ±{bias_bound:.3f} (10% of decile mean "
+            f"{candidate.bottom_decile_mean:.3f}, floor {BOTTOM_DECILE_BIAS_ABS_FLOOR:.2f})"
+        )
     return True, (
         f"SHIP: top-decile MAE {top_impr:+.1%}, global MAE {global_reg:+.1%}"
         + (
@@ -486,6 +543,7 @@ def _print_live_scorecard(card: object, stem: str, pred_col: str) -> None:
         f"global_mae={card.global_mae:.3f}  "
         f"top_decile_mae={card.top_decile_mae:.3f}  "
         f"top_decile_bias={card.top_decile_bias:+.3f}  "
+        f"bottom_decile_bias={card.bottom_decile_bias:+.3f}  "
         f"compression_ratio={card.compression_ratio:.3f} "
         f"(top {card.top_decile_compression_ratio:.3f})"
     )
@@ -645,6 +703,7 @@ def main(
             f"global_mae={card.global_mae:.3f}  "
             f"top_decile_mae={card.top_decile_mae:.3f}  "
             f"top_decile_bias={card.top_decile_bias:+.3f}  "
+            f"bottom_decile_bias={card.bottom_decile_bias:+.3f}  "
             f"compression_ratio={card.compression_ratio:.3f} "
             f"(top {card.top_decile_compression_ratio:.3f})"
         )
