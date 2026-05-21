@@ -14,11 +14,15 @@ from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
-from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import train_market
 
 warnings.simplefilter("ignore", UserWarning)
 np.seterr(divide="ignore", invalid="ignore")
+
+# Reproducibility seed for non-deterministic training runs. Not used under
+# --deterministic (which pins RNGs via seed_everything with a fixed value).
+_RNG_SEED: int = 69
 
 
 @click.command()
@@ -92,6 +96,15 @@ np.seterr(divide="ignore", invalid="ignore")
         "Default 'joint' is byte-identical to pre-P2.B production."
     ),
 )
+@click.option(
+    "--market",
+    default=None,
+    help=(
+        "Comma-separated market stem(s) to train (e.g. 'FTM,STL'). "
+        "When omitted, all markets for the active league are trained. "
+        "A stem absent from every active league is an error."
+    ),
+)
 def meditate(
     force,
     league,
@@ -102,6 +115,7 @@ def meditate(
     deterministic,
     target_strategy,
     zinb_mode,
+    market,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # --deterministic implies --force: the input-freeze (new_M = empty)
@@ -122,6 +136,7 @@ def meditate(
             "deterministic": deterministic,
             "target_strategy": target_strategy,
             "zinb_mode": zinb_mode,
+            "market": market,
         },
     )
     click.echo(
@@ -130,7 +145,7 @@ def meditate(
         f"deterministic={deterministic}"
     )
     if not deterministic:
-        np.random.seed(69)
+        np.random.seed(_RNG_SEED)
 
     if reset_markets.strip():
         ff_path = pkg_resources.files(data) / "feature_filter.json"
@@ -162,8 +177,6 @@ def meditate(
     nba = StatsNBA()
     nfl = StatsNFL()
     wnba = StatsWNBA()
-    # mlb = StatsMLB()
-    # nhl = StatsNHL()
 
     stat_structs = {}
 
@@ -191,18 +204,11 @@ def meditate(
         click.echo("[WNBA] updating from league API...")
         wnba.update()
         stat_structs.update({"WNBA": wnba})
-    # if datetime.today().date() > (mlb.season_start - timedelta(days=7)) or league == "MLB":
-    #     mlb.load()
-    #     mlb.update()
-    #     stat_structs.update({"MLB": mlb})
-    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)) or league == "NHL":
-    #     nhl.load()
-    #     nhl.update()
-    #     stat_structs.update({"NHL": nhl})
 
     active_markets = dict(ALL_MARKETS)
     if league != "All":
         active_markets = {league: ALL_MARKETS[league]}
+    active_markets = select_markets(active_markets, market)
 
     if rebuild_correlations:
         for lg in active_markets:

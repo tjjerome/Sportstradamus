@@ -42,4 +42,8 @@ Options:
                                   docs/OVERCONFIDENCE_INVESTIGATION.md §2).
                                   Default 'joint' is byte-identical to pre-P2.B
                                   production.  [default: joint]
+  --market TEXT                   Comma-separated market stem(s) to train (e.g.
+                                  'FTM,STL'). When omitted, all markets for the
+                                  active league are trained. A stem absent from
+                                  every active league is an error.
   --help                          Show this message and exit.
