@@ -20,6 +20,7 @@
 | **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
 | **Stage 0 — live-data instrumentation** | ✅ done (PR #46) | All five deliverables shipped: 0.1 `compute_book_brier_skill_score` in [analysis.py](../src/sportstradamus/analysis.py) (8 unit tests, hand-computed-reference within 1e-6); 0.2 `_compute_live_metrics` + Step 6 in [nightly.py](../src/sportstradamus/nightly.py) writing `data/live_metrics_per_market.parquet` with the locked 10-column / 2-window schema (6 round-trip tests including empty-window n_settled=0 case); 0.3 `compression_eval --live-window N` in [scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) using `_history_to_eval_frame` + per-league `_load_league_stats_lookup` (functools.cached) with Stats-backed MeanYr lookup, mockable via monkeypatch (8 new tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py)); 0.4 [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) CLI joining Gate 1 (model_stats.parquet) × Gate 2 (live_metrics_per_market.parquet, 30d window) with `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted}, colored stdout table (11 tests including 7 parametrized state-machine cases); 0.5 [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) walking history backwards with `--days/--step` controls + idempotent dedup on day-precision `computed_at` (5 tests). All three always-on gates green (ruff clean, 113 golden pass, 9 integration pass); 30 new Stage 0 tests added. refactoring-specialist sweep applied two minor fixes (nightly docstring step list, `_classify_lifecycle` line-length split). Two new console scripts registered in `pyproject.toml`: `check-graduation`, `backfill-live-metrics`. Default behavior of `meditate`/`prophecize`/`confer` byte-identical; `reflect` gains tail Step 6 only. **Track A / Track B graduation lookups are now a parquet read** — see "Stage 0 — Live-data instrumentation" section below for the lifecycle classifier rules. |
 | **Stage B1 — ZTNB likelihood fix + routing diagnostics** | ✅ done, result: **ZTNB hypothesis REFUTED; routing rescope delivered** | **B1.1 (ZTNB):** correct in isolation — the zero-truncated NB recovers an unbiased count component (`tests/test_ztnb_loss.py`, scipy-referenced) — but **incompatible with the frozen derived-π hurdle decode**. On FG3M the ZTNB count component implies `NB(0) ≈ 0.41` vs observed `q ≈ 0.31`, so on **65 % of rows `NB(0) > q`** → derived-π clips to 0 → the reconstruction identity breaks (`tests/integration/test_zinb_hurdle_live_path.py` diff **0.136** vs 0.02 tol). E[Y\|Y>0] is ~unchanged (old 2.2 vs ZTNB 2.12); ZTNB only re-decomposes the positive mean, which is exactly what breaks the decode. The fix would **regress the 6 P2.B SHIP markets**, not just fail FTM/STL. Wire-in **reverted**; `_ZeroTruncatedNB` kept as an unwired, test-covered building block for MZINB (B3). Smoke A/B not run (no stats.nba.com network in the build env) — analytical verdict is KILL; commands handed to the user. **B1.2 (routing):** new read-only `scripts/zinb_routing_diagnostics.py` + golden test + `statsmodels` dep; writes `data/zinb_routing/{LEAGUE}_diagnostics.parquet` for all 23 cells. Result: **0/23 route to `hurdle_nb_ztnb`; 13 → `cmp` (underdispersed, var/mean ≤ 1.3), 10 → `mzinb`.** The blanket ZINB label in `stat_dist.json` is wrong for ≥ 13 markets. **STL → cmp** (underdispersed, the kill's real cause), **FTM → mzinb** (genuinely inflated+overdispersed). Tooling: new `meditate --market` flag; `select_markets` relocated `cli.py → training/markets.py`. See "Stage B1 — outcome & Track-B rescope" below. |
+| **Stage A1 — SkewNormal ICC diagnostic gate** | ✅ done, result: **family clusters AMBIGUOUS — ICC alone does not cleanly route the SkewNormal family** | New read-only `scripts/icc_diagnostics.py` (console script `icc-diagnostics`) + `tests/golden/test_icc_diagnostics.py` (15 tests). Computes ICC₁ via a two-level moment decomposition (σ²_between = Var(player-season means), σ²_within = mean within-(player-season) variance) over **(Player, season)** groups — season via the `stats/base.py:527-528` Aug-boundary rule, since the NFL/WNBA cached parquets are multi-season (NFL 2021–26, WNBA 2022–25; NBA single-season). Participation filter (nonzero-game fraction ≥ 0.5, **no position map**) resolves the NFL position-confound; skew-driven transform escalation raw→log1p→rank (all 36 cells landed `raw`). Writes `data/icc/{NBA,WNBA,NFL}_icc.parquet`, one row per (league, market); all 36 cells produced. **Routing verdict: 25 ambiguous, 10 eb_centering, 1 tail_extension.** NBA (ICC 0.27–0.51): only PA 0.514→eb_centering and DREB 0.274→tail_extension, other 11 ambiguous; **FGA 0.489 (NOT the predicted >0.6)**, **PTS 0.473** (just over the predicted 0.3–0.45 band). WNBA (0.37–0.57, slightly *higher* than NBA, not noisier — 4-season (player,season) pooling, n_player_seasons ≈ 480–530, is stable): 5 eb_centering (MIN/FGA/PRA/PA/PR). NFL (0.41–0.79, widest spread): qb-yards 0.790, carries 0.666, targets 0.507, rushing-yards 0.502 → eb_centering; the participation filter excluded ~1380–1391 non-QB player-seasons on passing-yards/attempts/completions (kept n_players ≈ 90–92 = QBs), confirming the position-confound fix. **Decision triggers:** "ICC_PTS > 0.5 on any league" did NOT fire (entanglement hypothesis stands; T7 does not jump to A2); there is NO bimodal split and the family is NOT uniformly-low → the 25 ambiguous cells sit in the plan's "try both, route on outcome" band, so A2 should run EB-centering *and* tail-extension per-market rather than route off ICC alone. **ICC does not predict the P1 EB ship/kill** — FGA SHIPPED at ICC 0.489 while PA (highest NBA ICC, 0.514) KILLED; caveat: ICC is unconditional and the production model already carries a wide feature matrix (~280 columns) that captures much between-player level, so unconditional ICC is necessary context, not a sufficient router. **eb_K** per-league median ≈ NBA 1.4 / WNBA 1.1 / NFL 1.2 — **NFL is NOT an outlier**, so the "K=10 is wrong for NFL *specifically*" suspicion is unconfirmed; further caveat: the moment eb_K = σ²_within/Var(player-season means) is a downward-biased estimate of the Casella–Berger EB constant (observed between-player variance is inflated by σ²_within/n̄), so the table cannot assert "K=10 too high" — re-derive K with a bias-corrected estimator before acting on it in A2. No model/inference/pickle change; default flags byte-identical. All three always-on gates green (ruff clean, golden 140 incl. 15 new, integration 11); refactoring-specialist run (added an `Args` block + test type hints, no logic change). |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
 
 ## Scope — leagues this plan covers
@@ -699,15 +700,168 @@ the ZTNB hurdle.
    seeded directly from `zinb_routing_diagnostics.py` output (cmp / mzinb), not
    from a hurdle-vs-joint flag.
 
-Research-agent handoff: `/tmp/track_b_rescope_research_prompt.md` (regenerate with
-`poetry run zinb-routing-diagnostics` if the parquet is stale). Reproduce the B1.1
-diagnostic with the script archived at the same path's sibling notes.
+Research-agent handoff: `/tmp/track_b_rescope_research_prompt.md`; the returned
+statistician's brief is archived at `/tmp/researcher_track_b_rescope_response.md`
+and its load-bearing conclusions are folded into the next subsection. Regenerate
+the diagnostics with `poetry run zinb-routing-diagnostics` if the parquet is stale.
+
+### Stage B1 — research verdict (distribution-family routing)
+
+A claude.ai statistician reviewed the B1.2 rescope (brief at
+`/tmp/researcher_track_b_rescope_response.md`; conclusions copied here so the plan
+stays self-contained). It **confirms the two-cluster rescope** and sharpens it
+into an implementable routing protocol, with two reality checks that change the
+economics of the stages below.
+
+**Headline.** Route the 13 underdispersed cells to **mean-parameterized
+Conway-Maxwell-Poisson (CMPμ)** and the 10 inflated cells to **marginalized ZINB
+(MZINB)**; keep the derived-π hurdle as the *default* for borderline cells. The
+two new families are **add-ons, not a wholesale replacement** of the shipped
+hurdle.
+
+**1. Route on *conditional* dispersion, not the marginal var/mean alone.** The
+marginal var/mean is a necessary screen but not a sufficient router. It misleads
+once features explain the mean: (a) *mean-mixing* inflates it — pooling a star
+(3.5 threes/g) with a benchwarmer (0.4) looks overdispersed even if each player is
+Poisson(μ_i), and a good feature set absorbs the role mixture so residual
+conditional dispersion → 1; (b) floor/ceiling effects (PF capped at 6) create
+*conditional* underdispersion features cannot remove. Safe protocol:
+1. Marginal (var/mean, ZI-index, score-test p) per cell with bootstrap CIs — what
+   `zinb_routing_diagnostics.py` already produces.
+2. Fit a baseline Poisson GBM; compute *conditional* dispersion from
+   randomized-quantile residuals (Dunn & Smyth).
+3. Route only when marginal and conditional agree, conditional overriding:
+   **CMPμ** iff conditional var/mean < 0.90 AND marginal < 1.0; **MZINB** iff
+   conditional var/mean > 1.20 AND ZI-index CI excludes 0.
+4. Disagreement zone → keep the derived-π hurdle (least to lose).
+5. Tiny-sample cells (rare markets, late-season WNBA) → single-stage Poisson +
+   sandwich SE beats data-driven family selection.
+So the B2 routing config must be seeded from a *two-stage* diagnostic (marginal +
+a Poisson-GBM residual pass), not from the marginal parquet alone.
+
+**2. Tightened dispersion bands.** B1.2's `var/mean < 1.3 → cmp` lumps
+equi-dispersed and mildly-overdispersed regimes. Literature-matched bands: ≤ 0.85
+strong underdispersion (CMPμ) · 0.85–1.15 equi-dispersed (Poisson) · 1.15–1.5 mild
+overdispersion (NB) · ≥ 1.5 NB/hurdle/ZINB. Adopt **1.15**, not 1.3, as the NB
+lower edge.
+
+**3. Do NOT use the Vuong test** to pick ZINB-vs-NB — they are nested at γ=0 so
+the Vuong assumptions fail (Wilson 2015, Economics Letters). Read the
+`zinb_routing_diagnostics.py` "Schwarz-corrected Vuong" column as descriptive
+only; use a boundary likelihood-ratio / score test for the inflation decision.
+
+**4. CMPμ is an engineering project, not a research project — but the ceiling is
+modest.** Use Huang's (2017, Statistical Modelling) *mean*-parameterized CMP
+(log-link μ, orthogonal dispersion ν), NOT canonical (λ,ν) where λ ≠ E[Y] — boost
+the quantity you price against. Neither LightGBMLSS nor XGBoostLSS ships CMP
+(verified to XGBoostLSS 0.6.1 / current LightGBMLSS), so it is a custom
+distribution class; the frameworks accept any distribution with first/second
+derivatives, and CMPμ's score/Hessian are tractable once Z(λ,ν) is tabulated
+(truncate the series at K≈64 in our μ≈0.3–3 regime; well-conditioned info matrix
+from Huang & Rathouz 2017 mean/dispersion orthogonality). Proven pattern: a
+precomputed (μ,ν)→λ look-up grid with bilinear interpolation, refreshed once per
+market (Philipson & Huang 2023, Stat. Comput.; CMPBoost / Chatla & Shmueli 2020
+JCGS is the boosting reference, code `SuneelChatla/CMPTree`). Stabilize the ν
+gradient (clip log(ν)∈[−1, 2]). **Reality check:** projected top-decile-MAE gain
+is **~3–8% relative, not 30%** — for conditional var/mean ≈ 0.75 fit as NB ≈ 1.4,
+σ is overstated ~1.37×, moving a half-line tail probability only a few points.
+Worth building to amortize across 13 cells; **not** worth it for one. When
+conditional var/mean ∈ [0.90, 1.10], plain **Poisson** is the right call — CMPμ
+collapses to it and forcing NB on equi-dispersed data destabilizes the MLE (Yang
+et al. 2026, arXiv:2404.07457).
+
+**5. For the inflated cluster, prefer the *marginalized hurdle* (Kassahun et al.
+2014) over MZINB — and that is where `_ZeroTruncatedNB` belongs.** Two joint-fit
+families remove the derived-π `q ≥ NB(0)` clip:
+- **Marginalized hurdle (Kassahun et al. 2014, Stat. Med. doi:10.1002/sim.6237) —
+  recommended, smaller lift.** It is the literal joint-fit version of the
+  two-stage hurdle we already ship: a logistic for P(Y>0) and a **zero-truncated**
+  NB on the positives, with the marginal mean reparameterized as the regression
+  target. No `q ≥ NB(0)` constraint — the count component is genuinely defined on
+  positives and the zero mass is its own free parameter, so the ZTNB that broke
+  B1.1 inside the *derived-π decode* has a *natural home* here (this is what
+  `_ZeroTruncatedNB` was kept for). Preserves the structural cleanliness of
+  derived-π while making it one joint fit. (Molenberghs et al. 2018,
+  doi:10.1002/sim.7596, for the design choices.)
+- **MZINB (Preisser et al. 2016) — the alternative, only for true structural-zero
+  excess.** Parameterizes log(ν_i)=X_i′β (β = marginal mean = the line),
+  back-computes μ_i = ν_i/(1−ψ_i), separate logistic gate; the count component is
+  a *full* NB at all y (**NOT** zero-truncated — ZTNB does not belong in MZINB).
+  Pick it only when a meaningful subpopulation is plausibly at *structural* zero
+  beyond the NB's own zeros (e.g. a player who simply never shoots threes).
+
+**Either way, joint fitting *relocates* the gate-vs-count identifiability problem,
+it does not solve it** — for fixed ν_i a larger ψ_i is offset by a larger μ_i (α
+absorbs the residual). Three mitigations that work: (a) **separate covariate
+sets** — drive ψ off zero-risk-only variables (minutes, availability,
+blowout/garbage-time flags) and ν off count variables (ability, opponent defense,
+pace); identifiability is much better when the inflation predictors are not a
+subset of the mean predictors; (b) **warm-start from the derived-π fit** — init
+the gate from the classifier log-odds at ψ̂_i = clip(q_i), β from log(ȳ_i), α from
+the NB MLE on positives; (c) **constrain α weakly** (log-normal penalty around the
+method-of-moments estimate, sd≈0.5) so the gate is not swamped by NB
+over-dispersion. Preisser's ~100% convergence is from their own simulations; the
+2017 follow-up calls MZIP/MZINB "prone to convergence problems to a degree shared
+by ZIP and ZINB" — budget real validation, keep the derived-π hurdle as fallback.
+
+**6. The routing will drift across seasons.** NBA 3PA/game rose ~1000% (2.8 →
+32.0) from 1979 to 2018-19 with 3P% up 28%→36% (Zając et al. 2023) — distribution
+shape, zero mass, and dispersion regime all move. Treat single-season routing as
+stale: re-run the diagnostic each offseason, route on a **hysteresis band** (flip
+a cell to CMPμ/MZINB only if it sits outside [0.85, 1.30] var/mean in the last
+*two* seasons), default to the hurdle inside the band, and if a cell's routing
+flips year-over-year force the more robust NB-based hurdle.
+
+**7. Cheap pre-checks before building anything.** (a) **Confirm the compression is
+a likelihood problem at all:** refit the suspect cells with a plain **Poisson GBM**
+(no over-dispersion). If top-decile compression *persists*, the likelihood is part
+of the story; if it *vanishes*, the cause was the **feature set** (missing
+opponent-defense interaction, no garbage-time/blowout flag), not the distribution
+family — fix features first, far cheaper than CMPμ/marginalized-hurdle. (b) **Audit
+for Vuong misuse:** any routing decision that used a Vuong p-value to choose
+ZINB-vs-NB is invalid (nested at γ=0) — redo with Wilson-Einbeck or a boundary LR
+test. (c) **ZICMP is research territory:** `mpcmp` does not yet ship a
+zero-inflated CMP, so a cell needing *both* inflation and under-dispersion has no
+off-the-shelf family — flag it rather than forcing one.
+
+**Recommended sequencing (supersedes the B2/B3/B4 ordering below; effort is the
+researcher's estimate):**
+1. **Diagnostics infrastructure (1–2 weeks)** — extend `zinb_routing_diagnostics.py`
+   into a per-market panel: marginal mean, var/mean + bootstrap CI, ZI-index + CI,
+   Wilson-Einbeck score test, **conditional** var/mean from randomized-quantile
+   residuals of a baseline Poisson GBM, and a 4-season stability flag (fraction of
+   seasonal var/mean in the same routing zone over the last 4 seasons). Lock the
+   protocol *before* refitting any family (Campbell 2021 selection-bias trap). Run
+   the Poisson-GBM compression pre-check (§7a) here.
+2. **Marginalized hurdle for the 10 inflated cells (3–4 weeks)** — smallest delta
+   from what we ship; consumes `_ZeroTruncatedNB`; warm-start + separate covariate
+   sets per §5. **Gate: promote iff top-decile MAE improves ≥ 3% on the inflated
+   cluster on a held-out season; else revert.**
+3. **CMPμ for the 13 underdispersed cells (6–8 weeks)** — promoted from B4
+   "STL-only/optional" to first-class. **Gate: ship CMPμ only where conditional
+   var/mean < 0.90 AND held-out top-decile MAE improves ≥ 2%; in the 0.90–1.15 band
+   ship plain Poisson (strictly safer at ν≈1).** Ceiling ~3–8% — worth it amortized
+   across 13 cells, not for one.
+4. **Routing governance (ongoing)** — offseason refresh on a rolling 3-season
+   window; hysteresis band (var/mean < 0.85 last 2 seasons → CMPμ; > 1.30 with ZI
+   CI excluding 0 → marg-hurdle/MZINB; else hurdle); stability < 0.75 → derived-π
+   hurdle; mid-season regime-flip detector → hurdle fallback. The B2 config gains
+   `poisson`/`cmp`/`marg_hurdle`/`mzinb` values, seeded by the two-stage diagnostic.
+
+**What would change this:** if LightGBMLSS/XGBoostLSS ship a native CMPμ head
+(watch the StatMixedML repos) CMPμ drops from 6–8 weeks to ~1; if held-out
+top-decile MAE on the underdispersed cells is already within 2% of a Poisson
+oracle, skip CMPμ; if > 3–4 cells show conditional var/mean < 0.70 (deep
+underdispersion) CMPμ rises in priority — only CMPμ or generalized/double-Poisson
+(Efron 1986) can fit those. The GPBoost fork (B3 below) stays an alternative *only*
+if post-step-1 residuals show systematic per-player offsets rather than dispersion
+misfit.
 
 ### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
-| **Per-league × per-market routing wiring** | Tier 1 (ZINB) #2 | days | Implement the routing logic from B1's table. `data/zinb_mode_per_market.json` config schema: `{LEAGUE: {market: "joint"|"hurdle"|"plain_nb"|"cmp"}}` (keyed by both league and market — NBA STL and WNBA STL may route differently). Per-cell lookup in [training/pipeline.py:1869](../src/sportstradamus/training/pipeline.py#L1869) `_step_select_distribution` consults the config; default `"joint"` for any unrouted cell keeps legacy production byte-identical. | `pipeline.py` per-cell dispatch; new JSON config under `data/`. |
+| **Per-league × per-market routing wiring** | Tier 1 (ZINB) #2 | days | Implement the routing logic from B1's table. `data/zinb_mode_per_market.json` config schema: `{LEAGUE: {market: "joint"|"hurdle"|"plain_nb"|"poisson"|"cmp"|"marg_hurdle"|"mzinb"}}` (keyed by both league and market — NBA STL and WNBA STL may route differently). **Seeded by the two-stage routing diagnostic (marginal `zinb_routing_diagnostics.py` + a Poisson-GBM conditional-dispersion residual pass) under the Stage B1 research verdict's hysteresis band — not the marginal parquet alone.** Per-cell lookup in [training/pipeline.py:1869](../src/sportstradamus/training/pipeline.py#L1869) `_step_select_distribution` consults the config; default `"joint"` for any unrouted cell keeps legacy production byte-identical. | `pipeline.py` per-cell dispatch; new JSON config under `data/`. |
 | **Leakage-safe target-encoded player features** | Tier 2 (ZINB) #5; was original P5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. Orthogonal to architectural choice; ships regardless of which Stage B3 winner emerges. League-agnostic — same expanding-mean recipe works for NBA/WNBA/NFL. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as the MeanYr/Mean10 columns. |
 
 **Decision points (gate logic for Stage B2):**
@@ -741,7 +895,7 @@ Stage B2**.
 
 | Option | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
-| **MZINB head in LightGBMLSS** | Tier 2 (ZINB) #4 | 2–4 weeks | Reparameterize so the marginal mean ν = E[Y] is boosted directly; the latent NB conditional mean μ = ν/(1−ψ) is reconstructed. Three heads: logit(ψ), log(ν), log(α). The boosted ν IS the quantity the downstream pipeline already consumes. Cleaner than current derived-π trick. Sidesteps the gate-vs-NB(0) trade-off as a side effect. **No published GBDT implementation — novel contribution.** | New `MZINB` class alongside the existing distributions in [skew_normal.py](../src/sportstradamus/skew_normal.py) or under [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py); foundational papers Long 2014 + Preisser 2016. Use Mutiso et al. 2024 (Pólya-gamma augmentation) as a likelihood-structure reference. |
+| **MZINB head in LightGBMLSS** | Tier 2 (ZINB) #4 | 2–4 weeks | Reparameterize so the marginal mean ν = E[Y] is boosted directly; the latent NB conditional mean μ = ν/(1−ψ) is reconstructed. Three heads: logit(ψ), log(ν), log(α). The boosted ν IS the quantity the downstream pipeline already consumes. Cleaner than the current derived-π trick. Removes the `q ≥ NB(0)` clip **by construction**, but *relocates* (does not eliminate) the gate-vs-count trade-off — see the **Stage B1 research verdict §5**, which recommends the **marginalized hurdle (Kassahun 2014)** as the smaller-lift joint fit for the inflated cluster (the natural home for `_ZeroTruncatedNB`), with MZINB reserved for true structural-zero excess. **No published GBDT implementation — novel contribution.** | New `MZINB` class alongside the existing distributions in [skew_normal.py](../src/sportstradamus/skew_normal.py) or under [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py); foundational papers Long 2014 + Preisser 2016. Use Mutiso et al. 2024 (Pólya-gamma augmentation) as a likelihood-structure reference. |
 | **GPBoost with NegBin likelihood + player random intercept** | Tier 2 (ZINB) #3; was original P10 | 1–2 weeks | NegBin is one of GPBoost's native likelihoods, so the LSS-flexibility loss is smaller on counts than on SkewNormal. Sigrist's published benchmarks (~10pp gap vs LightGBM-Cat, ~93pp vs naive numeric ID) transfer to NB. The earlier GPBoost prototype failed on SkewNormal FGA, not on counts. | New GPBoost dependency (user pre-approved for a phase that needs it); custom training path branched off [pipeline.py](../src/sportstradamus/training/pipeline.py). Treat as a sub-project with its own task list. |
 
 **Decision criterion (researcher-specified):**
@@ -797,7 +951,7 @@ evaluate the bigger structural change.
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
 | **Per-parameter Optuna search** | Tier 3 (ZINB) #6 | days | Separate `learning_rate` and `n_estimators` for gate vs NB heads inside the existing LightGBMLSS Optuna sweep. cyc-GBM-inspired without porting. May resolve the deterministic-30-round blowups without architectural change. Daub et al. 2026 ("balanced step length") provides theoretical justification. | Extend the Optuna search-space dict in [pipeline.py:348-368](../src/sportstradamus/training/pipeline.py#L348) to distinguish gate vs count hyperparameters. |
-| **CMP head for STL specifically** | Tier 4 (ZINB) #8 | 1–2 weeks | Only worth implementing if STL's empirical variance/mean ratio < 1.3 (per Stage B1 diagnostic). NB always has variance > mean for finite α; CMP corrects in either direction. Philipson & Huang 2023 provide a fast look-up-table mean-parameterized CMP. | New PyTorch custom distribution; pre-computed Z(λ, ν) lookup table at module load. |
+| **CMPμ head — PROMOTED to first-class (owns the 13 underdispersed cells, not STL-only)** | was Tier 4 → Tier 1 (ZINB) #8 | 6–8 weeks | Per the Stage B1 research verdict, no longer optional STL polish — owns the 13 underdispersed cells. Mean-parameterized CMP (Huang 2017; canonical λ ≠ E[Y], unusable for line-pricing). Custom distribution class — neither LightGBMLSS nor XGBoostLSS ships CMP. Series truncation K≈64; precomputed (μ,ν)→λ look-up grid (Philipson & Huang 2023); init ν from method-of-moments; clip log(ν)∈[−1,2]. Ceiling ~3–8% top-decile MAE amortized across 13 cells. Plain **Poisson** when conditional var/mean ∈ [0.90, 1.10]. | New PyTorch custom distribution; pre-computed Z(λ, ν) + (μ,ν)→λ lookup table at module load. Reference: CMPBoost (Chatla & Shmueli 2020), code `SuneelChatla/CMPTree`. |
 | **Reduced regularization on location parameter** | Tier 3 (ZINB) #7; was original P6 | hours | Larger `num_leaves`, smaller `min_data_in_leaf`, deeper `max_depth`. Marginal effect. Try only after Tier 1–2. | Optuna search-space dict. |
 | **MERF-style iteration with LightGBMLSS** | Tier 4 (ZINB) #9; was original P9/P10 fallback | 2–3 weeks | Alternating fit-residual / re-estimate-shrunken-per-player-baseline loop. Reserve as fallback if Stage B3 (both MZINB and GPBoost) prove infeasible. | New module under `src/sportstradamus/training/`. |
 | **Quantile / expectile heads alongside the ZINB** | Tier 5 (ZINB) #11; was original P7-equivalent | days | **Different use case** — DFS ceiling and over bets, not the bias fix. Add alongside, not instead of, Tier 1–2. Sluijterman et al. 2025 arctan pinball loss is a drop-in replacement for standard pinball with better-calibrated extremes. | New quantile head pickled alongside the ZINB pickle. |

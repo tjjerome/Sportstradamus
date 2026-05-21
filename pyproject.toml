@@ -51,6 +51,7 @@ pickem-build = "sportstradamus.strategies.underdog_pickem:main"
 backfill-live-metrics = "sportstradamus.scripts.backfill_live_metrics:main"
 check-graduation = "sportstradamus.scripts.check_graduation:main"
 zinb-routing-diagnostics = "sportstradamus.scripts.zinb_routing_diagnostics:main"
+icc-diagnostics = "sportstradamus.scripts.icc_diagnostics:main"
 
 [tool.poetry.group.strategy]
 optional = true
