@@ -130,7 +130,9 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
     # into distribution-specific columns (Model R, Model Alpha, etc.) for scipy.
     if "Model Param" in df.columns and "Dist" in df.columns:
         df["Model R"] = np.where(df["Dist"].isin(("NegBin", "ZINB")), df["Model Param"], np.nan)
-        df["Model Alpha"] = np.where(df["Dist"].isin(("Gamma", "ZAGamma")), df["Model Param"], np.nan)
+        df["Model Alpha"] = np.where(
+            df["Dist"].isin(("Gamma", "ZAGamma")), df["Model Param"], np.nan
+        )
         df["Model Sigma"] = np.where(df["Dist"] == "SkewNormal", df["Model Param"], np.nan)
 
     # Ensure Gate is present (zero-inflation probability for ZINB, ZAGamma).

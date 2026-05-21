@@ -20,8 +20,9 @@ style guide is the mechanical source of truth; this document gives you the map.
 7. [Adding a New League](#adding-a-new-league)
 8. [Adding a New Market](#adding-a-new-market)
 9. [Modifying the Training Pipeline](#modifying-the-training-pipeline)
-10. [Tests](#tests)
-11. [Archived / Deprecated Code](#archived--deprecated-code)
+10. [Shipping to Production (devel)](#shipping-to-production-devel)
+11. [Tests](#tests)
+12. [Archived / Deprecated Code](#archived--deprecated-code)
 
 ---
 
@@ -349,6 +350,79 @@ The training loop is in `training/pipeline.py` → `train_market`. The stages in
 To change the objective function, edit the `objective` closure inside `train_market`.
 To change dispersion calibration, edit the `minimize_scalar` call that follows model fit.
 To change the feature filter logic, see `training/shap.py`.
+
+---
+
+## Shipping to Production (`devel`)
+
+**The production server tracks `devel` and pulls the entire branch.** Anything
+merged to `devel` runs in production — including its dependencies and console
+scripts. So `devel` must carry **production-runtime code and operator tools
+only**, never the dev-only research scaffolding used to *decide* a change.
+
+This is the process for shipping **any** model change for **any** market to
+production. The ship mechanism — `data/ship_config.json`, the per-cell strategy
+resolve + withhold/prune in `meditate`, and the Gate 1 / Gate 2 lifecycle —
+applies to **every `(league, market)` cell**, not to one track or league. A
+research line (e.g. the GBDT mean-regression work on
+`claude/fix-gbdt-mean-regression-*`) is just where the *evidence* for a given
+ship is produced; the pipeline itself is project-wide.
+
+Model improvements are developed on a long-lived research branch that accumulates
+diagnostics, A/B harnesses, and experiment flags. **Do not merge a research
+branch wholesale into `devel`.** Ship in two phases.
+
+### Phase A — foundation (one-time)
+
+Land the production substrate the ship mechanism needs:
+
+- the strategy registry (`training/baselines.py`) + pipeline `target_strategy` /
+  `zinb_mode` dispatch + `model_prob` decode;
+- the Gate 2 live-metrics machinery (`analysis.compute_book_brier_skill_score`,
+  the `nightly.py` live-metrics step, `check-graduation`, `backfill-live-metrics`);
+- the per-cell ship plumbing (`training/ship_config.py`, the `helpers/io.py`
+  model-pickle helpers, the `meditate` wiring) + an empty `data/ship_config.json`.
+
+With an empty `ship_config.json` and default flags, production behavior is
+unchanged — the mechanism is simply now live.
+
+### Phase B — per-market ship PRs (repeating)
+
+When a `(league, market)` cell clears **Gate 1** (see
+`docs/gbdt_mean_regression_plan.md`, "Ship mechanism — per-cell strategy config
+on devel"), open a focused PR to `devel` carrying the **production delta only**:
+
+1. **Training** — if the cell ships a *new* strategy: its slug + forward/decode in
+   `training/baselines.py`. If it needs new features: those `stats/` + `pipeline`
+   additions. If the strategy is already deployed: nothing here.
+2. **Inference** — the matching `model_prob` decode branch for that strategy, with
+   an inference-path test (a Gate 1 requirement).
+3. **Toggle** — the one `ship_config.json` line (`cell → strategy`, or
+   `"withheld"` to dark-out a cell under rework).
+
+The offline **evidence** that justifies the ship (compression-eval runs,
+diagnostic verdicts) **travels as prose in the PR description, never as committed
+code.**
+
+### Keep on `devel` vs leave on the research branch
+
+| Keep (production runtime / operator tools) | Leave off `devel` (dev-only research) |
+|---|---|
+| `baselines.py`, pipeline dispatch, `model_prob` decode | `compression_eval` (offline A/B harness) |
+| `ship_config.py` + `helpers/io.py` model-pickle helpers + `meditate` wiring | `zinb-routing-diagnostics` + the **`statsmodels`** dependency it pulls in |
+| `nightly` live-metrics, `check-graduation`, `backfill-live-metrics` | `icc-diagnostics` |
+| Production data / feature fixes | the diagnostics' test suites; any `/tmp` harness |
+
+The `--target-strategy` / `--zinb-mode` / `--deterministic` flags default to
+current production behavior, so they are inert on `devel`; the heavy determinism
+*integration tests* are dev scaffolding and need not ship.
+
+### Use the `devel-ship-curator` agent
+
+Phase B PRs (and any further foundation layers) **must be carved by the
+`devel-ship-curator` agent** (`.claude/agents/devel-ship-curator.md`), which
+enforces the keep/drop split above and the production-delta-only discipline.
+The initial Phase A foundation PR is the one exception — it is carved by hand.
 
 ---
 
