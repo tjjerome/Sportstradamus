@@ -81,6 +81,13 @@ live at `/tmp/researcher_skewnormal.md` and `/tmp/researcher_zinb.md` in the
 originating session); the load-bearing citations and recommendations are
 copied below. Future sessions should treat this file as self-contained.
 
+Future research handoffs are produced **in-repo** by the
+[research-analyst subagent](../.claude/agents/research-analyst.md) (dispatch via
+the `Agent` tool, `subagent_type: "research-analyst"`) rather than
+round-tripping to claude.ai; the brief lands at `/tmp/researcher_{topic}.md` and
+the main session distills its load-bearing conclusions here, exactly as the two
+seed briefs above were. See "Research handoffs (in-repo)" under Session handoff.
+
 - **SkewNormal track** — surfaces 10 new methods (T1–T10) for top-decile bias
   on SkewNormal markets (PTS/REB/AST/PRA/FGA/MIN/PA/PR/FG3A/FGM). Headline:
   ICC₁ per-market routing comes first; the original P3 basic rate
@@ -169,6 +176,8 @@ Don't let perfect be the enemy of good. Each stage exists because the
 shows the deployed model is already calibrated and profitable on a given
 market or league, **stop that track for that market/league and redeploy
 the engineering effort elsewhere**. The plan is a backlog, not a queue.
+(If the residual or cost analysis behind a stop/continue call is ambiguous,
+dispatch the `research-analyst` agent before deciding.)
 
 ### Lifecycle: offline gate → production test → live gate → graduation
 
@@ -891,7 +900,8 @@ misfit.
 This is the canonical decision point of the ZINB track. The researcher
 explicitly flags that running MZINB and GPBoost in parallel doubles cost
 without obvious gain. The decision criterion is **residual structure after
-Stage B2**.
+Stage B2**. If that residual structure is ambiguous, dispatch the
+`research-analyst` agent to adjudicate the fork before committing 4–6 weeks.
 
 | Option | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
@@ -1204,6 +1214,30 @@ git history. The handoff for **Stage 0** lives at
 `/tmp/stage0_handoff_prompt.md` after this plan revision (initial
 production by the prompt-engineer agent in commit
 `{stage0-handoff-commit}`).
+
+### Research handoffs (in-repo)
+
+When a diagnostic result is ambiguous or a path-forward decision needs
+literature + statistical synthesis, dispatch the
+[research-analyst subagent](../.claude/agents/research-analyst.md) via the
+`Agent` tool with `subagent_type: "research-analyst"`. It is the in-repo
+replacement for the claude.ai research round-trip: it reads the actual
+diagnostic outputs (and may re-run read-only diagnostics), searches the primary
+literature, and writes a cited statistician's brief — the same role the two seed
+briefs in "Research handoffs that fed this plan" played.
+
+- **Input** (optional): a research prompt at `/tmp/{topic}_research_prompt.md`,
+  or the question passed inline in the dispatch.
+- **Output**: a brief at `/tmp/researcher_{topic}.md` in the house format
+  (TL;DR / Key Findings with DOIs / Recommendation / Reality checks / Open
+  questions / Bibliography), ending with a "Load-bearing conclusions for the
+  plan" list.
+- **Distillation**: the main session copies the load-bearing conclusions into
+  this plan's "research verdict" / "Open questions" / "Cross-league caveats"
+  sections. The brief is the full archive; the agent does not edit the plan.
+
+The agent is read-only w.r.t. production (no pickles, no default flips, no
+inference-path or `src/` edits).
 
 ### Tooling note: `gh` is a userspace install on this workstation
 
