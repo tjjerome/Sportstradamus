@@ -38,6 +38,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_zi,
 )
+from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.training import baselines
@@ -415,8 +416,8 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
     with open(pkg_resources.files(data) / "book_weights.json", "w") as outfile:
         json.dump(book_weights, outfile, indent=4)
 
-    filename = "_".join([league, market]).replace(" ", "-")
-    filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+    filename = market_file_slug(league, market)
+    filepath = model_pickle_path(league, market)
     need_model = True
     if os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
