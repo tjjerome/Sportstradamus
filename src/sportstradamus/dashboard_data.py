@@ -43,11 +43,41 @@ LEAGUE_CLASSES = {
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
 GAMELOG_SCHEMA = {
-    "NBA":  {"file": "nba_gamelog.parquet",  "player": "PLAYER_NAME",         "date": "GAME_DATE", "opp": "OPP",      "home": "HOME"},
-    "WNBA": {"file": "wnba_gamelog.parquet", "player": "PLAYER_NAME",         "date": "GAME_DATE", "opp": "OPP",      "home": "HOME"},
-    "MLB":  {"file": "mlb_gamelog.parquet",  "player": "playerName",          "date": "gameDate",  "opp": "opponent", "home": "home"},
-    "NHL":  {"file": "nhl_gamelog.parquet",  "player": "playerName",          "date": "gameDate",  "opp": "opponent", "home": "home"},
-    "NFL":  {"file": "nfl_gamelog.parquet",  "player": "player display name", "date": None,        "opp": None,       "home": None},
+    "NBA": {
+        "file": "nba_gamelog.parquet",
+        "player": "PLAYER_NAME",
+        "date": "GAME_DATE",
+        "opp": "OPP",
+        "home": "HOME",
+    },
+    "WNBA": {
+        "file": "wnba_gamelog.parquet",
+        "player": "PLAYER_NAME",
+        "date": "GAME_DATE",
+        "opp": "OPP",
+        "home": "HOME",
+    },
+    "MLB": {
+        "file": "mlb_gamelog.parquet",
+        "player": "playerName",
+        "date": "gameDate",
+        "opp": "opponent",
+        "home": "home",
+    },
+    "NHL": {
+        "file": "nhl_gamelog.parquet",
+        "player": "playerName",
+        "date": "gameDate",
+        "opp": "opponent",
+        "home": "home",
+    },
+    "NFL": {
+        "file": "nfl_gamelog.parquet",
+        "player": "player display name",
+        "date": None,
+        "opp": None,
+        "home": None,
+    },
 }
 
 # Banner accent colors used by the two visual sections.

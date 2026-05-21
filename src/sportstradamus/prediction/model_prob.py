@@ -214,9 +214,7 @@ def model_prob(offers, league, market, platform, stat_data, playerStats):
                     dist,
                     playerStats,
                     normalized=normalized,
-                    offset_mode=bool(
-                        offset_meta and offset_meta.get("method") == "eb_additive"
-                    ),
+                    offset_mode=bool(offset_meta and offset_meta.get("method") == "eb_additive"),
                 )
 
             prob_params = model.predict(playerStats, pred_type="parameters")

@@ -74,10 +74,10 @@ def _seed_live_metrics(path):
     rows = []
     # (league, market, n_settled, book_bss) — supplies the Gate 2 side.
     cells = [
-        ("NBA", "PTS", 300, 0.05),       # graduated
-        ("NBA", "FG3M", 220, -0.03),     # demoted
-        ("WNBA", "PTS", 250, 0.10),      # gate1 fails → still not-shipped
-        ("WNBA", "FG3M", 80, 0.02),      # in-test (n < 200)
+        ("NBA", "PTS", 300, 0.05),  # graduated
+        ("NBA", "FG3M", 220, -0.03),  # demoted
+        ("WNBA", "PTS", 250, 0.10),  # gate1 fails → still not-shipped
+        ("WNBA", "FG3M", 80, 0.02),  # in-test (n < 200)
         ("NFL", "rushing_yards", 350, 0.04),  # graduated
         # NFL passing_tds intentionally absent — outer-merge keeps the model row.
     ]
@@ -110,15 +110,21 @@ def test_check_graduation_synthetic_parquets(tmp_path):
     result = runner.invoke(
         main,
         [
-            "--model-stats-path", str(model_stats),
-            "--live-metrics-path", str(live_metrics),
+            "--model-stats-path",
+            str(model_stats),
+            "--live-metrics-path",
+            str(live_metrics),
         ],
     )
     assert result.exit_code == 0, result.output
     # Every (league, market) cell from model_stats should appear once.
     expected_cells = [
-        ("NBA", "PTS"), ("NBA", "FG3M"), ("WNBA", "PTS"), ("WNBA", "FG3M"),
-        ("NFL", "rushing_yards"), ("NFL", "passing_tds"),
+        ("NBA", "PTS"),
+        ("NBA", "FG3M"),
+        ("WNBA", "PTS"),
+        ("WNBA", "FG3M"),
+        ("NFL", "rushing_yards"),
+        ("NFL", "passing_tds"),
     ]
     for league, market in expected_cells:
         assert f"{league}" in result.output
@@ -138,9 +144,12 @@ def test_check_graduation_filters_by_league(tmp_path):
     result = runner.invoke(
         main,
         [
-            "--league", "NBA",
-            "--model-stats-path", str(model_stats),
-            "--live-metrics-path", str(live_metrics),
+            "--league",
+            "NBA",
+            "--model-stats-path",
+            str(model_stats),
+            "--live-metrics-path",
+            str(live_metrics),
         ],
     )
     assert result.exit_code == 0
@@ -158,8 +167,10 @@ def test_check_graduation_missing_live_parquet_classifies_all_as_in_test(tmp_pat
     result = runner.invoke(
         main,
         [
-            "--model-stats-path", str(model_stats),
-            "--live-metrics-path", str(missing_live),
+            "--model-stats-path",
+            str(model_stats),
+            "--live-metrics-path",
+            str(missing_live),
         ],
     )
     assert result.exit_code == 0
@@ -174,8 +185,10 @@ def test_check_graduation_missing_model_stats_errors(tmp_path):
     result = runner.invoke(
         main,
         [
-            "--model-stats-path", str(tmp_path / "missing.parquet"),
-            "--live-metrics-path", str(tmp_path / "also_missing.parquet"),
+            "--model-stats-path",
+            str(tmp_path / "missing.parquet"),
+            "--live-metrics-path",
+            str(tmp_path / "also_missing.parquet"),
         ],
     )
     assert result.exit_code != 0

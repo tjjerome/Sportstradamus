@@ -46,35 +46,27 @@ def _synth_x(n: int = 8, rng_seed: int = 0) -> pd.DataFrame:
 
 def test_compute_eb_prior_exact_formula():
     """``(games·player_mean + k·global_mean) / (games + k)`` to machine precision."""
-    out = compute_eb_prior(
-        np.array([20.0]), np.array([10.0]), global_mean=5.0, k=10.0
-    )
+    out = compute_eb_prior(np.array([20.0]), np.array([10.0]), global_mean=5.0, k=10.0)
     # (10*20 + 10*5) / (10 + 10) = 12.5
     assert abs(out[0] - 12.5) < 1e-12
 
 
 def test_compute_eb_prior_shrinks_low_games_toward_global():
-    out = compute_eb_prior(
-        np.array([30.0]), np.array([1.0]), global_mean=10.0, k=EB_SHRINKAGE_K
-    )
+    out = compute_eb_prior(np.array([30.0]), np.array([1.0]), global_mean=10.0, k=EB_SHRINKAGE_K)
     # 1 game, player mean 30, global 10, K=10 -> heavy shrinkage:
     # (1*30 + 10*10) / (1 + 10) ≈ 11.8 — closer to 10 than to 30.
     assert 10.0 < out[0] < 14.0
 
 
 def test_compute_eb_prior_trusts_high_games():
-    out = compute_eb_prior(
-        np.array([30.0]), np.array([200.0]), global_mean=10.0, k=EB_SHRINKAGE_K
-    )
+    out = compute_eb_prior(np.array([30.0]), np.array([200.0]), global_mean=10.0, k=EB_SHRINKAGE_K)
     # 200 games dominates -> prior pulls toward player mean (30).
     assert abs(out[0] - 30.0) < 1.5
 
 
 def test_compute_eb_prior_clips_negative_games():
     """Defensive: negative GamesPlayed (shouldn't happen) clips to zero."""
-    out = compute_eb_prior(
-        np.array([20.0]), np.array([-3.0]), global_mean=5.0, k=EB_SHRINKAGE_K
-    )
+    out = compute_eb_prior(np.array([20.0]), np.array([-3.0]), global_mean=5.0, k=EB_SHRINKAGE_K)
     # games clipped to 0 -> prior == global_mean.
     assert abs(out[0] - 5.0) < 1e-12
 

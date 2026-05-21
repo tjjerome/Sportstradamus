@@ -67,9 +67,7 @@ def test_decile_table_shape_and_monotone_bias():
 
 
 def test_compression_ratio_below_one_for_shrunk_predictions():
-    card = scorecard(
-        _compressed_frame(), "EV", strategy="t", league="NBA", market="PTS"
-    )
+    card = scorecard(_compressed_frame(), "EV", strategy="t", league="NBA", market="PTS")
     assert 0.45 < card.compression_ratio < 0.55
     assert card.top_decile_mae > 0
     assert card.top_decile_bias < 0
@@ -85,9 +83,7 @@ def test_perfect_predictions_have_unit_ratio():
 
 
 def test_verdict_ships_when_top_decile_improves():
-    base = scorecard(
-        _compressed_frame(seed=0), "EV", strategy="base", league="NBA", market="PTS"
-    )
+    base = scorecard(_compressed_frame(seed=0), "EV", strategy="base", league="NBA", market="PTS")
     # Candidate: predictions much closer to actual (less compression).
     df = _compressed_frame(seed=0)
     df["EV"] = df["Result"].mean() + 0.95 * (df["Result"] - df["Result"].mean())
@@ -97,9 +93,7 @@ def test_verdict_ships_when_top_decile_improves():
 
 
 def test_verdict_kills_when_no_top_decile_gain():
-    base = scorecard(
-        _compressed_frame(seed=2), "EV", strategy="base", league="NBA", market="PTS"
-    )
+    base = scorecard(_compressed_frame(seed=2), "EV", strategy="base", league="NBA", market="PTS")
     ship, reason = verdict(base, base)
     assert not ship
     assert "KILL" in reason
@@ -141,9 +135,7 @@ def test_load_test_set_keeps_optional_columns_when_present(tmp_path):
 
 
 def test_load_test_set_handles_missing_optional_columns(tmp_path):
-    df = pd.DataFrame(
-        {"MeanYr": [10.0, 12.0], "Result": [11.0, 13.0], "EV": [10.5, 12.5]}
-    )
+    df = pd.DataFrame({"MeanYr": [10.0, 12.0], "Result": [11.0, 13.0], "EV": [10.5, 12.5]})
     p = tmp_path / "NBA_PTS.csv"
     df.to_csv(p, index=False)
     loaded = load_test_set(p, "EV")
@@ -203,12 +195,8 @@ def test_brier_skill_score_negative_when_book_beats_model():
 def test_verdict_kill_on_brier_skill_regression():
     # MAE gates pass (candidate improves top-decile MAE and global MAE), but
     # brier_skill_score regresses — third gate must fire.
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.10
-    )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.05
-    )
+    base = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.10)
+    cand = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.05)
     ship, reason = verdict(base, cand)
     assert not ship
     assert "KILL" in reason
@@ -216,12 +204,8 @@ def test_verdict_kill_on_brier_skill_regression():
 
 
 def test_verdict_ship_includes_brier_skill_when_present():
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.05
-    )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.10
-    )
+    base = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.05)
+    cand = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.10)
     ship, reason = verdict(base, cand)
     assert ship, reason
     assert "brier_skill" in reason
@@ -230,23 +214,15 @@ def test_verdict_ship_includes_brier_skill_when_present():
 def test_verdict_skips_brier_skill_gate_when_either_baseline_or_candidate_lacks_it():
     # Baseline has no brier; candidate has a (worse) value — gate must skip,
     # MAE gates alone decide. MAE improves so SHIP.
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=None
-    )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=-0.50
-    )
+    base = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=None)
+    cand = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=-0.50)
     ship, reason = verdict(base, cand)
     assert ship, reason
     assert "brier_skill" not in reason
 
     # And symmetric: candidate None.
-    base2 = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.50
-    )
-    cand2 = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, brier_skill_score=None
-    )
+    base2 = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.50)
+    cand2 = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=None)
     ship2, reason2 = verdict(base2, cand2)
     assert ship2, reason2
     assert "brier_skill" not in reason2
@@ -269,8 +245,7 @@ from sportstradamus.scripts.compression_eval import (
 
 
 def _build_live_offer(line, bet, model_p, books_p):
-    return (line, 1.0, "Underdog", bet, model_p, books_p,
-            float("nan"), float("nan"), float("nan"))
+    return (line, 1.0, "Underdog", bet, model_p, books_p, float("nan"), float("nan"), float("nan"))
 
 
 def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFrame:
@@ -324,7 +299,10 @@ def test_history_to_eval_frame_renames_and_normalizes_columns():
 
 def test_history_to_eval_frame_empty_history_returns_empty_schema():
     frame = _history_to_eval_frame(
-        pd.DataFrame(), league="NBA", market="PTS", window_days=30,
+        pd.DataFrame(),
+        league="NBA",
+        market="PTS",
+        window_days=30,
         meanyr_lookup=lambda p, m, d: 0.0,
     )
     assert frame.empty
@@ -336,34 +314,59 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
     rows = []
     # In-scope: NBA + PTS within window
     for idx in range(5):
-        rows.append({
-            "Player": f"A_{idx}", "League": "NBA", "Date": today.strftime("%Y-%m-%d"),
-            "Market": "PTS", "Model EV": 20.0,
+        rows.append(
+            {
+                "Player": f"A_{idx}",
+                "League": "NBA",
+                "Date": today.strftime("%Y-%m-%d"),
+                "Market": "PTS",
+                "Model EV": 20.0,
+                "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+                "Actual": 22.0,
+            }
+        )
+    # Out-of-scope league
+    rows.append(
+        {
+            "Player": "B",
+            "League": "WNBA",
+            "Date": today.strftime("%Y-%m-%d"),
+            "Market": "PTS",
+            "Model EV": 20.0,
             "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
             "Actual": 22.0,
-        })
-    # Out-of-scope league
-    rows.append({
-        "Player": "B", "League": "WNBA", "Date": today.strftime("%Y-%m-%d"),
-        "Market": "PTS", "Model EV": 20.0,
-        "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)], "Actual": 22.0,
-    })
+        }
+    )
     # Out-of-scope market
-    rows.append({
-        "Player": "C", "League": "NBA", "Date": today.strftime("%Y-%m-%d"),
-        "Market": "REB", "Model EV": 20.0,
-        "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)], "Actual": 22.0,
-    })
+    rows.append(
+        {
+            "Player": "C",
+            "League": "NBA",
+            "Date": today.strftime("%Y-%m-%d"),
+            "Market": "REB",
+            "Model EV": 20.0,
+            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+            "Actual": 22.0,
+        }
+    )
     # Out-of-scope date
-    rows.append({
-        "Player": "D", "League": "NBA",
-        "Date": (today - timedelta(days=120)).strftime("%Y-%m-%d"),
-        "Market": "PTS", "Model EV": 20.0,
-        "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)], "Actual": 22.0,
-    })
+    rows.append(
+        {
+            "Player": "D",
+            "League": "NBA",
+            "Date": (today - timedelta(days=120)).strftime("%Y-%m-%d"),
+            "Market": "PTS",
+            "Model EV": 20.0,
+            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+            "Actual": 22.0,
+        }
+    )
     history = pd.DataFrame(rows)
     frame = _history_to_eval_frame(
-        history, league="NBA", market="PTS", window_days=30,
+        history,
+        league="NBA",
+        market="PTS",
+        window_days=30,
         meanyr_lookup=lambda p, m, d: 18.0,
     )
     assert len(frame) == 5
@@ -375,26 +378,30 @@ def test_make_meanyr_lookup_returns_nan_when_gamelog_empty():
 
 
 def test_make_meanyr_lookup_returns_nan_when_market_column_missing():
-    gl = pd.DataFrame({
-        "playerName": ["Player_X"] * 5,
-        "gameDate": pd.date_range("2026-04-01", periods=5, freq="D"),
-        "REB": [10, 11, 12, 9, 8],
-    })
+    gl = pd.DataFrame(
+        {
+            "playerName": ["Player_X"] * 5,
+            "gameDate": pd.date_range("2026-04-01", periods=5, freq="D"),
+            "REB": [10, 11, 12, 9, 8],
+        }
+    )
     lookup = _make_meanyr_lookup_from_gamelog(gl, date_col="gameDate")
     assert math.isnan(lookup("Player_X", "PTS", pd.Timestamp("2026-05-20")))
 
 
 def test_make_meanyr_lookup_returns_mean_of_prior_year():
-    gl = pd.DataFrame({
-        "playerName": ["Player_X"] * 4,
-        "gameDate": [
-            pd.Timestamp("2026-05-10"),
-            pd.Timestamp("2026-05-12"),
-            pd.Timestamp("2026-05-15"),
-            pd.Timestamp("2026-05-19"),  # before the lookup date 2026-05-20
-        ],
-        "PTS": [10.0, 20.0, 30.0, 40.0],
-    })
+    gl = pd.DataFrame(
+        {
+            "playerName": ["Player_X"] * 4,
+            "gameDate": [
+                pd.Timestamp("2026-05-10"),
+                pd.Timestamp("2026-05-12"),
+                pd.Timestamp("2026-05-15"),
+                pd.Timestamp("2026-05-19"),  # before the lookup date 2026-05-20
+            ],
+            "PTS": [10.0, 20.0, 30.0, 40.0],
+        }
+    )
     lookup = _make_meanyr_lookup_from_gamelog(gl, date_col="gameDate")
     val = lookup("Player_X", "PTS", pd.Timestamp("2026-05-20"))
     assert val == pytest.approx(25.0)
@@ -427,8 +434,10 @@ def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
 
 
 def test_live_window_cli_rejects_conflicting_flags(monkeypatch, tmp_path):
-    monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history",
-                        lambda: _build_live_history_fixture(n=10))
+    monkeypatch.setattr(
+        "sportstradamus.scripts.compression_eval.read_history",
+        lambda: _build_live_history_fixture(n=10),
+    )
     runner = CliRunner()
     fake_csv = tmp_path / "fake.csv"
     fake_csv.write_text("MeanYr,Result,EV\n1,1,1\n")

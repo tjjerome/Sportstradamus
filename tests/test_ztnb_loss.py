@@ -45,9 +45,7 @@ def test_ztnb_log_prob_matches_scipy_reference() -> None:
     total_count, probs = 4.0, 0.35
     y = np.array([1, 2, 3, 5, 8, 13], dtype=float)
 
-    ztnb = _ZeroTruncatedNB(
-        total_count=torch.tensor(total_count), probs=torch.tensor(probs)
-    )
+    ztnb = _ZeroTruncatedNB(total_count=torch.tensor(total_count), probs=torch.tensor(probs))
     got = ztnb.log_prob(torch.tensor(y)).detach().numpy()
 
     ref = _scipy_ztnb_logpmf(y, total_count, probs)
@@ -83,9 +81,7 @@ def test_ztnb_log_prob_finite_under_degenerate_zero_mass() -> None:
     ZTNB log-prob ``+inf``). The ``_ZTNB_P0_FLOOR`` clamp keeps it finite while
     ``log p_NB(y)`` itself stays finite for these params.
     """
-    ztnb = _ZeroTruncatedNB(
-        total_count=torch.tensor(2.0), probs=torch.tensor(1e-20)
-    )
+    ztnb = _ZeroTruncatedNB(total_count=torch.tensor(2.0), probs=torch.tensor(1e-20))
     out = ztnb.log_prob(torch.tensor([1.0, 2.0, 3.0]))
     assert torch.isfinite(out).all(), f"non-finite ZTNB log-prob: {out}"
 

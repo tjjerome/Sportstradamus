@@ -103,7 +103,9 @@ def seed_everything(seed: int) -> dict[str, int | bool]:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(True)  # NOTE: process-global; later non-deterministic torch ops in-process will raise
+    torch.use_deterministic_algorithms(
+        True
+    )  # NOTE: process-global; later non-deterministic torch ops in-process will raise
     return {
         "seed": seed,
         "bagging_seed": seed,
@@ -233,8 +235,14 @@ def fit_predict_params(
         DataFrame of raw predicted distribution parameters for ``X_predict``.
     """
     model = fit_lss_model(
-        dist_obj, dist, X_train, y_train_labels, params,
-        normalized=normalized, shape_ceiling=shape_ceiling, seed=seed,
+        dist_obj,
+        dist,
+        X_train,
+        y_train_labels,
+        params,
+        normalized=normalized,
+        shape_ceiling=shape_ceiling,
+        seed=seed,
         offset_mode=offset_mode,
     )
     return predict_lss_params(
@@ -270,7 +278,9 @@ def fit_hurdle_model(
     """
     rounds = int(params["opt_rounds"])
     model = HurdleZINB()
-    model.fit(X_train, y_train_labels, hp=params, rounds=rounds, shape_ceiling=shape_ceiling, seed=seed)
+    model.fit(
+        X_train, y_train_labels, hp=params, rounds=rounds, shape_ceiling=shape_ceiling, seed=seed
+    )
     return model
 
 
@@ -611,7 +621,13 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
 
 
 def _step_build_lss_model(
-    dist: str, dist_obj, X_train, shape_ceiling, normalize: bool, offset_mode: bool, use_hurdle: bool
+    dist: str,
+    dist_obj,
+    X_train,
+    shape_ceiling,
+    normalize: bool,
+    offset_mode: bool,
+    use_hurdle: bool,
 ):
     """Apply the bounded shape response and build an unfit LightGBMLSS model.
 
@@ -745,13 +761,21 @@ def _step_fit_model(
             X_train, y_train_labels, opt_params, shape_ceiling=shape_ceiling, seed=seed
         )
     return fit_lss_model(
-        dist_obj, dist, X_train, y_train_labels, opt_params,
-        normalized=normalize, shape_ceiling=shape_ceiling, seed=seed,
+        dist_obj,
+        dist,
+        X_train,
+        y_train_labels,
+        opt_params,
+        normalized=normalize,
+        shape_ceiling=shape_ceiling,
+        seed=seed,
         offset_mode=offset_mode,
     )
 
 
-def _step_predict_splits(model, dist: str, splits: dict, normalize: bool, offset_mode: bool) -> dict:
+def _step_predict_splits(
+    model, dist: str, splits: dict, normalize: bool, offset_mode: bool
+) -> dict:
     """Predict raw distribution params on train/validation/test splits.
 
     Also sorts indices on every split + the B_* frames + replaces ``Odds == 0``
@@ -760,6 +784,7 @@ def _step_predict_splits(model, dist: str, splits: dict, normalize: bool, offset
     Returns:
         Dict with: ``prob_params_train``, ``prob_params_validation``, ``prob_params``.
     """
+
     def _predict(X_part: pd.DataFrame) -> pd.DataFrame:
         if getattr(model, "is_hurdle", False):
             return predict_hurdle_params(model, X_part)
@@ -777,8 +802,17 @@ def _step_predict_splits(model, dist: str, splits: dict, normalize: bool, offset
     prob_params_validation["result"] = splits["y_validation"]["Result"]
     prob_params.sort_index(inplace=True)
     prob_params["result"] = splits["y_test"]["Result"]
-    for key in ("X_train", "B_train", "y_train", "X_test", "B_test", "y_test",
-                "X_validation", "B_validation", "y_validation"):
+    for key in (
+        "X_train",
+        "B_train",
+        "y_train",
+        "X_test",
+        "B_test",
+        "y_test",
+        "X_validation",
+        "B_validation",
+        "y_validation",
+    ):
         splits[key].sort_index(inplace=True)
     for key in ("B_train", "B_test", "B_validation"):
         splits[key].loc[splits[key]["Odds"] == 0, "Odds"] = 0.5
@@ -814,7 +848,8 @@ def _step_compute_skill_metrics(
     else:
         logger.warning(
             "book baseline unavailable for %s/%s; skill score set to nan",
-            league, market,
+            league,
+            market,
         )
         book_metrics = None
         brier_skill_score = float("nan")
@@ -859,8 +894,12 @@ def _step_compute_mode_stats(
         under_mask = mask & (y_pred == 0)
         under_prec[i] = (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
     return {
-        "prec": prec, "acc": acc, "sharp": sharp,
-        "ll": ll, "over_pct": over_pct, "under_prec": under_prec,
+        "prec": prec,
+        "acc": acc,
+        "sharp": sharp,
+        "ll": ll,
+        "over_pct": over_pct,
+        "under_prec": under_prec,
     }
 
 
@@ -955,20 +994,26 @@ def _step_compute_diagnostics(
         emp_shape = np.full_like(weighted_mean, diag_empirical_shape)
         if dist in ("NegBin", "ZINB"):
             cf_under = get_odds(
-                B_test["Line"].to_numpy(), weighted_mean, dist,
-                r=emp_shape, gate=gate_blend_test,
+                B_test["Line"].to_numpy(),
+                weighted_mean,
+                dist,
+                r=emp_shape,
+                gate=gate_blend_test,
             )
         else:
             cf_under = get_odds(
-                B_test["Line"].to_numpy(), weighted_mean, dist,
-                alpha=emp_shape, step=step, gate=gate_blend_test,
+                B_test["Line"].to_numpy(),
+                weighted_mean,
+                dist,
+                alpha=emp_shape,
+                step=step,
+                gate=gate_blend_test,
             )
         cf_over = 1 - cf_under
         cf_pred = (cf_over > 0.5).astype(int)
         cf_mask = np.maximum(cf_under, cf_over) > 0.54
         diag_cf_over_pct = (
-            float(cf_pred[cf_mask].mean() / cf_mask.mean())
-            if cf_mask.sum() > 10 else float("nan")
+            float(cf_pred[cf_mask].mean() / cf_mask.mean()) if cf_mask.sum() > 10 else float("nan")
         )
     else:
         diag_cf_over_pct = float("nan")
@@ -1000,16 +1045,17 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
     gate_test = decoded["gate_test"]
     if dist == "SkewNormal":
         under = get_odds(
-            line, ev, "SkewNormal",
-            sigma=decoded["sn_sigma_test"], skew_alpha=decoded["sn_alpha_test"],
+            line,
+            ev,
+            "SkewNormal",
+            sigma=decoded["sn_sigma_test"],
+            skew_alpha=decoded["sn_alpha_test"],
             gate=gate_test,
         )
     elif dist in ("NegBin", "ZINB"):
         under = get_odds(line, ev, dist, r=decoded["r"], gate=gate_test)
     else:
-        under = get_odds(
-            line, ev, dist, alpha=decoded["alpha"], step=step, gate=gate_test
-        )
+        under = get_odds(line, ev, dist, alpha=decoded["alpha"], step=step, gate=gate_test)
     under = np.clip(under, 0, 1)
     return np.array([under, 1 - under]).transpose()
 
@@ -1214,9 +1260,7 @@ def _dispersion_crps_loss(
             x_max = max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4)
             x_grid = np.linspace(0, x_max, 500)
             dx = x_grid[1] - x_grid[0]
-            cdf_grid = gamma.cdf(
-                x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :]
-            )
+            cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
             cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
             indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
             crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
@@ -1298,15 +1342,15 @@ def _step_calibrate_dispersion(
         else alpha_blend_val / beta_blend_val
     )
 
-    mean_shape = (
-        np.mean(r_blend_val) if dist in ("NegBin", "ZINB") else np.mean(alpha_blend_val)
-    )
+    mean_shape = np.mean(r_blend_val) if dist in ("NegBin", "ZINB") else np.mean(alpha_blend_val)
     max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
     upper_bound = min(10.0, max_c)
 
     disp_result = minimize_scalar(
         lambda c: _dispersion_crps_loss(
-            c, dist=dist, y_val_arr=y_val_arr,
+            c,
+            dist=dist,
+            y_val_arr=y_val_arr,
             val_weighted_mean=val_weighted_mean,
             gate_blend_val=gate_blend_val,
             r_blend_val=r_blend_val,
@@ -1351,8 +1395,11 @@ def _step_compute_test_probabilities(
         )
     elif dist in ("NegBin", "ZINB"):
         under = get_odds(
-            B_test["Line"].to_numpy(), weighted_mean, dist,
-            r=calibrated["r_test"], gate=fused["gate_blend_test"],
+            B_test["Line"].to_numpy(),
+            weighted_mean,
+            dist,
+            r=calibrated["r_test"],
+            gate=fused["gate_blend_test"],
         )
     else:
         under = get_odds(
@@ -1376,9 +1423,7 @@ def _step_calibrate_temperature(
 ) -> tuple[float, np.ndarray, float]:
     """Fit temperature ``T_opt`` on validation, return calibrated val probs + model_calib."""
     B_validation = splits["B_validation"]
-    y_class_val = (
-        splits["y_validation"]["Result"] >= B_validation["Line"]
-    ).astype(int).to_numpy()
+    y_class_val = (splits["y_validation"]["Result"] >= B_validation["Line"]).astype(int).to_numpy()
 
     if dist == "SkewNormal":
         val_raw_under = get_odds(
@@ -1397,13 +1442,17 @@ def _step_calibrate_temperature(
             B_validation["Line"].to_numpy(),
             calibrated["val_weighted_mean"],
             dist,
-            alpha=_alpha_val, step=step, r=_r_val, gate=_gate_val,
+            alpha=_alpha_val,
+            step=step,
+            r=_r_val,
+            gate=_gate_val,
         )
     val_raw_over_clipped = np.clip(1 - val_raw_under, 1e-6, 1 - 1e-6)
     val_logits = logit(val_raw_over_clipped)
     result_ts = minimize_scalar(
         lambda T: _brier_temperature_loss(T, val_logits, y_class_val),
-        bounds=(1.0, 10.0), method="bounded",
+        bounds=(1.0, 10.0),
+        method="bounded",
     )
     T_opt = result_ts.x
     val_calibrated = expit(val_logits / T_opt)
@@ -1436,14 +1485,22 @@ def _step_decode_predictions(
         ``alpha_validation``, ``beta_validation``. Unused fields are None.
     """
     out = {
-        "ev": None, "ev_validation": None,
-        "gate_test": None, "gate_validation": None,
-        "sn_sigma_test": None, "sn_sigma_val": None,
-        "sn_alpha_test": None, "sn_alpha_val": None,
-        "r": None, "p": None,
-        "r_validation": None, "p_validation": None,
-        "alpha": None, "beta": None,
-        "alpha_validation": None, "beta_validation": None,
+        "ev": None,
+        "ev_validation": None,
+        "gate_test": None,
+        "gate_validation": None,
+        "sn_sigma_test": None,
+        "sn_sigma_val": None,
+        "sn_alpha_test": None,
+        "sn_alpha_val": None,
+        "r": None,
+        "p": None,
+        "r_validation": None,
+        "p_validation": None,
+        "alpha": None,
+        "beta": None,
+        "alpha_validation": None,
+        "beta_validation": None,
     }
     if dist == "SkewNormal":
         loc = prob_params["loc"].to_numpy()
@@ -1535,115 +1592,169 @@ def _step_fuse_predictions(
     y_val_result = splits["y_validation"]["Result"].to_numpy()
 
     base_dist = (
-        "SkewNormal" if dist == "SkewNormal"
+        "SkewNormal"
+        if dist == "SkewNormal"
         else ("NegBin" if dist in ("NegBin", "ZINB") else "Gamma")
     )
 
     out = {
-        "model_weight": None, "weighted_mean": None,
-        "gate_blend_test": None, "gate_blend_val": None,
-        "r_test": None, "r_blend_val": None,
-        "p_test": None, "p_val": None,
-        "alpha_blend": None, "alpha_blend_val": None,
-        "beta_blend": None, "beta_blend_val": None,
-        "sn_sigma_blend_test": None, "sn_sigma_blend_val": None,
-        "sn_alpha_blend_test": None, "sn_alpha_blend_val": None,
+        "model_weight": None,
+        "weighted_mean": None,
+        "gate_blend_test": None,
+        "gate_blend_val": None,
+        "r_test": None,
+        "r_blend_val": None,
+        "p_test": None,
+        "p_val": None,
+        "alpha_blend": None,
+        "alpha_blend_val": None,
+        "beta_blend": None,
+        "beta_blend_val": None,
+        "sn_sigma_blend_test": None,
+        "sn_sigma_blend_val": None,
+        "sn_alpha_blend_test": None,
+        "sn_alpha_blend_val": None,
     }
 
     if dist == "SkewNormal":
         _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
         model_weight = fit_model_weight(
-            ev_validation, book_ev_val, y_val_result, "SkewNormal",
-            cv=cv, model_sigma=decoded["sn_sigma_val"],
+            ev_validation,
+            book_ev_val,
+            y_val_result,
+            "SkewNormal",
+            cv=cv,
+            model_sigma=decoded["sn_sigma_val"],
             model_skew_alpha=decoded["sn_alpha_val"],
             **_zi_kwargs,
         )
         weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
-            model_weight, ev, book_ev_test, cv, "SkewNormal",
-            sigma=decoded["sn_sigma_test"], skew_alpha=decoded["sn_alpha_test"],
+            model_weight,
+            ev,
+            book_ev_test,
+            cv,
+            "SkewNormal",
+            sigma=decoded["sn_sigma_test"],
+            skew_alpha=decoded["sn_alpha_test"],
             **_zi_kwargs,
         )
         _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
-            model_weight, ev_validation, book_ev_val, cv, "SkewNormal",
-            sigma=decoded["sn_sigma_val"], skew_alpha=decoded["sn_alpha_val"],
+            model_weight,
+            ev_validation,
+            book_ev_val,
+            cv,
+            "SkewNormal",
+            sigma=decoded["sn_sigma_val"],
+            skew_alpha=decoded["sn_alpha_val"],
             **_zi_kwargs,
         )
-        out.update({
-            "model_weight": model_weight,
-            "weighted_mean": weighted_mean,
-            "gate_blend_test": gate_blend_test,
-            "gate_blend_val": gate_blend_val,
-            "sn_sigma_blend_test": sn_sigma_blend_test,
-            "sn_sigma_blend_val": sn_sigma_blend_val,
-            "sn_alpha_blend_test": sn_alpha_blend_test,
-            "sn_alpha_blend_val": sn_alpha_blend_val,
-        })
+        out.update(
+            {
+                "model_weight": model_weight,
+                "weighted_mean": weighted_mean,
+                "gate_blend_test": gate_blend_test,
+                "gate_blend_val": gate_blend_val,
+                "sn_sigma_blend_test": sn_sigma_blend_test,
+                "sn_sigma_blend_val": sn_sigma_blend_val,
+                "sn_alpha_blend_test": sn_alpha_blend_test,
+                "sn_alpha_blend_val": sn_alpha_blend_val,
+            }
+        )
         return out
 
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
     model_weight = fit_model_weight(
-        ev_validation, book_ev_val, y_val_result, base_dist,
+        ev_validation,
+        book_ev_val,
+        y_val_result,
+        base_dist,
         model_alpha=decoded["alpha_validation"],
         model_r=decoded["r_validation"],
-        cv=cv, **_zi_kwargs,
+        cv=cv,
+        **_zi_kwargs,
     )
     out["model_weight"] = model_weight
 
     if dist in ("NegBin", "ZINB"):
         _zi_test = (
-            dict(gate_model=decoded["gate_test"], gate_book=hist_gate)
-            if dist == "ZINB" else {}
+            dict(gate_model=decoded["gate_test"], gate_book=hist_gate) if dist == "ZINB" else {}
         )
         _zi_val = (
             dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
-            if dist == "ZINB" else {}
+            if dist == "ZINB"
+            else {}
         )
         r_blend_test, p_test, gate_blend_test = fused_loc(
-            model_weight, ev, book_ev_test, cv, "NegBin",
-            r=decoded["r"], **_zi_test,
+            model_weight,
+            ev,
+            book_ev_test,
+            cv,
+            "NegBin",
+            r=decoded["r"],
+            **_zi_test,
         )
         r_blend_val, p_val, gate_blend_val = fused_loc(
-            model_weight, ev_validation, book_ev_val, cv, "NegBin",
-            r=decoded["r_validation"], **_zi_val,
+            model_weight,
+            ev_validation,
+            book_ev_val,
+            cv,
+            "NegBin",
+            r=decoded["r_validation"],
+            **_zi_val,
         )
-        out.update({
-            "weighted_mean": r_blend_test * (1 - p_test) / p_test,
-            "r_test": r_blend_test,
-            "r_blend_val": r_blend_val,
-            "p_test": p_test, "p_val": p_val,
-            "gate_blend_test": gate_blend_test,
-            "gate_blend_val": gate_blend_val,
-        })
+        out.update(
+            {
+                "weighted_mean": r_blend_test * (1 - p_test) / p_test,
+                "r_test": r_blend_test,
+                "r_blend_val": r_blend_val,
+                "p_test": p_test,
+                "p_val": p_val,
+                "gate_blend_test": gate_blend_test,
+                "gate_blend_val": gate_blend_val,
+            }
+        )
         return out
 
     # Gamma / ZAGamma
     _zi_test = (
-        dict(gate_model=decoded["gate_test"], gate_book=hist_gate)
-        if dist == "ZAGamma" else {}
+        dict(gate_model=decoded["gate_test"], gate_book=hist_gate) if dist == "ZAGamma" else {}
     )
     _zi_val = (
         dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
-        if dist == "ZAGamma" else {}
+        if dist == "ZAGamma"
+        else {}
     )
     alpha_blend, beta_blend, gate_blend_test = fused_loc(
-        model_weight, ev, book_ev_test, cv, "Gamma",
-        alpha=decoded["alpha"], **_zi_test,
+        model_weight,
+        ev,
+        book_ev_test,
+        cv,
+        "Gamma",
+        alpha=decoded["alpha"],
+        **_zi_test,
     )
     alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(
-        model_weight, ev_validation, book_ev_val, cv, "Gamma",
-        alpha=decoded["alpha_validation"], **_zi_val,
+        model_weight,
+        ev_validation,
+        book_ev_val,
+        cv,
+        "Gamma",
+        alpha=decoded["alpha_validation"],
+        **_zi_val,
     )
-    out.update({
-        "weighted_mean": alpha_blend / beta_blend,
-        "alpha_blend": alpha_blend,
-        "alpha_blend_val": alpha_blend_val,
-        "beta_blend": beta_blend,
-        "beta_blend_val": beta_blend_val,
-        "gate_blend_test": gate_blend_test,
-        "gate_blend_val": gate_blend_val,
-    })
+    out.update(
+        {
+            "weighted_mean": alpha_blend / beta_blend,
+            "alpha_blend": alpha_blend,
+            "alpha_blend_val": alpha_blend_val,
+            "beta_blend": beta_blend,
+            "beta_blend_val": beta_blend_val,
+            "gate_blend_test": gate_blend_test,
+            "gate_blend_val": gate_blend_val,
+        }
+    )
     return out
 
 
@@ -1843,9 +1954,7 @@ def train_market(
             byte-identical to pre-P2.B production behavior.
     """
     if zinb_mode not in {"joint", "hurdle"}:
-        raise ValueError(
-            f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}"
-        )
+        raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
     init = _step_init_market(league, market, stat_data, archive)
     filedict = init["filedict"]
@@ -1854,8 +1963,14 @@ def train_market(
     filename = init["filename"]
 
     loaded = _step_load_matrix(
-        filename, league_start_date, stat_data, league, market,
-        deterministic, force, init["need_model"],
+        filename,
+        league_start_date,
+        stat_data,
+        league,
+        market,
+        deterministic,
+        force,
+        init["need_model"],
     )
     if loaded is None:
         return
@@ -1876,20 +1991,37 @@ def train_market(
     use_hurdle = dist == "ZINB" and zinb_mode == "hurdle"
 
     model = _step_build_lss_model(
-        dist, dist_info["dist_obj"], splits["X_train"],
-        shape_ceiling, dist_info["normalize"], dist_info["offset_mode"], use_hurdle,
+        dist,
+        dist_info["dist_obj"],
+        splits["X_train"],
+        shape_ceiling,
+        dist_info["normalize"],
+        dist_info["offset_mode"],
+        use_hurdle,
     )
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     # Under --rebuild-filter, warm-starting from old pickle hyperparams is invalid.
     opt_params_in = None if rebuild_filter else filedict.get("params")
     opt_params, _ = _step_select_hyperparams(
-        splits["X_train"], dist, model, use_hurdle, deterministic, opt_params_in, dtrain,
+        splits["X_train"],
+        dist,
+        model,
+        use_hurdle,
+        deterministic,
+        opt_params_in,
+        dtrain,
     )
     model = _step_fit_model(
-        use_hurdle, dist, dist_info["dist_obj"],
-        splits["X_train"], splits["y_train_labels"], opt_params,
-        normalize=dist_info["normalize"], offset_mode=dist_info["offset_mode"],
-        shape_ceiling=shape_ceiling, deterministic=deterministic,
+        use_hurdle,
+        dist,
+        dist_info["dist_obj"],
+        splits["X_train"],
+        splits["y_train_labels"],
+        opt_params,
+        normalize=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        shape_ceiling=shape_ceiling,
+        deterministic=deterministic,
     )
 
     preds = _step_predict_splits(
@@ -1898,14 +2030,26 @@ def train_market(
     prob_params = preds["prob_params"]
 
     decoded = _step_decode_predictions(
-        prob_params, preds["prob_params_validation"],
-        splits["X_test"], splits["X_validation"],
-        dist, dist_info["strategy"], dist_info["global_mean"],
-        dist_info["denom_col"], hist_gate,
+        prob_params,
+        preds["prob_params_validation"],
+        splits["X_test"],
+        splits["X_validation"],
+        dist,
+        dist_info["strategy"],
+        dist_info["global_mean"],
+        dist_info["denom_col"],
+        hist_gate,
     )
     fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate)
     calibrated = _step_calibrate_dispersion(
-        decoded, fused, splits, dist, cv, hist_gate, shape_ceiling, fused["model_weight"],
+        decoded,
+        fused,
+        splits,
+        dist,
+        cv,
+        hist_gate,
+        shape_ceiling,
+        fused["model_weight"],
     )
 
     y_proba_no_filt = _step_compute_test_probabilities(
@@ -1916,13 +2060,9 @@ def train_market(
     )
 
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
-    skill = _step_compute_skill_metrics(
-        val_calibrated, y_class_val, val_book_proba, league, market
-    )
+    skill = _step_compute_skill_metrics(val_calibrated, y_class_val, val_book_proba, league, market)
 
-    test_calibrated_over = expit(
-        logit(np.clip(y_proba_no_filt[:, 1], 1e-6, 1 - 1e-6)) / T_opt
-    )
+    test_calibrated_over = expit(logit(np.clip(y_proba_no_filt[:, 1], 1e-6, 1 - 1e-6)) / T_opt)
     y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
 
     y_class = np.ravel(
@@ -1932,28 +2072,58 @@ def train_market(
 
     mode_stats = _step_compute_mode_stats(y_proba_raw, y_proba_no_filt, y_proba_filt, y_class)
     diag = _step_compute_diagnostics(
-        splits, prob_params, fused["weighted_mean"], y_proba_no_filt, y_class,
-        fused["gate_blend_test"], dist, cv, dist_info["denom_col"],
-        dist_info["player_stats"], step,
+        splits,
+        prob_params,
+        fused["weighted_mean"],
+        y_proba_no_filt,
+        y_class,
+        fused["gate_blend_test"],
+        dist,
+        cv,
+        dist_info["denom_col"],
+        dist_info["player_stats"],
+        step,
     )
 
     filedict = _build_filedict(
-        model=model, step=step, mode_stats=mode_stats, skill=skill, diag=diag,
-        c_opt=calibrated["c_opt"], shape_ceiling=shape_ceiling,
+        model=model,
+        step=step,
+        mode_stats=mode_stats,
+        skill=skill,
+        diag=diag,
+        c_opt=calibrated["c_opt"],
+        shape_ceiling=shape_ceiling,
         marginal_shape=dist_info["marginal_shape"],
-        opt_params=opt_params, dist=dist, cv=cv, y=splits["y"], T_opt=T_opt,
-        model_weight=fused["model_weight"], model_calib=model_calib,
-        hist_gate=hist_gate, normalize=dist_info["normalize"],
-        strategy=dist_info["strategy"], global_mean=dist_info["global_mean"],
-        denom_col=dist_info["denom_col"], target_strategy=target_strategy,
-        zinb_mode=zinb_mode, X=splits["X"],
+        opt_params=opt_params,
+        dist=dist,
+        cv=cv,
+        y=splits["y"],
+        T_opt=T_opt,
+        model_weight=fused["model_weight"],
+        model_calib=model_calib,
+        hist_gate=hist_gate,
+        normalize=dist_info["normalize"],
+        strategy=dist_info["strategy"],
+        global_mean=dist_info["global_mean"],
+        denom_col=dist_info["denom_col"],
+        target_strategy=target_strategy,
+        zinb_mode=zinb_mode,
+        X=splits["X"],
     )
 
     _step_persist_artifacts(
-        filedict=filedict, splits=splits, prob_params=prob_params, decoded=decoded,
-        weighted_mean=fused["weighted_mean"], y_proba_filt=y_proba_filt, dist=dist,
-        hist_gate=hist_gate, filename=filename, deterministic=deterministic,
-        target_strategy=target_strategy, zinb_mode=zinb_mode,
+        filedict=filedict,
+        splits=splits,
+        prob_params=prob_params,
+        decoded=decoded,
+        weighted_mean=fused["weighted_mean"],
+        y_proba_filt=y_proba_filt,
+        dist=dist,
+        hist_gate=hist_gate,
+        filename=filename,
+        deterministic=deterministic,
+        target_strategy=target_strategy,
+        zinb_mode=zinb_mode,
     )
 
     if not deterministic:

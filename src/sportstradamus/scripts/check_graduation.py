@@ -87,8 +87,15 @@ def _read_gate1(path: Path, league: str | None) -> pd.DataFrame:
     df = df[(df["row_kind"] == "model") & (df["metric_row"] == "calibrated")]
     if league:
         df = df[df["league"] == league]
-    keep = ["league", "market", "distribution", "brier_skill_score",
-            "predicted_over_rate", "empirical_over_rate", "kelly_shrinkage"]
+    keep = [
+        "league",
+        "market",
+        "distribution",
+        "brier_skill_score",
+        "predicted_over_rate",
+        "empirical_over_rate",
+        "kelly_shrinkage",
+    ]
     available = [c for c in keep if c in df.columns]
     df = df[available].copy()
     return df.rename(columns={"brier_skill_score": "gate1_bss"})
@@ -101,8 +108,15 @@ def _read_gate2(path: Path) -> pd.DataFrame:
     missing — the outer merge then classifies every Gate 1 row as ``in-test``
     until the live aggregator catches up.
     """
-    cols = ["league", "market", "n_settled", "gate2_book_bss",
-            "predicted_over_rate_live", "empirical_over_rate_live", "profit_sim_yield"]
+    cols = [
+        "league",
+        "market",
+        "n_settled",
+        "gate2_book_bss",
+        "predicted_over_rate_live",
+        "empirical_over_rate_live",
+        "profit_sim_yield",
+    ]
     if not path.exists():
         return pd.DataFrame(columns=cols)
     df = pd.read_parquet(path, engine="pyarrow")

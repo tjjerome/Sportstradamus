@@ -16,8 +16,7 @@ NOW = datetime(2026, 5, 20, 0, 0, 0)
 
 
 def _offer(line, bet, model_p, books_p):
-    return (line, 1.0, "Underdog", bet, model_p, books_p,
-            float("nan"), float("nan"), float("nan"))
+    return (line, 1.0, "Underdog", bet, model_p, books_p, float("nan"), float("nan"), float("nan"))
 
 
 def _build_history(span_days: int = 100, n_per_cell: int = 8) -> pd.DataFrame:
