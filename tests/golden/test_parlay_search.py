@@ -42,8 +42,14 @@ def test_assign_families_splits_two_independent_groups() -> None:
     """Two leg blocks with ~0 cross-correlation → exactly two families."""
     c = _grouped_c([[0, 1, 2], [3, 4, 5]], intra=0.8, cross=0.0)
     bet_ids = [
-        (0, 1), (0, 2), (1, 2), (0, 1, 2),  # group A
-        (3, 4), (3, 5), (4, 5), (3, 4, 5),  # group B
+        (0, 1),
+        (0, 2),
+        (1, 2),
+        (0, 1, 2),  # group A
+        (3, 4),
+        (3, 5),
+        (4, 5),
+        (3, 4, 5),  # group B
     ]
     labels = assign_parlay_families(bet_ids, c)
 

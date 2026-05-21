@@ -36,11 +36,16 @@ CURRENT_OFFERS_PATH = pkg_resources.files(data) / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = pkg_resources.files(data) / "current_parlays.parquet"
 CURRENT_META_PATH = pkg_resources.files(data) / "current_meta.json"
 MODEL_STATS_PATH = pkg_resources.files(data) / "model_stats.parquet"
+LIVE_METRICS_PATH = pkg_resources.files(data) / "live_metrics_per_market.parquet"
 
 # Legacy pickle paths kept as read-only fallback until the parquet migration
 # has run on every install.
 HISTORY_PICKLE_PATH = pkg_resources.files(data) / "history.dat"
 PARLAY_HIST_PICKLE_PATH = pkg_resources.files(data) / "parlay_hist.dat"
+
+# Root for trained model pickles. model_pickle_path builds the per-cell path
+# from this root; prune_model_pickle deletes one to dark-out a withheld cell.
+MODELS_DIR = pkg_resources.files(data) / "models"
 
 # Field order for the Offers struct must match the in-memory tuple positions.
 # CLV adds the trailing three (close_books_p, market_clv, model_clv); legacy
@@ -60,6 +65,61 @@ _LEGACY_OFFER_LEN = 6
 
 # Tuple-typed columns in parlay_hist that round-trip as homogeneous float lists.
 _PARLAY_LIST_COLS = ("Leg Probs", "Corr Pairs", "Boost Pairs", "Markets", "Players")
+
+
+def market_file_slug(league: str, market: str) -> str:
+    """Slugify a ``(league, market)`` pair for on-disk filenames.
+
+    Joins league and market with an underscore and replaces spaces with hyphens,
+    e.g. ``("NFL", "rushing tds") -> "NFL_rushing-tds"``. Shared by the model
+    pickle, training-data, and test-set path builders so they all agree.
+
+    Args:
+        league: League code (e.g. ``"NBA"``).
+        market: Market stem, possibly containing spaces.
+
+    Returns:
+        The slug string (no directory, no extension).
+    """
+    return "_".join([league, market]).replace(" ", "-")
+
+
+def model_pickle_path(league: str, market: str) -> Path:
+    """Return the production model-pickle path for a ``(league, market)`` cell.
+
+    Built from :func:`market_file_slug`, e.g.
+    ``("NFL", "rushing tds") -> models/NFL_rushing-tds.mdl``. This is the single
+    path both the training writer and the prediction loader use, and the one
+    ``prune_model_pickle`` deletes to dark-out a withheld cell.
+
+    Args:
+        league: League code (e.g. ``"NBA"``).
+        market: Market stem, possibly containing spaces.
+
+    Returns:
+        The ``.mdl`` path under ``data/models/`` (not guaranteed to exist).
+    """
+    return Path(str(MODELS_DIR / f"{market_file_slug(league, market)}.mdl"))
+
+
+def prune_model_pickle(league: str, market: str) -> bool:
+    """Delete a cell's production model pickle so inference skips that market.
+
+    Used by ``meditate`` to dark-out a cell marked ``"withheld"`` in
+    ``ship_config.json``: with no pickle on disk, ``model_prob`` returns ``[]``
+    and the market is not scored.
+
+    Args:
+        league: League code.
+        market: Market stem.
+
+    Returns:
+        ``True`` if a pickle existed and was removed, ``False`` if none was present.
+    """
+    path = model_pickle_path(league, market)
+    existed = path.exists()
+    path.unlink(missing_ok=True)
+    return existed
 
 
 def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None) -> None:

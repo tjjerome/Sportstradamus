@@ -10,14 +10,25 @@ import numpy as np
 
 from sportstradamus import data
 from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
+from sportstradamus.helpers.io import prune_model_pickle
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
+from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
-from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import train_market
+from sportstradamus.training.ship_config import (
+    WITHHELD,
+    load_ship_config,
+    resolve_cell_strategy,
+)
 
 warnings.simplefilter("ignore", UserWarning)
 np.seterr(divide="ignore", invalid="ignore")
+
+# Reproducibility seed for non-deterministic training runs. Not used under
+# --deterministic (which pins RNGs via seed_everything with a fixed value).
+_RNG_SEED: int = 69
 
 
 @click.command()
@@ -57,8 +68,68 @@ np.seterr(divide="ignore", invalid="ignore")
     default="INFO",
     help="Verbosity for the structured JSONL log.",
 )
-def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations, log_level):
+@click.option(
+    "--deterministic/--no-deterministic",
+    default=False,
+    help=(
+        "DEBUG/EVAL ONLY: pin all RNGs, use fixed fast hyperparameters, and "
+        "freeze input to the cached parquet so runs are bit-identical for the "
+        "compression eval harness. NEVER publish a model trained with this "
+        "flag — it is deliberately low quality."
+    ),
+)
+@click.option(
+    "--target-strategy",
+    type=click.Choice(list(baselines.STRATEGY_SLUGS)),
+    default="ratio_meanyr",
+    show_default=True,
+    help=(
+        "Target/baseline strategy for SkewNormal markets. "
+        "Non-default values are A/B experiments (run under --deterministic); "
+        "the default 'ratio_meanyr' is current production behavior."
+    ),
+)
+@click.option(
+    "--zinb-mode",
+    type=click.Choice(["joint", "hurdle"]),
+    default="joint",
+    show_default=True,
+    help=(
+        "Model architecture for ZINB markets. 'joint' is the legacy "
+        "jointly-fit LightGBMLSS ZINB. 'hurdle' uses the two-stage "
+        "HurdleZINB (calibrated zero classifier + NegBin on positives + "
+        "derived-pi gate; see docs/OVERCONFIDENCE_INVESTIGATION.md §2). "
+        "Default 'joint' is byte-identical to pre-P2.B production."
+    ),
+)
+@click.option(
+    "--market",
+    default=None,
+    help=(
+        "Comma-separated market stem(s) to train (e.g. 'FTM,STL'). "
+        "When omitted, all markets for the active league are trained. "
+        "A stem absent from every active league is an error."
+    ),
+)
+def meditate(
+    force,
+    league,
+    rebuild_filter,
+    reset_markets,
+    rebuild_correlations,
+    log_level,
+    deterministic,
+    target_strategy,
+    zinb_mode,
+    market,
+):
     """Train or retrain LightGBMLSS models for each configured market."""
+    # --deterministic implies --force: the input-freeze (new_M = empty)
+    # otherwise short-circuits train_market when a prior model pickle exists,
+    # which is precisely when the eval harness needs a fresh deterministic
+    # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
+    if deterministic and not force:
+        force = True
     log = get_logger("meditate")
     log.setLevel(log_level)
     log.info(
@@ -68,13 +139,27 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
             "league": league,
             "rebuild_filter": rebuild_filter,
             "rebuild_correlations": rebuild_correlations,
+            "deterministic": deterministic,
+            "target_strategy": target_strategy,
+            "zinb_mode": zinb_mode,
+            "market": market,
         },
     )
     click.echo(
         f"meditate starting: league={league} force={force} "
-        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations}"
+        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations} "
+        f"deterministic={deterministic}"
     )
-    np.random.seed(69)
+    if not deterministic:
+        np.random.seed(_RNG_SEED)
+
+    # Per-cell ship config (data/ship_config.json) governs which markets train
+    # with which strategy and which are withheld (skipped + pruned). Validated
+    # here so a bad entry fails before the expensive gamelog loads below.
+    # Deterministic A/B runs ignore it: they target an explicit --market with an
+    # explicit --target-strategy and must never mutate production pickles.
+    # See docs/gbdt_mean_regression_plan.md "Ship mechanism — per-cell strategy".
+    ship_config = {} if deterministic else load_ship_config()
 
     if reset_markets.strip():
         ff_path = pkg_resources.files(data) / "feature_filter.json"
@@ -90,8 +175,13 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
             if mk in ff[lg]["Filtered"]:
                 del ff[lg]["Filtered"][mk]
                 log.info("Reset filter", extra={"league": lg, "market": mk})
-        with open(ff_path, "w") as fh:
-            json.dump(ff, fh, indent=4)
+        # In deterministic mode the in-memory clear still propagates (so this
+        # run sees the reset), but skip persisting to feature_filter.json —
+        # deterministic runs use crippled hyperparameters and must never
+        # mutate production config.
+        if not deterministic:
+            with open(ff_path, "w") as fh:
+                json.dump(ff, fh, indent=4)
         # Reload module-level feature_filter so this run sees the change
         from sportstradamus import helpers as _hp
 
@@ -101,8 +191,6 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
     nba = StatsNBA()
     nfl = StatsNFL()
     wnba = StatsWNBA()
-    # mlb = StatsMLB()
-    # nhl = StatsNHL()
 
     stat_structs = {}
 
@@ -130,18 +218,11 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
         click.echo("[WNBA] updating from league API...")
         wnba.update()
         stat_structs.update({"WNBA": wnba})
-    # if datetime.today().date() > (mlb.season_start - timedelta(days=7)) or league == "MLB":
-    #     mlb.load()
-    #     mlb.update()
-    #     stat_structs.update({"MLB": mlb})
-    # if datetime.today().date() > (nhl.season_start - timedelta(days=7)) or league == "NHL":
-    #     nhl.load()
-    #     nhl.update()
-    #     stat_structs.update({"NHL": nhl})
 
     active_markets = dict(ALL_MARKETS)
     if league != "All":
         active_markets = {league: ALL_MARKETS[league]}
+    active_markets = select_markets(active_markets, market)
 
     if rebuild_correlations:
         for lg in active_markets:
@@ -186,4 +267,20 @@ def meditate(force, league, rebuild_filter, reset_markets, rebuild_correlations,
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
-            train_market(lg, market, stat_data, force, rebuild_filter, archive, league_start_date)
+            cell_strategy = resolve_cell_strategy(lg, market, target_strategy, ship_config)
+            if cell_strategy == WITHHELD:
+                prune_model_pickle(lg, market)
+                click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
+                continue
+            train_market(
+                lg,
+                market,
+                stat_data,
+                force,
+                rebuild_filter,
+                archive,
+                league_start_date,
+                deterministic=deterministic,
+                target_strategy=cell_strategy,
+                zinb_mode=zinb_mode,
+            )
