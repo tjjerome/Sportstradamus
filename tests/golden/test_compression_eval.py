@@ -37,8 +37,9 @@ def _base_card(**overrides) -> Scorecard:
         pred_meanyr_corr=-0.5,
         result_meanyr_corr=0.0,
         brier_skill_score=None,
-        bottom_decile_bias=0.0,
-        bottom_decile_mean=10.0,
+        bottom_quartile_bias=0.0,
+        bottom_quartile_mean=10.0,
+        top_decile_mean=20.0,
     )
     defaults.update(overrides)
     return Scorecard(**defaults)
@@ -84,29 +85,30 @@ def test_perfect_predictions_have_unit_ratio():
     assert card.global_mae == pytest.approx(0.0, abs=1e-9)
 
 
-def test_scorecard_includes_bottom_decile_bias_and_mean():
-    # Bottom decile (10 lowest-MeanYr rows) over-predicted by a known +2.0; all
-    # other deciles predicted perfectly. The scorecard must surface the bottom-
-    # decile signed bias and that decile's empirical (actual) mean so the plan's
-    # bottom-decile ship gate is computable from the logged scorecard.
+def test_scorecard_includes_bottom_quartile_bias_and_mean():
+    # Bottom quartile (25 lowest-MeanYr rows of 100) over-predicted by a known
+    # +2.0; all other rows predicted perfectly. The scorecard must surface the
+    # bottom-quartile signed bias and that quartile's empirical (actual) mean so
+    # the plan's bottom-quartile ship gate is computable from the scorecard.
     meanyr = np.arange(100, dtype=float)
     result = meanyr.copy()
     pred = result.copy()
-    pred[:10] += 2.0  # over-predict the lowest decile only
+    pred[:25] += 2.0  # over-predict the lowest quartile only
     df = pd.DataFrame({"MeanYr": meanyr, "Result": result, "EV": pred})
     card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.bottom_decile_bias == pytest.approx(2.0)
-    assert card.bottom_decile_mean == pytest.approx(4.5)  # mean(0..9)
+    assert card.bottom_quartile_bias == pytest.approx(2.0)
+    assert card.bottom_quartile_mean == pytest.approx(12.0)  # mean(0..24)
 
 
 def test_verdict_ships_when_top_decile_improves():
     base = scorecard(_compressed_frame(seed=0), "EV", strategy="base", league="NBA", market="PTS")
     # Candidate: well-calibrated predictions (track actual with small unbiased
-    # noise). This decompresses the top decile AND leaves the bottom decile
-    # unbiased, so it clears the full ship gate including the bottom-decile bias
-    # condition. A merely-less-compressed candidate (e.g. a 0.95 shrink toward
-    # the mean) still over-predicts the bottom decile and is correctly KILLed by
-    # that condition, so it cannot stand in for a legitimate SHIP here.
+    # noise). This decompresses the top decile AND leaves the bottom quartile
+    # unbiased, so it clears the full ship gate including the bottom-quartile and
+    # top-decile bias conditions. A merely-less-compressed candidate (e.g. a 0.95
+    # shrink toward the mean) still over-predicts the bottom quartile and is
+    # correctly KILLed by that condition, so it cannot stand in for a legitimate
+    # SHIP here.
     df = _compressed_frame(seed=0)
     df["EV"] = df["Result"] + np.random.default_rng(0).normal(0, 0.5, len(df))
     cand = scorecard(df, "EV", strategy="cand", league="NBA", market="PTS")
@@ -122,46 +124,114 @@ def test_verdict_kills_when_no_top_decile_gain():
     assert f"{MIN_TOP_DECILE_MAE_IMPROVEMENT:.0%}" in reason
 
 
-def test_verdict_kills_when_bottom_decile_bias_worsens():
+def test_verdict_kills_when_bottom_quartile_bias_worsens():
     # MAE gates pass (top-decile and global both improve), but the candidate
-    # over-predicts the low-volume bottom decile more than the baseline — the
-    # exact §7a failure (a top-decile win financed by bottom-decile over-bias).
+    # over-predicts the low-volume bottom quartile more than the baseline — the
+    # §7a failure (a top-decile win financed by bottom-quartile over-bias). The
+    # relative "not worse than the previous default" check fires.
     base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_decile_bias=0.0, bottom_decile_mean=10.0
+        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.0, bottom_quartile_mean=10.0
     )
     cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_decile_bias=0.5, bottom_decile_mean=10.0
+        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=0.5, bottom_quartile_mean=10.0
     )
     ship, reason = verdict(base, cand)
     assert not ship
     assert "KILL" in reason
-    assert "bottom-decile bias" in reason
+    assert "bottom-quartile bias" in reason
 
 
-def test_verdict_kills_when_bottom_decile_bias_exceeds_absolute_bound():
-    # Candidate bias is LESS positive than baseline (passes the relative check)
-    # but still exceeds the absolute calibration bound for a low-mean cell
-    # (max(10% * 0.2, 0.05) = 0.05). 0.5 >> 0.05 → KILL on the absolute bound.
+def test_verdict_kills_when_bottom_quartile_overpredicts_beyond_bound():
+    # The bottom-quartile absolute bound is ONE-SIDED: only over-prediction
+    # (positive bias) of bench warmers is a failure mode. Candidate bias is LESS
+    # positive than baseline (passes the relative check) but still over-predicts
+    # beyond the absolute ceiling for a low-mean cell (max(30% * 0.2, 0.10) =
+    # 0.10). +0.5 >> +0.10 → KILL.
     base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_decile_bias=0.8, bottom_decile_mean=0.2
+        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.8, bottom_quartile_mean=0.2
     )
     cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_decile_bias=0.5, bottom_decile_mean=0.2
+        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=0.5, bottom_quartile_mean=0.2
     )
     ship, reason = verdict(base, cand)
     assert not ship
     assert "KILL" in reason
-    assert "bottom-decile bias" in reason
+    assert "bottom-quartile bias" in reason
 
 
-def test_verdict_ships_when_bottom_decile_bias_within_bounds():
-    # Bottom-decile bias improves vs baseline and stays within the bound while
-    # the MAE gates pass — the candidate ships.
+def test_verdict_allows_bottom_quartile_underprediction():
+    # Bench-warmer UNDER-prediction is tolerated (the failure mode is
+    # over-prediction only). A large negative bottom-quartile bias passes both
+    # the relative check (not more positive than baseline) and the one-sided
+    # absolute ceiling, so the candidate ships when the MAE/top-decile gates pass.
     base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_decile_bias=0.2, bottom_decile_mean=10.0
+        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.0, bottom_quartile_mean=10.0
     )
     cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_decile_bias=0.1, bottom_decile_mean=10.0
+        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=-5.0, bottom_quartile_mean=10.0
+    )
+    ship, reason = verdict(base, cand)
+    assert ship, reason
+
+
+def test_verdict_kills_when_top_decile_underpredicts_beyond_bound():
+    # Stars are gated BIDIRECTIONALLY — no systematic over- OR under-prediction.
+    # Under side: bound = max(30% * 20.0, 0.10) = 6.0; -8.0 < -6.0 → KILL.
+    base = _base_card(
+        global_mae=1.0,
+        top_decile_mae=2.0,
+        top_decile_bias=-0.5,
+        top_decile_mean=20.0,
+        bottom_quartile_bias=0.0,
+        bottom_quartile_mean=10.0,
+    )
+    cand = _base_card(
+        global_mae=0.9,
+        top_decile_mae=1.5,
+        top_decile_bias=-8.0,
+        top_decile_mean=20.0,
+        bottom_quartile_bias=0.0,
+        bottom_quartile_mean=10.0,
+    )
+    ship, reason = verdict(base, cand)
+    assert not ship
+    assert "KILL" in reason
+    assert "top-decile bias" in reason
+
+
+def test_verdict_kills_when_top_decile_overpredicts_beyond_bound():
+    # Over side of the same bidirectional star gate: a large POSITIVE top-decile
+    # bias kills just as the negative one does. +8.0 > +6.0 → KILL.
+    base = _base_card(
+        global_mae=1.0,
+        top_decile_mae=2.0,
+        top_decile_bias=-0.5,
+        top_decile_mean=20.0,
+        bottom_quartile_bias=0.0,
+        bottom_quartile_mean=10.0,
+    )
+    cand = _base_card(
+        global_mae=0.9,
+        top_decile_mae=1.5,
+        top_decile_bias=8.0,
+        top_decile_mean=20.0,
+        bottom_quartile_bias=0.0,
+        bottom_quartile_mean=10.0,
+    )
+    ship, reason = verdict(base, cand)
+    assert not ship
+    assert "KILL" in reason
+    assert "top-decile bias" in reason
+
+
+def test_verdict_ships_when_bottom_quartile_bias_within_bounds():
+    # Bottom-quartile bias improves vs baseline and stays within the bound while
+    # the MAE and top-decile gates pass — the candidate ships.
+    base = _base_card(
+        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.2, bottom_quartile_mean=10.0
+    )
+    cand = _base_card(
+        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=0.1, bottom_quartile_mean=10.0
     )
     ship, reason = verdict(base, cand)
     assert ship, reason

@@ -55,16 +55,29 @@ MAX_GLOBAL_MAE_REGRESSION = 0.01
 # baseline (any worsening = KILL, even if the MAE gates pass).
 MAX_BRIER_SKILL_REGRESSION: float = 0.0
 
-# Bottom-decile over-prediction gate (Universal decision threshold condition 4 /
-# Gate 1). Added after the §7a pre-check found top-decile MAE "wins" that were
-# really low-volume over-prediction (FG3M bottom decile predicted ~3.4x actual).
-# A candidate KILLs if its bottom-mean-decile signed bias is more positive than
-# the baseline's, or if its magnitude exceeds this fraction of that decile's
-# empirical mean — floored so low-mean count cells aren't held to an impossibly
-# tight bound. Tolerances are tunable; the direction (a top-decile win must not
-# be financed by bottom-decile over-prediction) is fixed.
-BOTTOM_DECILE_BIAS_MAGNITUDE_FRAC: float = 0.10
-BOTTOM_DECILE_BIAS_ABS_FLOOR: float = 0.05
+# Calibration gate (Universal decision threshold condition 4 / Gate 1). Added
+# after the §7a pre-check found top-decile MAE "wins" that were really low-volume
+# over-prediction (FG3M bottom buckets predicted ~3.4x actual). Two parts:
+#   * RELATIVE — the candidate's bottom-quartile signed bias must not be more
+#     positive (worse) than the baseline's. The lowest 25% of players (bench
+#     warmers) are pooled coarsely on purpose: they generalize more than stars,
+#     so a quartile aggregate is more representative than a single decile.
+#   * ABSOLUTE backstops on BOTH ends, floored so low-mean count cells aren't held
+#     to an impossibly tight bound. The bottom-quartile bound is ONE-SIDED — only
+#     over-prediction (positive bias) of bench warmers is a failure mode;
+#     under-prediction is tolerated for now. The top-decile bound is BIDIRECTIONAL
+#     (on |bias|) — stars must not be systematically over- OR under-predicted. The
+#     backstop catches an egregious bias even when the baseline was itself bad
+#     enough to pass the relative check.
+# These bounds are deliberately WIDE for Phase 0 — the relative check does the
+# heavy lifting while the bias-correction track lands real improvements. Tighten
+# the fractions/floor as those improvements accrue (this is the knob the plan's
+# "wider as we get started" note refers to). The direction (a top-decile win must
+# not be financed by bottom-quartile over-prediction) is fixed.
+BOTTOM_QUARTILE_FRAC: float = 0.25
+BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC: float = 0.30
+TOP_DECILE_BIAS_MAGNITUDE_FRAC: float = 0.30
+BIAS_ABS_FLOOR: float = 0.10
 
 # Probability clip mirrors training/pipeline.py:_PROBA_CLIP so Brier never sees
 # exact 0 or 1 from either model or book.
@@ -120,12 +133,16 @@ class Scorecard:
     # Appended last so existing compression_eval_log.csv files (written before
     # this field existed) keep appending without breaking pandas concat reads.
     brier_skill_score: float | None
-    # Bottom-mean-decile signed bias and that decile's empirical (actual) mean,
-    # appended last for the same CSV-back-compat reason. They make the plan's
-    # bottom-decile ship gate (Universal decision threshold condition 4 / Gate 1)
-    # computable directly from the logged scorecard, not just the printed table.
-    bottom_decile_bias: float
-    bottom_decile_mean: float
+    # Bottom-mean-QUARTILE signed bias + that quartile's empirical (actual) mean,
+    # and the top-mean-decile empirical mean. Together they make the calibration
+    # ship gate (Universal decision threshold condition 4 / Gate 1) computable
+    # directly from the logged scorecard: the bottom quartile drives the relative
+    # + absolute low-volume check, the top-decile mean sizes the top-end absolute
+    # backstop (top_decile_bias already carries the top-end bias). Appended last
+    # for the same CSV-append back-compat reason.
+    bottom_quartile_bias: float
+    bottom_quartile_mean: float
+    top_decile_mean: float
 
 
 def _git_sha() -> str:
@@ -270,8 +287,8 @@ def scorecard(
 
     Returns:
         A :class:`Scorecard` with global and per-decile compression metrics,
-        including ``bottom_decile_bias`` and ``bottom_decile_mean`` for the
-        bottom-mean-decile ship gate.
+        including ``bottom_quartile_bias`` / ``bottom_quartile_mean`` and
+        ``top_decile_mean`` for the calibration ship gate.
     """
     meanyr = df[DECILE_COL].to_numpy()
     actual = df[ACTUAL_COL].to_numpy()
@@ -279,8 +296,18 @@ def scorecard(
 
     table = decile_table(df, pred_col, n_deciles)
     top = table.iloc[-1]
-    bottom = table.iloc[0]
     top_mask = df[DECILE_COL] >= df[DECILE_COL].quantile(1 - 1 / n_deciles)
+    # Bottom quartile = the lowest 25% of players by MeanYr (bench warmers),
+    # selected by rank for tie-robust equal-frequency pooling — matching the
+    # decile table's rank-based binning. The ship gate pools them this coarsely
+    # because low-volume players generalize more than stars.
+    rank = df[DECILE_COL].rank(method="first").to_numpy()
+    # ceil + floor-of-1 so the quartile is never empty on tiny frames (a NaN bias
+    # would silently defeat the gate); production test sets have thousands of rows.
+    n_bottom = max(1, int(np.ceil(BOTTOM_QUARTILE_FRAC * len(df))))
+    bq_mask = rank <= n_bottom
+    bottom_quartile_bias = float(np.mean(pred[bq_mask] - actual[bq_mask]))
+    bottom_quartile_mean = float(np.mean(actual[bq_mask]))
     brier_skill = _brier_skill_score(df)
 
     return Scorecard(
@@ -301,8 +328,9 @@ def scorecard(
         pred_meanyr_corr=_corr(meanyr, pred - meanyr),
         result_meanyr_corr=_corr(meanyr, actual - meanyr),
         brier_skill_score=brier_skill,
-        bottom_decile_bias=float(bottom["bias"]),
-        bottom_decile_mean=float(bottom["actual_mean"]),
+        bottom_quartile_bias=bottom_quartile_bias,
+        bottom_quartile_mean=bottom_quartile_mean,
+        top_decile_mean=float(top["actual_mean"]),
     )
 
 
@@ -310,16 +338,22 @@ def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
     """Apply the offline ship gate comparing a candidate to a baseline.
 
     Returns:
-        ``(ship, reason)``. ``ship`` is True only if all four gate conditions
-        hold: (1) top-decile MAE improves by at least
+        ``(ship, reason)``. ``ship`` is True only if every gate condition holds:
+        (1) top-decile MAE improves by at least
         :data:`MIN_TOP_DECILE_MAE_IMPROVEMENT`; (2) global MAE does not regress
         by more than :data:`MAX_GLOBAL_MAE_REGRESSION`; (3) ``brier_skill_score``
-        does not regress (skipped if either card lacks it); (4) the bottom-mean-
-        decile signed bias is not more positive than the baseline's and its
-        magnitude stays within :data:`BOTTOM_DECILE_BIAS_MAGNITUDE_FRAC` of that
-        decile's empirical mean (floored at :data:`BOTTOM_DECILE_BIAS_ABS_FLOOR`).
-        Condition (4) blocks a top-decile win bought by low-volume
-        over-prediction — the §7a failure mode.
+        does not regress (skipped if either card lacks it); (4) calibration — the
+        bottom-quartile signed bias is not more positive than the baseline's
+        (relative), the bottom-quartile bias does not over-predict beyond
+        :data:`BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC` of that quartile's empirical
+        mean (one-sided — under-prediction of bench warmers is tolerated), and the
+        top-decile bias magnitude stays within
+        :data:`TOP_DECILE_BIAS_MAGNITUDE_FRAC` of that decile's mean (bidirectional
+        — stars must not be systematically over- or under-predicted). Both
+        absolute bounds are floored at :data:`BIAS_ABS_FLOOR`. Condition (4) blocks
+        a top-decile win bought by low-volume over-prediction — the §7a failure
+        mode. The absolute bounds are wide for Phase 0 and tighten as the
+        bias-correction track improves.
     """
     if baseline.top_decile_mae == 0:
         return False, "baseline top-decile MAE is zero; cannot compute improvement"
@@ -344,24 +378,47 @@ def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
                 f"{baseline.brier_skill_score:+.3f} → "
                 f"{candidate.brier_skill_score:+.3f} (Δ {delta:+.3f})"
             )
-    if candidate.bottom_decile_bias > baseline.bottom_decile_bias:
+    # (4a) RELATIVE: the bottom quartile (bench warmers) must not be
+    # over-predicted more than the baseline already does. More positive = worse.
+    if candidate.bottom_quartile_bias > baseline.bottom_quartile_bias:
         return False, (
-            f"KILL: bottom-decile bias worsened "
-            f"{baseline.bottom_decile_bias:+.3f} → {candidate.bottom_decile_bias:+.3f} "
-            f"(low-volume over-prediction must not increase)"
+            f"KILL: bottom-quartile bias worsened "
+            f"{baseline.bottom_quartile_bias:+.3f} → {candidate.bottom_quartile_bias:+.3f} "
+            f"(low-volume over-prediction must not increase vs the default)"
         )
-    bias_bound = max(
-        BOTTOM_DECILE_BIAS_MAGNITUDE_FRAC * candidate.bottom_decile_mean,
-        BOTTOM_DECILE_BIAS_ABS_FLOOR,
+    # (4b) ABSOLUTE backstops, wide for Phase 0. Bottom quartile is ONE-SIDED:
+    # only over-prediction (positive bias) of bench warmers is a failure mode;
+    # under-prediction is tolerated for now, so the bound caps the positive side
+    # only. Top decile is BIDIRECTIONAL: stars must not be systematically over- OR
+    # under-predicted, so the bound is on |bias|.
+    bq_bound = max(
+        BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC * candidate.bottom_quartile_mean,
+        BIAS_ABS_FLOOR,
     )
-    if abs(candidate.bottom_decile_bias) > bias_bound:
+    if candidate.bottom_quartile_bias > bq_bound:
         return False, (
-            f"KILL: bottom-decile bias {candidate.bottom_decile_bias:+.3f} exceeds "
-            f"calibration bound ±{bias_bound:.3f} (10% of decile mean "
-            f"{candidate.bottom_decile_mean:.3f}, floor {BOTTOM_DECILE_BIAS_ABS_FLOOR:.2f})"
+            f"KILL: bottom-quartile bias {candidate.bottom_quartile_bias:+.3f} over-predicts "
+            f"beyond +{bq_bound:.3f} "
+            f"({BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC:.0%} of quartile mean "
+            f"{candidate.bottom_quartile_mean:.3f}, floor {BIAS_ABS_FLOOR:.2f}; "
+            f"under-prediction tolerated)"
+        )
+    td_bound = max(
+        TOP_DECILE_BIAS_MAGNITUDE_FRAC * candidate.top_decile_mean,
+        BIAS_ABS_FLOOR,
+    )
+    if abs(candidate.top_decile_bias) > td_bound:
+        return False, (
+            f"KILL: top-decile bias {candidate.top_decile_bias:+.3f} exceeds "
+            f"bidirectional bound ±{td_bound:.3f} "
+            f"({TOP_DECILE_BIAS_MAGNITUDE_FRAC:.0%} of decile mean "
+            f"{candidate.top_decile_mean:.3f}, floor {BIAS_ABS_FLOOR:.2f})"
         )
     return True, (
-        f"SHIP: top-decile MAE {top_impr:+.1%}, global MAE {global_reg:+.1%}"
+        f"SHIP: top-decile MAE {top_impr:+.1%}, global MAE {global_reg:+.1%}, "
+        f"bottom-quartile bias {candidate.bottom_quartile_bias:+.3f} "
+        f"(≤ base {baseline.bottom_quartile_bias:+.3f}), "
+        f"top-decile bias {candidate.top_decile_bias:+.3f}"
         + (
             f", brier_skill {baseline.brier_skill_score:+.3f} → "
             f"{candidate.brier_skill_score:+.3f}"
@@ -535,7 +592,7 @@ def _load_league_stats_lookup(league: str) -> MeanYrLookup:
     return _make_meanyr_lookup_from_gamelog(gamelog, date_col)
 
 
-def _print_live_scorecard(card: object, stem: str, pred_col: str) -> None:
+def _print_live_scorecard(card: Scorecard, stem: str, pred_col: str) -> None:
     """Print the live-window scorecard summary in the same shape as offline mode."""
     click.echo(f"\n=== {stem}  ({pred_col}, n={card.n_rows}) ===")
     click.echo(
@@ -543,7 +600,7 @@ def _print_live_scorecard(card: object, stem: str, pred_col: str) -> None:
         f"global_mae={card.global_mae:.3f}  "
         f"top_decile_mae={card.top_decile_mae:.3f}  "
         f"top_decile_bias={card.top_decile_bias:+.3f}  "
-        f"bottom_decile_bias={card.bottom_decile_bias:+.3f}  "
+        f"bottom_quartile_bias={card.bottom_quartile_bias:+.3f}  "
         f"compression_ratio={card.compression_ratio:.3f} "
         f"(top {card.top_decile_compression_ratio:.3f})"
     )
@@ -703,7 +760,7 @@ def main(
             f"global_mae={card.global_mae:.3f}  "
             f"top_decile_mae={card.top_decile_mae:.3f}  "
             f"top_decile_bias={card.top_decile_bias:+.3f}  "
-            f"bottom_decile_bias={card.bottom_decile_bias:+.3f}  "
+            f"bottom_quartile_bias={card.bottom_quartile_bias:+.3f}  "
             f"compression_ratio={card.compression_ratio:.3f} "
             f"(top {card.top_decile_compression_ratio:.3f})"
         )
