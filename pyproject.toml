@@ -49,6 +49,7 @@ kelly = "sportstradamus.strategies.kelly:main"
 pickem-build = "sportstradamus.strategies.underdog_pickem:main"
 backfill-live-metrics = "sportstradamus.scripts.backfill_live_metrics:main"
 check-graduation = "sportstradamus.scripts.check_graduation:main"
+generate-ship-config = "sportstradamus.scripts.generate_ship_config:main"
 
 [tool.poetry.group.strategy]
 optional = true

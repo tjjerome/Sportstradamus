@@ -25,10 +25,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import click
+
+from sportstradamus.helpers.io import (
+    LIVE_METRICS_PATH,
+    MODEL_STATS_PATH,
+    prune_model_pickle,
+)
 from sportstradamus.training.baselines import STRATEGY_SLUGS
 from sportstradamus.training.graduation import graduated_cells
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.ship_config import WITHHELD, ShipConfig
+from sportstradamus.training.ship_config import (
+    GATE1_DECISIONS_PATH,
+    SHIP_CONFIG_PATH,
+    WITHHELD,
+    ShipConfig,
+)
 
 
 def load_decisions(path: Path) -> ShipConfig:
@@ -118,3 +130,76 @@ def build_ship_config(decisions: ShipConfig, active: set[tuple[str, str]]) -> Sh
                 cell[market] = WITHHELD
         config[league] = cell
     return config
+
+
+@click.command()
+@click.option(
+    "--branch",
+    type=click.Choice(["devel", "main"]),
+    required=True,
+    help="Which branch's gate to apply: 'devel' = Gate 1 passers, 'main' = graduated.",
+)
+@click.option(
+    "--prune/--no-prune",
+    default=False,
+    help="Also delete every non-active cell's model pickle (immediate dark-out on this machine).",
+)
+@click.option(
+    "--decisions",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Decisions JSON path (defaults to data/gate1_decisions.json).",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output ship_config.json path (defaults to data/ship_config.json).",
+)
+@click.option(
+    "--model-stats",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Gate 1 parquet path (defaults to data/model_stats.parquet). Only read for --branch main.",
+)
+@click.option(
+    "--live-metrics",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet). main only.",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Print the config; do not write or prune.")
+def main(branch, prune, decisions, out, model_stats, live_metrics, dry_run) -> None:
+    """Write an exhaustive, gate-driven ship_config.json for one branch."""
+    decisions_path = Path(decisions) if decisions else Path(str(GATE1_DECISIONS_PATH))
+    out_path = Path(out) if out else Path(str(SHIP_CONFIG_PATH))
+    model_stats_path = Path(model_stats) if model_stats else Path(str(MODEL_STATS_PATH))
+    live_metrics_path = Path(live_metrics) if live_metrics else Path(str(LIVE_METRICS_PATH))
+
+    decisions_map = load_decisions(decisions_path)
+    active = active_cells(branch, decisions_map, model_stats_path, live_metrics_path)
+    config = build_ship_config(decisions_map, active)
+
+    n_active = sum(1 for lg in config for mk in config[lg] if config[lg][mk] != WITHHELD)
+    n_withheld = sum(1 for lg in config for mk in config[lg] if config[lg][mk] == WITHHELD)
+    payload = json.dumps(config, indent=4, sort_keys=True)
+
+    if dry_run:
+        click.echo(payload)
+        click.echo(f"# branch={branch} active={n_active} withheld={n_withheld} (dry-run, not written)")
+        return
+
+    out_path.write_text(payload + "\n")
+    click.echo(f"wrote {out_path}: active={n_active} withheld={n_withheld} (branch={branch})")
+
+    if prune:
+        pruned = 0
+        for league in ALL_MARKETS:
+            for market in ALL_MARKETS[league]:
+                if (league, market) not in active and prune_model_pickle(league, market):
+                    pruned += 1
+        click.echo(f"pruned {pruned} non-active pickles")
+
+
+if __name__ == "__main__":
+    main()
