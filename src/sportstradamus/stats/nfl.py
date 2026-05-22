@@ -47,14 +47,14 @@ from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 NFL_MARKET_POSITIONS = {
     # Passing + QB total offense — QB only
     "passing yards": {"QB"},
-    "attempts": {"QB"},  # passing attempts
+    "attempts": {"QB"},            # passing attempts
     "completions": {"QB"},
     "passing tds": {"QB"},
     "passing first downs": {"QB"},
     "interceptions": {"QB"},
     "sacks taken": {"QB"},
-    "qb yards": {"QB"},  # pass+rush yards — a QB market
-    "qb tds": {"QB"},  # pass+rush TDs — a QB market
+    "qb yards": {"QB"},            # pass+rush yards — a QB market
+    "qb tds": {"QB"},              # pass+rush TDs — a QB market
     # Rushing — QB + RB (QBs scramble; excluding them skews scramble games)
     "rushing yards": {"QB", "RB"},
     "carries": {"QB", "RB"},
@@ -64,9 +64,29 @@ NFL_MARKET_POSITIONS = {
     "targets": {"WR", "RB", "TE"},
     "receptions": {"WR", "RB", "TE"},
     "receiving tds": {"WR", "RB", "TE"},
-    "yards": {"WR", "RB", "TE"},  # rush+rec scrimmage yards
-    "tds": {"WR", "RB", "TE"},  # rush+rec TDs
+    "yards": {"WR", "RB", "TE"},   # rush+rec scrimmage yards
+    "tds": {"WR", "RB", "TE"},     # rush+rec TDs
 }
+
+# nfl-data-py delivers the advanced-stat columns (yards per carry, passer
+# rating, the target-share metrics, ...) as object-dtype numeric strings. Every
+# gamelog column EXCEPT these identifier / categorical / boolean ones is coerced
+# to numeric on load and update (see StatsNFL._coerce_numeric_gamelog); leaving
+# them as strings crashes base_profile's tail(5).mean() short-window aggregate.
+_NON_NUMERIC_GAMELOG_COLS = frozenset(
+    {
+        "player id",
+        "player display name",
+        "position",
+        "position group",
+        "team",
+        "season type",
+        "opponent",
+        "gameday",
+        "game id",
+        "home",
+    }
+)
 
 
 class StatsNFL(Stats):
@@ -353,6 +373,21 @@ class StatsNFL(Stats):
             return gamelog
         return gamelog.loc[gamelog[self.log_strings["position"]].isin(eligible)]
 
+    def _coerce_numeric_gamelog(self):
+        """Coerce numeric-as-string gamelog columns to numeric dtype in place.
+
+        The nfl-data-py advanced-stat columns arrive as object-dtype numeric
+        strings. Uncoerced, they survive base_profile's numeric_only=True
+        aggregate by being silently dropped, but crash the short-window
+        tail(5).mean() aggregate (no numeric_only argument available). Coerce
+        every column except the known identifier/categorical/boolean columns;
+        unparseable values become NaN (downstream code fills them with 0).
+        """
+        numeric_cols = [c for c in self.gamelog.columns if c not in _NON_NUMERIC_GAMELOG_COLS]
+        self.gamelog[numeric_cols] = self.gamelog[numeric_cols].apply(
+            pd.to_numeric, errors="coerce"
+        )
+
     def load(self):
         """Load data from files."""
         nfl_data = read_gamelog("nfl")
@@ -363,6 +398,7 @@ class StatsNFL(Stats):
             isinstance(players, dict) and players
         ):
             self.players = players
+        self._coerce_numeric_gamelog()
 
     def update(self):
         """Update data from the web API."""
@@ -704,6 +740,8 @@ class StatsNFL(Stats):
             self.gamelog.loc[:, "totals"] = self.gamelog.apply(
                 lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1
             )
+
+        self._coerce_numeric_gamelog()
 
         # Save the updated player data
         write_gamelog("nfl", self.gamelog, self.teamlog, self.players)

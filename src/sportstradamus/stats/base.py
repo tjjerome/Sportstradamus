@@ -48,6 +48,19 @@ clean_data = False
 pd.set_option("future.no_silent_downcasting", True)
 
 
+def _profile_rows_for_teams(profile: pd.DataFrame, team_keys: pd.Index | list[str]) -> pd.DataFrame:
+    """Look up ``profile`` rows for ``team_keys``, tolerating any absent team.
+
+    A mid-season expansion franchise (the 2025 Golden State Valkyries, the 2026
+    Toronto Tempo) shows up in the gamelog before it accrues the teamlog history
+    that builds ``teamProfile`` / ``defenseProfile``; a plain ``.loc`` lookup then
+    raises ``KeyError``. ``reindex`` substitutes an all-NaN row, which LightGBM
+    consumes as a missing feature — the honest representation for a team with no
+    history. Replaces the former per-team hardcoded ``"GSV"`` guards.
+    """
+    return profile.reindex(team_keys)
+
+
 class Stats:
     """A parent class for handling and analyzing sports statistics.
 
@@ -508,8 +521,6 @@ class Stats:
                     _all_mean.reindex(self.playerProfile.index) - _comp_wmean
                 ) / _comp_wstd
 
-        if self.league == "WNBA" and "GSV" not in self.defenseProfile.index:
-            self.defenseProfile.loc["GSV"] = np.nan
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
@@ -766,13 +777,14 @@ class Stats:
         if self.league != "MLB":
             stats = stats.loc[stats["Player depth"] > 0]
 
-        if self.league == "WNBA" and "GSV" not in self.teamProfile.index:
-            self.teamProfile.loc["GSV"] = np.nan
-
-        teamstats = self.teamProfile.loc[stats.index.map(teams)].add_prefix("Team ")
+        teamstats = _profile_rows_for_teams(self.teamProfile, stats.index.map(teams)).add_prefix(
+            "Team "
+        )
         teamstats.index = stats.index
         stats = stats.join(teamstats)
-        defstats = self.defenseProfile.loc[stats.index.map(opponents)].astype(float)
+        defstats = _profile_rows_for_teams(
+            self.defenseProfile, stats.index.map(opponents)
+        ).astype(float)
         if self.league == "MLB":
             defstats.loc[
                 [x in self.pitcherProfile.index for x in stats.index.map(pitchers)],
