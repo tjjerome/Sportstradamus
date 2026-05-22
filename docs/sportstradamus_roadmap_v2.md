@@ -8,10 +8,30 @@ The result: **Phase 1 is no longer about reviving missing code; it's about audit
 
 ---
 
-## Current Status Snapshot (audited 2026-05-08)
+## Current Status Snapshot (audited 2026-05-21)
 
 A walk through the live tree against this roadmap. Status markers are inlined per
 sub-phase below; this section is the executive summary.
+
+> **Audit refresh (2026-05-21).** Since the 2026-05-08 audit, the headline change is a
+> model-correctness-and-breadth track that is now the project's **active** work — see the
+> new leading **"Active Track — Model Correctness & Market Breadth"** phase below (Phases
+> 1–6 keep their original numbers). The Phase-1 follow-ups (1.2, 1.6) and deferred Phases
+> 4–6 are otherwise unchanged.
+
+**ACTIVE — Model Correctness & Market Breadth (IN PROGRESS).** Home of record:
+[`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md). Prompted by **defects
+found in the live implementation**, not optional polish: GBDT regression-toward-the-mean
+(top-decile compression), SkewNormal overconfidence, ZINB joint-fit per-row blowups
+(compression up to ~5357×, predicted means up to ~1437) fixed by HurdleZINB, the blanket
+ZINB label being wrong for ≥ 13 markets, and an NFL position-confound that put the
+passing-yards training mean at **38 instead of 216**. Shipped so far: P0 offline harness,
+P0.5 determinism gate, P1 centered-target verdict (FGA ship / family kill), P2.B
+HurdleZINB (6/8 NBA ZINB ship), Stage 0 live instrumentation, Stage B1/B1.5 routing
+diagnostics, A1/A1.5/A1.6 ICC diagnostics + NFL position-split cleanup. **Goal: ≥ 75% of
+markets per league carry a set baseline.** Current: NBA 13/21, WNBA 10/18, NFL 13/20 —
+**gap NBA −3, WNBA −4, NFL −2**. Immediate next: Tier-0 audit code → Stage B1.6
+feature/bias track → depth tracks A2/B2/B3; follow until diminishing returns.
 
 **Phase 1 — Audit and Strengthen the Foundation: ~80% complete.**
 
@@ -135,11 +155,120 @@ Every prompt is written for a Claude Code or GitHub Copilot Chat session inside 
 **Standing rules for every session, regardless of phase:**
 
 - Open with: "Read `CLAUDE.md` and `CONTRIBUTING.md` first."
-- Close with: "Run `poetry run ruff check src/sportstradamus/` and `poetry run pytest tests/golden/`. Both must pass."
+- **Close with the full always-on gate set — all must pass:**
+  ```bash
+  poetry run ruff check src/sportstradamus/
+  poetry run pytest tests/golden/
+  poetry run pytest -m integration      # fake-mode, no network
+  REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py   # when CLI flags change
+  ```
+- **Run the `refactoring-specialist` subagent before any of five triggers** on Python
+  edits: a `git push`, a PR create/update, replying "done", dispatching a code-review
+  subagent, or asking the user for a review. Mandated by `CLAUDE.md`; the single most
+  important workflow item — reviewers should not spend attention on style nits the
+  specialist would catch. Hand it the explicit list of `.py` files touched this session.
+- **Dispatch the `research-analyst` subagent** (`subagent_type: "research-analyst"`) when
+  a diagnostic result is ambiguous or a path-forward decision needs literature + stats
+  synthesis. Read-only; writes a cited brief to `/tmp/researcher_{topic}.md`.
+- **End-of-phase handoff via the `prompt-engineer` agent** (part of the Definition of
+  Done): produce the next-stage handoff prompt in the 10-section structure, written to
+  `/tmp/{stage}_handoff_prompt.md`; on user acceptance, commit it to
+  `docs/handoffs/{stage}.md`.
+- **Cross-league testing policy:** run a smoke phase (1–2 markets per league) first; only
+  after smoke passes run full verification (all markets in all covered leagues for the
+  affected distribution branch). A smoke regression is a hard stop.
+- **Determinism gate before any cross-league A/B:** `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`.
 - Scope to one module per subagent (dispatch in parallel for multi-module work), then commit.
-- When adding a CLI flag or command, regenerate snapshots: `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
 - When adding a dependency, specify the Poetry group (core, `[bayes]`, `[strategy]`, `[alerts]`) so it doesn't dump into core.
 - Money values are always `Decimal`, never `float`.
+
+---
+
+## Tools and CLIs built
+
+Infrastructure hardened during the model-correctness track (above). Most diagnostics are
+**dev-only** — they stay off `devel` per the CONTRIBUTING.md "Shipping to Production
+(`devel`)" denylist; the live-metrics + graduation tooling is production runtime.
+
+**Offline A/B + verdict**
+- `compression_eval` (`src/sportstradamus/scripts/compression_eval.py`) — offline A/B
+  harness over the cached `data/test_sets/` artifacts; `--baseline` / `--candidate` /
+  `--live-window N` flags. `verdict()` currently encodes only the **Tier-1** relative
+  gate; the **Tier-0** absolute-only mode is the next code step. *(dev-only)*
+
+**Live metrics + lifecycle (production runtime)**
+- `check-graduation` (`scripts/check_graduation.py`) — joins Gate 1
+  (`data/model_stats.parquet`) × Gate 2 (`data/live_metrics_per_market.parquet`, 30-day
+  window) and prints the lifecycle state per (league, market): not-shipped / in-test /
+  graduated / demoted.
+- `backfill-live-metrics` (`scripts/backfill_live_metrics.py`) — walks settled history
+  backwards with `--days` / `--step` controls; idempotent day-precision dedup.
+
+**Diagnostics (dev-only)**
+- `icc-diagnostics` (`scripts/icc_diagnostics.py`) — ICC₁ per (league, market) cell →
+  `data/icc/{LEAGUE}_icc.parquet`.
+- `zinb-routing-diagnostics` (`scripts/zinb_routing_diagnostics.py`) — per-league ×
+  per-market dispersion routing → `data/zinb_routing/{LEAGUE}_diagnostics.parquet` (pulls
+  the `statsmodels` dep — denylisted off `devel`).
+
+**`meditate` flags**
+- `meditate --deterministic` — opt-in deterministic mode (debug-only, never publish):
+  RNGs pinned, Optuna swapped for fixed params, writes redirected to
+  `data/{test_sets,models}/deterministic/`.
+- `meditate --market <name>` — per-market scoped training (added Stage B1).
+
+**Persisted artifacts**
+- `data/live_metrics_per_market.parquet` — live BSS, 10-column / 2-window schema (Gate 2).
+- `data/model_stats.parquet` — offline training report (Gate 1).
+- `data/icc/`, `data/zinb_routing/` — diagnostic parquets.
+
+**Shipping mechanism**
+- `data/ship_config.json` — per-cell strategy config, nested `{league: {market:
+  strategy}}`; the single toggle a ship PR flips.
+- `devel-ship-curator` agent (`.claude/agents/devel-ship-curator.md`) — carves per-market
+  production-delta ship PRs to `devel`, enforcing the research-scaffolding denylist
+  (`compression_eval`, `zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`,
+  `/tmp` harnesses). Never pushes; the human approves.
+- [`docs/ship_gate.md`](ship_gate.md) — human-readable mirror of the `compression_eval`
+  threshold constants. Update it whenever a threshold changes.
+
+---
+
+## Active Track — Model Correctness & Market Breadth (IN PROGRESS)
+
+> **This leads the remaining work**, ahead of the deferred Phase 4 (alerts/dashboard) and
+> Phase 5 (best ball). It is not a Phase-6 "refinement": it was prompted by **defects
+> discovered in the live implementation**, which makes it production-quality *correction*
+> work. Phases 1–6 keep their original numbers; this section is the current focus.
+
+**Home of record:** [`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md).
+This entry is a pointer + status, not a duplicate of the stage detail.
+
+**Why it is urgent (the discovered defects):**
+- GBDT regression-toward-the-mean — top-decile compression, a family-invariant
+  leaf-averaging bias.
+- SkewNormal overconfidence / level bias.
+- ZINB joint-fit catastrophic per-row blowups (compression up to ~5357×, predicted means
+  up to ~1437) on BLK/OREB/PF/BLST — fixed by HurdleZINB.
+- The blanket ZINB label being wrong for ≥ 13 markets (underdispersed → should route to
+  CMP).
+- An NFL position-confound that put the passing-yards training mean at **38 instead of
+  216** (and similar across passing/rushing markets).
+
+**Goal:** ≥ 75% of markets per league carry a *set baseline* (NBA ≥ 16/21, WNBA ≥ 14/18,
+NFL ≥ 15/20). **Current:** NBA 13/21, WNBA 10/18, NFL 13/20 — **gap NBA −3, WNBA −4,
+NFL −2**.
+
+**Scope (pre-break — the active work):** reach 75% breadth (Tier-0 audit code → Stage
+B1.6 feature/bias track), then the core depth methods expected to pay off — A2 (T3
+tail-head), A3 (calibration polish), B2 (routing + feature engineering), B3 (MZINB /
+marginalized-hurdle family build). The post-break speculative tail (Stage A4 / B4 /
+long-shots) is deferred into **Phase 6** below. **Follow the track until diminishing
+returns**, then stop it per-cell.
+
+**Immediate next steps:** Tier-0 audit code → Stage B1.6 feature/bias track → A2/B2/B3.
+See the gbdt plan's "Roadmap to 75%" and "Diminishing returns — stop-the-track principle"
+sections.
 
 ---
 
@@ -1317,6 +1446,17 @@ Smaller scope than Best Ball. Ship this before tackling advance equity.
 
 **Estimated time:** opportunistic, 1–4 weekends per item
 
+> **What Phase 6 is now (2026-05-21).** This phase is the home for **deferred** model work
+> of two kinds: (1) the **speculative tail** of the active model track — the
+> post-diminishing-returns stages from
+> [`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md): **Stage A4** (novel
+> risky retries), **Stage B4** (tuning/polish — optional), and any long-shot method; plus
+> (2) the **original refinements** 6.1–6.5 below. None of Phase 6 was ever the urgent work
+> — the urgent work is fixing the discovered defects and reaching 75% breadth (see the
+> leading "Active Track — Model Correctness & Market Breadth" phase). Everything here is
+> **deferred until breadth is met**. The gbdt plan stays the home of record for the
+> A4/B4 stage detail; this Phase-6 entry is a pointer, not a duplicate.
+
 ### 6.1 Bayesian hierarchical for low-sample players
 
 **Prompt:**
@@ -1481,30 +1621,36 @@ A realistic minimum-viable path was: **Phase 1.1 (correlate) + 1.2 (parlay) + 2 
 
 ## Updated Critical Path (post-2026-05-08 audit, scope-reduced)
 
-The modeling and CLV foundations are in place (1.1 + 1.2 + 2.x + 3.2).
-With placed-bet tracking explicitly out of scope, the remaining work is
-narrower: close out Phase 1 follow-ups, ship Kelly + Underdog-native
-recommendation, and add useful alerts. Recommended order:
+The model-correctness-and-breadth track now **leads** the critical path. The modeling and
+CLV foundations are in place (1.1 + 1.2 + 2.x + 3.x); Kelly (3.1) and the Underdog-native
+CLI (3.3) have **landed since the 2026-05-08 audit**. With placed-bet tracking explicitly
+out of scope, the genuinely remaining non-model work is narrow: close out the Phase 1
+follow-ups and the dashboard recommendations tab. Recommended order:
 
-1. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the
+1. **Model Correctness & Market Breadth — ACTIVE (lead).** Reach ≥ 75% baseline breadth
+   per league (gap NBA −3, WNBA −4, NFL −2): Tier-0 audit code → Stage B1.6 feature/bias
+   track → core depth A2/B2/B3. Follow until diminishing returns; the speculative tail
+   (A4/B4) is deferred to Phase 6. Home of record:
+   [`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md).
+2. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the
    `find_correlation` pairwise-EV unbounded score, replace inline magic
    numbers with named constants, swap substring same-player guarding for
    `player_id` joins, and reconcile the `Boost`-column overwrite at
    `correlation.py:498` so the displayed multiplier matches the EV that
    ranked the parlay. Re-run `audit_parlay_calibration.py` on production
    archive data and commit a real plot.
-2. **Phase 1.6 — deprecated triage (½ weekend).** `correlation.py` and
+3. **Phase 1.6 — deprecated triage (½ weekend).** `correlation.py` and
    `opt_parlay.py` in `src/deprecated/` can be deleted; `opt_kelley_bet.py`
    should be marked REVIVE for the next session. Cheap and unblocks
    confusion for future agents.
-3. **Phase 3.1 — Kelly module (1 weekend).** Genuinely missing. The
-   parlay search produces ranked candidates that nothing currently sizes.
-   Output is a recommendation, not a placed-bet trigger — users decide
-   whether to actually wager.
-4. **Phase 3.3 — Underdog-native strategy CLI (1 weekend).** Single
-   `pickem-build` CLI that produces today's ranked, Kelly-sized
-   recommendations as YAML / Sheets export.
-5. **Phase 4.2 dashboard — Today's Recommendations tab only.** Reads
+4. **Phase 3.1 — Kelly module — ✅ landed since the audit.** `strategies/kelly.py`
+   (`fractional_kelly_stake`, `joint_kelly_portfolio`, the resolution chain) plus the
+   `kelly` CLI. Retained here for order; the parlay search's ranked candidates are now
+   sized. Output is a recommendation, not a placed-bet trigger.
+5. **Phase 3.3 — Underdog-native strategy CLI — ✅ landed since the audit.** The
+   `pickem-build` CLI emits today's ranked, Kelly-sized recommendations to
+   `data/recommendations/{date}.yaml`. Retained here for order.
+6. **Phase 4.2 dashboard — Today's Recommendations tab only.** Reads
    `data/recommendations/{today}.yaml`. Skip the Open Entries / Settled
    History / Bankroll tabs. The dashboard refresh covers the alerting
    role at current polling cadence.
