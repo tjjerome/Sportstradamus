@@ -105,8 +105,9 @@ high-volume markets + every fantasy-points cell; `centered_additive_eb_meanyr_k1
 takes the NBA/WNBA volume markets (FGA, MIN, DREB, PA, PR, PRA, REB); the hurdle
 wins once (NFL sacks-taken). Per-cell selection is material — no single strategy
 dominates. **Gap to close (Step 2):** NBA +3, WNBA +4 via the feature/bias track
-(post-hoc bias correction first, aimed at the bias-failing count cells); NFL
-already clears 75%.
+(post-hoc bias correction first, aimed at the bias-failing count cells); NFL +2 —
+the screen's 16/20 fell to **13/20 confirmed at full HP** (qb-tds, rushing-yards,
+and sacks-taken failed Tier-0 on the real retrain; see Step 3).
 
 **Step 3 result — baselines locked (2026-05-21).** Full-HP retrain driven by the
 per-cell `ship_config.json` (`--force`, non-deterministic). Methodology finding: a
@@ -137,14 +138,22 @@ confirmation is available going forward, not just the crippled-HP screen.
   `zinb_mode` gap), the other 9 as `ratio_meanyr`. Committed to `ship_config.json`.
   This is 10/18 of all WNBA markets baselined; the remaining +4 to the 14/18 North
   Star is the Step-2 feature/bias track on the count markets (FG3M/FTM/STL …).
-- **NFL — screen picks identified, not yet retrained.** Mostly `ratio_meanyr`;
-  `centered_additive_mean10` for receptions + rushing-yards (incumbent fails
-  Tier-0 there); `eb` for passing-first-downs; `ratio_meanyr`+hurdle for
-  sacks-taken — but `ship_config` cannot express a per-cell `zinb_mode`, so
-  sacks-taken is deferred (NFL still meets 75% without it: 16/20 ≥ 15). The
-  centered transforms blow up on NFL yardage (passing-yards `eb` top-decile MAE
-  2629, qb-yards `mean10` 44902) — incumbent is unambiguously correct there. NFL
-  lock-in pending a fresh retrain.
+- **NFL — 13/16 baseline-able locked, confirmed at full HP.** The per-cell
+  `zinb_mode` plumbing was built first (object-form `ship_config` cells +
+  `resolve_cell_zinb_mode`; `ZINB_MODES` in `baselines.py`) so sacks-taken *could*
+  ship as `ratio_meanyr`+hurdle. The full-HP `--force` retrain then **confirmed
+  only 13 of the 16 screen-passers** — the crippled-HP screen was optimistic for
+  3: `qb tds` (full-HP bench +0.39 / star +0.68 over the bounds), `rushing yards`
+  (`centered_additive_mean10` BSS −0.006; incumbent also failed it), and **`sacks
+  taken`** (hurdle: star-bias +0.67 > 0.50 — the plumbing works end-to-end, pickle
+  `is_hurdle=True`/`zinb_mode=hurdle`, but the cell fails Tier-0 anyway). Locked 13:
+  `passing first downs`→`eb`, `receptions`→`mean10`, the other 11→`ratio_meanyr`.
+  The centered transforms blow up on NFL yardage (passing-yards `eb` top-decile MAE
+  2629, qb-yards `mean10` 44902) — incumbent unambiguously correct there. **NFL
+  lands 13/20, short of the 15/20 North Star by 2** (the screen's "16" was
+  crippled-HP-optimistic); the 3 pruned + 4 never-baseline-able = a 7-cell Step-2
+  pool. Full per-cell results + the devel ship handoff are in
+  [docs/lockin_ship_handoff.md](lockin_ship_handoff.md).
 
 Depth work — superseding baselines via the ≥ 5% compression improvement, the Track
 A tail-head and Track B family builds — is **secondary** to reaching 75% breadth.

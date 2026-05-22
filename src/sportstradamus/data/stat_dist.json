@@ -19,7 +19,7 @@
         "receptions": "SkewNormal",
         "interceptions": "ZINB",
         "sacks taken": "ZINB",
-        "passing first downs": "ZINB"
+        "passing first downs": "SkewNormal"
     },
     "NBA": {
         "MIN": "SkewNormal",

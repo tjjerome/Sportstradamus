@@ -271,6 +271,12 @@ _STRATEGIES: dict[str, TargetStrategy] = {
 # Public list of slugs accepted by the ``meditate --target-strategy`` flag.
 STRATEGY_SLUGS: tuple[str, ...] = tuple(_STRATEGIES.keys())
 
+# The ZINB architecture axis (orthogonal to the target-strategy axis above):
+# ``joint`` is the legacy jointly-fit LightGBMLSS ZINB, ``hurdle`` the two-stage
+# HurdleZINB (P2.B). The single source of truth for the ``meditate --zinb-mode``
+# choices, the ``train_market`` guard, and per-cell ``ship_config`` validation.
+ZINB_MODES: tuple[str, ...] = ("joint", "hurdle")
+
 
 def get_strategy(slug: str) -> TargetStrategy:
     """Resolve a target-strategy slug to a :class:`TargetStrategy`.

@@ -1954,8 +1954,10 @@ def train_market(
             when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
             byte-identical to pre-P2.B production behavior.
     """
-    if zinb_mode not in {"joint", "hurdle"}:
-        raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
+    if zinb_mode not in baselines.ZINB_MODES:
+        raise ValueError(
+            f"zinb_mode must be one of {baselines.ZINB_MODES}, got {zinb_mode!r}"
+        )
 
     init = _step_init_market(league, market, stat_data, archive)
     filedict = init["filedict"]
