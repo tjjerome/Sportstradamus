@@ -80,6 +80,13 @@ step.)
 3. **Set + soak:** ship the highest-BSS passer per cell to `devel`; start the
    14-day Gate-2 soak.
 
+**Immediate next steps (Step 1 audit is done — see below; Step 2 is now the work).** The
+first **code** task is adding **`compression_eval.verdict()` Tier-0 absolute-only mode** —
+today `verdict()` encodes only the Tier-1 relative path, so the breadth audit's Tier-0
+calls are not yet a first-class code path; this is the Stage B1.6 prerequisite. With that
+landed, run the **Stage B1.6** feature/bias track to close the gaps (NBA −3, WNBA −4,
+NFL −2), then set + soak. The depth tracks (A2/B2/B3) follow only once breadth is met.
+
 **Step 1 result — breadth baseline (2026-05-21).** Tier-0 audit over all four
 candidate strategies (incumbent `ratio_meanyr`, `centered_additive_mean10`,
 `centered_additive_eb_meanyr_k10`, and `ratio_meanyr` + hurdle) on the
@@ -158,6 +165,108 @@ confirmation is available going forward, not just the crippled-HP screen.
 Depth work — superseding baselines via the ≥ 5% compression improvement, the Track
 A tail-head and Track B family builds — is **secondary** to reaching 75% breadth.
 
+## Market cell status — Gate 1 / `devel` / `main`
+
+Per-cell shipping status, to prioritize which markets to work next. Sourced from
+committed state only — the locked baselines in
+[`data/ship_config.json`](../src/sportstradamus/data/ship_config.json), the market roster
+in [`training/markets.py`](../src/sportstradamus/training/markets.py) (`ALL_MARKETS`), the
+declared distribution family in
+[`data/stat_dist.json`](../src/sportstradamus/data/stat_dist.json), and the locked
+2026-05-21 breadth audit above. No verdict is recomputed here.
+
+- **Gate 1** = passes the Tier-0 absolute gates. A locked baseline ⇒ Gate 1 passed.
+- **`devel`** = baseline shipped to the live beta (the per-cell entry in `ship_config.json`).
+- **`main`** = graduated on the 14-day Gate-2 live soak. **No cell has begun a soak yet**
+  (`data/live_metrics_per_market.parquet` is not yet populated), so every `main` cell is
+  ⏳ pending.
+- Unbaselined cells (no `ship_config.json` entry) are the **Step-2 feature/bias-track
+  (B1.6)** work pool.
+
+**Baselined: NBA 13/21, WNBA 10/18, NFL 13/20.** 75% target / gap: NBA 16 (**−3**),
+WNBA 14 (**−4**), NFL 15 (**−2**). These are the full-HP **locked** counts from Step 3;
+the Step-1 screen table above reports the crippled-HP bias-pass counts (e.g. NFL 17/20),
+three of which (NFL rushing-yards, qb-tds, sacks-taken) failed Tier-0 on the full-HP
+retrain — Step 3 is the real shipping state.
+
+**NBA — 13/21 baselined**
+
+| Market | Family | Baseline strategy | Gate 1 | `devel` | `main` | Next step |
+|---|---|---|---|---|---|---|
+| MIN | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PTS | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| REB | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| AST | SkewNormal | — | ❌ | — | — | Step-2 (B1.6) |
+| PRA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PR | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| RA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FG3M | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| fantasy points prizepicks | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FG3A | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FTM | ZINB | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FGM | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FGA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| STL | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| BLK | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| BLST | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| TOV | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| OREB | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| DREB | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PF | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+
+**WNBA — 10/18 baselined**
+
+| Market | Family | Baseline strategy | Gate 1 | `devel` | `main` | Next step |
+|---|---|---|---|---|---|---|
+| MIN | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| AST | SkewNormal | — | ❌ | — | — | Step-2 (B1.6) |
+| FG3M | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| PA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PR | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PTS | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| RA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| REB | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| OREB | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| DREB | SkewNormal | `centered_additive_mean10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FGA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| BLK | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| STL | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| BLST | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| TOV | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| FTM | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| PRA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| fantasy points prizepicks | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+
+**NFL — 13/20 baselined**
+
+| Market | Family | Baseline strategy | Gate 1 | `devel` | `main` | Next step |
+|---|---|---|---|---|---|---|
+| targets | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| carries | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| attempts | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| passing yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| rushing yards | SkewNormal | — | ❌ | — | — | Step-2 (B1.6) † |
+| receiving yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| qb yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| fantasy points prizepicks | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| fantasy points underdog | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| passing tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| tds | ZINB | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| rushing tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| receiving tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| qb tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) † |
+| completions | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| receptions | SkewNormal | `centered_additive_mean10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| interceptions | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| sacks taken | ZINB | — | ❌ | — | — | Step-2 (B1.6) † |
+| passing first downs | SkewNormal | `centered_additive_eb_meanyr_k10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+
+† Passed the crippled-HP Step-1 screen but failed Tier-0 on the full-HP retrain (Step 3).
+`sacks taken`'s `ratio_meanyr`+hurdle plumbing works end-to-end (pickle `is_hurdle=True`),
+but the cell's star-bias still exceeds the bound — these three join the Step-2 pool.
+
 ## Status / progress log
 
 | Phase | State | Notes |
@@ -174,6 +283,7 @@ A tail-head and Track B family builds — is **secondary** to reaching 75% bread
 | **Stage A1.5 — factor-ICC de-risk (T5 fork gate)** | ✅ done, result: **T5 KILLED as a wholesale architecture; A2 pivots to T3 tail head** | research-analyst brief (`/tmp/researcher_factor_icc.md`) computed factor-level ICC read-only by reusing A1's tested engine — reference markets reproduce the A1 parquet ICCs to 1e-6 (NBA MIN 0.3468, FGA 0.4890), so factor ICCs inherit A1's 15-test coverage and sit on the same scale. **Per-league band verdict (median ICC(volume) − median ICC(efficiency), pre-registered bands 0.20/0.10):** NBA gap **+0.232** (vol 0.391 / eff 0.158) → **MIXED** — gap-confirmed but the volume clause FAILED (0/3 NBA volume factors ≥ 0.5: MIN 0.347, FGA 0.489, FGA-per-MIN 0.391 all ambiguous, the same band where P1 shipped EB on FGA yet KILLED PA); WNBA gap **+0.456** (vol 0.559 / eff 0.103) → **CONFIRMED but low-confidence** (single computable efficiency factor — WNBA has no `FGM`/`FG3A` *markets*, so true FG%/3P% are uncomputable; needs new efficiency test cases — see caveat #3); NFL gap **+0.291** (vol 0.507 / eff 0.216) → **CONFIRMED** (carries 0.666, targets 0.507 high; yards-per-* efficiency genuinely heavy-tailed, skew +2.9 to +4.4). Efficiency factors are low-ICC in all three leagues (**8/8 ≤ 0.30**, the A1 tail-extension ceiling) — the "efficiency = noise" half is strongly confirmed and matches Franks et al. 2016 (DOI 10.1515/jqas-2016-0098); the "volume = stable identity" half is FALSE for NBA. **Literature OVERRIDES the band-only CONFIRMED to a T5 KILL on the body of the stat:** Goodman's exact variance-of-products (DOI 10.1080/01621459.1960.10483369) gives CV²(XY) = CV²(X)+CV²(Y)+CV²(X)CV²(Y), and on the actual NBA top-mean-decile PTS data, recomposing FGA × (PTS/FGA) inflates the within-player-season CV to **0.423 vs 0.334 modeling PTS directly (+27%)** — independent Monte-Carlo recomposition discards the structural volume↔efficiency negative covariance and re-inflates the priced tail; the disaggregate-forecasting result (ECB WP 1365, 2011) says factorization wins only with known-DGP components, not estimated GBDT heads. The plan's line-492 "DFS-industry consensus" is practitioner **lore** (no peer-reviewed tail-bias validation). **A2 fork: build T3 (spliced/Pareto or normalizing-flow tail head, 1–2 wk) as the primary; do NOT build T5 (2–3 wk + the largest inference change in the plan, 36 cells).** T5's internal logic survives only as a narrow **NFL per-factor route** (carries/targets → EB, yards-per-* → T3) as an A3/A4 follow-on — routing, not Monte-Carlo recomposition, so it avoids the +27% penalty. No `src/` change; verdict-only gate. |
 | **Stage A1.6 — NFL position-split matrix cleanup + WNBA test-case fix** | ✅ done | Moved the NFL position confound from a read-side workaround (A1's `icc_diagnostics.py` nonzero-fraction filter) to a **write-side fix**: `NFL_MARKET_POSITIONS` constant + `_market_position_filter` hook (no-op default in [base.py](../src/sportstradamus/stats/base.py), NFL override in [nfl.py](../src/sportstradamus/stats/nfl.py)) called in `get_training_matrix` before the usage cutoff. Scoping: passing + QB total-offense (`passing yards`, `attempts`, `completions`, `passing tds`/`first downs`, `interceptions`, `sacks taken`, `qb yards`, `qb tds`) → **QB**; rushing (`rushing yards`, `carries`, `rushing tds`) → **QB+RB**; receiving + skill scrimmage (`receiving yards`/`tds`, `targets`, `receptions`, `yards`, `tds`) → **WR+RB+TE**; only the fantasy-points composites stay all-position. Existing cached parquets cleaned in-place via [scripts/prune_nfl_matrix_positions.py](../src/sportstradamus/scripts/prune_nfl_matrix_positions.py) (one source of truth — codes derived from `StatsNFL.positions`): **passing-yards 15000→2646 rows, mean 38.1→215.9**; attempts 5.4→30.4; qb-yards→QB-only 45.3→228.0. **ICC re-run (`icc-diagnostics`): NBA/WNBA value-identical (untouched); all NFL shifts downward and explained by exact scoping removing gadget players A1's nonzero-fraction proxy retained** — passing-yards 0.420→0.405, receiving/targets/receptions ≤0.001, but **qb-yards 0.790→0.423** (RB rows removed, 632→222 player-seasons — the 0.790 was a QB-vs-RB between-position artifact), yards 0.470→0.440, carries 0.666→0.627 / rushing-yards 0.502→0.475 (≈47 WR/TE gadget rushers like Deebo removed), attempts 0.458→0.436 / completions 0.451→0.429 (Taysom-Hill-type passers removed). New NFL ICCs are computed on the *correct modeled population* and supersede A1's for A2 routing. No pickle/inference/default-flag change; parquets gitignored ⇒ PR diff is code + script + plan only. WNBA efficiency test cases chosen: `FTM_per_FGA` + `FG3M_per_FGA` (distinct regimes) with `PTS_per_FGA` (0.103) anchor. **New Stage A4 entry T11: per-position model-split bias experiment** (selective, overfitting-guarded, gated behind A2/A3). Two flagged inference edges for A2: QB-only `qb yards` vs Underdog "Total Yards"; QB+RB `carries` excludes gadget WR-rushers. Gates green; determinism green; refactoring-specialist run. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
+| **Docs rework — breadth-led reorg + roadmap sync** | ✅ done (docs-only) | Reorganized this plan so the breadth North Star + per-cell status table lead, depth Tracks A/B are explicitly labeled secondary, the diminishing-returns pre/post-break split is marked, and a "Branches & model-promotion flow" section was added (four-branch pipeline + `devel-ship-curator`). Synced `docs/sportstradamus_roadmap_v2.md`: snapshot → 2026-05-21, model work promoted to a leading "Active Track" phase, post-break tail deferred into Phase 6, Standing rules + a "Tools and CLIs built" section added. No `.py`/`.json`/threshold changes; no retrain. |
 
 ## Scope — leagues this plan covers
 
@@ -388,6 +498,22 @@ the engineering effort elsewhere**. The plan is a backlog, not a queue.
 (If the residual or cost analysis behind a stop/continue call is ambiguous,
 dispatch the `research-analyst` agent before deciding.)
 
+**The break — what is active vs the speculative tail.** This principle is the cut line
+that splits the model work in two, and it drives the
+[roadmap](sportstradamus_roadmap_v2.md) phase split:
+
+- **Pre-break (active — worth the effort).** Reach 75% breadth first — the Tier-0 audit
+  code (`compression_eval.verdict()` absolute-only mode) then the **Stage B1.6**
+  feature/bias track — then the core depth methods expected to pay off: **A2** (T3
+  tail-head), **A3** (calibration polish — orthogonal, stacks on A2; classified active,
+  not tail), **B2** (routing + orthogonal feature engineering), **B3** (MZINB /
+  marginalized-hurdle family build). This is the roadmap's leading "Active Track" phase.
+- **Post-break (speculative tail — deferred).** **Stage A4** (novel risky retries, only
+  if A2/A3 leave a gap), **Stage B4** (tuning/polish — optional), and any long-shot
+  method. All stage bodies stay in this plan (it remains the home of record), but they are
+  **deferred — tracked under roadmap Phase 6** alongside the original 6.1–6.5 refinements.
+  None of the tail was ever the urgent work.
+
 ### Lifecycle: offline gate → production test → live gate → graduation
 
 Every (league, market) cell moves through three states. Two gates control
@@ -538,6 +664,42 @@ Production (`devel`)"**. Every per-market ship PR (and any further foundation la
 `statsmodels`), keeps the Gate-1 verdict as PR prose rather than committed code, and
 verifies the three gates. The initial Phase A foundation PR is carved by hand (the
 one exception).
+
+### Branches & model-promotion flow
+
+Four branches map to the two gates. Candidate work is built and offline-tested on a
+research branch, trimmed into a clean production base, shipped to the live beta, and
+finally graduated to the shipped models:
+
+- **`model-research`** — where candidate updates are developed and offline-tested
+  (deterministic A/B, research scaffolding, cached test sets). All experimentation bloat
+  lives here. *(This is the intended rename of the current
+  `claude/fix-gbdt-mean-regression-GcY1g` branch; the rename is **documented here, not
+  performed** — it is entangled with PR #46, whose head ref is that branch, so renaming it
+  now would orphan the PR. Sequence the rename for after PR #46 merges, or retarget the PR
+  first.)*
+- **`devel-foundation`** — the trimmed, clean "production shipping foundation":
+  `model-research` minus the testing bloat (the denylist below). The clean base `devel`
+  builds on.
+- **`devel`** — the **live beta**. Candidates that pass **Gate 1** (offline ship) ship
+  here and soak on live data through the 14-day **Gate 2** window. The remote server
+  tracks `devel` (CLAUDE.md), so this is the real beta environment.
+- **`main`** — the **final shipped models**. A cell graduates to `main` once it passes
+  **Gate 2** on live data.
+
+```
+model-research ─(build + offline-test)→ trim → devel-foundation
+   ─(Gate-1 passers)→ devel [live beta / Gate-2 soak] ─(Gate-2 graduates)→ main
+```
+
+The `devel-foundation` / `model-research` →(Gate-1 passers)→ `devel` crossing is carved by
+the **`devel-ship-curator`** agent (`.claude/agents/devel-ship-curator.md`): it branches
+off `devel`, brings only production-runtime code + the single `data/ship_config.json`
+toggle for one cleared cell, **hard-excludes** the research-scaffolding denylist
+(`compression_eval`, `zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp`
+harnesses), carries the offline verdict as **PR prose, not code**, verifies the three
+gates, and **never pushes** (the human approves). It does not decide *whether* to ship —
+Gate 1 already did — it selects, excludes, verifies, and packages.
 
 ### Track-wide stop condition
 
@@ -710,9 +872,20 @@ Work proceeds on two independent tracks. Stages within a track are sequential
 infrastructure (the harness, the determinism gate, the per-strategy registry)
 but the diagnostics and method choices diverge.
 
+> **Depth work — secondary to 75% breadth.** Both tracks are *depth* work: superseding a
+> set baseline with a better one (the Tier-1 ≥ 5% compression bar). They are secondary to
+> the breadth North Star at the top of this plan and **begin once the 75%-per-league
+> breadth gap closes** (NBA −3, WNBA −4, NFL −2 as of 2026-05-21). The active pre-break
+> work is the breadth push (Tier-0 audit → Stage B1.6) plus the core depth methods
+> A2/A3/B2/B3; the post-break tail (A4/B4) is deferred — see
+> [roadmap](sportstradamus_roadmap_v2.md) Phase 6.
+
 ---
 
 ## Track A — SkewNormal markets
+
+*Depth work — secondary to 75% breadth; begins after the breadth gap closes. A2/A3 are
+the active (pre-break) core depth; A4 is the deferred post-break tail (roadmap Phase 6).*
 
 Source: `/tmp/researcher_skewnormal.md`. Scope: PTS, REB, AST, PRA, FGA, MIN,
 PA, PR, FG3A, FGM, fantasy points. After P1, FGA ships with EB(MeanYr, K=10)
@@ -946,6 +1119,8 @@ framing is superseded by this fork.
 
 ### Stage A4 — Novel risky retries (only if Stage A2/A3 leave a gap)
 
+> **Deferred — post-break speculative tail; tracked under [roadmap](sportstradamus_roadmap_v2.md) Phase 6.** Body kept here (home of record); not active until A2/A3 leave a gap *and* breadth is met.
+
 | Method | Source | Cost | Direct effect | Notes |
 |---|---|---|---|---|
 | **T4. MEGB / GBMixed** *(replaces original P10 GPBoost retry)* | Tier 3 (Skew) | 1–2 weeks (MEGB), more for GBMixed | EM/BLUP-based mixed-effects boosting that fixes the bias GPBoost was criticized for in Prevett et al. 2025. MEGB is on CRAN + github.com/rid4stat/MEGB; GBMixed has no public code. **Different mechanism from GPBoost** — prior failure does not predict failure here. | Point prediction only for MEGB; use for loc, keep LightGBMLSS for scale/shape. Port GBMixed from the paper if MEGB ships. |
@@ -1003,6 +1178,10 @@ framing is superseded by this fork.
 ---
 
 ## Track B — ZINB markets (FTM, STL kill recovery + 6 SHIP hardening)
+
+*Depth work — secondary to 75% breadth; begins after the breadth gap closes. B1.6 (the
+feature/bias track) is the active breadth lever; B2/B3 are the active (pre-break) core
+depth; B4 is the deferred post-break tail (roadmap Phase 6).*
 
 Source: `/tmp/researcher_zinb.md`. Scope: FG3M, FTM, OREB, PF, STL, TOV, BLK,
 BLST. After P2.B, 6/8 ship under hurdle mode; FTM and STL kill. The
@@ -1520,6 +1699,8 @@ evaluate the bigger structural change.
 
 ### Stage B4 — Tuning, polish, specialized fixes (optional)
 
+> **Deferred — post-break speculative tail; tracked under [roadmap](sportstradamus_roadmap_v2.md) Phase 6.** Body kept here (home of record); optional, not active until B2/B3 leave a gap *and* breadth is met.
+
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
 | **Per-parameter Optuna search** | Tier 3 (ZINB) #6 | days | Separate `learning_rate` and `n_estimators` for gate vs NB heads inside the existing LightGBMLSS Optuna sweep. cyc-GBM-inspired without porting. May resolve the deterministic-30-round blowups without architectural change. Daub et al. 2026 ("balanced step length") provides theoretical justification. | Extend the Optuna search-space dict in [pipeline.py:348-368](../src/sportstradamus/training/pipeline.py#L348) to distinguish gate vs count hyperparameters. |
@@ -1881,11 +2062,18 @@ returns `HTTP 401`, the user needs to re-auth.
 
 ### Branch / PR / commit refs
 
-- Branch: `claude/fix-gbdt-mean-regression-GcY1g`
-- PR: #46 (→ `devel`)
-- HEAD at this plan rewrite: `6e913b1` ("docs: add research handoff for
-  centered-target negative result")
-- Latest shipped: P2.B HurdleZINB (commit `cee5625` ships
-  `centered_additive_eb_meanyr_k10`; subsequent commits add the verdict and
-  the HurdleZINB landing); P1 follow-up `1d0e65e` adds
+See **"Branches & model-promotion flow"** above for the four-branch pipeline
+(`model-research` → `devel-foundation` → `devel` → `main`) and why the `model-research`
+rename is deferred behind PR #46.
+
+- Branch: `claude/fix-gbdt-mean-regression-GcY1g` (the intended future `model-research`).
+- PR: #46 (→ `devel`); HEAD `fbec3cc` ("feat(ship): per-cell `zinb_mode` plumbing + lock
+  13 NFL baselines (full-HP confirmed)").
+- Earlier plan-rewrite HEAD: `6e913b1` ("docs: add research handoff for centered-target
+  negative result").
+- Latest shipped: 13 NBA + 10 WNBA + 13 NFL baselines locked in `data/ship_config.json`
+  (`b5d2609` / `c9fcf01` / `fbec3cc`); P2.B HurdleZINB (`cee5625` ships
+  `centered_additive_eb_meanyr_k10`); P1 follow-up `1d0e65e` adds
   `centered_additive_mean10` as the path-wide A/B counterexample.
+- This breadth-led docs reorg + roadmap sync landed on `claude/roadmap-rework-docs-h13so`
+  (cut off `fbec3cc`; PR → `devel`, stacked on PR #46).
