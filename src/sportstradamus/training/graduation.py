@@ -29,6 +29,12 @@ MIN_SETTLED_FOR_GRADUATION = 200
 GRADUATION_WINDOW_DAYS = 30
 
 
+def _is_nan_like(x: object) -> bool:
+    # Treats None and float NaN as "missing". Pandas merges produce NaN (not None)
+    # for missing join keys, but callers may also pass None explicitly.
+    return x is None or (isinstance(x, float) and math.isnan(x))
+
+
 def classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float) -> str:
     """Map (Gate-1 BSS, n_settled, Gate-2 BSS) to a lifecycle state.
 
@@ -44,15 +50,14 @@ def classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float) 
     Returns:
         One of ``"not-shipped"``, ``"in-test"``, ``"graduated"``, ``"demoted"``.
     """
-    if gate1_bss is None or (isinstance(gate1_bss, float) and math.isnan(gate1_bss)):
+    if _is_nan_like(gate1_bss):
         return "not-shipped"
     if gate1_bss < 0:
         return "not-shipped"
-    n_settled_nan = n_settled is None or (isinstance(n_settled, float) and math.isnan(n_settled))
-    n_int = 0 if n_settled_nan else int(n_settled)
+    n_int = 0 if _is_nan_like(n_settled) else int(n_settled)
     if n_int < MIN_SETTLED_FOR_GRADUATION:
         return "in-test"
-    if book_bss_30d is None or (isinstance(book_bss_30d, float) and math.isnan(book_bss_30d)):
+    if _is_nan_like(book_bss_30d):
         return "in-test"
     if book_bss_30d < 0:
         return "demoted"
@@ -73,7 +78,7 @@ def read_gate1(path: Path, league: str | None = None) -> pd.DataFrame:
     Raises:
         click.UsageError: If the parquet is missing (Gate 1 is required).
     """
-    if not Path(str(path)).exists():
+    if not path.exists():
         raise click.UsageError(f"model_stats parquet not found: {path}")
     df = pd.read_parquet(path, engine="pyarrow")
     df = df[(df["row_kind"] == "model") & (df["metric_row"] == "calibrated")]
@@ -116,7 +121,7 @@ def read_gate2(path: Path) -> pd.DataFrame:
         "empirical_over_rate_live",
         "profit_sim_yield",
     ]
-    if not Path(str(path)).exists():
+    if not path.exists():
         return pd.DataFrame(columns=cols)
     df = pd.read_parquet(path, engine="pyarrow")
     df = df[df["window_days"] == GRADUATION_WINDOW_DAYS]
@@ -178,7 +183,7 @@ def graduated_cells(model_stats_path: Path, live_metrics_path: Path) -> set[tupl
     Returns:
         Set of graduated ``(league, market)`` tuples.
     """
-    if not Path(str(model_stats_path)).exists():
+    if not model_stats_path.exists():
         return set()
     table = lifecycle_table(model_stats_path, live_metrics_path)
     if table.empty:
