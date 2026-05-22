@@ -139,7 +139,15 @@ Python 3.11 required. PyTorch CPU-only (2.1.2) via custom Poetry source.
   0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
   0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
   */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
+  0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
   ```
+
+  The `gate-status` job runs monthly: it regenerates `main`'s `ship_config.json`
+  from live graduation and opens a PR (a human merges — `main` is the public
+  branch). It needs `gh` authenticated on the box (`GH_TOKEN` or `gh auth`) and
+  `HEALTHCHECK_URL_GATE_STATUS` set. `devel`'s `ship_config.json` is regenerated
+  manually with `generate-ship-config --branch devel` whenever
+  `gate1_decisions.json` changes.
 
   `prophecize` and `close-lines` both fire at `:50` during peak hours; the
   `run_job.sh` archive flock serializes them, so the second-to-acquire just

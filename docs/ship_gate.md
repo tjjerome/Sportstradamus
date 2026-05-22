@@ -108,6 +108,29 @@ the real arbiter.
 
 ---
 
+## Serving control — default-deny via generated ship_config
+
+`ship_config.json` is a **generated artifact**, not hand-edited. The canonical
+human-curated source is `data/gate1_decisions.json` (`{league: {market:
+strategy}}` for Gate-1 passers). `generate-ship-config --branch {devel|main}`
+writes `ship_config.json` exhaustively over **all** `ALL_MARKETS` cells:
+
+- a cell that passed the branch's gate gets its decisions strategy (served);
+- every other cell gets `"withheld"` — `meditate` prunes its pickle so
+  `prophecize` dark-outs the market.
+
+This is **default-deny**: only gate-passing cells serve. `--branch devel` =
+Gate-1 passers (regenerate manually when `gate1_decisions.json` changes);
+`--branch main` = Gate-2 graduated cells (regenerated monthly by the
+`run_job.sh gate-status` cron, which opens a PR a human merges).
+
+**Known gap:** the graduated classifier (`training/graduation.py`) uses a
+proxy of Gate 2 — positive Gate-1 BSS + ≥ 200 settled offers in the 30d window
++ non-negative live book-BSS — not the full metric set below. `main` is dormant
+until the live aggregator produces data, so the proxy is acceptable for now.
+
+---
+
 ## Gate 2 — live graduation gate
 
 Computed on the last 30 days of settled production offers
