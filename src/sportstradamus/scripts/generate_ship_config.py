@@ -25,22 +25,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import click
-
-from sportstradamus.helpers.io import (
-    LIVE_METRICS_PATH,
-    MODEL_STATS_PATH,
-    prune_model_pickle,
-)
 from sportstradamus.training.baselines import STRATEGY_SLUGS
 from sportstradamus.training.graduation import graduated_cells
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.ship_config import (
-    GATE1_DECISIONS_PATH,
-    SHIP_CONFIG_PATH,
-    WITHHELD,
-    ShipConfig,
-)
+from sportstradamus.training.ship_config import WITHHELD, ShipConfig
 
 
 def load_decisions(path: Path) -> ShipConfig:
