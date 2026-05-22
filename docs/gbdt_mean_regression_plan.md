@@ -9,6 +9,264 @@
 > phase's code, the harness run-log entries, and the status updates below land
 > as commits on that one PR; do not open separate PRs per phase.
 
+## Top priority — baseline breadth (≥ 75% of markets per league)
+
+**The North Star for this project is breadth, not depth: get a baseline *set* for
+at least three-quarters of the markets in every covered league (NBA ≥ 16/21,
+WNBA ≥ 14/18, NFL ≥ 15/20).** This
+supersedes the earlier framing where the only ship was a ≥ 5% top-decile-MAE
+*improvement*. The Stage B1.5 §7a verdict showed top-decile compression is
+family-invariant — a GBT leaf-averaging property no strategy or distribution swap
+removes — so gating the *first* ship on a ≥ 5% compression improvement blocks most
+cells from ever shipping (the NBA sweep set a baseline on only 2 of 21 markets
+under that bar). The objective is making money on as many markets as possible; the
+gate is reframed to measure that directly.
+
+### Two-tier ship model
+
+Every cell is in one of two regimes:
+
+**Tier 0 — set the first baseline (absolute gates only). This is the priority.** A
+cell with no baseline set gets one as soon as *any* candidate clears the
+**absolute** gates. Nothing relative is required, because there is no prior
+baseline to improve on:
+
+1. **Bench-warmer (bottom-quartile) absolute gate** — bottom-quartile signed bias
+   within the one-sided over-prediction bound (under-prediction tolerated).
+2. **Star (top-decile) absolute gate** — top-decile signed bias within the
+   bidirectional bound.
+3. **BSS in the tolerated range** — `brier_skill_score ≥ 0` (beats the book) on
+   the full-quality retrain. Phase-0 floor; this is the knob for reaching 75% — if
+   a league can't get three-quarters of its markets to ≥ 0, widen toward the
+   Gate-2 −0.02 tolerance rather than ship a book-losing cell.
+
+The **incumbent devel/default strategy is itself a candidate** in this test. Of
+*every* candidate that clears the absolute gates for a cell, the one with the
+highest `brier_skill_score` — after a full, non-deterministic retrain — is shipped
+as the baseline, because live production can only A/B one strategy per cell at a
+time (tiebreaker detail in [docs/ship_gate.md](ship_gate.md)).
+
+**Tier 1 — supersede an established baseline (absolute + relative gates).** Once a
+cell's baseline is set, a challenger must clear **both** the absolute gates **and**
+the relative gates — the full Universal decision threshold below: ≥ 5%
+top-decile-MAE improvement, global MAE not worse, BSS not worse, and
+bottom-quartile bias not more positive. The ≥ 5% compression bar's correct role is
+here — it prevents churning an established baseline without a real improvement, not
+blocking the first ship.
+
+**Gate 2 — live graduation** is unchanged: a newly-set baseline soaks ≥ 14 days,
+then graduates on settled-offer book-BSS, calibration, and profit-sim.
+
+### What "absolute gate" means here
+
+The bench-warmer and star absolute gates are the per-band signed-**bias**
+(calibration) bounds built this session — bottom-quartile one-sided on
+over-prediction, top-decile bidirectional — at the wide Phase-0 values (30% of the
+band's empirical mean, floor 0.10). Current numbers and the BSS tiebreaker live in
+[docs/ship_gate.md](ship_gate.md). (`compression_eval.verdict()` currently encodes
+only the Tier-1 path; the Tier-0 absolute-only mode is the immediate next code
+step.)
+
+### Roadmap to 75%
+
+1. **Audit (do first):** run the absolute-only Tier-0 gate over every cell ×
+   candidate (incl. the incumbent) in all three leagues; record per league how
+   many already clear it and on which strategy. That is the breadth baseline.
+2. **Fill the gap:** for cells that don't yet clear the absolute gates, apply the
+   Stage B1.6 feature/bias track (post-hoc bias correction, expanding-mean
+   encoding, opponent-defense / blowout features) until ≥ 75% per league can be
+   set. Post-hoc bias correction in particular pulls both bands toward zero, so it
+   serves the absolute gates directly.
+3. **Set + soak:** ship the highest-BSS passer per cell to `devel`; start the
+   14-day Gate-2 soak.
+
+**Immediate next steps (Step 1 audit is done — see below; Step 2 is now the work).** The
+first **code** task is adding **`compression_eval.verdict()` Tier-0 absolute-only mode** —
+today `verdict()` encodes only the Tier-1 relative path, so the breadth audit's Tier-0
+calls are not yet a first-class code path; this is the Stage B1.6 prerequisite. With that
+landed, run the **Stage B1.6** feature/bias track to close the gaps (NBA −3, WNBA −4,
+NFL −2), then set + soak. The depth tracks (A2/B2/B3) follow only once breadth is met.
+
+**Step 1 result — breadth baseline (2026-05-21).** Tier-0 audit over all four
+candidate strategies (incumbent `ratio_meanyr`, `centered_additive_mean10`,
+`centered_additive_eb_meanyr_k10`, and `ratio_meanyr` + hurdle) on the
+deterministic A/B test sets, after the NFL gamelog numeric-coercion bug was fixed
+(NFL candidates were previously un-generatable). BSS here is on crippled-HP
+deterministic models — **conservative**; the final per-cell pick is the highest
+*full-retrain* BSS. The absolute bias gates are HP-robust.
+
+| League | passes bias gates | bias + BSS ≥ 0 | 75% target | gap |
+|---|---|---|---|---|
+| NBA | 14/21 | 13/21 | 16 | −3 |
+| WNBA | 10/18 | 10/18 | 14 | −4 |
+| NFL | 17/20 | 16/20 | 15 | **MEETS (+1)** |
+
+**The binding constraint is the absolute bias gates, not the BSS floor.** The
+failing cells are the low-mean count markets — NBA AST/BLK/BLST/FG3M/OREB/STL/TOV,
+WNBA those + FTM, NFL passing-tds/receiving-tds/rushing-tds — exactly the
+family-invariant-compression cells Stage B1.5 routed to the feature/bias track.
+The crippled-HP BSS floor excludes only one extra cell per league beyond the bias
+failures (NBA PF, NFL interceptions — both "bias-only"), so a full retrain should
+recover several. Winning strategy varies by cell: `ratio_meanyr` takes most NFL
+high-volume markets + every fantasy-points cell; `centered_additive_eb_meanyr_k10`
+takes the NBA/WNBA volume markets (FGA, MIN, DREB, PA, PR, PRA, REB); the hurdle
+wins once (NFL sacks-taken). Per-cell selection is material — no single strategy
+dominates. **Gap to close (Step 2):** NBA +3, WNBA +4 via the feature/bias track
+(post-hoc bias correction first, aimed at the bias-failing count cells); NFL +2 —
+the screen's 16/20 fell to **13/20 confirmed at full HP** (qb-tds, rushing-yards,
+and sacks-taken failed Tier-0 on the real retrain; see Step 3).
+
+**Step 3 result — baselines locked (2026-05-21).** Full-HP retrain driven by the
+per-cell `ship_config.json` (`--force`, non-deterministic). Methodology finding: a
+fresh retrain's test sets ARE `compression_eval`-scoreable (they carry the
+book-odds columns), unlike the pre-existing May-8 production sets — so full-HP BSS
+confirmation is available going forward, not just the crippled-HP screen.
+
+- **NBA — 13/13 locked, confirmed at full HP.** Every baseline-able cell passes
+  Tier-0 at full HP (BSS +0.027 … +0.352: MIN +0.284, fpp +0.352, DREB +0.251,
+  REB +0.131, PTS +0.097, FGM +0.094, FGA +0.093, FTM +0.087, PR +0.074, FG3A
+  +0.061, RA +0.060, PA +0.049, PRA +0.027). The crippled-HP "centered wins" in
+  the Step-1 audit were all 0–2pp noise; the incumbent `ratio_meanyr` is confirmed
+  best-or-equal, so all 13 lock as `ratio_meanyr`. Committed to `ship_config.json`.
+- **WNBA — 10/10 baseline-able cells locked, confirmed at full HP (TOR fix landed).**
+  The retrain had crashed in `get_stats`: `teamProfile.loc[…]` raised
+  `KeyError: ['TOR']` because Toronto Tempo (the 2026 WNBA expansion team) is absent
+  from `teamProfile`. Root cause was a pair of hardcoded `"GSV"` (2025 Golden State
+  Valkyries) guards that only papered over the *prior* season's expansion. Fixed with
+  a league-agnostic `_profile_rows_for_teams` helper
+  ([base.py:51](../src/sportstradamus/stats/base.py#L51)) that `reindex`es the profile
+  so any absent franchise yields an all-NaN row (LightGBM consumes it as a missing
+  feature) — robust to future expansions; both GSV guards deleted; regression test
+  `tests/golden/test_profile_team_lookup.py`. The full-HP retrain then completed all
+  10 markets cleanly, every cell passing Tier-0 (BSS +0.013 … +0.230: fpp +0.230,
+  MIN +0.189, FGA +0.137, DREB +0.096, PA +0.050, PR +0.048, REB +0.041, RA +0.036,
+  PTS +0.033, PRA +0.013). DREB locks as `centered_additive_mean10` (the sole Tier-0
+  passer in the screen — incumbent fails the bench gate — and fully plumbed, no
+  `zinb_mode` gap), the other 9 as `ratio_meanyr`. Committed to `ship_config.json`.
+  This is 10/18 of all WNBA markets baselined; the remaining +4 to the 14/18 North
+  Star is the Step-2 feature/bias track on the count markets (FG3M/FTM/STL …).
+- **NFL — 13/16 baseline-able locked, confirmed at full HP.** The per-cell
+  `zinb_mode` plumbing was built first (object-form `ship_config` cells +
+  `resolve_cell_zinb_mode`; `ZINB_MODES` in `baselines.py`) so sacks-taken *could*
+  ship as `ratio_meanyr`+hurdle. The full-HP `--force` retrain then **confirmed
+  only 13 of the 16 screen-passers** — the crippled-HP screen was optimistic for
+  3: `qb tds` (full-HP bench +0.39 / star +0.68 over the bounds), `rushing yards`
+  (`centered_additive_mean10` BSS −0.006; incumbent also failed it), and **`sacks
+  taken`** (hurdle: star-bias +0.67 > 0.50 — the plumbing works end-to-end, pickle
+  `is_hurdle=True`/`zinb_mode=hurdle`, but the cell fails Tier-0 anyway). Locked 13:
+  `passing first downs`→`eb`, `receptions`→`mean10`, the other 11→`ratio_meanyr`.
+  The centered transforms blow up on NFL yardage (passing-yards `eb` top-decile MAE
+  2629, qb-yards `mean10` 44902) — incumbent unambiguously correct there. **NFL
+  lands 13/20, short of the 15/20 North Star by 2** (the screen's "16" was
+  crippled-HP-optimistic); the 3 pruned + 4 never-baseline-able = a 7-cell Step-2
+  pool. Full per-cell results + the devel ship handoff are in
+  [docs/lockin_ship_handoff.md](lockin_ship_handoff.md).
+
+Depth work — superseding baselines via the ≥ 5% compression improvement, the Track
+A tail-head and Track B family builds — is **secondary** to reaching 75% breadth.
+
+## Market cell status — Gate 1 / `devel` / `main`
+
+Per-cell shipping status, to prioritize which markets to work next. Sourced from
+committed state only — the locked baselines in
+[`data/ship_config.json`](../src/sportstradamus/data/ship_config.json), the market roster
+in [`training/markets.py`](../src/sportstradamus/training/markets.py) (`ALL_MARKETS`), the
+declared distribution family in
+[`data/stat_dist.json`](../src/sportstradamus/data/stat_dist.json), and the locked
+2026-05-21 breadth audit above. No verdict is recomputed here.
+
+- **Gate 1** = passes the Tier-0 absolute gates. A locked baseline ⇒ Gate 1 passed.
+- **`devel`** = baseline shipped to the live beta (the per-cell entry in `ship_config.json`).
+- **`main`** = graduated on the 14-day Gate-2 live soak. **No cell has begun a soak yet**
+  (`data/live_metrics_per_market.parquet` is not yet populated), so every `main` cell is
+  ⏳ pending.
+- Unbaselined cells (no `ship_config.json` entry) are the **Step-2 feature/bias-track
+  (B1.6)** work pool.
+
+**Baselined: NBA 13/21, WNBA 10/18, NFL 13/20.** 75% target / gap: NBA 16 (**−3**),
+WNBA 14 (**−4**), NFL 15 (**−2**). These are the full-HP **locked** counts from Step 3;
+the Step-1 screen table above reports the crippled-HP bias-pass counts (e.g. NFL 17/20),
+three of which (NFL rushing-yards, qb-tds, sacks-taken) failed Tier-0 on the full-HP
+retrain — Step 3 is the real shipping state.
+
+**NBA — 13/21 baselined**
+
+| Market | Family | Baseline strategy | Gate 1 | `devel` | `main` | Next step |
+|---|---|---|---|---|---|---|
+| MIN | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PTS | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| REB | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| AST | SkewNormal | — | ❌ | — | — | Step-2 (B1.6) |
+| PRA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PR | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| RA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FG3M | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| fantasy points prizepicks | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FG3A | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FTM | ZINB | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FGM | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FGA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| STL | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| BLK | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| BLST | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| TOV | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| OREB | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| DREB | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PF | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+
+**WNBA — 10/18 baselined**
+
+| Market | Family | Baseline strategy | Gate 1 | `devel` | `main` | Next step |
+|---|---|---|---|---|---|---|
+| MIN | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| AST | SkewNormal | — | ❌ | — | — | Step-2 (B1.6) |
+| FG3M | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| PA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PR | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| PTS | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| RA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| REB | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| OREB | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| DREB | SkewNormal | `centered_additive_mean10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| FGA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| BLK | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| STL | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| BLST | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| TOV | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| FTM | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| PRA | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| fantasy points prizepicks | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+
+**NFL — 13/20 baselined**
+
+| Market | Family | Baseline strategy | Gate 1 | `devel` | `main` | Next step |
+|---|---|---|---|---|---|---|
+| targets | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| carries | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| attempts | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| passing yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| rushing yards | SkewNormal | — | ❌ | — | — | Step-2 (B1.6) † |
+| receiving yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| qb yards | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| fantasy points prizepicks | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| fantasy points underdog | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| passing tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| tds | ZINB | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| rushing tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| receiving tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| qb tds | ZINB | — | ❌ | — | — | Step-2 (B1.6) † |
+| completions | SkewNormal | `ratio_meanyr` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| receptions | SkewNormal | `centered_additive_mean10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+| interceptions | ZINB | — | ❌ | — | — | Step-2 (B1.6) |
+| sacks taken | ZINB | — | ❌ | — | — | Step-2 (B1.6) † |
+| passing first downs | SkewNormal | `centered_additive_eb_meanyr_k10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
+
+† Passed the crippled-HP Step-1 screen but failed Tier-0 on the full-HP retrain (Step 3).
+`sacks taken`'s `ratio_meanyr`+hurdle plumbing works end-to-end (pickle `is_hurdle=True`),
+but the cell's star-bias still exceeds the bound — these three join the Step-2 pool.
+
 ## Status / progress log
 
 | Phase | State | Notes |
@@ -25,6 +283,7 @@
 | **Stage A1.5 — factor-ICC de-risk (T5 fork gate)** | ✅ done, result: **T5 KILLED as a wholesale architecture; A2 pivots to T3 tail head** | research-analyst brief (`/tmp/researcher_factor_icc.md`) computed factor-level ICC read-only by reusing A1's tested engine — reference markets reproduce the A1 parquet ICCs to 1e-6 (NBA MIN 0.3468, FGA 0.4890), so factor ICCs inherit A1's 15-test coverage and sit on the same scale. **Per-league band verdict (median ICC(volume) − median ICC(efficiency), pre-registered bands 0.20/0.10):** NBA gap **+0.232** (vol 0.391 / eff 0.158) → **MIXED** — gap-confirmed but the volume clause FAILED (0/3 NBA volume factors ≥ 0.5: MIN 0.347, FGA 0.489, FGA-per-MIN 0.391 all ambiguous, the same band where P1 shipped EB on FGA yet KILLED PA); WNBA gap **+0.456** (vol 0.559 / eff 0.103) → **CONFIRMED but low-confidence** (single computable efficiency factor — WNBA has no `FGM`/`FG3A` *markets*, so true FG%/3P% are uncomputable; needs new efficiency test cases — see caveat #3); NFL gap **+0.291** (vol 0.507 / eff 0.216) → **CONFIRMED** (carries 0.666, targets 0.507 high; yards-per-* efficiency genuinely heavy-tailed, skew +2.9 to +4.4). Efficiency factors are low-ICC in all three leagues (**8/8 ≤ 0.30**, the A1 tail-extension ceiling) — the "efficiency = noise" half is strongly confirmed and matches Franks et al. 2016 (DOI 10.1515/jqas-2016-0098); the "volume = stable identity" half is FALSE for NBA. **Literature OVERRIDES the band-only CONFIRMED to a T5 KILL on the body of the stat:** Goodman's exact variance-of-products (DOI 10.1080/01621459.1960.10483369) gives CV²(XY) = CV²(X)+CV²(Y)+CV²(X)CV²(Y), and on the actual NBA top-mean-decile PTS data, recomposing FGA × (PTS/FGA) inflates the within-player-season CV to **0.423 vs 0.334 modeling PTS directly (+27%)** — independent Monte-Carlo recomposition discards the structural volume↔efficiency negative covariance and re-inflates the priced tail; the disaggregate-forecasting result (ECB WP 1365, 2011) says factorization wins only with known-DGP components, not estimated GBDT heads. The plan's line-492 "DFS-industry consensus" is practitioner **lore** (no peer-reviewed tail-bias validation). **A2 fork: build T3 (spliced/Pareto or normalizing-flow tail head, 1–2 wk) as the primary; do NOT build T5 (2–3 wk + the largest inference change in the plan, 36 cells).** T5's internal logic survives only as a narrow **NFL per-factor route** (carries/targets → EB, yards-per-* → T3) as an A3/A4 follow-on — routing, not Monte-Carlo recomposition, so it avoids the +27% penalty. No `src/` change; verdict-only gate. |
 | **Stage A1.6 — NFL position-split matrix cleanup + WNBA test-case fix** | ✅ done | Moved the NFL position confound from a read-side workaround (A1's `icc_diagnostics.py` nonzero-fraction filter) to a **write-side fix**: `NFL_MARKET_POSITIONS` constant + `_market_position_filter` hook (no-op default in [base.py](../src/sportstradamus/stats/base.py), NFL override in [nfl.py](../src/sportstradamus/stats/nfl.py)) called in `get_training_matrix` before the usage cutoff. Scoping: passing + QB total-offense (`passing yards`, `attempts`, `completions`, `passing tds`/`first downs`, `interceptions`, `sacks taken`, `qb yards`, `qb tds`) → **QB**; rushing (`rushing yards`, `carries`, `rushing tds`) → **QB+RB**; receiving + skill scrimmage (`receiving yards`/`tds`, `targets`, `receptions`, `yards`, `tds`) → **WR+RB+TE**; only the fantasy-points composites stay all-position. Existing cached parquets cleaned in-place via [scripts/prune_nfl_matrix_positions.py](../src/sportstradamus/scripts/prune_nfl_matrix_positions.py) (one source of truth — codes derived from `StatsNFL.positions`): **passing-yards 15000→2646 rows, mean 38.1→215.9**; attempts 5.4→30.4; qb-yards→QB-only 45.3→228.0. **ICC re-run (`icc-diagnostics`): NBA/WNBA value-identical (untouched); all NFL shifts downward and explained by exact scoping removing gadget players A1's nonzero-fraction proxy retained** — passing-yards 0.420→0.405, receiving/targets/receptions ≤0.001, but **qb-yards 0.790→0.423** (RB rows removed, 632→222 player-seasons — the 0.790 was a QB-vs-RB between-position artifact), yards 0.470→0.440, carries 0.666→0.627 / rushing-yards 0.502→0.475 (≈47 WR/TE gadget rushers like Deebo removed), attempts 0.458→0.436 / completions 0.451→0.429 (Taysom-Hill-type passers removed). New NFL ICCs are computed on the *correct modeled population* and supersede A1's for A2 routing. No pickle/inference/default-flag change; parquets gitignored ⇒ PR diff is code + script + plan only. WNBA efficiency test cases chosen: `FTM_per_FGA` + `FG3M_per_FGA` (distinct regimes) with `PTS_per_FGA` (0.103) anchor. **New Stage A4 entry T11: per-position model-split bias experiment** (selective, overfitting-guarded, gated behind A2/A3). Two flagged inference edges for A2: QB-only `qb yards` vs Underdog "Total Yards"; QB+RB `carries` excludes gadget WR-rushers. Gates green; determinism green; refactoring-specialist run. |
 | P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
+| **Docs rework — breadth-led reorg + roadmap sync** | ✅ done (docs-only) | Reorganized this plan so the breadth North Star + per-cell status table lead, depth Tracks A/B are explicitly labeled secondary, the diminishing-returns pre/post-break split is marked, and a "Branches & model-promotion flow" section was added (four-branch pipeline + `devel-ship-curator`). Synced `docs/sportstradamus_roadmap_v2.md`: snapshot → 2026-05-21, model work promoted to a leading "Active Track" phase, post-break tail deferred into Phase 6, Standing rules + a "Tools and CLIs built" section added. No `.py`/`.json`/threshold changes; no retrain. |
 
 ## Scope — leagues this plan covers
 
@@ -165,19 +424,36 @@ new baseline must be computed there identically and leakage-safe. STYLE_GUIDE
 §9 (named constants), §18.9 (no orphan methods), and the CLAUDE.md
 "no new monoliths" rule all apply.
 
-**Universal decision threshold (every experiment, every market, every covered league):**
-ship a strategy only if it (1) reduces **top-mean-decile MAE by ≥ 5%** vs the
-current production strategy, (2) does not worsen **global MAE by > 1%**, (3) does
-not worsen `brier_skill_score` on the existing report, and (4) does not buy the
-top-decile win with **low-volume over-prediction** — the **bottom-mean-decile
-signed bias** (mean predicted − mean actual, lowest decile) must not become more
-positive than the current default's, and its magnitude must stay ≤ 10% of that
-decile's empirical mean (absolute floor 0.05 for cells whose bottom-decile mean
-< 0.5). Condition (4) was added after the Stage B1.5 §7a pre-check found two cells
-whose only MAE "wins" came from over-predicting low-volume players (FG3M bottom
-decile predicted ~3.4× actual) — the inverse of the under-predicted-stars symptom
-this plan targets; the initial tolerances are tunable but the *direction* (a
-top-decile win must not be financed by bottom-decile over-prediction) is fixed. The
+**Universal decision threshold — the Tier-1 gate that supersedes an established
+baseline (every market, every covered league):** once a cell's baseline is set
+(Tier 0, see "Top priority — baseline breadth" above), a challenger ships only if
+it (1) reduces **top-mean-decile MAE by ≥ 5%** vs the current baseline, (2) does not
+worsen **global MAE by > 1%**, (3) does not worsen `brier_skill_score` on the
+existing report, and (4) does not buy the top-decile win with **low-volume
+over-prediction**. The **Tier-0 first-baseline gate is the absolute subset of
+this**: condition (4)'s absolute bounds (bottom-quartile + top-decile bias) plus
+`brier_skill_score ≥ 0`; the relative conditions (1), (2), and (4)'s relative part
+are dropped, because there is no prior baseline to improve on. Condition (4) has a
+**relative** part and **absolute backstops on both ends**, gated *asymmetrically*
+by betting risk. For the **bottom quartile** (lowest 25% of players by season mean
+— the bench warmers) the failure mode is **over-prediction only**, so the
+**bottom-mean-quartile signed bias** (mean predicted − mean actual) must (a) not
+become more positive than the current default's (*relative*) and (b) not
+over-predict beyond a fraction of that quartile's empirical mean (*absolute,
+one-sided* — currently **+30%**, floor **0.10**); **under-prediction of bench
+warmers is tolerated for now** (it trips neither check). For the **top decile**
+(stars) the gate is **bidirectional**: the |signed bias| must stay within a
+fraction of that decile's mean (currently **30%**, floor **0.10**) — no systematic
+over- *or* under-prediction. The lowest quartile is pooled coarsely on purpose —
+bench warmers generalize more than stars, so a quartile aggregate is more
+representative than a single decile; the absolute bounds start **wide and tighten
+as the bias-correction track lands real improvements**. Condition (4) was added
+after the Stage B1.5 §7a pre-check found two cells whose only MAE "wins" came from
+over-predicting low-volume players (FG3M bottom buckets predicted ~3.4× actual) —
+the inverse of the under-predicted-stars symptom this plan targets; the bounds are
+tunable but the *direction* (a top-decile win must not be financed by
+bottom-quartile over-prediction) is fixed. A standalone quick-reference of the
+current values lives at [docs/ship_gate.md](ship_gate.md). The
 threshold must hold on **every market in every covered league** — or the routing
 config records the per-market/per-league exceptions. Otherwise kill it
 and move on. The harness —
@@ -222,6 +498,22 @@ the engineering effort elsewhere**. The plan is a backlog, not a queue.
 (If the residual or cost analysis behind a stop/continue call is ambiguous,
 dispatch the `research-analyst` agent before deciding.)
 
+**The break — what is active vs the speculative tail.** This principle is the cut line
+that splits the model work in two, and it drives the
+[roadmap](sportstradamus_roadmap_v2.md) phase split:
+
+- **Pre-break (active — worth the effort).** Reach 75% breadth first — the Tier-0 audit
+  code (`compression_eval.verdict()` absolute-only mode) then the **Stage B1.6**
+  feature/bias track — then the core depth methods expected to pay off: **A2** (T3
+  tail-head), **A3** (calibration polish — orthogonal, stacks on A2; classified active,
+  not tail), **B2** (routing + orthogonal feature engineering), **B3** (MZINB /
+  marginalized-hurdle family build). This is the roadmap's leading "Active Track" phase.
+- **Post-break (speculative tail — deferred).** **Stage A4** (novel risky retries, only
+  if A2/A3 leave a gap), **Stage B4** (tuning/polish — optional), and any long-shot
+  method. All stage bodies stay in this plan (it remains the home of record), but they are
+  **deferred — tracked under roadmap Phase 6** alongside the original 6.1–6.5 refinements.
+  None of the tail was ever the urgent work.
+
 ### Lifecycle: offline gate → production test → live gate → graduation
 
 Every (league, market) cell moves through three states. Two gates control
@@ -239,23 +531,33 @@ not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  
 
 Computed on the **held-out validation + test split** that `train_market`
 already produces (lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py)
-and the deterministic test_set CSVs under `data/test_sets/`). This is the
-existing universal decision threshold restated as a per-cell gate.
+and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 has **two
+tiers** (see "Top priority — baseline breadth" above): **Tier 0** sets a cell's
+*first* baseline from the **absolute** rows only; **Tier 1** supersedes an
+*established* baseline and additionally requires the **relative** rows. The Tier
+column tags which rows apply when.
 
-| Offline metric | Threshold | Where it lives |
-|---|---|---|
-| Top-mean-decile MAE on the test split | ≥ 5% better than current default strategy on the same cell | `compression_eval --baseline ... --candidate ...` output |
-| Global MAE on the test split | not worse by > 1% vs current default | `compression_eval` global summary |
-| `brier_skill_score` on the validation split (book baseline) | not worse than current default | `model_stats.parquet` for the candidate run |
-| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
-| Bottom-mean-decile signed bias on the test split | not more positive than current default; magnitude ≤ 10% of that decile's empirical mean (abs. floor 0.05 for sub-0.5-mean cells) | per-decile signed-bias column in `compression_eval` — proven in the Stage B1.5 harness (`/tmp/precheck_harness.py`); **to be promoted to a standard `compression_eval` output** (brief reality-check R4) |
+| Offline metric | Threshold | Tier | Where it lives |
+|---|---|---|---|
+| Top-mean-decile MAE on the test split | ≥ 5% better than the current baseline on the same cell | Tier 1 only | `compression_eval --baseline ... --candidate ...` output |
+| Global MAE on the test split | not worse by > 1% vs current baseline | Tier 1 only | `compression_eval` global summary |
+| `brier_skill_score` (book baseline) | **Tier 0:** ≥ 0 (beats book); **Tier 1:** not worse than the established baseline | both | `model_stats.parquet` for the candidate run |
+| Bottom-quartile bias — **absolute** | over-prediction ≤ +30% of quartile mean (floor 0.10); under-prediction tolerated | both | `bottom_quartile_bias` / `bottom_quartile_mean` in `compression_eval` |
+| Bottom-quartile bias — **relative** | not more positive than the established baseline | Tier 1 only | `verdict()` condition 4a |
+| Top-decile bias — **absolute** | \|bias\| ≤ 30% of decile mean (floor 0.10), bidirectional | both | `top_decile_bias` / `top_decile_mean` in `compression_eval` |
+| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | both | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
 
-If **all five** clear on every cell in every covered league (or the
-routing config records the exceptions), the strategy is allowed to
-promote: change becomes the new default for those cells on `devel`, runs
-in production for the **mandatory ≥ 14-day soak window** before the live
-gate is evaluated. During the soak, the previous version's pickle stays
-archived under `data/old_models/` so revert is one cron-pull away.
+**Tier 0 — set the first baseline (the priority):** the "both" rows must clear —
+bottom-quartile + top-decile absolute bias and `brier_skill_score ≥ 0`. Of every
+candidate (incl. the incumbent default) that clears them on a cell, the
+highest-BSS full retrain is set as that cell's baseline and promoted to the
+**mandatory ≥ 14-day soak window**.
+
+**Tier 1 — supersede an established baseline:** all rows must clear — the absolute
+rows plus the relative ≥ 5% top-decile, global-MAE-not-worse, BSS-not-worse, and
+bottom-quartile-not-more-positive checks — on every cell in every covered league
+(or the routing config records the exceptions). On promotion the previous pickle
+stays archived under `data/old_models/` so revert is one cron-pull away.
 
 ### Gate 2 — Live graduation gate (cell graduates from the track)
 
@@ -269,7 +571,7 @@ in `nightly.py`. A cell graduates from the track — no further stage work
 | Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
 | Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
 | Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
-| Bottom-mean-decile signed bias on settled bets | within ±10% of that decile's empirical settled mean (abs. floor 0.05 for sub-0.5-mean cells) over ≥ 100 settled offers in the decile, AND not more positive than the prior version | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), per-decile bias column (live analog of the Gate 1 row) |
+| Bottom-quartile bias (one-sided) + top-decile bias (bidirectional) on settled bets | mirrors Gate 1 cond. 4 over ≥ 100 settled offers: bottom-quartile over-prediction ≤ +30% of band mean (floor 0.10) AND not more positive than prior; top-decile \|bias\| ≤ 30% (floor 0.10) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), `bottom_quartile_bias` column (live analog of the Gate 1 row) |
 | Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
 
 If a cell graduates, mark it ✅ in the Status table with the graduating
@@ -362,6 +664,42 @@ Production (`devel`)"**. Every per-market ship PR (and any further foundation la
 `statsmodels`), keeps the Gate-1 verdict as PR prose rather than committed code, and
 verifies the three gates. The initial Phase A foundation PR is carved by hand (the
 one exception).
+
+### Branches & model-promotion flow
+
+Four branches map to the two gates. Candidate work is built and offline-tested on a
+research branch, trimmed into a clean production base, shipped to the live beta, and
+finally graduated to the shipped models:
+
+- **`model-research`** — where candidate updates are developed and offline-tested
+  (deterministic A/B, research scaffolding, cached test sets). All experimentation bloat
+  lives here. *(This is the intended rename of the current
+  `claude/fix-gbdt-mean-regression-GcY1g` branch; the rename is **documented here, not
+  performed** — it is entangled with PR #46, whose head ref is that branch, so renaming it
+  now would orphan the PR. Sequence the rename for after PR #46 merges, or retarget the PR
+  first.)*
+- **`devel-foundation`** — the trimmed, clean "production shipping foundation":
+  `model-research` minus the testing bloat (the denylist below). The clean base `devel`
+  builds on.
+- **`devel`** — the **live beta**. Candidates that pass **Gate 1** (offline ship) ship
+  here and soak on live data through the 14-day **Gate 2** window. The remote server
+  tracks `devel` (CLAUDE.md), so this is the real beta environment.
+- **`main`** — the **final shipped models**. A cell graduates to `main` once it passes
+  **Gate 2** on live data.
+
+```
+model-research ─(build + offline-test)→ trim → devel-foundation
+   ─(Gate-1 passers)→ devel [live beta / Gate-2 soak] ─(Gate-2 graduates)→ main
+```
+
+The `devel-foundation` / `model-research` →(Gate-1 passers)→ `devel` crossing is carved by
+the **`devel-ship-curator`** agent (`.claude/agents/devel-ship-curator.md`): it branches
+off `devel`, brings only production-runtime code + the single `data/ship_config.json`
+toggle for one cleared cell, **hard-excludes** the research-scaffolding denylist
+(`compression_eval`, `zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp`
+harnesses), carries the offline verdict as **PR prose, not code**, verifies the three
+gates, and **never pushes** (the human approves). It does not decide *whether* to ship —
+Gate 1 already did — it selects, excludes, verifies, and packages.
 
 ### Track-wide stop condition
 
@@ -534,9 +872,20 @@ Work proceeds on two independent tracks. Stages within a track are sequential
 infrastructure (the harness, the determinism gate, the per-strategy registry)
 but the diagnostics and method choices diverge.
 
+> **Depth work — secondary to 75% breadth.** Both tracks are *depth* work: superseding a
+> set baseline with a better one (the Tier-1 ≥ 5% compression bar). They are secondary to
+> the breadth North Star at the top of this plan and **begin once the 75%-per-league
+> breadth gap closes** (NBA −3, WNBA −4, NFL −2 as of 2026-05-21). The active pre-break
+> work is the breadth push (Tier-0 audit → Stage B1.6) plus the core depth methods
+> A2/A3/B2/B3; the post-break tail (A4/B4) is deferred — see
+> [roadmap](sportstradamus_roadmap_v2.md) Phase 6.
+
 ---
 
 ## Track A — SkewNormal markets
+
+*Depth work — secondary to 75% breadth; begins after the breadth gap closes. A2/A3 are
+the active (pre-break) core depth; A4 is the deferred post-break tail (roadmap Phase 6).*
 
 Source: `/tmp/researcher_skewnormal.md`. Scope: PTS, REB, AST, PRA, FGA, MIN,
 PA, PR, FG3A, FGM, fantasy points. After P1, FGA ships with EB(MeanYr, K=10)
@@ -770,6 +1119,8 @@ framing is superseded by this fork.
 
 ### Stage A4 — Novel risky retries (only if Stage A2/A3 leave a gap)
 
+> **Deferred — post-break speculative tail; tracked under [roadmap](sportstradamus_roadmap_v2.md) Phase 6.** Body kept here (home of record); not active until A2/A3 leave a gap *and* breadth is met.
+
 | Method | Source | Cost | Direct effect | Notes |
 |---|---|---|---|---|
 | **T4. MEGB / GBMixed** *(replaces original P10 GPBoost retry)* | Tier 3 (Skew) | 1–2 weeks (MEGB), more for GBMixed | EM/BLUP-based mixed-effects boosting that fixes the bias GPBoost was criticized for in Prevett et al. 2025. MEGB is on CRAN + github.com/rid4stat/MEGB; GBMixed has no public code. **Different mechanism from GPBoost** — prior failure does not predict failure here. | Point prediction only for MEGB; use for loc, keep LightGBMLSS for scale/shape. Port GBMixed from the paper if MEGB ships. |
@@ -827,6 +1178,10 @@ framing is superseded by this fork.
 ---
 
 ## Track B — ZINB markets (FTM, STL kill recovery + 6 SHIP hardening)
+
+*Depth work — secondary to 75% breadth; begins after the breadth gap closes. B1.6 (the
+feature/bias track) is the active breadth lever; B2/B3 are the active (pre-break) core
+depth; B4 is the deferred post-break tail (roadmap Phase 6).*
 
 Source: `/tmp/researcher_zinb.md`. Scope: FG3M, FTM, OREB, PF, STL, TOV, BLK,
 BLST. After P2.B, 6/8 ship under hurdle mode; FTM and STL kill. The
@@ -1146,9 +1501,10 @@ actual is 0.20), the inverse of the under-prediction-of-stars compression Track 
 targets. A trivial bias re-centering (subtract mean signed bias, change nothing else)
 recovers 41% (FG3M) / 47% (rushing-tds) of the gain with **no family change**; the
 remainder is better mean-fit from a fresh GBM, not orthogonal dispersion. Under the
-bottom-mean-decile-bias ship gate (Universal decision threshold condition 4, added
-in response to this finding), both cells **fail Gate 1** — the low-volume
-over-prediction their top-decile wins rely on is exactly what that gate now blocks.
+calibration ship gate (Universal decision threshold condition 4, added in response
+to this finding — now a bottom-quartile relative check + wide absolute backstops on
+both ends), both cells **fail Gate 1** — the low-volume over-prediction their
+top-decile wins rely on is exactly what that gate now blocks.
 
 **3. No CMPμ candidate among the NBA/WNBA cells.** Conditional Dunn–Smyth RQR variance
 (Dunn & Smyth 1996, doi:10.1080/10618600.1996.10474708; power for count GOF: Feng et
@@ -1211,14 +1567,15 @@ condition at the end of this stage. Lock the eval protocol before refitting (Cam
 
 **Sequencing (cheapest, highest-leverage first): (1) → (2) → (3).** Do the post-hoc
 correction first — days of work, directly attacks the family-invariant compression,
-and on its own is expected to clear the new bottom-decile-bias gate on FG3M/rushing-tds.
+and on its own is expected to clear the new calibration (bottom-quartile) gate on
+FG3M/rushing-tds.
 Re-run `compression_eval` per cell after each workstream and **promote every cell that
 clears Gate 1's five conditions to the 14-day live soak immediately** — do not wait for
 later workstreams or for other cells.
 
 **Decision points (gate logic for Stage B1.6):**
-- After (1): any cell now clearing Gate 1 (incl. the new bottom-decile-bias condition)
-  ships to soak. Expect FG3M/rushing-tds to flip from "bias-driven nominal SHIP" to a
+- After (1): any cell now clearing Gate 1 (incl. the new calibration / bottom-quartile
+  condition) ships to soak. Expect FG3M/rushing-tds to flip from "bias-driven nominal SHIP" to a
   *legitimate* SHIP once the over-prediction is corrected rather than exploited.
 - After (1)+(2)+(3): cells that clear Gate 1 ship; cells that still kill carry to the
   re-entry check below.
@@ -1341,6 +1698,8 @@ evaluate the bigger structural change.
   larger than MZINB's parameter-contract change.
 
 ### Stage B4 — Tuning, polish, specialized fixes (optional)
+
+> **Deferred — post-break speculative tail; tracked under [roadmap](sportstradamus_roadmap_v2.md) Phase 6.** Body kept here (home of record); optional, not active until B2/B3 leave a gap *and* breadth is met.
 
 | Method | Source | Cost | Direct effect | Implementation site |
 |---|---|---|---|---|
@@ -1703,11 +2062,18 @@ returns `HTTP 401`, the user needs to re-auth.
 
 ### Branch / PR / commit refs
 
-- Branch: `claude/fix-gbdt-mean-regression-GcY1g`
-- PR: #46 (→ `devel`)
-- HEAD at this plan rewrite: `6e913b1` ("docs: add research handoff for
-  centered-target negative result")
-- Latest shipped: P2.B HurdleZINB (commit `cee5625` ships
-  `centered_additive_eb_meanyr_k10`; subsequent commits add the verdict and
-  the HurdleZINB landing); P1 follow-up `1d0e65e` adds
+See **"Branches & model-promotion flow"** above for the four-branch pipeline
+(`model-research` → `devel-foundation` → `devel` → `main`) and why the `model-research`
+rename is deferred behind PR #46.
+
+- Branch: `claude/fix-gbdt-mean-regression-GcY1g` (the intended future `model-research`).
+- PR: #46 (→ `devel`); HEAD `fbec3cc` ("feat(ship): per-cell `zinb_mode` plumbing + lock
+  13 NFL baselines (full-HP confirmed)").
+- Earlier plan-rewrite HEAD: `6e913b1` ("docs: add research handoff for centered-target
+  negative result").
+- Latest shipped: 13 NBA + 10 WNBA + 13 NFL baselines locked in `data/ship_config.json`
+  (`b5d2609` / `c9fcf01` / `fbec3cc`); P2.B HurdleZINB (`cee5625` ships
+  `centered_additive_eb_meanyr_k10`); P1 follow-up `1d0e65e` adds
   `centered_additive_mean10` as the path-wide A/B counterexample.
+- This breadth-led docs reorg + roadmap sync landed on `claude/roadmap-rework-docs-h13so`
+  (cut off `fbec3cc`; PR → `devel`, stacked on PR #46).
