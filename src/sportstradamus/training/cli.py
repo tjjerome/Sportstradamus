@@ -21,6 +21,7 @@ from sportstradamus.training.ship_config import (
     WITHHELD,
     load_ship_config,
     resolve_cell_strategy,
+    resolve_cell_zinb_mode,
 )
 
 warnings.simplefilter("ignore", UserWarning)
@@ -91,7 +92,7 @@ _RNG_SEED: int = 69
 )
 @click.option(
     "--zinb-mode",
-    type=click.Choice(["joint", "hurdle"]),
+    type=click.Choice(list(baselines.ZINB_MODES)),
     default="joint",
     show_default=True,
     help=(
@@ -272,6 +273,7 @@ def meditate(
                 prune_model_pickle(lg, market)
                 click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
                 continue
+            cell_zinb_mode = resolve_cell_zinb_mode(lg, market, zinb_mode, ship_config)
             train_market(
                 lg,
                 market,
@@ -282,5 +284,5 @@ def meditate(
                 league_start_date,
                 deterministic=deterministic,
                 target_strategy=cell_strategy,
-                zinb_mode=zinb_mode,
+                zinb_mode=cell_zinb_mode,
             )

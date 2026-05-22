@@ -25,5 +25,20 @@
         "RA": "ratio_meanyr",
         "REB": "ratio_meanyr",
         "fantasy points prizepicks": "ratio_meanyr"
+    },
+    "NFL": {
+        "attempts": "ratio_meanyr",
+        "carries": "ratio_meanyr",
+        "completions": "ratio_meanyr",
+        "fantasy points prizepicks": "ratio_meanyr",
+        "fantasy points underdog": "ratio_meanyr",
+        "passing first downs": "centered_additive_eb_meanyr_k10",
+        "passing yards": "ratio_meanyr",
+        "qb yards": "ratio_meanyr",
+        "receiving yards": "ratio_meanyr",
+        "receptions": "centered_additive_mean10",
+        "targets": "ratio_meanyr",
+        "tds": "ratio_meanyr",
+        "yards": "ratio_meanyr"
     }
 }
