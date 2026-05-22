@@ -113,3 +113,97 @@ def test_active_cells_main_intersects_graduated(tmp_path):
         ]
     ).to_parquet(lm, engine="pyarrow", index=False)
     assert active_cells("main", decisions, ms, lm) == {("NBA", "PTS")}
+
+
+from click.testing import CliRunner
+
+from sportstradamus.scripts.generate_ship_config import main
+
+
+def _invoke(args):
+    return CliRunner().invoke(main, args)
+
+
+def test_cli_devel_writes_active_plus_withheld(tmp_path):
+    dpath = tmp_path / "decisions.json"
+    _write(dpath, {"NBA": {"PTS": "ratio_meanyr"}})
+    out = tmp_path / "ship_config.json"
+    result = _invoke(
+        [
+            "--branch", "devel",
+            "--decisions", str(dpath),
+            "--out", str(out),
+            "--model-stats", str(tmp_path / "ms.parquet"),
+            "--live-metrics", str(tmp_path / "lm.parquet"),
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    cfg = json.loads(out.read_text())
+    assert cfg["NBA"]["PTS"] == "ratio_meanyr"
+    assert cfg["NBA"]["REB"] == WITHHELD
+    n_active = sum(1 for lg in cfg for mk in cfg[lg] if cfg[lg][mk] != WITHHELD)
+    assert n_active == 1
+
+
+def test_cli_main_no_data_all_withheld(tmp_path):
+    dpath = tmp_path / "decisions.json"
+    _write(dpath, {"NBA": {"PTS": "ratio_meanyr"}})
+    out = tmp_path / "ship_config.json"
+    result = _invoke(
+        [
+            "--branch", "main",
+            "--decisions", str(dpath),
+            "--out", str(out),
+            "--model-stats", str(tmp_path / "ms.parquet"),
+            "--live-metrics", str(tmp_path / "lm.parquet"),
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    cfg = json.loads(out.read_text())
+    assert all(cfg[lg][mk] == WITHHELD for lg in cfg for mk in cfg[lg])
+
+
+def test_cli_dry_run_does_not_write(tmp_path):
+    dpath = tmp_path / "decisions.json"
+    _write(dpath, {"NBA": {"PTS": "ratio_meanyr"}})
+    out = tmp_path / "ship_config.json"
+    result = _invoke(
+        [
+            "--branch", "devel",
+            "--decisions", str(dpath),
+            "--out", str(out),
+            "--model-stats", str(tmp_path / "ms.parquet"),
+            "--live-metrics", str(tmp_path / "lm.parquet"),
+            "--dry-run",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert not out.exists()
+    assert "ratio_meanyr" in result.output
+
+
+def test_cli_prune_deletes_only_non_active_pickles(tmp_path, monkeypatch):
+    import sportstradamus.helpers.io as io_mod
+
+    models = tmp_path / "models"
+    models.mkdir()
+    monkeypatch.setattr(io_mod, "MODELS_DIR", models)
+    (models / "NBA_PTS.mdl").write_text("x")  # active -> kept
+    (models / "NBA_REB.mdl").write_text("x")  # non-active -> pruned
+
+    dpath = tmp_path / "decisions.json"
+    _write(dpath, {"NBA": {"PTS": "ratio_meanyr"}})
+    out = tmp_path / "ship_config.json"
+    result = _invoke(
+        [
+            "--branch", "devel",
+            "--decisions", str(dpath),
+            "--out", str(out),
+            "--model-stats", str(tmp_path / "ms.parquet"),
+            "--live-metrics", str(tmp_path / "lm.parquet"),
+            "--prune",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert (models / "NBA_PTS.mdl").exists()
+    assert not (models / "NBA_REB.mdl").exists()
