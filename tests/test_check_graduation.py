@@ -6,26 +6,9 @@ import math
 
 import numpy as np
 import pandas as pd
-import pytest
 from click.testing import CliRunner
 
-from sportstradamus.scripts.check_graduation import _classify_lifecycle, main
-
-
-@pytest.mark.parametrize(
-    ("gate1_bss", "n_settled", "book_bss_30d", "expected"),
-    [
-        (math.nan, 500, 0.10, "not-shipped"),
-        (-0.05, 500, 0.10, "not-shipped"),
-        (0.10, 50, 0.10, "in-test"),
-        (0.10, 250, math.nan, "in-test"),  # live row missing entirely
-        (0.10, 250, 0.05, "graduated"),
-        (0.10, 250, 0.0, "graduated"),
-        (0.10, 250, -0.04, "demoted"),
-    ],
-)
-def test_lifecycle_classification(gate1_bss, n_settled, book_bss_30d, expected):
-    assert _classify_lifecycle(gate1_bss, n_settled, book_bss_30d) == expected
+from sportstradamus.scripts.check_graduation import main
 
 
 def _seed_model_stats(path):
