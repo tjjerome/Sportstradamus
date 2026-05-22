@@ -13,5 +13,17 @@
         "RA": "ratio_meanyr",
         "REB": "ratio_meanyr",
         "fantasy points prizepicks": "ratio_meanyr"
+    },
+    "WNBA": {
+        "DREB": "centered_additive_mean10",
+        "FGA": "ratio_meanyr",
+        "MIN": "ratio_meanyr",
+        "PA": "ratio_meanyr",
+        "PR": "ratio_meanyr",
+        "PRA": "ratio_meanyr",
+        "PTS": "ratio_meanyr",
+        "RA": "ratio_meanyr",
+        "REB": "ratio_meanyr",
+        "fantasy points prizepicks": "ratio_meanyr"
     }
 }

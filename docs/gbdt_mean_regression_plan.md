@@ -120,14 +120,23 @@ confirmation is available going forward, not just the crippled-HP screen.
   +0.061, RA +0.060, PA +0.049, PRA +0.027). The crippled-HP "centered wins" in
   the Step-1 audit were all 0–2pp noise; the incumbent `ratio_meanyr` is confirmed
   best-or-equal, so all 13 lock as `ratio_meanyr`. Committed to `ship_config.json`.
-- **WNBA — picks decided, full-HP retrain BLOCKED.** Screen says DREB →
-  `centered_additive_mean10` (sole Tier-0 passer; incumbent fails the bench gate),
-  other 9 → `ratio_meanyr`. The retrain crashed in `get_stats`
-  ([base.py:772](../src/sportstradamus/stats/base.py#L772)): `teamProfile.loc[…]`
-  raises `KeyError: ['TOR']` because Toronto Tempo (the 2026 WNBA expansion team)
-  is absent from `teamProfile`. This blocks any WNBA `--force` retrain *and* the
-  next production WNBA cron. WNBA baselines NOT committed — pending the TOR fix +
-  full-HP confirmation.
+- **WNBA — 10/10 baseline-able cells locked, confirmed at full HP (TOR fix landed).**
+  The retrain had crashed in `get_stats`: `teamProfile.loc[…]` raised
+  `KeyError: ['TOR']` because Toronto Tempo (the 2026 WNBA expansion team) is absent
+  from `teamProfile`. Root cause was a pair of hardcoded `"GSV"` (2025 Golden State
+  Valkyries) guards that only papered over the *prior* season's expansion. Fixed with
+  a league-agnostic `_profile_rows_for_teams` helper
+  ([base.py:51](../src/sportstradamus/stats/base.py#L51)) that `reindex`es the profile
+  so any absent franchise yields an all-NaN row (LightGBM consumes it as a missing
+  feature) — robust to future expansions; both GSV guards deleted; regression test
+  `tests/golden/test_profile_team_lookup.py`. The full-HP retrain then completed all
+  10 markets cleanly, every cell passing Tier-0 (BSS +0.013 … +0.230: fpp +0.230,
+  MIN +0.189, FGA +0.137, DREB +0.096, PA +0.050, PR +0.048, REB +0.041, RA +0.036,
+  PTS +0.033, PRA +0.013). DREB locks as `centered_additive_mean10` (the sole Tier-0
+  passer in the screen — incumbent fails the bench gate — and fully plumbed, no
+  `zinb_mode` gap), the other 9 as `ratio_meanyr`. Committed to `ship_config.json`.
+  This is 10/18 of all WNBA markets baselined; the remaining +4 to the 14/18 North
+  Star is the Step-2 feature/bias track on the count markets (FG3M/FTM/STL …).
 - **NFL — screen picks identified, not yet retrained.** Mostly `ratio_meanyr`;
   `centered_additive_mean10` for receptions + rushing-yards (incumbent fails
   Tier-0 there); `eb` for passing-first-downs; `ratio_meanyr`+hurdle for
