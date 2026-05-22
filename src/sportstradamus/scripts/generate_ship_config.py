@@ -168,7 +168,9 @@ def build_ship_config(decisions: ShipConfig, active: set[tuple[str, str]]) -> Sh
     default=None,
     help="Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet). main only.",
 )
-@click.option("--dry-run", is_flag=True, default=False, help="Print the config; do not write or prune.")
+@click.option(
+    "--dry-run", is_flag=True, default=False, help="Print the config; do not write or prune."
+)
 def main(branch, prune, decisions, out, model_stats, live_metrics, dry_run) -> None:
     """Write an exhaustive, gate-driven ship_config.json for one branch."""
     decisions_path = Path(decisions) if decisions else Path(str(GATE1_DECISIONS_PATH))
@@ -186,7 +188,9 @@ def main(branch, prune, decisions, out, model_stats, live_metrics, dry_run) -> N
 
     if dry_run:
         click.echo(payload)
-        click.echo(f"# branch={branch} active={n_active} withheld={n_withheld} (dry-run, not written)")
+        click.echo(
+            f"# branch={branch} active={n_active} withheld={n_withheld} (dry-run, not written)"
+        )
         return
 
     out_path.write_text(payload + "\n")
