@@ -1,1 +1,17 @@
-{}
+{
+    "NBA": {
+        "DREB": "ratio_meanyr",
+        "FG3A": "ratio_meanyr",
+        "FGA": "ratio_meanyr",
+        "FGM": "ratio_meanyr",
+        "FTM": "ratio_meanyr",
+        "MIN": "ratio_meanyr",
+        "PA": "ratio_meanyr",
+        "PR": "ratio_meanyr",
+        "PRA": "ratio_meanyr",
+        "PTS": "ratio_meanyr",
+        "RA": "ratio_meanyr",
+        "REB": "ratio_meanyr",
+        "fantasy points prizepicks": "ratio_meanyr"
+    }
+}

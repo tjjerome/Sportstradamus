@@ -108,6 +108,35 @@ dominates. **Gap to close (Step 2):** NBA +3, WNBA +4 via the feature/bias track
 (post-hoc bias correction first, aimed at the bias-failing count cells); NFL
 already clears 75%.
 
+**Step 3 result — baselines locked (2026-05-21).** Full-HP retrain driven by the
+per-cell `ship_config.json` (`--force`, non-deterministic). Methodology finding: a
+fresh retrain's test sets ARE `compression_eval`-scoreable (they carry the
+book-odds columns), unlike the pre-existing May-8 production sets — so full-HP BSS
+confirmation is available going forward, not just the crippled-HP screen.
+
+- **NBA — 13/13 locked, confirmed at full HP.** Every baseline-able cell passes
+  Tier-0 at full HP (BSS +0.027 … +0.352: MIN +0.284, fpp +0.352, DREB +0.251,
+  REB +0.131, PTS +0.097, FGM +0.094, FGA +0.093, FTM +0.087, PR +0.074, FG3A
+  +0.061, RA +0.060, PA +0.049, PRA +0.027). The crippled-HP "centered wins" in
+  the Step-1 audit were all 0–2pp noise; the incumbent `ratio_meanyr` is confirmed
+  best-or-equal, so all 13 lock as `ratio_meanyr`. Committed to `ship_config.json`.
+- **WNBA — picks decided, full-HP retrain BLOCKED.** Screen says DREB →
+  `centered_additive_mean10` (sole Tier-0 passer; incumbent fails the bench gate),
+  other 9 → `ratio_meanyr`. The retrain crashed in `get_stats`
+  ([base.py:772](../src/sportstradamus/stats/base.py#L772)): `teamProfile.loc[…]`
+  raises `KeyError: ['TOR']` because Toronto Tempo (the 2026 WNBA expansion team)
+  is absent from `teamProfile`. This blocks any WNBA `--force` retrain *and* the
+  next production WNBA cron. WNBA baselines NOT committed — pending the TOR fix +
+  full-HP confirmation.
+- **NFL — screen picks identified, not yet retrained.** Mostly `ratio_meanyr`;
+  `centered_additive_mean10` for receptions + rushing-yards (incumbent fails
+  Tier-0 there); `eb` for passing-first-downs; `ratio_meanyr`+hurdle for
+  sacks-taken — but `ship_config` cannot express a per-cell `zinb_mode`, so
+  sacks-taken is deferred (NFL still meets 75% without it: 16/20 ≥ 15). The
+  centered transforms blow up on NFL yardage (passing-yards `eb` top-decile MAE
+  2629, qb-yards `mean10` 44902) — incumbent is unambiguously correct there. NFL
+  lock-in pending a fresh retrain.
+
 Depth work — superseding baselines via the ≥ 5% compression improvement, the Track
 A tail-head and Track B family builds — is **secondary** to reaching 75% breadth.
 
