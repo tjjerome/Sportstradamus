@@ -33,6 +33,10 @@ WITHHELD = "withheld"
 
 SHIP_CONFIG_PATH = pkg_resources.files(data) / "ship_config.json"
 
+# Canonical, branch-independent Gate-1 record (which cells passed + their
+# strategy). generate-ship-config reads this to synthesize ship_config.json.
+GATE1_DECISIONS_PATH = pkg_resources.files(data) / "gate1_decisions.json"
+
 # Nested {league: {market: strategy}}, where strategy is a slug or WITHHELD.
 ShipConfig = dict[str, dict[str, str]]
 
