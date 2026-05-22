@@ -29,7 +29,17 @@ git fetch origin main
 
 TMP_CONFIG="$(mktemp)"
 TMP_MAIN="$(mktemp)"
-trap 'rm -f "$TMP_CONFIG" "$TMP_MAIN"' EXIT
+WORKTREE_DIR=""
+# Always remove the temp files, and the worktree if one was created, so a
+# mid-run failure (push / gh pr create) can't leave a stale worktree that
+# collides with next month's `git worktree add`.
+cleanup() {
+    rm -f "$TMP_CONFIG" "$TMP_MAIN"
+    if [[ -n "$WORKTREE_DIR" ]]; then
+        git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 $GEN_CMD --branch main --out "$TMP_CONFIG"
 
@@ -51,5 +61,5 @@ git -C "$WORKTREE_DIR" push -u origin "$BRANCH"
 gh pr create --base main --head "$BRANCH" \
     --title "Gate-status: refresh main ship_config from live graduation" \
     --body "Automated monthly regeneration of main's ship_config.json from live graduation metrics (training/graduation.py). Review the active/withheld diff before merging; main is the public branch."
-git worktree remove --force "$WORKTREE_DIR"
 echo "gate-status: opened PR on branch $BRANCH."
+# The EXIT trap removes the worktree (here on success, or on any earlier failure).
