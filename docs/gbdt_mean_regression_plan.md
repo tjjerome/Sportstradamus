@@ -52,6 +52,18 @@ the *first* ship on ≥ 5% compression improvement blocks most cells from ever
 shipping (the NBA sweep set a baseline on only 2 of 21 markets under that bar). The
 gate is reframed to measure money-making breadth directly.
 
+**Breadth is a 3-rung ladder, not a one-shot target — ratchet quality and breadth
+alternately:**
+
+1. **Rung 1 (now): reach 75% per league at the current bar.** Absolute bias gates at
+   the wide Phase-0 value (30% of the band's empirical mean, floor 0.10). Close the
+   gaps (NBA −3, WNBA −4, NFL −2) via the Stage B1.6 feature/bias track.
+2. **Rung 2 (next): tighten the absolute gates 30% → 20% of band mean** (floor 0.10
+   unchanged) and re-reach 75% at that stricter bar. Some Rung-1 passers will fail at
+   20% and need more B1.6 work. **Dispatch a fresh research agent at that point** to
+   inform the strategy.
+3. **Rung 3 (after): push to >90% coverage** at the tightened (20%) bar.
+
 ### Two-tier ship model
 
 **Tier 0 — set the first baseline (absolute gates only; this is the priority).** A
@@ -129,6 +141,8 @@ ship/kill gate.
 Tier-0 absolute-only mode (today it encodes only the Tier-1 relative path — the
 Stage B1.6 prerequisite). Then run **Stage B1.6** to close gaps (NBA −3, WNBA −4,
 NFL −2), then set + soak. Depth tracks (A2/B2/B3) follow only once breadth is met.
+The **2026-05-22 research verdict** ranks the B1.6 work (post-hoc mean-bias correction
+first) and sets per-league targets — see **Path to 75% — feature/bias track** below.
 
 | League | passes bias gates | bias + BSS ≥ 0 | 75% target | gap |
 |---|---|---|---|---|
@@ -261,6 +275,7 @@ phase are in the context doc → **Status / progress log (detailed)**.
 | **Stage 0 — live-data instrumentation** | ✅ done (PR #46) | All five deliverables shipped; graduation lookups are now a parquet read. |
 | **Stage B1 — ZTNB fix + routing diagnostics** | ✅ done | **ZTNB REFUTED; routing rescope delivered** (0/23 → ztnb; 13 cmp, 10 mzinb). |
 | **Stage B1.5 — §7a likelihood-vs-features pre-check** | ✅ done | **FEATURES, not likelihood**; compression family-invariant; family build DEFERRED. |
+| **Stage B1.6 — feature/bias track (breadth → 75%)** | 🔜 research done, build pending | Post-hoc mean-bias correction is the rank-1 lever; Tier-0 `verdict()` mode is the precondition; per-league targets set (2026-05-22). |
 | **Stage A1 — SkewNormal ICC diagnostic gate** | ✅ done | **Family clusters AMBIGUOUS** (25 ambiguous, 10 eb, 1 tail); ICC alone does not route. |
 | **Stage A1.5 — factor-ICC de-risk (T5 fork gate)** | ✅ done | **T5 KILLED wholesale**; A2 pivots to T3 tail head. |
 | **Stage A1.6 — NFL position-split cleanup + WNBA test fix** | ✅ done | Write-side NFL position scoping; new NFL ICCs supersede A1; T11 entry added. |
@@ -619,9 +634,31 @@ Open question #12). Build CMPμ / marginalized hurdle **only** on a cell that st
 after B1.6 (conditional Dunn–Smyth RQR variance < 0.70 AND Poisson tracking the top
 decile while NB compresses).
 
-> **Full Stage B1.6 rationale, the §7a evidence behind it, and all of Track A / Track B
-> depth work** live in the context doc → **Two-track depth plan** (Track A SkewNormal:
-> A1/A1.5/A2/A3/A4; Track B ZINB: B1/B1.5/B1.6 full body/B2/B3/B4).
+**Research verdict (2026-05-22, research-analyst).** The gap is a **bias-gate**
+problem; workstream (1) post-hoc correction is the **rank-1 lever** — the only method
+that moves both gated bands by construction — ahead of the feature work. Prefer
+**isotonic-on-prediction** where the decile miscalibration is curved (over-low /
+under-high); per-decile multicalibration [44] is the formal frame but a fallback for a
+band *just* outside, not the lead (trained GBDTs are often near-multicalibrated [45]).
+**Hard precondition (Step 0):** build the Tier-0 absolute-only
+`compression_eval.verdict()` mode and run the read-only per-cell triage audit — the
++3/+4/+2 counts are unmeasurable until it exists. **Ordered:** Step 0 → (1) post-hoc →
+(2) player feature → (3) opponent features → (4) gate-tuning; ship each cell to Gate-2
+the instant it clears Tier-0. **Per-league targets:** NBA **TOV / BLST / OREB / PF**
+(STL, FG3M backups); WNBA **TOV / BLST / OREB / STL** (re-validate — half the games make
+isotonic tails + the expanding-mean feature noisier; fall back to affine ROE / strong
+shrinkage); NFL **rushing-tds + receiving-tds** via **affine ROE** (not isotonic /
+per-decile — too few positive events at interceptions ~0.5, TD zero-rates 0.78–0.92 [48];
+keep rushing-yards / qb-tds / sacks-taken on the Track-A T11 bench). **Gate-tuning (4)** —
+widen the Tier-0 BSS floor toward −0.02 only for the ~1 bias-passes/BSS-fails cell per
+league (NBA PF, NFL interceptions); widen the constant, not per-cell, and flag for
+Gate-2. **Note:** NBA/WNBA **AST are SkewNormal**, not count cells — post-hoc + player
+feature apply, but count-family reasoning does not (treat as Track-A). New refs [43]–[48].
+
+> **Full Stage B1.6 rationale (incl. the 2026-05-22 research verdict in detail), the §7a
+> evidence behind it, and all of Track A / Track B depth work** live in the context doc →
+> **Track B → Stage B1.6 — breadth research verdict** and **Two-track depth plan** (Track
+> A SkewNormal: A1/A1.5/A2/A3/A4; Track B ZINB: B1/B1.5/B1.6 full body/B2/B3/B4).
 
 ## Cross-league caveats (read before running any cross-league A/B)
 
@@ -673,6 +710,12 @@ decile while NB compresses).
    when many μ̂ ≈ 0, and RQR randomization is coarse when P(Y=0|x) ≈ 0.97. A future low-mean
    NFL pass should bootstrap the RQR variance and/or use deviance-based dispersion, and lean
    on Wilson–Einbeck for the marginal zero-modification call. (B1.5 §7a verdict.)
+9. **Post-hoc bias correctors at NFL count means must be affine ROE, not isotonic /
+   per-decile.** At interceptions ~0.5 and TD zero-rates 0.78–0.92 the top bin holds a
+   handful of positive events; isotonic tails and per-bin (multicalibration) correctors
+   overfit, and percent-calibration error is worst in low-base-rate groups [48]. Use the
+   global affine `y ~ a + b·ŷ` form there; reserve isotonic / per-decile for the
+   higher-mean NBA/WNBA count cells. (B1.6 research verdict, 2026-05-22.)
 
 ## Critical files
 

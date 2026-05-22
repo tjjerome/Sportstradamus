@@ -39,6 +39,7 @@ Every result note keeps its numbers and verdict; prose tightened only.
 | **Stage A1.6 — NFL position-split matrix cleanup + WNBA test-case fix** | ✅ done | Moved the NFL position confound from a read-side workaround (A1's nonzero-fraction filter) to a **write-side fix**: `NFL_MARKET_POSITIONS` constant + `_market_position_filter` hook (no-op default in [base.py](../src/sportstradamus/stats/base.py), NFL override in [nfl.py](../src/sportstradamus/stats/nfl.py)) called in `get_training_matrix` before the usage cutoff. Scoping: passing + QB total-offense → **QB**; rushing → **QB+RB**; receiving + skill scrimmage → **WR+RB+TE**; fantasy-points composites stay all-position. Cached parquets cleaned in-place via [scripts/prune_nfl_matrix_positions.py](../src/sportstradamus/scripts/prune_nfl_matrix_positions.py): **passing-yards 15000→2646 rows, mean 38.1→215.9**; attempts 5.4→30.4; qb-yards→QB-only 45.3→228.0. **ICC re-run:** NBA/WNBA value-identical; all NFL shifts downward (exact scoping removes gadget players): passing-yards 0.420→0.405, receiving/targets/receptions ≤0.001, **qb-yards 0.790→0.423** (632→222 player-seasons — the 0.790 was a QB-vs-RB between-position artifact), yards 0.470→0.440, carries 0.666→0.627 / rushing-yards 0.502→0.475, attempts 0.458→0.436 / completions 0.451→0.429. New NFL ICCs supersede A1's for A2 routing. No pickle/inference change; parquets gitignored ⇒ PR diff is code + script + plan. WNBA efficiency test cases: `FTM_per_FGA` + `FG3M_per_FGA` with `PTS_per_FGA` (0.103) anchor. **New Stage A4 entry T11: per-position model-split bias experiment.** Two flagged inference edges for A2: QB-only `qb yards` vs Underdog "Total Yards"; QB+RB `carries` excludes gadget WR-rushers. Gates green; refactoring-specialist run. |
 | P3–P10 | ⬜ | See priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below. |
 | **Docs rework — breadth-led reorg + roadmap sync** | ✅ done (docs-only) | Reorganized this plan so the breadth North Star + per-cell status table lead, depth Tracks A/B labeled secondary, the diminishing-returns pre/post-break split marked, and a "Branches & model-promotion flow" section added (four-branch pipeline + `devel-ship-curator`). Synced `docs/sportstradamus_roadmap_v2.md`: snapshot → 2026-05-21, model work promoted to a leading "Active Track" phase, post-break tail deferred into Phase 6, Standing rules + "Tools and CLIs built" added. No `.py`/`.json`/threshold changes; no retrain. |
+| **B1.6 — breadth research verdict (research-analyst)** | ✅ done (research-only) | A cited 2026-05-22 brief (`/tmp/researcher_breadth_75.md`) confirming the breadth gap (NBA +3, WNBA +4, NFL +2) is a **bias-gate** problem, with post-hoc mean-bias correction as the **rank-1 on-mechanism lever** (the only method moving both gated bands by construction), the expanding-mean/EB-shrunk player feature rank 2, opponent features rank 3, BSS-floor gate-tuning as mop-up. Per-league targets set (NBA TOV/BLST/OREB/PF; WNBA TOV/BLST/OREB/STL; NFL rushing-tds/receiving-tds via affine ROE). Flagged NBA/WNBA AST as SkewNormal (Track-A treatment, not count-family). No data re-run (clean checkout — no cached parquets/models); the Tier-0 absolute-only `compression_eval.verdict()` mode named as the hard precondition. New refs [43]–[48]. |
 
 ## Prior-phase results
 
@@ -737,6 +738,74 @@ re-checks this is the conditional-RQR pass from Open question #11 (run it on the
 untested `cmp`-labelled cells before any CMPμ build); only then do B2's routing wiring +
 the B3 fork apply, scoped to that cell.
 
+### Stage B1.6 — breadth research verdict (2026-05-22, research-analyst)
+
+The `research-analyst` reviewed the per-league baseline-breadth gap (NBA +3, WNBA +4,
+NFL +2) and wrote a cited statistician's brief (`/tmp/researcher_breadth_75.md`,
+References [43]–[48]). It **confirms the B1.5 §7a pivot and ranks the breadth levers**.
+The actionable summary lives in the plan's "Path to 75%" + roadmap; this block is the
+detail.
+
+**Bottleneck restated.** Every failing cell is a **low-mean count market** and fails
+Tier-0 on the **absolute bias gates (conditions 4b/4c), not the BSS floor** (the BSS
+floor excludes only ~1 extra cell/league beyond the bias failures — NBA PF, NFL
+interceptions). Two symptoms: bottom-quartile **over**-prediction (gate 4b, one-sided —
+e.g. FG3M bottom decile 0.68 predicted vs 0.20 actual) and top-decile **under**-prediction
+(gate 4c — STL −0.59, FTM −1.16, TOV −0.39, PF −0.46 on the healthy joint cells).
+Family swaps are **dead per B1.5 §7a**: leaf-averaging compression is family-invariant
+(Poisson top-decile CR 0.16–0.35 ≈ NB/ZINB 0.12–0.37), so CMPμ/MZINB/hurdle re-parameterize
+dispersion or the zero gate and **leave the boosted mean head untouched** ([3][4][30][8]).
+Only two layers touch the mean head: **post-hoc correction of the prediction** and
+**features that hand the tree the per-player level it averages away**.
+
+**Ranked methods (effect on the two gated bands).**
+
+1. **Post-hoc per-decile / isotonic / affine mean-bias correction — RANK 1.** The *only*
+   method that moves **both** gated bands by construction (a monotone map pulls bottom-band
+   over-prediction down and top-band under-prediction up at once). Prefer **isotonic** where
+   the decile miscalibration is **curved** (over-low/under-high — the compression shape);
+   plain affine/ROE [3] captures the uniform part (≈ the §7a "41%/47% recovered" finding).
+   **Per-decile multicalibration is the formal frame** (Globus-Harris et al., arXiv:2301.13767
+   [44] — per-subgroup squared-error de-biasing *is* a boosting procedure) but a **fallback,
+   not the lead**: Hansen et al., arXiv:2406.06487 [45], find trained GBDTs are often already
+   near-multicalibrated, so budget per-decile only for a band just outside the bound.
+2. **Leakage-safe expanding-mean / EB-shrunk player feature — RANK 2** (the deferred P5).
+   `groupby(player_id).expanding().mean().shift(1)` for stat and stat × opponent as a
+   *feature*; optionally a James-Stein / empirical-Bayes-shrunk variant (Efron–Morris [47];
+   shrinkage weight `K = σ²_within/σ²_between`). Regularized target encoding beats one-hot and
+   naive mean encoding for high-cardinality `player_id` (Pargent et al. 2022, DOI
+   10.1007/s00180-022-01207-6 [43]); unregularized encoding overfits.
+3. **Opponent-defense × player + blowout/garbage-time features — RANK 3.** Narrowest, most
+   build cost; targets the FG3M low-volume overshoot (does this player attempt the stat at
+   all tonight). Mostly helps the bottom band.
+4. **BSS-floor gate-tuning toward −0.02 — mop-up only.** A policy lever for the ~1
+   bias-passes/BSS-fails cell per league (NBA PF, NFL interceptions); does **not** address
+   the binding bias-gate failures. Widen the constant, never per-cell; flag widened cells.
+
+**Per-league nearest-miss triage.**
+
+- **NBA (+3):** target **TOV, BLST, OREB, PF** (STL, FG3M as backups) — near-equi-dispersed
+  conditionally, so they want post-hoc correction, not family.
+- **WNBA (+4):** target **TOV, BLST, OREB, STL** — same family as the NBA cheap wins, but
+  **re-validate, never assume** (half the games: ~40/season makes isotonic tails and the
+  expanding-mean feature noisier; fall back to affine ROE / strongly-shrunk player mean).
+- **NFL (+2):** target **rushing-tds + receiving-tds** via **affine ROE — not isotonic /
+  per-decile** (too few positive events at those means: interceptions 0.5, TD zero-rates
+  0.78–0.92; per-bin error is worst in low-base-rate groups [48]). Keep **rushing-yards,
+  qb-tds, sacks-taken** on the Track-A T11 (per-position) bench.
+
+**Ordered experiment plan** (ship each cell to Gate-2 the instant it clears Tier-0):
+
+- **Step 0 — Tier-0 absolute-only `compression_eval.verdict()` mode (hard precondition).**
+  No baseline-only path exists today (`compression_eval.py:337-426` encodes only the Tier-1
+  pairwise path); the +3/+4/+2 counts are unmeasurable until it does. Run the read-only
+  per-cell 4b/4c-slack + BSS triage audit on this mode first.
+- **Step 1 — post-hoc correction** (affine first, then isotonic), fit on validation, applied
+  before `fused_loc`; re-validate BSS/CRPS does not regress.
+- **Step 2 — expanding-mean / EB-shrunk player feature**, leakage-audited like MeanYr.
+- **Step 3 — opponent-defense × player + blowout features** for cells still failing.
+- **Step 4 — BSS-floor gate-tuning** for the bias-passes/BSS-fails stragglers.
+
 ### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
 
 > **Status after the B1.5 §7a verdict:** this stage is now **downstream of B1.6 and gated
@@ -884,6 +953,14 @@ pickle schema, live-path test).
     the pre-check does not speak to probabilistic calibration: any eventual family **or**
     bias-correction switch must still be validated on CRPS/log-score **and** brier_skill on
     a report run that carries the book columns. (Extends #7; B1.5 verdict.)
+13. **Post-hoc mean correction can distort the probabilistic shape** — point calibration ≠
+    distributional calibration (Venn-Abers, Cortes-Gomez et al. arXiv:2502.05676 [46]).
+    Validate BSS/CRPS at every B1.6 step, not the corrected mean alone. (Extends #12;
+    B1.6 breadth verdict.)
+14. **The expanding-mean player feature may add little over the existing `MeanYr`** — the
+    §7a Poisson GBM already carried the full feature matrix and still compressed. Measure the
+    marginal lift; its novelty is causal within-season updating + the stat × opponent cross,
+    not the per-player level itself. (B1.6 breadth verdict.)
 
 ---
 
@@ -912,6 +989,10 @@ Each is one decision + one rationale; the detail lives where cited.
 | **The "DFS-industry consensus" funnel is convention, not ship evidence.** | Practitioner lore with no peer-reviewed tail-bias validation; the only primary sources on products of separately-modeled components ([1], [7]) point the other way for the tail. | A1.5 Finding 3 |
 | **Diminishing-returns pre/post-break split drives the roadmap phase split.** | Pre-break (active): breadth → A2/A3/B2/B3. Post-break (deferred): A4/B4/long-shots. Stop a track when a cell is good live; the plan is a backlog, not a queue. | Diminishing returns |
 | **Track-A drops: P3 → folded into T5; P5 → T2 CatBoost ordered TS; P10 GPBoost retry → T4 MEGB/GBMixed.** | T5 is the four-stage version DFS shops actually use; ordered TS dominates expanding-mean encoding [17]; MEGB's EM-pseudo-residual fixes the documented GPBoost bias. (T5 itself later killed — see above.) | "What is dropped from Track A" |
+| **NBA/WNBA AST are SkewNormal, not count markets.** | Their Tier-0 failure is the P1 family-wide SkewNormal compression; take the Track-A treatment (post-hoc + per-player feature). Do NOT group with FG3M/STL count-family reasoning (CMP/Poisson, zero-gate). | B1.6 breadth verdict / Track A |
+| **Post-hoc mean-bias correction is the RANK-1 breadth lever.** | The only method that moves both gated bands (bottom-quartile over-prediction, top-decile under-prediction) by construction; ranked above the feature work. | B1.6 breadth verdict |
+| **NFL low-mean cells use affine ROE, not isotonic / per-decile.** | Too few positive events (interceptions 0.5, TD zero-rates 0.78–0.92); per-bin error worst in low-base-rate groups [48]. Target rushing-tds + receiving-tds for the +2. | B1.6 breadth verdict |
+| **Breadth is a 3-rung ladder, not a one-shot target.** | Rung 1: 75%/league at the current ~30%-of-band absolute-gate bar (floor 0.10). Rung 2: tighten the absolute gates to 20% of band mean (floor 0.10 unchanged), re-reach 75% at that stricter bar (a fresh research agent is dispatched then). Rung 3: push to >90% coverage at the tightened bar. Ratchet quality and breadth alternately rather than over-fitting one. | North Star |
 
 ## References
 
@@ -999,3 +1080,23 @@ completeness:
     tutorial; Grodri notes on count moments.
 41. **Normalizing-flow heads** — LightGBMLSS v0.3.0, 20 Jul 2023.
 42. **Efron** 1986 — double-Poisson (deep underdispersion fit).
+
+New citations [43]–[48] from the 2026-05-22 breadth brief (`/tmp/researcher_breadth_75.md`):
+
+43. **Pargent, Pfisterer, Thomas & Bischl**, *Regularized target encoding outperforms
+    traditional methods in supervised ML with high cardinality features*, Computational
+    Statistics 37:2671–2692, 2022. DOI 10.1007/s00180-022-01207-6; arXiv:2104.00629.
+    (Regularized/out-of-fold target encoding beats one-hot & naive mean; `player_id`.)
+44. **Globus-Harris, Harrison, Kearns, Roth & Sorrell**, *Multicalibration as Boosting for
+    Regression*, ICML 2023. arXiv:2301.13767. (Per-decile squared-error de-biasing is a
+    boosting procedure.)
+45. **Hansen, Devic, Nakkiran & Sharan**, *When is Multicalibration Post-Processing
+    Necessary?*, NeurIPS 2024. arXiv:2406.06487. (Trained tree ensembles often need little
+    post-hoc multicalibration.)
+46. **Cortes-Gomez et al.**, *Generalized Venn and Venn-Abers Calibration*, 2025.
+    arXiv:2502.05676. (Point calibration ≠ distributional calibration.)
+47. **Efron & Morris**, *Data Analysis Using Stein's Estimator and its Generalizations*, JASA
+    70:311–319, 1975. DOI 10.1080/01621459.1975.10479864. (James-Stein/EB shrinkage for
+    few-obs-per-unit.)
+48. **Becker et al.**, *Fair admission risk prediction with proportional multicalibration*,
+    2023. PMC10417639. (Percent-calibration error is worst in low-base-rate groups.)
