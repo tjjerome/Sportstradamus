@@ -57,7 +57,7 @@ def load_decisions(path: Path) -> ShipConfig:
             file records real strategies only — ``"withheld"`` is a generated
             ship_config value, never a decision.
     """
-    with open(str(path)) as fh:
+    with open(path) as fh:
         decisions: ShipConfig = json.load(fh)
     for league, markets in decisions.items():
         for market, strategy in markets.items():

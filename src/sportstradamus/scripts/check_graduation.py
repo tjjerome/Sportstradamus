@@ -103,8 +103,8 @@ def _print_summary(states: pd.Series) -> None:
 )
 def main(league: str | None, model_stats_path: Path | None, live_metrics_path: Path | None) -> None:
     """Print the lifecycle status table joining Gate 1 (offline) and Gate 2 (live)."""
-    gate1_path = Path(model_stats_path) if model_stats_path else Path(str(MODEL_STATS_PATH))
-    gate2_path = Path(live_metrics_path) if live_metrics_path else Path(str(LIVE_METRICS_PATH))
+    gate1_path = model_stats_path if model_stats_path else Path(str(MODEL_STATS_PATH))
+    gate2_path = live_metrics_path if live_metrics_path else Path(str(LIVE_METRICS_PATH))
 
     merged = lifecycle_table(gate1_path, gate2_path, league)
     if merged.empty:
