@@ -61,7 +61,7 @@ returns.
 
 **Phase 1 detail:**
 
-- **1.1 Correlate** ✅ — audit `docs/CORRELATE_AUDIT.md`; fixes shipped: rolling 8-game
+- **1.1 Correlate** ✅ — audit `docs/archive/CORRELATE_AUDIT.md`; fixes shipped: rolling 8-game
   residualization (`_residualize_gamelog`, line 404), stratified matrices,
   `meditate --rebuild-correlations` (`training/cli.py:50`).
 - **1.2 Parlay** ✅ audit / ⚠️ fixes partial — audit `docs/PARLAY_AUDIT.md`,
@@ -87,7 +87,7 @@ deferred. Monitor: revisit if segment sizes stay below `CLV_SEGMENT_MIN_N=20`, i
 drifts from ~50% on no-edge segments.
 
 **Phase 3 — Underdog Decision Engine (shipped, Power/Flex/Rivals):** see
-[docs/PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md). 3.1 Kelly ✅, 3.2 contest-variant
+[docs/archive/PHASE_3_IMPLEMENTATION.md](archive/PHASE_3_IMPLEMENTATION.md). 3.1 Kelly ✅, 3.2 contest-variant
 payouts ✅, 3.3 Underdog-native module ✅, 3.4 Champions ❌ REMOVED (pari-mutuel), 3.5 Rivals ✅ /
 Streaks+Ladders ❌ DEFERRED.
 
@@ -244,7 +244,7 @@ fix is gated on the audit. **Estimated:** 3–4 weekends.
 
 ### 1.1 Audit `training/correlate.py` — ✅ DONE (audit + fix shipped)
 
-**Audit** at `docs/CORRELATE_AUDIT.md`. **Fixes shipped:** 8-game rolling residualization
+**Audit** at `docs/archive/CORRELATE_AUDIT.md`. **Fixes shipped:** 8-game rolling residualization
 (`_residualize_gamelog`), stratified per-team matrices, `--rebuild-correlations` flag on `meditate`.
 
 The audit answered, per quoted source line: inputs/time-window; raw vs residualized correlation +
@@ -402,11 +402,11 @@ can't answer a real question.
 
 **Goal:** turn EV signals into ranked Underdog entries with proper bankroll sizing across Underdog's
 contest variants. **Estimated:** 4–5 weekends. Implementation log:
-[docs/PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md).
+[docs/archive/PHASE_3_IMPLEMENTATION.md](archive/PHASE_3_IMPLEMENTATION.md).
 
 ### 3.1 Kelly sizing module — ✅ DONE
 
-`src/sportstradamus/strategies/kelly.py` (PHASE_3_IMPLEMENTATION.md §5). The kwarg was renamed
+`src/sportstradamus/strategies/kelly.py` (archive/PHASE_3_IMPLEMENTATION.md §5). The kwarg was renamed
 `model_calibration` → `model_shrinkage` to match the migrated training-report schema;
 `opt_kelley_bet.py` moved to `src/deprecated/.archived/`.
 
@@ -435,7 +435,7 @@ are sharper). Default behavior unchanged for callers not passing `contest_varian
 ### 3.3 Underdog-native strategy module — ✅ DONE
 
 `src/sportstradamus/strategies/underdog_pickem.py` plus the `pickem-build` CLI
-(PHASE_3_IMPLEMENTATION.md §6). Sheets export was deprecated on `devel`, so the only sink is
+(archive/PHASE_3_IMPLEMENTATION.md §6). Sheets export was deprecated on `devel`, so the only sink is
 `data/recommendations/{date}.yaml` (the dashboard reads it directly). Bankroll is a CLI flag only (no
 `data/bankroll.json`). Rivals is folded into the same orchestrator (2- and 3-leg sizes only, both
 sides of the matchup required).
@@ -452,7 +452,7 @@ non-empty YAML on a small fixture.
 
 ### 3.4 Pick'em Champions — ❌ REMOVED
 
-Dropped per PHASE_3_IMPLEMENTATION.md §0. Pari-mutuel optimization is a different problem shape (you
+Dropped per archive/PHASE_3_IMPLEMENTATION.md §0. Pari-mutuel optimization is a different problem shape (you
 play other users, not the house — static-line-vs-sharp arbitrage doesn't apply); revisit only after
 Phase 3 has measurable CLV. See [Decisions & Trade-offs](#decisions--trade-offs).
 
@@ -464,7 +464,7 @@ equity via a `champions` curve in `data/underdog_payouts.json`. Separate from `u
 
 ### 3.5 Streaks / Ladders / Rivals — Rivals ✅ DONE; Streaks/Ladders ❌ DEFERRED
 
-**Rivals** shipped folded into `pickem-build` (PHASE_3_IMPLEMENTATION.md §6) — restricted to 2- and
+**Rivals** shipped folded into `pickem-build` (archive/PHASE_3_IMPLEMENTATION.md §6) — restricted to 2- and
 3-leg sizes; both sides of the matchup must be covered for the same market or the entry is dropped with
 a logged WARNING.
 
@@ -734,7 +734,7 @@ Items the audit surfaced that aren't in any phase but matter for long-term healt
   per-retrain historical CSV surfaces drift (1.0→1.3 over six months = creeping dispersion). Cheap add to
   `training/report.py`.
 - **Parquet-everything migration** — confirm no production path still reads CSV/pickle; the archive is
-  DuckDB but `data/{LEAGUE}_corr.csv` is still CSV (per CORRELATE_AUDIT.md) — convert to parquet for
+  DuckDB but `data/{LEAGUE}_corr.csv` is still CSV (per archive/CORRELATE_AUDIT.md) — convert to parquet for
   read time + typed metadata.
 - **Continuity-correction audit** — Phase 6.5's per-market support audit is a ~2-hour task that catches
   mis-applied push probabilities (anytime-TD, NHL goals, NBA 3PM); worth promoting to Phase 1.
