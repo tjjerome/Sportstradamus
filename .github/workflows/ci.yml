@@ -46,9 +46,11 @@ jobs:
       - name: Stage CI test fixtures (data + creds stubs)
         # Live config files are gitignored because they hold secrets or large
         # learned outputs. The committed stubs in tests/ci_fixtures/ have the
-        # keys callers expect at import time, with placeholder values.
+        # keys callers expect at import time, with placeholder values. The data
+        # reorg (24e58b7) moved config JSON to src/sportstradamus/data/config/;
+        # stage the fixtures there so helpers/config.py finds them at import.
         run: |
-          cp tests/ci_fixtures/data/*.json src/sportstradamus/data/
+          cp tests/ci_fixtures/data/*.json src/sportstradamus/data/config/
           cp tests/ci_fixtures/creds/keys.json src/sportstradamus/creds/keys.json
 
       - name: Lint (ruff check)
