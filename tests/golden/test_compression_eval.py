@@ -1,8 +1,8 @@
-"""Unit tests for the Phase-0 compression eval harness.
+"""Unit tests for the offline compression-eval / ship-gate harness.
 
-Exercises the numeric path (decile binning, compression ratio, scorecard,
-ship/kill verdict) on synthetic test-set frames so no trained model, network,
-or plotting backend is required.
+Exercises the numeric path (decile binning, compression ratio, scorecard, the five
+offline ship gates, and their deterministic-1/0 oracle) on synthetic test-set frames
+so no trained model, network, or plotting backend is required.
 """
 
 import numpy as np
@@ -10,39 +10,27 @@ import pandas as pd
 import pytest
 
 from sportstradamus.scripts.compression_eval import (
-    MIN_TOP_DECILE_MAE_IMPROVEMENT,
-    Scorecard,
+    _GATE1_CI_HI_MAX,
+    _GATE2_STAR_Z_MAX,
+    _GATE3_BENCH_Z_MAX,
+    _GATE4_IQR_RATIO_MIN,
+    _GATE5_ECE_MAX,
+    _gate1_brier_ci,
+    _gate4_iqr_spread,
+    _gate5_ece_equal_mass,
+    _gate23_segment_match,
+    _segment_masks,
+    _supersede_paired_brier_ci,
+    _supersede_paired_sharpe,
+    _test_set_to_bet_frame,
+    apply_thresholds,
     decile_table,
+    gate_row,
     load_test_set,
     scorecard,
-    verdict,
+    supersede_verdict,
+    write_gate_scorecard,
 )
-
-
-def _base_card(**overrides) -> Scorecard:
-    """Build a Scorecard with sensible defaults for verdict() unit tests."""
-    defaults = dict(
-        timestamp="2026-05-19T00:00:00+00:00",
-        git_sha="deadbeef",
-        strategy="t",
-        league="NBA",
-        market="PTS",
-        pred_col="EV",
-        n_rows=100,
-        global_mae=1.0,
-        top_decile_mae=2.0,
-        top_decile_bias=-0.5,
-        compression_ratio=0.5,
-        top_decile_compression_ratio=0.4,
-        pred_meanyr_corr=-0.5,
-        result_meanyr_corr=0.0,
-        brier_skill_score=None,
-        bottom_quartile_bias=0.0,
-        bottom_quartile_mean=10.0,
-        top_decile_mean=20.0,
-    )
-    defaults.update(overrides)
-    return Scorecard(**defaults)
 
 
 def _compressed_frame(n: int = 2000, seed: int = 0) -> pd.DataFrame:
@@ -57,6 +45,31 @@ def _compressed_frame(n: int = 2000, seed: int = 0) -> pd.DataFrame:
     grand = actual.mean()
     pred = grand + 0.5 * (actual - grand)
     return pd.DataFrame({"MeanYr": meanyr, "Result": actual, "EV": pred})
+
+
+def _priced_frame(n: int = 4000, seed: int = 7) -> pd.DataFrame:
+    """A priced frame (P/Odds/Line present) with a calibrated-ish model and a noisy book."""
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(2, 30, n)
+    line = meanyr.copy()
+    p_true = rng.uniform(0.05, 0.95, n)
+    outcomes = rng.uniform(size=n) < p_true
+    result = np.where(outcomes, line + 1.0, line - 1.0)
+    return pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": meanyr,
+            "Line": line,
+            "P": p_true,  # model tracks the true over-rate
+            "Odds": np.full(n, 0.5),  # book under-prob 0.5 (near-random)
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Compression diagnostics (decile table, std-ratio scorecard) — unchanged.
+# ---------------------------------------------------------------------------
 
 
 def test_decile_table_shape_and_monotone_bias():
@@ -88,8 +101,7 @@ def test_perfect_predictions_have_unit_ratio():
 def test_scorecard_includes_bottom_quartile_bias_and_mean():
     # Bottom quartile (25 lowest-MeanYr rows of 100) over-predicted by a known
     # +2.0; all other rows predicted perfectly. The scorecard must surface the
-    # bottom-quartile signed bias and that quartile's empirical (actual) mean so
-    # the plan's bottom-quartile ship gate is computable from the scorecard.
+    # bottom-quartile signed bias and that quartile's empirical (actual) mean.
     meanyr = np.arange(100, dtype=float)
     result = meanyr.copy()
     pred = result.copy()
@@ -98,143 +110,333 @@ def test_scorecard_includes_bottom_quartile_bias_and_mean():
     card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
     assert card.bottom_quartile_bias == pytest.approx(2.0)
     assert card.bottom_quartile_mean == pytest.approx(12.0)  # mean(0..24)
+    assert card.bottom_quartile_mae == pytest.approx(2.0)
 
 
-def test_verdict_ships_when_top_decile_improves():
-    base = scorecard(_compressed_frame(seed=0), "EV", strategy="base", league="NBA", market="PTS")
-    # Candidate: well-calibrated predictions (track actual with small unbiased
-    # noise). This decompresses the top decile AND leaves the bottom quartile
-    # unbiased, so it clears the full ship gate including the bottom-quartile and
-    # top-decile bias conditions. A merely-less-compressed candidate (e.g. a 0.95
-    # shrink toward the mean) still over-predicts the bottom quartile and is
-    # correctly KILLed by that condition, so it cannot stand in for a legitimate
-    # SHIP here.
-    df = _compressed_frame(seed=0)
-    df["EV"] = df["Result"] + np.random.default_rng(0).normal(0, 0.5, len(df))
-    cand = scorecard(df, "EV", strategy="cand", league="NBA", market="PTS")
-    ship, reason = verdict(base, cand)
-    assert ship, reason
+def test_brier_skill_score_positive_when_model_beats_book():
+    card = scorecard(_priced_frame(seed=0), "EV", strategy="t", league="NBA", market="PTS")
+    assert card.brier_skill_score is not None
+    assert card.brier_skill_score > 0.1
 
 
-def test_verdict_kills_when_no_top_decile_gain():
-    base = scorecard(_compressed_frame(seed=2), "EV", strategy="base", league="NBA", market="PTS")
-    ship, reason = verdict(base, base)
-    assert not ship
-    assert "KILL" in reason
-    assert f"{MIN_TOP_DECILE_MAE_IMPROVEMENT:.0%}" in reason
-
-
-def test_verdict_kills_when_bottom_quartile_bias_worsens():
-    # MAE gates pass (top-decile and global both improve), but the candidate
-    # over-predicts the low-volume bottom quartile more than the baseline — the
-    # §7a failure (a top-decile win financed by bottom-quartile over-bias). The
-    # relative "not worse than the previous default" check fires.
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.0, bottom_quartile_mean=10.0
+def test_brier_skill_score_negative_when_book_beats_model():
+    rng = np.random.default_rng(1)
+    n = 4000
+    meanyr = rng.uniform(2, 30, n)
+    line = meanyr.copy()
+    p_true = rng.uniform(0.05, 0.95, n)
+    outcomes = rng.uniform(size=n) < p_true
+    result = np.where(outcomes, line + 1.0, line - 1.0)
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": meanyr,
+            "Line": line,
+            # Model is anti-correlated noise; book is the true probability so
+            # book_over = 1 - Odds nails it.
+            "P": 1.0 - p_true,
+            "Odds": 1.0 - p_true,
+        }
     )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=0.5, bottom_quartile_mean=10.0
-    )
-    ship, reason = verdict(base, cand)
-    assert not ship
-    assert "KILL" in reason
-    assert "bottom-quartile bias" in reason
+    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
+    assert card.brier_skill_score is not None
+    assert card.brier_skill_score < 0
 
 
-def test_verdict_kills_when_bottom_quartile_overpredicts_beyond_bound():
-    # The bottom-quartile absolute bound is ONE-SIDED: only over-prediction
-    # (positive bias) of bench warmers is a failure mode. Candidate bias is LESS
-    # positive than baseline (passes the relative check) but still over-predicts
-    # beyond the absolute ceiling for a low-mean cell (max(30% * 0.2, 0.10) =
-    # 0.10). +0.5 >> +0.10 → KILL.
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.8, bottom_quartile_mean=0.2
-    )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=0.5, bottom_quartile_mean=0.2
-    )
-    ship, reason = verdict(base, cand)
-    assert not ship
-    assert "KILL" in reason
-    assert "bottom-quartile bias" in reason
+# ---------------------------------------------------------------------------
+# Segment masks (shared by scorecard + Gates 2/3).
+# ---------------------------------------------------------------------------
 
 
-def test_verdict_allows_bottom_quartile_underprediction():
-    # Bench-warmer UNDER-prediction is tolerated (the failure mode is
-    # over-prediction only). A large negative bottom-quartile bias passes both
-    # the relative check (not more positive than baseline) and the one-sided
-    # absolute ceiling, so the candidate ships when the MAE/top-decile gates pass.
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.0, bottom_quartile_mean=10.0
-    )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=-5.0, bottom_quartile_mean=10.0
-    )
-    ship, reason = verdict(base, cand)
-    assert ship, reason
+def test_segment_masks_partition_top_decile_and_bottom_quartile():
+    df = pd.DataFrame({"MeanYr": np.arange(100, dtype=float)})
+    star_mask, bench_mask = _segment_masks(df, n_deciles=10)
+    assert star_mask.sum() == 10  # top decile
+    assert bench_mask.sum() == 25  # bottom quartile
+    assert not (star_mask & bench_mask).any()  # disjoint segments
 
 
-def test_verdict_kills_when_top_decile_underpredicts_beyond_bound():
-    # Stars are gated BIDIRECTIONALLY — no systematic over- OR under-prediction.
-    # Under side: bound = max(30% * 20.0, 0.10) = 6.0; -8.0 < -6.0 → KILL.
-    base = _base_card(
-        global_mae=1.0,
-        top_decile_mae=2.0,
-        top_decile_bias=-0.5,
-        top_decile_mean=20.0,
-        bottom_quartile_bias=0.0,
-        bottom_quartile_mean=10.0,
-    )
-    cand = _base_card(
-        global_mae=0.9,
-        top_decile_mae=1.5,
-        top_decile_bias=-8.0,
-        top_decile_mean=20.0,
-        bottom_quartile_bias=0.0,
-        bottom_quartile_mean=10.0,
-    )
-    ship, reason = verdict(base, cand)
-    assert not ship
-    assert "KILL" in reason
-    assert "top-decile bias" in reason
+# ---------------------------------------------------------------------------
+# Gate 1 — Brier vs book, paired bootstrap CI.
+# ---------------------------------------------------------------------------
 
 
-def test_verdict_kills_when_top_decile_overpredicts_beyond_bound():
-    # Over side of the same bidirectional star gate: a large POSITIVE top-decile
-    # bias kills just as the negative one does. +8.0 > +6.0 → KILL.
-    base = _base_card(
-        global_mae=1.0,
-        top_decile_mae=2.0,
-        top_decile_bias=-0.5,
-        top_decile_mean=20.0,
-        bottom_quartile_bias=0.0,
-        bottom_quartile_mean=10.0,
-    )
-    cand = _base_card(
-        global_mae=0.9,
-        top_decile_mae=1.5,
-        top_decile_bias=8.0,
-        top_decile_mean=20.0,
-        bottom_quartile_bias=0.0,
-        bottom_quartile_mean=10.0,
-    )
-    ship, reason = verdict(base, cand)
-    assert not ship
-    assert "KILL" in reason
-    assert "top-decile bias" in reason
+def test_gate1_ci_below_zero_when_model_beats_book():
+    rng = np.random.default_rng(0)
+    y = (rng.uniform(size=4000) < 0.5).astype(float)
+    p_model = np.where(y == 1, 0.9, 0.1)  # close to truth
+    p_book = np.full_like(y, 0.5)  # near-random
+    mean, lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    assert mean < 0  # model Brier lower than book
+    assert hi < 0  # 95% CI entirely below 0
 
 
-def test_verdict_ships_when_bottom_quartile_bias_within_bounds():
-    # Bottom-quartile bias improves vs baseline and stays within the bound while
-    # the MAE and top-decile gates pass — the candidate ships.
-    base = _base_card(
-        global_mae=1.0, top_decile_mae=2.0, bottom_quartile_bias=0.2, bottom_quartile_mean=10.0
+def test_gate1_ci_above_zero_when_book_beats_model():
+    rng = np.random.default_rng(1)
+    y = (rng.uniform(size=4000) < 0.5).astype(float)
+    p_model = np.where(y == 1, 0.1, 0.9)  # anti-correlated
+    p_book = np.where(y == 1, 0.9, 0.1)  # nails it
+    mean, lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    assert mean > 0
+    assert lo > 0  # CI excludes 0 on the book's side
+
+
+def test_gate1_oracle_equals_negative_book_brier():
+    # Oracle p_model = y -> d_i = -(p_book - y)^2; the point mean is exactly
+    # -mean(book Brier), and the CI sits entirely below 0.
+    rng = np.random.default_rng(2)
+    y = (rng.uniform(size=3000) < 0.5).astype(float)
+    p_book = rng.uniform(0.2, 0.8, size=3000)
+    mean, lo, hi = _gate1_brier_ci(y, p_book, y, rng)
+    assert mean == pytest.approx(-float(np.mean((p_book - y) ** 2)))
+    assert hi < 0
+
+
+# ---------------------------------------------------------------------------
+# Gates 2/3 — segment bias-vs-spread match (denominator = segment sigma).
+# ---------------------------------------------------------------------------
+
+
+def test_gate23_segment_match_z_matches_known_bias():
+    actual = np.arange(50, 150, dtype=float)
+    mask = np.zeros(len(actual), dtype=bool)
+    mask[:30] = True
+    pred = actual.copy()
+    pred[:30] += 2.0  # over-predict the segment by a constant +2.0
+    pred_mean, true_mean, abs_diff, sigma, z = _gate23_segment_match(pred, actual, mask)
+    expected_sigma = float(np.std(actual[:30], ddof=1))
+    assert abs_diff == pytest.approx(2.0)
+    assert sigma == pytest.approx(expected_sigma)
+    assert z == pytest.approx(2.0 / expected_sigma)
+
+
+def test_gate23_oracle_z_is_zero():
+    actual = np.arange(50, 150, dtype=float)
+    mask = np.zeros(len(actual), dtype=bool)
+    mask[:30] = True
+    *_, z = _gate23_segment_match(actual, actual, mask)  # oracle: pred = actual
+    assert z == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Gate 4 — IQR spread (compression).
+# ---------------------------------------------------------------------------
+
+
+def test_gate4_iqr_ratio_below_one_for_compressed():
+    df = _compressed_frame()
+    _, _, ratio = _gate4_iqr_spread(df["Result"].to_numpy(), df["EV"].to_numpy())
+    assert 0.45 < ratio < 0.55  # predictions shrunk to half-spread
+
+
+def test_gate4_iqr_ratio_unit_for_perfect():
+    x = np.arange(100, dtype=float)
+    _, _, ratio = _gate4_iqr_spread(x, x)
+    assert ratio == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Gate 5 — equal-mass ECE.
+# ---------------------------------------------------------------------------
+
+
+def test_gate5_ece_zero_for_oracle():
+    y = np.array([0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0])
+    assert _gate5_ece_equal_mass(y, y) == pytest.approx(0.0)
+
+
+def test_gate5_ece_large_for_confidently_wrong():
+    y = np.zeros(1000)
+    p_model = np.full(1000, 0.9)  # confident "over" on outcomes that never hit
+    assert _gate5_ece_equal_mass(p_model, y) == pytest.approx(0.9, abs=1e-9)
+
+
+def test_gate5_ece_small_for_calibrated_stream():
+    rng = np.random.default_rng(3)
+    p_model = rng.uniform(0.0, 1.0, 20000)
+    y = (rng.uniform(size=20000) < p_model).astype(float)  # calibrated by construction
+    assert _gate5_ece_equal_mass(p_model, y) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# gate_row — model + oracle assembly, column set, unpriced handling.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_row_full_column_set_and_oracle_identities():
+    row = gate_row(_priced_frame(), "EV", league="NBA", market="PTS", strategy="t")
+    expected = {
+        "league", "market", "strategy", "n_rows",
+        "g1_brier_diff_mean", "g1_brier_diff_ci_lo", "g1_brier_diff_ci_hi",
+        "g1_brier_diff_mean_oracle", "g1_brier_diff_ci_lo_oracle", "g1_brier_diff_ci_hi_oracle",
+        "g1_brier_skill_score",
+        "g2_star_pred_mean", "g2_star_true_mean", "g2_star_abs_diff", "g2_star_sigma",
+        "g2_star_z", "g2_star_z_oracle",
+        "g3_bench_pred_mean", "g3_bench_true_mean", "g3_bench_abs_diff", "g3_bench_sigma",
+        "g3_bench_z", "g3_bench_z_oracle",
+        "g4_iqr_pred", "g4_iqr_true", "g4_iqr_ratio", "g4_iqr_ratio_oracle",
+        "g5_ece", "g5_ece_oracle",
+    }
+    assert set(row) == expected
+    # Oracle identities: segment z = 0, IQR ratio = 1, ECE = 0, Brier diff < 0.
+    assert row["g2_star_z_oracle"] == pytest.approx(0.0)
+    assert row["g3_bench_z_oracle"] == pytest.approx(0.0)
+    assert row["g4_iqr_ratio_oracle"] == pytest.approx(1.0)
+    assert row["g5_ece_oracle"] == pytest.approx(0.0)
+    assert row["g1_brier_diff_ci_hi_oracle"] < 0  # oracle beats the (imperfect) book
+
+
+def test_gate_row_no_book_columns_blanks_gates_1_and_5():
+    """No P/Odds/Line at all → both book-touching gates blank, price-free gates still run."""
+    df = _compressed_frame()
+    row = gate_row(df, "EV", league="NBA", market="AST", strategy="t")
+    assert row["g1_brier_diff_mean"] is None
+    assert row["g1_brier_skill_score"] is None
+    assert row["g5_ece"] is None
+    assert row["g2_star_z"] is not None
+    assert row["g4_iqr_ratio"] is not None
+
+
+def test_gate_row_no_odds_but_line_present_blanks_g1_only():
+    """Book-unpriced cells (Line + P present, no Odds) → Gate 1 blank, Gate 5 still computes.
+
+    Gate 5 is model-only calibration: it needs P + Line + Result but NOT the book's
+    Odds, so it should still produce a value when the market has a posted line and a
+    model probability but no book quote to compare Brier against.
+    """
+    rng = np.random.default_rng(11)
+    n = 2000
+    meanyr = rng.uniform(2, 30, n)
+    line = meanyr.copy()
+    p = rng.uniform(0.05, 0.95, n)
+    outcomes = rng.uniform(size=n) < p
+    result = np.where(outcomes, line + 1.0, line - 1.0)
+    df = pd.DataFrame(
+        {"MeanYr": meanyr, "Result": result, "EV": meanyr, "Line": line, "P": p}
     )
-    cand = _base_card(
-        global_mae=0.9, top_decile_mae=1.5, bottom_quartile_bias=0.1, bottom_quartile_mean=10.0
+    row = gate_row(df, "EV", league="NBA", market="AST", strategy="t")
+    assert row["g1_brier_diff_mean"] is None  # no Odds → Gate 1 auto-pass at verdict time
+    assert row["g1_brier_skill_score"] is None
+    assert row["g5_ece"] is not None  # Gate 5 computes on P + Line alone
+
+
+def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):
+    rows = [
+        gate_row(_compressed_frame(seed=1), "EV", league="NFL", market="yards", strategy="t"),
+        gate_row(_compressed_frame(seed=2), "EV", league="NBA", market="PTS", strategy="t"),
+    ]
+    out = tmp_path / "tier0_scorecard.csv"
+    df = write_gate_scorecard(rows, out)
+    assert out.exists()
+    assert list(df["league"]) == ["NBA", "NFL"]  # sorted by (league, market)
+    reread = pd.read_csv(out)
+    assert "g4_iqr_ratio" in reread.columns
+    assert len(reread) == 2
+    # Snapshot overwrites (not appends): a one-row rewrite leaves one row.
+    write_gate_scorecard([rows[0]], out)
+    assert len(pd.read_csv(out)) == 1
+
+
+# ---------------------------------------------------------------------------
+# apply_thresholds — strict pass/fail wiring on the starter combo.
+# ---------------------------------------------------------------------------
+
+
+def _clean_row(**overrides) -> dict[str, object]:
+    """Build a gate_row-shaped dict that clears every strict threshold."""
+    row = {
+        "league": "NBA",
+        "market": "PTS",
+        "strategy": "t",
+        "n_rows": 2000,
+        "g1_brier_diff_mean": -0.05,
+        "g1_brier_diff_ci_lo": -0.07,
+        "g1_brier_diff_ci_hi": -0.03,
+        "g1_brier_diff_mean_oracle": -0.25,
+        "g1_brier_diff_ci_lo_oracle": -0.27,
+        "g1_brier_diff_ci_hi_oracle": -0.23,
+        "g1_brier_skill_score": 0.10,
+        "g2_star_pred_mean": 25.0,
+        "g2_star_true_mean": 25.2,
+        "g2_star_abs_diff": 0.2,
+        "g2_star_sigma": 5.0,
+        "g2_star_z": 0.04,
+        "g2_star_z_oracle": 0.0,
+        "g3_bench_pred_mean": 7.0,
+        "g3_bench_true_mean": 7.1,
+        "g3_bench_abs_diff": 0.1,
+        "g3_bench_sigma": 1.5,
+        "g3_bench_z": 0.07,
+        "g3_bench_z_oracle": 0.0,
+        "g4_iqr_pred": 8.0,
+        "g4_iqr_true": 12.0,
+        "g4_iqr_ratio": 0.67,
+        "g4_iqr_ratio_oracle": 1.0,
+        "g5_ece": 0.05,
+        "g5_ece_oracle": 0.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_apply_thresholds_clean_cell_ships():
+    out = apply_thresholds(_clean_row())
+    for g in ("g1", "g2", "g3", "g4", "g5"):
+        assert out[f"{g}_pass"], f"{g} failed unexpectedly"
+    assert out["ship"]
+
+
+def test_apply_thresholds_each_gate_fails_when_threshold_exceeded():
+    fails = {
+        "g1": _clean_row(g1_brier_diff_ci_hi=0.001),  # CI doesn't exclude 0 below
+        "g2": _clean_row(g2_star_z=0.51),             # over the 0.5 cap
+        "g3": _clean_row(g3_bench_z=0.51),
+        "g4": _clean_row(g4_iqr_ratio=0.49),          # below the 0.5 floor
+        "g5": _clean_row(g5_ece=0.076),               # over the 0.075 cap
+    }
+    for gate, row in fails.items():
+        out = apply_thresholds(row)
+        assert not out[f"{gate}_pass"], f"{gate} should have failed"
+        assert not out["ship"]
+
+
+def test_apply_thresholds_g1_no_odds_auto_passes():
+    """G1 blank (no book Odds) ⇒ auto-pass — model wins by default."""
+    out = apply_thresholds(
+        _clean_row(
+            g1_brier_diff_mean=None,
+            g1_brier_diff_ci_lo=None,
+            g1_brier_diff_ci_hi=None,
+            g1_brier_diff_mean_oracle=None,
+            g1_brier_skill_score=None,
+        )
     )
-    ship, reason = verdict(base, cand)
-    assert ship, reason
+    assert out["g1_pass"]
+    assert out["ship"]
+
+
+def test_apply_thresholds_g4_nan_fails_under_strict():
+    """G4 blank (binary tds markets, IQR(Result)=0) fails under strict — flagged for revisit."""
+    out = apply_thresholds(_clean_row(g4_iqr_pred=None, g4_iqr_true=None, g4_iqr_ratio=None))
+    assert not out["g4_pass"]
+    assert not out["ship"]
+
+
+def test_apply_thresholds_g5_blank_fails():
+    """G5 blank (no P or no Line) fails — not auto-pass; the cell couldn't compute calibration."""
+    out = apply_thresholds(_clean_row(g5_ece=None))
+    assert not out["g5_pass"]
+    assert not out["ship"]
+
+
+def test_strict_thresholds_are_pinned():
+    """Lock the strict starter combo so an accidental tweak fails CI."""
+    assert _GATE1_CI_HI_MAX == 0.0
+    assert _GATE2_STAR_Z_MAX == 0.5
+    assert _GATE3_BENCH_Z_MAX == 0.5
+    assert _GATE4_IQR_RATIO_MIN == 0.5
+    assert _GATE5_ECE_MAX == 0.075
 
 
 def test_load_test_set_drops_nonfinite_and_validates_columns(tmp_path):
@@ -280,89 +482,210 @@ def test_load_test_set_handles_missing_optional_columns(tmp_path):
     assert card.brier_skill_score is None
 
 
-def test_brier_skill_score_positive_when_model_beats_book():
-    rng = np.random.default_rng(0)
-    n = 4000
+# ---------------------------------------------------------------------------
+# Supersede gate — S1 + S2 + S3 (research -> devel, supersede an incumbent)
+# ---------------------------------------------------------------------------
+
+
+def _supersede_pair(
+    n: int = 800,
+    seed: int = 42,
+    candidate_calibration_noise: float = 0.0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build (baseline, candidate) test-set frames sharing the same events.
+
+    Set-up: the **book** is flat (over-prob = 0.5 for every event) — half the
+    rows are real over-edges (``p_true > 0.5``), half are real under-edges. The
+    **candidate** has correctly-sided ``EV`` (over-edge ⇒ EV above line; under-
+    edge ⇒ EV below) and probability ``p_true``. The **baseline** has the same
+    EVs perturbed by Gaussian noise (so it picks the wrong side sometimes) and a
+    mid-regressed probability. ``candidate_calibration_noise > 0`` injects noise
+    into the candidate's ``EV`` instead — used to invert the win condition.
+    """
+    rng = np.random.default_rng(seed)
     meanyr = rng.uniform(2, 30, n)
     line = meanyr.copy()
-    # True over rate aligned tightly with model probability; book is near-random.
-    p_true = rng.uniform(0.05, 0.95, n)
+    p_true = rng.uniform(0.20, 0.80, n)
     outcomes = rng.uniform(size=n) < p_true
     result = np.where(outcomes, line + 1.0, line - 1.0)
-    df = pd.DataFrame(
+    odds = np.full(n, 0.5)
+    # Correctly-sided EV — bet side aligns with the truth.
+    correct_ev = np.where(p_true > 0.5, line + 1.0, line - 1.0)
+    # Baseline EV is the correct side perturbed by enough noise that ~25% of
+    # rows flip sides → baseline bets the wrong side on those events.
+    baseline_ev = correct_ev + rng.normal(0, 1.2, n)
+    baseline_p = 0.5 + 0.4 * (p_true - 0.5)  # mid-regressed prob
+    # Candidate gets correctly-sided EV and tracks p_true exactly. Rejection
+    # scenarios swamp its probability with Gaussian noise — large noise makes
+    # the candidate's P uninformative and its Brier worse than baseline's.
+    candidate_ev = correct_ev.copy()
+    candidate_p = np.clip(
+        p_true + rng.normal(0, candidate_calibration_noise, n), 1e-3, 1.0 - 1e-3
+    )
+    b_df = pd.DataFrame(
         {
             "MeanYr": meanyr,
-            "Result": result,
-            "EV": meanyr,
+            "Result": result.astype(float),
+            "EV": baseline_ev,
             "Line": line,
-            "P": p_true,  # model nails it
-            "Odds": np.full(n, 0.5),  # book is 50/50
+            "Odds": odds,
+            "P": baseline_p,
         }
     )
-    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.brier_skill_score is not None
-    assert card.brier_skill_score > 0.1
-
-
-def test_brier_skill_score_negative_when_book_beats_model():
-    rng = np.random.default_rng(1)
-    n = 4000
-    meanyr = rng.uniform(2, 30, n)
-    line = meanyr.copy()
-    p_true = rng.uniform(0.05, 0.95, n)
-    outcomes = rng.uniform(size=n) < p_true
-    result = np.where(outcomes, line + 1.0, line - 1.0)
-    df = pd.DataFrame(
+    c_df = pd.DataFrame(
         {
             "MeanYr": meanyr,
-            "Result": result,
-            "EV": meanyr,
+            "Result": result.astype(float),
+            "EV": candidate_ev,
             "Line": line,
-            # Model is anti-correlated noise; book is the true probability so
-            # book_over = 1 - Odds nails it.
-            "P": 1.0 - p_true,
-            "Odds": 1.0 - p_true,
+            "Odds": odds,
+            "P": candidate_p,
         }
     )
-    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.brier_skill_score is not None
-    assert card.brier_skill_score < 0
+    return b_df, c_df
 
 
-def test_verdict_kill_on_brier_skill_regression():
-    # MAE gates pass (candidate improves top-decile MAE and global MAE), but
-    # brier_skill_score regresses — third gate must fire.
-    base = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.10)
-    cand = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.05)
-    ship, reason = verdict(base, cand)
-    assert not ship
-    assert "KILL" in reason
-    assert "brier_skill_score regressed" in reason
+def test_paired_brier_ci_positive_when_candidate_beats_baseline():
+    # Candidate is well-calibrated; baseline is regressed toward 0.5 → candidate
+    # Brier strictly lower per event ⇒ d_i > 0 ⇒ CI lo > 0. Need a decent N for
+    # the bootstrap CI to be tight enough to strictly exclude 0.
+    b_df, c_df = _supersede_pair(n=4000)
+    res = _supersede_paired_brier_ci(b_df, c_df)
+    assert res is not None
+    n, mean, ci_lo, _ci_hi = res
+    assert n == len(b_df)
+    assert mean > 0
+    assert ci_lo > 0
 
 
-def test_verdict_ship_includes_brier_skill_when_present():
-    base = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.05)
-    cand = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=0.10)
-    ship, reason = verdict(base, cand)
-    assert ship, reason
-    assert "brier_skill" in reason
+def test_paired_brier_ci_negative_when_baseline_beats_candidate():
+    # Add enough noise to the candidate's P that it's WORSE than the baseline's
+    # mid-regressed-but-still-signal P. Needs n large + noise large for the CI
+    # to land strictly below 0.
+    b_df, c_df = _supersede_pair(n=4000, candidate_calibration_noise=0.8)
+    res = _supersede_paired_brier_ci(b_df, c_df)
+    assert res is not None
+    _, mean, _ci_lo, ci_hi = res
+    assert mean < 0
+    assert ci_hi < 0
 
 
-def test_verdict_skips_brier_skill_gate_when_either_baseline_or_candidate_lacks_it():
-    # Baseline has no brier; candidate has a (worse) value — gate must skip,
-    # MAE gates alone decide. MAE improves so SHIP.
-    base = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=None)
-    cand = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=-0.50)
-    ship, reason = verdict(base, cand)
-    assert ship, reason
-    assert "brier_skill" not in reason
+def test_paired_brier_ci_returns_none_when_inputs_lack_p():
+    df = pd.DataFrame({"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0]})
+    assert _supersede_paired_brier_ci(df, df) is None
 
-    # And symmetric: candidate None.
-    base2 = _base_card(global_mae=1.0, top_decile_mae=2.0, brier_skill_score=0.50)
-    cand2 = _base_card(global_mae=0.9, top_decile_mae=1.5, brier_skill_score=None)
-    ship2, reason2 = verdict(base2, cand2)
-    assert ship2, reason2
-    assert "brier_skill" not in reason2
+
+def test_paired_brier_ci_returns_none_on_empty_intersection():
+    b_df, c_df = _supersede_pair(n=50)
+    # Disjoint indices — no shared events.
+    c_df.index = c_df.index + 1000
+    assert _supersede_paired_brier_ci(b_df, c_df) is None
+
+
+def test_test_set_to_bet_frame_picks_ev_side_and_decimal_payout():
+    # EV > Line ⇒ bet over ⇒ Hit = (Result >= Line); payout = 1/(1-Odds).
+    df = pd.DataFrame(
+        {
+            "MeanYr": [10.0, 10.0],
+            "Result": [12.0, 8.0],
+            "EV": [11.0, 11.0],  # both EV > Line ⇒ both bet over
+            "Line": [10.0, 10.0],
+            "Odds": [0.4, 0.4],  # book under-prob 0.4 ⇒ over-prob 0.6
+            "P": [0.6, 0.6],
+        }
+    )
+    bets = _test_set_to_bet_frame(df, "EV")
+    assert len(bets) == 2
+    assert (bets["Platform"] == "Sleeper").all()
+    # Boost = decimal odds = 1 / book_over_prob = 1 / 0.6 ≈ 1.667
+    assert bets["Boost"].iloc[0] == pytest.approx(1.0 / 0.6)
+    # Hit: row 0 Result >= Line ⇒ True; row 1 ⇒ False.
+    assert bool(bets["Hit"].iloc[0]) is True
+    assert bool(bets["Hit"].iloc[1]) is False
+
+
+def test_test_set_to_bet_frame_returns_empty_without_odds():
+    df = pd.DataFrame(
+        {"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0], "P": [0.5]}
+    )
+    bets = _test_set_to_bet_frame(df, "EV")
+    assert bets.empty
+
+
+def test_test_set_to_bet_frame_picks_under_when_ev_below_line():
+    # EV < Line ⇒ bet under ⇒ Hit when Result < Line; book_under_prob = Odds.
+    df = pd.DataFrame(
+        {
+            "MeanYr": [10.0],
+            "Result": [8.0],
+            "EV": [9.0],  # EV < Line ⇒ bet under
+            "Line": [10.0],
+            "Odds": [0.55],  # book under-prob 0.55 ⇒ decimal odds = 1/0.55
+            "P": [0.4],
+        }
+    )
+    bets = _test_set_to_bet_frame(df, "EV")
+    assert bets["Boost"].iloc[0] == pytest.approx(1.0 / 0.55)
+    # Hit: Result (8) < Line (10) ⇒ under wins.
+    assert bool(bets["Hit"].iloc[0]) is True
+    # Model probability on the UNDER side = 1 - P = 0.6.
+    assert bets["Model P"].iloc[0] == pytest.approx(0.6)
+
+
+def test_paired_sharpe_returns_finite_pair():
+    b_df, c_df = _supersede_pair()
+    res = _supersede_paired_sharpe(b_df, c_df, "EV")
+    assert res is not None
+    sb, sc = res
+    assert np.isfinite(sb)
+    assert np.isfinite(sc)
+
+
+def test_paired_sharpe_candidate_higher_when_better_calibrated():
+    # Calibrated candidate vs regressed baseline ⇒ candidate Kelly stakes are
+    # more aligned with true win probability ⇒ higher long-run Sharpe.
+    b_df, c_df = _supersede_pair(n=2000)
+    res = _supersede_paired_sharpe(b_df, c_df, "EV")
+    assert res is not None
+    sb, sc = res
+    assert sc > sb
+
+
+def test_paired_sharpe_returns_none_on_empty_intersection():
+    b_df, c_df = _supersede_pair(n=20)
+    c_df.index = c_df.index + 1000
+    assert _supersede_paired_sharpe(b_df, c_df, "EV") is None
+
+
+def test_supersede_verdict_ships_when_all_three_pass():
+    # A clean calibrated candidate that clears all 5 gates outright + beats a
+    # regressed-toward-0.5 baseline on paired Brier + has higher Sharpe ⇒ ship.
+    b_df, c_df = _supersede_pair(n=4000, seed=11)
+    v = supersede_verdict(b_df, c_df, "EV", strategy="cand")
+    assert v["s1_pass"] is True
+    assert v["s2_pass"] is True
+    assert v["s3_pass"] is True
+    assert v["ship"] is True
+
+
+def test_supersede_verdict_holds_when_candidate_worse():
+    # Candidate worse than baseline ⇒ S2 fails (paired Brier CI negative) and
+    # S3 fails (lower Sharpe). The verdict is HOLD even if S1 happens to pass.
+    b_df, c_df = _supersede_pair(n=2000, seed=13, candidate_calibration_noise=0.4)
+    v = supersede_verdict(b_df, c_df, "EV", strategy="cand")
+    assert v["s2_pass"] is False
+    assert v["ship"] is False
+
+
+def test_supersede_verdict_holds_when_baseline_unpriced():
+    # Baseline has no Odds column ⇒ S2 and S3 both return None ⇒ HOLD even if
+    # the candidate would clear S1 on its own.
+    _b, c_df = _supersede_pair(n=200, seed=21)
+    b_unpriced = c_df.drop(columns=["Odds"])
+    v = supersede_verdict(b_unpriced, c_df, "EV", strategy="cand")
+    assert v["s2_pass"] is False
+    assert v["s3_pass"] is False
+    assert v["ship"] is False
 
 
 # ---------------------------------------------------------------------------
