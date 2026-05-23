@@ -88,7 +88,7 @@ its betting risk, **not** symmetrically:
 
 ### Tiebreaker — when more than one candidate passes (mainly Tier 0)
 
-`verdict()` is pairwise and does **not** rank candidates; `ship_config.json` holds
+`verdict()` is pairwise and does **not** rank candidates; `stat_meta.json` holds
 one strategy per cell, and live production can A/B only **one** strategy per cell at
 a time. When several clear the gate (the common Tier-0 case — incumbent + each
 strategy compete), pick in two stages:
@@ -108,21 +108,27 @@ the real arbiter.
 
 ---
 
-## Serving control — default-deny via generated ship_config
+## Serving control — default-deny via stat_meta `shipped` field
 
-`ship_config.json` is a **generated artifact**, not hand-edited. The canonical
-human-curated source is `data/gate1_decisions.json` (`{league: {market:
-strategy}}` for Gate-1 passers). `generate-ship-config --branch {devel|main}`
-writes `ship_config.json` exhaustively over **all** `ALL_MARKETS` cells:
+`data/config/stat_meta.json` is the **canonical, hand-curated** per-cell
+record. Every cell carries `{"dist": ..., "shipped": ..., "strategy": ...}`
+where `shipped` is one of `"withheld"` / `"devel"` / `"main"`:
 
-- a cell that passed the branch's gate gets its decisions strategy (served);
-- every other cell gets `"withheld"` — `meditate` prunes its pickle so
-  `prophecize` dark-outs the market.
+- `"withheld"` — `meditate` prunes the cell's pickle so `prophecize`
+  dark-outs the market.
+- `"devel"` — the production-tracking branch (`devel`) trains + ships
+  the cell. In 14-day Gate-2 soak.
+- `"main"` — the cell also passed Gate-2 graduation; it's locked in on
+  `main`.
 
-This is **default-deny**: only gate-passing cells serve. `--branch devel` =
-Gate-1 passers (regenerate manually when `gate1_decisions.json` changes);
-`--branch main` = Gate-2 graduated cells (regenerated monthly by the
-`run_job.sh gate-status` cron, which opens a PR a human merges).
+This is **default-deny**: only cells the human explicitly promotes
+(`shipped` ≠ `"withheld"`) serve. Promoting a Gate-1 passer is a
+one-line edit (`"withheld"` → `"devel"`). `generate-ship-config --branch
+main` mutates `stat_meta.json` monthly (cron via `run_job.sh
+gate-status`) to promote graduated cells `"devel"` → `"main"` and demote
+the rest back to `"devel"`; the cron opens a PR a human merges.
+`generate-ship-config --branch devel` only validates the current state
+and prints a summary — devel promotions are direct edits.
 
 **Known gap:** the graduated classifier (`training/graduation.py`) uses a
 proxy of Gate 2 — positive Gate-1 BSS + ≥ 200 settled offers in the 30d window

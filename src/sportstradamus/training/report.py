@@ -19,6 +19,7 @@ from sportstradamus.helpers.io import MODEL_STATS_PATH, _atomic_write_parquet
 from sportstradamus.training.config import (
     load_distribution_config,
     load_zi_config,
+    save_cv_std_config,
     save_distribution_config,
     save_zi_config,
 )
@@ -61,12 +62,21 @@ def report() -> None:
         f.name for f in (pkg_resources.files(data) / "models/").iterdir() if ".mdl" in f.name
     ]
     model_list.sort()
-    with open(pkg_resources.files(data) / "config" / "stat_cv.json") as f:
-        stat_cv = json.load(f)
-    with open(pkg_resources.files(data) / "config" / "stat_std.json") as f:
-        stat_std = json.load(f)
+    # cv/std/zi live in stat_calibration.json (gitignored, runtime-recomputed);
+    # dist lives in stat_meta.json (committed). Both are read via the helpers
+    # in training.config so the on-disk layout can evolve in one place.
     stat_dist = load_distribution_config()
     stat_zi_local = load_zi_config()
+    _cal_path = pkg_resources.files(data) / "config" / "stat_calibration.json"
+    if _cal_path.is_file():
+        with open(_cal_path) as f:
+            _cal = json.load(f)
+    else:
+        _cal = {}
+    stat_cv = {lg: {m: cell.get("cv", 1.0) for m, cell in mkts.items()} for lg, mkts in _cal.items()}
+    stat_std = {
+        lg: {m: cell.get("std") for m, cell in mkts.items()} for lg, mkts in _cal.items()
+    }
 
     with open(pkg_resources.files(data) / "training" / "training_report.txt", "w") as f:
         league_models = {}
@@ -221,12 +231,7 @@ def report() -> None:
                 )
             f.write("\n")
 
-    with open(pkg_resources.files(data) / "config" / "stat_cv.json", "w") as f:
-        json.dump(stat_cv, f, indent=4)
-
-    with open(pkg_resources.files(data) / "config" / "stat_std.json", "w") as f:
-        json.dump(stat_std, f, indent=4)
-
+    save_cv_std_config(stat_cv, stat_std)
     save_distribution_config(stat_dist)
     save_zi_config(stat_zi_local)
 

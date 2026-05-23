@@ -43,7 +43,11 @@ from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.training import baselines
 from sportstradamus.training.calibration import fit_book_weights, fit_model_weight
-from sportstradamus.training.config import load_distribution_config, save_zi_config
+from sportstradamus.training.config import (
+    load_distribution_config,
+    save_cv_std_config,
+    save_zi_config,
+)
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, warm_start_hyper_opt
 from sportstradamus.training.report import report
@@ -1804,7 +1808,7 @@ def _step_select_distribution(
         market: Market name.
         league: League slug.
         target_strategy: Slug for ``baselines.get_strategy``.
-        deterministic: If True, skip persisting ``stat_zi.json``.
+        deterministic: If True, skip persisting cv/zi to stat_calibration.json.
 
     Returns:
         Dict with: ``dist``, ``dist_obj`` (None on hurdle path until built),
@@ -1830,8 +1834,8 @@ def _step_select_distribution(
     stat_zi[league][market] = hist_gate
     # In deterministic mode the in-memory update still flows downstream (so
     # this run's branch selection sees the gate), but skip persisting to
-    # stat_zi.json — deterministic runs use crippled hyperparameters and
-    # must never mutate production config.
+    # stat_calibration.json — deterministic runs use crippled hyperparameters
+    # and must never mutate production config.
     if not deterministic:
         save_zi_config(stat_zi)
 
@@ -1902,8 +1906,7 @@ def _step_select_distribution(
         cv = max(cv, 1 / np.sqrt(shape_ceiling))
 
     stat_cv[league][market] = cv
-    with open(pkg_resources.files(data) / "config" / "stat_cv.json", "w") as f:
-        json.dump(stat_cv, f, indent=4)
+    save_cv_std_config({league: {market: cv}}, {})
 
     # Reflect SkewNormal nonzero filtering back into splits.
     splits["X_train"] = X_train

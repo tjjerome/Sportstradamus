@@ -1,7 +1,6 @@
 ~$feature_importances.xlsx
 feature_importances.xlsx
-config/stat_cv.json
-config/stat_std.json
+config/stat_calibration.json
 config/book_weights.json
 config/goalies.json
 training/training_report.txt
