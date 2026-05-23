@@ -44,9 +44,27 @@ _AUTH_STATUSES = (401, 403)
 
 Accept = Literal["json", "text", "bytes"]
 
+# Body preview length in decode-failure diagnostics. Long enough to
+# identify HTML error pages ("<!DOCTYPE html>...Cloudflare...") or
+# compressed binary blobs (leading magic bytes); short enough not to
+# spam logs with a 200 KB FP payload that happened to start mid-token.
+_DECODE_PREVIEW_CHARS = 300
+
 
 class FantasyPointsAuthError(RuntimeError):
     """FP returned 401/403; the stored Authorization token is expired."""
+
+
+class FantasyPointsDecodeError(RuntimeError):
+    """FP returned 2xx but the body couldn't be decoded as JSON.
+
+    Most common cause: the catalog entry kept ``Accept-Encoding: br, zstd``
+    from the original DevTools curl, so FP responded with brotli/zstd —
+    which ``requests`` can't transparently decompress without the
+    optional ``brotli`` / ``zstandard`` extras. Re-running
+    ``fp-fetch import-curl`` against a fresh curl regenerates the
+    catalog entry without the offending header.
+    """
 
 
 class FantasyPointsClient:
@@ -209,6 +227,13 @@ class FantasyPointsClient:
             merged.update(headers)
         if json_body is not None and "Content-Type" not in merged:
             merged["Content-Type"] = "application/json"
+        # Defense-in-depth: even if an old catalog entry still carries
+        # browser-style Accept-Encoding (gzip, deflate, br, zstd), strip
+        # it before the call so the server replies with gzip/identity
+        # that ``requests`` can decompress on its own. Without this the
+        # body comes back as undecoded brotli/zstd and JSON parsing
+        # blows up with "Expecting value: line 1 column 1".
+        merged = {k: v for k, v in merged.items() if k.lower() != "accept-encoding"}
         attempts = (*_RETRY_BACKOFF_S, None)
         last_response = None
         for backoff in attempts:
@@ -246,9 +271,40 @@ class FantasyPointsClient:
         raise RuntimeError("unreachable")
 
     @staticmethod
-    def _decode(response: requests.Response, accept: Accept):
+    def _decode(response: requests.Response, accept: Accept) -> dict | list | str | bytes:
         if accept == "json":
-            return response.json()
+            try:
+                return response.json()
+            except ValueError as e:
+                raise FantasyPointsDecodeError(_format_decode_failure(response, e)) from e
         if accept == "text":
             return response.text
         return response.content
+
+
+def _format_decode_failure(response: requests.Response, error: Exception) -> str:
+    r"""Render a single-string diagnostic for a non-JSON 2xx body.
+
+    Includes status, the two response headers most likely to explain a
+    decode failure (``Content-Type`` and ``Content-Encoding``), the raw
+    body length, and the first ``_DECODE_PREVIEW_CHARS`` of the body
+    (escaped to repr so binary garbage shows as ``\xNN`` rather than
+    breaking the log line).
+    """
+    content_type = response.headers.get("Content-Type", "<missing>")
+    content_encoding = response.headers.get("Content-Encoding", "<missing>")
+    body = response.content or b""
+    preview = body[:_DECODE_PREVIEW_CHARS]
+    try:
+        preview_str = preview.decode("utf-8")
+    except UnicodeDecodeError:
+        preview_str = repr(preview)
+    return (
+        f"FP returned {response.status_code} {response.request.method} "
+        f"{response.url} but body is not JSON ({error}). "
+        f"Content-Type={content_type!r} Content-Encoding={content_encoding!r} "
+        f"body_len={len(body)} preview={preview_str!r}. "
+        "If Content-Encoding is br/zstd, the catalog entry has a stale "
+        "Accept-Encoding header — re-run `fp-fetch import-curl` with a "
+        "fresh DevTools curl. See docs/fantasypoints.md."
+    )

@@ -20,19 +20,40 @@ from sportstradamus.fantasypoints.cli import (
 from sportstradamus.fantasypoints.client import (
     FantasyPointsAuthError,
     FantasyPointsClient,
+    FantasyPointsDecodeError,
 )
 
 
 class FakeResponse:
     """Minimal stand-in for :class:`requests.Response`."""
 
-    def __init__(self, status_code, body=None, text=""):
+    def __init__(
+        self,
+        status_code,
+        body=None,
+        text="",
+        *,
+        content=None,
+        headers=None,
+        url="https://example/",
+        method="GET",
+        json_error=None,
+    ):
         self.status_code = status_code
         self._body = body
         self.text = text
-        self.content = text.encode() if text else b""
+        if content is not None:
+            self.content = content
+        else:
+            self.content = text.encode() if text else b""
+        self.headers = headers or {}
+        self.url = url
+        self.request = type("FakeRequest", (), {"method": method})()
+        self._json_error = json_error
 
     def json(self):
+        if self._json_error is not None:
+            raise self._json_error
         return self._body
 
     def raise_for_status(self):
@@ -125,6 +146,45 @@ def test_client_post_sends_json_body(monkeypatch):
     assert out == {"ok": True}
     assert captured["method"] == "POST"
     assert captured["json"] == body
+
+
+def test_client_strips_accept_encoding_from_request_headers(monkeypatch):
+    captured = {}
+
+    def capture(method, url, headers=None, params=None, json=None):
+        captured["headers"] = headers
+        return FakeResponse(200, body={"ok": True})
+
+    _patch_request(monkeypatch, capture)
+    _client().get(
+        "https://example/",
+        headers={"Accept-Encoding": "gzip, deflate, br, zstd"},
+    )
+    keys = {k.lower() for k in captured["headers"]}
+    assert "accept-encoding" not in keys, (
+        "Accept-Encoding must be stripped before the request reaches FP; "
+        f"got headers={captured['headers']}"
+    )
+
+
+def test_client_raises_decode_error_with_diagnostic_on_non_json_body(monkeypatch):
+    def respond_with_garbage(method, url, headers=None, params=None, json=None):
+        return FakeResponse(
+            200,
+            content=b"\x83\xaa\xbf",
+            headers={"Content-Type": "application/json", "Content-Encoding": "zstd"},
+            url="https://example/v2/ds/nfl/tools/team/line-matchups",
+            method="POST",
+            json_error=ValueError("Expecting value: line 1 column 1 (char 0)"),
+        )
+
+    _patch_request(monkeypatch, respond_with_garbage)
+    with pytest.raises(FantasyPointsDecodeError) as exc_info:
+        _client().post("https://example/", json_body={"x": 1})
+    msg = str(exc_info.value)
+    assert "Content-Encoding" in msg and "zstd" in msg
+    assert "body_len=" in msg
+    assert "fp-fetch import-curl" in msg
 
 
 def test_client_fails_fast_when_authorization_empty(monkeypatch):

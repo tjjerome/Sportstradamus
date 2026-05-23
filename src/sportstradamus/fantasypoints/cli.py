@@ -61,7 +61,10 @@ _TUESDAY = 1
 
 # Headers that should never be persisted in the catalog — Authorization
 # and Cookie come from creds/keys.json, host/connection/length are
-# per-request, UA is set by the client.
+# per-request, UA is set by the client, accept-encoding is set by
+# requests itself (we can only decompress gzip + deflate without extra
+# packages; letting the catalog ask for br/zstd produces undecoded
+# binary bodies that fail json parsing).
 _STRIPPED_CURL_HEADERS = frozenset(
     {
         "authorization",
@@ -74,6 +77,7 @@ _STRIPPED_CURL_HEADERS = frozenset(
         "content-length",
         "alt-used",
         "te",
+        "accept-encoding",
     }
 )
 
