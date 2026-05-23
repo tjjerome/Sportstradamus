@@ -67,7 +67,7 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `config.py` | Loads every JSON config file at import time; exposes `stat_cv`, `stat_dist`, `stat_map`, `stat_zi`, `stat_std`, `book_weights`, `books`, `feature_filter`, `banned`, `abbreviations`, `combo_props`, `nhl_goalies`, `name_map`, `odds_api` |
+| `config.py` | Loads every JSON config file at import time; exposes `stat_meta` (per-cell `{dist, shipped, strategy, cv, std, zi}` union of committed `stat_meta.json` and gitignored `stat_calibration.json`), the legacy per-field views `stat_cv` / `stat_dist` / `stat_std` / `stat_zi` derived from it, plus `stat_map`, `book_weights`, `books`, `feature_filter`, `banned`, `abbreviations`, `combo_props`, `nhl_goalies`, `name_map`, `odds_api` |
 | `archive.py` | `Archive` class — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev)` and `lines(...)` tables. Public read methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. Public write methods: `add_dfs`, `merge_player_books`, `set_team_books`, `write`. Module-level helper: `clean_archive`. |
 | `scraping.py` | `Scrape` class — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
 | `distributions.py` | `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds`, `set_model_start_values` |
@@ -195,9 +195,10 @@ pickem-build (Phase 3)
 | I want to... | Look here |
 |---|---|
 | Change which markets a league trains | `training/markets.py` → `ALL_MARKETS` |
-| Change which distribution a stat uses | `src/sportstradamus/data/stat_dist.json` |
-| Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/prop_books.json` |
-| Add a player name alias | `src/sportstradamus/data/name_map.json` |
+| Change which distribution a stat uses | `src/sportstradamus/data/config/stat_meta.json` (`dist` field) |
+| Ship a cell that cleared Gate 1 | `src/sportstradamus/data/config/stat_meta.json` (`shipped: "withheld"` → `"devel"`) |
+| Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/config/prop_books.json` |
+| Add a player name alias | `src/sportstradamus/data/config/name_map.json` |
 | Understand a training report metric | [CLAUDE.md](CLAUDE.md) §Training Report Diagnostics — covers the raw-metric schema (`brier_score`, `log_loss`, `roc_auc`, `expected_calibration_error`, `brier_skill_score`, `kelly_shrinkage`, etc.) and the pinned `row_kind="book_baseline"` row |
 | Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → returns `{kelly_shrinkage, brier_skill_score, model_weight}` for a `(league, market)` from `data/model_stats.parquet` |
 | Tune the Kelly resolution chain | `strategies/kelly.py` constants `LIVE_BLEND_FLOOR=25`, `LIVE_BLEND_FULL=100`, `DEFAULT_KELLY_FRACTION=0.25`, `MAX_FRACTION_OF_BANKROLL=0.005` |
@@ -291,12 +292,15 @@ The full rules are in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md). Quick referenc
 
 3. **Add markets** to `training/markets.py` → `ALL_MARKETS["{LEAGUE}"]`.
 
-4. **Add distribution types** in `data/stat_dist.json` for each new market.
+4. **Add per-cell entries** in `data/config/stat_meta.json` for each new
+   market: `{"dist": "Gamma" | "NegBin" | ..., "shipped": "withheld",
+   "strategy": "none"}`. The cell ships only after passing Gate 1 (then
+   edit `shipped` to `"devel"`).
 
-5. **Add stat name mappings** in `data/stat_map.json` to normalize API names to
-   internal names.
+5. **Add stat name mappings** in `data/config/stat_map.json` to normalize
+   API names to internal names.
 
-6. **Add abbreviations** to `data/abbreviations.json`.
+6. **Add abbreviations** to `data/config/abbreviations.json`.
 
 7. **Wire into `meditate`** — `training/cli.py` already reads `ALL_MARKETS` and
    instantiates each league's Stats class dynamically; if your class follows the naming
@@ -311,11 +315,14 @@ The full rules are in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md). Quick referenc
 A "market" is a betting category for a single stat in a single league (e.g. "assists",
 "strikeouts"). To add one:
 
-1. **`data/stat_dist.json`** — add `"{LEAGUE}: {market}": "Gamma"` (or NegBin / ZINB /
-   ZAGamma based on whether the stat is continuous or count-valued and whether it has
-   zero-inflation).
+1. **`data/config/stat_meta.json`** — add a per-cell entry:
+   `"{LEAGUE}": {"{market}": {"dist": "Gamma", "shipped": "withheld",
+   "strategy": "none"}}` (pick a distribution family based on whether the
+   stat is continuous or count-valued and whether it has zero-inflation).
+   `shipped: "withheld"` keeps the cell out of training until it clears
+   Gate 1.
 
-2. **`data/stat_map.json`** — map the sportsbook's name for the stat to your internal name.
+2. **`data/config/stat_map.json`** — map the sportsbook's name for the stat to your internal name.
 
 3. **`training/markets.py` → `ALL_MARKETS`** — append the market string to the list for
    that league.
@@ -361,12 +368,13 @@ scripts. So `devel` must carry **production-runtime code and operator tools
 only**, never the dev-only research scaffolding used to *decide* a change.
 
 This is the process for shipping **any** model change for **any** market to
-production. The ship mechanism — `data/ship_config.json`, the per-cell strategy
-resolve + withhold/prune in `meditate`, and the Gate 1 / Gate 2 lifecycle —
-applies to **every `(league, market)` cell**, not to one track or league. A
-research line (e.g. the GBDT mean-regression work on
-`claude/fix-gbdt-mean-regression-*`) is just where the *evidence* for a given
-ship is produced; the pipeline itself is project-wide.
+production. The ship mechanism — `data/config/stat_meta.json`'s per-cell
+`shipped` field, the per-cell strategy resolve + withhold/prune in
+`meditate`, and the Gate 1 / Gate 2 lifecycle — applies to **every
+`(league, market)` cell**, not to one track or league. A research line
+(e.g. the GBDT mean-regression work on
+`claude/fix-gbdt-mean-regression-*`) is just where the *evidence* for a
+given ship is produced; the pipeline itself is project-wide.
 
 Model improvements are developed on a long-lived research branch that accumulates
 diagnostics, A/B harnesses, and experiment flags. **Do not merge a research
@@ -381,9 +389,10 @@ Land the production substrate the ship mechanism needs:
 - the Gate 2 live-metrics machinery (`analysis.compute_book_brier_skill_score`,
   the `nightly.py` live-metrics step, `check-graduation`, `backfill-live-metrics`);
 - the per-cell ship plumbing (`training/ship_config.py`, the `helpers/io.py`
-  model-pickle helpers, the `meditate` wiring) + an empty `data/ship_config.json`.
+  model-pickle helpers, the `meditate` wiring) + a `data/config/stat_meta.json`
+  in which every cell starts `shipped: "withheld"`.
 
-With an empty `ship_config.json` and default flags, production behavior is
+With every cell `"withheld"` and default flags, production behavior is
 unchanged — the mechanism is simply now live.
 
 ### Phase B — per-market ship PRs (repeating)
@@ -397,8 +406,9 @@ on devel"), open a focused PR to `devel` carrying the **production delta only**:
    additions. If the strategy is already deployed: nothing here.
 2. **Inference** — the matching `model_prob` decode branch for that strategy, with
    an inference-path test (a Gate 1 requirement).
-3. **Toggle** — the one `ship_config.json` line (`cell → strategy`, or
-   `"withheld"` to dark-out a cell under rework).
+3. **Toggle** — the one-field edit in `stat_meta.json` (set the cell's
+   `shipped` to `"devel"` to ship, or back to `"withheld"` to dark-out a
+   cell under rework).
 
 The offline **evidence** that justifies the ship (compression-eval runs,
 diagnostic verdicts) **travels as prose in the PR description, never as committed

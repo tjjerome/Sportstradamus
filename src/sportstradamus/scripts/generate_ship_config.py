@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
-"""Generate an exhaustive, gate-driven ship_config.json for one branch.
+"""Promote / demote cells in ``stat_meta.json`` based on gate state.
 
-Reads the canonical ``gate1_decisions.json`` (which cells passed Gate 1 + their
-strategy) and writes ``ship_config.json`` over **all** ``ALL_MARKETS`` cells:
-active cells get their decisions strategy, every other cell gets ``"withheld"``.
-This is default-deny serving control — only gate-passing cells keep a pickle and
-are served by prophecize.
-
-Active set by branch:
-
-* ``devel`` — every cell in the decisions file (Gate-1 passers).
-* ``main`` — decisions cells that are also live-``graduated`` (Gate 2), per
-  ``training.graduation``. Dormant (empty) until live metrics exist.
+``stat_meta.json`` (committed) holds the canonical per-cell shipping
+record. Humans edit ``shipped`` from ``"withheld"`` to ``"devel"`` when a
+cell clears Gate 1. This CLI handles the ``main`` promotion mechanically:
+when Gate-2 graduation runs, cells that pass move ``shipped: "devel"`` →
+``shipped: "main"`` and cells that fail demote back.
 
 Usage
 -----
-    poetry run generate-ship-config --branch devel
+    poetry run generate-ship-config --branch main          # mutate stat_meta in place
     poetry run generate-ship-config --branch main --dry-run
+    poetry run generate-ship-config --branch devel         # validate + summarize (no mutation)
     poetry run generate-ship-config --branch devel --prune
 """
 
@@ -32,104 +27,61 @@ from sportstradamus.helpers.io import (
     MODEL_STATS_PATH,
     prune_model_pickle,
 )
-from sportstradamus.training.baselines import STRATEGY_SLUGS
 from sportstradamus.training.graduation import graduated_cells
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.ship_config import (
-    GATE1_DECISIONS_PATH,
-    SHIP_CONFIG_PATH,
+    STAT_META_PATH,
     WITHHELD,
-    ShipConfig,
+    load_ship_config,
 )
 
 
-def load_decisions(path: Path) -> ShipConfig:
-    """Load and validate ``gate1_decisions.json``.
-
-    Args:
-        path: Path to the decisions JSON.
-
-    Returns:
-        Nested ``{league: {market: strategy}}`` map.
-
-    Raises:
-        ValueError: If any value is not a known strategy slug. The decisions
-            file records real strategies only — ``"withheld"`` is a generated
-            ship_config value, never a decision.
-    """
+def _load_meta(path: Path) -> dict[str, dict[str, dict]]:
+    if not path.exists():
+        return {}
     with open(path) as fh:
-        decisions: ShipConfig = json.load(fh)
-    for league, markets in decisions.items():
-        for market, strategy in markets.items():
-            if strategy not in STRATEGY_SLUGS:
-                raise ValueError(
-                    f"gate1_decisions.json: {league}/{market} has non-strategy "
-                    f"value {strategy!r}; valid: {STRATEGY_SLUGS}"
-                )
-    return decisions
+        return json.load(fh)
 
 
-def active_cells(
-    branch: str,
-    decisions: ShipConfig,
-    model_stats_path: Path,
-    live_metrics_path: Path,
-) -> set[tuple[str, str]]:
-    """Return the set of cells that serve on ``branch``.
-
-    Args:
-        branch: ``"devel"`` (all decisions) or ``"main"`` (decisions that are
-            also live-graduated).
-        decisions: Loaded decisions map.
-        model_stats_path: Gate-1 parquet path (only read for ``main``).
-        live_metrics_path: Gate-2 parquet path (only read for ``main``).
-
-    Returns:
-        Set of active ``(league, market)`` tuples.
-
-    Raises:
-        ValueError: If ``branch`` is neither ``"devel"`` nor ``"main"``.
-    """
-    decision_cells = {
-        (league, market) for league, markets in decisions.items() for market in markets
-    }
-    if branch == "devel":
-        return decision_cells
-    if branch == "main":
-        return decision_cells & graduated_cells(model_stats_path, live_metrics_path)
-    raise ValueError(f"unknown branch {branch!r}; expected 'devel' or 'main'")
+def _write_meta(path: Path, meta: dict) -> None:
+    with open(path, "w") as fh:
+        json.dump(meta, fh, indent=4)
+        fh.write("\n")
 
 
-def build_ship_config(decisions: ShipConfig, active: set[tuple[str, str]]) -> ShipConfig:
-    """Build an exhaustive ship_config over ``ALL_MARKETS``.
+def promote_for_main(
+    meta: dict[str, dict[str, dict]],
+    graduated: set[tuple[str, str]],
+) -> tuple[dict[str, dict[str, dict]], list[tuple[str, str, str, str]]]:
+    """Apply Gate-2 graduation to a stat_meta map.
 
-    Active cells get their decisions strategy; every other ``ALL_MARKETS`` cell
-    gets ``"withheld"``. Output is deterministic (leagues and markets sorted).
+    Cells in ``graduated`` move ``shipped: "devel"`` → ``shipped: "main"``.
+    Cells currently ``shipped: "main"`` that fall out of ``graduated``
+    demote back to ``shipped: "devel"``. ``"withheld"`` cells are
+    untouched (they have not passed Gate 1).
 
     Args:
-        decisions: Loaded decisions map (its strategies fill the active cells).
-        active: The set of active ``(league, market)`` tuples.
+        meta: Loaded stat_meta map (mutated in-place + returned).
+        graduated: Set of ``(league, market)`` tuples currently passing
+            Gate 2 per ``training.graduation``.
 
     Returns:
-        Nested ``{league: {market: strategy-or-withheld}}`` over all 96 cells.
-
-    Raises:
-        ValueError: If a decisions cell is not in ``ALL_MARKETS`` (typo guard).
+        ``(meta, changes)`` — the mutated map and the per-cell change log
+        as ``[(league, market, old_shipped, new_shipped), ...]``.
     """
-    for league, markets in decisions.items():
-        for market in markets:
-            if league not in ALL_MARKETS or market not in ALL_MARKETS[league]:
-                raise ValueError(f"decisions cell {league}/{market} not in ALL_MARKETS")
-    config: ShipConfig = {}
-    for league in sorted(ALL_MARKETS):
-        cell: dict[str, str] = {}
-        for market in sorted(ALL_MARKETS[league]):
-            if (league, market) in active:
-                cell[market] = decisions[league][market]
-            else:
-                cell[market] = WITHHELD
-        config[league] = cell
-    return config
+    changes: list[tuple[str, str, str, str]] = []
+    for league, markets in meta.items():
+        for market, cell in markets.items():
+            current = cell.get("shipped")
+            new = current
+            if (league, market) in graduated and current == "devel":
+                new = "main"
+            elif (league, market) not in graduated and current == "main":
+                new = "devel"
+            if new != current:
+                cell["shipped"] = new
+                changes.append((league, market, current, new))
+    return meta, changes
 
 
 @click.command()
@@ -137,24 +89,26 @@ def build_ship_config(decisions: ShipConfig, active: set[tuple[str, str]]) -> Sh
     "--branch",
     type=click.Choice(["devel", "main"]),
     required=True,
-    help="Which branch's gate to apply: 'devel' = Gate 1 passers, 'main' = graduated.",
+    help=(
+        "Gate to apply. 'main' promotes graduated cells (shipped:devel→main) "
+        "and demotes failed cells (shipped:main→devel) in stat_meta.json. "
+        "'devel' validates the current stat_meta + prints a summary; the "
+        "human curates devel promotions by hand."
+    ),
 )
 @click.option(
     "--prune/--no-prune",
     default=False,
-    help="Also delete every non-active cell's model pickle (immediate dark-out on this machine).",
+    help=(
+        "Delete every withheld cell's model pickle (immediate dark-out on "
+        "this machine). Honors the resolved branch policy."
+    ),
 )
 @click.option(
-    "--decisions",
+    "--meta",
     type=click.Path(path_type=Path),
     default=None,
-    help="Decisions JSON path (defaults to data/gate1_decisions.json).",
-)
-@click.option(
-    "--out",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output ship_config.json path (defaults to data/ship_config.json).",
+    help="stat_meta.json path (defaults to data/config/stat_meta.json).",
 )
 @click.option(
     "--model-stats",
@@ -169,40 +123,57 @@ def build_ship_config(decisions: ShipConfig, active: set[tuple[str, str]]) -> Sh
     help="Gate 2 parquet path (defaults to data/live_metrics_per_market.parquet). main only.",
 )
 @click.option(
-    "--dry-run", is_flag=True, default=False, help="Print the config; do not write or prune."
+    "--dry-run", is_flag=True, default=False, help="Print the changes; do not mutate or prune."
 )
-def main(branch, prune, decisions, out, model_stats, live_metrics, dry_run) -> None:
-    """Write an exhaustive, gate-driven ship_config.json for one branch."""
-    decisions_path = Path(decisions) if decisions else Path(str(GATE1_DECISIONS_PATH))
-    out_path = Path(out) if out else Path(str(SHIP_CONFIG_PATH))
+def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
+    """Promote / demote stat_meta entries based on gate state."""
+    meta_path = Path(meta) if meta else Path(str(STAT_META_PATH))
     model_stats_path = Path(model_stats) if model_stats else Path(str(MODEL_STATS_PATH))
     live_metrics_path = Path(live_metrics) if live_metrics else Path(str(LIVE_METRICS_PATH))
 
-    decisions_map = load_decisions(decisions_path)
-    active = active_cells(branch, decisions_map, model_stats_path, live_metrics_path)
-    config = build_ship_config(decisions_map, active)
+    meta_map = _load_meta(meta_path)
 
-    n_active = sum(1 for lg in config for mk in config[lg] if config[lg][mk] != WITHHELD)
-    n_withheld = sum(1 for lg in config for mk in config[lg] if config[lg][mk] == WITHHELD)
-    payload = json.dumps(config, indent=4, sort_keys=True)
-
-    if dry_run:
-        click.echo(payload)
-        click.echo(
-            f"# branch={branch} active={n_active} withheld={n_withheld} (dry-run, not written)"
+    if branch == "main":
+        graduated = graduated_cells(model_stats_path, live_metrics_path)
+        meta_map, changes = promote_for_main(meta_map, graduated)
+        if not changes:
+            click.echo(f"# branch=main: no shipping changes (graduated={len(graduated)} cells)")
+        else:
+            for league, market, old, new in changes:
+                click.echo(f"  {league}/{market}: shipped {old} -> {new}")
+            click.echo(
+                f"# branch=main: {len(changes)} shipping changes "
+                f"(graduated={len(graduated)} cells)"
+            )
+        if not dry_run and changes:
+            _write_meta(meta_path, meta_map)
+            click.echo(f"wrote {meta_path}")
+        elif dry_run:
+            click.echo("# (dry-run, not written)")
+    else:
+        # branch == "devel": validate + summarize.
+        config = load_ship_config(branch="devel", path=meta_path)
+        n_active = sum(
+            1 for lg in config for mk in config[lg] if config[lg][mk] != WITHHELD
         )
-        return
-
-    out_path.write_text(payload + "\n")
-    click.echo(f"wrote {out_path}: active={n_active} withheld={n_withheld} (branch={branch})")
+        n_withheld = sum(
+            1 for lg in config for mk in config[lg] if config[lg][mk] == WITHHELD
+        )
+        click.echo(
+            f"# branch=devel: active={n_active} withheld={n_withheld} "
+            f"(stat_meta.json validated; no mutation)"
+        )
 
     if prune:
+        # Use the resolved (post-mutation) config to decide what to prune.
+        config = load_ship_config(branch=branch, path=meta_path)
         pruned = 0
         for league in ALL_MARKETS:
             for market in ALL_MARKETS[league]:
-                if (league, market) not in active and prune_model_pickle(league, market):
+                cell = config.get(league, {}).get(market, WITHHELD)
+                if cell == WITHHELD and prune_model_pickle(league, market):
                     pruned += 1
-        click.echo(f"pruned {pruned} non-active pickles")
+        click.echo(f"pruned {pruned} withheld pickles")
 
 
 if __name__ == "__main__":

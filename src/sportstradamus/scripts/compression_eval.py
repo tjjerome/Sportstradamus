@@ -794,7 +794,7 @@ def _round_gate_value(v: float | None) -> float | None:
 
 @functools.lru_cache(maxsize=1)
 def _cached_ship_config() -> dict:
-    """Memoize the parsed ship_config so a full-audit loop hits disk once."""
+    """Memoize the parsed stat_meta ship policy so a full-audit loop hits disk once."""
     return load_ship_config()
 
 
@@ -802,10 +802,10 @@ def _resolve_decode_strategy(league: str, market_stem: str) -> str:
     """Look up the per-cell training strategy for a SkewNormal decode mirror.
 
     ``market_stem`` is the file-slug form (e.g. ``fantasy-points-prizepicks``)
-    that lives in the test_set CSV name; ``ship_config.json`` keys are the
+    that lives in the test_set CSV name; ``stat_meta.json`` keys are the
     raw market names with spaces, so we reverse the hyphenation done by
     :func:`helpers.io.market_file_slug` (line 81). Falls back to
-    ``ratio_meanyr`` when the cell isn't in ship_config (un-shipped cells
+    ``ratio_meanyr`` when the cell isn't shipped (un-shipped cells
     were trained under the ``--target-strategy`` default, which is
     ``ratio_meanyr``).
     """
@@ -851,7 +851,7 @@ def gate_row(
     # pooled-IQR estimator when per-row distribution params are present in df,
     # else falls back to the point estimator for back-compat (synthetic frames
     # in the golden tests). ``decode_strategy`` is the per-cell training
-    # strategy (ship_config lookup); ``strategy`` is just the run label kept
+    # strategy (stat_meta lookup); ``strategy`` is just the run label kept
     # for the row.
     g4_dist = _infer_dist_from_columns(df)
     decode_for_g4 = decode_strategy or strategy
@@ -1641,7 +1641,7 @@ def main(
         lg, _, mkt = stem.partition("_")
         df = load_test_set(path, pred_col)
         card = scorecard(df, pred_col, strategy=strategy, league=lg, market=mkt, n_deciles=deciles)
-        # Per-cell training strategy comes from ship_config (the source of
+        # Per-cell training strategy comes from stat_meta (the source of
         # truth for what `meditate` trained the cell with); the CLI
         # `--strategy` value is just the run label written into the row.
         decode_strategy = _resolve_decode_strategy(lg, mkt)
