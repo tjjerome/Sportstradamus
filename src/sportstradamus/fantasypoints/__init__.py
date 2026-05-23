@@ -21,6 +21,7 @@ from sportstradamus.fantasypoints.catalog import (
 from sportstradamus.fantasypoints.client import (
     FantasyPointsAuthError,
     FantasyPointsClient,
+    FantasyPointsDecodeError,
 )
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "EndpointSpec",
     "FantasyPointsAuthError",
     "FantasyPointsClient",
+    "FantasyPointsDecodeError",
     "load_catalog",
     "save_catalog",
 ]
