@@ -3,8 +3,8 @@
 The catalog is a JSON list at
 ``src/sportstradamus/data/config/fantasypoints_endpoints.json``. Each
 entry describes one tool's XHR endpoint and how its response should be
-written. ``params`` values may contain ``{week}`` / ``{season}``
-placeholders that the runner substitutes at fetch time.
+written. ``params`` and ``json_body`` values may contain ``{week}`` /
+``{season}`` placeholders that the runner substitutes at fetch time.
 
 Adding an endpoint: capture a ``curl`` command in DevTools (Network →
 right-click → Copy as cURL), then run
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +27,11 @@ CATALOG_PATH = Path(str(pkg_resources.files(data) / "config" / "fantasypoints_en
 
 # File extension per supported response format.
 _FORMAT_EXTENSIONS: dict[str, str] = {"json": ".json", "csv": ".csv", "html": ".html"}
+
+# Template placeholders the runner substitutes at fetch time. We only
+# touch a string if it actually contains one of these tokens so JSON
+# values with stray ``{`` / ``}`` are left alone.
+_TEMPLATE_TOKENS = ("{week}", "{season}")
 
 ResponseFormat = Literal["json", "csv", "html"]
 
@@ -40,6 +45,7 @@ class EndpointSpec:
     output_subdir: str
     method: str = "GET"
     params: dict[str, str] | None = None
+    json_body: dict | list | None = None
     extra_headers: dict[str, str] | None = None
     response_format: ResponseFormat = "json"
     weekly: bool = True
@@ -49,8 +55,23 @@ class EndpointSpec:
         """Resolve ``{season}`` / ``{week}`` placeholders in ``params``."""
         out: dict[str, str] = {}
         for k, v in (self.params or {}).items():
-            out[k] = v.format(season=season, week=week) if isinstance(v, str) else v
+            out[k] = _substitute(v, season=season, week=week) if isinstance(v, str) else v
         return out
+
+    def render_json_body(self, *, season: int, week: int) -> dict | list | None:
+        """Resolve ``{season}`` / ``{week}`` placeholders inside the JSON body.
+
+        Args:
+            season: NFL season year substituted for ``{season}`` tokens.
+            week: NFL week number substituted for ``{week}`` tokens.
+
+        Returns:
+            A deep copy of ``json_body`` with all template tokens replaced,
+            or ``None`` if the spec has no body.
+        """
+        if self.json_body is None:
+            return None
+        return _substitute_in_tree(self.json_body, season=season, week=week)
 
     def output_path(self, *, base: Path, season: int, week: int) -> Path:
         """Compose the on-disk path for one snapshot.
@@ -67,7 +88,7 @@ class EndpointSpec:
 
 # Field defaults that should not be persisted when they are empty —
 # keeps the on-disk catalog compact and reviewable.
-_OMIT_IF_EMPTY = ("params", "extra_headers", "notes")
+_OMIT_IF_EMPTY = ("params", "json_body", "extra_headers", "notes")
 
 
 def load_catalog(path: Path | None = None) -> list[EndpointSpec]:
@@ -98,3 +119,19 @@ def _spec_to_dict(spec: EndpointSpec) -> dict:
         if not payload.get(key):
             payload.pop(key, None)
     return payload
+
+
+def _substitute(value: str, *, season: int, week: int) -> str:
+    if any(token in value for token in _TEMPLATE_TOKENS):
+        return value.format(season=season, week=week)
+    return value
+
+
+def _substitute_in_tree(node, *, season: int, week: int):
+    if isinstance(node, str):
+        return _substitute(node, season=season, week=week)
+    if isinstance(node, dict):
+        return {k: _substitute_in_tree(v, season=season, week=week) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_substitute_in_tree(v, season=season, week=week) for v in node]
+    return node

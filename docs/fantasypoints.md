@@ -2,7 +2,7 @@
 
 `fp-fetch` walks a catalog of Fantasy Points Data Suite endpoints and
 writes each tool's response to disk every week. The catalog and the
-session cookie are the only two things you maintain.
+session token are the only two things you maintain.
 
 ## Before you start: legal
 
@@ -14,26 +14,34 @@ account suspension is a realistic risk if their ToS forbids this.
 
 ## One-time setup
 
-### 1. Grab a fresh session cookie
+### 1. Grab a fresh `Authorization` token
 
-In Chromium or Firefox:
+The Data Suite v2 API authenticates via a bearer-style `Authorization`
+header (not a cookie). You capture it once per session:
 
-1. Log in to <https://data.fantasypoints.com/>.
-2. Open DevTools → **Network** tab.
-3. Reload the page; click any request to `data.fantasypoints.com` in
-   the list.
-4. In the **Headers** panel scroll to **Request Headers** and copy the
-   full `Cookie:` value (everything after `Cookie: `, no quotes).
-5. Paste it into `src/sportstradamus/creds/keys.json`:
+1. Log in to <https://data.fantasypoints.com/> in a desktop browser.
+2. Open DevTools → **Network** tab, filter to **Fetch/XHR**.
+3. Click any tool (line matchups is fine) so the SPA fires its data
+   call.
+4. Click the request row in the Network list → **Headers** panel →
+   **Request Headers**. Copy the *value* of the `Authorization:`
+   header (everything after `Authorization: `).
+5. (Optional but recommended) Copy the `Cookie:` header value too —
+   some endpoints want analytics/session cookies alongside the token.
+6. Paste into `src/sportstradamus/creds/keys.json`:
 
 ```json
 {
-  "fantasypoints_cookie": "session=...; csrftoken=...; ..."
+  "fantasypoints_authorization": "Bearer eyJ...",
+  "fantasypoints_cookie": "_shopify_y=...; ..."
 }
 ```
 
 Optionally set `fantasypoints_user_agent` to your browser's UA in the
-same file — the default Chrome UA is fine for most users.
+same file — the default Firefox UA is fine for most users.
+
+The tokens rotate on a schedule we don't control. When they expire the
+weekly job alerts via Healthchecks.io and you redo this step.
 
 ### 2. Register the endpoints you want snapshotted
 
@@ -41,8 +49,8 @@ For each tool you care about:
 
 1. Open the tool in your browser with DevTools' **Network** tab open
    and filter by `Fetch/XHR`.
-2. Click around until the tool fires its data call (often on page
-   load, sometimes on a filter change).
+2. Click around until the tool fires its data call (usually on page
+   load).
 3. Right-click the XHR row → **Copy** → **Copy as cURL (bash)**.
 4. Paste into a temp file:
 
@@ -62,22 +70,36 @@ For each tool you care about:
    The endpoint lands in
    `src/sportstradamus/data/config/fantasypoints_endpoints.json`.
 
-If the captured URL contains week/season query params, `import-curl`
-keeps them literally — open the catalog JSON and rewrite them as
-`"{week}"` / `"{season}"` so the runner substitutes the current week:
+`import-curl` handles both GET and POST out of the box. POST requests
+with a `--data-raw '{...}'` JSON body are parsed and stored in the
+catalog as `json_body`. `Authorization`, `Cookie`, and `User-Agent`
+headers are stripped automatically (they come from `creds/keys.json`).
+
+If you want week/season substitution into the JSON body (FP's v2
+endpoints we've seen so far don't need this — the response carries
+all weeks and the SPA filters client-side), open the catalog JSON and
+replace literal values with `"{week}"` / `"{season}"`:
 
 ```json
 {
   "name": "line_matchups",
-  "url": "https://data.fantasypoints.com/api/nfl/team/line-matchups",
-  "params": {"week": "{week}", "season": "{season}"},
-  "output_subdir": "team/line_matchups"
+  "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
+  "method": "POST",
+  "output_subdir": "team/line_matchups",
+  "json_body": {
+    "context": {"grouping": "$team.teamId", "routeContext": "team"},
+    "filters": {"week": "{week}", "season": "{season}"},
+    "useCache": true
+  }
 }
 ```
 
-For season-long aggregates that should not be refetched per week, pass
-`--season-long` at `import-curl` time (or set `"weekly": false` in the
-catalog entry).
+Substitution works recursively through nested dicts and lists; only
+strings that contain `{week}` or `{season}` are touched.
+
+For season-long aggregates that should not be re-fetched per week,
+pass `--season-long` at `import-curl` time (or set `"weekly": false`
+in the catalog entry).
 
 ### 3. Verify locally
 
@@ -100,19 +122,20 @@ On the production box (see `CLAUDE.md` for the full crontab):
 
 Wednesday 10:00 server time — after Monday/Tuesday stat corrections
 settle, well before Sunday games. Set `HEALTHCHECK_URL_FP_FETCH` in
-the environment so cookie-expiry failures alert via Healthchecks.io.
+the environment so token-expiry failures alert via Healthchecks.io.
 
-## When the cookie expires
+## When the token expires
 
 The healthcheck alert (`/fail` ping with the last 50 log lines) will
 quote a message like:
 
 ```
-FP returned 401 for https://...  — session cookie is expired or missing.
-Refresh it in creds/keys.json; see docs/fantasypoints.md.
+FP returned 401 for POST https://...  — Authorization token is
+expired or missing. Refresh fantasypoints_authorization in
+creds/keys.json; see docs/fantasypoints.md.
 ```
 
-Re-run the cookie-capture step from §1 and rerun
+Re-run the token-capture step from §1 and rerun
 `poetry run fp-fetch run` once by hand to confirm.
 
 ## Output layout
