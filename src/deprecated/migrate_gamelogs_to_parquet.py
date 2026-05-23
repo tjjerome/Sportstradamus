@@ -1,3 +1,13 @@
+# ARCHIVED 2026-05-22 from src/sportstradamus/scripts/migrate_gamelogs_to_parquet.py
+# Reason: source files ({league}_data.dat klepto pickles) removed from the
+#   data package; this one-shot migration is complete.
+# Last live SHA: 9ec4ea2
+# Original imports (now unresolved here):
+#   import pickle
+#   import click
+#   import pandas as pd
+#   from sportstradamus.helpers.io import _gamelog_paths, read_gamelog, write_gamelog
+
 """One-shot migration: ``{league}_data.dat`` pickle -> parquet + JSON sidecar.
 
 Run once after deploying the parquet writers. The legacy ``.dat`` files are

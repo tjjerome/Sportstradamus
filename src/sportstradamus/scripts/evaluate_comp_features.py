@@ -439,7 +439,7 @@ def main():
     )
     args = parser.parse_args()
 
-    with open(pkg_resources.files(data) / "playerCompStats.json") as f:
+    with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
         current_weights = json.load(f)
 
     # Load league data once
@@ -645,7 +645,7 @@ def main():
             current_weights[args.league][position] = normalize_weights(equal_w)
 
     if args.save:
-        filepath = pkg_resources.files(data) / "playerCompStats.json"
+        filepath = pkg_resources.files(data) / "config" / "playerCompStats.json"
         with open(filepath, "w") as f:
             json.dump(current_weights, f, indent=4)
         print(f"\nSaved updated weights to {filepath}")

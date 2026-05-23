@@ -162,7 +162,7 @@ def meditate(
     ship_config = {} if deterministic else load_ship_config()
 
     if reset_markets.strip():
-        ff_path = pkg_resources.files(data) / "feature_filter.json"
+        ff_path = pkg_resources.files(data) / "config" / "feature_filter.json"
         with open(ff_path) as fh:
             ff = json.load(fh)
         for tok in [t.strip() for t in reset_markets.split(",") if t.strip()]:
@@ -259,7 +259,7 @@ def meditate(
         elif lg == "NHL":
             stat_data.dump_goalie_list()
 
-        with open(pkg_resources.files(data) / "book_weights.json", "w") as outfile:
+        with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
             json.dump(book_weights, outfile, indent=4)
 
         stat_data.update_player_comps()

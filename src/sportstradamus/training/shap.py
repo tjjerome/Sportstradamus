@@ -69,8 +69,8 @@ def compute_market_importance(league, market, model, test_df, distribution):
     shap_dict, corr_dict = _compute_shap_and_corr(model, test_df, distribution)
 
     col_name = f"{league}_{market.replace(' ', '-')}"
-    shap_path = pkg_resources.files(data) / "feature_importances.csv"
-    corr_path = pkg_resources.files(data) / "feature_correlations.csv"
+    shap_path = pkg_resources.files(data) / "training" / "feature_importances.csv"
+    corr_path = pkg_resources.files(data) / "training" / "feature_correlations.csv"
 
     shap_df = pd.read_csv(shap_path, index_col=0) if shap_path.is_file() else pd.DataFrame()
     corr_df = pd.read_csv(corr_path, index_col=0) if corr_path.is_file() else pd.DataFrame()
@@ -118,16 +118,16 @@ def see_features():
         .transpose()
     )
     df = _refresh_all_aggregates(df)
-    df.to_csv(pkg_resources.files(data) / "feature_importances.csv")
+    df.to_csv(pkg_resources.files(data) / "training" / "feature_importances.csv")
     pd.DataFrame(feature_correlations, index=[m[:-4] for m in model_list]).T.to_csv(
-        pkg_resources.files(data) / "feature_correlations.csv"
+        pkg_resources.files(data) / "training" / "feature_correlations.csv"
     )
 
 
 def _load_shap_corr_dfs():
     """Read SHAP + corr CSVs, drop ALL aggregate cols, return (shap_df, corr_df)."""
-    sp = pkg_resources.files(data) / "feature_importances.csv"
-    cp = pkg_resources.files(data) / "feature_correlations.csv"
+    sp = pkg_resources.files(data) / "training" / "feature_importances.csv"
+    cp = pkg_resources.files(data) / "training" / "feature_correlations.csv"
     shap_df = pd.read_csv(sp, index_col=0) if sp.is_file() else pd.DataFrame()
     corr_df = pd.read_csv(cp, index_col=0) if cp.is_file() else pd.DataFrame()
     if not shap_df.empty:
@@ -140,7 +140,7 @@ def _save_feature_filter() -> None:
     """Write the current feature_filter dict to feature_filter.json."""
     import json
 
-    with open(pkg_resources.files(data) / "feature_filter.json", "w") as outfile:
+    with open(pkg_resources.files(data) / "config" / "feature_filter.json", "w") as outfile:
         json.dump(feature_filter, outfile, indent=4)
 
 

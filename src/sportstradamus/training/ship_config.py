@@ -31,7 +31,7 @@ from sportstradamus.training.baselines import STRATEGY_SLUGS
 # Reserved config value: skip training this cell and prune its production pickle.
 WITHHELD = "withheld"
 
-SHIP_CONFIG_PATH = pkg_resources.files(data) / "ship_config.json"
+SHIP_CONFIG_PATH = pkg_resources.files(data) / "config" / "ship_config.json"
 
 # Canonical, branch-independent Gate-1 record (which cells passed + their
 # strategy). generate-ship-config reads this to synthesize ship_config.json.

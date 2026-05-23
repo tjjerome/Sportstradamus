@@ -4,13 +4,18 @@ import importlib.resources as pkg_resources
 import json
 import os.path
 import pickle
+import warnings
 from datetime import datetime, timedelta
+from io import StringIO
 from time import sleep
 
+import line_profiler
 import nba_api.stats.endpoints as nba
 import nfl_data_py as nfl
 import nflreadpy as nflr
 import numpy as np
+import pandas as pd
+import requests
 import statsapi as mlb
 from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
@@ -36,12 +41,6 @@ from sportstradamus.spiderLogger import logger
 
 archive = Archive()
 scraper = Scrape()
-import warnings
-from io import StringIO
-
-import line_profiler
-import pandas as pd
-import requests
 
 # flag to clean up gamelogs
 clean_data = False
@@ -192,8 +191,7 @@ class Stats:
         """Write current comps to the league's JSON file for inspection."""
         if not self.comps:
             return
-        filename = f"{self.league.lower()}_comps.json"
-        filepath = pkg_resources.files(data) / filename
+        filepath = pkg_resources.files(data) / "leagues" / self.league.lower() / "comps.json"
         with open(filepath, "w") as f:
             json.dump(self.comps, f, indent=4)
 

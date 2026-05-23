@@ -1,3 +1,21 @@
+# ARCHIVED 2026-05-22 from src/sportstradamus/scripts/migrate_pickle_to_parquet.py
+# Reason: source files (history.dat, parlay_hist.dat) removed from the data
+#   package; this one-shot migration is complete.
+# Last live SHA: 9ec4ea2
+# Original imports (now unresolved here):
+#   import click
+#   import pandas as pd
+#   from sportstradamus.helpers.io import (
+#       HISTORY_PATH,
+#       HISTORY_PICKLE_PATH,
+#       PARLAY_HIST_PATH,
+#       PARLAY_HIST_PICKLE_PATH,
+#       read_history,
+#       read_parlay_hist,
+#       write_history,
+#       write_parlay_hist,
+#   )
+
 """One-shot migration: history.dat / parlay_hist.dat -> parquet.
 
 Run once after deploying the parquet writers. The legacy `.dat` files are

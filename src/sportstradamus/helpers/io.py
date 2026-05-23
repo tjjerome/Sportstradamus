@@ -9,10 +9,8 @@ PyArrow needs a ``list<struct>`` for that, so the converters round-trip
 tuple <-> dict at the parquet boundary. Every other consumer of the column
 keeps its tuple-indexed semantics.
 
-Reads prefer parquet but fall back to the legacy ``.dat`` pickle when
-parquet is absent — this lets installs that haven't run the one-shot
-migration script keep working. Writes target parquet only; ``.dat`` files
-are read-only legacy.
+Writes target parquet only. The legacy ``.dat`` klepto pickles have been
+removed from the data package; readers no longer fall back to them.
 """
 
 from __future__ import annotations
@@ -20,7 +18,6 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import json
 import math
-import pickle
 from pathlib import Path
 
 import numpy as np
@@ -30,18 +27,18 @@ from sportstradamus import data
 
 # --- Canonical artifact paths ---
 # Dashboard reads these; pipelines write these. Single source of truth.
-HISTORY_PATH = pkg_resources.files(data) / "history.parquet"
-PARLAY_HIST_PATH = pkg_resources.files(data) / "parlay_hist.parquet"
-CURRENT_OFFERS_PATH = pkg_resources.files(data) / "current_offers.parquet"
-CURRENT_PARLAYS_PATH = pkg_resources.files(data) / "current_parlays.parquet"
-CURRENT_META_PATH = pkg_resources.files(data) / "current_meta.json"
-MODEL_STATS_PATH = pkg_resources.files(data) / "model_stats.parquet"
-LIVE_METRICS_PATH = pkg_resources.files(data) / "live_metrics_per_market.parquet"
-
-# Legacy pickle paths kept as read-only fallback until the parquet migration
-# has run on every install.
-HISTORY_PICKLE_PATH = pkg_resources.files(data) / "history.dat"
-PARLAY_HIST_PICKLE_PATH = pkg_resources.files(data) / "parlay_hist.dat"
+# Layout: data/config/ (live configs), data/runtime/ (job state),
+# data/training/ (training outputs), data/leagues/{league}/ (per-league files),
+# data/models/ (model pickles).
+_RUNTIME_DIR = pkg_resources.files(data) / "runtime"
+_TRAINING_DIR = pkg_resources.files(data) / "training"
+HISTORY_PATH = _RUNTIME_DIR / "history.parquet"
+PARLAY_HIST_PATH = _RUNTIME_DIR / "parlay_hist.parquet"
+CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
+CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
+CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
+MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
+LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes one to dark-out a withheld cell.
@@ -148,14 +145,6 @@ def read_parquet_safe(path) -> pd.DataFrame:
     return pd.read_parquet(p, engine="pyarrow")
 
 
-def _read_pickle_fallback(path) -> pd.DataFrame:
-    """Return pickle contents or an empty DataFrame if the file is absent."""
-    p = Path(str(path))
-    if not p.is_file():
-        return pd.DataFrame()
-    return pd.read_pickle(p)
-
-
 # ---------------------------------------------------------------------------
 # History.Offers <-> parquet struct
 # ---------------------------------------------------------------------------
@@ -207,10 +196,8 @@ def write_history(df: pd.DataFrame) -> None:
 
 
 def read_history() -> pd.DataFrame:
-    """Read the prediction history. Falls back to ``history.dat`` on miss."""
+    """Read the prediction history."""
     df = read_parquet_safe(HISTORY_PATH)
-    if df.empty:
-        df = _read_pickle_fallback(HISTORY_PICKLE_PATH)
     if df.empty:
         return df
     if "Offers" in df.columns:
@@ -247,10 +234,8 @@ def write_parlay_hist(df: pd.DataFrame) -> None:
 
 
 def read_parlay_hist() -> pd.DataFrame:
-    """Read the parlay history. Falls back to ``parlay_hist.dat`` on miss."""
+    """Read the parlay history."""
     df = read_parquet_safe(PARLAY_HIST_PATH)
-    if df.empty:
-        df = _read_pickle_fallback(PARLAY_HIST_PICKLE_PATH)
     if df.empty:
         return df
     for col in _PARLAY_LIST_COLS:
@@ -263,7 +248,7 @@ def read_parlay_hist() -> pd.DataFrame:
 # Upcoming-events ledger (close-line scheduler input)
 # ---------------------------------------------------------------------------
 
-UPCOMING_EVENTS_PATH = pkg_resources.files(data) / "upcoming_events.json"
+UPCOMING_EVENTS_PATH = _RUNTIME_DIR / "upcoming_events.json"
 
 
 def read_upcoming_events() -> list[dict]:
@@ -293,13 +278,12 @@ def _has_nan(values) -> bool:
 
 def _gamelog_paths(league: str):
     league = league.lower()
-    base = pkg_resources.files(data)
+    base = pkg_resources.files(data) / "leagues" / league
     return {
-        "gamelog": base / f"{league}_gamelog.parquet",
-        "teamlog": base / f"{league}_teamlog.parquet",
-        "players_json": base / f"{league}_players.json",
-        "players_parquet": base / f"{league}_players.parquet",
-        "legacy_pickle": base / f"{league}_data.dat",
+        "gamelog": base / "gamelog.parquet",
+        "teamlog": base / "teamlog.parquet",
+        "players_json": base / "players.json",
+        "players_parquet": base / "players.parquet",
     }
 
 
@@ -404,9 +388,8 @@ def _read_players(paths):
 def read_gamelog(league: str) -> dict:
     """Return ``{"players", "gamelog", "teamlog"}`` for the league.
 
-    Reads parquet first; falls back to ``{league}_data.dat`` pickle if the
-    parquet files are absent. Mirrors ``read_history`` so installs that
-    haven't run the migration script keep working.
+    Returns empty DataFrames and an empty ``players`` dict when the parquet
+    files are absent.
     """
     paths = _gamelog_paths(league)
     gp = Path(str(paths["gamelog"]))
@@ -422,19 +405,6 @@ def read_gamelog(league: str) -> dict:
         if players is None:
             players = {}
         return {"players": players, "gamelog": gamelog, "teamlog": teamlog}
-
-    legacy = Path(str(paths["legacy_pickle"]))
-    if legacy.is_file():
-        with legacy.open("rb") as f:
-            obj = pickle.load(f)
-        if isinstance(obj, dict):
-            return {
-                "players": obj.get("players", {}),
-                "gamelog": obj.get("gamelog", pd.DataFrame()),
-                "teamlog": obj.get("teamlog", pd.DataFrame()),
-            }
-        # NFL legacy format pre-dates the dict wrapper: a bare gamelog DataFrame.
-        return {"players": {}, "gamelog": obj, "teamlog": pd.DataFrame()}
 
     return {"players": {}, "gamelog": pd.DataFrame(), "teamlog": pd.DataFrame()}
 

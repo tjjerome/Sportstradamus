@@ -777,7 +777,7 @@ class StatsMLB(Stats):
         self.teamlog = mlb_data["teamlog"]
         self.players = mlb_data["players"]
 
-        filepath = pkg_resources.files(data) / "park_factor.json"
+        filepath = pkg_resources.files(data) / "config" / "park_factor.json"
         if os.path.isfile(filepath):
             with open(filepath) as infile:
                 self.park_factors = json.load(infile)
