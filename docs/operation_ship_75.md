@@ -22,13 +22,13 @@ goes to production once it proves it — Tier-0 gate offline → 14-day
 Gate-2 soak live → graduate. A cell promoted but still in 14-day soak
 counts toward the 75% numerator (ship-incrementally).
 
-## Current state (scorecard snapshot 2026-05-23, post-Step-0 audit)
+## Current state (scorecard snapshot 2026-05-23, post-Step-0.5 audit)
 
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
-| NBA | 13 | 21 | 62% | 16 | **−3** |
-| NFL | 9 | 20 | 45% | 15 | **−6** |
-| WNBA | 10 | 18 | 56% | 14 | **−4** |
+| NBA | 18 | 21 | 86% | 16 | **+2** |
+| NFL | 11 | 20 | 55% | 15 | **−4** |
+| WNBA | 12 | 18 | 67% | 14 | **−2** |
 
 Source: [`data/training/tier0_scorecard.csv`](../src/sportstradamus/data/training/tier0_scorecard.csv),
 strategy `ship75-step0-g4audit-2026-05-23`. `ship = g1_pass AND g2_pass AND
@@ -61,6 +61,57 @@ the equal-mass ECE ceiling (0.075). Step 1 (post-hoc bias correction)
 must extend to ECE-driven post-hoc calibration of `P` (probabilities),
 not just mean bias.
 
+## Step 0.5 — Lifecycle gate audit (G5 + S3 fixes; DONE 2026-05-23)
+
+Triggered by the user-requested objective audit of the remaining four
+gates after Step 0. Brief at `/tmp/researcher_lifecycle_gate_audit.md`.
+
+**Verdicts:**
+
+- G1 paired-Brier CI = **SOUND** (re-audited at user request — brief at
+  `/tmp/researcher_g1_audit.md`). 88 % pass rate is genuine: paired
+  correctly, effectively one-sided α=0.025, MDE 1 % on full-season
+  cells / 2–3 % on NFL-N≈400. All 7 failures have CIs straddling zero.
+  No block-bootstrap fix is currently constructible — `test_set` CSVs
+  lack a `Date` column. Backlog: schema upgrade enables block bootstrap
+  for both offline G1 and live Gate-2.
+- G2 star-bias z, G3 bench-bias z = SOUND. Closed-form 2-sample z on
+  inflation-conditional means; thresholds calibrated to ½ σ.
+- G4 IQR ratio = SOUND post-Step-0 (analytical IQR, pooled).
+- G5 equal-mass ECE = **DEFECT (false-fails)**. Raw equal-mass ECE is
+  positively biased at finite N — the bias scales O(1/√N_bin) and
+  falsely fails up to 44.6 % of perfectly-calibrated NFL-N≈240 cells.
+  Per [Roelofs 2022], the fix is to subtract the matched null-bias
+  offset estimated via Monte-Carlo bootstrap under
+  `y ~ Bernoulli(p_model)`.
+- S2 paired Brier CI = SOUND.
+- S3 paired Sharpe (`sc > sb`) = **DEFECT (coin-flip)**. Bare ratio
+  comparison has ~50 % Type-I rate. Per [Memmel 2003], replace with the
+  closed-form paired-Sharpe z and ship at `z > 1.645` (one-sided
+  α=0.05).
+
+**Step 0.5 implementation:**
+
+- `_ece_debias_offset(p_model)` — 200-resample Monte-Carlo null bias.
+- `_gate5_ece_debiased(p_model, y)` — `raw_ECE - offset`.
+- `apply_thresholds` now reads `g5_ece_debiased` (was raw `g5_ece`).
+  Falls back to raw if the debiased column is absent.
+- `_memmel_sharpe_z(b, c) -> (SR_b, SR_c, z)` — closed-form paired-Sharpe z.
+- `_supersede_paired_sharpe` returns the z; `supersede_verdict.s3_pass`
+  fires on `z > _SUPERSEDE_S3_Z_MIN = 1.645`.
+
+**Step 0.5 recovery (9 cells flip to ship, 0 break):**
+
+- NBA flips (5): BLST, DREB, FG3M, FGM, TOV (all g5 raw 0.077–0.091,
+  debiased 0.04–0.064; gate threshold 0.075).
+- NFL flips (2): passing-first-downs (raw 0.095 → debiased 0.025),
+  passing-yards (raw 0.093 → debiased 0.030).
+- WNBA flips (2): DREB (raw 0.083 → debiased 0.057), STL (raw 0.096 →
+  debiased 0.070).
+
+**Counts after Step 0.5:** NBA 18/21 (PAST 75 % target of 16),
+NFL 11/20 (need +4 more), WNBA 12/18 (need +2 more). Total 41/59 = 69 %.
+
 ## Lifecycle table (operator maintains this)
 
 Status values:
@@ -79,7 +130,7 @@ Lever-attempts counter is the safety on the per-cell pivot policy. User
 mandate: *push every cell until it ships OR fails ≥ 4 levers — no easy
 out.*
 
-**NBA — 13/21 shipped post-Step-0, need +3 to hit 16/21**
+**NBA — 18/21 shipped post-Step-0.5, PAST 75 % target of 16/21**
 
 | Market | Family | Status | Strategy | Gates failing | Next step | Levers |
 |---|---|---|---|---|---|---|
@@ -96,20 +147,20 @@ out.*
 | FTM | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.36→0.67) | Step 0.3 promote | 0 |
 | OREB | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g1 auto-pass, g4 0.49→1.00) | Step 0.3 promote | 0 |
 | STL | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.41→1.00) | Step 0.3 promote | 0 |
-| BLST | ZINB | g5-fail | `ratio_meanyr` | g5 (0.09); g4 now 1.00 | Step 1 ECE calibration | 0 |
-| DREB | SkewNormal | g5-fail | `ratio_meanyr` | g5 (0.087); g4 0.65 | Step 1 ECE calibration | 0 |
-| FG3M | ZINB | g5-fail | `ratio_meanyr` | g5 (0.077); g4 now 1.00 | Step 1 ECE calibration | 0 |
-| FGA | SkewNormal | g2+g5-fail | `ratio_meanyr` | g2 (z=0.91 star bias), g5 (0.093) | Step 1 isotonic + ECE | 0 |
-| FGM | SkewNormal | g5-fail | `ratio_meanyr` | g5 (0.08); g4 0.66 | Step 1 ECE calibration | 0 |
-| PF | ZINB | g5-fail | `ratio_meanyr` | g1 (no odds → auto-pass), g5 (0.147) | Step 1 ECE calibration | 0 |
-| TOV | ZINB | g5-fail | `ratio_meanyr` | g5 (0.078); g4 now 1.00 | Step 1 ECE calibration | 0 |
-| fantasy-points-prizepicks | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52); g4 now 0.76 | Step 1 isotonic | 0 |
+| BLST | ZINB | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.091→0.064 debiased) | Step 0.5 promote | 0 |
+| DREB | SkewNormal | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.087→0.061 debiased) | Step 0.5 promote | 0 |
+| FG3M | ZINB | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.077→0.053 debiased) | Step 0.5 promote | 0 |
+| FGA | SkewNormal | g5-fail | `ratio_meanyr` | g5 debiased 0.067 (raw 0.093); g2 z=0.91 | Step 1 isotonic + ECE | 0 |
+| FGM | SkewNormal | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.080→0.054 debiased) | Step 0.5 promote | 0 |
+| PF | ZINB | g5-fail | `ratio_meanyr` | g5 debiased 0.121 (raw 0.147); g1 auto-pass | Step 1 ECE calibration | 0 |
+| TOV | ZINB | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.078→0.049 debiased) | Step 0.5 promote | 0 |
+| fantasy-points-prizepicks | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52); g5 0.032 debiased | Step 1 isotonic | 0 |
 
-**WNBA — 10/18 (no change post-Step-0), need +4 to hit 14/18**
+**WNBA — 12/18 shipped post-Step-0.5, need +2 to hit 14/18**
 
-WNBA G4 audit recovered 5/8 failing cells onto G4-pass, but every one
-still fails another gate (mostly G5 ECE). No net shipping recovery yet;
-Step 1 is the lever.
+Step 0.5 G5 debias flipped 2 cells (DREB, STL) to ship. Six WNBA cells
+still kill on non-G5 gates (AST g3-fail, BLK g3+g4-fail, BLST g5-fail,
+FG3M g4-fail, PRA g1-fail, TOV g5-fail) — Step 1 attacks these.
 
 | Market | Family | Status | Strategy | Gates failing | Next step | Levers |
 |---|---|---|---|---|---|---|
@@ -125,14 +176,14 @@ Step 1 is the lever.
 | fantasy-points-prizepicks | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
 | AST | SkewNormal | g3-fail | `ratio_meanyr` | g3 (z=0.59); g4 now 0.70 | Step 1 affine ROE (bench) | 0 |
 | BLK | ZINB | g3+g4-fail | `ratio_meanyr` | g3 (z=0.61), g4 (0.00 — under-spread, model over-pinned at 0) | Step 1 + dispersion review | 0 |
-| BLST | ZINB | g5-fail | `ratio_meanyr` | g5 (0.12); g4 now 1.00 | Step 1 ECE calibration | 0 |
-| DREB | SkewNormal | g5-fail | `centered_additive_mean10` | g5 (0.083); g4 now 0.64 | Step 1 ECE calibration | 0 |
+| BLST | ZINB | g5-fail | `ratio_meanyr` | g5 debiased 0.095 (raw 0.121) | Step 1 ECE calibration | 0 |
+| DREB | SkewNormal | ready (Step 0.5 flip) | `centered_additive_mean10` | — (g5 0.083→0.057 debiased) | Step 0.5 promote | 0 |
 | FG3M | ZINB | g4-fail | `ratio_meanyr` | g4 (0.50, borderline) | Step 1 + Step 4 widen | 0 |
 | PRA | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI=0.0028, barely fails) | Step 4 widen OR retrain | 0 |
-| STL | ZINB | g5-fail | `ratio_meanyr` | g5 (0.096); g4 now 1.00 | Step 1 ECE calibration | 0 |
-| TOV | ZINB | g5-fail | `ratio_meanyr` | g5 (0.12); g4 now 1.00 | Step 1 ECE calibration | 0 |
+| STL | ZINB | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.096→0.070 debiased) | Step 0.5 promote | 0 |
+| TOV | ZINB | g5-fail | `ratio_meanyr` | g5 debiased 0.095 (raw 0.121) | Step 1 ECE calibration | 0 |
 
-**NFL — 9/20 shipped post-Step-0, need +6 to hit 15/20**
+**NFL — 11/20 shipped post-Step-0.5, need +4 to hit 15/20**
 
 | Market | Family | Status | Strategy | Gates failing | Next step | Levers |
 |---|---|---|---|---|---|---|
@@ -149,8 +200,8 @@ Step 1 is the lever.
 | carries | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.89 | Step 4 small-n widen | 0 |
 | completions | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.76 | Step 4 small-n widen | 0 |
 | interceptions | ZINB | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.09); g4 now 1.00 | Step 1 affine + Step 4 | 0 |
-| passing-first-downs | SkewNormal | g5-fail | `centered_additive_eb_meanyr_k10` | g5 (0.095); g4 now 0.69 | Step 1 ECE calibration | 0 |
-| passing-yards | SkewNormal | g5-fail | `ratio_meanyr` | g5 (0.093) | Step 1 affine ROE | 0 |
+| passing-first-downs | SkewNormal | ready (Step 0.5 flip) | `centered_additive_eb_meanyr_k10` | — (g5 0.095→0.025 debiased) | Step 0.5 promote | 0 |
+| passing-yards | SkewNormal | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.093→0.030 debiased) | Step 0.5 promote | 0 |
 | qb-tds | ZINB | g2+g5-fail | `ratio_meanyr` | g2 (z=0.83), g5 (0.096); g4 now 1.00 | Step 1 isotonic + ECE | 0 |
 | qb-yards | SkewNormal | g2+g5-fail | `ratio_meanyr` | g2 (z=0.68), g5 (0.174); g4 1.18 | Step 1 isotonic | 0 |
 | rushing-yards | SkewNormal | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.092); g4 18.7 (over-spread) | Step 4 + dispersion ceiling | 0 |
