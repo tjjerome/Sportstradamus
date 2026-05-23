@@ -73,10 +73,10 @@ def report() -> None:
             _cal = json.load(f)
     else:
         _cal = {}
-    stat_cv = {lg: {m: cell.get("cv", 1.0) for m, cell in mkts.items()} for lg, mkts in _cal.items()}
-    stat_std = {
-        lg: {m: cell.get("std") for m, cell in mkts.items()} for lg, mkts in _cal.items()
+    stat_cv = {
+        lg: {m: cell.get("cv", 1.0) for m, cell in mkts.items()} for lg, mkts in _cal.items()
     }
+    stat_std = {lg: {m: cell.get("std") for m, cell in mkts.items()} for lg, mkts in _cal.items()}
 
     with open(pkg_resources.files(data) / "training" / "training_report.txt", "w") as f:
         league_models = {}
