@@ -2,8 +2,10 @@
     "NBA": {
         "AST": "ratio_meanyr",
         "BLK": "ratio_meanyr",
+        "BLST": "ratio_meanyr",
         "DREB": "ratio_meanyr",
         "FG3A": "ratio_meanyr",
+        "FG3M": "ratio_meanyr",
         "FGA": "ratio_meanyr",
         "FGM": "ratio_meanyr",
         "FTM": "ratio_meanyr",
@@ -16,6 +18,7 @@
         "RA": "ratio_meanyr",
         "REB": "ratio_meanyr",
         "STL": "ratio_meanyr",
+        "TOV": "ratio_meanyr",
         "fantasy points prizepicks": "ratio_meanyr"
     },
     "WNBA": {
@@ -28,6 +31,7 @@
         "PTS": "ratio_meanyr",
         "RA": "ratio_meanyr",
         "REB": "ratio_meanyr",
+        "STL": "ratio_meanyr",
         "fantasy points prizepicks": "ratio_meanyr"
     },
     "NFL": {

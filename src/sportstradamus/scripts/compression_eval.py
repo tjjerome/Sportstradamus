@@ -101,12 +101,23 @@ _ECE_BINS: int = 10
 #   G2 star  z < 0.5 : top-mean-decile bias under half the segment's stdev of outcomes
 #   G3 bench z < 0.5 : bottom-quartile bias under half the segment's stdev of outcomes
 #   G4 iqr_ratio > 0.5: prediction IQR at least half the truth's (<= 50% compression)
-#   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5%
+#   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5% (Roelofs-debiased: raw - null bias offset)
 _GATE1_CI_HI_MAX: float = 0.0
 _GATE2_STAR_Z_MAX: float = 0.5
 _GATE3_BENCH_Z_MAX: float = 0.5
 _GATE4_IQR_RATIO_MIN: float = 0.5
 _GATE5_ECE_MAX: float = 0.075
+
+# Gate 5 debias — Roelofs (2022) "Mitigating Bias in Calibration Error
+# Estimation". Equal-mass ECE is positively biased at finite N; the bias
+# scales O(1/sqrt(N_bin)) and falsely fails ~45% of perfectly calibrated
+# NFL-N≈240 cells per the lifecycle gate audit at /tmp/researcher_lifecycle_gate_audit.md.
+# Fix: bootstrap-estimate the null bias by drawing y ~ Bernoulli(p_model)
+# and subtracting the mean of those null ECEs from the raw ECE.
+_GATE5_DEBIAS_RESAMPLES: int = 200
+# Distinct from _GATE1_SEED so the null draws don't correlate with the
+# Gate-1 paired-Brier bootstrap on the same probabilities.
+_GATE5_DEBIAS_SEED: int = 9173
 
 # Breadth target — at least this fraction of each league's markets should clear the
 # 5 gates (docs/ship_gate.md "Top priority"). Drives the per-league rollup.
@@ -704,6 +715,61 @@ def _gate5_ece_equal_mass(p_model: np.ndarray, y: np.ndarray, n_bins: int = _ECE
     return float(ece)
 
 
+def _ece_debias_offset(
+    p_model: np.ndarray,
+    *,
+    n_resamples: int = _GATE5_DEBIAS_RESAMPLES,
+    rng: np.random.Generator | None = None,
+) -> float:
+    """Roelofs (2022) Monte-Carlo bias correction for the equal-mass ECE.
+
+    The binned ECE estimator is positively biased at finite N — even a
+    perfectly calibrated model produces ``_gate5_ece_equal_mass > 0``
+    because sampling noise in each bin's mean-``y`` inflates
+    ``|mean_p - mean_y|``. Per the lifecycle gate audit at
+    ``/tmp/researcher_lifecycle_gate_audit.md`` this falsely fails up to
+    44.6 % of perfectly calibrated NFL-N≈240 cells.
+
+    The fix: estimate the bias as the expected ECE under the null
+    hypothesis that ``p_model`` IS the calibration, by drawing
+    ``y ~ Bernoulli(p_model)`` ``n_resamples`` times and averaging the
+    resulting ECEs. Subtract that offset from the raw ECE in
+    :func:`_gate5_ece_debiased`. Returns ``nan`` on empty input.
+    """
+    if rng is None:
+        rng = np.random.default_rng(_GATE5_DEBIAS_SEED)
+    p = np.clip(np.asarray(p_model, dtype=float), 0.0, 1.0)
+    if len(p) == 0:
+        return float("nan")
+    eces = np.empty(n_resamples, dtype=float)
+    for i in range(n_resamples):
+        y_null = (rng.uniform(size=len(p)) < p).astype(float)
+        eces[i] = _gate5_ece_equal_mass(p, y_null)
+    return float(np.nanmean(eces))
+
+
+def _gate5_ece_debiased(
+    p_model: np.ndarray,
+    y: np.ndarray,
+    *,
+    n_resamples: int = _GATE5_DEBIAS_RESAMPLES,
+    rng: np.random.Generator | None = None,
+) -> float:
+    """Raw equal-mass ECE minus the Roelofs (2022) null-distribution offset.
+
+    ``raw_ECE - mean_null_ECE`` removes the binning-noise floor while
+    preserving genuine miscalibration signal. Falls back to the raw ECE
+    if either term is non-finite (degenerate inputs).
+    """
+    raw = _gate5_ece_equal_mass(p_model, y)
+    if not np.isfinite(raw):
+        return raw
+    offset = _ece_debias_offset(p_model, n_resamples=n_resamples, rng=rng)
+    if not np.isfinite(offset):
+        return raw
+    return float(raw - offset)
+
+
 # Scatter plot output settings. DPI and figure size are presentation choices,
 # not model parameters; named here so they are easy to find and adjust.
 _SCATTER_DPI: int = 110
@@ -816,11 +882,29 @@ def gate_row(
     # P or Line is missing entirely; that's "couldn't compute", NOT auto-pass.
     cal_in = _calibration_inputs(df)
     if cal_in is None:
-        g5_ece = g5_ece_o = None
+        g5_ece = g5_ece_o = g5_ece_db = g5_ece_db_o = g5_ece_bias = None
     else:
         p_model_c, y_c = cal_in
         g5_ece = _gate5_ece_equal_mass(p_model_c, y_c)
         g5_ece_o = _gate5_ece_equal_mass(y_c, y_c)
+        # Roelofs (2022) bias-correction. Per the lifecycle gate audit the
+        # raw equal-mass ECE falsely fails ~45% of perfectly calibrated
+        # NFL-N≈240 cells; the debiased variant is the one apply_thresholds
+        # actually checks. The model-row offset uses the model's own
+        # probabilities; the oracle row uses the deterministic 0/1 prediction
+        # ``p = y`` and so its null offset is structurally tiny.
+        g5_ece_bias = _ece_debias_offset(p_model_c)
+        g5_ece_db = (
+            float(g5_ece - g5_ece_bias)
+            if np.isfinite(g5_ece) and np.isfinite(g5_ece_bias)
+            else g5_ece
+        )
+        oracle_bias = _ece_debias_offset(y_c)
+        g5_ece_db_o = (
+            float(g5_ece_o - oracle_bias)
+            if np.isfinite(g5_ece_o) and np.isfinite(oracle_bias)
+            else g5_ece_o
+        )
 
     r = _round_gate_value
     return {
@@ -853,6 +937,9 @@ def gate_row(
         "g4_iqr_ratio_oracle": r(g4_ratio_oracle),
         "g5_ece": r(g5_ece),
         "g5_ece_oracle": r(g5_ece_o),
+        "g5_ece_null_bias": r(g5_ece_bias),
+        "g5_ece_debiased": r(g5_ece_db),
+        "g5_ece_debiased_oracle": r(g5_ece_db_o),
     }
 
 
@@ -879,7 +966,9 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     g3_pass = g3 is not None and g3 < _GATE3_BENCH_Z_MAX
     g4 = out.get("g4_iqr_ratio")
     g4_pass = g4 is not None and g4 > _GATE4_IQR_RATIO_MIN
-    g5 = out.get("g5_ece")
+    # Gate 5 reads the Roelofs-debiased ECE (raw - null offset). Falls back
+    # to raw ECE if the debiased column is absent (synthetic golden frames).
+    g5 = out.get("g5_ece_debiased", out.get("g5_ece"))
     g5_pass = g5 is not None and g5 < _GATE5_ECE_MAX
     out["g1_pass"] = g1_pass
     out["g2_pass"] = g2_pass
@@ -934,7 +1023,8 @@ def _gate_headline(row: dict[str, object]) -> str:
         f"G1 brier_diff {f('g1_brier_diff_mean')} "
         f"[{f('g1_brier_diff_ci_lo')}, {f('g1_brier_diff_ci_hi')}]  "
         f"G2 star_z {f('g2_star_z', '.2f')}  G3 bench_z {f('g3_bench_z', '.2f')}  "
-        f"G4 iqr_ratio {f('g4_iqr_ratio', '.3f')}  G5 ece {f('g5_ece', '.4f')}"
+        f"G4 iqr_ratio {f('g4_iqr_ratio', '.3f')}  "
+        f"G5 ece_db {f('g5_ece_debiased', '.4f')} (raw {f('g5_ece', '.4f')})"
     )
     if row.get("g1_brier_diff_mean") is None:
         head += "  (no Odds; G1 auto-pass)"
@@ -958,8 +1048,14 @@ _SUPERSEDE_S2_SEED: int = 2027
 _SUPERSEDE_BOOK_P_FLOOR: float = 0.05
 _SUPERSEDE_BOOK_P_CEILING: float = 0.95
 # Initial bankroll for the paired Sharpe sim — units arbitrary; the gate compares
-# RATIOS (sharpe_new > sharpe_current), so absolute dollars are immaterial.
+# Sharpe ratios via Memmel inference, so absolute dollars are immaterial.
 _SUPERSEDE_S3_INITIAL_BANKROLL: float = 1000.0
+
+# S3 Memmel (2003) paired Sharpe z critical value. Per the lifecycle gate audit
+# the bare ``sharpe_c > sharpe_b`` rule has ~50 % Type-I rate; switching to a
+# one-sided z > 1.645 test at α = 0.05 restores nominal coverage. Reference:
+# Memmel (2003), "Performance Hypothesis Testing with the Sharpe Ratio".
+_SUPERSEDE_S3_Z_MIN: float = 1.645
 
 
 def _supersede_paired_brier_ci(
@@ -1052,18 +1148,72 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     )
 
 
+def _memmel_sharpe_z(
+    b_returns: np.ndarray, c_returns: np.ndarray
+) -> tuple[float, float, float]:
+    """Memmel (2003) closed-form test for the difference of paired Sharpe ratios.
+
+    Given paired return series with means μ_b, μ_c, stdevs σ_b, σ_c, and
+    Pearson correlation ρ, the z-statistic for ``SR_c - SR_b`` is::
+
+        Var(SR_c - SR_b) ≈ (1 / T) * (
+            2 * (1 - ρ)
+            + 0.5 * (SR_b² + SR_c²)
+            - SR_b * SR_c * (ρ² + 0.5 * (1 + ρ²))
+        )
+        z = (SR_c - SR_b) / sqrt(Var)
+
+    Replaces the bare ``sharpe_c > sharpe_b`` rule, which the lifecycle gate
+    audit measured at ~50 % Type-I rate. Returns ``(SR_b, SR_c, z)``.
+    Degenerate inputs (zero variance, length < 2, non-finite variance) return
+    ``z = 0`` rather than raising — the caller treats those as "no
+    information, hold".
+
+    Reference: Memmel, C. (2003), "Performance Hypothesis Testing with the
+    Sharpe Ratio", Finance Letters 1:21–23.
+    """
+    b = np.asarray(b_returns, dtype=float)
+    c = np.asarray(c_returns, dtype=float)
+    n = min(len(b), len(c))
+    if n < 2:
+        return 0.0, 0.0, 0.0
+    b = b[:n]
+    c = c[:n]
+    sd_b = float(np.std(b, ddof=0))
+    sd_c = float(np.std(c, ddof=0))
+    sr_b = float(np.mean(b)) / sd_b if sd_b > 0 else 0.0
+    sr_c = float(np.mean(c)) / sd_c if sd_c > 0 else 0.0
+    if sd_b == 0.0 or sd_c == 0.0:
+        return sr_b, sr_c, 0.0
+    rho = float(np.corrcoef(b, c)[0, 1])
+    if not np.isfinite(rho):
+        rho = 0.0
+    var = (1.0 / n) * (
+        2.0 * (1.0 - rho)
+        + 0.5 * (sr_b ** 2 + sr_c ** 2)
+        - sr_b * sr_c * (rho ** 2 + 0.5 * (1.0 + rho ** 2))
+    )
+    if not np.isfinite(var) or var <= 0.0:
+        return sr_b, sr_c, 0.0
+    z = (sr_c - sr_b) / float(np.sqrt(var))
+    if not np.isfinite(z):
+        return sr_b, sr_c, 0.0
+    return sr_b, sr_c, float(z)
+
+
 def _supersede_paired_sharpe(
     b_df: pd.DataFrame, c_df: pd.DataFrame, pred_col: str
-) -> tuple[float, float] | None:
-    """S3 — paired Sharpe from a Kelly-all sim on the shared events.
+) -> tuple[float, float, float] | None:
+    """S3 — paired Sharpe + Memmel z from a Kelly-all sim on shared events.
 
-    Returns ``(sharpe_baseline, sharpe_candidate)`` or ``None`` when either
-    frame can't be adapted to a bet frame (no ``Odds`` column or empty
-    intersection).
+    Returns ``(sharpe_baseline, sharpe_candidate, memmel_z)`` or ``None``
+    when either frame can't be adapted to a bet frame (no ``Odds`` column
+    or empty intersection). The verdict layer ships on ``z > 1.645``; the
+    raw Sharpe pair is preserved for the headline + scorecard row.
     """
     # Imported here to keep ``compression_eval``'s import surface minimal — the
     # supersede path is the only one that needs the profit-sim lib.
-    from sportstradamus.strategies.profit_sim import simulate_kelly_all, summarize_runs
+    from sportstradamus.strategies.profit_sim import extract_sim_returns, simulate_kelly_all
 
     shared = b_df.index.intersection(c_df.index)
     if len(shared) == 0:
@@ -1078,9 +1228,10 @@ def _supersede_paired_sharpe(
     c_sim = simulate_kelly_all(
         c_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
     )
-    s_b = summarize_runs(b_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)["sharpe"]
-    s_c = summarize_runs(c_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)["sharpe"]
-    return float(s_b), float(s_c)
+    b_returns = extract_sim_returns(b_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)
+    c_returns = extract_sim_returns(c_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)
+    sr_b, sr_c, z = _memmel_sharpe_z(b_returns, c_returns)
+    return float(sr_b), float(sr_c), float(z)
 
 
 def supersede_verdict(
@@ -1115,10 +1266,20 @@ def supersede_verdict(
 
     s3 = _supersede_paired_sharpe(b_df, c_df, pred_col)
     if s3 is None:
-        out.update(s3_sharpe_baseline=None, s3_sharpe_candidate=None, s3_pass=False)
+        out.update(
+            s3_sharpe_baseline=None,
+            s3_sharpe_candidate=None,
+            s3_memmel_z=None,
+            s3_pass=False,
+        )
     else:
-        sb, sc = s3
-        out.update(s3_sharpe_baseline=sb, s3_sharpe_candidate=sc, s3_pass=sc > sb)
+        sb, sc, z = s3
+        out.update(
+            s3_sharpe_baseline=sb,
+            s3_sharpe_candidate=sc,
+            s3_memmel_z=z,
+            s3_pass=z > _SUPERSEDE_S3_Z_MIN,
+        )
 
     out["ship"] = bool(out["s1_pass"] and out["s2_pass"] and out["s3_pass"])
     return out
@@ -1136,7 +1297,7 @@ def _supersede_headline(v: dict[str, object]) -> str:
         f"S2 d_mean {f('s2_mean')} [{f('s2_ci_lo')}, {f('s2_ci_hi')}] "
         f"n={v.get('s2_n', 'nan')} → {'PASS' if v.get('s2_pass') else 'FAIL'}",
         f"S3 sharpe base→cand {f('s3_sharpe_baseline', '.3f')} → "
-        f"{f('s3_sharpe_candidate', '.3f')} "
+        f"{f('s3_sharpe_candidate', '.3f')} (z {f('s3_memmel_z', '+.2f')}) "
         f"→ {'PASS' if v.get('s3_pass') else 'FAIL'}",
         f"[{'SUPERSEDE' if v.get('ship') else 'HOLD'}]",
     ]

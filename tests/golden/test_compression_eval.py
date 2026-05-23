@@ -15,12 +15,16 @@ from sportstradamus.scripts.compression_eval import (
     _GATE3_BENCH_Z_MAX,
     _GATE4_IQR_RATIO_MIN,
     _GATE5_ECE_MAX,
+    _SUPERSEDE_S3_Z_MIN,
+    _ece_debias_offset,
     _gate1_brier_ci,
     _gate4_iqr_spread,
+    _gate5_ece_debiased,
     _gate5_ece_equal_mass,
     _gate23_segment_match,
     _infer_dist_from_columns,
     _iqr_pred_analytical,
+    _memmel_sharpe_z,
     _segment_masks,
     _supersede_paired_brier_ci,
     _supersede_paired_sharpe,
@@ -561,6 +565,149 @@ def test_gate5_ece_small_for_calibrated_stream():
 
 
 # ---------------------------------------------------------------------------
+# Gate 5 debiased ECE (Ship 75 Step 0.5) — Roelofs 2022 correction for the
+# N-dependent upward binning bias documented in
+# /tmp/researcher_lifecycle_gate_audit.md. The raw ECE estimator falsely
+# fails up to 44.6% of perfectly calibrated NFL-N=240 cells; the debiased
+# variant subtracts the null-distribution mean per cell.
+# ---------------------------------------------------------------------------
+
+
+def test_ece_debias_offset_returns_positive_finite():
+    """The null-ECE bias is strictly positive for finite N (Roelofs 2022)."""
+    rng = np.random.default_rng(0)
+    p_model = rng.uniform(0.05, 0.95, 300)
+    offset = _ece_debias_offset(p_model, n_resamples=50, rng=np.random.default_rng(1729))
+    assert offset > 0
+    assert np.isfinite(offset)
+
+
+def test_ece_debias_offset_decreases_with_n():
+    """Binning bias shrinks as N grows — matches the audit's N-dependence table."""
+    rng = np.random.default_rng(0)
+    p_small = rng.uniform(0.05, 0.95, 240)
+    p_large = rng.uniform(0.05, 0.95, 2000)
+    off_small = _ece_debias_offset(p_small, n_resamples=80, rng=np.random.default_rng(1729))
+    off_large = _ece_debias_offset(p_large, n_resamples=80, rng=np.random.default_rng(1729))
+    assert off_small > off_large  # smaller N → larger bias
+
+
+def test_ece_debias_offset_deterministic_under_seed():
+    """Same seed → byte-identical offset (no determinism gate breakage)."""
+    rng = np.random.default_rng(0)
+    p_model = rng.uniform(0.05, 0.95, 500)
+    a = _ece_debias_offset(p_model, n_resamples=40, rng=np.random.default_rng(1729))
+    b = _ece_debias_offset(p_model, n_resamples=40, rng=np.random.default_rng(1729))
+    assert a == b
+
+
+def test_gate5_ece_debiased_perfect_calibration_near_zero():
+    """A perfectly calibrated stream's debiased ECE should be near zero —
+    raw ECE minus the matched null bias cancels by construction.
+    """
+    rng = np.random.default_rng(0)
+    p_model = rng.uniform(0.05, 0.95, 400)  # NFL-N regime where raw is biased high
+    y = (rng.uniform(size=len(p_model)) < p_model).astype(float)
+    raw = _gate5_ece_equal_mass(p_model, y)
+    debiased = _gate5_ece_debiased(
+        p_model, y, n_resamples=100, rng=np.random.default_rng(1729)
+    )
+    assert raw > 0.04  # raw is non-trivially biased at N=400
+    assert abs(debiased) < raw  # debias shrinks magnitude toward 0
+    assert abs(debiased) < 0.03  # near-zero after correction
+
+
+def test_gate5_ece_debiased_preserves_real_miscalibration():
+    """A confidently-wrong model still has nonzero debiased ECE — the bias
+    correction subtracts the null floor, not the genuine signal.
+    """
+    y = np.zeros(1000)
+    p_model = np.full(1000, 0.9)
+    raw = _gate5_ece_equal_mass(p_model, y)
+    debiased = _gate5_ece_debiased(
+        p_model, y, n_resamples=40, rng=np.random.default_rng(1729)
+    )
+    assert raw == pytest.approx(0.9, abs=1e-9)
+    # Null bias on a degenerate constant-p stream is small; debiased ≈ raw.
+    assert abs(debiased - raw) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# Supersede S3 — Memmel 2003 paired Sharpe inference. Replaces the bare
+# `sharpe_candidate > sharpe_baseline` rule, which had ~50% Type-I rate per
+# the audit. Per Memmel: z = (SR_c - SR_b) / SE(SR_diff) with closed-form
+# variance using the paired correlation; one-sided ship at z > 1.645.
+# ---------------------------------------------------------------------------
+
+
+def test_memmel_sharpe_z_identical_returns_zero():
+    """Two identical return streams → SR_diff = 0 → z exactly 0."""
+    rng = np.random.default_rng(7)
+    r = rng.normal(0.001, 0.02, 500)
+    sr_b, sr_c, z = _memmel_sharpe_z(r, r.copy())
+    assert sr_b == pytest.approx(sr_c)
+    assert z == pytest.approx(0.0, abs=1e-9)
+
+
+def test_memmel_sharpe_z_near_identical_models_under_critical():
+    """Two near-identical models (tiny iid noise) — z should sit well below
+    1.645 the vast majority of the time, fixing the audit's coin-flip rate.
+    """
+    rng = np.random.default_rng(11)
+    base = rng.normal(0.001, 0.02, 1000)
+    type1_rejects = 0
+    for i in range(40):
+        rng_i = np.random.default_rng(100 + i)
+        b = base + rng_i.normal(0, 1e-4, 1000)
+        c = base + rng_i.normal(0, 1e-4, 1000)
+        _, _, z = _memmel_sharpe_z(b, c)
+        if z > _SUPERSEDE_S3_Z_MIN:
+            type1_rejects += 1
+    # Under one-sided α=0.05, expected ~2 of 40. The audit's bare-comparison
+    # rule rejects ~20 of 40 (50%). Tolerate up to 6 for sample-size noise.
+    assert type1_rejects <= 6
+
+
+def test_memmel_sharpe_z_positive_when_candidate_genuinely_better():
+    """Candidate with shifted mean returns gets z > 1.645 at adequate N."""
+    rng = np.random.default_rng(13)
+    n = 1500
+    b = rng.normal(0.0005, 0.02, n)
+    c = b + rng.normal(0.0008, 0.005, n)  # genuine positive shift
+    sr_b, sr_c, z = _memmel_sharpe_z(b, c)
+    assert sr_c > sr_b
+    assert z > _SUPERSEDE_S3_Z_MIN
+
+
+def test_memmel_sharpe_z_correlation_tightens_se():
+    """Highly-correlated paired returns yield a smaller SE than uncorrelated
+    pairs at the same per-series SR — the whole point of using paired inference.
+    """
+    rng = np.random.default_rng(17)
+    n = 1000
+    common = rng.normal(0, 0.02, n)
+    # Correlated pair: shared common signal + tiny independent noise.
+    b_corr = common + rng.normal(0.0005, 0.001, n)
+    c_corr = common + rng.normal(0.0006, 0.001, n)  # tiny mean shift
+    # Independent pair: same marginals but no shared shock.
+    b_ind = rng.normal(common.mean(), common.std(), n) + rng.normal(0.0005, 0.001, n)
+    c_ind = rng.normal(common.mean(), common.std(), n) + rng.normal(0.0006, 0.001, n)
+    _, _, z_corr = _memmel_sharpe_z(b_corr, c_corr)
+    _, _, z_ind = _memmel_sharpe_z(b_ind, c_ind)
+    # Same expected SR difference, but correlated pair gets a sharper z.
+    assert abs(z_corr) > abs(z_ind)
+
+
+def test_memmel_sharpe_z_handles_zero_variance_returns():
+    """A zero-variance return series (Sharpe undefined) returns z=0 gracefully."""
+    rng = np.random.default_rng(19)
+    flat = np.zeros(200)
+    r = rng.normal(0.001, 0.02, 200)
+    _, _, z = _memmel_sharpe_z(flat, r)
+    assert np.isfinite(z) or z == 0.0  # implementation must not crash
+
+
+# ---------------------------------------------------------------------------
 # gate_row — model + oracle assembly, column set, unpriced handling.
 # ---------------------------------------------------------------------------
 
@@ -578,6 +725,7 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g3_bench_z", "g3_bench_z_oracle",
         "g4_iqr_pred", "g4_iqr_true", "g4_iqr_ratio", "g4_iqr_ratio_oracle",
         "g5_ece", "g5_ece_oracle",
+        "g5_ece_null_bias", "g5_ece_debiased", "g5_ece_debiased_oracle",
     }
     assert set(row) == expected
     # Oracle identities: segment z = 0, IQR ratio = 1, ECE = 0, Brier diff < 0.
@@ -937,19 +1085,23 @@ def test_paired_sharpe_returns_finite_pair():
     b_df, c_df = _supersede_pair()
     res = _supersede_paired_sharpe(b_df, c_df, "EV")
     assert res is not None
-    sb, sc = res
+    sb, sc, z = res
     assert np.isfinite(sb)
     assert np.isfinite(sc)
+    assert np.isfinite(z)
 
 
 def test_paired_sharpe_candidate_higher_when_better_calibrated():
     # Calibrated candidate vs regressed baseline ⇒ candidate Kelly stakes are
-    # more aligned with true win probability ⇒ higher long-run Sharpe.
+    # more aligned with true win probability ⇒ higher long-run Sharpe AND a
+    # positive Memmel z (the paired-inference test that supersedes the bare
+    # ``sc > sb`` rule).
     b_df, c_df = _supersede_pair(n=2000)
     res = _supersede_paired_sharpe(b_df, c_df, "EV")
     assert res is not None
-    sb, sc = res
+    sb, sc, z = res
     assert sc > sb
+    assert z > 0
 
 
 def test_paired_sharpe_returns_none_on_empty_intersection():
