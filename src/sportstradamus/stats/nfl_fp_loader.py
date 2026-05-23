@@ -66,9 +66,7 @@ _TEAM_COVERAGE_PREFIX = "tm_cov_off_"
 
 # FP CSV "key" columns that must NOT be prefixed -- they're either join
 # keys or filterable identifiers shared across files.
-_FP_KEY_COLUMNS: frozenset[str] = frozenset(
-    {"Name", "Team", "POS", "G", "Season", "Rank"}
-)
+_FP_KEY_COLUMNS: frozenset[str] = frozenset({"Name", "Team", "POS", "G", "Season", "Rank"})
 
 # coverageMatrixOffense uses full team names (``Cleveland Browns``);
 # every other FP per-player file uses an abbreviation that does NOT match
@@ -261,9 +259,7 @@ def derive_comp_metrics(profile: pd.DataFrame) -> pd.DataFrame:
     # WIN_RATE column for some bins, so SEP SCORE is the only metric
     # guaranteed across every route. The per-route mean uses every
     # ``SEP SCORE`` column (canonicalized + auto-suffixed).
-    route_sep_cols = [
-        c for c in profile.columns if c.startswith("rec_sep_route_SEP_SCORE")
-    ]
+    route_sep_cols = [c for c in profile.columns if c.startswith("rec_sep_route_SEP_SCORE")]
     qb_man = profile.get("qb_cov_QB_MAN_pct")
     tm_man = profile.get("tm_cov_off_MAN_pct")
     rush_success = profile.get("rush_adv_Success_pct")
@@ -392,9 +388,7 @@ def apply_rolling_transforms(
     for feature in features:
         if feature not in out.columns:
             continue
-        out[feature] = grouped[feature].transform(
-            lambda s: s.rolling(window, min_periods=1).mean()
-        )
+        out[feature] = grouped[feature].transform(lambda s: s.rolling(window, min_periods=1).mean())
     return out
 
 
@@ -408,9 +402,7 @@ def _join_nfl_players(profile: pd.DataFrame) -> pd.DataFrame:
 
     nfl_players = nfl_players.loc[nfl_players["position"].isin(_COMP_POSITIONS)]
     nfl_players.index = nfl_players["name"].apply(remove_accents)
-    nfl_players["bmi"] = (
-        nfl_players["weight"] / nfl_players["height"] / nfl_players["height"]
-    )
+    nfl_players["bmi"] = nfl_players["weight"] / nfl_players["height"] / nfl_players["height"]
     nfl_players = nfl_players[["age", "height", "bmi"]].dropna()
     nfl_players = nfl_players[~nfl_players.index.duplicated(keep="last")]
     return profile.join(nfl_players, how="left")
@@ -476,9 +468,7 @@ def _load_qb_coverage_file(fp_dir: object) -> pd.DataFrame | None:
     # Drop ``G`` / ``Season`` / ``Rank`` -- the per-player FP files already
     # carry these as join-key columns, and re-emitting them under the
     # qb-coverage frame would force ``G_x`` / ``G_y`` splits at combine.
-    grouped = grouped.drop(
-        columns=[c for c in ("G", "Season", "Rank") if c in grouped.columns]
-    )
+    grouped = grouped.drop(columns=[c for c in ("G", "Season", "Rank") if c in grouped.columns])
     grouped = _prefix_columns(grouped.reset_index(), _QB_COVERAGE_PREFIX)
     grouped.index = grouped["Name"].apply(remove_accents)
     grouped.index.name = None
@@ -512,16 +502,12 @@ def _load_team_coverage_file(fp_dir: object) -> pd.DataFrame | None:
     return df
 
 
-def _broadcast_team_columns(
-    per_year: pd.DataFrame, team_cov: pd.DataFrame
-) -> pd.DataFrame:
+def _broadcast_team_columns(per_year: pd.DataFrame, team_cov: pd.DataFrame) -> pd.DataFrame:
     """Broadcast team-grain coverage columns to every player on that team."""
     if "Team" not in per_year.columns:
         return per_year
 
-    joined = per_year.merge(
-        team_cov, how="left", left_on="Team", right_index=True
-    )
+    joined = per_year.merge(team_cov, how="left", left_on="Team", right_index=True)
     joined.index = per_year.index
     return joined
 
@@ -542,9 +528,7 @@ def _load_pbp_named_by_player(year: int) -> pd.DataFrame | None:
         logger.warning("import_ids() failed: %s", exc)
         return None
 
-    ids = ids.loc[
-        ids["position"].isin(_COMP_POSITIONS), ["name", "gsis_id"]
-    ].copy()
+    ids = ids.loc[ids["position"].isin(_COMP_POSITIONS), ["name", "gsis_id"]].copy()
     ids = ids.dropna(subset=["gsis_id"])
     ids["key"] = ids["name"].apply(remove_accents)
     # Multiple historical players can share a normalized name; mirror the
