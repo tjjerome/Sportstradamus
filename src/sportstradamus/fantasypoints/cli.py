@@ -5,17 +5,20 @@ Three subcommands:
 * ``fp-fetch run`` — walks the catalog and writes per-tool snapshots.
 * ``fp-fetch list`` — prints the registered catalog entries.
 * ``fp-fetch import-curl`` — registers a new endpoint from a
-  DevTools-copied curl command.
+  DevTools-copied curl command. Handles both GET and POST curls,
+  including ``--data-raw`` JSON bodies.
 
 The runner resolves ``--season`` / ``--week`` (defaults inferred from
 the current date) and substitutes them into each endpoint's ``params``
-template before calling :class:`FantasyPointsClient`.
+and ``json_body`` templates before calling :class:`FantasyPointsClient`.
 """
 
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import json
+import logging
+import re
 import shlex
 from datetime import date, timedelta
 from pathlib import Path
@@ -53,10 +56,12 @@ _SEASON_FLIP_MONTH = 7
 # close-enough boundary for the default. Tuesdays have weekday() == 1.
 _TUESDAY = 1
 
-# Headers that should never be persisted in the catalog — Cookie and UA
-# come from creds/keys.json, host/connection/auth are per-request.
+# Headers that should never be persisted in the catalog — Authorization
+# and Cookie come from creds/keys.json, host/connection/length are
+# per-request, UA is set by the client.
 _STRIPPED_CURL_HEADERS = frozenset(
     {
+        "authorization",
         "cookie",
         "user-agent",
         "authority",
@@ -64,8 +69,38 @@ _STRIPPED_CURL_HEADERS = frozenset(
         "host",
         "connection",
         "content-length",
+        "alt-used",
+        "te",
     }
 )
+
+# Curl option tokens whose next argument is a value we want to capture
+# rather than skip outright.
+_CURL_VALUE_FLAGS = frozenset(
+    {
+        "-H",
+        "--header",
+        "-X",
+        "--request",
+        "-d",
+        "--data",
+        "--data-raw",
+        "--data-binary",
+        "--data-ascii",
+        "-b",
+        "--cookie",
+        "-A",
+        "--user-agent",
+        "-e",
+        "--referer",
+    }
+)
+
+# Curl option tokens that take a value but whose value we never need.
+_CURL_SKIP_VALUE_FLAGS = frozenset({"-b", "--cookie", "-A", "--user-agent", "-e", "--referer"})
+
+# Backslash-newline continuation in shell here-doc style curls.
+_LINE_CONTINUATION_RE = re.compile(r"\\\s*\r?\n")
 
 
 @click.group()
@@ -122,7 +157,7 @@ def run(season, week, only, dry_run, catalog_path, output_base, log_level) -> No
         for spec in specs:
             url = _build_url(spec.url, spec.render_params(season=season, week=week))
             path = spec.output_path(base=out_base, season=season, week=week)
-            click.echo(f"{spec.name}: {url} -> {path}")
+            click.echo(f"{spec.name}: {spec.method} {url} -> {path}")
         return
     client = FantasyPointsClient()
     failures = _fetch_all(specs, client, season=season, week=week, base=out_base, log=log)
@@ -145,7 +180,7 @@ def list_endpoints(catalog_path) -> None:
         return
     for spec in specs:
         cadence = "weekly" if spec.weekly else "season"
-        click.echo(f"{spec.name:30s} {cadence:7s} {spec.url}")
+        click.echo(f"{spec.name:30s} {spec.method:5s} {cadence:7s} {spec.url}")
 
 
 @fp_fetch.command("import-curl")
@@ -181,7 +216,8 @@ def import_curl(curl_file, name, output_subdir, response_format, weekly, catalog
         raise click.ClickException(f"Endpoint named {spec.name!r} already exists.")
     existing.append(spec)
     save_catalog(existing, catalog_path)
-    click.echo(f"Registered {spec.name} -> {spec.url}")
+    body_note = " + body" if spec.json_body else ""
+    click.echo(f"Registered {spec.name} -> {spec.method} {spec.url}{body_note}")
 
 
 def parse_curl_to_spec(
@@ -195,9 +231,11 @@ def parse_curl_to_spec(
     """Parse a ``curl '...' ...`` invocation into an :class:`EndpointSpec`.
 
     Accepts the format produced by Chromium / Firefox DevTools'
-    "Copy as cURL (bash)" action. Cookie and User-Agent are stripped
-    (they come from ``creds/keys.json``); the URL query string is
-    split out into ``params``.
+    "Copy as cURL (bash)" action. Handles both GET (default) and POST
+    (``-X POST`` + ``--data-raw '{...}'``) calls. ``Authorization``,
+    ``Cookie``, and ``User-Agent`` headers are stripped (those come
+    from ``creds/keys.json``); the URL query string is split out into
+    ``params``; the POST body is parsed as JSON into ``json_body``.
 
     Args:
         curl_text: Raw text of the curl command.
@@ -209,30 +247,39 @@ def parse_curl_to_spec(
     Returns:
         A new :class:`EndpointSpec` ready to append to the catalog.
     """
-    tokens = shlex.split(curl_text.replace("\\\n", " "))
+    cleaned = _LINE_CONTINUATION_RE.sub(" ", curl_text.strip())
+    tokens = shlex.split(cleaned)
     if not tokens or tokens[0] != "curl":
         raise ValueError("Input does not look like a curl command.")
-    url, headers = _parse_curl_tokens(tokens[1:])
-    if url is None:
+    parsed = _parse_curl_tokens(tokens[1:])
+    if parsed["url"] is None:
         raise ValueError("No URL found in curl command.")
-    filtered = {k: v for k, v in headers.items() if k.lower() not in _STRIPPED_CURL_HEADERS}
-    parsed = urlsplit(url)
-    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    bare_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    filtered_headers = {
+        k: v for k, v in parsed["headers"].items() if k.lower() not in _STRIPPED_CURL_HEADERS
+    }
+    url_parts = urlsplit(parsed["url"])
+    params = dict(parse_qsl(url_parts.query, keep_blank_values=True))
+    bare_url = urlunsplit((url_parts.scheme, url_parts.netloc, url_parts.path, "", ""))
+    json_body = _decode_body(parsed["body"])
+    method = (parsed["method"] or ("POST" if json_body is not None else "GET")).upper()
     return EndpointSpec(
         name=name,
         url=bare_url,
-        method="GET",
+        method=method,
         params=params or None,
-        extra_headers=filtered or None,
+        json_body=json_body,
+        extra_headers=filtered_headers or None,
         response_format=response_format,
         output_subdir=output_subdir,
         weekly=weekly,
     )
 
 
-def _parse_curl_tokens(tokens: list[str]) -> tuple[str | None, dict[str, str]]:
+def _parse_curl_tokens(tokens: list[str]) -> dict:
+    """Walk curl arg tokens; collect URL, method, headers, body."""
     url: str | None = None
+    method: str | None = None
+    body: str | None = None
     headers: dict[str, str] = {}
     i = 0
     while i < len(tokens):
@@ -242,14 +289,32 @@ def _parse_curl_tokens(tokens: list[str]) -> tuple[str | None, dict[str, str]]:
             if i < len(tokens):
                 key, _, value = tokens[i].partition(":")
                 headers[key.strip()] = value.strip()
-        elif tok in ("-X", "--request", "-d", "--data", "--data-raw", "-b", "--cookie"):
-            i += 1  # Skip value of the option.
+        elif tok in ("-X", "--request"):
+            i += 1
+            if i < len(tokens):
+                method = tokens[i]
+        elif tok in ("-d", "--data", "--data-raw", "--data-binary", "--data-ascii"):
+            i += 1
+            if i < len(tokens):
+                body = tokens[i]
+        elif tok in _CURL_SKIP_VALUE_FLAGS:
+            i += 1  # Value irrelevant — UA/cookie come from keys.json.
         elif tok.startswith("-"):
             pass  # Flag without value (--compressed, --location, ...).
         elif url is None:
             url = tok
         i += 1
-    return url, headers
+    return {"url": url, "method": method, "headers": headers, "body": body}
+
+
+def _decode_body(body: str | None):
+    """Parse a curl body string as JSON. Return ``None`` if not JSON."""
+    if body is None:
+        return None
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return None
 
 
 def _filter_by_name(specs: list[EndpointSpec], names: tuple[str, ...]) -> list[EndpointSpec]:
@@ -268,24 +333,19 @@ def _fetch_all(
     season: int,
     week: int,
     base: Path,
-    log,
+    log: logging.Logger,
 ) -> list[str]:
     failures: list[str] = []
     for spec in tqdm(specs, desc="fp-fetch", unit="endpoint"):
         target = spec.output_path(base=base, season=season, week=week)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            body = client.get(
-                spec.url,
-                params=spec.render_params(season=season, week=week),
-                headers=spec.extra_headers,
-                accept=_client_accept(spec.response_format),
-            )
+            body = _dispatch(client, spec, season=season, week=week)
         except FantasyPointsAuthError as exc:
             log.error("auth failed", extra={"endpoint": spec.name, "error": str(exc)})
             click.echo(str(exc), err=True)
             raise click.ClickException(
-                "Session cookie expired. Refresh creds/keys.json and rerun."
+                "Authorization token expired. Refresh creds/keys.json and rerun."
             ) from exc
         except Exception as exc:
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
@@ -294,6 +354,35 @@ def _fetch_all(
         _write_payload(target, body, spec.response_format)
         log.info("wrote snapshot", extra={"endpoint": spec.name, "path": str(target)})
     return failures
+
+
+def _dispatch(
+    client: FantasyPointsClient,
+    spec: EndpointSpec,
+    *,
+    season: int,
+    week: int,
+) -> dict | list | str | bytes:
+    """Call the right verb on the client for one endpoint spec."""
+    params = spec.render_params(season=season, week=week)
+    accept = _client_accept(spec.response_format)
+    method = spec.method.upper()
+    if method == "POST":
+        return client.post(
+            spec.url,
+            json_body=spec.render_json_body(season=season, week=week),
+            params=params or None,
+            headers=spec.extra_headers,
+            accept=accept,
+        )
+    if method == "GET":
+        return client.get(
+            spec.url,
+            params=params or None,
+            headers=spec.extra_headers,
+            accept=accept,
+        )
+    raise click.ClickException(f"Unsupported method {method!r} for endpoint {spec.name!r}")
 
 
 def _client_accept(response_format: str) -> str:
@@ -310,7 +399,7 @@ def _build_url(url: str, params: dict[str, str]) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
 
 
-def _write_payload(path: Path, body, fmt: str) -> None:
+def _write_payload(path: Path, body: dict | list | str | bytes, fmt: str) -> None:
     if fmt == "json":
         with path.open("w") as f:
             json.dump(body, f, indent=2, default=str)
