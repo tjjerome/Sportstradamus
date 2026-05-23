@@ -124,7 +124,11 @@ ACTUAL_COL = "Result"
 # mixes in the bookmaker line and masks it. Default to the raw model column.
 DEFAULT_PRED_COL = "EV"
 
-RUN_LOG_PATH = pkg_resources.files(data) / "compression_eval_log.csv"
+# Research artifacts live outside the package data dir — the run log is an append-only
+# experiment journal, not shipped data. Climb scripts -> sportstradamus -> src -> repo
+# root and write the log to <repo_root>/research/compression_eval/.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+RUN_LOG_PATH = _REPO_ROOT / "research" / "compression_eval" / "compression_eval_log.csv"
 SCATTER_DIR = Path("/tmp")
 
 # Per-cell gate scorecard SNAPSHOT (not the append-only run log). write_gate_scorecard
@@ -132,7 +136,7 @@ SCATTER_DIR = Path("/tmp")
 # metrics for the model alongside an "oracle" column set (model = the true score
 # exactly) that bounds each gate. Measurement-only — no pass/fail until thresholds
 # are set. Readable as plain CSV without re-running the audit.
-TIER0_SCORECARD_PATH = pkg_resources.files(data) / "tier0_scorecard.csv"
+TIER0_SCORECARD_PATH = pkg_resources.files(data) / "training" / "tier0_scorecard.csv"
 
 # --live-window mode constants (Stage 0 deliverable 0.3).
 # Look-back window for MeanYr computation from the per-league gamelog. Matches
@@ -910,6 +914,7 @@ def _supersede_headline(v: dict[str, object]) -> str:
 
 def append_run_log(card: Scorecard, log_path: Path) -> None:
     """Append a scorecard row to the cross-session run log CSV."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     row = pd.DataFrame([asdict(card)])
     header = not log_path.exists()
     row.to_csv(log_path, mode="a", header=header, index=False)

@@ -47,7 +47,7 @@ _logger = get_logger("reflect")
 
 def _segments_parquet_path() -> Path:
     """Return the persistence path for the per-segment CLV parquet."""
-    return Path(str(pkg_resources.files(_data_pkg) / "clv_segments.parquet"))
+    return Path(str(pkg_resources.files(_data_pkg) / "runtime" / "clv_segments.parquet"))
 
 
 def _signed_clv(open_p: float, close_p: float, bet: str) -> float:

@@ -62,6 +62,14 @@ _PROBA_CLIP = 1e-6
 # Fixed RNG seed for --deterministic runs (debug/eval only).
 DETERMINISTIC_SEED = 1234
 
+# Deterministic-mode model pickles live OUTSIDE the installed package tree so
+# the research harness can iterate on them without polluting the production
+# model dir (`src/sportstradamus/data/models/`). Resolved off __file__ so the
+# path is stable regardless of cwd. parents[3] of
+# src/sportstradamus/training/pipeline.py is the repo root.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
+
 # P0.5 deterministic-mode hyperparameters. Replaces the Optuna search when
 # --deterministic is set. Deliberately small/fast: the goal is bit-identical
 # re-runs for the eval harness, NOT model quality. opt_rounds is read as
@@ -402,8 +410,8 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
     stat_dist.setdefault(league, {})
     stat_zi.setdefault(league, {})
 
-    if os.path.isfile(pkg_resources.files(data) / "book_weights.json"):
-        with open(pkg_resources.files(data) / "book_weights.json") as infile:
+    if os.path.isfile(pkg_resources.files(data) / "config" / "book_weights.json"):
+        with open(pkg_resources.files(data) / "config" / "book_weights.json") as infile:
             book_weights = json.load(infile)
     else:
         book_weights = {}
@@ -413,7 +421,7 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
         league, market, stat_data, archive, book_weights
     )
 
-    with open(pkg_resources.files(data) / "book_weights.json", "w") as outfile:
+    with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
         json.dump(book_weights, outfile, indent=4)
 
     filename = market_file_slug(league, market)
@@ -1164,7 +1172,13 @@ def _step_persist_artifacts(
     target_strategy: str,
     zinb_mode: str,
 ) -> None:
-    """Write the test-set CSV and the model pickle. Deterministic mode redirects to ``deterministic/{strategy}{_hurdle?}/``."""
+    """Write the test-set CSV and the model pickle.
+
+    Deterministic mode redirects the model pickle to
+    ``research/models/deterministic/{strategy}{_hurdle?}/`` at the repo root so
+    the research harness can iterate without overwriting the production model
+    dir. The test-set CSV still lives under the package ``data/test_sets/``.
+    """
     X_test = splits["X_test"]
     y_test = splits["y_test"]
     B_test = splits["B_test"]
@@ -1202,17 +1216,23 @@ def _step_persist_artifacts(
     # production. Training-data parquet and the whole-suite report() stay
     # suppressed (input is unchanged under input-freeze; report() is not
     # per-market and would clobber the production training_report.txt).
+    # Test-set CSVs remain inside the package data tree; only the model
+    # pickle moves to the repo-root research dir so the package install
+    # never carries the research artifacts.
     if deterministic:
         suffix = "_hurdle" if zinb_mode == "hurdle" else ""
-        subdir = f"deterministic/{target_strategy}{suffix}/"
+        strategy_subdir = f"{target_strategy}{suffix}"
+        csv_subdir = f"deterministic/{strategy_subdir}/"
+        mdl_dir = _DETERMINISTIC_MODEL_ROOT / strategy_subdir
     else:
-        subdir = ""
-    csv_filepath = pkg_resources.files(data) / f"test_sets/{subdir}{filename}.csv"
+        csv_subdir = ""
+        mdl_dir = Path(str(pkg_resources.files(data) / "models"))
+    csv_filepath = pkg_resources.files(data) / f"test_sets/{csv_subdir}{filename}.csv"
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)
 
-    mdl_filepath = pkg_resources.files(data) / f"models/{subdir}{filename}.mdl"
-    Path(str(mdl_filepath.parent)).mkdir(parents=True, exist_ok=True)
+    mdl_filepath = mdl_dir / f"{filename}.mdl"
+    mdl_filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(mdl_filepath, "wb") as outfile:
         pickle.dump(filedict, outfile, -1)
 
@@ -1882,7 +1902,7 @@ def _step_select_distribution(
         cv = max(cv, 1 / np.sqrt(shape_ceiling))
 
     stat_cv[league][market] = cv
-    with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
+    with open(pkg_resources.files(data) / "config" / "stat_cv.json", "w") as f:
         json.dump(stat_cv, f, indent=4)
 
     # Reflect SkewNormal nonzero filtering back into splits.
@@ -1939,8 +1959,9 @@ def train_market(
         archive: ``Archive`` instance (passed through for book weights).
         league_start_date: Earliest cutoff for training rows.
         deterministic: Pin RNGs and replace Optuna with fixed hyperparams for
-            bit-identical re-runs. Writes go to ``deterministic/{strategy}/``
-            subdirs. Debug/offline-eval only — never publish such a model.
+            bit-identical re-runs. Writes go to
+            ``research/models/deterministic/{strategy}/`` at the repo root.
+            Debug/offline-eval only — never publish such a model.
         target_strategy: Slug from
             :data:`sportstradamus.training.baselines.STRATEGY_SLUGS`. Selects
             the SkewNormal forward target transform and the matching decode.
