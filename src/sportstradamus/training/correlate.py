@@ -540,13 +540,13 @@ def _build_team_game_records(
 
         records.append(
             {"TEAM": home_team}
-            | {"DATE": gameDate.date()}
+            | {"DATE": gameDate}
             | homeStats
             | {"_OPP_" + k: v for k, v in awayStats.items()}
         )
         records.append(
             {"TEAM": away_team}
-            | {"DATE": gameDate.date()}
+            | {"DATE": gameDate}
             | awayStats
             | {"_OPP_" + k: v for k, v in homeStats.items()}
         )
@@ -722,6 +722,10 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
 
     new_records = _build_team_game_records(league, log, latest_date)
     matrix = pd.concat([matrix, pd.json_normalize(new_records)], ignore_index=True)
+    if "DATE" in matrix.columns:
+        # Keep DATE as pandas datetime64 for stable parquet writes across
+        # pyarrow versions/environments.
+        matrix["DATE"] = pd.to_datetime(matrix["DATE"], errors="coerce")
     matrix.to_parquet(raw_filepath, compression="zstd")
 
     matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
