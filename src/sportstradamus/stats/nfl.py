@@ -1357,7 +1357,7 @@ class StatsNFL(Stats):
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
-        with open(pkg_resources.files(data) / "playerCompStats.json") as infile:
+        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
             stats = json.load(infile)
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
@@ -1386,13 +1386,13 @@ class StatsNFL(Stats):
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
 
-        filepath = pkg_resources.files(data) / "nfl_comps.json"
+        filepath = pkg_resources.files(data) / "leagues" / "nfl" / "comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
     def _compute_comps(self):
         """Build comps from loaded data at runtime (no JSON I/O)."""
-        with open(pkg_resources.files(data) / "playerCompStats.json") as f:
+        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}

@@ -11,7 +11,7 @@ from sportstradamus.moneylines import get_moneylines, get_props
 archive = Archive()
 
 # Load prop markets
-filepath = pkg_resources.files(data) / "stat_map.json"
+filepath = pkg_resources.files(data) / "config" / "stat_map.json"
 with open(filepath) as infile:
     stat_map = json.load(infile)
 
@@ -26,20 +26,6 @@ key = "basketball_nba"
 
 Date = datetime(2025, 11, 28, 12)
 Date = pytz.timezone("America/Chicago").localize(Date)
-
-# print(sport)
-# while Date.astimezone(pytz.utc).date() < datetime(2025, 12, 4).date():
-#     if sport == "NFL" and Date.weekday() not in [0,3,5,6]:
-#         Date = Date + timedelta(days=1)
-#         continue
-
-#     print(Date)
-
-#     archive = get_moneylines(archive, keys, date=Date, sport=sport, key=key)
-#     if Date.astimezone(pytz.utc).date() > datetime(2023, 5, 3).date():
-#         archive = get_props(archive, apikey_plus, stat_map["Odds API"], date=Date, sport=sport, key=key)
-
-#     Date = Date + timedelta(days=1)
 
 sport = "NFL"
 key = "americanfootball_nfl"

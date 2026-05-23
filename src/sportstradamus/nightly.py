@@ -318,7 +318,7 @@ def run(league, skip_update, history_only, log_level):
     # ------------------------------------------------------------------
     history = read_history()
     if history.empty:
-        logger.error("history.parquet/.dat is empty or missing. Aborting.")
+        logger.error("history.parquet is empty or missing. Aborting.")
         raise SystemExit(1)
 
     if "Offers" not in history.columns:
@@ -368,7 +368,7 @@ def run(league, skip_update, history_only, log_level):
     n_resolved_parl = 0
     if not history_only:
         parlays = read_parlay_hist()
-        stat_map = json.loads((pkg_resources.files(data) / "stat_map.json").read_text())
+        stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
 
         unresolved = parlays.loc[parlays["Legs"].isna()]
         n_before_parl = len(unresolved)
@@ -396,7 +396,7 @@ def run(league, skip_update, history_only, log_level):
         "history_total": len(history),
         "history_pending": int(history["Actual"].isna().sum()),
     }
-    meta_path = pkg_resources.files(data) / "resolve_meta.json"
+    meta_path = pkg_resources.files(data) / "runtime" / "resolve_meta.json"
     meta_path.write_text(json.dumps(meta, indent=2))
 
     click.echo(

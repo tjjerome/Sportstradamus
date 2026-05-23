@@ -132,7 +132,7 @@ def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
     with open(filepath) as infile:
         keys = json.load(infile)
 
-    filepath = pkg_resources.files(data) / "stat_map.json"
+    filepath = pkg_resources.files(data) / "config" / "stat_map.json"
     with open(filepath) as infile:
         stat_map = json.load(infile)
 

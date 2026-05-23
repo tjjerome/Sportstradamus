@@ -1,3 +1,12 @@
+# ARCHIVED 2026-05-22 from src/sportstradamus/scripts/migrate_correlations_to_parquet.py
+# Reason: source files ({LEAGUE}_corr.csv stale_unsuffixed CSVs) removed from
+#   the data package; this one-shot migration is complete.
+# Last live SHA: 9ec4ea2
+# Original imports (now unresolved here):
+#   import click
+#   import pandas as pd
+#   import pandas.testing as pdt
+
 """One-shot migration: per-league correlation CSVs -> parquet (zstd).
 
 Three artifact families are migrated:

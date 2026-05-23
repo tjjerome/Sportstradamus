@@ -36,7 +36,7 @@ from sportstradamus.training.baselines import STRATEGY_SLUGS, ZINB_MODES
 # Reserved config value: skip training this cell and prune its production pickle.
 WITHHELD = "withheld"
 
-SHIP_CONFIG_PATH = pkg_resources.files(data) / "ship_config.json"
+SHIP_CONFIG_PATH = pkg_resources.files(data) / "config" / "ship_config.json"
 
 # Each cell is a bare strategy string (slug or WITHHELD) or a strategy object
 # {"strategy": slug, "zinb_mode": mode} that also pins the ZINB architecture.

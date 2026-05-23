@@ -4,16 +4,16 @@ Produces *stratified* Spearman correlation matrices on residualized per-game
 stats with sample-size-aware shrinkage, plus a metadata sidecar for
 reproducibility.
 
-Outputs (per league):
+Outputs (per league, all under ``data/leagues/{league}/``):
 
-* ``data/{LEAGUE}_corr_same_team.parquet`` — within-team pair correlations
-  indexed by ``(team, market_a, market_b)``.
-* ``data/{LEAGUE}_corr_opposing.parquet`` — cross-team pair correlations
-  indexed by ``(team, team_market, opp_market)``. Both sides keyed by their
-  raw (un-prefixed) market names; the file structure encodes the
-  team-vs-opponent relationship.
-* ``data/correlations/{LEAGUE}_corr_metadata.json`` — date range covered,
-  per-team observation counts, generation timestamp, git SHA.
+* ``corr_same_team.parquet`` — within-team pair correlations indexed by
+  ``(team, market_a, market_b)``.
+* ``corr_opposing.parquet`` — cross-team pair correlations indexed by
+  ``(team, team_market, opp_market)``. Both sides keyed by their raw
+  (un-prefixed) market names; the file structure encodes the team-vs-opponent
+  relationship.
+* ``corr_metadata.json`` — date range covered, per-team observation counts,
+  generation timestamp, git SHA.
 
 The intermediate per-game record at ``data/training_data/{LEAGUE}_corr.parquet``
 is still written (warm-start cache) but no longer used by the prediction
@@ -540,13 +540,13 @@ def _build_team_game_records(
 
         records.append(
             {"TEAM": home_team}
-            | {"DATE": gameDate.date()}
+            | {"DATE": gameDate}
             | homeStats
             | {"_OPP_" + k: v for k, v in awayStats.items()}
         )
         records.append(
             {"TEAM": away_team}
-            | {"DATE": gameDate.date()}
+            | {"DATE": gameDate}
             | awayStats
             | {"_OPP_" + k: v for k, v in homeStats.items()}
         )
@@ -722,6 +722,10 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
 
     new_records = _build_team_game_records(league, log, latest_date)
     matrix = pd.concat([matrix, pd.json_normalize(new_records)], ignore_index=True)
+    if "DATE" in matrix.columns:
+        # Keep DATE as pandas datetime64 for stable parquet writes across
+        # pyarrow versions/environments.
+        matrix["DATE"] = pd.to_datetime(matrix["DATE"], errors="coerce")
     matrix.to_parquet(raw_filepath, compression="zstd")
 
     matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
@@ -759,8 +763,10 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
         if not opposing.empty:
             opposing_blocks[team] = opposing
 
-    same_path = pkg_resources.files(data) / f"{league}_corr_same_team.parquet"
-    opposing_path = pkg_resources.files(data) / f"{league}_corr_opposing.parquet"
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    league_dir.mkdir(parents=True, exist_ok=True)
+    same_path = league_dir / "corr_same_team.parquet"
+    opposing_path = league_dir / "corr_opposing.parquet"
     if same_team_blocks:
         pd.concat(same_team_blocks).to_frame("R").to_parquet(same_path, compression="zstd")
     else:
@@ -770,9 +776,7 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
     else:
         pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
 
-    metadata_dir = pkg_resources.files(data) / "correlations"
-    metadata_dir.mkdir(parents=True, exist_ok=True)
-    metadata_path = metadata_dir / f"{league}_corr_metadata.json"
+    metadata_path = league_dir / "corr_metadata.json"
     dates = (
         pd.to_datetime(matrix.DATE)
         if "DATE" in matrix.columns
