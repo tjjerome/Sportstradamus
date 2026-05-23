@@ -40,11 +40,16 @@ from pathlib import Path
 import click
 import numpy as np
 import pandas as pd
+from scipy.stats import gamma as _scipy_gamma
+from scipy.stats import nbinom as _scipy_nbinom
+from scipy.stats import skewnorm as _scipy_skewnorm
 
 from sportstradamus import data
 from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.io import read_history
+from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
 from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.ship_config import load_ship_config, resolve_cell_strategy
 
 # ---------------------------------------------------------------------------
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -210,8 +215,12 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         pred_col: Predicted-mean column to evaluate (``EV`` or ``Blended_EV``).
 
     Returns:
-        Frame with ``MeanYr``, ``Result`` and the prediction column, rows with
-        non-finite values in any of the three dropped.
+        Frame with ``MeanYr``, ``Result``, the prediction column, optional
+        priced columns (``P``, ``Odds``, ``Line``), and any per-row
+        distribution parameters present (``SN_Loc`` / ``SN_Scale`` /
+        ``SN_Alpha`` for SkewNormal, ``R`` / ``NB_P`` for NegBin/ZINB,
+        ``Alpha`` for Gamma/ZAGamma, ``Gate`` for the zero-inflated variants).
+        Rows with non-finite values in any required column are dropped.
 
     Raises:
         ValueError: If a required column is missing from the CSV.
@@ -224,7 +233,16 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     # Opportunistically keep brier-skill inputs when present; older CSVs without
     # them stay loadable and just skip the third gate downstream.
     optional = {"P", "Odds", "Line"} & set(df.columns)
-    out = df[sorted(required | optional)].copy()
+    # Per-row distribution params (Operation Ship 75 Step 0.2 G4 audit).
+    # ``training/pipeline.py::_step_persist_artifacts`` dumps these at lines
+    # 1191-1212; older CSVs predating that dump simply leave them out and the
+    # gate falls back to the point-IQR estimator via `_infer_dist_from_columns`
+    # returning None.
+    dist_params = {
+        "SN_Loc", "SN_Scale", "SN_Alpha",
+        "R", "NB_P", "Alpha", "Gate",
+    } & set(df.columns)
+    out = df[sorted(required | optional | dist_params)].copy()
     # Filter non-finite rows on required columns only — missing P/Odds/Line rows
     # are filtered locally inside _brier_skill_score so older CSVs that lack
     # those columns still pass the harness.
@@ -448,6 +466,142 @@ def _iqr(values: np.ndarray) -> float:
     return float(p75 - p25)
 
 
+# ---------------------------------------------------------------------------
+# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B per the
+# research brief at /tmp/researcher_g4_audit.md. The old gate computed
+# IQR(point_pred) / IQR(actual), a sharpness-vs-calibration category error
+# (Gneiting & Raftery 2007): point predictions are conditional means and
+# always lose to realized-outcome spread on the IQR. The fix is to compute
+# the pooled IQR of the predictive distribution per-row, by inverting the
+# per-row CDF at q = 0.25 / 0.75, then taking the IQR of the concatenated
+# bag. Validated against sample-based IQR with M=1000 on five real cells
+# (/tmp/g4_iqr_experiment.py) — agrees to <=0.001 on ZINB, within 10% on
+# SkewNormal.
+# ---------------------------------------------------------------------------
+
+# torch's NegativeBinomial(probs=p) treats p as "probability of success" and
+# counts FAILURES; scipy.stats.nbinom(n, p) treats p the same way but counts
+# successes-needed before n failures, so the per-trial parameter is mirrored:
+# scipy_p = 1 - torch_probs. Mapping documented in /tmp/researcher_g4_audit.md.
+def _zinb_ppf(
+    q: float, r: np.ndarray, nb_p: np.ndarray, gate: np.ndarray
+) -> np.ndarray:
+    """Vectorized inverse CDF for ZINB(``gate``, ``r``, ``nb_p``).
+
+    Mixture: ``F(k) = π + (1−π)·F_NB(k; r, p)`` where ``π = gate``. Quantiles
+    at ``q ≤ π`` land at 0; above the gate, rescale to the conditional NB.
+    NegBin params follow PyTorch / LightGBMLSS (``probs``); scipy uses the
+    mirrored ``1 − probs`` for its second argument.
+    """
+    r = np.asarray(r, dtype=float)
+    nb_p = np.asarray(nb_p, dtype=float)
+    gate = np.asarray(gate, dtype=float)
+    # q <= π: quantile in the structural-zero point mass.
+    in_gate = q <= gate
+    scaled_q = np.where(in_gate, 0.0, (q - gate) / np.maximum(1.0 - gate, 1e-12))
+    nb_q = _scipy_nbinom.ppf(scaled_q, r, 1.0 - nb_p)
+    return np.where(in_gate, 0.0, nb_q)
+
+
+def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
+    """Identify the distribution family from per-row parameter columns.
+
+    Returns one of ``"SkewNormal"``, ``"NegBin"``, ``"ZINB"``, ``"Gamma"``,
+    ``"ZAGamma"`` based on which params ``training/pipeline.py``
+    ``_step_persist_artifacts`` dumped into the test-set CSV (~lines
+    1191-1212). ``None`` for legacy / synthetic frames missing every
+    distribution param — those keep the back-compat point-IQR semantics.
+    """
+    cols = set(df.columns)
+    if {"SN_Loc", "SN_Scale", "SN_Alpha"} <= cols:
+        return "SkewNormal"
+    if {"Alpha", "EV"} <= cols and "R" not in cols:
+        return "ZAGamma" if "Gate" in cols else "Gamma"
+    if {"R", "NB_P"} <= cols:
+        return "ZINB" if "Gate" in cols else "NegBin"
+    return None
+
+
+# MeanYr floor for ratio_meanyr decode is canonical at
+# `training.baselines._MEANYR_FLOOR` (imported at the top of this module as
+# `_SN_DENOM_FLOOR`); the analytical-IQR mirror must agree with the training
+# pipeline or the predicted IQR drifts from what the model actually output.
+
+# Strategies that decode SkewNormal scale by multiplying with MeanYr_clipped,
+# mirroring training.baselines._ratio_decode_scale. centered_additive_*
+# strategies leave SN_Scale alone (baselines._centered_eb_decode_scale and
+# _centered_mean10_decode_scale return raw scale).
+_RATIO_LIKE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr"})
+
+
+def _decode_sn_loc_scale(
+    df: pd.DataFrame, strategy: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Decode raw SkewNormal ``loc`` / ``scale`` to EV-space per strategy.
+
+    Mirrors ``training.baselines.TargetStrategy.decode_loc`` / ``decode_scale``
+    for the strategies wired in ``_STRATEGIES`` there. ``ratio_meanyr``
+    multiplies both by ``MeanYr.clip(_SN_DENOM_FLOOR)``; the
+    ``centered_additive_*`` strategies leave ``scale`` alone (location decode
+    is irrelevant for IQR, which is location-free for SkewNormal).
+    """
+    raw_loc = df["SN_Loc"].to_numpy(dtype=float)
+    raw_scale = df["SN_Scale"].to_numpy(dtype=float)
+    if strategy in _RATIO_LIKE_STRATEGIES and "MeanYr" in df.columns:
+        meanyr = df["MeanYr"].clip(lower=_SN_DENOM_FLOOR).to_numpy(dtype=float)
+        return raw_loc * meanyr, raw_scale * meanyr
+    return raw_loc, raw_scale
+
+
+def _iqr_pred_analytical(df: pd.DataFrame, dist: str, *, strategy: str) -> float:
+    """Pooled analytical IQR of the predicted distribution across all rows.
+
+    Per-row ``q25 = F⁻¹(0.25)`` and ``q75 = F⁻¹(0.75)`` are evaluated via
+    ``scipy.stats.<dist>.ppf`` (custom inversion for the ZINB / ZAGamma
+    mixtures). The arrays are concatenated and the bag's
+    ``percentile(75) − percentile(25)`` is the pooled IQR — a discrete
+    approximation to the mixture-predictive IQR, validated against
+    sample-based pooled IQR to ≤ 0.001 on count families.
+    """
+    if dist == "SkewNormal":
+        loc, scale = _decode_sn_loc_scale(df, strategy)
+        alpha = df["SN_Alpha"].to_numpy(dtype=float)
+        q25 = _scipy_skewnorm.ppf(0.25, alpha, loc=loc, scale=scale)
+        q75 = _scipy_skewnorm.ppf(0.75, alpha, loc=loc, scale=scale)
+    elif dist == "NegBin":
+        r = df["R"].to_numpy(dtype=float)
+        p = df["NB_P"].to_numpy(dtype=float)
+        q25 = _scipy_nbinom.ppf(0.25, r, 1.0 - p)
+        q75 = _scipy_nbinom.ppf(0.75, r, 1.0 - p)
+    elif dist == "ZINB":
+        r = df["R"].to_numpy(dtype=float)
+        p = df["NB_P"].to_numpy(dtype=float)
+        gate = df["Gate"].to_numpy(dtype=float)
+        q25 = _zinb_ppf(0.25, r, p, gate)
+        q75 = _zinb_ppf(0.75, r, p, gate)
+    elif dist == "Gamma":
+        # rate = concentration / EV; scale = 1 / rate = EV / concentration.
+        a = df["Alpha"].to_numpy(dtype=float)
+        ev = df["EV"].to_numpy(dtype=float)
+        scale = ev / np.maximum(a, 1e-12)
+        q25 = _scipy_gamma.ppf(0.25, a, scale=scale)
+        q75 = _scipy_gamma.ppf(0.75, a, scale=scale)
+    elif dist == "ZAGamma":
+        # Mixture of point-mass at 0 (gate) + Gamma on Y>0. Per-row inversion
+        # mirrors _zinb_ppf: q ≤ π → 0, else rescaled Gamma quantile.
+        a = df["Alpha"].to_numpy(dtype=float)
+        ev = df["EV"].to_numpy(dtype=float)
+        gate = df["Gate"].to_numpy(dtype=float)
+        scale = ev / np.maximum(a, 1e-12)
+        rescaled_25 = np.where(gate >= 0.25, 0.0, (0.25 - gate) / np.maximum(1 - gate, 1e-12))
+        rescaled_75 = np.where(gate >= 0.75, 0.0, (0.75 - gate) / np.maximum(1 - gate, 1e-12))
+        q25 = np.where(gate >= 0.25, 0.0, _scipy_gamma.ppf(rescaled_25, a, scale=scale))
+        q75 = np.where(gate >= 0.75, 0.0, _scipy_gamma.ppf(rescaled_75, a, scale=scale))
+    else:
+        raise ValueError(f"Unknown distribution family for analytical IQR: {dist!r}")
+    return _iqr(np.concatenate([q25, q75]))
+
+
 def _gate1_brier_ci(
     p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, rng: np.random.Generator
 ) -> tuple[float, float, float]:
@@ -489,16 +643,37 @@ def _gate23_segment_match(
     return pred_mean, true_mean, abs_diff, sigma, z
 
 
-def _gate4_iqr_spread(actual: np.ndarray, pred: np.ndarray) -> tuple[float, float, float]:
+def _gate4_iqr_spread(
+    actual: np.ndarray,
+    pred: np.ndarray,
+    *,
+    df: pd.DataFrame | None = None,
+    dist: str | None = None,
+    strategy: str | None = None,
+) -> tuple[float, float, float]:
     """Gate 4 — IQR spread (compression) over the full population.
 
-    Returns ``(iqr_pred, iqr_true, ratio)`` with ``ratio = iqr_pred / iqr_true``
-    (1.0 = no compression, <1 = predictions compressed). IQR-robust sibling of the
-    std-based :func:`_compression_ratio`.
+    When ``df`` + ``dist`` are supplied (the typical real-cell call from
+    :func:`gate_row`), the predicted IQR is the **pooled analytical IQR** of
+    the per-row predictive distribution — `_iqr_pred_analytical`. Without them
+    (oracle row, legacy synthetic frames) the predicted IQR falls back to the
+    point estimator ``_iqr(pred)`` so the oracle (`pred = actual`) keeps
+    returning ``ratio = 1.0``.
+
+    Degenerate handling (Ship 75 Step 0.4): when ``iqr_true = 0``, the
+    ``iqr_pred = 0`` cell gets ``ratio = 1.0`` (perfectly-matched degenerate
+    truth), but ``iqr_pred > 0`` gets ``ratio = inf`` (the gate fails — model
+    spreads where truth is point-mass).
     """
-    iqr_pred = _iqr(pred)
     iqr_true = _iqr(actual)
-    ratio = iqr_pred / iqr_true if iqr_true > 0 else float("nan")
+    if df is not None and dist is not None:
+        iqr_pred = _iqr_pred_analytical(df, dist, strategy=strategy or "ratio_meanyr")
+    else:
+        iqr_pred = _iqr(pred)
+    if iqr_true == 0:  # noqa: SIM108 — doubly-nested ternary is unreadable here
+        ratio = 1.0 if iqr_pred == 0 else float("inf")
+    else:
+        ratio = iqr_pred / iqr_true
     return iqr_pred, iqr_true, ratio
 
 
@@ -529,8 +704,57 @@ def _gate5_ece_equal_mass(p_model: np.ndarray, y: np.ndarray, n_bins: int = _ECE
     return float(ece)
 
 
+# Scatter plot output settings. DPI and figure size are presentation choices,
+# not model parameters; named here so they are easy to find and adjust.
+_SCATTER_DPI: int = 110
+_SCATTER_FIG_INCHES: tuple[int, int] = (7, 7)
+
+# Synthetic base date for the supersede S3 Kelly sim. The sim needs monotonic
+# per-event dates; using a fixed epoch keeps the date series deterministic and
+# independent of wall-clock time. Any fixed date works — only ordering matters.
+_SUPERSEDE_S3_BASE_DATE: pd.Timestamp = pd.Timestamp("2026-01-01")
+
+_DECODE_FALLBACK_STRATEGY: str = "ratio_meanyr"
+
+
+def _round_gate_value(v: float | None) -> float | None:
+    """Round to 4 dp; map None / non-finite to a blank CSV cell."""
+    if v is None or not np.isfinite(v):
+        return None
+    return round(float(v), 4)
+
+
+@functools.lru_cache(maxsize=1)
+def _cached_ship_config() -> dict:
+    """Memoize the parsed ship_config so a full-audit loop hits disk once."""
+    return load_ship_config()
+
+
+def _resolve_decode_strategy(league: str, market_stem: str) -> str:
+    """Look up the per-cell training strategy for a SkewNormal decode mirror.
+
+    ``market_stem`` is the file-slug form (e.g. ``fantasy-points-prizepicks``)
+    that lives in the test_set CSV name; ``ship_config.json`` keys are the
+    raw market names with spaces, so we reverse the hyphenation done by
+    :func:`helpers.io.market_file_slug` (line 81). Falls back to
+    ``ratio_meanyr`` when the cell isn't in ship_config (un-shipped cells
+    were trained under the ``--target-strategy`` default, which is
+    ``ratio_meanyr``).
+    """
+    market_with_spaces = market_stem.replace("-", " ")
+    return resolve_cell_strategy(
+        league, market_with_spaces, _DECODE_FALLBACK_STRATEGY, _cached_ship_config()
+    )
+
+
 def gate_row(
-    df: pd.DataFrame, pred_col: str, *, league: str, market: str, strategy: str
+    df: pd.DataFrame,
+    pred_col: str,
+    *,
+    league: str,
+    market: str,
+    strategy: str,
+    decode_strategy: str | None = None,
 ) -> dict[str, object]:
     """Compute the five offline gates for one cell — a model row plus an oracle row.
 
@@ -554,8 +778,21 @@ def gate_row(
     g3_pred, g3_true, g3_abs, g3_sigma, g3_z = _gate23_segment_match(pred, actual, bench_mask)
     _, _, _, _, g3_z_oracle = _gate23_segment_match(actual, actual, bench_mask)
 
-    # Gate 4 — IQR spread; the oracle (pred = actual) gives ratio 1.0.
-    g4_iqr_pred, g4_iqr_true, g4_ratio = _gate4_iqr_spread(actual, pred)
+    # Gate 4 — IQR spread; the oracle (pred = actual) gives ratio 1.0 via the
+    # point-IQR fallback. The model row routes through the analytical
+    # pooled-IQR estimator when per-row distribution params are present in df,
+    # else falls back to the point estimator for back-compat (synthetic frames
+    # in the golden tests). ``decode_strategy`` is the per-cell training
+    # strategy (ship_config lookup); ``strategy`` is just the run label kept
+    # for the row.
+    g4_dist = _infer_dist_from_columns(df)
+    decode_for_g4 = decode_strategy or strategy
+    if g4_dist is not None:
+        g4_iqr_pred, g4_iqr_true, g4_ratio = _gate4_iqr_spread(
+            actual, pred, df=df, dist=g4_dist, strategy=decode_for_g4
+        )
+    else:
+        g4_iqr_pred, g4_iqr_true, g4_ratio = _gate4_iqr_spread(actual, pred)
     _, _, g4_ratio_oracle = _gate4_iqr_spread(actual, actual)
 
     # Gate 1 — paired Brier vs book. Needs Odds; blank ⇒ "no book to beat, model wins
@@ -585,12 +822,7 @@ def gate_row(
         g5_ece = _gate5_ece_equal_mass(p_model_c, y_c)
         g5_ece_o = _gate5_ece_equal_mass(y_c, y_c)
 
-    def r(v: float | None) -> float | None:
-        """Round to 4 dp; map None / non-finite to a blank CSV cell."""
-        if v is None or not np.isfinite(v):
-            return None
-        return round(float(v), 4)
-
+    r = _round_gate_value
     return {
         "league": league,
         "market": market,
@@ -803,8 +1035,7 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
     hit = np.where(bet_over, hit_over, ~hit_over)
 
     n = len(sub)
-    base = pd.Timestamp("2026-01-01")
-    dates = [(base + pd.Timedelta(days=int(i))).date() for i in range(n)]
+    dates = [(_SUPERSEDE_S3_BASE_DATE + pd.Timedelta(days=int(i))).date() for i in range(n)]
     return pd.DataFrame(
         {
             "Player": [f"E{i}" for i in range(n)],
@@ -933,7 +1164,7 @@ def write_scatter(df: pd.DataFrame, pred_col: str, out_path: Path, title: str) -
 
     work = df.copy()
     work["decile"] = pd.qcut(work[DECILE_COL].rank(method="first"), N_DECILES, labels=False)
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=_SCATTER_FIG_INCHES)
     sc = ax.scatter(
         work[ACTUAL_COL], work[pred_col], c=work["decile"], cmap="viridis", s=8, alpha=0.4
     )
@@ -945,7 +1176,7 @@ def write_scatter(df: pd.DataFrame, pred_col: str, out_path: Path, title: str) -
     ax.legend(loc="upper left")
     fig.colorbar(sc, ax=ax, label="MeanYr decile")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=110)
+    fig.savefig(out_path, dpi=_SCATTER_DPI)
     plt.close(fig)
 
 
@@ -1248,7 +1479,20 @@ def main(
         lg, _, mkt = stem.partition("_")
         df = load_test_set(path, pred_col)
         card = scorecard(df, pred_col, strategy=strategy, league=lg, market=mkt, n_deciles=deciles)
-        row = apply_thresholds(gate_row(df, pred_col, league=lg, market=mkt, strategy=strategy))
+        # Per-cell training strategy comes from ship_config (the source of
+        # truth for what `meditate` trained the cell with); the CLI
+        # `--strategy` value is just the run label written into the row.
+        decode_strategy = _resolve_decode_strategy(lg, mkt)
+        row = apply_thresholds(
+            gate_row(
+                df,
+                pred_col,
+                league=lg,
+                market=mkt,
+                strategy=strategy,
+                decode_strategy=decode_strategy,
+            )
+        )
         rows.append(row)
         click.echo(f"\n=== {stem}  ({pred_col}, n={card.n_rows}) ===")
         _print_table(decile_table(df, pred_col, deciles))

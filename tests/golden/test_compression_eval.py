@@ -19,10 +19,13 @@ from sportstradamus.scripts.compression_eval import (
     _gate4_iqr_spread,
     _gate5_ece_equal_mass,
     _gate23_segment_match,
+    _infer_dist_from_columns,
+    _iqr_pred_analytical,
     _segment_masks,
     _supersede_paired_brier_ci,
     _supersede_paired_sharpe,
     _test_set_to_bet_frame,
+    _zinb_ppf,
     apply_thresholds,
     decile_table,
     gate_row,
@@ -234,6 +237,304 @@ def test_gate4_iqr_ratio_unit_for_perfect():
     x = np.arange(100, dtype=float)
     _, _, ratio = _gate4_iqr_spread(x, x)
     assert ratio == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — pooled per-row q25/q75
+# from the predicted distribution; replaces the broken point-IQR estimator on
+# probabilistic markets. Brief at /tmp/researcher_g4_audit.md (Outcome B).
+# ---------------------------------------------------------------------------
+
+
+def test_zinb_ppf_zero_inflated_quantile_clips_to_zero():
+    """Quantiles below the zero-inflation gate land at 0."""
+    r = np.array([5.0, 5.0])
+    nb_p = np.array([0.4, 0.4])
+    gate = np.array([0.4, 0.4])  # 40% structural zeros
+    # q=0.25 is well below π=0.4, so all rows return 0.
+    out = _zinb_ppf(0.25, r, nb_p, gate)
+    assert out.tolist() == [0.0, 0.0]
+
+
+def test_zinb_ppf_above_gate_matches_rescaled_nbinom():
+    """Above the gate the quantile inverts the rescaled NB tail."""
+    from scipy.stats import nbinom
+
+    r = np.array([5.0, 10.0])
+    nb_p = np.array([0.4, 0.6])  # torch "probs"
+    gate = np.array([0.2, 0.3])
+    q = 0.75
+    out = _zinb_ppf(q, r, nb_p, gate)
+    # Reference: rescaled NB quantile per row.
+    expected = np.array(
+        [
+            nbinom.ppf((q - 0.2) / (1 - 0.2), 5.0, 1.0 - 0.4),
+            nbinom.ppf((q - 0.3) / (1 - 0.3), 10.0, 1.0 - 0.6),
+        ]
+    )
+    assert np.allclose(out, expected)
+
+
+def test_zinb_ppf_no_gate_matches_plain_nbinom():
+    """gate=0 reduces ZINB to plain NB at every quantile."""
+    from scipy.stats import nbinom
+
+    r = np.array([5.0, 8.0, 12.0])
+    nb_p = np.array([0.3, 0.5, 0.7])
+    gate = np.zeros(3)
+    for q in (0.25, 0.5, 0.75):
+        out = _zinb_ppf(q, r, nb_p, gate)
+        ref = nbinom.ppf(q, r, 1.0 - nb_p)
+        assert np.allclose(out, ref), f"mismatch at q={q}"
+
+
+def test_iqr_pred_analytical_negbin_matches_pooled_quantiles():
+    """NegBin analytical IQR = IQR(concat(q25_per_row, q75_per_row))."""
+    from scipy.stats import nbinom
+
+    n = 500
+    df = pd.DataFrame(
+        {
+            "R": np.full(n, 10.0),
+            "NB_P": np.full(n, 0.5),
+        }
+    )
+    iqr = _iqr_pred_analytical(df, "NegBin", strategy="ratio_meanyr")
+    # All rows identical → pooled IQR equals the per-row IQR.
+    q25 = nbinom.ppf(0.25, 10.0, 0.5)
+    q75 = nbinom.ppf(0.75, 10.0, 0.5)
+    assert iqr == pytest.approx(q75 - q25, abs=1e-9)
+
+
+def test_iqr_pred_analytical_zinb_brief_worked_example():
+    """ZINB(π=0.3, r=5, p=0.4) — pooled IQR matches the manual computation.
+
+    F_ZINB(0) = 0.3 + 0.7 * (1-0.4)^5 = 0.3 + 0.7 * 0.07776 = 0.3544
+    F_ZINB(1) = 0.3 + 0.7 * nbinom.cdf(1, 5, 0.6) per scipy convention.
+    Since q25=0.25 < 0.3544 the per-row q25 = 0.
+    q75=0.75 → (0.75 - 0.3)/0.7 = 0.6429 → nbinom.ppf(0.6429, 5, 0.6).
+    """
+    from scipy.stats import nbinom
+
+    n = 1000
+    df = pd.DataFrame(
+        {
+            "R": np.full(n, 5.0),
+            "NB_P": np.full(n, 0.4),
+            "Gate": np.full(n, 0.3),
+        }
+    )
+    iqr = _iqr_pred_analytical(df, "ZINB", strategy="ratio_meanyr")
+    q25 = 0.0
+    q75 = float(nbinom.ppf((0.75 - 0.3) / (1 - 0.3), 5.0, 1.0 - 0.4))
+    assert iqr == pytest.approx(q75 - q25, abs=1e-9)
+
+
+def test_iqr_pred_analytical_skewnormal_ratio_strategy():
+    """SkewNormal under ratio_meanyr: decoded_scale = SN_Scale * MeanYr."""
+    from scipy.stats import skewnorm
+
+    n = 500
+    raw_loc = 1.0
+    raw_scale = 0.5
+    alpha = 2.0
+    meanyr_value = 4.0
+    df = pd.DataFrame(
+        {
+            "SN_Loc": np.full(n, raw_loc),
+            "SN_Scale": np.full(n, raw_scale),
+            "SN_Alpha": np.full(n, alpha),
+            "MeanYr": np.full(n, meanyr_value),
+            "Result": np.zeros(n),
+            "EV": np.zeros(n),
+        }
+    )
+    iqr = _iqr_pred_analytical(df, "SkewNormal", strategy="ratio_meanyr")
+    decoded_loc = raw_loc * meanyr_value
+    decoded_scale = raw_scale * meanyr_value
+    q25 = float(skewnorm.ppf(0.25, alpha, loc=decoded_loc, scale=decoded_scale))
+    q75 = float(skewnorm.ppf(0.75, alpha, loc=decoded_loc, scale=decoded_scale))
+    assert iqr == pytest.approx(q75 - q25, abs=1e-6)
+
+
+def test_iqr_pred_analytical_skewnormal_centered_strategy_passes_scale_through():
+    """centered_additive_* strategies leave SN_Scale alone (no MeanYr multiply)."""
+    from scipy.stats import skewnorm
+
+    n = 500
+    raw_loc = 1.5
+    raw_scale = 2.0
+    alpha = -1.0
+    df = pd.DataFrame(
+        {
+            "SN_Loc": np.full(n, raw_loc),
+            "SN_Scale": np.full(n, raw_scale),
+            "SN_Alpha": np.full(n, alpha),
+            "MeanYr": np.full(n, 4.0),  # would change result under ratio_meanyr
+        }
+    )
+    iqr = _iqr_pred_analytical(df, "SkewNormal", strategy="centered_additive_mean10")
+    q25 = float(skewnorm.ppf(0.25, alpha, loc=raw_loc, scale=raw_scale))
+    q75 = float(skewnorm.ppf(0.75, alpha, loc=raw_loc, scale=raw_scale))
+    assert iqr == pytest.approx(q75 - q25, abs=1e-6)
+
+
+def test_iqr_pred_analytical_gamma_recovers_rate_from_ev():
+    """Gamma analytical IQR uses scipy.stats.gamma; rate = Alpha / EV."""
+    from scipy.stats import gamma as scipy_gamma
+
+    n = 500
+    a = 4.0
+    rate = 2.0
+    ev = a / rate
+    df = pd.DataFrame(
+        {
+            "Alpha": np.full(n, a),
+            "EV": np.full(n, ev),
+        }
+    )
+    iqr = _iqr_pred_analytical(df, "Gamma", strategy="ratio_meanyr")
+    q25 = float(scipy_gamma.ppf(0.25, a, scale=1.0 / rate))
+    q75 = float(scipy_gamma.ppf(0.75, a, scale=1.0 / rate))
+    assert iqr == pytest.approx(q75 - q25, abs=1e-6)
+
+
+def test_gate4_iqr_spread_back_compat_point_iqr_without_df():
+    """Old signature (no df / dist / strategy) keeps point-IQR semantics — the
+    oracle row (pred = actual) still returns ratio = 1.0 so existing assertions
+    on `g4_iqr_ratio_oracle` carry over.
+    """
+    x = np.arange(100, dtype=float)
+    _, _, ratio = _gate4_iqr_spread(x, x)
+    assert ratio == pytest.approx(1.0)
+
+
+def test_gate4_iqr_spread_analytical_replaces_point_on_zinb():
+    """When df + dist supplied, predicted IQR is the analytical pooled IQR.
+
+    For a calibrated ZINB-like population, analytical IQR should match the
+    actuals' IQR closely — the new gate stops measuring the point-prediction
+    smoothing artifact.
+    """
+    from scipy.stats import nbinom
+
+    rng = np.random.default_rng(1729)
+    n = 4000
+    r_arr = np.full(n, 5.0)
+    p_arr = np.full(n, 0.4)
+    gate_arr = np.zeros(n)
+    # Calibrated actuals drawn from the matching NB.
+    actuals = nbinom.rvs(5.0, 1.0 - 0.4, size=n, random_state=rng).astype(float)
+    pred = np.full(n, float(actuals.mean()))  # point pred — smooth, deliberately
+    df = pd.DataFrame(
+        {"Result": actuals, "EV": pred, "R": r_arr, "NB_P": p_arr, "Gate": gate_arr}
+    )
+    iqr_pred, iqr_true, ratio = _gate4_iqr_spread(
+        actuals, pred, df=df, dist="ZINB", strategy="ratio_meanyr"
+    )
+    assert iqr_true > 0
+    # Analytical pooled q75 - q25 on the matching NB should equal the actuals' IQR
+    # (integer support; pooled bag of identical per-row q25/q75 gives that exact diff).
+    expected_q25 = float(nbinom.ppf(0.25, 5.0, 1.0 - 0.4))
+    expected_q75 = float(nbinom.ppf(0.75, 5.0, 1.0 - 0.4))
+    assert iqr_pred == pytest.approx(expected_q75 - expected_q25, abs=1e-9)
+    assert ratio > 0.5  # passes the gate
+
+
+def test_gate4_iqr_spread_degenerate_zero_over_zero_ships():
+    """IQR_true = 0 AND IQR_pred = 0 → ratio 1.0 (the 0/0 convention)."""
+    n = 200
+    actuals = np.zeros(n)
+    # ZINB with extreme structural zeros → IQR_pred also 0.
+    df = pd.DataFrame(
+        {
+            "Result": actuals,
+            "EV": np.zeros(n),
+            "R": np.full(n, 1.0),
+            "NB_P": np.full(n, 0.01),  # tiny mass on >0
+            "Gate": np.full(n, 0.99),  # 99% structural zeros
+        }
+    )
+    iqr_pred, iqr_true, ratio = _gate4_iqr_spread(
+        actuals, np.zeros(n), df=df, dist="ZINB", strategy="ratio_meanyr"
+    )
+    assert iqr_true == 0.0
+    assert iqr_pred == 0.0
+    assert ratio == pytest.approx(1.0)
+
+
+def test_gate4_iqr_spread_degenerate_nonzero_pred_zero_true_fails():
+    """IQR_pred > 0 but IQR_true = 0 → ratio = inf (the gate fails)."""
+    from scipy.stats import nbinom
+
+    n = 200
+    actuals = np.zeros(n)  # truth is fully zero
+    df = pd.DataFrame(
+        {
+            "Result": actuals,
+            "EV": np.full(n, 1.0),
+            "R": np.full(n, 5.0),
+            "NB_P": np.full(n, 0.5),
+            "Gate": np.zeros(n),
+        }
+    )
+    iqr_pred, iqr_true, ratio = _gate4_iqr_spread(
+        actuals, np.full(n, 1.0), df=df, dist="ZINB", strategy="ratio_meanyr"
+    )
+    assert iqr_true == 0.0
+    assert iqr_pred > 0
+    # NB(5, 0.5) actuals at NB_P=0.5 have IQR > 0; pred can't match a degenerate truth.
+    assert np.isinf(ratio)
+    # Confirm scipy NB IQR is non-zero for this parameterization (sanity).
+    assert nbinom.ppf(0.75, 5.0, 0.5) > nbinom.ppf(0.25, 5.0, 0.5)
+
+
+def test_infer_dist_from_columns_dispatches_by_param_columns():
+    """Distribution family inferred from the per-row param columns present."""
+    sn = pd.DataFrame({"SN_Loc": [1.0], "SN_Scale": [0.5], "SN_Alpha": [0.0]})
+    nb = pd.DataFrame({"R": [5.0], "NB_P": [0.4]})
+    zinb = pd.DataFrame({"R": [5.0], "NB_P": [0.4], "Gate": [0.2]})
+    gamma = pd.DataFrame({"Alpha": [4.0], "EV": [2.0]})
+    zagamma = pd.DataFrame({"Alpha": [4.0], "EV": [2.0], "Gate": [0.3]})
+    bare = pd.DataFrame({"Result": [0.0], "EV": [1.0]})
+    assert _infer_dist_from_columns(sn) == "SkewNormal"
+    assert _infer_dist_from_columns(nb) == "NegBin"
+    assert _infer_dist_from_columns(zinb) == "ZINB"
+    assert _infer_dist_from_columns(gamma) == "Gamma"
+    assert _infer_dist_from_columns(zagamma) == "ZAGamma"
+    assert _infer_dist_from_columns(bare) is None
+
+
+def test_gate_row_uses_analytical_g4_when_dist_columns_present():
+    """gate_row auto-detects ZINB columns and routes G4 through the analytical path.
+
+    On a synthetic calibrated ZINB-like frame, the analytical g4_iqr_pred should
+    differ from the point IQR of EV (which is degenerate at the mean).
+    """
+    from scipy.stats import nbinom
+
+    rng = np.random.default_rng(31)
+    n = 4000
+    actuals = nbinom.rvs(5.0, 1.0 - 0.4, size=n, random_state=rng).astype(float)
+    point_pred = np.full(n, float(actuals.mean()))
+    df = pd.DataFrame(
+        {
+            "MeanYr": np.full(n, float(actuals.mean())),
+            "Result": actuals,
+            "EV": point_pred,
+            "R": np.full(n, 5.0),
+            "NB_P": np.full(n, 0.4),
+            "Gate": np.zeros(n),
+        }
+    )
+    row = gate_row(df, "EV", league="NBA", market="REB", strategy="ratio_meanyr")
+    # Analytical replaces point on dist-aware rows: analytical pred IQR is the
+    # integer NB IQR (non-zero), not the (==0) point IQR of a constant EV column.
+    assert row["g4_iqr_pred"] > 0.0
+    # Sanity: point IQR of the EV column truly is 0, so any non-zero g4_iqr_pred
+    # proves the gate switched from the point estimator to the analytical one.
+    point_iqr = float(np.percentile(point_pred, 75) - np.percentile(point_pred, 25))
+    assert point_iqr == 0.0
 
 
 # ---------------------------------------------------------------------------
