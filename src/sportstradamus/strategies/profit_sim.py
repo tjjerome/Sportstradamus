@@ -170,6 +170,36 @@ def simulate_kelly_all(
     )
 
 
+def extract_sim_returns(sim_df: pd.DataFrame, initial_bankroll: float) -> np.ndarray:
+    """Per-event return series ``daily_pnl / start-of-event bankroll``.
+
+    Mirrors :func:`summarize_runs`'s Sharpe computation so callers that
+    want the raw per-event return series (e.g. Memmel paired-Sharpe inference)
+    use the same denominator that ``summarize_runs`` uses. Returns an empty
+    array for an empty simulation result.
+
+    Args:
+        sim_df: Result frame from :func:`simulate_kelly_all` or
+            :func:`simulate_strategy` — columns ``run``, ``daily_pnl``,
+            ``bankroll``.
+        initial_bankroll: Starting bankroll used in the simulation; fills the
+            shift-by-1 NaN at the first row of each run.
+
+    Returns:
+        1-D float array of per-event returns, all runs concatenated.
+    """
+    if sim_df.empty:
+        return np.array([], dtype=float)
+    series = sim_df.groupby("run", group_keys=False)[["daily_pnl", "bankroll"]].apply(
+        lambda x: x["daily_pnl"].values
+        / np.maximum(
+            x["bankroll"].shift(1).fillna(initial_bankroll).values,
+            1,
+        )
+    )
+    return np.concatenate(series.values)
+
+
 def summarize_runs(result: pd.DataFrame, initial_bankroll: float) -> dict[str, float]:
     """Collapse a :func:`simulate_strategy` result into headline metrics.
 
