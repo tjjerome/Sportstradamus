@@ -1,7 +1,7 @@
 {
   "league": "NFL",
-  "generated_at": "2026-05-22T20:54:49+00:00",
-  "git_sha": "fbec3cc",
+  "generated_at": "2026-05-23T21:06:16+00:00",
+  "git_sha": "760baa4",
   "lookback_days": 300,
   "rolling_window_games": 8,
   "min_overlap_for_full_weight": 30,
@@ -10,7 +10,7 @@
     "start": "2025-09-04",
     "end": "2026-02-08"
   },
-  "total_team_game_observations": 570,
+  "total_team_game_observations": 572,
   "per_team_observations": {
     "PHI": 18,
     "DAL": 17,
@@ -24,7 +24,7 @@
     "HOU": 19,
     "GB": 18,
     "DET": 17,
-    "NE": 21,
+    "NE": 22,
     "LV": 17,
     "BUF": 19,
     "BAL": 17,
@@ -40,7 +40,7 @@
     "TEN": 17,
     "CLE": 17,
     "CIN": 17,
-    "SEA": 20,
+    "SEA": 21,
     "SF": 19,
     "CHI": 19,
     "MIN": 17
