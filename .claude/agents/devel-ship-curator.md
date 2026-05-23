@@ -34,17 +34,21 @@ server.
 - The caller did not name **what is shipping**: either a specific
   `(league, market)` cell + its strategy and the Gate-1 verdict that cleared it,
   or a named foundation layer. Ask. Do not guess.
-- `devel` is not an ancestor of the research branch you are carving from
-  (`git log --oneline devel --not <research-ref>` is non-empty). If `devel` has
-  advanced independently, report it and stop — the caller must rebase/reconcile
-  first; you will not silently clobber `devel`-only work.
+- `origin/devel` is not an ancestor of the research branch you are carving from.
+  **Always `git fetch origin` first** — the local `devel` ref is often stale (it
+  can sit many commits behind `origin/devel`, and carving off it silently drops
+  the latest production work). Check `git log --oneline origin/devel --not
+  <research-ref>`; if non-empty, `origin/devel` has advanced independently —
+  report it and stop, the caller must rebase/reconcile first. You will not
+  silently clobber `devel`-only work.
 - The research branch's own gates are red. A red baseline means you cannot tell
   whether the carve broke anything. Report and stop.
 
 ## The carve procedure
 
-1. **Branch off `devel`** (never off the research branch):
-   `git checkout devel && git checkout -b <ship-branch-name>`.
+1. **Branch off `origin/devel`** (never off the research branch, and never off a
+   possibly-stale local `devel`): `git fetch origin && git checkout -b
+   <ship-branch-name> origin/devel`.
 2. **Bring only the production delta.** For a per-market ship that is: the strategy
    slug + decode in `training/baselines.py`, the matching `model_prob` decode
    branch, any required `stats/` + `pipeline` feature additions, the inference-path
@@ -60,8 +64,8 @@ server.
      pure dev scaffolding.
 4. **Verify no leak.** `grep -rn "compression_eval\|zinb_routing_diagnostics\|
    icc_diagnostics" src/ tests/` on the new branch must show only docstring/comment
-   mentions, never an `import`. `git diff devel --stat` must contain **zero**
-   denylist paths. `git diff devel -- pyproject.toml` must add **no** dev-only dep
+   mentions, never an `import`. `git diff origin/devel --stat` must contain **zero**
+   denylist paths. `git diff origin/devel -- pyproject.toml` must add **no** dev-only dep
    or script.
 5. **Run the three gates** and make them green: `poetry run ruff check
    src/sportstradamus/`, `poetry run pytest tests/golden/`, `poetry run pytest -m
@@ -81,7 +85,7 @@ and the soak plan. The reviewer reads the verdict; `devel` does not carry it.
 ## Before you declare success
 
 - The three gates are green on the new branch.
-- `git diff devel --stat` shows the production delta and nothing on the denylist.
+- `git diff origin/devel --stat` shows the production delta and nothing on the denylist.
 - `pyproject.toml` gained no dev-only dependency or diagnostic console script.
 - The `ship_config.json` change is exactly the intended toggle (cell → strategy,
   or `"withheld"`), validated by `load_ship_config` (a bad value fails `meditate`

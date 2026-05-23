@@ -38,17 +38,19 @@ def load_market(league, market):
     r = df["R"].to_numpy().astype(float) if "R" in df.columns else None
     nb_p = df["NB_P"].to_numpy().astype(float) if "NB_P" in df.columns else None
 
-    with open(os.path.join(DATA_DIR, "stat_cv.json")) as f:
-        stat_cv = json.load(f)
-    cv = stat_cv[league][market]
+    with open(os.path.join(DATA_DIR, "config", "stat_meta.json")) as f:
+        stat_meta = json.load(f)
+    dist = stat_meta[league][market]["dist"]
 
-    with open(os.path.join(DATA_DIR, "stat_dist.json")) as f:
-        stat_dist = json.load(f)
-    dist = stat_dist[league][market]
-
-    with open(os.path.join(DATA_DIR, "stat_zi.json")) as f:
-        stat_zi = json.load(f)
-    hist_gate = stat_zi.get(league, {}).get(market, 0.0)
+    cal_path = os.path.join(DATA_DIR, "config", "stat_calibration.json")
+    if os.path.isfile(cal_path):
+        with open(cal_path) as f:
+            stat_cal = json.load(f)
+    else:
+        stat_cal = {}
+    cell_cal = stat_cal.get(league, {}).get(market, {})
+    cv = cell_cal.get("cv", 1.0)
+    hist_gate = cell_cal.get("zi") or 0.0
 
     return {
         "result": result,

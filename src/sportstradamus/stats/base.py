@@ -780,9 +780,9 @@ class Stats:
         )
         teamstats.index = stats.index
         stats = stats.join(teamstats)
-        defstats = _profile_rows_for_teams(
-            self.defenseProfile, stats.index.map(opponents)
-        ).astype(float)
+        defstats = _profile_rows_for_teams(self.defenseProfile, stats.index.map(opponents)).astype(
+            float
+        )
         if self.league == "MLB":
             defstats.loc[
                 [x in self.pitcherProfile.index for x in stats.index.map(pitchers)],
@@ -984,7 +984,7 @@ class Stats:
         Base implementation keeps all rows. Position-locked leagues (NFL) override
         this to drop players whose position never accrues the stat, which would
         otherwise enter the matrix as all-zero rows that depress the marginal mean
-        and inflate the zero fraction (docs/operation_ship_references.md §9 Stage A1.6).
+        and inflate the zero fraction (docs/gbdt_mean_regression_plan.md Stage A1.6).
         """
         return gamelog
 

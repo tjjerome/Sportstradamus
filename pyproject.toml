@@ -38,7 +38,6 @@ scrapeops-python-requests = "^0.4.7"
 streamlit = ">=1.38"
 plotly = ">=5.18"
 streamlit-aggrid = "^1.2.1.post2"
-statsmodels = "^0.14.6"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.prediction.cli:main"
@@ -50,8 +49,7 @@ kelly = "sportstradamus.strategies.kelly:main"
 pickem-build = "sportstradamus.strategies.underdog_pickem:main"
 backfill-live-metrics = "sportstradamus.scripts.backfill_live_metrics:main"
 check-graduation = "sportstradamus.scripts.check_graduation:main"
-zinb-routing-diagnostics = "sportstradamus.scripts.zinb_routing_diagnostics:main"
-icc-diagnostics = "sportstradamus.scripts.icc_diagnostics:main"
+generate-ship-config = "sportstradamus.scripts.generate_ship_config:main"
 
 [tool.poetry.group.strategy]
 optional = true

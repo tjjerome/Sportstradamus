@@ -1,0 +1,537 @@
+{
+    "MLB": {
+        "1st inning hits allowed": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "1st inning runs allowed": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "batter strikeouts": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "doubles": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "hits": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "hits allowed": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "hits+runs+rbi": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "hitter fantasy points underdog": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "hitter fantasy score": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "home runs": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "pitcher fantasy points underdog": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "pitcher fantasy score": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "pitcher strikeouts": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "pitches thrown": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "pitching outs": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "plateAppearances": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "rbi": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "runs": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "runs allowed": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "singles": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "stolen bases": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "total bases": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "walks": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "walks allowed": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        }
+    },
+    "NBA": {
+        "AST": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "BLK": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "BLST": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "DREB": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "FG3A": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "FG3M": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "FGA": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "FGM": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "FTM": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "MIN": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "OREB": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "PA": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "PF": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "PR": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "PRA": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "PTS": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "RA": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "REB": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "STL": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "TOV": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "fantasy points prizepicks": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        }
+    },
+    "NFL": {
+        "attempts": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "carries": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "completion percentage": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "completions": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "fantasy points prizepicks": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "fantasy points underdog": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "first downs": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "fumbles lost": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "interceptions": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "longest completion": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "longest reception": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "longest rush": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "passing first downs": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "passing tds": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "passing yards": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "qb tds": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "qb yards": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "receiving tds": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "receiving yards": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "receptions": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "centered_additive_mean10"
+        },
+        "rushing tds": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "rushing yards": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "sacks taken": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "targets": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "tds": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "yards": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        }
+    },
+    "NHL": {
+        "assists": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "blocked": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "faceOffWins": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "fantasy points prizepicks": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "goalie fantasy points underdog": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "goals": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "goalsAgainst": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "hits": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "points": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "powerPlayPoints": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "saves": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "shots": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "shotsAgainst": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "skater fantasy points underdog": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "sogBS": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "timeOnIce": {
+            "dist": "Gamma",
+            "shipped": "withheld",
+            "strategy": "none"
+        }
+    },
+    "WNBA": {
+        "AST": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "BLK": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "BLST": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "DREB": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "centered_additive_mean10"
+        },
+        "FG3M": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "FGA": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "FTM": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "MIN": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "OREB": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "PA": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "PR": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "PRA": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "PTS": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "RA": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "REB": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        },
+        "STL": {
+            "dist": "ZINB",
+            "shipped": "devel",
+            "strategy": "none"
+        },
+        "TOV": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "strategy": "none"
+        },
+        "fantasy points prizepicks": {
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
+        }
+    }
+}

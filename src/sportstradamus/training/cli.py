@@ -18,10 +18,10 @@ from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import train_market
 from sportstradamus.training.ship_config import (
+    STRATEGY_NONE,
     WITHHELD,
     load_ship_config,
     resolve_cell_strategy,
-    resolve_cell_zinb_mode,
 )
 
 warnings.simplefilter("ignore", UserWarning)
@@ -92,7 +92,7 @@ _RNG_SEED: int = 69
 )
 @click.option(
     "--zinb-mode",
-    type=click.Choice(list(baselines.ZINB_MODES)),
+    type=click.Choice(["joint", "hurdle"]),
     default="joint",
     show_default=True,
     help=(
@@ -112,6 +112,18 @@ _RNG_SEED: int = 69
         "A stem absent from every active league is an error."
     ),
 )
+@click.option(
+    "--branch",
+    type=click.Choice(["devel", "main"]),
+    default="devel",
+    show_default=True,
+    help=(
+        "Which release branch's ship policy to honor. 'devel' (default, "
+        "matches the production server) trains every cell with "
+        "shipped in {devel, main}. 'main' only trains cells with "
+        "shipped=main. See data/config/stat_meta.json."
+    ),
+)
 def meditate(
     force,
     league,
@@ -123,12 +135,13 @@ def meditate(
     target_strategy,
     zinb_mode,
     market,
+    branch,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # --deterministic implies --force: the input-freeze (new_M = empty)
     # otherwise short-circuits train_market when a prior model pickle exists,
     # which is precisely when the eval harness needs a fresh deterministic
-    # rebuild. See docs/operation_ship_75.md (Step 0 verification) for the rationale.
+    # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
     if deterministic and not force:
         force = True
     log = get_logger("meditate")
@@ -144,6 +157,7 @@ def meditate(
             "target_strategy": target_strategy,
             "zinb_mode": zinb_mode,
             "market": market,
+            "branch": branch,
         },
     )
     click.echo(
@@ -154,13 +168,14 @@ def meditate(
     if not deterministic:
         np.random.seed(_RNG_SEED)
 
-    # Per-cell ship config (data/ship_config.json) governs which markets train
-    # with which strategy and which are withheld (skipped + pruned). Validated
-    # here so a bad entry fails before the expensive gamelog loads below.
-    # Deterministic A/B runs ignore it: they target an explicit --market with an
-    # explicit --target-strategy and must never mutate production pickles.
-    # See docs/operation_ship_75.md "Tier-1 supersession" for the ship mechanism.
-    ship_config = {} if deterministic else load_ship_config()
+    # Per-cell ship config (data/config/stat_meta.json) governs which markets
+    # train with which strategy and which are withheld (skipped + pruned).
+    # Validated here so a bad entry fails before the expensive gamelog loads
+    # below. Deterministic A/B runs ignore it: they target an explicit
+    # --market with an explicit --target-strategy and must never mutate
+    # production pickles. See docs/gbdt_mean_regression_plan.md "Ship
+    # mechanism — per-cell strategy".
+    ship_config = {} if deterministic else load_ship_config(branch=branch)
 
     if reset_markets.strip():
         ff_path = pkg_resources.files(data) / "config" / "feature_filter.json"
@@ -273,7 +288,12 @@ def meditate(
                 prune_model_pickle(lg, market)
                 click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
                 continue
-            cell_zinb_mode = resolve_cell_zinb_mode(lg, market, zinb_mode, ship_config)
+            # STRATEGY_NONE marks count-branch cells that don't opt into a
+            # SkewNormal strategy slug. The pipeline's count branch ignores
+            # the slug anyway, so substitute the CLI default — the run-wide
+            # target_strategy — to keep baselines.get_strategy() satisfied.
+            if cell_strategy == STRATEGY_NONE:
+                cell_strategy = target_strategy
             train_market(
                 lg,
                 market,
@@ -284,5 +304,5 @@ def meditate(
                 league_start_date,
                 deterministic=deterministic,
                 target_strategy=cell_strategy,
-                zinb_mode=cell_zinb_mode,
+                zinb_mode=zinb_mode,
             )

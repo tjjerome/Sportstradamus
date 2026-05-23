@@ -104,9 +104,7 @@ def simulate_strategy(
     """
     rank_col = RANKING_MAP.get(ranking, "K")
 
-    eligible = df.loc[
-        (df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)
-    ].copy()
+    eligible = df.loc[(df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)].copy()
     if eligible.empty:
         return pd.DataFrame()
 
@@ -238,9 +236,7 @@ def summarize_runs(result: pd.DataFrame, initial_bankroll: float) -> dict[str, f
         / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
     )
     all_returns = np.concatenate(daily_returns.values)
-    sharpe = (
-        float(np.mean(all_returns) / np.std(all_returns)) if np.std(all_returns) > 0 else 0.0
-    )
+    sharpe = float(np.mean(all_returns) / np.std(all_returns)) if np.std(all_returns) > 0 else 0.0
 
     daily_outcomes = result.groupby(["run", "date"])["daily_pnl"].sum().reset_index()
     win_rate = float((daily_outcomes["daily_pnl"] > 0).mean())

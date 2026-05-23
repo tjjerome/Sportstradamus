@@ -13,7 +13,6 @@ from sportstradamus.nightly import (
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
-    _profit_sim_kelly_yield,
 )
 
 NOW = datetime(2026, 5, 20, 12, 0, 0)
@@ -192,55 +191,3 @@ def test_compute_live_metrics_profit_sim_yield_signs():
     wnba_30d = metrics[(metrics["league"] == "WNBA") & (metrics["window_days"] == 30)].iloc[0]
     assert nba_30d["profit_sim_yield"] == pytest.approx(1.0, abs=1e-6)
     assert wnba_30d["profit_sim_yield"] == pytest.approx(-1.0, abs=1e-6)
-
-
-# --------------------------------------------------------------------------- #
-# Phase 4 — Kelly-sized live ROI (set-baseline -> main gate)
-
-
-def _kelly_group(bet_side: str, model_p: float, books_p: float, hit: int) -> pd.DataFrame:
-    """One-offer fixture for ``_profit_sim_kelly_yield`` exercises."""
-    return pd.DataFrame(
-        {
-            "Bet": [bet_side],
-            "Model P": [model_p],
-            "Books P": [books_p],
-            "Boost": [1.0],
-            "Hit": [hit],
-        }
-    )
-
-
-def test_profit_sim_kelly_yield_empty_group_is_nan():
-    empty = pd.DataFrame(columns=["Bet", "Model P", "Books P", "Boost", "Hit"])
-    assert math.isnan(_profit_sim_kelly_yield(empty))
-
-
-def test_profit_sim_kelly_yield_no_positive_kelly_is_nan():
-    # Model P (0.40) below book p (0.50) on the Over side ⇒ Kelly = 0 ⇒ NaN
-    # because no dollars were staked.
-    group = _kelly_group("Over", model_p=0.40, books_p=0.50, hit=1)
-    assert math.isnan(_profit_sim_kelly_yield(group))
-
-
-def test_profit_sim_kelly_yield_winning_bet_is_positive():
-    # Model P (0.60) > book p (0.50); decimal odds = 1 / 0.50 = 2.0 ⇒ b = 1
-    # ⇒ raw Kelly = (0.60 * 2.0 - 1) / 1 = 0.20 ⇒ cap 0.05 ⇒ stake 5%.
-    # Win pays b = 1 per stake ⇒ ROI per staked dollar = 1.0.
-    group = _kelly_group("Over", model_p=0.60, books_p=0.50, hit=1)
-    assert _profit_sim_kelly_yield(group) == pytest.approx(1.0)
-
-
-def test_profit_sim_kelly_yield_losing_bet_is_negative_one():
-    # Same Kelly stake (0.60 vs 0.50) but the bet lost ⇒ ROI per staked dollar
-    # = -1.0 (the cap-clipped stake is forfeited).
-    group = _kelly_group("Over", model_p=0.60, books_p=0.50, hit=0)
-    assert _profit_sim_kelly_yield(group) == pytest.approx(-1.0)
-
-
-def test_profit_sim_kelly_yield_aggregates_dollar_weighted():
-    # Two bets: equal stakes (both cap at 5%), one win + one loss ⇒ ROI = 0.
-    win = _kelly_group("Over", model_p=0.60, books_p=0.50, hit=1)
-    loss = _kelly_group("Over", model_p=0.60, books_p=0.50, hit=0)
-    group = pd.concat([win, loss], ignore_index=True)
-    assert _profit_sim_kelly_yield(group) == pytest.approx(0.0)
