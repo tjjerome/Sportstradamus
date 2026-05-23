@@ -4,39 +4,24 @@ import importlib.resources as pkg_resources
 import json
 import os.path
 import pickle
-import warnings
 from datetime import datetime, timedelta
-from io import StringIO
-from time import sleep
 
-import line_profiler
 import nfl_data_py as nfl
 import nflreadpy as nflr
 import numpy as np
 import pandas as pd
-import requests
-from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
-    Scrape,
-    abbreviations,
-    combo_props,
-    feature_filter,
-    get_ev,
-    get_mlb_pitchers,
-    get_odds,
     remove_accents,
     set_model_start_values,
-    stat_cv,
-    stat_dist,
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats import nfl_fp_loader
+from sportstradamus.stats.base import Stats, archive, clean_data
 
 # Positions that actually accrue each market stat. Rows for other positions are
 # all-zero (or wrong-population) noise that depresses MeanYr and inflates the zero
@@ -87,6 +72,19 @@ _NON_NUMERIC_GAMELOG_COLS = frozenset(
         "home",
     }
 )
+
+# Volume-normalization budget constants used in get_volume_stats.
+# Values measured from historical gamelog distributions (mean carries /
+# targets for depth-chart players not individually modeled).
+_UNMODELED_CARRY_RESERVE: int = 6  # mean carries for rank-3+ rushers per game
+_UNMODELED_TARGET_RESERVE: int = 8  # mean targets for rank-5+ receivers per game
+_CARRY_CAP: int = 40  # absolute single-player carry ceiling per game
+_TARGET_CAP: int = 20  # absolute single-player target ceiling per game
+
+# Gamelog lookback window for data hygiene: drop rows older than this many days
+# (~6 seasons). Keeping more than 6 seasons of NFL data inflates storage and
+# includes pre-analytics-era play-by-play that is noisier than modern data.
+_GAMELOG_RETENTION_DAYS: int = 2191  # 6 * 365 + 1 leap day
 
 
 class StatsNFL(Stats):
@@ -711,7 +709,7 @@ class StatsNFL(Stats):
         self.gamelog = self.gamelog.sort_values("gameday")
 
         # Remove old games to prevent file bloat
-        six_years_ago = datetime.today().date() - timedelta(days=2191)
+        six_years_ago = datetime.today().date() - timedelta(days=_GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             self.gamelog["gameday"].apply(
                 lambda x: six_years_ago
@@ -1247,111 +1245,61 @@ class StatsNFL(Stats):
             }
 
     def build_comp_profile(self):
-        """Build the full NFL player comp profile with all derived features.
+        """Build the NFL player comp profile from FantasyPoints + PBP aggregates.
 
-        Loads PFF CSV data, derives rate/differential features, and joins
-        with nfl.import_ids() for age/height/bmi.
+        Phase 1A+1D of the PFF -> FantasyPoints migration. Per-year FP CSVs
+        + PBP/NGS aggregates arrive from
+        :func:`sportstradamus.stats.nfl_fp_loader.load_one_year` already
+        derived and joined with age/height/bmi (Phase 1G surfaces the same
+        derived columns to the Y/Y stability diagnostic). Per-year frames
+        are concatenated with a ``season`` tag, the Phase 1G rolling
+        transform smooths the moderate-stability features over the lookback
+        window, then the most-recent row per player is selected for the
+        downstream KNN join.
 
         Returns:
-            playerProfile DataFrame indexed by player name, or empty DataFrame on failure.
-            Call load() before this method.
+            DataFrame indexed by accent-stripped player name with
+            ``position``, ``player_game_count``, the comp-filter aliases
+            (``dropbacks`` / ``attempts`` / ``routes``), every FP-prefixed
+            metric, every ``pbp_*`` aggregate, and (when available)
+            ``age`` / ``height`` / ``bmi``. Empty DataFrame if no FP files
+            are found in the lookback window.
         """
         if self.playerProfile.empty:
             self.profile_market("snap pct")
 
-        try:
-            nfl_players = nfl.import_ids()
-            nfl_players = nfl_players.loc[nfl_players["position"].isin(["QB", "RB", "WR", "TE"])]
-            nfl_players.index = nfl_players.name.apply(remove_accents)
-            nfl_players["bmi"] = (
-                nfl_players["weight"] / nfl_players["height"] / nfl_players["height"]
-            )
-            nfl_players = nfl_players[["age", "height", "bmi"]].dropna()
-        except Exception:
-            nfl_players = pd.DataFrame()
-
         year = self.season_start.year
-        playerProfile = pd.DataFrame()
-        for y in reversed(range(year - 3, year + 1)):
-            playerFolder = pkg_resources.files(data) / f"player_data/NFL/{y}"
-            if os.path.exists(playerFolder):
-                for file in os.listdir(playerFolder):
-                    if file.endswith(".csv"):
-                        df = pd.read_csv(playerFolder / file)
-                        df.index = df.player_id
-                        playerProfile = playerProfile.combine_first(df)
+        per_year_frames: list[pd.DataFrame] = []
+        for y in range(year - 3, year + 1):
+            per_year = nfl_fp_loader.load_one_year(y)
+            if per_year.empty:
+                continue
+            per_year = per_year.copy()
+            per_year["season"] = y
+            per_year_frames.append(per_year)
 
-        if playerProfile.empty:
-            return playerProfile
+        if not per_year_frames:
+            return pd.DataFrame()
 
-        playerProfile.loc[playerProfile.position == "HB", "position"] = "RB"
-        playerProfile.loc[playerProfile.position == "FB", "position"] = "RB"
-        playerProfile = playerProfile.loc[playerProfile.position.isin(["QB", "RB", "WR", "TE"])]
-        playerProfile.loc[playerProfile.position == "QB", "dropbacks_per_game"] = (
-            playerProfile.loc[playerProfile.position == "QB", "dropbacks"]
-            / playerProfile.loc[playerProfile.position == "QB", "player_game_count"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "blitz_grades_pass_diff"] = (
-            playerProfile.loc[playerProfile.position == "QB", "blitz_grades_pass"]
-            - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "pa_grades_pass_diff"] = (
-            playerProfile.loc[playerProfile.position == "QB", "pa_grades_pass"]
-            - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "screen_grades_pass_diff"] = (
-            playerProfile.loc[playerProfile.position == "QB", "screen_grades_pass"]
-            - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "deep_grades_pass_diff"] = (
-            playerProfile.loc[playerProfile.position == "QB", "deep_grades_pass"]
-            - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "cm_grades_pass_diff"] = (
-            playerProfile.loc[playerProfile.position == "QB", "center_medium_grades_pass"]
-            - playerProfile.loc[playerProfile.position == "QB", "grades_pass"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "scrambles_per_dropback"] = (
-            playerProfile.loc[playerProfile.position == "QB", "scrambles"]
-            / playerProfile.loc[playerProfile.position == "QB", "dropbacks"]
-        )
-        playerProfile.loc[playerProfile.position == "QB", "designed_yards_per_game"] = (
-            playerProfile.loc[playerProfile.position == "QB", "designed_yards"]
-            / playerProfile.loc[playerProfile.position == "QB", "player_game_count"]
-        )
-        playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route_diff"] = (
-            playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route"]
-            - playerProfile.loc[playerProfile.position != "QB", "grades_pass_route"]
-        )
-        playerProfile.loc[playerProfile.position == "RB", "breakaway_yards_per_game"] = (
-            playerProfile.loc[playerProfile.position == "RB", "breakaway_yards"]
-            / playerProfile.loc[playerProfile.position == "RB", "player_game_count"]
-        )
-        playerProfile.loc[playerProfile.position == "RB", "total_touches_per_game"] = (
-            playerProfile.loc[playerProfile.position == "RB", "total_touches"]
-            / playerProfile.loc[playerProfile.position == "RB", "player_game_count"]
-        )
-        playerProfile.loc[playerProfile.position != "QB", "contested_target_rate"] = (
-            playerProfile.loc[playerProfile.position != "QB", "contested_targets"]
-            / playerProfile.loc[playerProfile.position != "QB", "targets"]
-        )
-        playerProfile.loc[playerProfile.position != "QB", "deep_contested_target_rate"] = (
-            playerProfile.loc[playerProfile.position != "QB", "deep_contested_targets"]
-            / playerProfile.loc[playerProfile.position != "QB", "targets"]
-        )
-        playerProfile.loc[playerProfile.position != "QB", "zone_grades_pass_route_diff"] = (
-            playerProfile.loc[playerProfile.position != "QB", "zone_grades_pass_route"]
-            - playerProfile.loc[playerProfile.position != "QB", "grades_pass_route"]
-        )
-        playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route_diff"] = (
-            playerProfile.loc[playerProfile.position != "QB", "man_grades_pass_route"]
-            - playerProfile.loc[playerProfile.position != "QB", "grades_pass_route"]
-        )
-        playerProfile.index = playerProfile.player.apply(remove_accents)
+        stacked = pd.concat(per_year_frames)
+        stacked = nfl_fp_loader.apply_rolling_transforms(stacked)
+
+        # Take the most-recent row per player so the KNN sees the
+        # rolling-smoothed current-season value (and the latest snapshot of
+        # every other column).
+        stacked = stacked.sort_values("season", kind="stable")
+        playerProfile = stacked.loc[~stacked.index.duplicated(keep="last")]
+
+        # The downstream short-window join expects the index to be the
+        # accent-stripped player name. ``load_one_year`` already builds it
+        # that way but the concat/sort chain can lose the name attribute --
+        # rebuild it from ``Name`` defensively and mirror it into ``player``
+        # so legacy callers that look for the old PFF column name still work.
+        if "Name" in playerProfile.columns:
+            playerProfile = playerProfile.assign(player=playerProfile["Name"])
+            playerProfile.index = playerProfile["Name"].apply(remove_accents)
+
         playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
-        if not nfl_players.empty:
-            playerProfile = playerProfile.join(nfl_players)
-
         return playerProfile
 
     def update_player_comps(self, year=None):
@@ -1426,87 +1374,7 @@ class StatsNFL(Stats):
         self.comps = comps
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
-        return 0  # TODO reimplement this
-        player_games = self.short_gamelog.loc[
-            self.short_gamelog[self.log_strings["player"]] == player
-        ]
-        cv = stat_cv.get(self.league, {}).get(market, 1)
-        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
-        if not isinstance(date, str):
-            date = date.strftime("%Y-%m-%d")
-        if market in combo_props:
-            ev = 0
-            for submarket in combo_props.get(market, []):
-                sub_cv = stat_cv[self.league].get(submarket, 1)
-                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
-                v = archive.get_ev(self.league, submarket, date, player)
-                subline = archive.get_line(self.league, submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    ev = 0
-                    break
-                else:
-                    ev += v
-
-        elif market in ["rushing tds", "receiving tds"]:
-            ev = (
-                (
-                    archive.get_ev(self.league, "tds", date, player)
-                    * player_games[market].sum()
-                    / player_games["tds"].sum()
-                )
-                if player_games["tds"].sum()
-                else 0
-            )
-
-        elif "fantasy" in market:
-            ev = 0
-            book_odds = False
-            if "prizepicks" in market:
-                fantasy_props = [
-                    ("passing yards", 1 / 25),
-                    ("passing tds", 4),
-                    ("interceptions", -1),
-                    ("rushing yards", 0.1),
-                    ("receiving yards", 0.1),
-                    ("tds", 6),
-                    ("receptions", 1),
-                ]
-            else:
-                fantasy_props = [
-                    ("passing yards", 1 / 25),
-                    ("passing tds", 4),
-                    ("interceptions", -1),
-                    ("rushing yards", 0.1),
-                    ("receiving yards", 0.1),
-                    ("tds", 6),
-                    ("receptions", 0.5),
-                ]
-            for submarket, weight in fantasy_props:
-                sub_cv = stat_cv[self.league].get(submarket, 1)
-                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
-                v = archive.get_ev(self.league, submarket, date, player)
-                subline = archive.get_line(self.league, submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    if subline == 0 and not player_games.empty:
-                        subline = np.floor(player_games.iloc[-10:][submarket].median()) + 0.5
-
-                    if not subline <= 0:
-                        under = (player_games[submarket] < subline).mean()
-                        ev += get_ev(subline, under, sub_cv, dist=sub_dist)
-                else:
-                    book_odds = True
-                    ev += v * weight
-
-            if not book_odds:
-                ev = 0
-        else:
-            ev = 0
-
-        return 0 if np.isnan(ev) else ev
+        return 0  # combo-market EV pending reimplementation
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
         flat_offers = {}
@@ -1632,10 +1500,10 @@ class StatsNFL(Stats):
                 self.playerProfile.fillna(0, inplace=True)
                 continue
 
-            unmodeled_carry_reserve = 6  # measured: mean carries for rank 3+ rushers
-            unmodeled_target_reserve = 8  # measured: mean targets for rank 5+ receivers
-            carry_cap = 40  # absolute single-player carry ceiling
-            target_cap = 20  # absolute single-player target ceiling
+            unmodeled_carry_reserve = _UNMODELED_CARRY_RESERVE
+            unmodeled_target_reserve = _UNMODELED_TARGET_RESERVE
+            carry_cap = _CARRY_CAP
+            target_cap = _TARGET_CAP
 
             teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
             for team, team_df in teams:
