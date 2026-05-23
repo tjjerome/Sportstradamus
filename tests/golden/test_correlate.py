@@ -150,7 +150,7 @@ def _models_snapshot() -> dict[str, float]:
 def test_metadata_written_with_required_keys(tmp_path) -> None:
     """correlate() emits the metadata side-car with the documented keys."""
     stub = _StubStats()
-    metadata_path = pkg_resources.files(data) / "correlations" / "NBA_corr_metadata.json"
+    metadata_path = pkg_resources.files(data) / "leagues" / "nba" / "corr_metadata.json"
 
     correlate("NBA", stub, force=True)
 

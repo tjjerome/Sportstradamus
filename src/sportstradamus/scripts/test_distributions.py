@@ -43,6 +43,8 @@ from sportstradamus.skew_normal import SkewNormal
 warnings.filterwarnings("ignore")
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "training_data"
+# Repo root — research artifacts live outside the data package (top-level `research/`).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # ── Market configurations ───────────────────────────────────────────────
 # continuous=True  → base dist is continuous (Gamma), ALL zeros are structural
@@ -655,7 +657,8 @@ def main():
             )
 
     # Save results to JSON for later analysis
-    out_path = DATA_DIR.parent / "experiment_results.json"
+    out_path = _REPO_ROOT / "research" / "distributions" / "experiment_results.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     serializable = []
     for r in all_results:
         sr = {}

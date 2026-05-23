@@ -54,7 +54,7 @@ def reflect():
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE", "NFL": "gameday", "NHL": "gameDate"}
     teamStr = {"MLB": "team", "NBA": "TEAM_ABBREVIATION", "NFL": "team", "NHL": "team"}
 
-    with open(pkg_resources.files(data) / "stat_map.json") as infile:
+    with open(pkg_resources.files(data) / "config" / "stat_map.json") as infile:
         stat_map = json.load(infile)
 
     parlays_clean = read_parlay_hist()

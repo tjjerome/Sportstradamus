@@ -326,12 +326,12 @@ def main():
     args = parser.parse_args()
 
     # ── Load shared data ──
-    ff_path = pkg_resources.files(data) / "feature_filter.json"
+    ff_path = pkg_resources.files(data) / "config" / "feature_filter.json"
     with open(ff_path) as f:
         feature_filter = json.load(f)
 
-    shap_df = load_csv_safe(pkg_resources.files(data) / "feature_importances.csv")
-    corr_df = load_csv_safe(pkg_resources.files(data) / "feature_correlations.csv")
+    shap_df = load_csv_safe(pkg_resources.files(data) / "training" / "feature_importances.csv")
+    corr_df = load_csv_safe(pkg_resources.files(data) / "training" / "feature_correlations.csv")
 
     if not shap_df.empty:
         shap_df = shap_df.clip(lower=0)  # SHAP is always non-negative here

@@ -61,14 +61,14 @@ def report() -> None:
         f.name for f in (pkg_resources.files(data) / "models/").iterdir() if ".mdl" in f.name
     ]
     model_list.sort()
-    with open(pkg_resources.files(data) / "stat_cv.json") as f:
+    with open(pkg_resources.files(data) / "config" / "stat_cv.json") as f:
         stat_cv = json.load(f)
-    with open(pkg_resources.files(data) / "stat_std.json") as f:
+    with open(pkg_resources.files(data) / "config" / "stat_std.json") as f:
         stat_std = json.load(f)
     stat_dist = load_distribution_config()
     stat_zi_local = load_zi_config()
 
-    with open(pkg_resources.files(data) / "training_report.txt", "w") as f:
+    with open(pkg_resources.files(data) / "training" / "training_report.txt", "w") as f:
         league_models = {}
         for model_str in model_list:
             with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
@@ -221,10 +221,10 @@ def report() -> None:
                 )
             f.write("\n")
 
-    with open(pkg_resources.files(data) / "stat_cv.json", "w") as f:
+    with open(pkg_resources.files(data) / "config" / "stat_cv.json", "w") as f:
         json.dump(stat_cv, f, indent=4)
 
-    with open(pkg_resources.files(data) / "stat_std.json", "w") as f:
+    with open(pkg_resources.files(data) / "config" / "stat_std.json", "w") as f:
         json.dump(stat_std, f, indent=4)
 
     save_distribution_config(stat_dist)

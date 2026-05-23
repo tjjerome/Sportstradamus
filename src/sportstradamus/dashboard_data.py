@@ -44,35 +44,35 @@ LEAGUE_CLASSES = {
 # Keys: player, date, opp (None if not available), home (None if not available).
 GAMELOG_SCHEMA = {
     "NBA": {
-        "file": "nba_gamelog.parquet",
+        "file": "leagues/nba/gamelog.parquet",
         "player": "PLAYER_NAME",
         "date": "GAME_DATE",
         "opp": "OPP",
         "home": "HOME",
     },
     "WNBA": {
-        "file": "wnba_gamelog.parquet",
+        "file": "leagues/wnba/gamelog.parquet",
         "player": "PLAYER_NAME",
         "date": "GAME_DATE",
         "opp": "OPP",
         "home": "HOME",
     },
     "MLB": {
-        "file": "mlb_gamelog.parquet",
+        "file": "leagues/mlb/gamelog.parquet",
         "player": "playerName",
         "date": "gameDate",
         "opp": "opponent",
         "home": "home",
     },
     "NHL": {
-        "file": "nhl_gamelog.parquet",
+        "file": "leagues/nhl/gamelog.parquet",
         "player": "playerName",
         "date": "gameDate",
         "opp": "opponent",
         "home": "home",
     },
     "NFL": {
-        "file": "nfl_gamelog.parquet",
+        "file": "leagues/nfl/gamelog.parquet",
         "player": "player display name",
         "date": None,
         "opp": None,
@@ -107,7 +107,7 @@ def format_ts(ts: str) -> str:
 
 @st.cache_data(ttl=3600, show_spinner="Loading prediction history...")
 def load_history():
-    """Load prediction history (parquet → legacy pickle fallback).
+    """Load prediction history from parquet.
 
     Migrates old flat schema (no Offers column) to the normalized one-row-per-
     prediction shape with an Offers list, then writes the migrated frame back.
@@ -131,7 +131,7 @@ def load_history():
 
 @st.cache_data(ttl=3600, show_spinner="Loading parlay history...")
 def load_parlays():
-    """Load parlay history (parquet → legacy pickle fallback)."""
+    """Load parlay history from parquet."""
     parlays = read_parlay_hist()
     if parlays.empty:
         return parlays
@@ -223,7 +223,7 @@ def load_stats():
 
 @st.cache_data(ttl=3600, show_spinner="Loading stat map...")
 def load_stat_map():
-    with open(pkg_resources.files(data) / "stat_map.json") as f:
+    with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         return json.load(f)
 
 
@@ -233,7 +233,7 @@ def load_resolve_meta():
     Returns a dict with keys: last_run, history_resolved, parlays_resolved.
     Returns empty dict if file doesn't exist (nightly hasn't run yet).
     """
-    meta_path = pkg_resources.files(data) / "resolve_meta.json"
+    meta_path = pkg_resources.files(data) / "runtime" / "resolve_meta.json"
     try:
         with open(meta_path) as f:
             return json.load(f)

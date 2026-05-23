@@ -20,7 +20,7 @@ pd.options.mode.chained_assignment = None
 NFL = StatsNFL()
 NFL.load()
 
-with open(pkg_resources.files(data) / "playerCompStats.json") as infile:
+with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
     stats = json.load(infile)
 
 filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
@@ -140,7 +140,6 @@ for position in ["QB", "RB", "WR", "TE"]:
         }
     col_df = pd.DataFrame(col_stats).T.sort_values("total", ascending=False)
 
-    # col_df = col_df.loc[(col_df.fantasy>.3) & (col_df.yearly>.2)]
     columns = list(col_df.index)
     X = np.zeros([len(columns), len(columns)])
     for i, j in tqdm(combinations(range(len(columns)), 2), total=comb(len(columns), 2)):

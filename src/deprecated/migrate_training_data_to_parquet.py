@@ -1,3 +1,14 @@
+# ARCHIVED 2026-05-22 from src/sportstradamus/scripts/migrate_training_data_to_parquet.py
+# Reason: per-market training CSVs migrated to parquet; this one-shot
+#   migration is complete and the CSV source format is no longer produced.
+# Last live SHA: 9ec4ea2
+# Original imports (now unresolved here):
+#   from importlib import resources
+#   import click
+#   import pandas as pd
+#   import pandas.testing as pdt
+#   from sportstradamus import data
+
 """One-shot migration: ``training_data/{LEAGUE}_{MARKET}.csv`` -> parquet (zstd).
 
 Each per-market CSV is converted in place to a sibling ``.parquet`` file with

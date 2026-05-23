@@ -161,7 +161,7 @@ class StatsNHL(Stats):
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
-        with open(pkg_resources.files(data) / "playerCompStats.json") as infile:
+        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
             stats = json.load(infile)
 
         players = self.players.get(self.season_start.year - 1, {})
@@ -188,13 +188,13 @@ class StatsNHL(Stats):
             min_k = 4 if position == "G" else 5
             comps[position] = self._build_comps(knn, positionProfile, min_comps=min_k, max_comps=20)
 
-        filepath = pkg_resources.files(data) / "nhl_comps.json"
+        filepath = pkg_resources.files(data) / "leagues" / "nhl" / "comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
     def _compute_comps(self):
         """Build comps from loaded data at runtime (no JSON I/O)."""
-        with open(pkg_resources.files(data) / "playerCompStats.json") as f:
+        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
         playerProfile, all_players, id_to_name = self.build_comp_profile()
@@ -768,7 +768,7 @@ class StatsNHL(Stats):
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
 
     def dump_goalie_list(self):
-        filepath = pkg_resources.files(data) / "goalies.json"
+        filepath = pkg_resources.files(data) / "config" / "goalies.json"
         with open(filepath, "w") as outfile:
             json.dump(
                 list(self.gamelog.loc[self.gamelog.position == "G", "playerName"].unique()), outfile

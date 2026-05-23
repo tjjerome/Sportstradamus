@@ -1,6 +1,6 @@
 """Empirical calibration audit for beam-search parlay candidates.
 
-Reads ``data/parlay_hist.dat`` (written by ``prophecize`` and resolved by
+Reads ``data/parlay_hist.parquet`` (written by ``prophecize`` and resolved by
 ``reflect``), filters to the last ``--days`` (default 90) of resolved
 parlays, recovers each parlay's predicted joint probability from
 ``Model EV`` and the platform payout table, buckets by predicted
@@ -19,14 +19,13 @@ Outputs (timestamped with today's date):
   predicted-probability bin edges, mean predicted probability, empirical
   hit rate, sample count, and Wilson 95% confidence bounds.
 
-If ``parlay_hist.dat`` is missing or contains zero resolved rows in the
+If ``parlay_hist.parquet`` is missing or contains zero resolved rows in the
 window, the script writes an empty CSV plus a placeholder PNG explaining
 the data gap, so the audit document can still reference the artifacts.
 """
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -35,7 +34,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from sportstradamus import data
+from sportstradamus.helpers.io import read_parlay_hist
 
 # Underdog/PrizePicks per-size payout multipliers used inside
 # ``beam_search_parlays`` to convert a joint probability into ``Model EV``.
@@ -118,24 +117,20 @@ def _wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
-    """Load ``parlay_hist.dat`` and filter to resolved rows in the window.
+    """Load ``parlay_hist.parquet`` and filter to resolved rows in the window.
 
     A resolved row has non-null ``Legs`` and ``Misses`` (filled by
     ``reflect``). Rows whose ``Date`` is before ``window_start`` or whose
     platform/bet-size is unknown are dropped.
     """
-    path = pkg_resources.files(data) / "parlay_hist.dat"
-    if not Path(str(path)).is_file():
-        return pd.DataFrame()
-
-    df = pd.read_pickle(path)
+    df = read_parlay_hist()
     if df.empty:
         return df
 
     required = {"Date", "Platform", "Bet Size", "Boost", "Model EV", "Legs", "Misses"}
     missing = required - set(df.columns)
     if missing:
-        raise RuntimeError(f"parlay_hist.dat missing columns: {sorted(missing)}")
+        raise RuntimeError(f"parlay_hist.parquet missing columns: {sorted(missing)}")
 
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
