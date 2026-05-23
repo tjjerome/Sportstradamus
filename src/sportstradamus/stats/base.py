@@ -780,9 +780,9 @@ class Stats:
         )
         teamstats.index = stats.index
         stats = stats.join(teamstats)
-        defstats = _profile_rows_for_teams(
-            self.defenseProfile, stats.index.map(opponents)
-        ).astype(float)
+        defstats = _profile_rows_for_teams(self.defenseProfile, stats.index.map(opponents)).astype(
+            float
+        )
         if self.league == "MLB":
             defstats.loc[
                 [x in self.pitcherProfile.index for x in stats.index.map(pitchers)],

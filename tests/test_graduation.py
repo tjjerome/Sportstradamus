@@ -34,7 +34,11 @@ def test_classify_lifecycle(gate1_bss, n_settled, book_bss_30d, expected):
 
 def _seed_model_stats(path):
     rows = []
-    for league, market, bss in [("NBA", "PTS", 0.12), ("NBA", "FG3M", 0.08), ("WNBA", "PTS", -0.05)]:
+    for league, market, bss in [
+        ("NBA", "PTS", 0.12),
+        ("NBA", "FG3M", 0.08),
+        ("WNBA", "PTS", -0.05),
+    ]:
         rows.append(
             {
                 "league": league,
