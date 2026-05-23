@@ -66,12 +66,17 @@ LIVE_METRICS_COLUMNS = (
     "predicted_over_rate",
     "top_decile_mae",
     "profit_sim_yield",
+    "profit_sim_kelly_yield",
 )
 # Minimum offers needed in a window before _top_decile_mae returns a value;
 # below this, the top decile would be a single row and the metric is noise.
 _TOP_DECILE_MIN_OFFERS = 10
 # Clip bookmaker probabilities to avoid divide-by-zero in fair-odds payouts.
 _BOOKS_P_CLIP = 1e-3
+# Phase 4 live ship-gate (set-baseline -> main): Kelly stake fraction cap, mirroring
+# the offline S3 sim's 5% per-bet ceiling. The live ROI is the dollar-weighted
+# realized return on the staked dollars within the rolling window.
+_KELLY_LIVE_CAP_FRAC: float = 0.05
 
 
 def _empty_live_metrics_frame() -> pd.DataFrame:
@@ -88,6 +93,7 @@ def _empty_live_metrics_frame() -> pd.DataFrame:
             "predicted_over_rate": pd.Series(dtype="float64"),
             "top_decile_mae": pd.Series(dtype="float64"),
             "profit_sim_yield": pd.Series(dtype="float64"),
+            "profit_sim_kelly_yield": pd.Series(dtype="float64"),
         }
     )
 
@@ -129,7 +135,38 @@ def _profit_sim_yield(group: pd.DataFrame) -> float:
     return float((np.sum(payout * hit) - n) / n)
 
 
-def _build_cell_row(cell, group: pd.DataFrame, *, now: pd.Timestamp, window_days: int) -> dict:
+def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
+    """Kelly-sized realized ROI — Phase 4 set-baseline -> main live gate.
+
+    Per offer: ``decimal_odds = boost / books_p_for_bet_side`` (same convention as
+    :func:`_profit_sim_yield`); Kelly fraction = ``clip((p * d - 1) / (d - 1), 0,
+    0.05)`` where ``p`` is the model's probability on the bet side. ROI is the
+    dollar-weighted realized return — ``sum(stake * (b * hit - (1 - hit))) /
+    sum(stake)`` — so cells with different bet counts are comparable. Returns
+    NaN when no offer attracted a positive Kelly stake (no +EV bets in the
+    window).
+    """
+    n = len(group)
+    if n == 0:
+        return float("nan")
+    books_p = group["Books P"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    boost = group["Boost"].fillna(1.0).to_numpy()
+    hit = group["Hit"].fillna(0).to_numpy()
+    is_over = (group["Bet"] == "Over").to_numpy()
+    model_p = group["Model P"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
+    decimal_odds = np.where(is_over, boost / books_p, boost / (1 - books_p))
+    b = decimal_odds - 1.0
+    # b <= 0 ⇒ even-money or worse — Kelly always returns 0; skip those bets.
+    raw_kelly = np.where(b > 0, (model_p * decimal_odds - 1.0) / b, 0.0)
+    stake_frac = np.clip(raw_kelly, 0.0, _KELLY_LIVE_CAP_FRAC)
+    total_stake = float(stake_frac.sum())
+    if total_stake <= 0:
+        return float("nan")
+    pnl = stake_frac * (b * hit - (1.0 - hit))
+    return float(pnl.sum() / total_stake)
+
+
+def _build_cell_row(cell: tuple[str, str], group: pd.DataFrame, *, now: pd.Timestamp, window_days: int) -> dict:
     """Compute one (league, market, window) live-metrics row."""
     n = len(group)
     if n == 0:
@@ -144,6 +181,7 @@ def _build_cell_row(cell, group: pd.DataFrame, *, now: pd.Timestamp, window_days
             "predicted_over_rate": float("nan"),
             "top_decile_mae": float("nan"),
             "profit_sim_yield": float("nan"),
+            "profit_sim_kelly_yield": float("nan"),
         }
     return {
         "league": cell[0],
@@ -156,6 +194,7 @@ def _build_cell_row(cell, group: pd.DataFrame, *, now: pd.Timestamp, window_days
         "predicted_over_rate": float((group["Bet"] == "Over").mean()),
         "top_decile_mae": _top_decile_mae(group),
         "profit_sim_yield": _profit_sim_yield(group),
+        "profit_sim_kelly_yield": _profit_sim_kelly_yield(group),
     }
 
 
@@ -173,6 +212,7 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
         "predicted_over_rate",
         "top_decile_mae",
         "profit_sim_yield",
+        "profit_sim_kelly_yield",
     ):
         df[col] = df[col].astype("float64")
     return df

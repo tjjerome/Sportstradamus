@@ -405,48 +405,92 @@ not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  
 
 Computed on the **held-out validation + test split** that `train_market`
 already produces (lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py)
-and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 has **two
-tiers** (see "Top priority — baseline breadth" above): **Tier 0** sets a cell's
-*first* baseline from the **absolute** rows only; **Tier 1** supersedes an
-*established* baseline and additionally requires the **relative** rows. The Tier
-column tags which rows apply when.
+and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 is the
+**research → devel** edge of the 2×2 lifecycle (the live edge is Gate 2, the
+**devel → main** column below); each edge splits further into **set-baseline**
+and **supersede** tracks. See [docs/ship_gate.md](ship_gate.md) for the
+quick-reference; the constants and helpers live in `gate_row()` /
+`apply_thresholds()` / the five `_gate*` helpers in
+[scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py).
 
-| Offline metric | Threshold | Tier | Where it lives |
-|---|---|---|---|
-| Top-mean-decile MAE on the test split | ≥ 5% better than the current baseline on the same cell | Tier 1 only | `compression_eval --baseline ... --candidate ...` output |
-| Global MAE on the test split | not worse by > 1% vs current baseline | Tier 1 only | `compression_eval` global summary |
-| `brier_skill_score` (book baseline) | **Tier 0:** ≥ 0 (beats book); **Tier 1:** not worse than the established baseline | both | `model_stats.parquet` for the candidate run |
-| Bottom-quartile bias — **absolute** | over-prediction ≤ +30% of quartile mean (floor 0.10); under-prediction tolerated | both | `bottom_quartile_bias` / `bottom_quartile_mean` in `compression_eval` |
-| Bottom-quartile bias — **relative** | not more positive than the established baseline | Tier 1 only | `verdict()` condition 4a |
-| Top-decile bias — **absolute** | \|bias\| ≤ 30% of decile mean (floor 0.10), bidirectional | both | `top_decile_bias` / `top_decile_mean` in `compression_eval` |
-| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | both | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
+**Set-baseline track (the 5 strict gates).** A cell ships to devel iff **all
+five** pass. Star = top-mean **decile**; bench = bottom-mean **quartile** (pooled
+coarser on purpose — low-volume players generalize more than stars). Denominators
+on Gates 2/3 are **σ, not σ/√N** — with ~2000 rows/cell, σ/√N collapses to
+near-zero on low-variance bench segments and the gate would fire on a negligible
+bias; σ keeps the yardstick at "what a typical event in the segment looks like."
 
-**Tier 0 — set the first baseline (the priority):** the "both" rows must clear —
-bottom-quartile + top-decile absolute bias and `brier_skill_score ≥ 0`. Of every
-candidate (incl. the incumbent default) that clears them on a cell, the
-highest-BSS full retrain is set as that cell's baseline and promoted to the
-**mandatory ≥ 14-day soak window**.
+| # | Gate | Formula | Threshold |
+|---|------|---------|-----------|
+| 1 | Brier vs book, paired bootstrap | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0` — CI strictly excludes 0 from below |
+| 2 | Star σ-match (top-mean decile) | `z = \|mean(EV) − mean(Result)\| / std(Result)` | `z < 0.5` |
+| 3 | Bench σ-match (bottom-mean quartile) | same on bottom 25% | `z < 0.5` |
+| 4 | IQR spread / compression | `iqr_ratio = IQR(EV) / IQR(Result)` over all events | `iqr_ratio > 0.5` |
+| 5 | Equal-mass ECE | 10 equal-mass `p_model` bins; `ece = Σ (n_b/N)·\|mean(p_model) − mean(y)\|` | `ece < 0.075` |
 
-**Tier 1 — supersede an established baseline:** all rows must clear — the absolute
-rows plus the relative ≥ 5% top-decile, global-MAE-not-worse, BSS-not-worse, and
-bottom-quartile-not-more-positive checks — on every cell in every covered league
-(or the routing config records the exceptions). On promotion the previous pickle
-stays archived under `data/old_models/` so revert is one cron-pull away.
+**Auto-pass / fail conventions for blank metrics:**
+
+- **Gate 1 blank** (no `Odds` in the dump): **auto-pass** — no book to beat.
+- **Gate 5 blank** (no `P` or `Line`): **fail** — Gate 5 is decoupled from book
+  data; missing `P`/`Line` is a model artifact, not a free pass.
+- **Gate 4 blank** (sparse "tds"-style markets where `IQR(Result) = 0`): **fail**
+  under strict. The compression yardstick is structurally undefined on near-
+  binary markets — **revisit:** binary markets likely need a different spread
+  gate (e.g. a calibrated rate-floor rather than an IQR ratio); flagged for
+  follow-up once the breadth pass lands.
+- **Gates 2/3 blank** (no rows in the segment): fail.
+
+**Oracle columns.** Every gate emits a sibling "oracle" value under the
+deterministic 1/0 oracle (`pred = Result`; over-prob = `1 if Result>=Line else
+0`). The σ/IQR_true denominators equal the model row, so the oracle column sizes
+each gate's natural threshold:
+- Gate 1 oracle `mean = −book Brier` (and CI sits below 0) — exposes the book's
+  own Brier so the achievable headroom is visible.
+- Gates 2/3 oracle `z = 0`.
+- Gate 4 oracle `ratio = 1.0`.
+- Gate 5 oracle `ece = 0`.
+
+**NFL low-N watch on Gate 1.** The 95% percentile CI is naturally wide on cells
+with `< 1000` events, so a real-edge thin-N NFL cell can straddle 0 and KILL even
+when the point estimate beats book. **Revisit:** once Gate 1 becomes the binding
+constraint on NFL breadth (the current binding constraints are Gate 4 compression
+and Gate 5 ECE), evaluate a one-sided test (`ci_lo > 0` rejected → `ci_hi < 0`
+required) or an N-aware CI floor (e.g. compute `ci_hi` against `min(95%, 80% +
+20%·N/2000)`) before tightening anything else. The risk is over-punishing NFL
+for sample-size noise; the symptom is NFL cells with `g1_brier_diff_mean < 0`
+but `g1_brier_diff_ci_hi > 0` killing under the strict bar.
+
+**Supersede track (S1 + S2 + S3).** A challenger replaces an established baseline
+only if all three hold; computed by `supersede_verdict()` (Phase 3) on two
+row-aligned test-set CSVs via `compression_eval --baseline ... --candidate ...`.
+
+| # | Gate | Rule |
+|---|------|------|
+| S1 | Pass all 5 | Challenger clears every set-baseline gate above. |
+| S2 | Paired Brier CI | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0`. |
+| S3 | Paired Sharpe (backdated) | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; `sharpe_new > sharpe_current`. |
+
+On promotion the previous pickle stays archived under `data/old_models/` so
+revert is one cron-pull away. The determinism gate
+(`tests/integration/test_determinism_gate.py`) remains a hard prerequisite for
+any change to the deterministic-mode pipeline.
 
 ### Gate 2 — Live graduation gate (cell graduates from the track)
 
-Computed on the **last 30 days of settled production offers** by the
-Stage 0 `compute_book_brier_skill_score` and rolling-window aggregator
-in `nightly.py`. A cell graduates from the track — no further stage work
-— if all five hold:
+Computed on **settled production offers** by `strategies/profit_sim.py` (Phase 2
+— Kelly-sized ROI / Sharpe / drawdown, shared with the dashboard's Stats Profit
+Sim page) wired into `check_graduation.py` and `data/live_metrics_per_market.parquet`
+via `nightly.py`'s aggregator (Phase 4). Gate 2 splits along the same
+set-baseline / supersede edge as Gate 1:
 
-| Live metric | Threshold | Where it lives |
+| Case | Threshold | Where |
 |---|---|---|
-| Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
-| Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
-| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
-| Bottom-quartile bias (one-sided) + top-decile bias (bidirectional) on settled bets | mirrors Gate 1 cond. 4 over ≥ 100 settled offers: bottom-quartile over-prediction ≤ +30% of band mean (floor 0.10) AND not more positive than prior; top-decile \|bias\| ≤ 30% (floor 0.10) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), `bottom_quartile_bias` column (live analog of the Gate 1 row) |
-| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
+| **Set baseline → main (no incumbent)** | Positive Kelly-sized ROI on the cell's settled offers | `strategies/profit_sim.py` over `history.parquet`; surfaced by `check_graduation` |
+| **Supersede → main (incumbent present)** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers | Phase 4 wiring in `check_graduation.py` + `live_metrics_per_market.parquet` |
+
+A cell that drifts outside its set-baseline bounds (any of the 5 gates) is
+**withheld and re-enters the set-baseline track** for a fresh baseline. The prior
+pickle stays archived under `data/old_models/` for one-pull revert.
 
 If a cell graduates, mark it ✅ in the Status table with the graduating
 stage and the live metrics that triggered graduation. The track continues
@@ -1733,7 +1777,9 @@ evaluate the bigger structural change.
 | [src/sportstradamus/helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) | `set_model_start_values`; `fused_loc` (book blend) | 425–504 |
 | [src/sportstradamus/skew_normal.py](../src/sportstradamus/skew_normal.py) | custom SkewNormal (location-scale, supports negatives) | 30–199 |
 | [src/sportstradamus/hurdle.py](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here for Track-B Stage B1) | ~201 (NegBin loss for Stage 2) |
-| [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
+| [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **Set-baseline ship gate** — 5 strict gates + oracle (`gate_row`, `apply_thresholds`), supersede S1+S2+S3 (`supersede_verdict`, Phase 3), `tier0_scorecard.csv` writer, decile table, run log, `--live-window` | `_GATE1_CI_HI_MAX = 0.0`, `_GATE2_STAR_Z_MAX = 0.5`, `_GATE3_BENCH_Z_MAX = 0.5`, `_GATE4_IQR_RATIO_MIN = 0.5`, `_GATE5_ECE_MAX = 0.075`, `BREADTH_TARGET_FRAC = 0.75` |
+| [src/sportstradamus/strategies/profit_sim.py](../src/sportstradamus/strategies/profit_sim.py) | Reusable Kelly-sized ROI / Sharpe / drawdown sim (Phase 2 extraction from the dashboard); used by Gate 1 S3 and Gate 2 live | `simulate_strategy`, `summarize_runs`, deterministic-Kelly-all mode |
+| [src/sportstradamus/scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) | Lifecycle status table joining Gate 1 (offline) + Gate 2 (live) per cell; Phase 4 adds the +0.5% / 2-wk supersede compare | `_classify_lifecycle`, `_MIN_SETTLED_FOR_GRADUATION = 200`, `_GRADUATION_WINDOW_DAYS = 30` |
 | [src/sportstradamus/prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py) | **Live-path confound** — where shipped strategies must survive end-to-end | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
 | [docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md](superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md) | Source spec for the **ZINB derived-π gate** fix (P2.B precursor) | Phase B "SUPERSEDED → derived-π" |
 
