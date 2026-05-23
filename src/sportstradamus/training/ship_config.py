@@ -18,8 +18,8 @@ per-cell training decision and, with it, what is live on the production server
   An empty or missing file is therefore a strict no-op.
 
 Shipping a cell that has cleared Gate 1 is a one-line edit to ``ship_config.json``
-merged to ``devel`` (see docs/gbdt_mean_regression_plan.md, "Ship mechanism —
-per-cell strategy config on devel"). Inference never reads this file — it decodes
+merged to ``devel`` (see docs/operation_ship_75.md, "Tier-1 supersession" for the
+ship mechanism). Inference never reads this file — it decodes
 the strategy from the self-describing pickle — so training config and inference
 cannot drift.
 """

@@ -1,6 +1,15 @@
 # Plan: Mitigate GBDT Regression-Toward-the-Mean in the Training Pipeline
 
-> **Multi-session home-of-record.** LightGBMLSS predictions compress toward the
+> **⚠ SUPERSEDED 2026-05-23 — read-only archive.** This plan is retired.
+> The new home-of-record is
+> [`docs/operation_ship_75.md`](../operation_ship_75.md); load-bearing
+> facts (P1/P2.B verdicts, ZTNB refutation, Stage A1 ICC, A1.5 T5 kill,
+> B1.5 §7a verdict, B1.6 research verdict, references [1]–[48]) are
+> preserved in
+> [`docs/operation_ship_references.md`](../operation_ship_references.md).
+> Kept here verbatim only as historical record; do not edit.
+>
+> **Multi-session home-of-record (historical).** LightGBMLSS predictions compress toward the
 > global mean (high-volume players under-predicted, low-volume over-predicted).
 > This document is the durable plan + progress log for the fix, worked entirely on
 > branch `claude/fix-gbdt-mean-regression-GcY1g` (intended rename `model-research`)
