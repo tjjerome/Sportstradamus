@@ -102,8 +102,8 @@ def model_pickle_path(league: str, market: str) -> Path:
 def prune_model_pickle(league: str, market: str) -> bool:
     """Delete a cell's production model pickle so inference skips that market.
 
-    Used by ``meditate`` to dark-out a cell marked ``"withheld"`` in
-    ``ship_config.json``: with no pickle on disk, ``model_prob`` returns ``[]``
+    Used by ``meditate`` to dark-out a cell marked ``shipped="withheld"`` in
+    ``stat_meta.json``: with no pickle on disk, ``model_prob`` returns ``[]``
     and the market is not scored.
 
     Args:

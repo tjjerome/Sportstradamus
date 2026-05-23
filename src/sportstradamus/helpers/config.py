@@ -6,8 +6,24 @@ time. The resulting dicts are surfaced as module-level constants so callers
 can ``from sportstradamus.helpers import stat_cv`` etc. without paying a
 load cost per call site.
 
+Per-cell training metadata is split across two files:
+
+* ``stat_meta.json`` — **committed.** Per-cell ``{dist, shipped, strategy}``:
+  the semi-stable ML config humans curate (distribution family, release
+  state, training strategy slug).
+* ``stat_calibration.json`` — **gitignored.** Per-cell ``{cv, std, zi}``:
+  the calibration values that meditate recomputes every run.
+
+Legacy module-level constants (``stat_dist`` / ``stat_cv`` / ``stat_std`` /
+``stat_zi``) are derived from the union of both files so existing imports
+keep working unchanged.
+
 The eager load is deliberate: a missing config file should raise at startup
 rather than silently produce wrong answers deep inside a training run.
+``stat_calibration.json`` is the one exception: it may be missing on a
+fresh clone before the first meditate run, in which case calibration
+fields default to safe values (cv=1.0, std=None, zi missing) that the
+legacy ``.get(..., default)`` call sites already tolerate.
 """
 
 import importlib.resources as pkg_resources
@@ -32,24 +48,58 @@ with open(_config_dir / "abbreviations.json") as infile:
 with open(_config_dir / "combo_props.json") as infile:
     combo_props = json.load(infile)
 
-with open(_config_dir / "stat_cv.json") as infile:
-    stat_cv = json.load(infile)
+with open(_config_dir / "stat_meta.json") as infile:
+    _stat_meta_committed: dict[str, dict[str, dict]] = json.load(infile)
 
-with open(_config_dir / "stat_dist.json") as infile:
-    stat_dist = json.load(infile)
-
-with open(_config_dir / "stat_std.json") as infile:
-    stat_std = json.load(infile)
-
-# stat_zi is optional: a league that hasn't estimated zero-inflation yet
-# will fall through to a {} default and the downstream callers treat
-# "missing gate" as "no zero-inflation".
-_zi_path = _config_dir / "stat_zi.json"
-if os.path.isfile(_zi_path):
-    with open(_zi_path) as infile:
-        stat_zi = json.load(infile)
+# stat_calibration.json is gitignored — a fresh clone may not have it. In
+# that case start from an empty calibration map; meditate will bootstrap
+# values on its first run, matching the legacy stat_cv/stat_std behavior
+# (those files were already gitignored).
+_cal_path = _config_dir / "stat_calibration.json"
+if os.path.isfile(_cal_path):
+    with open(_cal_path) as infile:
+        _stat_cal: dict[str, dict[str, dict]] = json.load(infile)
 else:
-    stat_zi = {}
+    _stat_cal = {}
+
+# Public union of committed meta + runtime calibration. Each cell carries
+# every field; callers that want a typed view can read the field directly.
+stat_meta: dict[str, dict[str, dict]] = {}
+for _league, _markets in _stat_meta_committed.items():
+    stat_meta[_league] = {}
+    for _market, _meta_cell in _markets.items():
+        _cal_cell = _stat_cal.get(_league, {}).get(_market, {})
+        stat_meta[_league][_market] = {
+            "dist": _meta_cell["dist"],
+            "shipped": _meta_cell["shipped"],
+            "strategy": _meta_cell["strategy"],
+            "cv": _cal_cell.get("cv", 1.0),
+            "std": _cal_cell.get("std"),
+            "zi": _cal_cell.get("zi"),
+        }
+
+# Derived per-field views of the merged stat_meta map, kept so existing
+# ``from sportstradamus.helpers import stat_*`` import sites work unchanged.
+stat_dist: dict[str, dict[str, str]] = {
+    league: {market: cell["dist"] for market, cell in markets.items()}
+    for league, markets in stat_meta.items()
+}
+stat_cv: dict[str, dict[str, float]] = {
+    league: {market: cell["cv"] for market, cell in markets.items()}
+    for league, markets in stat_meta.items()
+}
+stat_std: dict[str, dict[str, float | None]] = {
+    league: {market: cell["std"] for market, cell in markets.items()}
+    for league, markets in stat_meta.items()
+}
+stat_zi: dict[str, dict[str, float]] = {
+    league: {
+        market: cell["zi"]
+        for market, cell in markets.items()
+        if cell.get("zi") is not None
+    }
+    for league, markets in stat_meta.items()
+}
 
 with open(_config_dir / "stat_map.json") as infile:
     stat_map = json.load(infile)

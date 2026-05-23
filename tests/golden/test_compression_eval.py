@@ -430,9 +430,7 @@ def test_gate4_iqr_spread_analytical_replaces_point_on_zinb():
     # Calibrated actuals drawn from the matching NB.
     actuals = nbinom.rvs(5.0, 1.0 - 0.4, size=n, random_state=rng).astype(float)
     pred = np.full(n, float(actuals.mean()))  # point pred — smooth, deliberately
-    df = pd.DataFrame(
-        {"Result": actuals, "EV": pred, "R": r_arr, "NB_P": p_arr, "Gate": gate_arr}
-    )
+    df = pd.DataFrame({"Result": actuals, "EV": pred, "R": r_arr, "NB_P": p_arr, "Gate": gate_arr})
     iqr_pred, iqr_true, ratio = _gate4_iqr_spread(
         actuals, pred, df=df, dist="ZINB", strategy="ratio_meanyr"
     )
@@ -609,9 +607,7 @@ def test_gate5_ece_debiased_perfect_calibration_near_zero():
     p_model = rng.uniform(0.05, 0.95, 400)  # NFL-N regime where raw is biased high
     y = (rng.uniform(size=len(p_model)) < p_model).astype(float)
     raw = _gate5_ece_equal_mass(p_model, y)
-    debiased = _gate5_ece_debiased(
-        p_model, y, n_resamples=100, rng=np.random.default_rng(1729)
-    )
+    debiased = _gate5_ece_debiased(p_model, y, n_resamples=100, rng=np.random.default_rng(1729))
     assert raw > 0.04  # raw is non-trivially biased at N=400
     assert abs(debiased) < raw  # debias shrinks magnitude toward 0
     assert abs(debiased) < 0.03  # near-zero after correction
@@ -624,9 +620,7 @@ def test_gate5_ece_debiased_preserves_real_miscalibration():
     y = np.zeros(1000)
     p_model = np.full(1000, 0.9)
     raw = _gate5_ece_equal_mass(p_model, y)
-    debiased = _gate5_ece_debiased(
-        p_model, y, n_resamples=40, rng=np.random.default_rng(1729)
-    )
+    debiased = _gate5_ece_debiased(p_model, y, n_resamples=40, rng=np.random.default_rng(1729))
     assert raw == pytest.approx(0.9, abs=1e-9)
     # Null bias on a degenerate constant-p stream is small; debiased ≈ raw.
     assert abs(debiased - raw) < 0.05
@@ -715,17 +709,38 @@ def test_memmel_sharpe_z_handles_zero_variance_returns():
 def test_gate_row_full_column_set_and_oracle_identities():
     row = gate_row(_priced_frame(), "EV", league="NBA", market="PTS", strategy="t")
     expected = {
-        "league", "market", "strategy", "n_rows",
-        "g1_brier_diff_mean", "g1_brier_diff_ci_lo", "g1_brier_diff_ci_hi",
-        "g1_brier_diff_mean_oracle", "g1_brier_diff_ci_lo_oracle", "g1_brier_diff_ci_hi_oracle",
+        "league",
+        "market",
+        "strategy",
+        "n_rows",
+        "g1_brier_diff_mean",
+        "g1_brier_diff_ci_lo",
+        "g1_brier_diff_ci_hi",
+        "g1_brier_diff_mean_oracle",
+        "g1_brier_diff_ci_lo_oracle",
+        "g1_brier_diff_ci_hi_oracle",
         "g1_brier_skill_score",
-        "g2_star_pred_mean", "g2_star_true_mean", "g2_star_abs_diff", "g2_star_sigma",
-        "g2_star_z", "g2_star_z_oracle",
-        "g3_bench_pred_mean", "g3_bench_true_mean", "g3_bench_abs_diff", "g3_bench_sigma",
-        "g3_bench_z", "g3_bench_z_oracle",
-        "g4_iqr_pred", "g4_iqr_true", "g4_iqr_ratio", "g4_iqr_ratio_oracle",
-        "g5_ece", "g5_ece_oracle",
-        "g5_ece_null_bias", "g5_ece_debiased", "g5_ece_debiased_oracle",
+        "g2_star_pred_mean",
+        "g2_star_true_mean",
+        "g2_star_abs_diff",
+        "g2_star_sigma",
+        "g2_star_z",
+        "g2_star_z_oracle",
+        "g3_bench_pred_mean",
+        "g3_bench_true_mean",
+        "g3_bench_abs_diff",
+        "g3_bench_sigma",
+        "g3_bench_z",
+        "g3_bench_z_oracle",
+        "g4_iqr_pred",
+        "g4_iqr_true",
+        "g4_iqr_ratio",
+        "g4_iqr_ratio_oracle",
+        "g5_ece",
+        "g5_ece_oracle",
+        "g5_ece_null_bias",
+        "g5_ece_debiased",
+        "g5_ece_debiased_oracle",
     }
     assert set(row) == expected
     # Oracle identities: segment z = 0, IQR ratio = 1, ECE = 0, Brier diff < 0.
@@ -761,9 +776,7 @@ def test_gate_row_no_odds_but_line_present_blanks_g1_only():
     p = rng.uniform(0.05, 0.95, n)
     outcomes = rng.uniform(size=n) < p
     result = np.where(outcomes, line + 1.0, line - 1.0)
-    df = pd.DataFrame(
-        {"MeanYr": meanyr, "Result": result, "EV": meanyr, "Line": line, "P": p}
-    )
+    df = pd.DataFrame({"MeanYr": meanyr, "Result": result, "EV": meanyr, "Line": line, "P": p})
     row = gate_row(df, "EV", league="NBA", market="AST", strategy="t")
     assert row["g1_brier_diff_mean"] is None  # no Odds → Gate 1 auto-pass at verdict time
     assert row["g1_brier_skill_score"] is None
@@ -839,10 +852,10 @@ def test_apply_thresholds_clean_cell_ships():
 def test_apply_thresholds_each_gate_fails_when_threshold_exceeded():
     fails = {
         "g1": _clean_row(g1_brier_diff_ci_hi=0.001),  # CI doesn't exclude 0 below
-        "g2": _clean_row(g2_star_z=0.51),             # over the 0.5 cap
+        "g2": _clean_row(g2_star_z=0.51),  # over the 0.5 cap
         "g3": _clean_row(g3_bench_z=0.51),
-        "g4": _clean_row(g4_iqr_ratio=0.49),          # below the 0.5 floor
-        "g5": _clean_row(g5_ece=0.076),               # over the 0.075 cap
+        "g4": _clean_row(g4_iqr_ratio=0.49),  # below the 0.5 floor
+        "g5": _clean_row(g5_ece=0.076),  # over the 0.075 cap
     }
     for gate, row in fails.items():
         out = apply_thresholds(row)
@@ -968,9 +981,7 @@ def _supersede_pair(
     # scenarios swamp its probability with Gaussian noise — large noise makes
     # the candidate's P uninformative and its Brier worse than baseline's.
     candidate_ev = correct_ev.copy()
-    candidate_p = np.clip(
-        p_true + rng.normal(0, candidate_calibration_noise, n), 1e-3, 1.0 - 1e-3
-    )
+    candidate_p = np.clip(p_true + rng.normal(0, candidate_calibration_noise, n), 1e-3, 1.0 - 1e-3)
     b_df = pd.DataFrame(
         {
             "MeanYr": meanyr,
@@ -1054,9 +1065,7 @@ def test_test_set_to_bet_frame_picks_ev_side_and_decimal_payout():
 
 
 def test_test_set_to_bet_frame_returns_empty_without_odds():
-    df = pd.DataFrame(
-        {"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0], "P": [0.5]}
-    )
+    df = pd.DataFrame({"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0], "P": [0.5]})
     bets = _test_set_to_bet_frame(df, "EV")
     assert bets.empty
 

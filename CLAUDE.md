@@ -139,7 +139,16 @@ Python 3.11 required. PyTorch CPU-only (2.1.2) via custom Poetry source.
   0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
   0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
   */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
+  0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
   ```
+
+  The `gate-status` job runs monthly: it promotes/demotes cells in `main`'s
+  `stat_meta.json` based on live Gate-2 graduation and opens a PR (a human
+  merges — `main` is the public branch). It needs `gh` authenticated on
+  the box (`GH_TOKEN` or `gh auth`) and `HEALTHCHECK_URL_GATE_STATUS` set.
+  On `devel`, ship promotions are one-line edits to `stat_meta.json`
+  (`shipped: "withheld"` → `shipped: "devel"`) the human commits directly;
+  `generate-ship-config --branch devel` only validates + summarizes.
 
   `prophecize` and `close-lines` both fire at `:50` during peak hours; the
   `run_job.sh` archive flock serializes them, so the second-to-acquire just
@@ -205,7 +214,7 @@ and ScrapingFish proxy fallback.
 
 **LightGBMLSS** for distributional regression — predicts full probability distributions.
 
-Distribution types (set per stat in `data/stat_dist.json`):
+Distribution types (set per cell in `data/config/stat_meta.json`):
 - **Gamma** / **ZAGamma** — continuous stats, optional zero-inflation
 - **Negative Binomial** / **ZINB** — count stats, optional zero-inflation
 - **SkewNormal** (`skew_normal.py`) — custom PyTorch distribution; used when
@@ -323,13 +332,13 @@ book-baseline row above each table and column-direction help text.
 
 | File | Purpose |
 |------|---------|
-| `stat_dist.json` | Distribution type per stat (Gamma, NegBin, ZINB, etc.) |
-| `stat_cv.json` | Coefficient of variation per stat |
-| `stat_zi.json` | Zero-inflation parameters |
-| `stat_map.json` | Stat name mappings across APIs/sportsbooks |
-| `feature_filter.json` | SHAP-based feature importance thresholds |
-| `playerCompStats.json` | Learned player comp weights per league/position |
-| `book_weights.json` | Sportsbook reliability weights for consensus lines |
+| `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, strategy}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, training strategy slug) |
+| `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi}` — runtime-recomputed by `meditate` each run |
+| `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
+| `config/feature_filter.json` | SHAP-based feature importance thresholds |
+| `config/playerCompStats.json` | Learned player comp weights per league/position |
+| `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
+| `config/prop_books.json` | List of sportsbooks consulted for player-prop consensus |
 | `{LEAGUE}_corr.csv` | Pre-computed player stat correlation matrices |
 
 ### Data Storage

@@ -2,14 +2,9 @@
 """Print the lifecycle status table for every (league, market) cell.
 
 Stage 0 deliverable 0.4. Joins ``data/model_stats.parquet`` (Gate 1) and
-``data/live_metrics_per_market.parquet`` (Gate 2) per (league, market) and
-classifies each cell into one of ``not-shipped`` / ``in-test`` / ``graduated``
-/ ``demoted`` so future sessions can read graduation state without inspecting
-dashboards.
-
-Output is printed colored to stdout (locked decision #9 — no CSV/parquet
-sink, no dashboard page in Stage 0). The 8-metric body shows 4 Gate 1 and
-4 Gate 2 columns alongside the lifecycle classification.
+``data/live_metrics_per_market.parquet`` (Gate 2) per (league, market) via
+``training.graduation`` and prints the classification colored to stdout. The
+8-metric body shows 4 Gate 1 and 4 Gate 2 columns alongside the lifecycle state.
 
 Usage
 -----
@@ -26,20 +21,8 @@ import click
 import pandas as pd
 
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
+from sportstradamus.training.graduation import lifecycle_table
 
-# Graduation requires at least this many settled offers in the 30d window
-# before the live BSS signal is trustworthy.
-_MIN_SETTLED_FOR_GRADUATION = 200
-# The 30d window is the canonical graduation gate (7d is too noisy for state).
-_GRADUATION_WINDOW_DAYS = 30
-# Phase 4 live ship-gate (set-baseline -> main): supersede an incumbent only if the
-# challenger's live ROI exceeds the incumbent's by at least this much over the
-# >= 2-week settled-data window. Surfaced as a helper today; the actual
-# challenger-vs-incumbent A/B tracking lives in ship_config.json + nightly's
-# aggregator, both of which need to record per-model-version ROI before the
-# comparison fires automatically. See plan Phase 4.
-_SUPERSEDE_LIVE_ROI_DELTA: float = 0.005
-_SUPERSEDE_LIVE_WINDOW_DAYS: int = 14
 # Color map for the lifecycle states, applied by click.secho per row.
 _STATE_COLORS = {
     "graduated": "green",
@@ -47,7 +30,7 @@ _STATE_COLORS = {
     "demoted": "red",
     "not-shipped": "cyan",
 }
-# Column order used by the printed table. 3 keys + 4 Gate 1 + 5 Gate 2 + 1 state.
+# Column order used by the printed table. 3 keys + 4 Gate 1 + 4 Gate 2 + 1 state.
 _DISPLAY_COLUMNS = (
     "league",
     "market",
@@ -60,140 +43,11 @@ _DISPLAY_COLUMNS = (
     "predicted_over_rate_live",
     "empirical_over_rate_live",
     "profit_sim_yield",
-    "profit_sim_kelly_yield",
     "lifecycle_state",
 )
 
 
-def _classify_lifecycle(
-    gate1_bss: float,
-    n_settled: float,
-    book_bss_30d: float,
-    kelly_yield_30d: float | None = None,
-) -> str:
-    """Map (Gate 1 BSS, n_settled, Gate 2 BSS, Kelly ROI) to a lifecycle state.
-
-    Phase 4 set-baseline live gate: a cell graduates to ``main`` once the
-    rolling-window Kelly-sized ROI is positive (the live analog of the offline
-    set-baseline Gate 1 + S3 path). Demote when EITHER live BSS is negative OR
-    Kelly ROI is negative — Brier and ROI both diagnose live drift but from
-    different angles (calibration vs. profitability), and a cell that fails on
-    either signal stops earning live evidence.
-
-    Order of checks (matches plan locked decision #15 + Phase 4):
-      NaN/negative Gate 1 -> ``not-shipped``
-      Positive Gate 1 but insufficient settled data -> ``in-test``
-      Live BSS negative OR Kelly ROI negative -> ``demoted``
-      Live BSS non-negative AND Kelly ROI non-negative -> ``graduated``
-      Otherwise (missing live BSS / ROI) -> ``in-test``
-    """
-    if gate1_bss is None or (isinstance(gate1_bss, float) and math.isnan(gate1_bss)):
-        return "not-shipped"
-    if gate1_bss < 0:
-        return "not-shipped"
-    n_settled_nan = n_settled is None or (isinstance(n_settled, float) and math.isnan(n_settled))
-    n_int = 0 if n_settled_nan else int(n_settled)
-    if n_int < _MIN_SETTLED_FOR_GRADUATION:
-        return "in-test"
-    bss_present = book_bss_30d is not None and not (
-        isinstance(book_bss_30d, float) and math.isnan(book_bss_30d)
-    )
-    kelly_present = kelly_yield_30d is not None and not (
-        isinstance(kelly_yield_30d, float) and math.isnan(kelly_yield_30d)
-    )
-    if not bss_present:
-        return "in-test"
-    if book_bss_30d < 0:
-        return "demoted"
-    if kelly_present and kelly_yield_30d < 0:
-        return "demoted"
-    if kelly_present:
-        return "graduated"
-    # BSS positive, Kelly ROI not yet computed (e.g. backfilled parquet pre-Phase 4)
-    # -> hold in-test rather than auto-graduate; the live gate needs both signals.
-    return "in-test"
-
-
-def supersede_live_delta(
-    challenger_kelly_yield: float | None, incumbent_kelly_yield: float | None
-) -> bool:
-    """Phase 4 supersede-live gate: challenger ROI - incumbent ROI >= 0.5%.
-
-    Wrapper helper so consumers (and tests) read the threshold from this module
-    instead of hard-coding 0.005. Requires a >= 2-week settled-data window per
-    the plan; the window-length check belongs to the caller because it owns
-    the rolling aggregator. Returns ``False`` when either input is missing.
-    """
-    if challenger_kelly_yield is None or incumbent_kelly_yield is None:
-        return False
-    if isinstance(challenger_kelly_yield, float) and math.isnan(challenger_kelly_yield):
-        return False
-    if isinstance(incumbent_kelly_yield, float) and math.isnan(incumbent_kelly_yield):
-        return False
-    return (
-        float(challenger_kelly_yield) - float(incumbent_kelly_yield)
-        >= _SUPERSEDE_LIVE_ROI_DELTA
-    )
-
-
-def _read_gate1(path: Path, league: str | None) -> pd.DataFrame:
-    """Read model_stats.parquet and project to the calibrated Gate 1 view."""
-    if not path.exists():
-        raise click.UsageError(f"model_stats parquet not found: {path}")
-    df = pd.read_parquet(path, engine="pyarrow")
-    df = df[(df["row_kind"] == "model") & (df["metric_row"] == "calibrated")]
-    if league:
-        df = df[df["league"] == league]
-    keep = [
-        "league",
-        "market",
-        "distribution",
-        "brier_skill_score",
-        "predicted_over_rate",
-        "empirical_over_rate",
-        "kelly_shrinkage",
-    ]
-    available = [c for c in keep if c in df.columns]
-    df = df[available].copy()
-    return df.rename(columns={"brier_skill_score": "gate1_bss"})
-
-
-def _read_gate2(path: Path) -> pd.DataFrame:
-    """Read live_metrics_per_market.parquet and project to the 30d Gate 2 view.
-
-    Returns an empty frame (correct columns, zero rows) when the parquet is
-    missing — the outer merge then classifies every Gate 1 row as ``in-test``
-    until the live aggregator catches up. ``profit_sim_kelly_yield`` (Phase 4)
-    NaN-fills for parquets written before that column existed so the lifecycle
-    classifier sees a uniform schema.
-    """
-    cols = [
-        "league",
-        "market",
-        "n_settled",
-        "gate2_book_bss",
-        "predicted_over_rate_live",
-        "empirical_over_rate_live",
-        "profit_sim_yield",
-        "profit_sim_kelly_yield",
-    ]
-    if not path.exists():
-        return pd.DataFrame(columns=cols)
-    df = pd.read_parquet(path, engine="pyarrow")
-    df = df[df["window_days"] == _GRADUATION_WINDOW_DAYS]
-    df = df.rename(
-        columns={
-            "book_bss": "gate2_book_bss",
-            "predicted_over_rate": "predicted_over_rate_live",
-            "empirical_over_rate": "empirical_over_rate_live",
-        }
-    )
-    if "profit_sim_kelly_yield" not in df.columns:
-        df["profit_sim_kelly_yield"] = float("nan")
-    return df[cols]
-
-
-def _format_metric(value: float | None) -> str:
+def _format_metric(value) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "    nan"
     return f"{float(value):+7.3f}"
@@ -203,7 +57,7 @@ def _print_header() -> None:
     click.echo(
         f"{'league':<6} {'market':<22} {'dist':<10} "
         f"{'g1_bss':>7} {'g1_p_or':>7} {'g1_e_or':>7} {'g1_kelly':>8} "
-        f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} {'g2_flat':>8} {'g2_kelly':>8} "
+        f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} {'g2_yield':>8} "
         f"{'state':<12}"
     )
 
@@ -220,7 +74,6 @@ def _print_row(row: pd.Series) -> None:
         f"{_format_metric(row.get('predicted_over_rate_live')):>7} "
         f"{_format_metric(row.get('empirical_over_rate_live')):>7} "
         f"{_format_metric(row.get('profit_sim_yield')):>8} "
-        f"{_format_metric(row.get('profit_sim_kelly_yield')):>8} "
         f"{row['lifecycle_state']:<12}"
     )
     color = _STATE_COLORS.get(row["lifecycle_state"], None)
@@ -250,25 +103,13 @@ def _print_summary(states: pd.Series) -> None:
 )
 def main(league: str | None, model_stats_path: Path | None, live_metrics_path: Path | None) -> None:
     """Print the lifecycle status table joining Gate 1 (offline) and Gate 2 (live)."""
-    gate1_path = Path(model_stats_path) if model_stats_path else Path(str(MODEL_STATS_PATH))
-    gate2_path = Path(live_metrics_path) if live_metrics_path else Path(str(LIVE_METRICS_PATH))
+    gate1_path = model_stats_path if model_stats_path else Path(str(MODEL_STATS_PATH))
+    gate2_path = live_metrics_path if live_metrics_path else Path(str(LIVE_METRICS_PATH))
 
-    gate1 = _read_gate1(gate1_path, league)
-    if gate1.empty:
+    merged = lifecycle_table(gate1_path, gate2_path, league)
+    if merged.empty:
         click.echo("No model_stats rows match the filter; nothing to classify.")
         return
-    gate2 = _read_gate2(gate2_path)
-
-    merged = gate1.merge(gate2, on=["league", "market"], how="left")
-    merged["lifecycle_state"] = merged.apply(
-        lambda r: _classify_lifecycle(
-            r.get("gate1_bss", float("nan")),
-            r.get("n_settled", float("nan")),
-            r.get("gate2_book_bss", float("nan")),
-            r.get("profit_sim_kelly_yield", float("nan")),
-        ),
-        axis=1,
-    )
 
     for col in _DISPLAY_COLUMNS:
         if col not in merged.columns:

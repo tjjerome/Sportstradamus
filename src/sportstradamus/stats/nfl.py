@@ -47,14 +47,14 @@ from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 NFL_MARKET_POSITIONS = {
     # Passing + QB total offense — QB only
     "passing yards": {"QB"},
-    "attempts": {"QB"},            # passing attempts
+    "attempts": {"QB"},  # passing attempts
     "completions": {"QB"},
     "passing tds": {"QB"},
     "passing first downs": {"QB"},
     "interceptions": {"QB"},
     "sacks taken": {"QB"},
-    "qb yards": {"QB"},            # pass+rush yards — a QB market
-    "qb tds": {"QB"},              # pass+rush TDs — a QB market
+    "qb yards": {"QB"},  # pass+rush yards — a QB market
+    "qb tds": {"QB"},  # pass+rush TDs — a QB market
     # Rushing — QB + RB (QBs scramble; excluding them skews scramble games)
     "rushing yards": {"QB", "RB"},
     "carries": {"QB", "RB"},
@@ -64,8 +64,8 @@ NFL_MARKET_POSITIONS = {
     "targets": {"WR", "RB", "TE"},
     "receptions": {"WR", "RB", "TE"},
     "receiving tds": {"WR", "RB", "TE"},
-    "yards": {"WR", "RB", "TE"},   # rush+rec scrimmage yards
-    "tds": {"WR", "RB", "TE"},     # rush+rec TDs
+    "yards": {"WR", "RB", "TE"},  # rush+rec scrimmage yards
+    "tds": {"WR", "RB", "TE"},  # rush+rec TDs
 }
 
 # nfl-data-py delivers the advanced-stat columns (yards per carry, passer
@@ -366,7 +366,7 @@ class StatsNFL(Stats):
 
         Overrides the base no-op hook. Markets absent from ``NFL_MARKET_POSITIONS``
         (the fantasy-points composites) keep all four positions. See Stage A1.6 in
-        docs/operation_ship_references.md §9.
+        docs/gbdt_mean_regression_plan.md.
         """
         eligible = NFL_MARKET_POSITIONS.get(market)
         if eligible is None:

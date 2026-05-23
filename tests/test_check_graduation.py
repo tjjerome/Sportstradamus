@@ -6,46 +6,9 @@ import math
 
 import numpy as np
 import pandas as pd
-import pytest
 from click.testing import CliRunner
 
-from sportstradamus.scripts.check_graduation import (
-    _classify_lifecycle,
-    main,
-    supersede_live_delta,
-)
-
-
-@pytest.mark.parametrize(
-    ("gate1_bss", "n_settled", "book_bss_30d", "kelly_yield_30d", "expected"),
-    [
-        (math.nan, 500, 0.10, 0.05, "not-shipped"),
-        (-0.05, 500, 0.10, 0.05, "not-shipped"),
-        (0.10, 50, 0.10, 0.05, "in-test"),
-        (0.10, 250, math.nan, math.nan, "in-test"),  # live BSS missing
-        (0.10, 250, 0.05, math.nan, "in-test"),  # BSS positive but Kelly missing
-        (0.10, 250, 0.05, 0.03, "graduated"),  # Both signals positive
-        (0.10, 250, 0.05, 0.0, "graduated"),  # Kelly ROI exactly 0 = non-negative
-        (0.10, 250, 0.0, 0.01, "graduated"),  # BSS exactly 0 = non-negative
-        (0.10, 250, -0.04, 0.05, "demoted"),  # Live BSS negative
-        (0.10, 250, 0.05, -0.02, "demoted"),  # Kelly ROI negative
-    ],
-)
-def test_lifecycle_classification(gate1_bss, n_settled, book_bss_30d, kelly_yield_30d, expected):
-    assert (
-        _classify_lifecycle(gate1_bss, n_settled, book_bss_30d, kelly_yield_30d) == expected
-    )
-
-
-def test_supersede_live_delta_threshold():
-    # Phase 4 supersede gate: challenger >= incumbent + 0.5%.
-    assert supersede_live_delta(0.030, 0.020) is True  # +1.0% beats +0.5%
-    assert supersede_live_delta(0.025, 0.020) is True  # exactly +0.5%
-    assert supersede_live_delta(0.024, 0.020) is False  # +0.4% < +0.5%
-    assert supersede_live_delta(-0.010, -0.020) is True  # +1.0% even when negative
-    assert supersede_live_delta(None, 0.020) is False
-    assert supersede_live_delta(0.030, None) is False
-    assert supersede_live_delta(math.nan, 0.020) is False
+from sportstradamus.scripts.check_graduation import main
 
 
 def _seed_model_stats(path):
@@ -92,18 +55,16 @@ def _seed_model_stats(path):
 
 def _seed_live_metrics(path):
     rows = []
-    # (league, market, n_settled, book_bss, kelly_yield) — supplies the Gate 2 side.
-    # Kelly yield is the Phase 4 set-baseline live gate; for cells that should
-    # graduate it must be positive alongside the book BSS.
+    # (league, market, n_settled, book_bss) — supplies the Gate 2 side.
     cells = [
-        ("NBA", "PTS", 300, 0.05, 0.03),  # graduated (BSS+ AND Kelly+)
-        ("NBA", "FG3M", 220, -0.03, 0.02),  # demoted (live BSS negative)
-        ("WNBA", "PTS", 250, 0.10, 0.04),  # gate1 fails → still not-shipped
-        ("WNBA", "FG3M", 80, 0.02, 0.01),  # in-test (n < 200)
-        ("NFL", "rushing_yards", 350, 0.04, 0.02),  # graduated
+        ("NBA", "PTS", 300, 0.05),  # graduated
+        ("NBA", "FG3M", 220, -0.03),  # demoted
+        ("WNBA", "PTS", 250, 0.10),  # gate1 fails → still not-shipped
+        ("WNBA", "FG3M", 80, 0.02),  # in-test (n < 200)
+        ("NFL", "rushing_yards", 350, 0.04),  # graduated
         # NFL passing_tds intentionally absent — outer-merge keeps the model row.
     ]
-    for league, market, n, bss, kelly in cells:
+    for league, market, n, bss in cells:
         for window in (7, 30):
             rows.append(
                 {
@@ -117,7 +78,6 @@ def _seed_live_metrics(path):
                     "predicted_over_rate": 0.53,
                     "top_decile_mae": 2.1,
                     "profit_sim_yield": 0.04,
-                    "profit_sim_kelly_yield": kelly,
                 }
             )
     pd.DataFrame(rows).to_parquet(path, engine="pyarrow", index=False)

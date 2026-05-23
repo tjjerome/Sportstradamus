@@ -22,13 +22,13 @@ goes to production once it proves it — Tier-0 gate offline → 14-day
 Gate-2 soak live → graduate. A cell promoted but still in 14-day soak
 counts toward the 75% numerator (ship-incrementally).
 
-## Current state (scorecard snapshot 2026-05-23, post-Step-0 audit)
+## Current state (scorecard snapshot 2026-05-23, post-Step-0.5 audit)
 
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
-| NBA | 13 | 21 | 62% | 16 | **−3** |
-| NFL | 9 | 20 | 45% | 15 | **−6** |
-| WNBA | 10 | 18 | 56% | 14 | **−4** |
+| NBA | 18 | 21 | 86% | 16 | **+2** |
+| NFL | 11 | 20 | 55% | 15 | **−4** |
+| WNBA | 12 | 18 | 67% | 14 | **−2** |
 
 Source: [`data/training/tier0_scorecard.csv`](../src/sportstradamus/data/training/tier0_scorecard.csv),
 strategy `ship75-step0-g4audit-2026-05-23`. `ship = g1_pass AND g2_pass AND
@@ -112,17 +112,77 @@ gates after Step 0. Brief at `/tmp/researcher_lifecycle_gate_audit.md`.
 **Counts after Step 0.5:** NBA 18/21 (PAST 75 % target of 16),
 NFL 11/20 (need +4 more), WNBA 12/18 (need +2 more). Total 41/59 = 69 %.
 
+## Strategy encoding (how cells declare what they train with)
+
+Per-cell ML config lives in
+[`src/sportstradamus/data/config/stat_meta.json`](../src/sportstradamus/data/config/stat_meta.json)
+(committed). Each cell has three relevant fields for Ship 75:
+
+```json
+{
+    "NBA": {
+        "PTS": {"dist": "SkewNormal", "shipped": "devel", "strategy": "ratio_meanyr"},
+        "FG3M": {"dist": "ZINB", "shipped": "devel", "strategy": "none"},
+        "FGA": {"dist": "SkewNormal", "shipped": "withheld", "strategy": "none"}
+    }
+}
+```
+
+- **`dist`** — distribution family (`"SkewNormal"` / `"ZINB"` /
+  `"NegBin"` / `"Gamma"` / `"ZAGamma"`). Drives which pipeline branch
+  consumes the strategy slug.
+- **`shipped`** — release surface. `"withheld"` skips training + prunes
+  the pickle; `"devel"` ships on the production-tracking branch (in
+  14-day Gate-2 soak or already graduated); `"main"` is Gate-2
+  graduated. The production server tracks `devel`, so any cell with
+  `shipped in {"devel", "main"}` is live in production.
+- **`strategy`** — training-pipeline strategy slug. Currently encodes
+  *target normalization* (the SkewNormal forward / decode transform in
+  `training/baselines.py`); future strategies are intended to encompass
+  any per-cell pipeline tweak — post-processing (Step 1's isotonic /
+  affine-ROE bias correction), calibration overrides, alternate
+  priors, etc. Count-branch cells (ZINB / NegBin / Gamma / ZAGamma)
+  carry `"none"` today because no strategy targets that branch yet.
+  When a strategy lands that count cells can opt into (e.g. Step 4.3's
+  `zinb_mode`), it gets registered in `baselines._STRATEGIES` and a
+  cell adopts it by editing the one field.
+
+**Hard invariants** enforced at
+[`training/ship_config.py:load_ship_config`](../src/sportstradamus/training/ship_config.py):
+
+- SkewNormal cells MUST have a real strategy slug (never `"none"`) when
+  shipped — `"none"` for a SkewNormal cell means the pipeline can't pick
+  a target transform.
+- Count-branch cells MUST have `strategy == "none"` — the SkewNormal
+  branch's slug would be silently ignored otherwise, which is
+  misleading.
+- `shipped` must be one of `{"withheld", "devel", "main"}`.
+
+**Promotion (one-line edits):**
+
+| From → to | Means |
+|---|---|
+| `"withheld"` → `"devel"` | Cell cleared Gate 1; ship to production. Manual edit. |
+| `"devel"` → `"main"` | Cell cleared Gate 2 graduation. Done by `generate-ship-config --branch main` (monthly cron). |
+| `"main"` → `"devel"` | Cell stopped passing Gate 2. Same cron, same PR. |
+| `"devel"` → `"withheld"` | Cell pulled for rework. Manual edit. |
+
+**Calibration values** (`cv`, `std`, `zi`) live in
+`stat_calibration.json` (**gitignored** — runtime-recomputed by
+`meditate`'s `report()` on every run). The committed `stat_meta.json`
+holds only the semi-stable ML config above.
+
 ## Lifecycle table (operator maintains this)
 
 Status values:
 
 | Status | Meaning |
 |---|---|
-| `shipped` | Locked in `ship_config.json`, in production via `devel`, Gate-2 graduated |
-| `soak` | In 14-day Gate-2 window — counts toward 75% numerator |
-| `ready` | Cleared Gate-1 offline, awaiting `ship_config.json` promotion |
+| `shipped` | `stat_meta.json` has `shipped: "main"` (Gate-2 graduated) or `shipped: "devel"` (in 14-day soak); both ship on the production-tracking `devel` branch |
+| `soak` | In 14-day Gate-2 window (`shipped: "devel"`) — counts toward 75% numerator |
+| `ready` | Cleared Gate-1 offline, awaiting promotion via `stat_meta.json` edit (`shipped: "withheld"` → `"devel"`) |
 | `g{n}-fail` | Failing one or more gates; primary failure listed first |
-| `withheld` | Under rework, model pruned (sentinel in `ship_config.json`) |
+| `withheld` | Under rework, model pruned (`stat_meta.json` has `shipped: "withheld"`) |
 | `deferred-90` | Failed ≥ 4 levers, kicked to Operation Ship 90 |
 | `degenerate` | Structurally untestable (e.g. actual IQR = 0); decision pending Step 0 |
 
@@ -234,7 +294,7 @@ Full deliverables:
   [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py)
   covering NB / ZINB / SkewNormal / Gamma analytical IQR, degenerate
   `0/0 → 1.0`, oracle back-compat, gate_row column-detection dispatch.
-- Per-cell ship_config strategy lookup wired in compression_eval main
+- Per-cell stat_meta strategy lookup wired in compression_eval main
   (the SkewNormal decode mirrors `baselines._ratio_decode_scale`).
 - `tier0_scorecard.csv` regenerated as
   `ship75-step0-g4audit-2026-05-23`.
@@ -271,9 +331,11 @@ Sub-questions:
 
 Re-run scorecard. Cells flipping to pass G4 → `status=ready`.
 
-**0.3 — Promote G4-flips to `ship_config.json`.** Per cell: add slug
-(`ratio_meanyr` unless A/B says otherwise), run `meditate --force`,
-re-run `compression_eval`, ship via `devel-ship-curator`.
+**0.3 — Promote G4-flips to `stat_meta.json`.** Per cell: set
+`strategy` to a real slug (`ratio_meanyr` unless A/B says otherwise) for
+SkewNormal cells, leave `strategy: "none"` for count-branch cells; set
+`shipped: "devel"`. Run `meditate --force`, re-run `compression_eval`,
+ship via `devel-ship-curator`.
 
 **0.4 — Degenerate-IQR cells** (NFL receiving-tds, rushing-tds, tds).
 Decide per cell:
@@ -332,7 +394,9 @@ outside bound. Don't lead with this — GBDTs already near-multicalibrated
 - Inference-path integration test (see "Inference-path checklist" in
   the [references doc](operation_ship_references.md) §12).
 
-**Selection per cell** (encoded via `ship_config.json` object form):
+**Selection per cell** (encoded via a future per-cell `bias_correction`
+field on `stat_meta.json` — the same one-cell-per-line shape that today
+carries `dist` / `shipped` / `strategy`):
 
 - **NBA / WNBA bias-failing cells:** isotonic.
 - **NFL count cells** (interceptions, TDs, sacks): affine ROE only
@@ -411,8 +475,12 @@ flag for Gate-2.
 `centered_additive_eb_meanyr_k10` or `centered_additive_mean10`. P1
 audit was crippled-HP; fresh A/Bs may flip cells.
 
-**4.3 — Hurdle vs joint ZINB.** Per-cell `zinb_mode` in
-`ship_config.json` object form (`"strategy": ..., "zinb_mode": "joint"|"hurdle"`).
+**4.3 — Hurdle vs joint ZINB.** Per-cell `zinb_mode` becomes a fourth
+field on each `stat_meta.json` cell:
+`{"dist": "ZINB", "shipped": "devel", "strategy": "none", "zinb_mode": "joint" | "hurdle"}`.
+Loader + validation in `training/ship_config.py`; defaulted to `"joint"`
+for cells without the field so the schema migration is backward
+compatible.
 
 **4.4 — Lever cap.** After 4 attempts, cell moves to `deferred-90`
 with a one-line documented reason.
@@ -430,7 +498,8 @@ if zero qualify (likely), family build stays parked.
 
 Every change to a **baselined** cell must clear
 [`compression_eval.supersede_verdict()`](../src/sportstradamus/scripts/compression_eval.py)
-(line 851) before replacing the baseline in `ship_config.json`. Computes:
+(line 851) before replacing the baseline (i.e. before editing the cell's
+`strategy` / `dist` in `stat_meta.json`). Computes:
 
 - **S1**: five Tier-0 gates on candidate
 - **S2**: paired Brier 95% CI (candidate vs baseline)

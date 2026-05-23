@@ -98,12 +98,42 @@ A challenger replaces an established baseline only if **all three** hold. Comput
 
 ---
 
+## Serving control — default-deny via stat_meta `shipped` field
+
+`data/config/stat_meta.json` is the **canonical, hand-curated** per-cell
+record. Every cell carries `{"dist": ..., "shipped": ..., "strategy": ...}`
+where `shipped` is one of `"withheld"` / `"devel"` / `"main"`:
+
+- `"withheld"` — `meditate` prunes the cell's pickle so `prophecize`
+  dark-outs the market.
+- `"devel"` — the production-tracking branch (`devel`) trains + ships
+  the cell. In 14-day Gate-2 soak.
+- `"main"` — the cell also passed Gate-2 graduation; it's locked in on
+  `main`.
+
+This is **default-deny**: only cells the human explicitly promotes
+(`shipped` ≠ `"withheld"`) serve. Promoting a Gate-1 passer is a
+one-line edit (`"withheld"` → `"devel"`). `generate-ship-config --branch
+main` mutates `stat_meta.json` monthly (cron via `run_job.sh
+gate-status`) to promote graduated cells `"devel"` → `"main"` and demote
+the rest back to `"devel"`; the cron opens a PR a human merges.
+`generate-ship-config --branch devel` only validates the current state
+and prints a summary — devel promotions are direct edits.
+
+**Known gap:** the graduated classifier (`training/graduation.py`) uses a
+proxy of Gate 2 — positive Gate-1 BSS + ≥ 200 settled offers in the 30d window
++ non-negative live book-BSS — not the full live metric set above. `main` is
+dormant until the live aggregator produces data, so the proxy is acceptable
+for now.
+
+---
+
 ## devel → main (live)
 
 | Case | Threshold | Where |
 |---|---|---|
 | **No incumbent in main** | Positive Kelly-sized ROI on the cell's settled offers within the 30-day graduation window (`profit_sim_kelly_yield ≥ 0` AND live `book_bss ≥ 0`) | `nightly._profit_sim_kelly_yield` writes `data/live_metrics_per_market.parquet`; `check_graduation._classify_lifecycle` reads it |
-| **Incumbent in main** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers (`_SUPERSEDE_LIVE_ROI_DELTA = 0.005`, `_SUPERSEDE_LIVE_WINDOW_DAYS = 14`) | `check_graduation.supersede_live_delta`; the challenger-vs-incumbent A/B record needs `ship_config.json` + per-model-version aggregation in `nightly.py` to fire automatically (dependency: live aggregator runs) |
+| **Incumbent in main** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers (`_SUPERSEDE_LIVE_ROI_DELTA = 0.005`, `_SUPERSEDE_LIVE_WINDOW_DAYS = 14`) | `check_graduation.supersede_live_delta`; the challenger-vs-incumbent A/B record needs `stat_meta.json` + per-model-version aggregation in `nightly.py` to fire automatically (dependency: live aggregator runs) |
 
 A cell that drifts outside its set-baseline bounds is **withheld and re-enters the
 set-baseline track** (drift monitor; the prior pickle stays archived under

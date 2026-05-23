@@ -46,4 +46,10 @@ Options:
                                   'FTM,STL'). When omitted, all markets for the
                                   active league are trained. A stem absent from
                                   every active league is an error.
+  --branch [devel|main]           Which release branch's ship policy to honor.
+                                  'devel' (default, matches the production
+                                  server) trains every cell with shipped in
+                                  {devel, main}. 'main' only trains cells with
+                                  shipped=main. See data/config/stat_meta.json.
+                                  [default: devel]
   --help                          Show this message and exit.
