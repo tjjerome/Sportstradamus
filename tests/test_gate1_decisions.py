@@ -9,8 +9,9 @@ from sportstradamus import data
 from sportstradamus.training.baselines import STRATEGY_SLUGS
 from sportstradamus.training.markets import ALL_MARKETS
 
-# The Gate-1 lock-in count seeded from ship/baselines-36-cells (NBA 13, WNBA 10, NFL 13).
-_EXPECTED_DECISION_COUNT = 36
+# Gate-1 ships under the 5-gate strict offline lifecycle (NBA 7, NFL 5, WNBA 10) after
+# the 2026-05-22 post-refresh audit on the v2 gate (35db7d5 on the research branch).
+_EXPECTED_DECISION_COUNT = 22
 
 
 def _load_decisions() -> dict[str, dict[str, str]]:
