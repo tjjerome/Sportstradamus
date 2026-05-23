@@ -1,3 +1,12 @@
+# ARCHIVED 2026-05-23 from src/sportstradamus/scripts/test_comp_factors.py
+# Reason: NFL PFF -> FantasyPoints migration deleted the PFF data this script
+#   depended on; per-feature scoring is now covered by
+#   `optimize_comp_weights.py --diagnostic-only`.
+# Last live SHA: 760baa4
+# Original imports (now unresolved here):
+#   from sportstradamus import data
+#   from sportstradamus.helpers import remove_accents
+#   from sportstradamus.stats import StatsNFL
 import importlib.resources as pkg_resources
 import json
 import os
