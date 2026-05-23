@@ -1,99 +1,148 @@
 # Plan: Mitigate GBDT Regression-Toward-the-Mean in the Training Pipeline
 
-> **Multi-session handoff doc.** Status below is updated each session. The
-> attached source report lives in the originating session; this file is the
-> durable plan + progress log for the project on branch
-> `claude/fix-gbdt-mean-regression-GcY1g` (PR #46 → `devel`).
+> **Multi-session home-of-record.** LightGBMLSS predictions compress toward the
+> global mean (high-volume players under-predicted, low-volume over-predicted).
+> This document is the durable plan + progress log for the fix, worked entirely on
+> branch `claude/fix-gbdt-mean-regression-GcY1g` (intended rename `model-research`)
+> under **PR #46 → `devel`** — every phase's code, run-log entries, and status
+> updates land as commits on that one PR, not separate per-phase PRs. Status is
+> updated each session. No fact in this document may be lost; citations are
+> numbered `[n]` and collected in **References** at the end.
 >
-> **All phases of this plan are worked and documented in PR #46.** Each
-> phase's code, the harness run-log entries, and the status updates below land
-> as commits on that one PR; do not open separate PRs per phase.
+> **Companion context doc:** `gbdt_mean_regression_context.md` (decision history,
+> prior-phase results, research verdicts, references).
 
-## Top priority — baseline breadth (≥ 75% of markets per league)
+## Abstract
 
-**The North Star for this project is breadth, not depth: get a baseline *set* for
-at least three-quarters of the markets in every covered league (NBA ≥ 16/21,
-WNBA ≥ 14/18, NFL ≥ 15/20).** This
-supersedes the earlier framing where the only ship was a ≥ 5% top-decile-MAE
-*improvement*. The Stage B1.5 §7a verdict showed top-decile compression is
-family-invariant — a GBT leaf-averaging property no strategy or distribution swap
-removes — so gating the *first* ship on a ≥ 5% compression improvement blocks most
-cells from ever shipping (the NBA sweep set a baseline on only 2 of 21 markets
-under that bar). The objective is making money on as many markets as possible; the
-gate is reframed to measure that directly.
+LightGBMLSS predictions exhibit **regression-toward-the-mean / top-decile
+compression** — a GBT leaf-averaging property that under-predicts high-volume
+players and over-predicts low-volume ones. The **North Star is baseline breadth:
+set a baseline for ≥ 75% of markets in every covered league** (NBA ≥ 16/21, WNBA ≥
+14/18, NFL ≥ 15/20), not depth on a few cells. **Current state (full-HP locked,
+2026-05-21): NBA 13/21, WNBA 10/18, NFL 13/20** — gaps of −3 / −4 / −2. The
+operative next step toward breadth is the **Stage B1.6 feature/bias track**.
+
+This is the **lean execution plan**: what to do, the per-market status, and the
+execution-critical mechanics. History, prior-phase results, research verdicts, and
+references live in the **context doc** (`gbdt_mean_regression_context.md`).
+
+## Table of contents
+
+- [North Star — baseline breadth (≥ 75%)](#north-star--baseline-breadth--75-of-markets-per-league)
+- [Market cell status — Gate 1 / `devel` / `main`](#market-cell-status--gate-1--devel--main)
+- [Phase status index](#phase-status-index)
+- [Scope, testing policy](#scope--leagues-this-plan-covers)
+- [Ship incrementally — per-market graduation](#ship-incrementally--per-market-graduation)
+- [Diminishing returns — stop-the-track principle](#diminishing-returns--stop-the-track-principle)
+- [Inference-path compatibility](#inference-path-compatibility-applies-to-every-shipped-change)
+- [Path to 75% — feature/bias track (Stage B1.6)](#path-to-75--featurebias-track-stage-b16)
+- [Cross-league caveats](#cross-league-caveats-read-before-running-any-cross-league-ab)
+- [Critical files](#critical-files)
+- [Verification](#verification-every-code-session)
+- [Session handoff](#session-handoff)
+
+## North Star — baseline breadth (≥ 75% of markets per league)
+
+**The objective is breadth, not depth: set a baseline for at least three-quarters
+of the markets in every covered league — NBA ≥ 16/21, WNBA ≥ 14/18, NFL ≥ 15/20.**
+This supersedes the earlier "ship only on a ≥ 5% top-decile-MAE *improvement*"
+framing. Stage B1.5 §7a showed top-decile compression is **family-invariant** (a
+GBT leaf-averaging property no strategy or distribution swap removes), so gating
+the *first* ship on ≥ 5% compression improvement blocks most cells from ever
+shipping (the NBA sweep set a baseline on only 2 of 21 markets under that bar). The
+gate is reframed to measure money-making breadth directly.
+
+**Breadth is a 3-rung ladder, not a one-shot target — ratchet quality and breadth
+alternately:**
+
+1. **Rung 1 (now): reach 75% per league at the current bar.** Absolute bias gates at
+   the wide Phase-0 value (30% of the band's empirical mean, floor 0.10). Close the
+   gaps (NBA −3, WNBA −4, NFL −2) via the Stage B1.6 feature/bias track.
+2. **Rung 2 (next): tighten the absolute gates 30% → 20% of band mean** (floor 0.10
+   unchanged) and re-reach 75% at that stricter bar. Some Rung-1 passers will fail at
+   20% and need more B1.6 work. **Dispatch a fresh research agent at that point** to
+   inform the strategy.
+3. **Rung 3 (after): push to >90% coverage** at the tightened (20%) bar.
 
 ### Two-tier ship model
 
-Every cell is in one of two regimes:
-
-**Tier 0 — set the first baseline (absolute gates only). This is the priority.** A
-cell with no baseline set gets one as soon as *any* candidate clears the
-**absolute** gates. Nothing relative is required, because there is no prior
-baseline to improve on:
+**Tier 0 — set the first baseline (absolute gates only; this is the priority).** A
+cell with no baseline gets one as soon as *any* candidate clears the **absolute**
+gates — nothing relative is required:
 
 1. **Bench-warmer (bottom-quartile) absolute gate** — bottom-quartile signed bias
    within the one-sided over-prediction bound (under-prediction tolerated).
 2. **Star (top-decile) absolute gate** — top-decile signed bias within the
    bidirectional bound.
-3. **BSS in the tolerated range** — `brier_skill_score ≥ 0` (beats the book) on
-   the full-quality retrain. Phase-0 floor; this is the knob for reaching 75% — if
-   a league can't get three-quarters of its markets to ≥ 0, widen toward the
-   Gate-2 −0.02 tolerance rather than ship a book-losing cell.
+3. **BSS in tolerated range** — `brier_skill_score ≥ 0` (beats the book) on the
+   full-quality retrain. This is the knob for reaching 75%: if a league can't get
+   three-quarters of markets to ≥ 0, widen toward the Gate-2 −0.02 tolerance rather
+   than ship a book-losing cell.
 
-The **incumbent devel/default strategy is itself a candidate** in this test. Of
-*every* candidate that clears the absolute gates for a cell, the one with the
-highest `brier_skill_score` — after a full, non-deterministic retrain — is shipped
-as the baseline, because live production can only A/B one strategy per cell at a
-time (tiebreaker detail in [docs/ship_gate.md](ship_gate.md)).
+The **incumbent devel/default strategy is itself a candidate.** Of every candidate
+clearing the absolute gates, the highest-`brier_skill_score` after a full
+non-deterministic retrain ships as the baseline (live production A/Bs one strategy
+per cell; tiebreaker in [ship_gate.md](ship_gate.md)).
 
-**Tier 1 — supersede an established baseline (absolute + relative gates).** Once a
-cell's baseline is set, a challenger must clear **both** the absolute gates **and**
-the relative gates — the full Universal decision threshold below: ≥ 5%
-top-decile-MAE improvement, global MAE not worse, BSS not worse, and
-bottom-quartile bias not more positive. The ≥ 5% compression bar's correct role is
-here — it prevents churning an established baseline without a real improvement, not
-blocking the first ship.
+**Tier 1 — supersede an established baseline (absolute + relative gates).** A
+challenger must clear both the absolute gates and the full Universal decision
+threshold: ≥ 5% top-decile-MAE improvement, global MAE not worse, BSS not worse,
+bottom-quartile bias not more positive. The ≥ 5% bar's correct role is here.
 
-**Gate 2 — live graduation** is unchanged: a newly-set baseline soaks ≥ 14 days,
+**Gate 2 — live graduation** (unchanged): a newly-set baseline soaks ≥ 14 days,
 then graduates on settled-offer book-BSS, calibration, and profit-sim.
 
-### What "absolute gate" means here
+**"Absolute gate"** = the per-band signed-**bias** (calibration) bounds built this
+session — bottom-quartile one-sided on over-prediction, top-decile bidirectional —
+at the wide Phase-0 values (30% of the band's empirical mean, floor 0.10). Current
+numbers + BSS tiebreaker live in [ship_gate.md](ship_gate.md).
+(`compression_eval.verdict()` currently encodes only the Tier-1 path; the Tier-0
+absolute-only mode is the immediate next code step.)
 
-The bench-warmer and star absolute gates are the per-band signed-**bias**
-(calibration) bounds built this session — bottom-quartile one-sided on
-over-prediction, top-decile bidirectional — at the wide Phase-0 values (30% of the
-band's empirical mean, floor 0.10). Current numbers and the BSS tiebreaker live in
-[docs/ship_gate.md](ship_gate.md). (`compression_eval.verdict()` currently encodes
-only the Tier-1 path; the Tier-0 absolute-only mode is the immediate next code
-step.)
+**Universal decision threshold — the Tier-1 gate (every market, every covered
+league).** Once a cell's baseline is set, a challenger ships only if it (1) reduces
+**top-mean-decile MAE by ≥ 5%** vs the baseline, (2) does not worsen **global MAE by
+> 1%**, (3) does not worsen `brier_skill_score`, and (4) does not buy the top-decile
+win with **low-volume over-prediction**. The **Tier-0 first-baseline gate is the
+absolute subset**: condition (4)'s absolute bounds (bottom-quartile + top-decile
+bias) plus `brier_skill_score ≥ 0`; the relative parts are dropped (no prior baseline
+to improve on).
+
+Condition (4) is gated *asymmetrically* by betting risk. **Bottom quartile** (bench
+warmers): failure mode is over-prediction only, so the bottom-mean-quartile signed
+bias must (a) not become more positive than the default's (*relative*) and (b) not
+over-predict beyond a fraction of that quartile's mean (*absolute, one-sided* —
+currently **+30%**, floor **0.10**); **under-prediction is tolerated**. **Top decile**
+(stars): **bidirectional** — |signed bias| within a fraction of that decile's mean
+(currently **30%**, floor **0.10**). The lowest quartile is pooled coarsely on purpose
+(bench warmers generalize more than stars); absolute bounds start **wide and tighten
+as the bias-correction track lands improvements**. Condition (4) was added after Stage
+B1.5 §7a found two cells whose only MAE wins came from over-predicting low-volume
+players (FG3M bottom buckets predicted ~3.4× actual); the bounds are tunable but the
+*direction* (a top-decile win must not be financed by bottom-quartile over-prediction)
+is fixed. Quick-reference values: [docs/ship_gate.md](ship_gate.md). The threshold
+must hold on **every market in every covered league** — or the routing config records
+the exceptions. The harness
+([compression_eval.py](../src/sportstradamus/scripts/compression_eval.py)) is the
+ship/kill gate.
 
 ### Roadmap to 75%
 
-1. **Audit (do first):** run the absolute-only Tier-0 gate over every cell ×
-   candidate (incl. the incumbent) in all three leagues; record per league how
-   many already clear it and on which strategy. That is the breadth baseline.
-2. **Fill the gap:** for cells that don't yet clear the absolute gates, apply the
-   Stage B1.6 feature/bias track (post-hoc bias correction, expanding-mean
-   encoding, opponent-defense / blowout features) until ≥ 75% per league can be
-   set. Post-hoc bias correction in particular pulls both bands toward zero, so it
-   serves the absolute gates directly.
+1. **Audit (done — Step 1):** run the absolute-only Tier-0 gate over every cell ×
+   candidate (incl. incumbent) in all three leagues.
+2. **Fill the gap (Step 2 — the work now):** the **Stage B1.6** feature/bias track
+   (post-hoc bias correction, expanding-mean encoding, opponent-defense/blowout
+   features). Post-hoc bias correction pulls both bands toward zero, serving the
+   absolute gates directly.
 3. **Set + soak:** ship the highest-BSS passer per cell to `devel`; start the
    14-day Gate-2 soak.
 
-**Immediate next steps (Step 1 audit is done — see below; Step 2 is now the work).** The
-first **code** task is adding **`compression_eval.verdict()` Tier-0 absolute-only mode** —
-today `verdict()` encodes only the Tier-1 relative path, so the breadth audit's Tier-0
-calls are not yet a first-class code path; this is the Stage B1.6 prerequisite. With that
-landed, run the **Stage B1.6** feature/bias track to close the gaps (NBA −3, WNBA −4,
-NFL −2), then set + soak. The depth tracks (A2/B2/B3) follow only once breadth is met.
-
-**Step 1 result — breadth baseline (2026-05-21).** Tier-0 audit over all four
-candidate strategies (incumbent `ratio_meanyr`, `centered_additive_mean10`,
-`centered_additive_eb_meanyr_k10`, and `ratio_meanyr` + hurdle) on the
-deterministic A/B test sets, after the NFL gamelog numeric-coercion bug was fixed
-(NFL candidates were previously un-generatable). BSS here is on crippled-HP
-deterministic models — **conservative**; the final per-cell pick is the highest
-*full-retrain* BSS. The absolute bias gates are HP-robust.
+**Immediate next steps.** First **code** task: add `compression_eval.verdict()`
+Tier-0 absolute-only mode (today it encodes only the Tier-1 relative path — the
+Stage B1.6 prerequisite). Then run **Stage B1.6** to close gaps (NBA −3, WNBA −4,
+NFL −2), then set + soak. Depth tracks (A2/B2/B3) follow only once breadth is met.
+The **2026-05-22 research verdict** ranks the B1.6 work (post-hoc mean-bias correction
+first) and sets per-league targets — see **Path to 75% — feature/bias track** below.
 
 | League | passes bias gates | bias + BSS ≥ 0 | 75% target | gap |
 |---|---|---|---|---|
@@ -101,93 +150,36 @@ deterministic models — **conservative**; the final per-cell pick is the highes
 | WNBA | 10/18 | 10/18 | 14 | −4 |
 | NFL | 17/20 | 16/20 | 15 | **MEETS (+1)** |
 
-**The binding constraint is the absolute bias gates, not the BSS floor.** The
-failing cells are the low-mean count markets — NBA AST/BLK/BLST/FG3M/OREB/STL/TOV,
-WNBA those + FTM, NFL passing-tds/receiving-tds/rushing-tds — exactly the
-family-invariant-compression cells Stage B1.5 routed to the feature/bias track.
-The crippled-HP BSS floor excludes only one extra cell per league beyond the bias
-failures (NBA PF, NFL interceptions — both "bias-only"), so a full retrain should
-recover several. Winning strategy varies by cell: `ratio_meanyr` takes most NFL
-high-volume markets + every fantasy-points cell; `centered_additive_eb_meanyr_k10`
-takes the NBA/WNBA volume markets (FGA, MIN, DREB, PA, PR, PRA, REB); the hurdle
-wins once (NFL sacks-taken). Per-cell selection is material — no single strategy
-dominates. **Gap to close (Step 2):** NBA +3, WNBA +4 via the feature/bias track
-(post-hoc bias correction first, aimed at the bias-failing count cells); NFL +2 —
-the screen's 16/20 fell to **13/20 confirmed at full HP** (qb-tds, rushing-yards,
-and sacks-taken failed Tier-0 on the real retrain; see Step 3).
+The Step-1 screen reports crippled-HP bias-pass counts (e.g. NFL 17/20). Three NFL
+cells (rushing-yards, qb-tds, sacks-taken) failed Tier-0 on the full-HP retrain, so
+**NFL lands 13/20 confirmed at full HP**, short of 15/20 by 2.
 
-**Step 3 result — baselines locked (2026-05-21).** Full-HP retrain driven by the
-per-cell `ship_config.json` (`--force`, non-deterministic). Methodology finding: a
-fresh retrain's test sets ARE `compression_eval`-scoreable (they carry the
-book-odds columns), unlike the pre-existing May-8 production sets — so full-HP BSS
-confirmation is available going forward, not just the crippled-HP screen.
+> **Per-cell audit + locked-baseline BSS detail:** see context doc → Prior-phase
+> results (Step 1 breadth baseline + Step 3 baselines-locked narratives, per-cell
+> BSS lists, the WNBA TOR fix, and the NFL pruning detail).
 
-- **NBA — 13/13 locked, confirmed at full HP.** Every baseline-able cell passes
-  Tier-0 at full HP (BSS +0.027 … +0.352: MIN +0.284, fpp +0.352, DREB +0.251,
-  REB +0.131, PTS +0.097, FGM +0.094, FGA +0.093, FTM +0.087, PR +0.074, FG3A
-  +0.061, RA +0.060, PA +0.049, PRA +0.027). The crippled-HP "centered wins" in
-  the Step-1 audit were all 0–2pp noise; the incumbent `ratio_meanyr` is confirmed
-  best-or-equal, so all 13 lock as `ratio_meanyr`. Committed to `ship_config.json`.
-- **WNBA — 10/10 baseline-able cells locked, confirmed at full HP (TOR fix landed).**
-  The retrain had crashed in `get_stats`: `teamProfile.loc[…]` raised
-  `KeyError: ['TOR']` because Toronto Tempo (the 2026 WNBA expansion team) is absent
-  from `teamProfile`. Root cause was a pair of hardcoded `"GSV"` (2025 Golden State
-  Valkyries) guards that only papered over the *prior* season's expansion. Fixed with
-  a league-agnostic `_profile_rows_for_teams` helper
-  ([base.py:51](../src/sportstradamus/stats/base.py#L51)) that `reindex`es the profile
-  so any absent franchise yields an all-NaN row (LightGBM consumes it as a missing
-  feature) — robust to future expansions; both GSV guards deleted; regression test
-  `tests/golden/test_profile_team_lookup.py`. The full-HP retrain then completed all
-  10 markets cleanly, every cell passing Tier-0 (BSS +0.013 … +0.230: fpp +0.230,
-  MIN +0.189, FGA +0.137, DREB +0.096, PA +0.050, PR +0.048, REB +0.041, RA +0.036,
-  PTS +0.033, PRA +0.013). DREB locks as `centered_additive_mean10` (the sole Tier-0
-  passer in the screen — incumbent fails the bench gate — and fully plumbed, no
-  `zinb_mode` gap), the other 9 as `ratio_meanyr`. Committed to `ship_config.json`.
-  This is 10/18 of all WNBA markets baselined; the remaining +4 to the 14/18 North
-  Star is the Step-2 feature/bias track on the count markets (FG3M/FTM/STL …).
-- **NFL — 13/16 baseline-able locked, confirmed at full HP.** The per-cell
-  `zinb_mode` plumbing was built first (object-form `ship_config` cells +
-  `resolve_cell_zinb_mode`; `ZINB_MODES` in `baselines.py`) so sacks-taken *could*
-  ship as `ratio_meanyr`+hurdle. The full-HP `--force` retrain then **confirmed
-  only 13 of the 16 screen-passers** — the crippled-HP screen was optimistic for
-  3: `qb tds` (full-HP bench +0.39 / star +0.68 over the bounds), `rushing yards`
-  (`centered_additive_mean10` BSS −0.006; incumbent also failed it), and **`sacks
-  taken`** (hurdle: star-bias +0.67 > 0.50 — the plumbing works end-to-end, pickle
-  `is_hurdle=True`/`zinb_mode=hurdle`, but the cell fails Tier-0 anyway). Locked 13:
-  `passing first downs`→`eb`, `receptions`→`mean10`, the other 11→`ratio_meanyr`.
-  The centered transforms blow up on NFL yardage (passing-yards `eb` top-decile MAE
-  2629, qb-yards `mean10` 44902) — incumbent unambiguously correct there. **NFL
-  lands 13/20, short of the 15/20 North Star by 2** (the screen's "16" was
-  crippled-HP-optimistic); the 3 pruned + 4 never-baseline-able = a 7-cell Step-2
-  pool. Full per-cell results + the devel ship handoff are in
-  [docs/lockin_ship_handoff.md](lockin_ship_handoff.md).
-
-Depth work — superseding baselines via the ≥ 5% compression improvement, the Track
-A tail-head and Track B family builds — is **secondary** to reaching 75% breadth.
+Depth work (superseding baselines via the ≥ 5% bar, Track A tail-head, Track B
+family builds) is **secondary** to reaching 75% breadth.
 
 ## Market cell status — Gate 1 / `devel` / `main`
 
-Per-cell shipping status, to prioritize which markets to work next. Sourced from
-committed state only — the locked baselines in
-[`data/ship_config.json`](../src/sportstradamus/data/ship_config.json), the market roster
-in [`training/markets.py`](../src/sportstradamus/training/markets.py) (`ALL_MARKETS`), the
-declared distribution family in
-[`data/stat_dist.json`](../src/sportstradamus/data/stat_dist.json), and the locked
-2026-05-21 breadth audit above. No verdict is recomputed here.
+Per-cell shipping status. Sourced from committed state only — locked baselines in
+[`data/ship_config.json`](../src/sportstradamus/data/ship_config.json), roster in
+[`training/markets.py`](../src/sportstradamus/training/markets.py) (`ALL_MARKETS`),
+families in [`data/stat_dist.json`](../src/sportstradamus/data/stat_dist.json), and
+the locked 2026-05-21 breadth audit. No verdict is recomputed here.
 
 - **Gate 1** = passes the Tier-0 absolute gates. A locked baseline ⇒ Gate 1 passed.
-- **`devel`** = baseline shipped to the live beta (the per-cell entry in `ship_config.json`).
-- **`main`** = graduated on the 14-day Gate-2 live soak. **No cell has begun a soak yet**
-  (`data/live_metrics_per_market.parquet` is not yet populated), so every `main` cell is
-  ⏳ pending.
+- **`devel`** = baseline shipped to live beta (the `ship_config.json` entry).
+- **`main`** = graduated on the 14-day Gate-2 live soak. **No cell has begun a soak**
+  (`data/live_metrics_per_market.parquet` not yet populated), so every `main` is ⏳.
 - Unbaselined cells (no `ship_config.json` entry) are the **Step-2 feature/bias-track
   (B1.6)** work pool.
 
-**Baselined: NBA 13/21, WNBA 10/18, NFL 13/20.** 75% target / gap: NBA 16 (**−3**),
-WNBA 14 (**−4**), NFL 15 (**−2**). These are the full-HP **locked** counts from Step 3;
-the Step-1 screen table above reports the crippled-HP bias-pass counts (e.g. NFL 17/20),
-three of which (NFL rushing-yards, qb-tds, sacks-taken) failed Tier-0 on the full-HP
-retrain — Step 3 is the real shipping state.
+**Baselined (full-HP locked, Step 3): NBA 13/21, WNBA 10/18, NFL 13/20.** 75% target
+/ gap: NBA 16 (**−3**), WNBA 14 (**−4**), NFL 15 (**−2**). The Step-1 screen reports
+the crippled-HP bias-pass counts (e.g. NFL 17/20), three of which (NFL rushing-yards,
+qb-tds, sacks-taken) failed Tier-0 on the full-HP retrain — Step 3 is the real state.
 
 **NBA — 13/21 baselined**
 
@@ -263,263 +255,122 @@ retrain — Step 3 is the real shipping state.
 | sacks taken | ZINB | — | ❌ | — | — | Step-2 (B1.6) † |
 | passing first downs | SkewNormal | `centered_additive_eb_meanyr_k10` | ✅ | ✅ 2026-05-21 | ⏳ | Gate-2 soak |
 
-† Passed the crippled-HP Step-1 screen but failed Tier-0 on the full-HP retrain (Step 3).
-`sacks taken`'s `ratio_meanyr`+hurdle plumbing works end-to-end (pickle `is_hurdle=True`),
-but the cell's star-bias still exceeds the bound — these three join the Step-2 pool.
+† Passed the crippled-HP Step-1 screen but failed Tier-0 on the full-HP retrain
+(Step 3). `sacks taken`'s `ratio_meanyr`+hurdle plumbing works end-to-end (pickle
+`is_hurdle=True`), but the cell's star-bias still exceeds the bound — these three
+join the Step-2 pool.
 
-## Status / progress log
+## Phase status index
 
-| Phase | State | Notes |
+Compact one-row-per-phase index. Full result prose, numbers, and verdicts for every
+phase are in the context doc → **Status / progress log (detailed)**.
+
+| Phase | State | Summary (≤ 15 words) |
 |---|---|---|
-| **P0 — offline eval harness** | ✅ done (PR #46) | `src/sportstradamus/scripts/compression_eval.py` + `tests/golden/test_compression_eval.py`. ruff clean, 6 unit tests pass, CLI single+diff smoke-tested on synthetic data. Full `poetry` gates NOT run in the build env — network policy blocks the PyTorch CPU wheel source so `poetry install` fails on `torch`; needs a normal-network run before merge. |
-| **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic` (debug-only, never publish) + `tests/integration/test_determinism_gate.py`. Pure helpers `seed_everything` / `fit_lss_model` / `predict_lss_params` / `fit_predict_params` in `pipeline.py`; under `--deterministic`: RNGs pinned (random/numpy/torch + `torch.use_deterministic_algorithms`), Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`, input frozen to cached parquet. Persistent writes are **redirected to `data/{test_sets,models}/deterministic/`** (training parquet + whole-suite `report()` stay fully suppressed) so a `--deterministic` run produces consumable artifacts without ever overwriting production paths. Gate runs on real cached `NBA_FGA.parquet` (4000 rows, ~5s) with stochastic LightGBM (`feature_fraction=0.8`, `bagging_fraction=0.8`, `bagging_freq=1`) so it actually tests the seeding mechanism — different seed produces `loc` max-abs diff ~0.34, same seed bit-identical. Default `meditate` byte-identical. P1 unblocked. |
-| **P1 — centered-target bridge (SkewNormal)** | ✅ done (PR #46), result: **FGA-only SHIP, family-wide KILL** | Two centered-target variants A/B'd path-wide under `meditate --deterministic` against the `ratio_meanyr` baseline. (a) `centered_additive_eb_meanyr_k10` (Phase-A's EB(MeanYr, K=10)): FGA SHIPS (+5.3% top-decile MAE, brier_skill +0.096→+0.112), every other SkewNormal market KILLs (PTS −3.5%, PA −4.1%, PR −2.9%, RA −2.2%, FG3A −3.8%, FGM −2.6%, MIN +3.7%, PRA +0.8%, REB +0.2%, fantasy-points-prizepicks brier_skill regressed). (b) `centered_additive_mean10` (trailing-10 baseline, more responsive to recent form — added post-Phase-A as the obvious "level shifts with form" hypothesis): **every SkewNormal market KILLs** including FGA (+4.6% — close but under the 5% bar), with PA −6.6% and PR −6.7% notably *worse* than Phase-A. Count-family markets (FG3M, FTM, OREB, PF, STL, TOV, BLK, BLST) showed exactly 0% delta under both strategies as expected — the centered-target transform is a no-op for NegBin/ZINB. **Both runs together confirm the OVERCONFIDENCE_INVESTIGATION §3.2 "decisive negative result", strengthened: the SkewNormal level bias is not the dominant compression cause path-wide, regardless of baseline horizon (long-term EB or short-term trailing-10).** FGA is genuinely special — its win comes from EB(MeanYr) capturing structural shot-volume; Mean10 is too noisy for FGA itself and not the right lever for volume-shifting markets either. Default `--target-strategy=ratio_meanyr` stays. The infrastructure (`baselines.py`, the registry, the offset_meta pickle field, the brier_skill gate, the live-path test) is reusable for P3 (rate decomposition) and P2 (init_score baseline for count markets) — the next levers worth trying based on the path-wide negative result. |
-| **P2.B — HurdleZINB (derived-π gate)** | ✅ done (PR #46), result: **6/8 NBA ZINB markets SHIP** | New `meditate --zinb-mode=hurdle` (orthogonal to `--target-strategy`; default `joint` stays byte-identical to pre-P2.B). `HurdleZINB` (in `src/sportstradamus/hurdle.py`) is a two-stage drop-in for joint ZINB: calibrated binary classifier estimates `q = P(Y=0)`; NegBin LightGBMLSS on `Y>0` supplies count shape; structural-inflation π derived from the ZINB identity `π = clip((q − NB(0))/(1 − NB(0)), 0, 1)` (NOT the simpler `gate = 1 − p_nonzero` from the original Phase B spec — corrected because downstream `fused_loc` in `helpers/distributions.py` explicitly treats `gate` as zero-inflation, not marginal P(Y=0)). Returned `total_count/probs/gate` columns match the LightGBMLSS ZINB contract so `model_prob` ZINB decode (lines 252-257) is untouched and legacy pickles still load via `getattr(model, "is_hurdle", False)`. Path-wide A/B under `meditate --deterministic --league NBA --zinb-mode hurdle` against the joint baseline: **SHIP** on FG3M (+9.7% top-decile MAE, brier_skill +0.115→+0.290), OREB (+44.9%, +0.019→+0.109), PF (+19.2%, −0.238→−0.002), TOV (+26.8%, −0.049→+0.058), BLK (+40.4%, +0.237→+0.299), BLST (+11.6%, −0.002→+0.093). **KILL** on FTM (+1.3%, under 5% bar) and STL (global MAE +14.1% regression). The joint ZINB had per-row catastrophic blowups in mid-deciles on BLK/OREB/PF/BLST under deterministic mode (compression_ratio 24–5357×; predicted means up to 1437) that the hurdle eliminates entirely — global MAE drops 60–99% on those markets. **Default stays `--zinb-mode=joint`** — shipping the infrastructure + verdict here; the per-market routing question (FTM/STL stay joint, the rest move to hurdle) is a follow-up. **Note on the verdict criterion**: the parent plan said "predicted gate mean ≈ hist_gate" — that criterion was mis-stated under derived-π semantics. Derived-π gate is π_zi (the inflation parameter), structurally ≤ q with equality only in the zero-truncated-NB limit. For FG3M (positives mean ≈ 2.2) NB(0) ≈ 0.20 even with a well-fit NB, so derived-π gate ≈ 0.17 (similar to joint's 0.18) but the *total reconstructed P(Y=0)* matches `q ≈ 0.33` exactly by construction. The meaningful SHIP/KILL signal is the downstream compression_eval verdict on `P(over@line)` proxies (top-decile MAE + brier_skill_score), not gate mean. New `tests/integration/test_zinb_hurdle_live_path.py` asserts the identity reconstruction `π + (1−π)·NB(0) ≈ q` per-row (mean tolerance 0.02) and two-run bit-identity under `DETERMINISTIC_SEED`. Determinism gate extended with a parallel hurdle assertion. |
-| **P2.A — `init_score` baseline (NegBin/ZINB)** | ✅ closed: **DEAD** | In-process spike on FG3M: LightGBMLSS accepts per-row `init_score` (as a length-2n flat array, `[log_EB, zeros]` per-parameter concatenation) without raising — but the produced predictions are **byte-identical** to a plain NegBin fit, every decile. Either LightGBMLSS overrides init_score with its own `start_values` seeding, or the 30-round deterministic fit converges to the same answer regardless of starting point. Either way, the bias signature does not move. Also: FG3M's plain-NegBin top-decile bias is already −0.013 — there is no meaningful compression signature on the count-branch NegBin mean to fix; the overconfidence was the gate, which P2.B already addresses. **P2.A is dead** on the count branch as a one-line `init_score` transform. Per parent plan, the fallback is P5 (leakage-safe target-encoded player-baseline feature) or P3 (rate decomposition) — both require their own design sessions. |
-| **Stage 0 — live-data instrumentation** | ✅ done (PR #46) | All five deliverables shipped: 0.1 `compute_book_brier_skill_score` in [analysis.py](../src/sportstradamus/analysis.py) (8 unit tests, hand-computed-reference within 1e-6); 0.2 `_compute_live_metrics` + Step 6 in [nightly.py](../src/sportstradamus/nightly.py) writing `data/live_metrics_per_market.parquet` with the locked 10-column / 2-window schema (6 round-trip tests including empty-window n_settled=0 case); 0.3 `compression_eval --live-window N` in [scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) using `_history_to_eval_frame` + per-league `_load_league_stats_lookup` (functools.cached) with Stats-backed MeanYr lookup, mockable via monkeypatch (8 new tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py)); 0.4 [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) CLI joining Gate 1 (model_stats.parquet) × Gate 2 (live_metrics_per_market.parquet, 30d window) with `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted}, colored stdout table (11 tests including 7 parametrized state-machine cases); 0.5 [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) walking history backwards with `--days/--step` controls + idempotent dedup on day-precision `computed_at` (5 tests). All three always-on gates green (ruff clean, 113 golden pass, 9 integration pass); 30 new Stage 0 tests added. refactoring-specialist sweep applied two minor fixes (nightly docstring step list, `_classify_lifecycle` line-length split). Two new console scripts registered in `pyproject.toml`: `check-graduation`, `backfill-live-metrics`. Default behavior of `meditate`/`prophecize`/`confer` byte-identical; `reflect` gains tail Step 6 only. **Track A / Track B graduation lookups are now a parquet read** — see "Stage 0 — Live-data instrumentation" section below for the lifecycle classifier rules. |
-| **Stage B1 — ZTNB likelihood fix + routing diagnostics** | ✅ done, result: **ZTNB hypothesis REFUTED; routing rescope delivered** | **B1.1 (ZTNB):** correct in isolation — the zero-truncated NB recovers an unbiased count component (`tests/test_ztnb_loss.py`, scipy-referenced) — but **incompatible with the frozen derived-π hurdle decode**. On FG3M the ZTNB count component implies `NB(0) ≈ 0.41` vs observed `q ≈ 0.31`, so on **65 % of rows `NB(0) > q`** → derived-π clips to 0 → the reconstruction identity breaks (`tests/integration/test_zinb_hurdle_live_path.py` diff **0.136** vs 0.02 tol). E[Y\|Y>0] is ~unchanged (old 2.2 vs ZTNB 2.12); ZTNB only re-decomposes the positive mean, which is exactly what breaks the decode. The fix would **regress the 6 P2.B SHIP markets**, not just fail FTM/STL. Wire-in **reverted**; `_ZeroTruncatedNB` kept as an unwired, test-covered building block for MZINB (B3). Smoke A/B not run (no stats.nba.com network in the build env) — analytical verdict is KILL; commands handed to the user. **B1.2 (routing):** new read-only `scripts/zinb_routing_diagnostics.py` + golden test + `statsmodels` dep; writes `data/zinb_routing/{LEAGUE}_diagnostics.parquet` for all 23 cells. Result: **0/23 route to `hurdle_nb_ztnb`; 13 → `cmp` (underdispersed, var/mean ≤ 1.3), 10 → `mzinb`.** The blanket ZINB label in `stat_dist.json` is wrong for ≥ 13 markets. **STL → cmp** (underdispersed, the kill's real cause), **FTM → mzinb** (genuinely inflated+overdispersed). Tooling: new `meditate --market` flag; `select_markets` relocated `cli.py → training/markets.py`. See "Stage B1 — outcome & Track-B rescope" below. |
-| **Stage B1.5 — §7a likelihood-vs-features pre-check** | ✅ done, result: **FEATURES, not likelihood — family build DEFERRED** | Poisson-GBM pre-check (in-repo `research-analyst`) on 9 cells: NBA FTM/STL/TOV/FG3M, WNBA STL/FG3M/FTM, NFL interceptions/rushing-tds. Top-decile compression **persists under a plain Poisson mean head** (Poisson top-decile CR 0.16–0.35 vs NB/ZINB 0.12–0.37) → it is a family-INVARIANT GBT leaf-averaging bias (Belitz & Stackelberg 2021; Boulevard arXiv:1806.09762), not a likelihood problem; **no CMPμ/MZINB swap can fix it.** Conditional Dunn–Smyth RQR variance collapses the "underdispersed" reps to ~1.0–1.08 (STL/TOV/WNBA-STL equi-dispersed → fail `CMPμ iff cond<0.90`); **no CMPμ candidate among NBA/WNBA.** Only 2/9 clear ≥5% top-decile (FG3M +6.3%, rushing-tds +10.3%) and both are **upward mean-bias** (over-predict low-volume players — inverse of Track B's symptom); ~half the gain is pure bias-recentering. **Pivot Track B's next step to a ~1–2 wk feature/bias track** (post-hoc dynamic-range/mean-bias correction + B2 expanding-mean encoding + opponent-defense/blowout features); re-enter the 9–12 wk family build only on a cell that still kills after. No model pickle written. Brief `/tmp/researcher_track_b_precheck.md`. See "Stage B1.5 — §7a pre-check verdict" below. |
-| **Stage A1 — SkewNormal ICC diagnostic gate** | ✅ done, result: **family clusters AMBIGUOUS — ICC alone does not cleanly route the SkewNormal family** | New read-only `scripts/icc_diagnostics.py` (console script `icc-diagnostics`) + `tests/golden/test_icc_diagnostics.py` (15 tests). Computes ICC₁ via a two-level moment decomposition (σ²_between = Var(player-season means), σ²_within = mean within-(player-season) variance) over **(Player, season)** groups — season via the `stats/base.py:527-528` Aug-boundary rule, since the NFL/WNBA cached parquets are multi-season (NFL 2021–26, WNBA 2022–25; NBA single-season). Participation filter (nonzero-game fraction ≥ 0.5, **no position map**) resolves the NFL position-confound; skew-driven transform escalation raw→log1p→rank (all 36 cells landed `raw`). Writes `data/icc/{NBA,WNBA,NFL}_icc.parquet`, one row per (league, market); all 36 cells produced. **Routing verdict: 25 ambiguous, 10 eb_centering, 1 tail_extension.** NBA (ICC 0.27–0.51): only PA 0.514→eb_centering and DREB 0.274→tail_extension, other 11 ambiguous; **FGA 0.489 (NOT the predicted >0.6)**, **PTS 0.473** (just over the predicted 0.3–0.45 band). WNBA (0.37–0.57, slightly *higher* than NBA, not noisier — 4-season (player,season) pooling, n_player_seasons ≈ 480–530, is stable): 5 eb_centering (MIN/FGA/PRA/PA/PR). NFL (0.41–0.79, widest spread): qb-yards 0.790, carries 0.666, targets 0.507, rushing-yards 0.502 → eb_centering; the participation filter excluded ~1380–1391 non-QB player-seasons on passing-yards/attempts/completions (kept n_players ≈ 90–92 = QBs), confirming the position-confound fix. **Decision triggers:** "ICC_PTS > 0.5 on any league" did NOT fire (entanglement hypothesis stands; T7 does not jump to A2); there is NO bimodal split and the family is NOT uniformly-low → the 25 ambiguous cells sit in the plan's "try both, route on outcome" band, so A2 should run EB-centering *and* tail-extension per-market rather than route off ICC alone. **ICC does not predict the P1 EB ship/kill** — FGA SHIPPED at ICC 0.489 while PA (highest NBA ICC, 0.514) KILLED; caveat: ICC is unconditional and the production model already carries a wide feature matrix (~280 columns) that captures much between-player level, so unconditional ICC is necessary context, not a sufficient router. **eb_K** per-league median ≈ NBA 1.4 / WNBA 1.1 / NFL 1.2 — **NFL is NOT an outlier**, so the "K=10 is wrong for NFL *specifically*" suspicion is unconfirmed; further caveat: the moment eb_K = σ²_within/Var(player-season means) is a downward-biased estimate of the Casella–Berger EB constant (observed between-player variance is inflated by σ²_within/n̄), so the table cannot assert "K=10 too high" — re-derive K with a bias-corrected estimator before acting on it in A2. No model/inference/pickle change; default flags byte-identical. All three always-on gates green (ruff clean, golden 140 incl. 15 new, integration 11); refactoring-specialist run (added an `Args` block + test type hints, no logic change). |
-| **Stage A1.5 — factor-ICC de-risk (T5 fork gate)** | ✅ done, result: **T5 KILLED as a wholesale architecture; A2 pivots to T3 tail head** | research-analyst brief (`/tmp/researcher_factor_icc.md`) computed factor-level ICC read-only by reusing A1's tested engine — reference markets reproduce the A1 parquet ICCs to 1e-6 (NBA MIN 0.3468, FGA 0.4890), so factor ICCs inherit A1's 15-test coverage and sit on the same scale. **Per-league band verdict (median ICC(volume) − median ICC(efficiency), pre-registered bands 0.20/0.10):** NBA gap **+0.232** (vol 0.391 / eff 0.158) → **MIXED** — gap-confirmed but the volume clause FAILED (0/3 NBA volume factors ≥ 0.5: MIN 0.347, FGA 0.489, FGA-per-MIN 0.391 all ambiguous, the same band where P1 shipped EB on FGA yet KILLED PA); WNBA gap **+0.456** (vol 0.559 / eff 0.103) → **CONFIRMED but low-confidence** (single computable efficiency factor — WNBA has no `FGM`/`FG3A` *markets*, so true FG%/3P% are uncomputable; needs new efficiency test cases — see caveat #3); NFL gap **+0.291** (vol 0.507 / eff 0.216) → **CONFIRMED** (carries 0.666, targets 0.507 high; yards-per-* efficiency genuinely heavy-tailed, skew +2.9 to +4.4). Efficiency factors are low-ICC in all three leagues (**8/8 ≤ 0.30**, the A1 tail-extension ceiling) — the "efficiency = noise" half is strongly confirmed and matches Franks et al. 2016 (DOI 10.1515/jqas-2016-0098); the "volume = stable identity" half is FALSE for NBA. **Literature OVERRIDES the band-only CONFIRMED to a T5 KILL on the body of the stat:** Goodman's exact variance-of-products (DOI 10.1080/01621459.1960.10483369) gives CV²(XY) = CV²(X)+CV²(Y)+CV²(X)CV²(Y), and on the actual NBA top-mean-decile PTS data, recomposing FGA × (PTS/FGA) inflates the within-player-season CV to **0.423 vs 0.334 modeling PTS directly (+27%)** — independent Monte-Carlo recomposition discards the structural volume↔efficiency negative covariance and re-inflates the priced tail; the disaggregate-forecasting result (ECB WP 1365, 2011) says factorization wins only with known-DGP components, not estimated GBDT heads. The plan's line-492 "DFS-industry consensus" is practitioner **lore** (no peer-reviewed tail-bias validation). **A2 fork: build T3 (spliced/Pareto or normalizing-flow tail head, 1–2 wk) as the primary; do NOT build T5 (2–3 wk + the largest inference change in the plan, 36 cells).** T5's internal logic survives only as a narrow **NFL per-factor route** (carries/targets → EB, yards-per-* → T3) as an A3/A4 follow-on — routing, not Monte-Carlo recomposition, so it avoids the +27% penalty. No `src/` change; verdict-only gate. |
-| **Stage A1.6 — NFL position-split matrix cleanup + WNBA test-case fix** | ✅ done | Moved the NFL position confound from a read-side workaround (A1's `icc_diagnostics.py` nonzero-fraction filter) to a **write-side fix**: `NFL_MARKET_POSITIONS` constant + `_market_position_filter` hook (no-op default in [base.py](../src/sportstradamus/stats/base.py), NFL override in [nfl.py](../src/sportstradamus/stats/nfl.py)) called in `get_training_matrix` before the usage cutoff. Scoping: passing + QB total-offense (`passing yards`, `attempts`, `completions`, `passing tds`/`first downs`, `interceptions`, `sacks taken`, `qb yards`, `qb tds`) → **QB**; rushing (`rushing yards`, `carries`, `rushing tds`) → **QB+RB**; receiving + skill scrimmage (`receiving yards`/`tds`, `targets`, `receptions`, `yards`, `tds`) → **WR+RB+TE**; only the fantasy-points composites stay all-position. Existing cached parquets cleaned in-place via [scripts/prune_nfl_matrix_positions.py](../src/sportstradamus/scripts/prune_nfl_matrix_positions.py) (one source of truth — codes derived from `StatsNFL.positions`): **passing-yards 15000→2646 rows, mean 38.1→215.9**; attempts 5.4→30.4; qb-yards→QB-only 45.3→228.0. **ICC re-run (`icc-diagnostics`): NBA/WNBA value-identical (untouched); all NFL shifts downward and explained by exact scoping removing gadget players A1's nonzero-fraction proxy retained** — passing-yards 0.420→0.405, receiving/targets/receptions ≤0.001, but **qb-yards 0.790→0.423** (RB rows removed, 632→222 player-seasons — the 0.790 was a QB-vs-RB between-position artifact), yards 0.470→0.440, carries 0.666→0.627 / rushing-yards 0.502→0.475 (≈47 WR/TE gadget rushers like Deebo removed), attempts 0.458→0.436 / completions 0.451→0.429 (Taysom-Hill-type passers removed). New NFL ICCs are computed on the *correct modeled population* and supersede A1's for A2 routing. No pickle/inference/default-flag change; parquets gitignored ⇒ PR diff is code + script + plan only. WNBA efficiency test cases chosen: `FTM_per_FGA` + `FG3M_per_FGA` (distinct regimes) with `PTS_per_FGA` (0.103) anchor. **New Stage A4 entry T11: per-position model-split bias experiment** (selective, overfitting-guarded, gated behind A2/A3). Two flagged inference edges for A2: QB-only `qb yards` vs Underdog "Total Yards"; QB+RB `carries` excludes gadget WR-rushers. Gates green; determinism green; refactoring-specialist run. |
-| P3–P10 | ⬜ | see priority list; P10 (GPBoost) already prototyped and failed deterministically — annotated below |
-| **Docs rework — breadth-led reorg + roadmap sync** | ✅ done (docs-only) | Reorganized this plan so the breadth North Star + per-cell status table lead, depth Tracks A/B are explicitly labeled secondary, the diminishing-returns pre/post-break split is marked, and a "Branches & model-promotion flow" section was added (four-branch pipeline + `devel-ship-curator`). Synced `docs/sportstradamus_roadmap_v2.md`: snapshot → 2026-05-21, model work promoted to a leading "Active Track" phase, post-break tail deferred into Phase 6, Standing rules + a "Tools and CLIs built" section added. No `.py`/`.json`/threshold changes; no retrain. |
+| **P0 — offline eval harness** | ✅ done (PR #46) | `compression_eval.py` + golden test; full poetry gates need a normal-network run before merge. |
+| **P0.5 — determinism gate** | ✅ done (PR #46) | Opt-in `meditate --deterministic`; RNGs pinned, fixed params, writes redirected; P1 unblocked. |
+| **P1 — centered-target bridge (SkewNormal)** | ✅ done | **FGA-only SHIP, family-wide KILL**; default stays `ratio_meanyr`. |
+| **P2.A — `init_score` baseline** | ✅ closed | **DEAD** — byte-identical to plain NegBin; no compression on count-branch mean. |
+| **P2.B — HurdleZINB (derived-π gate)** | ✅ done | **6/8 NBA ZINB markets SHIP**; default stays `--zinb-mode=joint`. |
+| **Stage 0 — live-data instrumentation** | ✅ done (PR #46) | All five deliverables shipped; graduation lookups are now a parquet read. |
+| **Stage B1 — ZTNB fix + routing diagnostics** | ✅ done | **ZTNB REFUTED; routing rescope delivered** (0/23 → ztnb; 13 cmp, 10 mzinb). |
+| **Stage B1.5 — §7a likelihood-vs-features pre-check** | ✅ done | **FEATURES, not likelihood**; compression family-invariant; family build DEFERRED. |
+| **Stage B1.6 — feature/bias track (breadth → 75%)** | 🔜 research done, build pending | Post-hoc mean-bias correction is the rank-1 lever; Tier-0 `verdict()` mode is the precondition; per-league targets set (2026-05-22). |
+| **Stage A1 — SkewNormal ICC diagnostic gate** | ✅ done | **Family clusters AMBIGUOUS** (25 ambiguous, 10 eb, 1 tail); ICC alone does not route. |
+| **Stage A1.5 — factor-ICC de-risk (T5 fork gate)** | ✅ done | **T5 KILLED wholesale**; A2 pivots to T3 tail head. |
+| **Stage A1.6 — NFL position-split cleanup + WNBA test fix** | ✅ done | Write-side NFL position scoping; new NFL ICCs supersede A1; T11 entry added. |
+| **P3–P10** | ⬜ | Superseded by T-method replacements; P10 GPBoost prototyped and failed deterministically. |
+| **Docs rework — breadth-led reorg + roadmap sync** | ✅ done (docs-only) | Breadth North Star + per-cell status lead; depth Tracks A/B labeled secondary; roadmap synced. |
 
 ## Scope — leagues this plan covers
 
-The training pipeline ships models for three leagues. Every method below is
-applicable to all three unless explicitly flagged as league-specific.
-Market counts (from `data/stat_dist.json`):
+The training pipeline ships models for three leagues. Every method below applies to
+all three unless flagged league-specific. Market counts (from `data/stat_dist.json`):
 
 | League | SkewNormal markets | ZINB markets | Games/season per player | EB K (current) |
 |---|---|---|---|---|
-| NBA | 13 (incl. PTS, REB, AST, PRA, FGA, MIN, PA, PR, FG3A, FGM, fantasy points) | 8 (FG3M, FTM, OREB, PF, STL, TOV, BLK, BLST) | ~82 | 10 |
-| WNBA | 11 | 7 (same names as NBA minus PF) | ~40 | 10 (likely fine) |
-| NFL | 12 (incl. passing/rushing/receiving yards, attempts, carries, targets) | 8 (passing tds, tds, rushing tds, receiving tds, qb tds, interceptions, sacks taken, passing first downs) | ~17 (regular season) | 10 (almost certainly wrong; see caveats) |
+| NBA | 13 (PTS, REB, AST, PRA, FGA, MIN, PA, PR, FG3A, FGM, fantasy points) | 8 (FG3M, FTM, OREB, PF, STL, TOV, BLK, BLST) | ~82 | 10 |
+| WNBA | 11 | 7 (NBA names minus PF) | ~40 | 10 (likely fine) |
+| NFL | 12 (passing/rushing/receiving yards, attempts, carries, targets) | 8 (passing tds, tds, rushing tds, receiving tds, qb tds, interceptions, sacks taken, passing first downs) | ~17 (regular season) | 10 (almost certainly wrong; see caveats) |
 
-NBA and WNBA share the same ZINB market names by construction — the same
-basketball stat universe with PF dropped on WNBA. NFL's ZINB markets are
-different names (touchdown counts, sacks, interceptions, etc.) but the same
-structural problem (low-mean count stats with zero inflation).
+NBA and WNBA share ZINB market names (same stat universe, PF dropped on WNBA). NFL's
+ZINB markets have different names but the same structural problem (low-mean count
+stats with zero inflation). `meditate --league {NBA,NFL,WNBA}` is wired in
+[training/cli.py:36-38](../src/sportstradamus/training/cli.py#L36-L38); the per-league
+dispatch loop ([training/cli.py:218-261](../src/sportstradamus/training/cli.py#L218-L261))
+trains each market through the same `train_market` orchestrator. The compression_eval
+harness is league-agnostic.
 
-`meditate --league {NBA,NFL,WNBA}` is already wired in
-[training/cli.py:36-38](../src/sportstradamus/training/cli.py#L36-L38); the
-per-league dispatch loop at
-[training/cli.py:218-261](../src/sportstradamus/training/cli.py#L218-L261)
-trains each market in each requested league through the same
-`train_market` orchestrator. The compression_eval harness itself is
-league-agnostic — it scores per-market CSVs and does not care which
-league they came from.
+> **Cross-league testing policy, research handoffs, context, and the architectural
+> principle** moved to the context doc (`gbdt_mean_regression_context.md`). The
+> testing-policy summary that gates code work is restated here:
 
-## Cross-league testing policy (applies to every method below)
+### Cross-league testing policy (applies to every method below)
 
 Every change goes through two test phases before shipping:
 
-1. **Smoke phase (start of work):** pick 1–2 representative markets per
-   league. For Track A pick the canonical SkewNormal market of the league
-   (NBA: FGA + PTS; WNBA: FGA + PTS; NFL: passing yards + receiving
-   yards). For Track B pick a SHIP and a KILL from the existing P2.B
-   verdict where they exist (NBA: FG3M + FTM/STL; WNBA: FG3M + STL;
-   NFL: pick the highest-zero-rate ZINB market + the lowest). Smoke
-   phase must pass before further development.
-2. **Full-verification phase (before any default-flag flip):** run the
-   compression_eval A/B on **every market in every covered league** that
-   uses the affected distribution branch. SkewNormal-only changes touch
-   13 + 11 + 12 = 36 markets; ZINB-only changes touch 8 + 7 + 8 = 23
-   markets. SHIP requires the universal decision threshold below to be
-   met on every market in every league, or per-league/per-market
-   routing config that documents the exceptions.
+1. **Smoke phase (start of work):** 1–2 representative markets per league. Track A:
+   the canonical SkewNormal market (NBA: FGA + PTS; WNBA: FGA + PTS; NFL: passing
+   yards + receiving yards). Track B: a SHIP and a KILL from the P2.B verdict (NBA:
+   FG3M + FTM/STL; WNBA: FG3M + STL; NFL: highest-zero-rate ZINB + lowest). Must pass
+   before further development.
+2. **Full-verification phase (before any default-flag flip):** the compression_eval
+   A/B on **every market in every covered league** using the affected distribution
+   branch. SkewNormal-only changes touch 13+11+12 = 36 markets; ZINB-only changes
+   touch 8+7+8 = 23. SHIP requires the universal decision threshold on every market
+   in every league, or a per-league/per-market routing config documenting exceptions.
 
-The deterministic test sets land under `data/test_sets/deterministic/{strategy}/`
-keyed by filename (`{LEAGUE}_{market}.csv` already), so the per-league
-output is already separable — no schema change needed to support the
-cross-league A/B.
+Deterministic test sets land under `data/test_sets/deterministic/{strategy}/` keyed
+by filename (`{LEAGUE}_{market}.csv`), so per-league output is already separable — no
+schema change needed.
 
-## Research handoffs that fed this plan
+## Ship incrementally — per-market graduation
 
-The next-session plan below integrates findings from two researcher passes that
-ran after P1 and P2.B landed. The reports themselves are not committed (they
-live at `/tmp/researcher_skewnormal.md` and `/tmp/researcher_zinb.md` in the
-originating session); the load-bearing citations and recommendations are
-copied below. Future sessions should treat this file as self-contained.
+**The unit of shipping is the (league, market) cell — never the stage or track.** The
+moment a cell clears Gate 1 offline, promote it to the 14-day live soak immediately;
+do not hold a well-behaved market hostage to failing ones. A well-calibrated STL in
+production gathering live evidence is worth more than on a branch waiting for FG3M.
 
-Future research handoffs are produced **in-repo** by the
-[research-analyst subagent](../.claude/agents/research-analyst.md) (dispatch via
-the `Agent` tool, `subagent_type: "research-analyst"`) rather than
-round-tripping to claude.ai; the brief lands at `/tmp/researcher_{topic}.md` and
-the main session distills its load-bearing conclusions here, exactly as the two
-seed briefs above were. See "Research handoffs (in-repo)" under Session handoff.
+- A stage is "ready to ship" the instant **any** cell clears Gate 1 — ship those,
+  keep the stage open on the rest. No batch; cells promote independently.
+- Struggling cells stay on the track into the next stage **in parallel** — never
+  blocking a graduated cell.
+- Live data on shipped cells is itself an input: a cell that looks good offline but
+  regresses live (Gate 2) teaches more than another offline iteration on the laggards.
+- Corollary for the Stage B1.5 pivot: ship the cells that pass the cheap feature/bias
+  fixes as soon as they clear Gate 1; reserve the expensive family build for the
+  specific cells that *still* kill after.
 
-- **SkewNormal track** — surfaces 10 new methods (T1–T10) for top-decile bias
-  on SkewNormal markets (PTS/REB/AST/PRA/FGA/MIN/PA/PR/FG3A/FGM). Headline:
-  ICC₁ per-market routing comes first; the original P3 basic rate
-  decomposition / P5 target-encoded features / P10 GPBoost retry are all
-  KILLED in favor of T-method replacements.
-- **ZINB track** — focused on the FTM/STL kill markets from P2.B. Headline:
-  the current "fit on positives" Stage-2 NegBin is a misspecified ZTNB; a
-  single-line PyTorch fix likely resolves FTM/STL by construction. Per-market
-  routing diagnostics (ziNB index, Wilson-Einbeck, Schwarz-corrected Vuong)
-  are the second item; the Stage 3 architectural choice (MZINB vs GPBoost)
-  is a strategic fork chosen by residual analysis, not run in parallel.
-
-Bibliography (DOIs preserved so the plan is self-contained):
-
-| Tag | Citation |
-|---|---|
-| MEGB | Olaniran et al., *Scientific Reports* 15:30927, 22 Aug 2025, DOI 10.1038/s41598-025-16526-z (CRAN + github.com/rid4stat/MEGB). |
-| GBMixed | Prevett, Hui, Tho, Welsh, Westveld, ANU, arXiv 2511.00217, 31 Oct 2025. |
-| CatBoost ordered TS | Prokhorenkova et al., NeurIPS 2018, arXiv 1706.09516. |
-| DEGPD / ZIDEGPD | Ahmad & Hussain, arXiv 2510.27365, 2025. |
-| gbex | Velthoen, Dombry, Cai, Engelke, *Extremes* (Springer), 2023. |
-| FAGTB / M²FGB | Grari et al., arXiv 1911.05369; Cruz et al., arXiv 2504.12458, Apr 2025. |
-| CQR / LCMQR | Romano et al., NeurIPS 2019; LCMQR arXiv 2411.19523, late 2024. |
-| Normalizing-flow heads | LightGBMLSS v0.3.0, 20 Jul 2023. |
-| PGBM | Sprangers et al., KDD 2021, DOI 10.1145/3447548.3467278. |
-| MZINB foundations | Long, Preisser, Herring & Golin, *Stat Med* 2014, DOI 10.1002/sim.6293; Preisser, Das, Long, Divaris, *Stat Med* 2016, DOI 10.1002/sim.6804. |
-| MZINB Stata | Cummings & Hardin, *Stata J* 19(3) 2019, DOI 10.1177/1536867X19874209. |
-| MZINB spatial | Mutiso et al., *Biometrical Journal* 2024, DOI 10.1002/bimj.202300182. |
-| Marginalized hurdle | Kassahun et al., *Stat Med* 2014, DOI 10.1002/sim.6237; Liu, Zhang, Tang et al., *HSORM* 2018, DOI 10.1007/s10742-018-0183-6. |
-| ZTNB | Hilbe 2011 *Negative Binomial Regression*; UCLA-OARC ZTNB tutorial; Grodri notes on count moments. |
-| ziNB / Wilson-Einbeck | Blasco-Moreno et al., *Methods Ecol Evol* 2019, DOI 10.1111/2041-210X.13185; Wilson & Einbeck, *Statistical Modelling* 2019, DOI 10.1177/1471082X18762277. |
-| Corrected Vuong | Desmarais & Harden 2013; Wilson 2015, *Economics Letters*, DOI 10.1016/j.econlet.2014.12.029. |
-| Feng GOF framework | Feng, *J Stat Distrib Appl* 2021, DOI 10.1186/s40488-021-00121-4. |
-| CMP head | Philipson & Huang, *Statistics and Computing* 2023, DOI 10.1007/s11222-023-10244-0. |
-| cyc-GBM | Delong, Lindholm & Zakrisson, SSRN 4352505, 9 Feb 2023, DOI 10.2139/ssrn.4352505. |
-| CyclicBoosting | Wick et al., Blue Yonder, arXiv 2009.07052; *SN OR Forum* 2021, DOI 10.1007/s43069-021-00079-8. |
-| Balanced GAMLSS boosting | Daub et al., *Computational Statistics* 2025, DOI 10.1007/s00607-023-01224-3; arXiv 2602.17272, 2026. |
-| Multi-parametric GBM benchmark | Chevalier & Côté, *European Actuarial Journal* 2025, DOI 10.1007/s13385-025-00428-5. |
-| Arctan pinball | Sluijterman et al., *Int J Mach Learn Cybern* 2025, DOI 10.1007/s13042-025-02671-4. |
-| Goodman product variance | Goodman, *On the Exact Variance of Products*, JASA 55(292):708–713, 1960, DOI 10.1080/01621459.1960.10483369; K-variable generalization JASA 57(297):54–60, 1962, DOI 10.1080/01621459.1962.10482151. |
-| Meta-analytics / discrimination (≈ICC) | Franks, D'Amour, Cervone & Bornn, *J. Quantitative Analysis in Sports* 12(4):151–165, 2016, DOI 10.1515/jqas-2016-0098, arXiv:1609.09830. |
-| Basketball performance-modeling review | *Modeling Player and Team Performance in Basketball*, *Annual Review of Statistics and Its Application* 2021, DOI 10.1146/annurev-statistics-040720-015536, arXiv:2007.10550. |
-| Aggregate vs disaggregate forecasting | Hubrich et al., *Understanding and forecasting aggregate and disaggregate price dynamics*, European Central Bank Working Paper No. 1365, 2011. |
-
-## Context
-
-LightGBMLSS predictions in this repo compress toward the global mean: high-volume
-players are systematically under-predicted, low-volume over-predicted. Two
-branches: the SkewNormal branch (`global_mean >= 2.0`, e.g. NBA PTS/FGA) uses a
-`Result/MeanYr` target and multiplicative denorm; the NegBin/ZINB branch
-(`global_mean < 2.0`) uses raw counts. P1 closed the centered-target question on
-SkewNormal markets (FGA-only ship); P2.B closed the joint-vs-hurdle question on
-ZINB markets (6/8 ship). The next-session plan attacks (a) the remaining
-SkewNormal top-decile bias path-wide and (b) the FTM/STL kill on the ZINB track.
-
-For deeper context see [docs/OVERCONFIDENCE_INVESTIGATION.md](OVERCONFIDENCE_INVESTIGATION.md)
-(determinism, live-path confound, the original investigation) and
-[docs/CENTERED_TARGET_NEGATIVE_RESULT.md](CENTERED_TARGET_NEGATIVE_RESULT.md)
-(the path-wide P1 KILL verdict).
-
-## Architectural principle (applies to all phases)
-
-Make the **target/baseline transform a single configurable strategy**, selected
-by a CLI flag on `meditate` (and a matching env var for the harness),
-defaulting to current behavior. Every experiment becomes a new strategy value,
-not a destructive rewrite. This is what makes the multi-session A/B tractable
-and keeps `devel` shippable between sessions. Centralize the forward
-transform, the inverse (de-norm) transform, and the inference-time mirror so
-train/predict cannot drift. The inference mirror lives in
-[stats/base.py:597](src/sportstradamus/stats/base.py#L597) (`get_stats`); any
-new baseline must be computed there identically and leakage-safe. STYLE_GUIDE
-§9 (named constants), §18.9 (no orphan methods), and the CLAUDE.md
-"no new monoliths" rule all apply.
-
-**Universal decision threshold — the Tier-1 gate that supersedes an established
-baseline (every market, every covered league):** once a cell's baseline is set
-(Tier 0, see "Top priority — baseline breadth" above), a challenger ships only if
-it (1) reduces **top-mean-decile MAE by ≥ 5%** vs the current baseline, (2) does not
-worsen **global MAE by > 1%**, (3) does not worsen `brier_skill_score` on the
-existing report, and (4) does not buy the top-decile win with **low-volume
-over-prediction**. The **Tier-0 first-baseline gate is the absolute subset of
-this**: condition (4)'s absolute bounds (bottom-quartile + top-decile bias) plus
-`brier_skill_score ≥ 0`; the relative conditions (1), (2), and (4)'s relative part
-are dropped, because there is no prior baseline to improve on. Condition (4) has a
-**relative** part and **absolute backstops on both ends**, gated *asymmetrically*
-by betting risk. For the **bottom quartile** (lowest 25% of players by season mean
-— the bench warmers) the failure mode is **over-prediction only**, so the
-**bottom-mean-quartile signed bias** (mean predicted − mean actual) must (a) not
-become more positive than the current default's (*relative*) and (b) not
-over-predict beyond a fraction of that quartile's empirical mean (*absolute,
-one-sided* — currently **+30%**, floor **0.10**); **under-prediction of bench
-warmers is tolerated for now** (it trips neither check). For the **top decile**
-(stars) the gate is **bidirectional**: the |signed bias| must stay within a
-fraction of that decile's mean (currently **30%**, floor **0.10**) — no systematic
-over- *or* under-prediction. The lowest quartile is pooled coarsely on purpose —
-bench warmers generalize more than stars, so a quartile aggregate is more
-representative than a single decile; the absolute bounds start **wide and tighten
-as the bias-correction track lands real improvements**. Condition (4) was added
-after the Stage B1.5 §7a pre-check found two cells whose only MAE "wins" came from
-over-predicting low-volume players (FG3M bottom buckets predicted ~3.4× actual) —
-the inverse of the under-predicted-stars symptom this plan targets; the bounds are
-tunable but the *direction* (a top-decile win must not be financed by
-bottom-quartile over-prediction) is fixed. A standalone quick-reference of the
-current values lives at [docs/ship_gate.md](ship_gate.md). The
-threshold must hold on **every market in every covered league** — or the routing
-config records the per-market/per-league exceptions. Otherwise kill it
-and move on. The harness —
-[src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py)
-— is the ship/kill gate; the cross-league A/B is the
-full-verification phase from the testing policy above.
-
-## Ship incrementally — per-market graduation (perfect is not the enemy of good)
-
-**The unit of shipping is the (league, market) cell — never the stage or the
-track.** The moment a cell clears Gate 1 offline, promote it to the 14-day live
-soak **immediately**; do not hold a market that already behaves well hostage to
-the markets that still fail. A well-calibrated STL today is worth more in
-production gathering live evidence than on a branch waiting for FG3M to catch up.
-Concretely:
-
-- A stage is "ready to ship" the instant **any** cell in it clears Gate 1 — ship
-  those cells and keep the stage open on the rest. There is no batch; cells
-  promote independently (this is exactly what the per-cell Gate 1 / Gate 2
-  lifecycle below already implements).
-- The struggling cells stay on the track and continue into the next stage **in
-  parallel** — their unfinished work never blocks a graduated cell from shipping.
-- Live data on the shipped cells is itself an input to the remaining work: a cell
-  that looks good offline but regresses live (Gate 2) teaches you more than
-  another offline iteration on the laggards would, and it does so while the good
-  cells are already earning.
-- Corollary for the Stage B1.5 pivot: ship the cells that pass the cheap
-  feature/bias fixes as soon as they clear Gate 1; reserve the expensive family
-  build for the specific cells that *still* kill after shipping the rest.
-
-This is the constructive half of the diminishing-returns rule that follows: **ship
-what is good now, stop when a cell is good live, and spend the freed effort only on
-cells that still fail.**
+This is the constructive half of the diminishing-returns rule: **ship what is good
+now, stop when a cell is good live, spend freed effort only on cells that still fail.**
 
 ## Diminishing returns — stop-the-track principle
 
-Don't let perfect be the enemy of good. Each stage exists because the
-*previous* stage's verdict suggested more lift was available; if live data
-shows the deployed model is already calibrated and profitable on a given
-market or league, **stop that track for that market/league and redeploy
-the engineering effort elsewhere**. The plan is a backlog, not a queue.
-(If the residual or cost analysis behind a stop/continue call is ambiguous,
+Each stage exists because the *previous* stage's verdict suggested more lift was
+available; if live data shows the deployed model is already calibrated and profitable
+on a market/league, **stop that track there and redeploy effort elsewhere**. The plan
+is a backlog, not a queue. (If a stop/continue residual or cost analysis is ambiguous,
 dispatch the `research-analyst` agent before deciding.)
 
-**The break — what is active vs the speculative tail.** This principle is the cut line
-that splits the model work in two, and it drives the
+**The break — active vs speculative tail.** This is the cut line that drives the
 [roadmap](sportstradamus_roadmap_v2.md) phase split:
 
-- **Pre-break (active — worth the effort).** Reach 75% breadth first — the Tier-0 audit
-  code (`compression_eval.verdict()` absolute-only mode) then the **Stage B1.6**
-  feature/bias track — then the core depth methods expected to pay off: **A2** (T3
-  tail-head), **A3** (calibration polish — orthogonal, stacks on A2; classified active,
-  not tail), **B2** (routing + orthogonal feature engineering), **B3** (MZINB /
-  marginalized-hurdle family build). This is the roadmap's leading "Active Track" phase.
-- **Post-break (speculative tail — deferred).** **Stage A4** (novel risky retries, only
+- **Pre-break (active).** Reach 75% breadth first — the Tier-0 audit code
+  (`compression_eval.verdict()` absolute-only mode) then the **Stage B1.6**
+  feature/bias track — then the core depth methods: **A2** (T3 tail-head), **A3**
+  (calibration polish — orthogonal, stacks on A2; active, not tail), **B2** (routing +
+  orthogonal feature engineering), **B3** (MZINB / marginalized-hurdle family build).
+  The roadmap's leading "Active Track" phase.
+- **Post-break (deferred — roadmap Phase 6).** **Stage A4** (novel risky retries, only
   if A2/A3 leave a gap), **Stage B4** (tuning/polish — optional), and any long-shot
-  method. All stage bodies stay in this plan (it remains the home of record), but they are
-  **deferred — tracked under roadmap Phase 6** alongside the original 6.1–6.5 refinements.
-  None of the tail was ever the urgent work.
+  method. Bodies stay in the context doc (home of record); none was ever urgent.
+
+See the context doc → **Decisions & trade-offs** for the full deferral list.
 
 ### Lifecycle: offline gate → production test → live gate → graduation
 
-Every (league, market) cell moves through three states. Two gates control
-the transitions. Both gates appear in the same `check_graduation` table
-(Stage 0 deliverable 0.4) so a single view answers "what changed, what's
-in test, what's graduated."
+Every cell moves through three states; two gates control transitions. Both gates
+appear in the same `check_graduation` table (Stage 0 deliverable 0.4).
 
 ```
 not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  graduated
@@ -527,139 +378,84 @@ not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  
    └────── re-entry / revert ←─────────────┴────[live regression]───────────┘
 ```
 
-### Gate 1 — Offline ship gate (qualifies a cell for production test run)
+### Gate 1 — Offline ship gate
 
 Computed on the **held-out validation + test split** that `train_market`
 already produces (lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py)
-and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 is the
-**research → devel** edge of the 2×2 lifecycle (the live edge is Gate 2, the
-**devel → main** column below); each edge splits further into **set-baseline**
-and **supersede** tracks. See [docs/ship_gate.md](ship_gate.md) for the
-quick-reference; the constants and helpers live in `gate_row()` /
-`apply_thresholds()` / the five `_gate*` helpers in
-[scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py).
+and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 has **two
+tiers** (see "Top priority — baseline breadth" above): **Tier 0** sets a cell's
+*first* baseline from the **absolute** rows only; **Tier 1** supersedes an
+*established* baseline and additionally requires the **relative** rows. The Tier
+column tags which rows apply when.
 
-**Set-baseline track (the 5 strict gates).** A cell ships to devel iff **all
-five** pass. Star = top-mean **decile**; bench = bottom-mean **quartile** (pooled
-coarser on purpose — low-volume players generalize more than stars). Denominators
-on Gates 2/3 are **σ, not σ/√N** — with ~2000 rows/cell, σ/√N collapses to
-near-zero on low-variance bench segments and the gate would fire on a negligible
-bias; σ keeps the yardstick at "what a typical event in the segment looks like."
+| Offline metric | Threshold | Tier | Where it lives |
+|---|---|---|---|
+| Top-mean-decile MAE on the test split | ≥ 5% better than the current baseline on the same cell | Tier 1 only | `compression_eval --baseline ... --candidate ...` output |
+| Global MAE on the test split | not worse by > 1% vs current baseline | Tier 1 only | `compression_eval` global summary |
+| `brier_skill_score` (book baseline) | **Tier 0:** ≥ 0 (beats book); **Tier 1:** not worse than the established baseline | both | `model_stats.parquet` for the candidate run |
+| Bottom-quartile bias — **absolute** | over-prediction ≤ +30% of quartile mean (floor 0.10); under-prediction tolerated | both | `bottom_quartile_bias` / `bottom_quartile_mean` in `compression_eval` |
+| Bottom-quartile bias — **relative** | not more positive than the established baseline | Tier 1 only | `verdict()` condition 4a |
+| Top-decile bias — **absolute** | \|bias\| ≤ 30% of decile mean (floor 0.10), bidirectional | both | `top_decile_bias` / `top_decile_mean` in `compression_eval` |
+| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | both | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
 
-| # | Gate | Formula | Threshold |
-|---|------|---------|-----------|
-| 1 | Brier vs book, paired bootstrap | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0` — CI strictly excludes 0 from below |
-| 2 | Star σ-match (top-mean decile) | `z = \|mean(EV) − mean(Result)\| / std(Result)` | `z < 0.5` |
-| 3 | Bench σ-match (bottom-mean quartile) | same on bottom 25% | `z < 0.5` |
-| 4 | IQR spread / compression | `iqr_ratio = IQR(EV) / IQR(Result)` over all events | `iqr_ratio > 0.5` |
-| 5 | Equal-mass ECE | 10 equal-mass `p_model` bins; `ece = Σ (n_b/N)·\|mean(p_model) − mean(y)\|` | `ece < 0.075` |
+**Tier 0 — set the first baseline (the priority):** the "both" rows must clear —
+bottom-quartile + top-decile absolute bias and `brier_skill_score ≥ 0`. Of every
+candidate (incl. the incumbent default) that clears them on a cell, the
+highest-BSS full retrain is set as that cell's baseline and promoted to the
+**mandatory ≥ 14-day soak window**.
 
-**Auto-pass / fail conventions for blank metrics:**
+**Tier 1 — supersede an established baseline:** all rows must clear — the absolute
+rows plus the relative ≥ 5% top-decile, global-MAE-not-worse, BSS-not-worse, and
+bottom-quartile-not-more-positive checks — on every cell in every covered league
+(or the routing config records the exceptions). On promotion the previous pickle
+stays archived under `data/old_models/` so revert is one cron-pull away.
 
-- **Gate 1 blank** (no `Odds` in the dump): **auto-pass** — no book to beat.
-- **Gate 5 blank** (no `P` or `Line`): **fail** — Gate 5 is decoupled from book
-  data; missing `P`/`Line` is a model artifact, not a free pass.
-- **Gate 4 blank** (sparse "tds"-style markets where `IQR(Result) = 0`): **fail**
-  under strict. The compression yardstick is structurally undefined on near-
-  binary markets — **revisit:** binary markets likely need a different spread
-  gate (e.g. a calibrated rate-floor rather than an IQR ratio); flagged for
-  follow-up once the breadth pass lands.
-- **Gates 2/3 blank** (no rows in the segment): fail.
+### Gate 2 — Live graduation gate
 
-**Oracle columns.** Every gate emits a sibling "oracle" value under the
-deterministic 1/0 oracle (`pred = Result`; over-prob = `1 if Result>=Line else
-0`). The σ/IQR_true denominators equal the model row, so the oracle column sizes
-each gate's natural threshold:
-- Gate 1 oracle `mean = −book Brier` (and CI sits below 0) — exposes the book's
-  own Brier so the achievable headroom is visible.
-- Gates 2/3 oracle `z = 0`.
-- Gate 4 oracle `ratio = 1.0`.
-- Gate 5 oracle `ece = 0`.
-
-**NFL low-N watch on Gate 1.** The 95% percentile CI is naturally wide on cells
-with `< 1000` events, so a real-edge thin-N NFL cell can straddle 0 and KILL even
-when the point estimate beats book. **Revisit:** once Gate 1 becomes the binding
-constraint on NFL breadth (the current binding constraints are Gate 4 compression
-and Gate 5 ECE), evaluate a one-sided test (`ci_lo > 0` rejected → `ci_hi < 0`
-required) or an N-aware CI floor (e.g. compute `ci_hi` against `min(95%, 80% +
-20%·N/2000)`) before tightening anything else. The risk is over-punishing NFL
-for sample-size noise; the symptom is NFL cells with `g1_brier_diff_mean < 0`
-but `g1_brier_diff_ci_hi > 0` killing under the strict bar.
-
-**Supersede track (S1 + S2 + S3).** A challenger replaces an established baseline
-only if all three hold; computed by `supersede_verdict()` (Phase 3) on two
-row-aligned test-set CSVs via `compression_eval --baseline ... --candidate ...`.
-
-| # | Gate | Rule |
-|---|------|------|
-| S1 | Pass all 5 | Challenger clears every set-baseline gate above. |
-| S2 | Paired Brier CI | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0`. |
-| S3 | Paired Sharpe (backdated) | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; `sharpe_new > sharpe_current`. |
-
-On promotion the previous pickle stays archived under `data/old_models/` so
-revert is one cron-pull away. The determinism gate
-(`tests/integration/test_determinism_gate.py`) remains a hard prerequisite for
-any change to the deterministic-mode pipeline.
-
-### Gate 2 — Live graduation gate (cell graduates from the track)
-
-Computed on **settled production offers** by `strategies/profit_sim.py` (Phase 2
-— Kelly-sized ROI / Sharpe / drawdown, shared with the dashboard's Stats Profit
-Sim page) wired into `check_graduation.py` and `data/live_metrics_per_market.parquet`
-via `nightly.py`'s aggregator (Phase 4). Gate 2 splits along the same
-set-baseline / supersede edge as Gate 1:
+Computed on the **last 30 days of settled production offers** by the
+Stage 0 `compute_book_brier_skill_score` and rolling-window aggregator
+in `nightly.py`. A cell graduates from the track — no further stage work
+— if all five hold:
 
 | Case | Threshold | Where |
 |---|---|---|
-| **Set baseline → main (no incumbent)** | Positive Kelly-sized ROI on the cell's settled offers | `strategies/profit_sim.py` over `history.parquet`; surfaced by `check_graduation` |
-| **Supersede → main (incumbent present)** | Challenger's live ROI **≥ incumbent's + 0.5%** over **≥ 2 weeks** of settled offers | Phase 4 wiring in `check_graduation.py` + `live_metrics_per_market.parquet` |
+| Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
+| Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
+| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
+| Bottom-quartile bias (one-sided) + top-decile bias (bidirectional) on settled bets | mirrors Gate 1 cond. 4 over ≥ 100 settled offers: bottom-quartile over-prediction ≤ +30% of band mean (floor 0.10) AND not more positive than prior; top-decile \|bias\| ≤ 30% (floor 0.10) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), `bottom_quartile_bias` column (live analog of the Gate 1 row) |
+| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
 
-A cell that drifts outside its set-baseline bounds (any of the 5 gates) is
-**withheld and re-enters the set-baseline track** for a fresh baseline. The prior
-pickle stays archived under `data/old_models/` for one-pull revert.
+On graduation, mark ✅ in the Status table with the graduating stage + triggering
+metrics. The track continues on non-graduating cells only — the live-data analog of
+P1's "FGA-only SHIP".
 
-If a cell graduates, mark it ✅ in the Status table with the graduating
-stage and the live metrics that triggered graduation. The track continues
-on the non-graduating cells only. This is the live-data analog of P1's
-"FGA-only SHIP" verdict — FGA graduated at Stage A2 (effectively), the
-rest of the SkewNormal family did not.
-
-### Why both gates need to exist
-
-Gate 1 (offline) without Gate 2 (live) is the failure mode P1 actually
-hit — `centered_additive_eb_meanyr_k10` cleared the offline gate on FGA
-under deterministic mode, but the production-mode pipeline had different
-hyperparameters and the live data could have looked different from
-test-set CSVs. The 14-day soak window is what catches that drift.
-
-Gate 2 without Gate 1 is the inverse failure: shipping changes to
-production on live-data intuition alone, no offline ship verdict to
-revert to. The plan rejects both modes — every cell must clear Gate 1,
-soak, then clear Gate 2 before graduating.
+**Why both gates exist.** Gate 1 without Gate 2 is the failure P1 hit
+(`centered_additive_eb_meanyr_k10` cleared offline on FGA under deterministic mode, but
+production HP / live data could differ; the 14-day soak catches that drift). Gate 2
+without Gate 1 is the inverse (shipping on live-data intuition with no offline verdict
+to revert to). Every cell must clear Gate 1, soak, then clear Gate 2.
 
 ### Ship mechanism — per-cell strategy config on `devel`
 
-The gates decide *when* a cell ships; this is *how* it physically goes live on the
-production server (which tracks `devel`). Two invariants keep it safe:
+The gates decide *when* a cell ships; this is *how* it goes live on the production
+server (which tracks `devel`). Two invariants keep it safe:
 
-- **Training is config-driven.** A git-tracked map, `data/ship_config.json` (nested
-  `{league: {market: strategy}}`, mirroring `ALL_MARKETS`), assigns each cell one of
-  three states, and `meditate` trains accordingly:
-  - a real strategy slug (one of `baselines.STRATEGY_SLUGS`) → **shipped**: train
-    that cell with that strategy;
-  - the reserved value `"withheld"` → **under rework**: skip training **and delete**
-    the cell's production pickle (`data/models/{league}_{market}.mdl`) so it goes dark;
-  - **absent from the map** → **untouched**: train with the run's default strategy,
-    exactly as today. An empty/missing `ship_config.json` is therefore a strict no-op
-    — adopting this plumbing changes nothing until a cell is explicitly listed.
+- **Training is config-driven.** A git-tracked `data/ship_config.json` (nested
+  `{league: {market: strategy}}`, mirroring `ALL_MARKETS`) assigns each cell one of
+  three states:
+  - a real strategy slug (one of `baselines.STRATEGY_SLUGS`) → **shipped**: train that
+    cell with that strategy;
+  - `"withheld"` → **under rework**: skip training **and delete** the cell's pickle
+    (`data/models/{league}_{market}.mdl`) so it goes dark;
+  - **absent** → **untouched**: train with the run's default strategy. An empty/missing
+    `ship_config.json` is a strict no-op.
 - **Inference is pickle-driven.** `model_prob` never reads `ship_config.json`; it
   decodes the strategy recorded *in the pickle it loaded* (pickles are
-  self-describing) and applies the matching step. A missing pickle already returns
-  `[]` (the market is skipped). Training config and inference therefore cannot drift
-  — the server runs only whatever strategy is physically baked into the pickle on disk.
+  self-describing). A missing pickle returns `[]` (market skipped). Training config and
+  inference cannot drift — the server runs only the strategy baked into the pickle.
 
-**Shipping a cell is a one-line PR to `ship_config.json` on `devel`.** Each transition
-is a config edit landed by the next weekly `meditate`:
+**Shipping a cell is a one-line PR to `ship_config.json` on `devel`,** landed by the
+next weekly `meditate`:
 
 ```
 absent ──(begin rework)──▶ "withheld" ──(Gate 1 pass)──▶ "<strategy>" ──(Gate 2 pass)──▶ graduated
@@ -668,67 +464,53 @@ absent ──(begin rework)──▶ "withheld" ──(Gate 1 pass)──▶ "<s
   └──(back to default)────────┘                             └◀──(Gate 2 live regression)──────┘
 ```
 
-- **Withhold is deliberate and scoped.** Only a cell you *explicitly* mark
-  `"withheld"` is pruned; the prune is inline in `meditate`'s per-cell loop, so a
-  scoped run (`meditate --market FG3M`) can only ever prune cells in its own scope — a
-  stray dev run cannot dark-out the rest of the book. Merging a `"withheld"` entry
-  stops betting that cell on the next `meditate`; it returns when flipped to a slug.
-- **New strategies are additive.** A new target strategy ships as (1) a slug in
-  `baselines.STRATEGY_SLUGS` with its forward/decode functions, (2) a `model_prob`
-  decode branch keyed on that slug, and (3) the `ship_config.json` line. The decode
-  branch lands *with* the strategy (Stage B1.6 workstream 1), since the strategy does
-  not exist before then. `load_ship_config` validates every value against
-  `STRATEGY_SLUGS ∪ {"withheld"}` at startup, so a typo or an unbuilt strategy fails
-  `meditate` fast rather than after hours of gamelog loading.
+- **Withhold is deliberate and scoped.** Only an *explicitly* `"withheld"` cell is
+  pruned; the prune is inline in `meditate`'s per-cell loop, so a scoped run
+  (`meditate --market FG3M`) can only prune cells in its own scope — a stray dev run
+  cannot dark-out the book.
+- **New strategies are additive:** (1) a slug in `baselines.STRATEGY_SLUGS` with
+  forward/decode functions, (2) a `model_prob` decode branch keyed on that slug, (3)
+  the `ship_config.json` line. The decode branch lands *with* the strategy (Stage B1.6
+  workstream 1). `load_ship_config` validates every value against
+  `STRATEGY_SLUGS ∪ {"withheld"}` at startup so a typo fails `meditate` fast.
 
-End-to-end: Gate 1 SHIP → edit `ship_config.json` (`"withheld"` → strategy slug) →
-merge to `devel` → next weekly `meditate` retrains only that cell with the new
-strategy and leaves untouched cells alone → `prophecize` scores it live → 14-day soak
-→ Gate 2. Revert-archiving the prior shipped pickle under `data/old_models/` (the
-soak-window safety at the Gate 1 promotion note above) is orthogonal to the withhold
-prune and is not part of this plumbing.
+End-to-end: Gate 1 SHIP → edit `ship_config.json` → merge `devel` → next weekly
+`meditate` retrains only that cell → `prophecize` scores it live → 14-day soak →
+Gate 2. Revert-archiving the prior pickle under `data/old_models/` is orthogonal to the
+withhold prune.
 
-**Implementation note (this session):** the plumbing — `training/ship_config.py`
-(loader + `resolve_cell_strategy` + `WITHHELD`), `helpers/io.py`
-(`model_pickle_path` + `prune_model_pickle`, deduping the inline path currently
-copied in `model_prob.py` and `pipeline.py`), and the thin `meditate` wiring — was
-built in the main session rather than per-module subagents, because it is one
-tightly-coupled feature (a config loader, its sole consumer, and a shared path
-helper). The `refactoring-specialist` runs over every touched file before any push,
-per the mandate.
+**Implementation note:** the plumbing — `training/ship_config.py`
+(loader + `resolve_cell_strategy` + `WITHHELD`), `helpers/io.py` (`model_pickle_path` +
+`prune_model_pickle`, deduping the inline path copied in `model_prob.py` and
+`pipeline.py`), and the thin `meditate` wiring — was built in the main session (one
+tightly-coupled feature). refactoring-specialist runs over every touched file before
+any push.
 
-**Shipping process (authoritative checklist + agent).** The production server
-tracks `devel` and pulls the whole branch, so a research branch is never merged
-wholesale. The two-phase model (one-time foundation, then production-delta-only
-per-market PRs) and the keep/drop denylist live in **CONTRIBUTING.md → "Shipping to
-Production (`devel`)"**. Every per-market ship PR (and any further foundation layer)
+**Shipping process.** The production server tracks `devel` and pulls the whole branch,
+so a research branch is never merged wholesale. The two-phase model (one-time
+foundation, then production-delta-only per-market PRs) and the keep/drop denylist live
+in **CONTRIBUTING.md → "Shipping to Production (`devel`)"**. Every per-market ship PR
 **must be carved by the `devel-ship-curator` agent**
-(`.claude/agents/devel-ship-curator.md`), which enforces the denylist
-(no `compression_eval` / `zinb-routing-diagnostics` / `icc-diagnostics` /
-`statsmodels`), keeps the Gate-1 verdict as PR prose rather than committed code, and
-verifies the three gates. The initial Phase A foundation PR is carved by hand (the
-one exception).
+(`.claude/agents/devel-ship-curator.md`), which enforces the denylist (no
+`compression_eval` / `zinb-routing-diagnostics` / `icc-diagnostics` / `statsmodels`),
+keeps the Gate-1 verdict as PR prose not committed code, and verifies the three gates.
+The initial Phase A foundation PR is carved by hand (the one exception).
 
 ### Branches & model-promotion flow
 
-Four branches map to the two gates. Candidate work is built and offline-tested on a
-research branch, trimmed into a clean production base, shipped to the live beta, and
-finally graduated to the shipped models:
+Four branches map to the two gates:
 
 - **`model-research`** — where candidate updates are developed and offline-tested
   (deterministic A/B, research scaffolding, cached test sets). All experimentation bloat
-  lives here. *(This is the intended rename of the current
-  `claude/fix-gbdt-mean-regression-GcY1g` branch; the rename is **documented here, not
-  performed** — it is entangled with PR #46, whose head ref is that branch, so renaming it
-  now would orphan the PR. Sequence the rename for after PR #46 merges, or retarget the PR
-  first.)*
-- **`devel-foundation`** — the trimmed, clean "production shipping foundation":
-  `model-research` minus the testing bloat (the denylist below). The clean base `devel`
-  builds on.
-- **`devel`** — the **live beta**. Candidates that pass **Gate 1** (offline ship) ship
-  here and soak on live data through the 14-day **Gate 2** window. The remote server
-  tracks `devel` (CLAUDE.md), so this is the real beta environment.
-- **`main`** — the **final shipped models**. A cell graduates to `main` once it passes
+  lives here. *(Intended rename of `claude/fix-gbdt-mean-regression-GcY1g`; rename is
+  **documented here, not performed** — it is entangled with PR #46 whose head ref is that
+  branch, so renaming now would orphan the PR. Sequence after PR #46 merges, or retarget
+  the PR first.)*
+- **`devel-foundation`** — the trimmed clean "production shipping foundation":
+  `model-research` minus the testing bloat (the denylist).
+- **`devel`** — the **live beta**. Candidates passing **Gate 1** ship here and soak
+  through the 14-day **Gate 2** window. The remote server tracks `devel`.
+- **`main`** — the **final shipped models**. A cell graduates here once it passes
   **Gate 2** on live data.
 
 ```
@@ -736,110 +518,40 @@ model-research ─(build + offline-test)→ trim → devel-foundation
    ─(Gate-1 passers)→ devel [live beta / Gate-2 soak] ─(Gate-2 graduates)→ main
 ```
 
-The `devel-foundation` / `model-research` →(Gate-1 passers)→ `devel` crossing is carved by
-the **`devel-ship-curator`** agent (`.claude/agents/devel-ship-curator.md`): it branches
-off `devel`, brings only production-runtime code + the single `data/ship_config.json`
-toggle for one cleared cell, **hard-excludes** the research-scaffolding denylist
-(`compression_eval`, `zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp`
-harnesses), carries the offline verdict as **PR prose, not code**, verifies the three
-gates, and **never pushes** (the human approves). It does not decide *whether* to ship —
-Gate 1 already did — it selects, excludes, verifies, and packages.
+The `devel-foundation` / `model-research` →(Gate-1 passers)→ `devel` crossing is carved
+by the **`devel-ship-curator`** agent: it branches off `devel`, brings only
+production-runtime code + the single `data/ship_config.json` toggle for one cleared
+cell, **hard-excludes** the research-scaffolding denylist (`compression_eval`,
+`zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp` harnesses), carries
+the offline verdict as **PR prose not code**, verifies the three gates, and **never
+pushes** (the human approves). It selects, excludes, verifies, and packages — Gate 1
+already decided *whether* to ship.
 
 ### Track-wide stop condition
 
-A whole track stops when **every cell has graduated**. At that point any
-remaining staged work (e.g. Stage B3 MZINB if Stage B1 ZTNB already
-graduated 8/8 ZINB cells across NBA/WNBA/NFL) is filed under "future
-research" — code in `src/deprecated/` if prototyped, otherwise just
-noted in the Status table as deprioritized with a one-line reason
-(e.g. "B3 not pursued: B1 graduated 23/23 cells; further structural
-change would be perfect-as-enemy-of-good").
+A whole track stops when **every cell has graduated**. Remaining staged work (e.g.
+Stage B3 MZINB if Stage B1 ZTNB already graduated 8/8 ZINB cells) is filed under
+"future research" — code in `src/deprecated/` if prototyped, otherwise noted in the
+Status table as deprioritized with a one-line reason.
 
 ### Re-entry condition
 
-If a graduated cell *regresses* — settled brier_skill_score drops below
-the graduation threshold for two consecutive 7-day windows — it re-enters
-the track at the stage where it graduated. Track work resumes on that
-cell only. Re-entry is logged in the Status table with the regression
-metric so future sessions can read the pattern (e.g. "WNBA FG3M re-entered
-2026-09-12 after settled brier_skill dropped to −0.04 vs graduation 0.11
-— preseason rotations changed minutes patterns").
+If a graduated cell *regresses* — settled brier_skill_score below the graduation
+threshold for two consecutive 7-day windows — it re-enters the track at the stage where
+it graduated. Track work resumes on that cell only. Re-entry is logged in the Status
+table with the regression metric.
 
-### Stage 0 — Live-data instrumentation (prerequisite for everything else)
-
-**The graduation criteria above reference metrics that are not currently
-persisted in a usable form.** Before any track work that intends to use
-the stop-the-track principle, Stage 0 must ship. Without it, "settled
-brier_skill ≥ 0 over the last 30 days" is rhetorical, not actionable.
-
-What exists today:
-
-| Component | State |
-|---|---|
-| [analysis.py:877](../src/sportstradamus/analysis.py#L877) `compute_brier_skill_score(subset, base_rate=0.5)` | Computes BSS against base-rate 0.5 (chance), **not against the book** — different quantity than training-side `brier_skill_score` which uses the book baseline. Not directly comparable to the training metric the plan references. |
-| `history.parquet` with settled `Actual` column | Exists; filled by [nightly.py](../src/sportstradamus/nightly.py) on every `reflect` run. Per-offer granularity; not aggregated per (league, market) or over rolling windows. |
-| Dashboard pages 3/4/6 | Compute brier / BSS / profit-sim **on demand** from `history.parquet` when a user opens the page. Not persisted; future sessions cannot read these values programmatically. |
-| Live top-decile MAE on settled bets | **Does not exist.** [compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) only scores `data/test_sets/` CSVs (offline held-out test rows), not live settled offers. |
-| Per-(league, market) persistent metric store | **Does not exist.** No `data/live_metrics_per_market.parquet`. |
-
-Stage 0 deliverables (in dependency order):
-
-| # | Deliverable | Cost | Where it lives |
-|---|---|---|---|
-| 0.1 | **Live brier_skill_score against the book baseline** — variant of [analysis.py:877](../src/sportstradamus/analysis.py#L877) that uses the bookmaker's implied prob (already stored per-offer in `history.parquet` as the original `Odds` column) as the reference, mirroring the training-side `brier_skill_score` exactly. Add as `compute_book_brier_skill_score(subset)` alongside the existing function — keep the chance-baseline version (some dashboards already rely on it). | ~2 hours | [analysis.py](../src/sportstradamus/analysis.py) |
-| 0.2 | **Rolling-window aggregation per (league, market)** — extend `reflect` to compute, for each (league, market) cell at the end of every nightly run: 7-day and 30-day rolling book-BSS, empirical-vs-predicted over-rate, total settled bets, and total profit-sim yield. Write to `data/live_metrics_per_market.parquet` keyed by (league, market, computed_at). | ~1 day | New `compute_live_metrics()` step at the tail of [nightly.py](../src/sportstradamus/nightly.py) `run()`. |
-| 0.3 | **Live top-decile MAE harness mode** — new `compression_eval --live-window N` flag that reads `history.parquet` instead of a test-set CSV, filters to the last N days of settled bets per (league, market), and runs the existing decile-bias scoring code path. Output schema matches the offline mode so the comparison "live vs offline top-decile MAE" is a parquet join. | ~1 day | [compression_eval.py](../src/sportstradamus/scripts/compression_eval.py); add unit tests in [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py). |
-| 0.4 | **Lifecycle-status table view** — small CLI (`poetry run check-graduation`) or dashboard page that joins `data/live_metrics_per_market.parquet` against **both gates** and emits a per-(league, market) status: not-shipped / in-test (days into soak) / graduated. Renders as a 36-cell × 8-metric table — 4 Gate 1 (offline) columns + 4 Gate 2 (live) columns + a state column. Future sessions read this to decide both "can this candidate ship to test?" (Gate 1) and "can this cell graduate?" (Gate 2). | ~half day | New [src/sportstradamus/scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) or a new dashboard page. |
-| 0.5 | **Backfill rolling metrics on existing history** — one-shot script that walks back through `history.parquet` and emits the rolling-window points for the last ~90 days so Stage 0's first publication of `live_metrics_per_market.parquet` has historical context to compare against. | ~half day | One-shot script under [src/sportstradamus/scripts/](../src/sportstradamus/scripts/). |
-
-**Total Stage 0 cost: ~3 days.** Modest — and the entire stop-the-track
-principle becomes empirically grounded instead of rhetorical.
-
-**Stage 0 ship gate** (separate from the universal threshold — Stage 0 is
-infrastructure, not a model change):
-- `live_metrics_per_market.parquet` exists and has ≥ 7 days of history at
-  publication
-- Live book-BSS computed by 0.1 matches a hand-computed reference within
-  1e-6 on a 100-row spot check from `history.parquet`
-- `compression_eval --live-window 30` produces a deterministic output on a
-  fixed history.parquet snapshot (frozen for the test) and the golden
-  test asserts row-count + schema
-- A `check_graduation` invocation on the cached snapshot produces a
-  non-empty table covering NBA / WNBA / NFL × all distributions, with
-  the lifecycle state column populated for every cell (not-shipped /
-  in-test with day count / graduated)
-- The 8-metric output (4 Gate 1 + 4 Gate 2) reads from the same
-  parquet on every invocation — no recomputation of Gate 1 from
-  `model_stats.parquet` and Gate 2 from a separate source
-
-**Stage 0 stop-the-track check:** there is no "we have enough live data
-already" exit for Stage 0 — it's the infrastructure that makes
-graduation decisions possible. Skip Stage 0 only if you also skip the
-stop-the-track principle (which means committing to running every
-remaining stage on every cell — exactly the perfect-as-enemy-of-good
-mode the principle is designed to prevent).
-
-**Why Stage 0 doesn't compete with the actual model work:** Stage 0 ships
-once. Every subsequent stage's graduation check is a 30-second parquet
-read. Across the remaining ~12 stages × 36+23 cells, the amortized cost
-is negligible. Without Stage 0, every graduation check requires either a
-manual dashboard inspection (slow, not programmatic, won't survive
-future sessions) or re-deriving the metric in an ad-hoc script (which is
-Stage 0 done badly).
+> **Stage 0 — Live-data instrumentation** (the completed-build detail: what existed
+> before Stage 0, the five deliverables in dependency order, and the Stage 0 ship gate)
+> moved to the context doc → **Stage 0 — Live-data instrumentation**. Stage 0 is
+> **done** (see the Phase status index / context status log).
 
 ## Inference-path compatibility (applies to every shipped change)
 
-Every change in this plan must land its inference-side mirror in the
-**same PR** before promotion to production. Gate 1 above lets a change
-into the test-run window; the inference-path checklist below is what
-makes that window safe to enter.
-
-The architectural principle near the top of this plan already requires
-this for target/baseline transforms ("Centralize the forward transform,
-the inverse (de-norm) transform, and the inference-time mirror"). This
-section restates it as a hard requirement covering **every** change
-type, not just target transforms — and it names the concrete files and
-seams so the work is unambiguous.
+Every change must land its inference-side mirror in the **same PR** before promotion to
+production. Gate 1 lets a change into the test-run window; the inference-path checklist
+is what makes that window safe. This restates the architectural principle as a hard
+requirement covering **every** change type and names the concrete seams.
 
 ### Inference path (where things live)
 
@@ -847,1105 +559,171 @@ seams so the work is unambiguous.
 |---|---|---|
 | CLI entry | `prophecize` → `sportstradamus.prediction.cli` | Loads slate, dispatches per-market |
 | Model load | [prediction/__init__.py](../src/sportstradamus/prediction/__init__.py) `main()` | Reads pickle from `data/models/{LEAGUE}_{market}.mdl` |
-| Per-offer scoring | [model_prob.py:114](../src/sportstradamus/prediction/model_prob.py#L114) `model_prob()` | The function the user is asking about — runs once per offer |
-| Per-offer features | [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats()` | Builds the `playerStats` row consumed by `model_prob`. **Inference mirror of `get_training_matrix`** — any new training feature must be computed identically here (leakage-safe). |
-| Per-distribution decode | [model_prob.py:259-272](../src/sportstradamus/prediction/model_prob.py#L259-L272) (NegBin/ZINB/Gamma/ZAGamma) + [model_prob.py:276](../src/sportstradamus/prediction/model_prob.py#L276) (SkewNormal via `_decode_skewnormal`) | Per-`dist` block that turns `predict(pred_type="parameters")` output into `Model EV` + `Model Gate` + `Model R/Alpha` columns |
-| Hurdle dispatch | [model_prob.py:205](../src/sportstradamus/prediction/model_prob.py#L205) `getattr(model, "is_hurdle", False)` | The pattern P2.B introduced for opting a model into a non-default predict path. **Every new model class follows this pattern.** |
-| Distribution-specific blend | [helpers/distributions.py:69](../src/sportstradamus/helpers/distributions.py#L69) `get_ev`, [314](../src/sportstradamus/helpers/distributions.py#L314) `fused_loc`, [163](../src/sportstradamus/helpers/distributions.py#L163) `get_odds`, [425](../src/sportstradamus/helpers/distributions.py#L425) `set_model_start_values` | Every distribution name the plan introduces must round-trip through all four; the `dist` string is the dispatch key. |
-| Pickle schema | [pipeline.py:1940](../src/sportstradamus/training/pipeline.py#L1940) `_build_filedict` (writer) ↔ [model_prob.py](../src/sportstradamus/prediction/model_prob.py) + [training/pipeline.py](../src/sportstradamus/training/pipeline.py) (readers) | Any new pickle key must be added to the writer AND read back by every consumer. Legacy pickles must still load — use `filedict.get("new_key", legacy_default)`. |
+| Per-offer scoring | [model_prob.py:114](../src/sportstradamus/prediction/model_prob.py#L114) `model_prob()` | Runs once per offer |
+| Per-offer features | [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats()` | Builds the `playerStats` row. **Inference mirror of `get_training_matrix`** — any new training feature computed identically here (leakage-safe). |
+| Per-distribution decode | [model_prob.py:259-272](../src/sportstradamus/prediction/model_prob.py#L259-L272) (NegBin/ZINB/Gamma/ZAGamma) + [model_prob.py:276](../src/sportstradamus/prediction/model_prob.py#L276) (SkewNormal via `_decode_skewnormal`) | Turns `predict(pred_type="parameters")` into `Model EV` + `Model Gate` + `Model R/Alpha` |
+| Hurdle dispatch | [model_prob.py:205](../src/sportstradamus/prediction/model_prob.py#L205) `getattr(model, "is_hurdle", False)` | The P2.B pattern for a non-default predict path. **Every new model class follows it.** |
+| Distribution-specific blend | [helpers/distributions.py:69](../src/sportstradamus/helpers/distributions.py#L69) `get_ev`, [314](../src/sportstradamus/helpers/distributions.py#L314) `fused_loc`, [163](../src/sportstradamus/helpers/distributions.py#L163) `get_odds`, [425](../src/sportstradamus/helpers/distributions.py#L425) `set_model_start_values` | Every new `dist` name must round-trip through all four |
+| Pickle schema | [pipeline.py:1940](../src/sportstradamus/training/pipeline.py#L1940) `_build_filedict` (writer) ↔ readers | Any new key added to writer AND read back by every consumer; legacy pickles load via `filedict.get("new_key", legacy_default)` |
 
 ### Per-change-type inference checklist
 
-Use this table to identify what needs to land alongside each Track A / B
-method. The table is keyed on change type, not stage — many stages
-include multiple change types.
-
-| Change type | Inference-side work required | Reference precedent |
+| Change type | Inference-side work | Precedent |
 |---|---|---|
-| **Training-only** (T6 FAGTB adversarial objective, T9 monotone constraint, B1 ZTNB likelihood, B4 per-parameter Optuna, B4 reduced regularization, B4 sample reweighting) | **None.** Output schema (the `(total_count, probs, gate)` triple for ZINB; `(loc, scale, alpha)` for SkewNormal; etc.) is unchanged. The pickle round-trips. | B1 ZTNB fix: only loss changes; `predict(pred_type="parameters")` still returns the same columns. |
-| **New target/baseline strategy** (P1-style — already done; future Track-A variants in the same family) | Inverse decode in `model_prob.py:_decode_skewnormal` via `baselines.STRATEGY_REGISTRY[strategy].decode_loc/decode_scale`; matching `*_Ratio` feature in `stats/base.py:get_stats`; `target_strategy` + `offset_meta` pickle keys round-trip. | P1 `centered_additive_*` strategies — registry entry, live-path test, pickle field, decode dispatch. |
-| **New distribution head** (T3 spliced/Pareto, T10 PGBM, B3 MZINB, B4 CMP, B4 quantile heads, T4 MEGB output, T7 gbex) | (a) New decode block in [model_prob.py:259-272](../src/sportstradamus/prediction/model_prob.py#L259-L272) that turns `predict(pred_type="parameters")` into `Model EV` columns; (b) [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) `get_ev`, `get_odds`, `fused_loc`, `set_model_start_values` each accept the new `dist` name; (c) `dist` string in `_build_filedict` + the legacy `dist=…` fallback in `model_prob`; (d) new live-path integration test mirroring [test_zinb_hurdle_live_path.py](../tests/integration/test_zinb_hurdle_live_path.py) asserting `Model EV` is finite, `Model Gate ∈ [0,1]` where applicable, and two runs identical under `DETERMINISTIC_SEED`. | P2.B HurdleZINB: `getattr(model, "is_hurdle", False)` gate, `zinb_mode` + `is_hurdle` pickle keys, identity-reconstruction test, determinism gate parallel assertion. |
-| **Post-hoc calibration object** (A3 isotonic on loc, T8 CQR/LCMQR, B4 isotonic on ZINB-mean) | Pickle the calibration object as a new key (`isotonic`, `cqr`, `temperature` already exists as precedent); load it in `model_prob` and apply after the distribution decode but before `fused_loc` (or after — depends on what's calibrated). Round-trip test asserts byte-identical predictions across save/load. | `temperature` field on the existing pickle dict ([pipeline.py:1958](../src/sportstradamus/training/pipeline.py#L1958)) and the calibrated proba path. |
-| **New player-level feature** (B2 leakage-safe target-encoded `expanding().mean().shift(1)` per player) | Feature column added to BOTH `Stats.get_training_matrix` (training) AND [stats/base.py:get_stats](../src/sportstradamus/stats/base.py#L597) (inference) — computed identically, leakage-safe at inference time (no peek at the current game). Same dtype + index across train/inference. Add the feature to `feature_filter.json` whitelist for affected markets. | `MeanYr` / `Mean10` / `*_Ratio` columns at `stats/base.py:676-702` and the leakage tests at `test_meanyr_mean10_leakage.py`. |
-| **Multi-head factorization** (T5-basketball, T5-NFL) | `prophecize` loads N pickles per market (one per factor in the factor tree); `model_prob` Monte Carlos: sample from each factor's predicted distribution at inference time, multiply, derive the marginal distribution of the composed target; `fused_loc` may need a multi-output blend variant that respects the joint distribution. New live-path test drives multi-head decode end-to-end. Pickle schema: new `factor_pickles: dict[str, Path]` field on the parent market pickle. | None in-repo. Closest analogue: the per-market book_weights handling. Expect this to be the largest inference-side change in the plan. |
-| **Different model class** (T2 CatBoost ordered TS, T4 MEGB native R, B3 GPBoost) | New `getattr(model, "is_catboost", False)` / `"is_gpboost", False` flag on the model class; `model_prob` dispatches accordingly. `prediction/__init__.py` model-load path branches on the new class. Determinism gate extended with the new class. If the alternative class doesn't have the LSS `predict(pred_type="parameters")` API, the dispatch must adapt. | P2.B `is_hurdle` pattern — identical structure, just a new attribute name. |
+| **Training-only** (T6 FAGTB objective, T9 monotone constraint, B1 ZTNB likelihood, B4 per-parameter Optuna, B4 reduced regularization, B4 sample reweighting) | **None.** Output schema unchanged; pickle round-trips. | B1 ZTNB fix: only loss changes. |
+| **New target/baseline strategy** (P1-style; future Track-A variants) | Inverse decode in `model_prob.py:_decode_skewnormal` via `baselines.STRATEGY_REGISTRY[strategy].decode_loc/decode_scale`; matching `*_Ratio` feature in `get_stats`; `target_strategy` + `offset_meta` keys round-trip. | P1 `centered_additive_*`. |
+| **New distribution head** (T3 spliced/Pareto, T10 PGBM, B3 MZINB, B4 CMP, B4 quantile heads, T4 MEGB, T7 gbex) | (a) new decode block in [model_prob.py:259-272](../src/sportstradamus/prediction/model_prob.py#L259-L272); (b) `get_ev`/`get_odds`/`fused_loc`/`set_model_start_values` accept the new `dist`; (c) `dist` in `_build_filedict` + legacy fallback; (d) new live-path test mirroring [test_zinb_hurdle_live_path.py](../tests/integration/test_zinb_hurdle_live_path.py). | P2.B HurdleZINB. |
+| **Post-hoc calibration object** (A3 isotonic on loc, T8 CQR/LCMQR, B4 isotonic on ZINB-mean) | Pickle as a new key (`isotonic`/`cqr`/`temperature` precedent); load in `model_prob`, apply after decode (before/after `fused_loc` per what's calibrated); byte-identical round-trip test. | `temperature` field ([pipeline.py:1958](../src/sportstradamus/training/pipeline.py#L1958)). |
+| **New player-level feature** (B2 leakage-safe target-encoded `expanding().mean().shift(1)`) | Column added to BOTH `get_training_matrix` and [get_stats](../src/sportstradamus/stats/base.py#L597), computed identically, leakage-safe; same dtype/index; add to `feature_filter.json` whitelist. | `MeanYr`/`Mean10`/`*_Ratio` (`base.py:676-702`), `test_meanyr_mean10_leakage.py`. |
+| **Multi-head factorization** (T5-basketball, T5-NFL) | `prophecize` loads N pickles/market; `model_prob` Monte Carlos (sample each factor, multiply, derive marginal); `fused_loc` may need a multi-output blend; new `factor_pickles: dict[str, Path]` on the parent pickle; new live-path test. **Expect the largest inference-side change in the plan.** | None in-repo; closest is per-market book_weights. |
+| **Different model class** (T2 CatBoost ordered TS, T4 MEGB native R, B3 GPBoost) | New `is_catboost`/`is_gpboost` flag; `model_prob` + `prediction/__init__.py` load path branch; determinism gate extended; adapt if no LSS `predict(pred_type="parameters")` API. | P2.B `is_hurdle`. |
 
 ### Inference-path test as a hard ship gate
 
-Any change requiring inference-side work must have a passing live-path
-integration test under `tests/integration/` **before promotion to
-production** (i.e. before Gate 1 from the lifecycle section is even
-checked — the test asserts the inference path doesn't blow up on cached
-real data). The test must assert:
+Any change requiring inference-side work must have a passing live-path integration test
+under `tests/integration/` **before promotion to production** (before Gate 1 is even
+checked). The test asserts:
 
-1. `Model EV` is finite for every offer.
+1. `Model EV` finite for every offer.
 2. For ZI-class distributions: `Model Gate ∈ [0, 1]`.
 3. Two runs with `DETERMINISTIC_SEED` produce identical predictions.
-4. Legacy pickles (those without the new pickle keys) still load and
-   predict — the `filedict.get(key, default)` pattern from P2.B is the
-   contract.
-
-If the inference test does not exist, the change cannot ship. This is
-the lesson from OVERCONFIDENCE_INVESTIGATION §3.4 (the live-path
-confound): offline A/B verdicts are meaningless if the change crashes
-or silently drifts in `prophecize`.
-
-### Pickle-schema discipline (the seam where train/predict drift hides)
-
-The pickle dict written by [pipeline.py:1940 `_build_filedict`](../src/sportstradamus/training/pipeline.py#L1940)
-is the contract between training and inference. Every new field added
-during this plan **must** also have:
-
-1. A reader site in `model_prob.py` (or wherever the field is consumed).
-2. A legacy-default fallback so pre-change pickles still load:
-   `filedict.get("new_key", "joint")` — the P2.B `zinb_mode` pattern.
-3. A round-trip test in `tests/test_*.py` that pickles the new model,
-   re-loads, asserts byte-identical predictions.
-
-The list of fields written today (as of commit `77e4a41`): `model`,
-`step`, `stats`, `metrics`, `diagnostics`, `params`, `distribution`,
-`cv`, `std`, `temperature`, `dispersion_cal`, `weight`, `r_book`,
-`hist_gate`, `shape_ceiling`, `normalized`, `offset_meta`,
-`target_strategy`, `zinb_mode`, `is_hurdle`, `expected_columns`. Any
-addition lands in this list and gets the three-step contract above.
-
-## Two-track next-session plan
-
-Work proceeds on two independent tracks. Stages within a track are sequential
-(later stages depend on diagnostics from earlier ones). The two tracks share
-infrastructure (the harness, the determinism gate, the per-strategy registry)
-but the diagnostics and method choices diverge.
-
-> **Depth work — secondary to 75% breadth.** Both tracks are *depth* work: superseding a
-> set baseline with a better one (the Tier-1 ≥ 5% compression bar). They are secondary to
-> the breadth North Star at the top of this plan and **begin once the 75%-per-league
-> breadth gap closes** (NBA −3, WNBA −4, NFL −2 as of 2026-05-21). The active pre-break
-> work is the breadth push (Tier-0 audit → Stage B1.6) plus the core depth methods
-> A2/A3/B2/B3; the post-break tail (A4/B4) is deferred — see
-> [roadmap](sportstradamus_roadmap_v2.md) Phase 6.
-
----
-
-## Track A — SkewNormal markets
-
-*Depth work — secondary to 75% breadth; begins after the breadth gap closes. A2/A3 are
-the active (pre-break) core depth; A4 is the deferred post-break tail (roadmap Phase 6).*
-
-Source: `/tmp/researcher_skewnormal.md`. Scope: PTS, REB, AST, PRA, FGA, MIN,
-PA, PR, FG3A, FGM, fantasy points. After P1, FGA ships with EB(MeanYr, K=10)
-centering; every other SkewNormal market killed under both EB-centered and
-Mean10-centered strategies. The researcher's hypothesis is that the dominant
-compression cause is **volume-efficiency entanglement** (PTS = FGA × eFG% × …),
-not leaf-averaging — and that ICC per market predicts which strategies can work.
-
-### Stage A1 — Diagnostic gate (~1 day)
-
-**T1. ICC per league × per market.** Compute ICC₁ for every SkewNormal
-market in every covered league (NBA 13 + WNBA 11 + NFL 12 = 36 cells) on
-three seasons of held-out data using a two-level ANOVA decomposition:
-σ²_between = Var(player season means), σ²_within = mean(Var(game logs
-within player)), ICC = σ²_between / (σ²_between + σ²_within). For highly
-skewed markets (NBA STL/BLK; NFL interceptions/sacks) compute on
-`log(1+Y)` or rank-transformed target.
-
-Output a 36-row table keyed by (league, market). Pre-register the routing
-cutoff per cell before running A/Bs:
-- ICC ≥ 0.5 → EB-style centering can work (T5 four-stage factorization).
-- ICC ≤ 0.3 → needs distributional tail extension (T3/T7).
-- 0.3 < ICC < 0.5 → ambiguous; try both, route based on outcome.
-
-Expected (NBA): FGA > 0.6, PTS in 0.3–0.45, STL/BLK < 0.2. WNBA likely
-similar to NBA (same sport, fewer games per player so estimator is
-noisier). NFL likely *higher* than basketball for position-dependent
-stats (a top QB always passes for 250+ yds, a RB1 always rushes) but
-small-sample variance inflates the within-player term — net effect is
-empirical, not predicted.
-
-Implementation site: a new one-shot CLI in
-`src/sportstradamus/scripts/icc_diagnostics.py` that consumes
-`data/training_data/{LEAGUE}_{market}.parquet` for every cached league.
-Output to `data/icc/{LEAGUE}_icc.parquet` (per-league file keeps the diff
-trivial when only one league's gamelogs change). No model changes.
-Source: researcher T1 (Tier 0).
-
-**Decision points (gate logic for Stage A1):**
-- If ICC_PTS > 0.5 on any league — entanglement hypothesis is wrong for
-  that league; leaf-averaging hypothesis revives; T7 (extreme-tail
-  boosting via gbex) jumps to Stage A2 on that league.
-- If ICC is uniformly low across a family within a league — that league's
-  family is form-driven and T3 (heavy-tail / normalizing-flow head) takes
-  priority over T5 there.
-- If ICC clusters bimodally within a league (e.g. FGA/MIN high, PTS/AST
-  low) — per-market routing in Stage A2 is justified for that league.
-- **NFL-specific:** if ICC is high but EB shrinkage K=10 produces noisy
-  per-player MeanYr (small sample), re-derive K per the
-  Casella–Berger empirical-Bayes formula
-  `K = σ²_within / σ²_between` evaluated *per league*; record the per-league
-  K alongside the per-league ICC table.
-- **Stop-the-track check:** Stage A1 is a diagnostic — it does not by
-  itself ship a model change, so there are no live-data graduations here.
-  But if the ICC table reveals the family is *already* well-routed by the
-  existing `ratio_meanyr` default (e.g. low-ICC markets are already kept
-  out of EB centering by P1's verdict), Stage A2 should be skipped for
-  those cells and the track-resumption discussion happens only if live
-  metrics regress.
-- **Inference-path check:** Stage A1 ships no model change — diagnostic
-  only. No inference touchpoints.
-
-### Stage A1.5 — research verdict (factor-ICC de-risk of T5)
-
-The `research-analyst` reviewed the T5 factor-ICC question (brief at
-`/tmp/researcher_factor_icc.md`; conclusions copied here so the plan stays
-self-contained). It computed **factor-level ICC** read-only by reusing the Stage A1
-engine — reference markets reproduce the A1 parquet ICCs to 1e-6, so the factor ICCs
-inherit A1's 15-test coverage and sit on the same scale as the market ICCs. The verdict
-**KILLs T5 as a wholesale multiplicative architecture** and routes A2 to **T3** instead.
-
-**Headline.** The T5 premise is *half* true, and the wrong half is true for the lift.
-Efficiency factors are unambiguously low-ICC in all three leagues (8/8 ≤ 0.30), but that
-is exactly the half a tail head (T3) serves directly on the whole stat — without
-recomposition. The "volume = high-ICC stable identity" half holds only for WNBA/NFL, not
-NBA. And the variance algebra of multiplying separately-modeled factors inflates the
-priced tail. Build T3 (1–2 wk); do not build T5 (2–3 wk + the largest inference change in
-the plan).
-
-**1. Per-league band verdict (median ICC(volume) − median ICC(efficiency); pre-registered
-bands 0.20/0.10).**
-- **NBA — MIXED.** Gap **+0.232** (vol 0.391 / eff 0.158). Gap-confirmed, but the
-  CONFIRMED band's volume clause FAILED: 0/3 NBA volume factors reach the 0.5 EB floor
-  (MIN 0.347, FGA 0.489, FGA-per-MIN 0.391 — all ambiguous). These are the same ambiguous
-  band where P1 shipped EB on FGA (0.489) yet KILLED PA (0.514), so **decomposing PTS into
-  volume × efficiency does not explain the P1 ship/kill split** — FGA is itself an
-  ambiguous-ICC volume factor that happened to ship. Factor ICC inherits P1's lesson that
-  mid-band ICC is not a sufficient router; it does not resolve it.
-- **WNBA — CONFIRMED, low-confidence.** Gap **+0.456** (vol 0.559 / eff 0.103), but a
-  *single* computable efficiency factor (`PTS_per_FGA`; WNBA has no `FGM`/`FG3A`
-  *markets*, so true FG%/3P% are uncomputable), so the "median" is one point and the gap
-  is statistically fragile. A real WNBA efficiency verdict needs new test cases from
-  WNBA's actual markets (see Cross-league caveat #3).
-- **NFL — CONFIRMED.** Gap **+0.291** (vol 0.507 / eff 0.216); volume clause 0.67,
-  efficiency clause 1.00, and NFL efficiency factors are genuinely heavy-tailed
-  (yards-per-carry skew +4.43, yards-per-attempt +2.92, all `log1p`) — the tail a
-  Pareto/spliced T3 head is built to fit.
-
-The gap is robust to factor-classing (NBA 0.22–0.26, WNBA 0.37–0.46, NFL 0.29 across
-three classing variants). Efficiency-low-ICC matches the basketball reliability
-literature: Franks, D'Amour, Cervone & Bornn 2016 (DOI 10.1515/jqas-2016-0098,
-arXiv:1609.09830) find most observed 3P% differences are sampling variability, not skill —
-the FG3% ICC of 0.066 here is that finding measured on this cache (see also the *Annual
-Review of Statistics* basketball-modeling review, DOI 10.1146/annurev-statistics-040720-015536,
-arXiv:2007.10550).
-
-**2. The literature OVERRIDES the band-only CONFIRMED to a T5 KILL on the body of the stat
-— recomposition inflates the priced tail.** Goodman's exact variance-of-products (Goodman
-1960, JASA, DOI 10.1080/01621459.1960.10483369; K-variable generalization Goodman 1962,
-DOI 10.1080/01621459.1962.10482151) gives
-**CV²(XY) = CV²(X) + CV²(Y) + CV²(X)·CV²(Y) ≥ CV²(X) + CV²(Y)** — relative variances add
-super-additively under multiplication. Measured on the *actual* NBA top-mean-decile PTS
-player-seasons, PTS modeled directly has within-player-season CV **0.334**, but the
-recomposed FGA × (PTS/FGA) product has CV **0.423 — a +27% predictive-variance inflation
-on the cell we price.** Because PTS = FGA × (PTS/FGA) is an identity, the factors are
-*negatively* correlated within games (volume dilutes efficiency); modeling them as
-independent heads and Monte-Carlo recomposing **discards that negative covariance and
-re-inflates the tail toward the Goodman independent bound.** For top-decile MAE — set by
-tail mass around the line — T5 fixes the location and inflates the tail, the wrong trade.
-The aggregate-vs-disaggregate forecasting result (Hubrich et al., ECB Working Paper No.
-1365, 2011) says the same: the disaggregate forecast beats the direct one only when
-component DGPs are *known*; once they must be estimated (four–five GBDT heads, each with
-its own SkewNormal mis-specification) "the superiority of the disaggregate forecast is no
-longer assured."
-
-**3. The line-492 "DFS-industry consensus" claim is practitioner LORE, not published
-method.** The minutes × usage × efficiency funnel is genuine industry practice but has no
-peer-reviewed validation that it reduces top-decile bias or beats direct modeling on the
-tail; one practitioner source explicitly warns projections "are not some kind of simple
-multiplication problem." It is restated below as *convention*, not ship evidence — the
-only primary sources on products of separately-modeled components (Goodman; ECB WP 1365)
-point the other way for the tail.
-
-**Reality checks.**
-- **Projected T3 lift is single-digit percent**, best where the body model gets location
-  roughly right and the miss is tail mass — NFL yardage (heavy-tailed efficiency) is the
-  best regime, NBA scoring (near-symmetric efficiency noise) the worst. This mirrors the
-  Track-B CMP "3–8%, not 30%" reality; there is no published 30%+ tail-MAE result that
-  transfers, and T3's own validation is out-of-domain (gbex on rainfall; LightGBMLSS
-  normalizing-flow general-purpose). Treat any larger number as a bet. Neither T5 nor T3
-  is a ship until it clears the universal threshold on every covered cell via
-  `compression_eval`; this brief de-risks the *fork*, not the ship.
-- **What would revive T5:** (a) NFL per-factor *conditional* signal turning out large once
-  features are added (a SkewNormal-GBM residual pass per factor beats the whole-stat model
-  out-of-sample) — the ICCs here are unconditional and the ~280-column matrix already
-  absorbs much volume identity, so the marginal split overstates the residual gain (Open
-  question #10); (b) modeling the negative volume↔efficiency covariance jointly (copula /
-  joint multi-output head) instead of discarding it — which is *more* engineering than T5,
-  not less. Neither condition is met, so the KILL stands.
-- **If T5 is trialed anyway (NFL only, lowest-risk cell):** Gate 1 must verify
-  top-mean-decile MAE improves ≥5% **and** the recomposed predictive scale is not inflated
-  vs the direct SkewNormal baseline (the +27% CV is the thing to watch), on both metric
-  families (CRPS/log-score and top-decile MAE) — Open question #9.
-
-### Stage A2 — Highest-leverage structural fixes (2–3 sprints)
-
-**A2 fork decision (set by Stage A1.5 — see the verdict block above): build T3 as the
-primary structural fix; T5 is KILLED as a wholesale multiplicative architecture.** The
-factor-ICC de-risk found the low-ICC half of the volume/efficiency split is the
-*efficiency* half — exactly what a T3 tail head serves directly on the whole stat — while
-Goodman's variance-of-products algebra shows Monte-Carlo recomposition inflates the priced
-top-decile tail (+27% CV on NBA PTS). T3 captures the realizable lift for ~half the build
-cost and a fraction of the inference risk. T5's internal logic survives only as a narrow
-**NFL per-factor route** (carries/targets → EB, yards-per-* → T3) as an A3/A4 follow-on,
-never the full recomposed architecture. The original "two methods, pick order by ICC"
-framing is superseded by this fork.
-
-| Method | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **❌ T5-basketball — KILLED by A1.5. Four-stage multiplicative factorization (NBA + WNBA)** *(replaces original P3)* | Tier 1 (Skew) | 2–3 weeks | Predict (a) P(plays), (b) MIN \| plays, (c) per-100-poss rate \| MIN, (d) for PTS: FGA-per-100 × FG% × points-per-make; recombine via Monte Carlo. NBA and WNBA share this structure exactly. Routes each factor to its own ICC-appropriate strategy. The minutes × usage × efficiency funnel is DFS *practitioner convention*, not peer-reviewed tail-bias evidence (A1.5 Finding 5). | New `src/sportstradamus/factorize/` package or extend [pipeline.py](../src/sportstradamus/training/pipeline.py); inference mirror in [stats/base.py](../src/sportstradamus/stats/base.py); per-market wiring via the existing strategy registry from P1. |
-| **⚠️ T5-NFL — deferred by A1.5 to a narrow per-factor route (A3/A4 follow-on; run a conditional residual pass first). Position-dependent factorization** | Tier 1 (Skew), adapted | 2–3 weeks (depends on T5-basketball landing first) | Football has no per-100-possession equivalent and stats are position-locked. Candidate factor trees: passing yards = P(plays) × Snaps × Attempts/snap × Yards/attempt; rushing yards = P(plays) × Snaps × Carries/snap × Yards/carry; receiving yards = P(plays) × Snaps × Targets/snap × Catch-rate × Yards/catch. The Stage A1 ICC table tells you whether each factor is high-ICC (route to EB centering) or low-ICC (route to T3 distributional tail). Position-locked features (`Player position` already a category in `X` per [pipeline.py](../src/sportstradamus/training/pipeline.py)) make per-position model variants cleanly separable if needed. | Same `src/sportstradamus/factorize/` package; NFL-specific factor definitions in a config file under `data/factorize_nfl.json`. **Defer until T5-basketball ships** — same architectural code, different factor lists. |
-| **✅ T3 — A1.5 PRIMARY A2 BUILD. Spliced / Pareto-tail or normalizing-flow head** | Tier 1 (Skew) | 1–2 weeks per distribution | Body ~ SkewNormal up to learned threshold u, tail ~ Generalized Pareto above u, mixing weight per-row. LightGBMLSS v0.3.0 normalizing-flow head is the simplest production path. Direct attack on top-decile MAE without touching loc. | Custom PyTorch distribution alongside [skew_normal.py](../src/sportstradamus/skew_normal.py); dist selection in [pipeline.py:245-324](../src/sportstradamus/training/pipeline.py#L245). |
-
-**Decision points (gate logic for Stage A2):**
-- **[A1.5 fork: T3 is the primary build; T5 is killed wholesale. The "If T5 ships
-  globally" branch applies only to the narrow NFL per-factor route, not the full
-  Monte-Carlo recomposed architecture — and only after the conditional residual pass in
-  Open question #10.]**
-- If T5 ships globally → make it the new baseline and re-run EB centering on
-  each factor independently (factor-specific ICCs dominate the decision).
-  Stage A3/A4 become polish.
-- If T3 ships on the high-ICC, heavy-tail markets but T5 doesn't → distribution
-  was the bottleneck; route those markets to T3 and continue T5 work on
-  low-ICC volume-driven markets only.
-- If neither ships → either ICCs are pathologically low across the family
-  (re-check T1) or the live-path confound (Model Skew=NaN, see
-  `OVERCONFIDENCE_INVESTIGATION` §3.4) is consuming the gain. Stop and
-  resolve the live path before more training-side work.
-- **Stop-the-track check:** after T5 or T3 ships and runs in production
-  for ≥ 14 days, compute the live-data graduation criteria above per
-  cell. Cells that graduate skip Stage A3 and A4 entirely. Common
-  expected outcome: high-ICC markets graduate after T5; low-ICC
-  heavy-tail markets graduate after T3; the remaining gap is what
-  Stage A3 polish targets.
-- **Inference-path check:** Stage A2 is the largest inference-side change
-  in the plan. T5 needs `prophecize` to load N pickles per market and
-  Monte Carlo recompose; `model_prob` and `fused_loc` may need multi-head
-  variants. T3 introduces a new distribution name (spliced or
-  normalizing-flow) requiring decode + blend in `model_prob.py` and
-  `helpers/distributions.py`. Inference-path test must exist before Gate 1
-  is evaluated. Use the P2.B HurdleZINB pattern as the template.
-
-### Stage A3 — Calibration polish (1 sprint, mostly orthogonal — stack them)
-
-| Method | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **Original P7. Isotonic on loc** | Original plan | hours | Fixes residual average bias on the location parameter. Cheap, monotone. | Wrap predictions in `IsotonicRegression(out_of_bounds="clip")` post-fit in [pipeline.py](../src/sportstradamus/training/pipeline.py) before the test-set dump. |
-| **T8. CQR with player-decile-local conditioning (LCMQR)** | Tier 2 (Skew) | 2–3 days | Post-hoc per-player-decile calibration of *scale*. Complements P7 (loc) — they are orthogonal. Romano-Patterson-Candès CQR (NeurIPS 2019) and LCMQR (arXiv 2411.19523) give finite-sample marginal-coverage guarantees. | New module under `src/sportstradamus/calibration/` if it grows past 50 lines; otherwise an inline helper in the report path. |
-| **Original P6. Reduce tree regularization** | Original plan | ~1 day | Widen Optuna ranges: larger `num_leaves`/`max_depth`, smaller `min_child_samples`/`min_child_weight` at [pipeline.py:348-368](../src/sportstradamus/training/pipeline.py#L348). | Optuna search space dict in `pipeline.py`. |
-| **T9. Monotone constraint MeanYr → loc** | Tier 2 (Skew) | 1 day | Smoke test only — LightGBM `monotone_constraints` forces non-decreasing dependence of loc on MeanYr. If violated, that tells you something about the feature set. Diagnostic, not a primary fix. | `monotone_constraints` arg on the LightGBM call in [pipeline.py](../src/sportstradamus/training/pipeline.py); MeanYr feature column must be identified by index. |
-
-**Decision points (gate logic for Stage A3):**
-- If P7 + T8 combined ship ≥ 5% on top-decile MAE — calibration was the
-  bottleneck; Stage A4 (novel retries) becomes lower-ROI.
-- If T9 monotone constraint is violated by the trained model — feature set
-  is missing a key volume driver; loop back to A1 ICC analysis with that
-  feature included.
-- **Stop-the-track check:** Stage A3 is intentionally cheap calibration
-  polish. If P7+T8+P6 combined push live-data graduation across the
-  remaining cells (high probability — these target the residual loc/scale
-  miscalibration after A2), do NOT proceed to Stage A4. Stage A4 is
-  reserved for cells that fail to graduate despite both structural fix
-  (A2) and calibration polish (A3); if A3 fixes them, A4 is
-  perfect-as-enemy-of-good.
-- **Inference-path check:** P7 (isotonic on loc) and T8 (CQR) are
-  post-hoc calibration objects — new pickle keys (`isotonic`, `cqr`)
-  loaded by `model_prob` and applied after the distribution decode but
-  before `fused_loc`. Round-trip test required. P6 (reduce regularization)
-  is training-only, no inference change. T9 (monotone constraint) is
-  training-only, no inference change.
-
-### Stage A4 — Novel risky retries (only if Stage A2/A3 leave a gap)
-
-> **Deferred — post-break speculative tail; tracked under [roadmap](sportstradamus_roadmap_v2.md) Phase 6.** Body kept here (home of record); not active until A2/A3 leave a gap *and* breadth is met.
-
-| Method | Source | Cost | Direct effect | Notes |
-|---|---|---|---|---|
-| **T4. MEGB / GBMixed** *(replaces original P10 GPBoost retry)* | Tier 3 (Skew) | 1–2 weeks (MEGB), more for GBMixed | EM/BLUP-based mixed-effects boosting that fixes the bias GPBoost was criticized for in Prevett et al. 2025. MEGB is on CRAN + github.com/rid4stat/MEGB; GBMixed has no public code. **Different mechanism from GPBoost** — prior failure does not predict failure here. | Point prediction only for MEGB; use for loc, keep LightGBMLSS for scale/shape. Port GBMixed from the paper if MEGB ships. |
-| **T2. CatBoost ordered TS** *(replaces original P5 leakage-safe target encoding)* | Tier 3 (Skew) | 3–5 days per market | Only published GBDT mechanism with a proof of unbiasedness for high-cardinality categoricals (`player_id`). Strictly dominates greedy mean encoding per Prokhorenkova et al. NeurIPS 2018. | Re-fit SkewNormal/NegBin LSS heads using CatBoost instead of LightGBM. CatBoostLSS forks exist; alternatively wire an external objective. **Caveat:** unbiasedness proof is for log-loss / squared-error, not SkewNormal NLL — validate empirically. |
-| **T7. gbex** | Tier 3 (Skew) | 1–2 weeks | Generalized Pareto tail boosting on exceedances. Layered on top of the existing LSS body model. Good parallel experiment to T3. | Velthoen et al. *Extremes* 2023. Published validation is on rainfall extremes, not sports data. |
-| **T6. FAGTB adversarial penalty against MeanYr decile** | Tier 3 (Skew) | 1 week | Quantile-bucket MeanYr (10 deciles); adversary tries to predict the decile from the residual; penalize the loc gradient by adversary loss. Principled "bias-by-group" penalty per Grari et al. (arXiv 1911.05369) and M²FGB (arXiv 2504.12458). | Custom LightGBM objective + one notebook. FAGTB was designed for binary protected attributes; for continuous MeanYr, quantile-bucket first. |
-| **T10. PGBM** | Tier 3 (Skew) | 1 week | Alternative scale predictor: mean + variance from a single ensemble without parametric distribution assumption. Avoids the SkewNormal shape bound. | Sprangers et al. KDD 2021. Per Chevalier & Côté 2025, NB-class targets do **not** uniformly benefit from probabilistic GBM over point-prediction GBM — validate per market. |
-| **T11. Per-position model split** *(enabled by A1.6 position scoping)* | Stage A1.6 follow-on | 1–2 weeks (selective) | Train a separate model per (position, market) instead of one pooled cross-position model carrying `Player position` as a categorical. Removes the GBDT pooling bias where the *eligible* positions still diverge — e.g. rushing-yards QB-scramble (~19) vs RB-workhorse (~37). Attacks the mean-regression symptom on the location, complementary to T3's tail fix. | **Selective, not wholesale.** Split only where eligible-position marginals diverge materially (rushing QB-vs-RB is the prime candidate; tight receiving distributions stay pooled). NFL has ~17 games/player-season (caveat #1), so over-splitting **starves and overfits** each head — apply a min-row guard and fall back to pooled+categorical below threshold. A/B per (position, market) cell under the universal threshold. Prereq: A1.6's clean scoping (splitting contaminated rows is meaningless). Generalizes the A1.5 NFL per-factor route from factors to positions. |
-
-**Decision points (gate logic for Stage A4):**
-- If CatBoost ordered TS alone ships > 5% on a low-ICC market → bias was
-  largely `player_id` encoding leakage, not structural compression.
-  Deprioritize the rest of Stage A4; MEGB and gbex become nice-to-have.
-- If MEGB ships on PTS but not on FG3M → confirms the high-ICC vs low-ICC
-  dichotomy; route count markets to T3/T7 only and stop Track-A work there.
-- If per-position split (T11) ships on rushing-yards (QB-vs-RB, the widest
-  within-market position gap) but not on the tighter receiving markets →
-  the bias is position-pooling only where marginals diverge; split those
-  cells and keep the rest pooled. If it overfits even on rushing-yards
-  (thin QB-rusher sample), the pooled+categorical model is already
-  near-optimal — drop T11.
-- **Stop-the-track check:** Stage A4 is the last resort. If any cell is
-  still failing graduation here, *first* check whether it has crossed into
-  "live data shows we're already profitable on this market with the
-  current model" — the bar for justifying a novel risky retry (T4, T2,
-  T7, T6, T10) is much higher than for the cheap fixes earlier in the
-  track. A cell that has settled brier_skill ≥ 0 in production but
-  doesn't pass the strict 5% top-decile MAE bar on offline A/B is
-  almost certainly NOT worth Stage A4 effort — file as "deprioritized:
-  acceptable live performance, offline gap is academic."
-- **Inference-path check:** T4 MEGB (different model class, R-native —
-  needs Python wrapper and `is_megb` dispatch flag), T2 CatBoost
-  (different model class with `cat_features` + ordered TS — needs
-  `is_catboost` dispatch and a CatBoostLSS adapter or external objective
-  wrapper for SkewNormal NLL), T10 PGBM (different model class) all
-  require the most invasive inference work in Stage A4. T7 gbex (tail
-  model layered on body — multi-pickle Monte Carlo at inference). T6
-  FAGTB (training-only objective change, no inference touchpoint).
-  Inference cost is a tie-breaker: prefer T7 over T2/T4/T10 when
-  inference-engineering capacity is the constraint.
-
-### What is dropped from the Track-A plan and why
-
-- **Original P3 basic rate decomposition** → folded into T5 four-stage
-  factorization. No reason to run the basic version when the industry-standard
-  four-stage version is the actual approach DFS shops use.
-- **Original P5 leakage-safe target-encoded player features** → replaced by
-  T2 CatBoost ordered TS. Ordered TS strictly dominates expanding-mean
-  encoding per the NeurIPS 2018 proof.
-- **Original P10 GPBoost retry** → replaced by T4 MEGB/GBMixed. Same goal
-  (mixed-effects boosting) but the EM-pseudo-residual mechanism fixes the
-  documented GPBoost bias. Already-failed GPBoost prototype stands as the
-  baseline to beat, not a reason to abandon mixed-effects entirely.
-
----
-
-## Track B — ZINB markets (FTM, STL kill recovery + 6 SHIP hardening)
-
-*Depth work — secondary to 75% breadth; begins after the breadth gap closes. B1.6 (the
-feature/bias track) is the active breadth lever; B2/B3 are the active (pre-break) core
-depth; B4 is the deferred post-break tail (roadmap Phase 6).*
-
-Source: `/tmp/researcher_zinb.md`. Scope: FG3M, FTM, OREB, PF, STL, TOV, BLK,
-BLST. After P2.B, 6/8 ship under hurdle mode; FTM and STL kill. The
-researcher's hypothesis is that the FTM/STL kill is a **mathematical artifact
-of using "fit on positives" instead of a true zero-truncated NegBin (ZTNB)
-likelihood** in [hurdle.py:201](../src/sportstradamus/hurdle.py#L201). The
-hurdle Stage 2 is currently a misspecified ZTNB.
-
-### Stage B1 — Isolate and diagnose (1 week)
-
-Two tasks in parallel. Tier 1 from the researcher.
-
-| Method | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **ZTNB Stage 2 likelihood fix** | Tier 1 (ZINB) #1 | hours | Replace `NegativeBinomial(μ, α).log_prob(y)` in the Stage-2 hurdle loss with `nb.log_prob(y) − log1p(−exp(nb.log_prob(zeros_like(y))))`. The optimizer recovers an unbiased μ; the derived-π identity then gives the correct ZINB marginal mean (1−ψ)·μ. Eliminates the +NB(0)·(1−q)·μ_pos/(1−NB(0)) over-prediction on FTM/STL **by construction**. League-agnostic — applies to every ZINB market in every covered league. | Wrap the existing NegBin loss in [hurdle.py](../src/sportstradamus/hurdle.py); PyTorch already has `torch.distributions.NegativeBinomial`. |
-| **Per-league × per-market routing diagnostics** | Tier 1 (ZINB) #2 | days | Build a per-league × per-market dashboard with: observed mean, variance, zero-rate p₀; ziP and ziNB indices with bootstrap CIs (Blasco-Moreno et al. 2019); Wilson-Einbeck p-value (Stat Modelling 2019); Schwarz-corrected Vuong (HurdleNB vs ZINB) per Wilson 2015; var/mean ratio; conditional positive mean E[Y\|Y>0] vs μ. Routes each (league, market) cell to plain NB / HurdleNB(ZTNB) / MZINB / CMP. 23 cells total (NBA 8 + WNBA 7 + NFL 8). | New `src/sportstradamus/scripts/zinb_routing_diagnostics.py`; output to `data/zinb_routing/{LEAGUE}_diagnostics.parquet` (one file per league keeps diffs minimal when only one league updates). |
-
-Routing rule (precomputable from training data alone, survives temporal split):
-- ziNB CI contains 0 + low overdispersion → **plain NB**
-- ziNB CI contains 0 + hurdle structurally appropriate → **HurdleNB with ZTNB Stage 2**
-- ziNB > 0 robustly → **MZINB** (after Stage B3) or stay on HurdleZINB-with-ZTNB
-- var/mean < 1.3 → **CMP**
-
-**Decision points (gate logic for Stage B1):**
-- FTM/STL flip to ship/neutral under ZTNB Stage 2 → bias was likelihood-level
-  only. Stop and harden; Tier 2 work becomes lower-ROI.
-- FTM/STL still kill → routing diagnostics tell you whether the problem is
-  structural (use plain HurdleNB instead of ZINB on those markets) or deeper
-  (proceed to Stage B2).
-- If sample variance/mean ratio for STL is < 1.0 → pivot STL specifically to
-  CMP (Stage B4) and run that A/B before any other Stage B3 work.
-- **Stop-the-track check:** the ZTNB fix is the cheapest single change
-  in the entire plan and the researcher's strongest claim ("likely resolves
-  FTM/STL by construction"). After it ships and runs ≥ 14 days, expect
-  most ZINB cells to graduate. The bar for proceeding past Stage B1 is
-  *unambiguous* live-data failure on specific cells — not "we could
-  probably squeeze out more on FG3M with MZINB."
-- **Inference-path check:** ZTNB likelihood fix is **training-only** —
-  `HurdleZINB.predict()` returns the same `(total_count, probs, gate)`
-  triple, the derived-π formula is unchanged, downstream
-  `helpers/distributions.py` consumers are untouched. The existing
-  `tests/integration/test_zinb_hurdle_live_path.py` is sufficient
-  inference coverage. Per-market routing diagnostics (`zinb_routing_diagnostics.py`)
-  are read-only — no inference touchpoint.
-
-### Stage B1 — outcome & Track-B rescope
-
-**B1.1 — ZTNB likelihood fix: hypothesis REFUTED.** The zero-truncated NB
-(`_ZeroTruncatedNB` in `hurdle.py`, verified against scipy in
-`tests/test_ztnb_loss.py`) is correct in isolation but is **incompatible with the
-frozen derived-π hurdle decode**. Diagnostic on FG3M (a P2.B *SHIP*), 4000-row
-deterministic fit:
-
-| quantity | value |
-|---|---|
-| observed zero rate | 0.326 |
-| classifier `q` (pred P(Y=0)) | 0.311 |
-| ZTNB count-component `NB(0)` | **0.412** |
-| frac rows `NB(0) > q` → π clips to 0 | **0.652** |
-| ZTNB `μ_NB` (= base_ev) | 1.249 |
-| `E[Y\|Y>0]` under ZTNB = 1.249/(1−0.412) | 2.12 ≈ empirical 2.22 |
-
-The derived-π identity `q = π + (1−π)·NB(0)` requires `q ≥ NB(0)` per row. ZTNB
-correctly recovers a count component with a *higher* zero mass than the old
-full-support-NB-on-positives fit, so `NB(0)` exceeds `q` on most rows, π clips to
-0, and the reconstruction overshoots q (`test_zinb_hurdle_live_path` identity diff
-**0.136** ≫ 0.02 tol). Crucially `E[Y|Y>0]` is essentially unchanged (old ≈ 2.2,
-ZTNB ≈ 2.12) — ZTNB only re-decomposes the positive mean into (lower count mean,
-higher count-zero mass), which is precisely what breaks the decode. The fix would
-**regress the 6 markets P2.B shipped**, not just fail FTM/STL. Decision: revert the
-one-line wire-in; keep `_ZeroTruncatedNB` as an unwired, test-covered building
-block for the MZINB head (B3). The smoke A/B was not run (no stats.nba.com network
-in the build env); the analytical verdict is KILL.
-
-**B1.2 — routing diagnostics: the ZINB label is wrong for most cells.** The
-marginal diagnostics (`data/zinb_routing/{LEAGUE}_diagnostics.parquet`, 23 cells)
-split into two physical clusters:
-
-- **Underdispersed / near-Poisson → CMP (13 cells):** `var/mean ≤ 1.3`, ziNB ≈ 0
-  (three *negative* = zero-deflation). NBA STL, BLST, TOV, OREB, PF; WNBA BLK, STL,
-  BLST, TOV, OREB; NFL tds, rushing tds, receiving tds. NB/ZINB **cannot** fit
-  var < mean — it forces overdispersion these markets do not have; their high zero
-  rates are low-mean *sampling* zeros, not structural inflation.
-- **Overdispersed + mild inflation → MZINB (10 cells):** NBA FG3M, FTM, BLK; WNBA
-  FG3M, FTM; NFL passing tds, qb tds, interceptions, sacks taken, passing first
-  downs. Genuine overdispersion (var/mean 1.35–7.9), small-but-positive ziNB,
-  Vuong favors ZINB over the hurdle.
-
-**0/23 cells route to `hurdle_nb_ztnb`.** The two P2.B kills have *different* root
-causes: **STL** is underdispersed (var/mean 0.99–1.17) → mis-labeled ZINB → wants
-**CMP** (B4, as the parent plan's STL note anticipated); **FTM** is genuinely
-overdispersed+inflated (highest ziNB ≈ 0.063) → wants **MZINB** (B3). Neither wants
-the ZTNB hurdle.
-
-**Rescope recommendation (supersedes the original B2/B3/B4 ordering):**
-
-1. **Revisit `stat_dist.json` ZINB labeling.** ≥ 13 of the 23 "ZINB" cells are
-   underdispersed/near-Poisson and are being over-dispersed by the NB family — a
-   plausible source of the compression on those markets independent of the gate.
-2. **CMP track (was B4) is now first-class, not optional** — it owns the 13
-   underdispersed cells. Conway-Maxwell-Poisson (or plain Poisson) handles
-   var ≤ mean, which NB/ZINB structurally cannot.
-3. **MZINB (B3)** owns the 10 genuinely-inflated cells and is the consumer of the
-   `_ZeroTruncatedNB` building block (a marginalized ZINB estimates the count
-   component and the gate jointly, avoiding the derived-π `q ≥ NB(0)` constraint
-   that broke B1.1).
-4. **B2 routing wiring** is still the mechanism, but the routing config should be
-   seeded directly from `zinb_routing_diagnostics.py` output (cmp / mzinb), not
-   from a hurdle-vs-joint flag.
-
-Research-agent handoff: `/tmp/track_b_rescope_research_prompt.md`; the returned
-statistician's brief is archived at `/tmp/researcher_track_b_rescope_response.md`
-and its load-bearing conclusions are folded into the next subsection. Regenerate
-the diagnostics with `poetry run zinb-routing-diagnostics` if the parquet is stale.
-
-### Stage B1 — research verdict (distribution-family routing)
-
-A claude.ai statistician reviewed the B1.2 rescope (brief at
-`/tmp/researcher_track_b_rescope_response.md`; conclusions copied here so the plan
-stays self-contained). It **confirms the two-cluster rescope** and sharpens it
-into an implementable routing protocol, with two reality checks that change the
-economics of the stages below.
-
-**Headline.** Route the 13 underdispersed cells to **mean-parameterized
-Conway-Maxwell-Poisson (CMPμ)** and the 10 inflated cells to **marginalized ZINB
-(MZINB)**; keep the derived-π hurdle as the *default* for borderline cells. The
-two new families are **add-ons, not a wholesale replacement** of the shipped
-hurdle.
-
-**1. Route on *conditional* dispersion, not the marginal var/mean alone.** The
-marginal var/mean is a necessary screen but not a sufficient router. It misleads
-once features explain the mean: (a) *mean-mixing* inflates it — pooling a star
-(3.5 threes/g) with a benchwarmer (0.4) looks overdispersed even if each player is
-Poisson(μ_i), and a good feature set absorbs the role mixture so residual
-conditional dispersion → 1; (b) floor/ceiling effects (PF capped at 6) create
-*conditional* underdispersion features cannot remove. Safe protocol:
-1. Marginal (var/mean, ZI-index, score-test p) per cell with bootstrap CIs — what
-   `zinb_routing_diagnostics.py` already produces.
-2. Fit a baseline Poisson GBM; compute *conditional* dispersion from
-   randomized-quantile residuals (Dunn & Smyth).
-3. Route only when marginal and conditional agree, conditional overriding:
-   **CMPμ** iff conditional var/mean < 0.90 AND marginal < 1.0; **MZINB** iff
-   conditional var/mean > 1.20 AND ZI-index CI excludes 0.
-4. Disagreement zone → keep the derived-π hurdle (least to lose).
-5. Tiny-sample cells (rare markets, late-season WNBA) → single-stage Poisson +
-   sandwich SE beats data-driven family selection.
-So the B2 routing config must be seeded from a *two-stage* diagnostic (marginal +
-a Poisson-GBM residual pass), not from the marginal parquet alone.
-
-**2. Tightened dispersion bands.** B1.2's `var/mean < 1.3 → cmp` lumps
-equi-dispersed and mildly-overdispersed regimes. Literature-matched bands: ≤ 0.85
-strong underdispersion (CMPμ) · 0.85–1.15 equi-dispersed (Poisson) · 1.15–1.5 mild
-overdispersion (NB) · ≥ 1.5 NB/hurdle/ZINB. Adopt **1.15**, not 1.3, as the NB
-lower edge.
-
-**3. Do NOT use the Vuong test** to pick ZINB-vs-NB — they are nested at γ=0 so
-the Vuong assumptions fail (Wilson 2015, Economics Letters). Read the
-`zinb_routing_diagnostics.py` "Schwarz-corrected Vuong" column as descriptive
-only; use a boundary likelihood-ratio / score test for the inflation decision.
-
-**4. CMPμ is an engineering project, not a research project — but the ceiling is
-modest.** Use Huang's (2017, Statistical Modelling) *mean*-parameterized CMP
-(log-link μ, orthogonal dispersion ν), NOT canonical (λ,ν) where λ ≠ E[Y] — boost
-the quantity you price against. Neither LightGBMLSS nor XGBoostLSS ships CMP
-(verified to XGBoostLSS 0.6.1 / current LightGBMLSS), so it is a custom
-distribution class; the frameworks accept any distribution with first/second
-derivatives, and CMPμ's score/Hessian are tractable once Z(λ,ν) is tabulated
-(truncate the series at K≈64 in our μ≈0.3–3 regime; well-conditioned info matrix
-from Huang & Rathouz 2017 mean/dispersion orthogonality). Proven pattern: a
-precomputed (μ,ν)→λ look-up grid with bilinear interpolation, refreshed once per
-market (Philipson & Huang 2023, Stat. Comput.; CMPBoost / Chatla & Shmueli 2020
-JCGS is the boosting reference, code `SuneelChatla/CMPTree`). Stabilize the ν
-gradient (clip log(ν)∈[−1, 2]). **Reality check:** projected top-decile-MAE gain
-is **~3–8% relative, not 30%** — for conditional var/mean ≈ 0.75 fit as NB ≈ 1.4,
-σ is overstated ~1.37×, moving a half-line tail probability only a few points.
-Worth building to amortize across 13 cells; **not** worth it for one. When
-conditional var/mean ∈ [0.90, 1.10], plain **Poisson** is the right call — CMPμ
-collapses to it and forcing NB on equi-dispersed data destabilizes the MLE (Yang
-et al. 2026, arXiv:2404.07457).
-
-**5. For the inflated cluster, prefer the *marginalized hurdle* (Kassahun et al.
-2014) over MZINB — and that is where `_ZeroTruncatedNB` belongs.** Two joint-fit
-families remove the derived-π `q ≥ NB(0)` clip:
-- **Marginalized hurdle (Kassahun et al. 2014, Stat. Med. doi:10.1002/sim.6237) —
-  recommended, smaller lift.** It is the literal joint-fit version of the
-  two-stage hurdle we already ship: a logistic for P(Y>0) and a **zero-truncated**
-  NB on the positives, with the marginal mean reparameterized as the regression
-  target. No `q ≥ NB(0)` constraint — the count component is genuinely defined on
-  positives and the zero mass is its own free parameter, so the ZTNB that broke
-  B1.1 inside the *derived-π decode* has a *natural home* here (this is what
-  `_ZeroTruncatedNB` was kept for). Preserves the structural cleanliness of
-  derived-π while making it one joint fit. (Molenberghs et al. 2018,
-  doi:10.1002/sim.7596, for the design choices.)
-- **MZINB (Preisser et al. 2016) — the alternative, only for true structural-zero
-  excess.** Parameterizes log(ν_i)=X_i′β (β = marginal mean = the line),
-  back-computes μ_i = ν_i/(1−ψ_i), separate logistic gate; the count component is
-  a *full* NB at all y (**NOT** zero-truncated — ZTNB does not belong in MZINB).
-  Pick it only when a meaningful subpopulation is plausibly at *structural* zero
-  beyond the NB's own zeros (e.g. a player who simply never shoots threes).
-
-**Either way, joint fitting *relocates* the gate-vs-count identifiability problem,
-it does not solve it** — for fixed ν_i a larger ψ_i is offset by a larger μ_i (α
-absorbs the residual). Three mitigations that work: (a) **separate covariate
-sets** — drive ψ off zero-risk-only variables (minutes, availability,
-blowout/garbage-time flags) and ν off count variables (ability, opponent defense,
-pace); identifiability is much better when the inflation predictors are not a
-subset of the mean predictors; (b) **warm-start from the derived-π fit** — init
-the gate from the classifier log-odds at ψ̂_i = clip(q_i), β from log(ȳ_i), α from
-the NB MLE on positives; (c) **constrain α weakly** (log-normal penalty around the
-method-of-moments estimate, sd≈0.5) so the gate is not swamped by NB
-over-dispersion. Preisser's ~100% convergence is from their own simulations; the
-2017 follow-up calls MZIP/MZINB "prone to convergence problems to a degree shared
-by ZIP and ZINB" — budget real validation, keep the derived-π hurdle as fallback.
-
-**6. The routing will drift across seasons.** NBA 3PA/game rose ~1000% (2.8 →
-32.0) from 1979 to 2018-19 with 3P% up 28%→36% (Zając et al. 2023) — distribution
-shape, zero mass, and dispersion regime all move. Treat single-season routing as
-stale: re-run the diagnostic each offseason, route on a **hysteresis band** (flip
-a cell to CMPμ/MZINB only if it sits outside [0.85, 1.30] var/mean in the last
-*two* seasons), default to the hurdle inside the band, and if a cell's routing
-flips year-over-year force the more robust NB-based hurdle.
-
-**7. Cheap pre-checks before building anything.** (a) **Confirm the compression is
-a likelihood problem at all:** refit the suspect cells with a plain **Poisson GBM**
-(no over-dispersion). If top-decile compression *persists*, the likelihood is part
-of the story; if it *vanishes*, the cause was the **feature set** (missing
-opponent-defense interaction, no garbage-time/blowout flag), not the distribution
-family — fix features first, far cheaper than CMPμ/marginalized-hurdle. (b) **Audit
-for Vuong misuse:** any routing decision that used a Vuong p-value to choose
-ZINB-vs-NB is invalid (nested at γ=0) — redo with Wilson-Einbeck or a boundary LR
-test. (c) **ZICMP is research territory:** `mpcmp` does not yet ship a
-zero-inflated CMP, so a cell needing *both* inflation and under-dispersion has no
-off-the-shelf family — flag it rather than forcing one.
-
-**Recommended sequencing (supersedes the B2/B3/B4 ordering below; effort is the
-researcher's estimate):**
-1. **Diagnostics infrastructure (1–2 weeks)** — extend `zinb_routing_diagnostics.py`
-   into a per-market panel: marginal mean, var/mean + bootstrap CI, ZI-index + CI,
-   Wilson-Einbeck score test, **conditional** var/mean from randomized-quantile
-   residuals of a baseline Poisson GBM, and a 4-season stability flag (fraction of
-   seasonal var/mean in the same routing zone over the last 4 seasons). Lock the
-   protocol *before* refitting any family (Campbell 2021 selection-bias trap). Run
-   the Poisson-GBM compression pre-check (§7a) here.
-2. **Marginalized hurdle for the 10 inflated cells (3–4 weeks)** — smallest delta
-   from what we ship; consumes `_ZeroTruncatedNB`; warm-start + separate covariate
-   sets per §5. **Gate: promote iff top-decile MAE improves ≥ 3% on the inflated
-   cluster on a held-out season; else revert.**
-3. **CMPμ for the 13 underdispersed cells (6–8 weeks)** — promoted from B4
-   "STL-only/optional" to first-class. **Gate: ship CMPμ only where conditional
-   var/mean < 0.90 AND held-out top-decile MAE improves ≥ 2%; in the 0.90–1.15 band
-   ship plain Poisson (strictly safer at ν≈1).** Ceiling ~3–8% — worth it amortized
-   across 13 cells, not for one.
-4. **Routing governance (ongoing)** — offseason refresh on a rolling 3-season
-   window; hysteresis band (var/mean < 0.85 last 2 seasons → CMPμ; > 1.30 with ZI
-   CI excluding 0 → marg-hurdle/MZINB; else hurdle); stability < 0.75 → derived-π
-   hurdle; mid-season regime-flip detector → hurdle fallback. The B2 config gains
-   `poisson`/`cmp`/`marg_hurdle`/`mzinb` values, seeded by the two-stage diagnostic.
-
-**What would change this:** if LightGBMLSS/XGBoostLSS ship a native CMPμ head
-(watch the StatMixedML repos) CMPμ drops from 6–8 weeks to ~1; if held-out
-top-decile MAE on the underdispersed cells is already within 2% of a Poisson
-oracle, skip CMPμ; if > 3–4 cells show conditional var/mean < 0.70 (deep
-underdispersion) CMPμ rises in priority — only CMPμ or generalized/double-Poisson
-(Efron 1986) can fit those. The GPBoost fork (B3 below) stays an alternative *only*
-if post-step-1 residuals show systematic per-player offsets rather than dispersion
-misfit.
-
-### Stage B1.5 — §7a pre-check verdict (likelihood vs features)
-
-The §7(a) Poisson-GBM compression pre-check was run by the in-repo `research-analyst`
-**before** paying for the family build; brief at `/tmp/researcher_track_b_precheck.md`
-(conclusions copied here so the plan stays self-contained). It covered **9 cells
-across all three covered leagues** — NBA FTM/STL/TOV/FG3M (the 4 mandatory: the two
-P2.B kills + one rep per cluster), WNBA STL/FG3M/FTM, NFL interceptions/rushing-tds —
-each fit with a throwaway in-memory Poisson GBM (LightGBM `objective="poisson"`, seed
-1729, **no pickle saved**) on the non-test rows and scored against the production
-NB/ZINB baseline via `compression_eval` on identical held-out rows.
-
-**Verdict: FEATURES, not likelihood — DEFER/CANCEL the 9–12-week CMPμ +
-marginalized-hurdle/MZINB build as Track B's next step.** The likelihood signature
-("Poisson tracks the top decile while NB compresses it") did not appear on any cell.
-
-| cell | cluster | marg var/mean | cond RQR var | top-MAE Δ (Pois vs NB) | §7a verdict |
-|---|---|---|---|---|---|
-| NBA FTM | inflated | 2.00 | 1.54 | +3.3% | KILL → features |
-| NBA STL | underdisp | 1.17 | 1.08 | +3.5% | KILL → features |
-| NBA TOV | underdisp | 1.16 | 1.04 | +1.4% | KILL → features |
-| NBA FG3M | inflated | 1.57 | 1.17 | +6.3% | KILL → **mean-bias** (SHIP is bias, not family) |
-| WNBA STL | underdisp | 0.99 | 1.00 | −0.9% | KILL → features |
-| WNBA FG3M | inflated | 1.58 | 1.12 | −0.6% | KILL → features |
-| WNBA FTM | inflated | 1.92 | 1.46 | +0.9% | KILL → features |
-| NFL interceptions | inflated | 1.60 | 1.04 | −1.1% | KILL → features (RQR≈1: low-count, not inflated cond.) |
-| NFL rushing-tds | underdisp | 0.96 | 0.96 | +10.3% | KILL → **mean-bias** (SHIP is bias, not family) |
-
-**1. Top-decile compression is distribution-family-INVARIANT — it persists under a
-Poisson mean head, so it cannot be a likelihood problem.** Poisson top-decile
-compression ratio `std(pred)/std(actual)` is 0.16–0.35 vs the production NB/ZINB
-0.12–0.37 — indistinguishable, both severely compressed; a model with **no
-over-dispersion freedom at all** compresses the high-mean tail just as hard. This is
-the textbook ensemble-tree dynamic-range bias (extreme values estimated by
-leaf-averages of neighbours; persists regardless of sample size or family) — Belitz &
-Stackelberg 2021 (doi:10.1016/j.envsoft.2021.105006), Zhang & Lu 2012
-(doi:10.1080/02664763.2011.578621); mechanism = the regularized leaf-average itself
-(Boulevard, Zhou & Hooker, arXiv:1806.09762). Neither CMPμ (re-parameterizes
-dispersion, leaves the boosted mean unchanged) nor MZINB/hurdle (re-parameterizes the
-zero gate) touches the mean head's leaf-averaging. **Load-bearing finding — it gates
-the entire family build.** Independently predicted by the plan's own bibliography:
-Chevalier & Côté 2025 (doi:10.1007/s13385-025-00428-5) find point ≡ probabilistic in
-Poisson, and a global dispersion parameter beat covariate-specific dispersion in their
-benchmark.
-
-**2. The 2 cells that pass the ≥5% gate are upward mean-bias, not dispersion, and not
-Track B's symptom.** NBA FG3M (+6.3%) and NFL rushing-tds (+10.3%) "SHIP," but the
-decile-bias tables show **uniform upward bias** — the production model over-predicts,
-worst at the *bottom* decile (low-volume players: FG3M predicts 0.68 threes where the
-actual is 0.20), the inverse of the under-prediction-of-stars compression Track B
-targets. A trivial bias re-centering (subtract mean signed bias, change nothing else)
-recovers 41% (FG3M) / 47% (rushing-tds) of the gain with **no family change**; the
-remainder is better mean-fit from a fresh GBM, not orthogonal dispersion. Under the
-calibration ship gate (Universal decision threshold condition 4, added in response
-to this finding — now a bottom-quartile relative check + wide absolute backstops on
-both ends), both cells **fail Gate 1** — the low-volume over-prediction their
-top-decile wins rely on is exactly what that gate now blocks.
-
-**3. No CMPμ candidate among the NBA/WNBA cells.** Conditional Dunn–Smyth RQR variance
-(Dunn & Smyth 1996, doi:10.1080/10618600.1996.10474708; power for count GOF: Feng et
-al. 2020, doi:10.1186/s12874-020-01055-2) collapses the marginal var/mean toward 1
-once the ~280-col feature set conditions the mean: STL 1.17→1.08, TOV 1.16→1.04, WNBA
-STL 0.99→1.00 — **equi-dispersed, not underdispersed**, failing the verdict's own
-`CMPμ iff conditional < 0.90 AND marginal < 1.0` gate. At ν≈1 there is nothing for
-CMPμ to learn; its ~3–8% ceiling does not survive contact with conditional RQR ≈ 1.
-The inflated cells keep genuine conditional overdispersion (FTM 1.46–1.54, FG3M
-1.12–1.17 → NB is the right family there) but a Poisson/NB mean swap moves top-decile
-MAE < 5% on every inflated cell except the bias-driven FG3M, so the
-marginalized-hurdle/MZINB build is **not** justified by this pre-check either.
-
-**Pivot — Track B's next step is a ~1–2 week feature/bias track, not the family build
-(supersedes the §7-verdict B2/B3 sequencing above):**
-1. **Post-hoc mean-bias / dynamic-range correction** — cheapest of the six Belitz &
-   Stackelberg 2021 methods (ROE = regress-observed-on-estimated, or EDM =
-   empirical-distribution matching), fit on validation, applied before `fused_loc`. A
-   post-hoc calibration object on the inference checklist (one new pickle key + a
-   `model_prob` apply step + a round-trip test). **Days.** Directly attacks the
-   family-invariant dynamic-range compression; captures ~half the FG3M/rushing-tds gain
-   by construction.
-2. **The leakage-safe target-encoded player features already staged as B2**
-   (`groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent) — the
-   named "deficient feature set" items; league-agnostic; ship regardless of family.
-   **Days.**
-3. **Opponent-defense interaction + garbage-time/blowout flag** — the other named
-   feature-cause culprits; the FG3M bottom-decile overshoot (low-volume players
-   predicted ~3.4× actual) points at not conditioning on *whether the player attempts
-   threes at all* — an availability/role feature, far cheaper than a structural-zero
-   gate.
-
-**Cost the pre-check gates:** ~1–2 weeks (feature/bias) vs ~9–12 weeks (CMPμ +
-marginalized hurdle + the largest inference-path change in the plan + the
-Open-question-#2 "3–5 cycles debugging the MZINB gradient" risk). **Re-entry condition:**
-build the family only on a cell that **still kills after** the cheap feature/bias fixes
-— specifically conditional RQR variance < 0.70 AND the Poisson GBM tracking the top
-decile while NB compresses it. None of the 9 cells does. Caveat: this is a
-single-snapshot, single-fit pre-check (untuned Poisson, one HP set); a *tuned* Poisson
-would only strengthen the "features/fit, not family" read, and the brier_skill gate did
-not fire (see Open question #12). Per-cluster: the 13-cell `cmp` label and the 10-cell
-inflated label from Stage B1.2 are both unsupported as a *family-build* trigger by this
-evidence (see Open question #11).
-
-### Stage B1.6 — Feature/bias track (the §7a pivot — Track B's operative next step, ~1–2 weeks)
-
-Per the Stage B1.5 §7a verdict the top-decile compression is a **mean-head + feature**
-problem, not a likelihood problem, so this stage attacks those two layers
-cheapest-first and **ships per market the instant a cell clears Gate 1** (per the
-"Ship incrementally" principle). It **supersedes the family build (Stage B2 routing +
-Stage B3 fork) as the next step**; the family build is deferred behind the re-entry
-condition at the end of this stage. Lock the eval protocol before refitting (Campbell
-2021 selection-bias trap, doi:10.1111/2041-210X.13559).
-
-| Workstream | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **1. Post-hoc mean-bias / dynamic-range correction** (NEW — the only piece that targets the actual mechanism) | Belitz & Stackelberg 2021 (doi:10.1016/j.envsoft.2021.105006), ROE / EDM | days | Attacks the family-invariant leaf-averaging compression *directly* (B1.5 Finding 1). Fit `ŷ_corrected = f(ŷ)` on the validation split — ROE (regress observed-on-estimated) or EDM (empirical-distribution matching) — and apply to the predicted mean **before** `fused_loc`. Symmetric: pulls the bottom-decile over-prediction *down*, so it directly serves the new Gate-1/Gate-2 bias gates. Recovers ~half the FG3M/rushing-tds gain by construction. | Post-hoc calibration object: new pickle key (e.g. `bias_correction`) per the **Pickle-schema discipline** section; apply step in `model_prob` before [helpers/distributions.py:314](../src/sportstradamus/helpers/distributions.py#L314) `fused_loc` / `get_ev`; fit on validation only (leakage-safe); one inference-path round-trip test. |
-| **2. Leakage-safe target-encoded player features** (pulled forward from Stage B2) | Tier 2 (ZINB) #5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. League-agnostic; ships regardless of family. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as MeanYr/Mean10 ([test_meanyr_mean10_leakage.py](../tests/test_meanyr_mean10_leakage.py)). |
-| **3. Opponent-defense interaction + garbage-time/blowout flag** | B1.5 Finding 2 / dispatch feature-cause list | days–1 wk | The named "deficient feature set" items. Opponent-defense interaction (player stat × opponent defensive profile from `profile_market`); a blowout/garbage-time flag (projected point-differential bucket / minutes-at-risk). Addresses the FG3M low-volume overshoot — the model not conditioning on *whether the player attempts the stat at all*; an availability/role feature is far cheaper than a structural-zero gate. | New feature columns in the feature build + the [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats` inference mirror; leakage-safe, same audit. |
-
-**Sequencing (cheapest, highest-leverage first): (1) → (2) → (3).** Do the post-hoc
-correction first — days of work, directly attacks the family-invariant compression,
-and on its own is expected to clear the new calibration (bottom-quartile) gate on
-FG3M/rushing-tds.
-Re-run `compression_eval` per cell after each workstream and **promote every cell that
-clears Gate 1's five conditions to the 14-day live soak immediately** — do not wait for
-later workstreams or for other cells.
-
-**Decision points (gate logic for Stage B1.6):**
-- After (1): any cell now clearing Gate 1 (incl. the new calibration / bottom-quartile
-  condition) ships to soak. Expect FG3M/rushing-tds to flip from "bias-driven nominal SHIP" to a
-  *legitimate* SHIP once the over-prediction is corrected rather than exploited.
-- After (1)+(2)+(3): cells that clear Gate 1 ship; cells that still kill carry to the
-  re-entry check below.
-- **Stop-the-track check:** if a cell graduates via Gate 2 after B1.6, stop track work
-  on it — do not reach for the family build "because we can" (diminishing-returns
-  principle).
-- **Inference-path check:** workstream (1) is the cleanest possible inference change —
-  strictly post-hoc on the mean: one pickle key + one `model_prob` apply step + a
-  round-trip test. Workstreams (2)/(3) need the `get_stats` train/inference mirror,
-  identical at both ends, leakage-tested like MeanYr/Mean10. **Validate (1) does not
-  worsen `brier_skill_score`** — a post-hoc mean shift must not distort the
-  probabilistic shape (Open question #12: check CRPS/log-score + brier_skill, not MAE
-  alone).
-
-**Re-entry to the family build (supersedes the B2/B3 sequencing below).** Build CMPμ or
-the marginalized hurdle **only** on a cell that *still* kills after B1.6 ships —
-specifically conditional Dunn–Smyth RQR variance **< 0.70** AND the Poisson GBM
-tracking the top decile while NB compresses it. None of the 9 §7a cells qualifies today
-(B1.5). The diagnostic that re-checks this is the conditional-RQR pass from Open
-question #11 (run it on the 11 untested `cmp`-labelled cells before any CMPμ build); if
-a re-entry cell appears, only then do Stage B2's routing wiring + the Stage B3 fork
-apply, scoped to that cell.
-
-### Stage B2 — Routing + orthogonal feature engineering (2 weeks, in parallel)
-
-> **Status after the Stage B1.5 §7a verdict:** this stage is now **downstream of Stage
-> B1.6 and gated by the re-entry condition** — the family build (CMPμ /
-> marginalized-hurdle, Stage B3) and the routing wiring below are pursued **per cell,
-> only for cells that still kill after B1.6 ships.** The "leakage-safe target-encoded
-> player features" row is **pulled forward into Stage B1.6** (it ships regardless of
-> family choice); the routing-config wiring stays here for when a re-entry cell needs a
-> non-default family.
-
-| Method | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **Per-league × per-market routing wiring** | Tier 1 (ZINB) #2 | days | Implement the routing logic from B1's table. `data/zinb_mode_per_market.json` config schema: `{LEAGUE: {market: "joint"|"hurdle"|"plain_nb"|"poisson"|"cmp"|"marg_hurdle"|"mzinb"}}` (keyed by both league and market — NBA STL and WNBA STL may route differently). **Seeded by the two-stage routing diagnostic (marginal `zinb_routing_diagnostics.py` + a Poisson-GBM conditional-dispersion residual pass) under the Stage B1 research verdict's hysteresis band — not the marginal parquet alone.** Per-cell lookup in [training/pipeline.py:1869](../src/sportstradamus/training/pipeline.py#L1869) `_step_select_distribution` consults the config; default `"joint"` for any unrouted cell keeps legacy production byte-identical. | `pipeline.py` per-cell dispatch; new JSON config under `data/`. |
-| **Leakage-safe target-encoded player features** | Tier 2 (ZINB) #5; was original P5 | days | `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent. Orthogonal to architectural choice; ships regardless of which Stage B3 winner emerges. League-agnostic — same expanding-mean recipe works for NBA/WNBA/NFL. | New columns in [stats/base.py:597](../src/sportstradamus/stats/base.py#L597) `get_stats`; same leakage audit as the MeanYr/Mean10 columns. |
-
-**Decision points (gate logic for Stage B2):**
-- 8/8 ship under routing + encoded features → hold off on Stage B3 unless
-  ROI is needed elsewhere. The system is in a good state.
-- <8/8 ship → proceed to Stage B3 on the markets that still kill.
-- **Stop-the-track check:** after Stage B2's routing config lands and
-  runs ≥ 14 days, expect the remaining ZINB cells (across NBA/WNBA/NFL)
-  to graduate. Stage B3 is a 4–6 week investment in a novel architecture
-  (MZINB) or a non-trivial dependency add (GPBoost); do not start it
-  unless ≥ 3 cells have *not* graduated AND their offline residual
-  diagnostics point clearly at one of MZINB or GPBoost. "We can probably
-  do better than B2" without that evidence is the perfect-as-enemy-of-good
-  trap.
-- **Inference-path check:** Per-(league, market) routing config is the
-  cleanest inference change in Track B — `model_prob` already dispatches
-  on `getattr(model, "is_hurdle", False)` (the P2.B pattern), so the
-  config just changes which pickle gets loaded per cell; per-cell pickle
-  already records `zinb_mode`. Leakage-safe target-encoded features
-  require the same `stats/base.py:get_stats` mirror as MeanYr/Mean10 —
-  feature column must be computed identically at inference with no peek
-  at the current game; leakage test pattern from
-  [test_meanyr_mean10_leakage.py](../tests/test_meanyr_mean10_leakage.py).
-
-### Stage B3 — Strategic fork (4–6 weeks, pick ONE — not both)
-
-This is the canonical decision point of the ZINB track. The researcher
-explicitly flags that running MZINB and GPBoost in parallel doubles cost
-without obvious gain. The decision criterion is **residual structure after
-Stage B2**. If that residual structure is ambiguous, dispatch the
-`research-analyst` agent to adjudicate the fork before committing 4–6 weeks.
-
-| Option | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **MZINB head in LightGBMLSS** | Tier 2 (ZINB) #4 | 2–4 weeks | Reparameterize so the marginal mean ν = E[Y] is boosted directly; the latent NB conditional mean μ = ν/(1−ψ) is reconstructed. Three heads: logit(ψ), log(ν), log(α). The boosted ν IS the quantity the downstream pipeline already consumes. Cleaner than the current derived-π trick. Removes the `q ≥ NB(0)` clip **by construction**, but *relocates* (does not eliminate) the gate-vs-count trade-off — see the **Stage B1 research verdict §5**, which recommends the **marginalized hurdle (Kassahun 2014)** as the smaller-lift joint fit for the inflated cluster (the natural home for `_ZeroTruncatedNB`), with MZINB reserved for true structural-zero excess. **No published GBDT implementation — novel contribution.** | New `MZINB` class alongside the existing distributions in [skew_normal.py](../src/sportstradamus/skew_normal.py) or under [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py); foundational papers Long 2014 + Preisser 2016. Use Mutiso et al. 2024 (Pólya-gamma augmentation) as a likelihood-structure reference. |
-| **GPBoost with NegBin likelihood + player random intercept** | Tier 2 (ZINB) #3; was original P10 | 1–2 weeks | NegBin is one of GPBoost's native likelihoods, so the LSS-flexibility loss is smaller on counts than on SkewNormal. Sigrist's published benchmarks (~10pp gap vs LightGBM-Cat, ~93pp vs naive numeric ID) transfer to NB. The earlier GPBoost prototype failed on SkewNormal FGA, not on counts. | New GPBoost dependency (user pre-approved for a phase that needs it); custom training path branched off [pipeline.py](../src/sportstradamus/training/pipeline.py). Treat as a sub-project with its own task list. |
-
-**Decision criterion (researcher-specified):**
-- **Choose GPBoost** if residuals plotted by `player_id` (with bootstrap CIs)
-  show systematic per-player offsets statistically distinguishable from zero
-  — i.e. the problem is missing player effects. Trade-off: lose LSS-style
-  distributional flexibility for future markets that need exotic distributions
-  (CMP, mixtures, normalizing flows).
-- **Choose MZINB** if residuals are tail-driven or shape-driven
-  (heavy-tailed within-player residuals, not location-shifted) — i.e. the
-  problem is identifiability of the gate vs the count head, not missing
-  player effects. Trade-off: novel implementation, ~4 weeks of debugging,
-  no GBDT precedent.
-
-In either case, also implement **Per-parameter Optuna search** (Tier 3 #6,
-days of work, see Stage B4) — you want a fair tuned baseline against which to
-evaluate the bigger structural change.
-
-**Decision points (gate logic for Stage B3):**
-- If residuals after Stage B2 are ambiguous (no clear per-player pattern AND
-  no clear tail-driven pattern) → run a 2-week MZINB spike first (cheaper
-  exit if it fails); GPBoost is the fallback.
-- If Stage B4 per-parameter Optuna alone eliminates the deterministic-mode
-  blowups across all SHIP markets → MZINB becomes much weaker as a
-  recommendation; identifiability was hyperparameter-induced not
-  parameterization-induced. Reroute Stage B3 effort to GPBoost-only.
-- **Stop-the-track check:** Stage B3 is the canonical "is it worth it"
-  decision. The researcher explicitly flags MZINB as "no GBDT precedent
-  — novel contribution." That implementation risk is only worth eating
-  if (a) live data shows specific cells still failing graduation after
-  B1+B2 AND (b) their residual structure clearly favors MZINB over the
-  cheaper GPBoost alternative. If live performance is acceptable on all
-  cells but offline metrics still show top-decile gap, the right
-  decision is "file MZINB as future research" and move to Stage B4 or
-  a different project.
-- **Inference-path check:** Both options change the parameter contract.
-  MZINB heads return `(ν, ψ, α)` instead of `(total_count, probs, gate)`
-  — `model_prob.py` needs a new ZINB-MZINB decode block that derives
-  `Model EV = ν` directly (the marginal mean IS the boosted quantity)
-  and reconstructs the `Model Gate` from `ψ` for downstream `fused_loc`
-  compatibility. The `dist` string can stay `"ZINB"` (mode field
-  distinguishes), but a new `mzinb_mode` pickle key with a legacy
-  default of `"hurdle"` keeps existing pickles loadable. GPBoost is a
-  different model class entirely — `is_gpboost` dispatch flag in
-  `model_prob`, model-load path branches in `prediction/__init__.py`,
-  and a GPBoost-specific live-path test. **Inference-engineering cost
-  alone is enough reason to prefer one fork over the other when
-  residual diagnostics are ambiguous** — GPBoost's class change is
-  larger than MZINB's parameter-contract change.
-
-### Stage B4 — Tuning, polish, specialized fixes (optional)
-
-> **Deferred — post-break speculative tail; tracked under [roadmap](sportstradamus_roadmap_v2.md) Phase 6.** Body kept here (home of record); optional, not active until B2/B3 leave a gap *and* breadth is met.
-
-| Method | Source | Cost | Direct effect | Implementation site |
-|---|---|---|---|---|
-| **Per-parameter Optuna search** | Tier 3 (ZINB) #6 | days | Separate `learning_rate` and `n_estimators` for gate vs NB heads inside the existing LightGBMLSS Optuna sweep. cyc-GBM-inspired without porting. May resolve the deterministic-30-round blowups without architectural change. Daub et al. 2026 ("balanced step length") provides theoretical justification. | Extend the Optuna search-space dict in [pipeline.py:348-368](../src/sportstradamus/training/pipeline.py#L348) to distinguish gate vs count hyperparameters. |
-| **CMPμ head — PROMOTED to first-class (owns the 13 underdispersed cells, not STL-only)** | was Tier 4 → Tier 1 (ZINB) #8 | 6–8 weeks | Per the Stage B1 research verdict, no longer optional STL polish — owns the 13 underdispersed cells. Mean-parameterized CMP (Huang 2017; canonical λ ≠ E[Y], unusable for line-pricing). Custom distribution class — neither LightGBMLSS nor XGBoostLSS ships CMP. Series truncation K≈64; precomputed (μ,ν)→λ look-up grid (Philipson & Huang 2023); init ν from method-of-moments; clip log(ν)∈[−1,2]. Ceiling ~3–8% top-decile MAE amortized across 13 cells. Plain **Poisson** when conditional var/mean ∈ [0.90, 1.10]. | New PyTorch custom distribution; pre-computed Z(λ, ν) + (μ,ν)→λ lookup table at module load. Reference: CMPBoost (Chatla & Shmueli 2020), code `SuneelChatla/CMPTree`. |
-| **Reduced regularization on location parameter** | Tier 3 (ZINB) #7; was original P6 | hours | Larger `num_leaves`, smaller `min_data_in_leaf`, deeper `max_depth`. Marginal effect. Try only after Tier 1–2. | Optuna search-space dict. |
-| **MERF-style iteration with LightGBMLSS** | Tier 4 (ZINB) #9; was original P9/P10 fallback | 2–3 weeks | Alternating fit-residual / re-estimate-shrunken-per-player-baseline loop. Reserve as fallback if Stage B3 (both MZINB and GPBoost) prove infeasible. | New module under `src/sportstradamus/training/`. |
-| **Quantile / expectile heads alongside the ZINB** | Tier 5 (ZINB) #11; was original P7-equivalent | days | **Different use case** — DFS ceiling and over bets, not the bias fix. Add alongside, not instead of, Tier 1–2. Sluijterman et al. 2025 arctan pinball loss is a drop-in replacement for standard pinball with better-calibrated extremes. | New quantile head pickled alongside the ZINB pickle. |
-| **Isotonic post-hoc calibration on ZINB-mean** | Tier 5 (ZINB) #12; was original P8 | hours | Polish. Mops up residual average bias after architectural fixes. Don't lead with it. | Wrap predictions in `IsotonicRegression(out_of_bounds="clip")`. |
-| **Sample reweighting on high-scoring games** | Tier 5 (ZINB) #13; was original P9 | hours | Last resort. Increases variance in the upweighted region. | LightGBM `sample_weight` arg. |
-
-**What NOT to do (researcher-specified warnings):**
-- Do **not** lead with quantile/expectile heads as a bias fix — they change
-  which point of the distribution is predicted, not the underlying bias.
-- Do **not** lead with isotonic calibration. It's polish, not a primary fix.
-- Do **not** port to cyc-GBM or CyclicBoosting before trying per-parameter
-  Optuna inside the existing LightGBMLSS stack. Port cost is unjustified
-  until you've ruled out the cheap version of the same idea.
-- Do **not** pursue per-minute decomposition on count markets in parallel
-  with Track A — leverage is materially lower on counts (STL/BLK are
-  low-mean stochastic events, not rate-times-minutes phenomena) and the
-  engineering cost overlaps.
-- Do **not** commit to both MZINB and GPBoost. Pick based on Stage B2
-  residual diagnostics.
-
-**Decision points (gate logic for Stage B4):**
-- If per-parameter Optuna alone hits the threshold → declare done; don't
-  proceed to CMP/MERF.
-- If STL's var/mean ratio < 1.0 → CMP becomes a primary fix, not Stage B4
-  polish. Move it up to Stage B3.
-- If everything in B4 fails → loop back to a Track-A-style live-path audit:
-  the FTM/STL kill may actually originate downstream in
-  [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py),
-  not in training. See OVERCONFIDENCE_INVESTIGATION §3.4 for the live-path
-  confound playbook.
-- **Stop-the-track check:** Stage B4 items are individually cheap (hours
-  to days), so the perfect-as-enemy-of-good risk is lower than at Stage
-  B3. But the *cumulative* time across all 6 items is multiple weeks. If
-  per-parameter Optuna alone graduates the holdout cells, do not run the
-  other 5 — file as deprioritized with the graduating metrics noted.
-- **Inference-path check:** Per-parameter Optuna and reduced
-  regularization are training-only — no inference change. Sample
-  reweighting is training-only — no inference change. CMP head is a new
-  distribution: `model_prob` decode + `helpers/distributions.py`
-  consumers all need to accept `dist == "CMP"`; live-path test required.
-  Isotonic on ZINB-mean is a post-hoc calibration object — new
-  `isotonic_zinb` pickle key + load + apply in `model_prob` after the
-  ZINB decode block; round-trip test. Quantile heads pickle alongside
-  the ZINB model with a new key (`quantile_heads`) and a new live-path
-  decode path. MERF-style iteration changes the model architecture
-  (alternating fit-residual / re-estimate-shrunken-baseline) — pickle
-  schema changes, `is_merf` dispatch flag, new live-path test.
-
----
-
-## Open questions (researcher-flagged, unresolved)
-
-1. **Feature-predictive-power asymmetry between zero-vs-count splits at the
-   market level is not in the published literature.** Your TOV-vs-STL puzzle
-   (similar surface stats, opposite hurdle outcomes) is not directly
-   addressed; the closest analogue is Feng (2021)'s finding that NB
-   outperforms ZINB at ~20% zero rates (STL at 48% is well above that
-   regime). You may be observing a genuine domain-specific phenomenon that
-   would be publishable in its own right. Capture data and patterns
-   discovered in this project for a possible write-up after Stage B
-   concludes. (ZINB researcher caveat #5.)
-2. **No GBDT precedent for MZINB.** First implementation in boosting will be
-   yours. Expect 3–5 cycles of debugging the gradient computation for
-   log(ν) → μ_implied = ν/(1−ψ) before the model trains stably. The
-   empirical case for boosted MZINB resolving the deterministic-mode
-   blowups would itself be a novel contribution. (ZINB researcher caveat #1.)
-3. **MEGB's headline 35–76% MSE improvement is from simulations**, not
-   from a real high-n low-p panel matching the NBA regime. Transfer is the
-   bet, not a confirmed result. (SkewNormal researcher caveat.)
-4. **DEGPD / ZIDEGPD count distributions** (Ahmad & Hussain 2025) are very
-   new with no production-grade Python implementation. Implementation from
-   the paper required if the routing diagnostic points there. Deliberately
-   not staged into Track B — too speculative for the current plan.
-5. **CMP normalizing-constant lookup table** implementation cost is non-trivial.
-   Worth it only if Stage B1 var/mean diagnostics strongly suggest under-dispersion
-   for at least one market.
-6. **CatBoost ordered TS unbiasedness was proven for log-loss / squared-error**;
-   the proof does not directly extend to a distributional SkewNormal NLL.
-   Mechanism should still help, but validate empirically. (SkewNormal
-   researcher caveat.)
-7. **The Chevalier & Côté (2025) benchmark warns that probabilistic GBM is
-   not uniformly better than point-prediction GBM on NB-class targets.**
-   Validate any architectural switch (MZINB, cyc-GBM, CMP) against the
-   current LightGBMLSS-ZINB baseline on probabilistic metrics (CRPS,
-   log-score) **and** on the downstream MAE metric, not just one of these.
-8. **None of these approaches solves "high-volume players get under-predicted"
-   if it is fundamentally a player-effect issue.** Best long-term architecture
-   probably combines (a) MZINB likelihood, (b) per-player random intercept
-   à la GPBoost, and (c) per-parameter early stopping à la cyc-GBM — but
-   each piece is an independent A/B and should be staged as above.
-9. **The T5 recomposition-variance penalty must be checked at Gate 1 if T5 is ever
-   trialed.** Stage A1.5 measured **+27% within-player-season CV inflation** from
-   recomposing FGA × (PTS/FGA) vs modeling NBA PTS directly (Goodman 1960, DOI
-   10.1080/01621459.1960.10483369). The +27% is an identity-decomposition floor, not a
-   trained-model A/B — the *direction* (inflation) is robust because the
-   volume↔efficiency negative covariance is a structural identity, the *magnitude* is an
-   estimate. Any T5 trial (NFL only, per the A1.5 fork) must verify the recomposed
-   predictive scale is not inflated vs the direct SkewNormal baseline on **both** metric
-   families (CRPS/log-score and top-decile MAE per Open question #7), not MAE alone.
-   (Stage A1.5 research verdict.)
-10. **Marginal vs conditional, for the NFL per-factor route.** Every factor ICC in A1.5
-   is *unconditional*; the ~280-column production matrix already absorbs much
-   between-player volume identity, so the marginal volume/efficiency split overstates the
-   residual signal available to either T5 or T3. Before A2 commits engineering to the NFL
-   per-factor route, run a one-pass diagnostic — does a SkewNormal-GBM on each NFL factor
-   beat the whole-stat SkewNormal-GBM on held-out top-decile MAE? — to convert the
-   marginal verdict to a conditional one. Flagged, not blocking. (Stage A1.5 research
-   verdict.)
-11. **The marginal "underdispersed (CMP)" cluster label is mostly a mean-mixing
-   artifact for NBA/WNBA.** 13 cells were routed to `cmp` on marginal var/mean ≤ 1.3
-   (Stage B1.2); the two reps Poisson-GBM-checked in Stage B1.5 (STL, TOV) are
-   conditionally **equi-dispersed** (RQR ≈ 1.0–1.08). The other 11 underdispersed-
-   labelled cells (NBA BLST/OREB/PF, WNBA BLK/STL/BLST/TOV/OREB, NFL tds/receiving-tds)
-   were not individually checked — each needs the same conditional-RQR pass before any
-   CMPμ build, and the strong prior is that most land at RQR ≈ 1 (plain Poisson, not
-   CMPμ). (Stage B1.5 §7a pre-check verdict.)
-12. **The brier_skill_score third gate did not fire in the Stage B1.5 pre-check** — the
-   test CSVs carry no `Odds` column and the candidate left `P` unchanged (only `EV`
-   swapped), so the gate reduced to the two MAE conditions. Correct for a mean-head
-   pre-check, but it means the pre-check does not speak to probabilistic calibration:
-   any eventual family **or** bias-correction switch must still be validated on
-   CRPS/log-score **and** brier_skill on a report run that carries the book columns.
-   (Extends Open question #7; Stage B1.5 verdict.)
-
----
+4. Legacy pickles (without the new keys) still load and predict — the
+   `filedict.get(key, default)` contract from P2.B.
+
+If the inference test does not exist, the change cannot ship (the
+OVERCONFIDENCE_INVESTIGATION §3.4 live-path-confound lesson: offline A/B verdicts are
+meaningless if the change crashes or silently drifts in `prophecize`).
+
+### Pickle-schema discipline (where train/predict drift hides)
+
+The pickle dict written by
+[pipeline.py:1940 `_build_filedict`](../src/sportstradamus/training/pipeline.py#L1940)
+is the train↔inference contract. Every new field needs: (1) a reader site in
+`model_prob.py` (or wherever consumed); (2) a legacy-default fallback
+(`filedict.get("new_key", "joint")` — the P2.B `zinb_mode` pattern); (3) a round-trip
+test asserting byte-identical predictions.
+
+Fields written as of commit `77e4a41`: `model`, `step`, `stats`, `metrics`,
+`diagnostics`, `params`, `distribution`, `cv`, `std`, `temperature`, `dispersion_cal`,
+`weight`, `r_book`, `hist_gate`, `shape_ceiling`, `normalized`, `offset_meta`,
+`target_strategy`, `zinb_mode`, `is_hurdle`, `expected_columns`. Any addition lands in
+this list and gets the three-step contract.
+
+## Path to 75% — feature/bias track (Stage B1.6)
+
+The operative next step toward breadth. Per the Stage B1.5 §7a verdict, top-decile
+compression is a **mean-head + feature** problem, not a likelihood problem, so Stage
+B1.6 attacks those two layers cheapest-first and **ships per market the instant a cell
+clears Gate 1** (per "Ship incrementally"). It **supersedes the family build (B2
+routing + B3 fork) as the next step**; the family build is deferred behind a re-entry
+condition. Target: the bias-failing low-mean count cells (NBA −3, WNBA −4, NFL −2).
+Lock the eval protocol before refitting [29].
+
+**Three workstreams, sequenced cheapest/highest-leverage first — (1) → (2) → (3):**
+
+1. **Post-hoc mean-bias / dynamic-range correction** (NEW; the only piece targeting
+   the actual mechanism). Fit `ŷ_corrected = f(ŷ)` on validation (ROE or EDM [3]),
+   apply to the predicted mean **before** `fused_loc`. Symmetric: pulls bottom-decile
+   over-prediction *down*, serving the new bias gates; recovers ~half the
+   FG3M/rushing-tds gain by construction. New pickle key (e.g. `bias_correction`); apply
+   step in `model_prob` before [distributions.py:314](../src/sportstradamus/helpers/distributions.py#L314); one round-trip test.
+2. **Leakage-safe target-encoded player features** (pulled forward from B2).
+   `groupby(player_id).expanding().mean().shift(1)` for stat and stat×opponent; new
+   columns in [get_stats](../src/sportstradamus/stats/base.py#L597); same leakage audit
+   as MeanYr/Mean10.
+3. **Opponent-defense interaction + garbage-time/blowout flag** (B1.5 Finding 2).
+   Player stat × opponent defensive profile (`profile_market`) + a blowout/garbage-time
+   flag; addresses the FG3M low-volume overshoot. Same `get_stats` mirror, leakage-safe.
+
+**Decision points / validation:** after each workstream re-run `compression_eval` per
+cell; promote every cell clearing Gate 1's five conditions to the 14-day soak. **Validate
+(1) does not worsen `brier_skill_score`** (CRPS/log-score + brier_skill, not MAE alone —
+Open question #12). Build CMPμ / marginalized hurdle **only** on a cell that still kills
+after B1.6 (conditional Dunn–Smyth RQR variance < 0.70 AND Poisson tracking the top
+decile while NB compresses).
+
+**Research verdict (2026-05-22, research-analyst).** The gap is a **bias-gate**
+problem; workstream (1) post-hoc correction is the **rank-1 lever** — the only method
+that moves both gated bands by construction — ahead of the feature work. Prefer
+**isotonic-on-prediction** where the decile miscalibration is curved (over-low /
+under-high); per-decile multicalibration [44] is the formal frame but a fallback for a
+band *just* outside, not the lead (trained GBDTs are often near-multicalibrated [45]).
+**Hard precondition (Step 0):** build the Tier-0 absolute-only
+`compression_eval.verdict()` mode and run the read-only per-cell triage audit — the
++3/+4/+2 counts are unmeasurable until it exists. **Ordered:** Step 0 → (1) post-hoc →
+(2) player feature → (3) opponent features → (4) gate-tuning; ship each cell to Gate-2
+the instant it clears Tier-0. **Per-league targets:** NBA **TOV / BLST / OREB / PF**
+(STL, FG3M backups); WNBA **TOV / BLST / OREB / STL** (re-validate — half the games make
+isotonic tails + the expanding-mean feature noisier; fall back to affine ROE / strong
+shrinkage); NFL **rushing-tds + receiving-tds** via **affine ROE** (not isotonic /
+per-decile — too few positive events at interceptions ~0.5, TD zero-rates 0.78–0.92 [48];
+keep rushing-yards / qb-tds / sacks-taken on the Track-A T11 bench). **Gate-tuning (4)** —
+widen the Tier-0 BSS floor toward −0.02 only for the ~1 bias-passes/BSS-fails cell per
+league (NBA PF, NFL interceptions); widen the constant, not per-cell, and flag for
+Gate-2. **Note:** NBA/WNBA **AST are SkewNormal**, not count cells — post-hoc + player
+feature apply, but count-family reasoning does not (treat as Track-A). New refs [43]–[48].
+
+> **Full Stage B1.6 rationale (incl. the 2026-05-22 research verdict in detail), the §7a
+> evidence behind it, and all of Track A / Track B depth work** live in the context doc →
+> **Track B → Stage B1.6 — breadth research verdict** and **Two-track depth plan** (Track
+> A SkewNormal: A1/A1.5/A2/A3/A4; Track B ZINB: B1/B1.5/B1.6 full body/B2/B3/B4).
 
 ## Cross-league caveats (read before running any cross-league A/B)
 
-1. **NFL sample sizes are an order of magnitude smaller than NBA.** ~17 games
-   per player per regular season vs ~82 for NBA. EB(MeanYr, K=10) is
-   aggressive shrinkage with that sample size — Stage A1 should re-derive
-   `K = σ²_within / σ²_between` per league. Expect NFL K to be much lower
-   (or for the EB target transform to fail outright on form-volatile NFL
-   markets — file as a Stage A1 finding, not a P1-style negative result).
-2. **NFL stats are position-locked in a way basketball isn't.** `Player
-   position` is already a categorical feature
-   ([pipeline.py](../src/sportstradamus/training/pipeline.py)
-   `_step_build_splits`). Researcher Track-A methods that train one
-   cross-player model per market may not transfer cleanly to NFL — a QB
-   and a WR don't share the same "passing yards" distribution. The Stage
-   A1 ICC table should be computed *within position* for NFL where
-   relevant (e.g. passing yards ICC computed across QBs only).
-3. **WNBA shares NBA's structure but has half the games/season.** EB K=10
-   is probably fine but should still be verified in Stage A1. The
-   per-100-possession factorization (T5-basketball) transfers
-   exactly — WNBA uses the same court geometry and stat universe.
-   **Stage A1.5 update:** T5-basketball is KILLED (see the A1.5 verdict), so the
-   transfer point is moot. WNBA's own factor-ICC verdict is **low-confidence**: WNBA has
-   no `FGM` or `FG3A` *markets* (confirmed against `stat_dist.json` — the WNBA market set
-   is MIN/AST/FG3M/PA/PR/PTS/RA/REB/OREB/DREB/FGA/BLK/STL/BLST/TOV/FTM/PRA/fantasy), so
-   true FG% / 3P% are uncomputable and `PTS_per_FGA` (ICC 0.103) is the *only* clean
-   efficiency factor — the WNBA gap (+0.456) rests on a single point. There is **no regen
-   path** for FGM/FG3A (they are not markets here); a real WNBA efficiency verdict needs
-   **new test cases** computed from WNBA's actual markets. **Stage A1.6 update — chosen
-   replacement test cases:** `FTM_per_FGA` and `FG3M_per_FGA` (distinct ICC regimes —
-   free-throw-generation rate is a stable role trait → expected higher/ambiguous band;
-   3P make-rate is dominated by sampling variability per Franks et al. → expected
-   low/tail band), with `PTS_per_FGA` (0.103) retained as the anchor — a 3-point
-   efficiency median spanning tail and ambiguous bands instead of one fragile point.
-   All three are computable from existing WNBA markets (FTM/FGA/FG3M/PTS); **no code
-   change** — `icc_diagnostics.py` already factors them, and A2 runs it when the T3 build
-   needs the WNBA verdict. The NFL half of this prerequisite (position-split cleanup)
+1. **NFL sample sizes are an order of magnitude smaller than NBA** (~17 vs ~82
+   games/player/season). EB(MeanYr, K=10) is aggressive shrinkage at that size — A1 should
+   re-derive `K = σ²_within / σ²_between` per league. Expect NFL K much lower (or the EB
+   transform to fail on form-volatile NFL markets — file as an A1 finding).
+2. **NFL stats are position-locked in a way basketball isn't.** `Player position` is
+   already a categorical ([pipeline.py](../src/sportstradamus/training/pipeline.py)
+   `_step_build_splits`). Track-A methods training one cross-player model per market may
+   not transfer cleanly (a QB and WR don't share "passing yards"); compute the A1 ICC table
+   *within position* for NFL where relevant.
+3. **WNBA shares NBA's structure but has half the games/season.** EB K=10 probably fine but
+   verify in A1. The per-100-poss factorization (T5-basketball) transfers exactly. **A1.5
+   update:** T5-basketball is KILLED, so the transfer point is moot. WNBA's own factor-ICC
+   verdict is **low-confidence**: WNBA has no `FGM` or `FG3A` *markets* (confirmed against
+   `stat_dist.json` — WNBA set is MIN/AST/FG3M/PA/PR/PTS/RA/REB/OREB/DREB/FGA/BLK/STL/BLST/
+   TOV/FTM/PRA/fantasy), so true FG%/3P% are uncomputable and `PTS_per_FGA` (0.103) is the
+   *only* clean efficiency factor — the WNBA gap (+0.456) rests on a single point. No regen
+   path for FGM/FG3A; a real verdict needs **new test cases** from WNBA's actual markets.
+   **A1.6 update — chosen replacements:** `FTM_per_FGA` and `FG3M_per_FGA` (distinct ICC
+   regimes — free-throw-generation rate a stable role trait → higher/ambiguous; 3P
+   make-rate dominated by sampling variability per [2] → low/tail), with `PTS_per_FGA`
+   (0.103) as anchor. All computable from existing WNBA markets; **no code change**
+   (`icc_diagnostics.py` already factors them). The NFL half (position-split cleanup)
    shipped in A1.6. The NBA/NFL fork does **not** depend on the WNBA gap.
-4. **The compression_eval A/B harness is league-agnostic but file paths
-   are league-specific.** Cached parquets live at
-   `data/training_data/{LEAGUE}_{market}.parquet`; deterministic test
-   sets at `data/test_sets/deterministic/{strategy}/{LEAGUE}_{market}.csv`.
-   The full-verification phase (cross-league A/B) iterates the existing
-   league loop — no harness rewrite needed.
-5. **Determinism gate currently covers NBA only.** The two
-   `test_deterministic_mode_*` integration tests use NBA_FGA + NBA_FG3M
-   parquets ([tests/integration/test_determinism_gate.py:37,102](../tests/integration/test_determinism_gate.py)).
-   Before shipping a cross-league change, add parallel determinism
-   assertions on WNBA_FGA + WNBA_FG3M + a representative NFL market.
-   Without them the cross-league A/B verdict is noise for the new leagues
-   (P1's hard-learned lesson — see `CENTERED_TARGET_NEGATIVE_RESULT.md`).
-6. **For low-mean NFL markets** (interceptions mean ~0.5, sacks ~1.5),
-   the ZINB diagnostic formulae in Stage B1 may need to compute on
-   `log(1+Y)` per the Blasco-Moreno et al. STL/BLK caveat — the
-   asymptotic Vuong test in particular degrades badly at very low means.
-   Wilson-Einbeck's non-asymptotic Poisson-binomial test handles this
-   better but should be the only test trusted for NFL interceptions/sacks
-   in Stage B1.
-7. **Two-track parallelism still holds across leagues.** Track A and
-   Track B touch different distribution branches and different markets;
-   they can be worked in parallel per league. They share no mutable
-   state — the only shared resource is the compression_eval harness,
-   which is read-only during scoring.
-8. **Low-mean conditional-dispersion diagnostics need a non-Pearson estimator —
-   trust the Dunn–Smyth RQR over Pearson at mean ≲ 0.11** (extends caveat #6). In
-   Stage B1.5 the df-corrected Pearson statistic and the RQR variance diverged at very
-   low NFL means (rushing-tds: Pearson 0.57 vs RQR 0.96; interceptions: Pearson 1.38 vs
-   RQR 1.04) — Pearson `(y−μ̂)²/μ̂` is unstable when many μ̂ ≈ 0 (a few rows dominate the
-   sum) and the RQR's discrete-CDF randomization is coarse when P(Y=0|x) ≈ 0.97. A
-   future low-mean NFL diagnostic pass should bootstrap the RQR variance and/or use
-   deviance-based dispersion, and lean on Wilson–Einbeck for the marginal
-   zero-modification call. (Stage B1.5 §7a pre-check verdict.)
+4. **The compression_eval A/B harness is league-agnostic but file paths are
+   league-specific.** Cached parquets at `data/training_data/{LEAGUE}_{market}.parquet`;
+   deterministic test sets at
+   `data/test_sets/deterministic/{strategy}/{LEAGUE}_{market}.csv`. The full-verification
+   phase iterates the existing league loop — no harness rewrite.
+5. **Determinism gate currently covers NBA only.** The two `test_deterministic_mode_*`
+   tests use NBA_FGA + NBA_FG3M
+   ([tests/integration/test_determinism_gate.py:37,102](../tests/integration/test_determinism_gate.py)).
+   Before a cross-league change, add parallel assertions on WNBA_FGA + WNBA_FG3M + a
+   representative NFL market — else the cross-league verdict is noise (P1's lesson, see
+   `CENTERED_TARGET_NEGATIVE_RESULT.md`).
+6. **For low-mean NFL markets** (interceptions mean ~0.5, sacks ~1.5), the ZINB diagnostic
+   formulae in B1 may need to compute on `log(1+Y)` [22]; the asymptotic Vuong degrades
+   badly at very low means. Wilson-Einbeck's non-asymptotic test should be the only one
+   trusted for NFL interceptions/sacks.
+7. **Two-track parallelism holds across leagues.** Track A and B touch different
+   distribution branches and markets; workable in parallel per league. Shared resource is
+   the read-only compression_eval harness.
+8. **Low-mean conditional-dispersion diagnostics need a non-Pearson estimator — trust the
+   Dunn–Smyth RQR over Pearson at mean ≲ 0.11** (extends #6). In B1.5 the df-corrected
+   Pearson and the RQR variance diverged at very low NFL means (rushing-tds: Pearson 0.57
+   vs RQR 0.96; interceptions: Pearson 1.38 vs RQR 1.04) — Pearson `(y−μ̂)²/μ̂` is unstable
+   when many μ̂ ≈ 0, and RQR randomization is coarse when P(Y=0|x) ≈ 0.97. A future low-mean
+   NFL pass should bootstrap the RQR variance and/or use deviance-based dispersion, and lean
+   on Wilson–Einbeck for the marginal zero-modification call. (B1.5 §7a verdict.)
+9. **Post-hoc bias correctors at NFL count means must be affine ROE, not isotonic /
+   per-decile.** At interceptions ~0.5 and TD zero-rates 0.78–0.92 the top bin holds a
+   handful of positive events; isotonic tails and per-bin (multicalibration) correctors
+   overfit, and percent-calibration error is worst in low-base-rate groups [48]. Use the
+   global affine `y ~ a + b·ŷ` form there; reserve isotonic / per-decile for the
+   higher-mean NBA/WNBA count cells. (B1.6 research verdict, 2026-05-22.)
 
 ## Critical files
 
@@ -1958,159 +736,106 @@ evaluate the bigger structural change.
 | [src/sportstradamus/helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) | `set_model_start_values`; `fused_loc` (book blend) | 425–504 |
 | [src/sportstradamus/skew_normal.py](../src/sportstradamus/skew_normal.py) | custom SkewNormal (location-scale, supports negatives) | 30–199 |
 | [src/sportstradamus/hurdle.py](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here for Track-B Stage B1) | ~201 (NegBin loss for Stage 2) |
-| [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **Set-baseline ship gate** — 5 strict gates + oracle (`gate_row`, `apply_thresholds`), supersede S1+S2+S3 (`supersede_verdict`, Phase 3), `tier0_scorecard.csv` writer, decile table, run log, `--live-window` | `_GATE1_CI_HI_MAX = 0.0`, `_GATE2_STAR_Z_MAX = 0.5`, `_GATE3_BENCH_Z_MAX = 0.5`, `_GATE4_IQR_RATIO_MIN = 0.5`, `_GATE5_ECE_MAX = 0.075`, `BREADTH_TARGET_FRAC = 0.75` |
-| [src/sportstradamus/strategies/profit_sim.py](../src/sportstradamus/strategies/profit_sim.py) | Reusable Kelly-sized ROI / Sharpe / drawdown sim (Phase 2 extraction from the dashboard); used by Gate 1 S3 and Gate 2 live | `simulate_strategy`, `summarize_runs`, deterministic-Kelly-all mode |
-| [src/sportstradamus/scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) | Lifecycle status table joining Gate 1 (offline) + Gate 2 (live) per cell; Phase 4 adds the +0.5% / 2-wk supersede compare | `_classify_lifecycle`, `_MIN_SETTLED_FOR_GRADUATION = 200`, `_GRADUATION_WINDOW_DAYS = 30` |
+| [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
 | [src/sportstradamus/prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py) | **Live-path confound** — where shipped strategies must survive end-to-end | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
 | [docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md](superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md) | Source spec for the **ZINB derived-π gate** fix (P2.B precursor) | Phase B "SUPERSEDED → derived-π" |
 
 ## Verification (every code session)
 
-**Always-on quality gates** (run on every commit, every session, every PR):
+**Always-on quality gates** (every commit, session, PR):
 - `poetry run ruff check src/sportstradamus/`
 - `poetry run pytest tests/golden/` (incl. `test_compression_eval.py`)
 - `poetry run pytest -m integration` (fake-mode, no network)
 - Regenerate CLI help snapshots if `meditate` flags change:
   `REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py`
-- Determinism gate (P0.5): `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`
+- Determinism gate (P0.5):
+  `poetry run pytest tests/integration/test_determinism_gate.py -v -m integration`
 
-**Smoke phase** (at the start of a new experiment, before full A/B):
-- Pick 1–2 representative markets per league (see "Cross-league testing
-  policy" above for the per-league smoke list).
-- Run `meditate --deterministic --league {NBA,WNBA,NFL} --market <smoke-market>`
-  per league × per smoke-market. Confirm the strategy doesn't immediately
-  blow up determinism, produces sensible `compression_eval` output, and
-  doesn't regress the smoke markets vs baseline.
-- A smoke regression is a hard stop — fix or revert before further work.
+**Smoke phase** (start of a new experiment, before full A/B): pick 1–2 representative
+markets per league (see "Cross-league testing policy"); run
+`meditate --deterministic --league {NBA,WNBA,NFL} --market <smoke-market>` per league ×
+smoke-market; confirm no determinism blowup, sensible `compression_eval` output, no
+smoke regression vs baseline. A smoke regression is a hard stop.
 
-**Full-verification phase** (before any default-flag flip or `--zinb-mode`
-config change):
-- Run the A/B on every market in every covered league for the affected
-  distribution branch (SkewNormal: 36 cells; ZINB: 23 cells).
-- Strategy SHIPs only if it clears the universal decision threshold on
-  every cell, OR the per-cell routing config records the exceptions.
-- **Inference-path test** (required for any change that touches the
-  prediction-side schema — every change in the "Per-change-type
-  inference checklist" above except the training-only rows): live-path
-  integration test under `tests/integration/` that loads the new
-  pickle, runs `model_prob` on a cached 100-row fixture, asserts:
-  (a) `Model EV` finite for every offer; (b) `Model Gate ∈ [0, 1]` if
-  ZI-class; (c) two runs with `DETERMINISTIC_SEED` produce identical
-  predictions; (d) legacy pickles (without the new pickle keys) still
-  load and predict. The test exists **before promotion to test
-  production**, not after — Gate 1's "soak window" assumes the
-  inference path is structurally sound.
-- **Pickle round-trip test** (required for any new `_build_filedict`
-  key): save the new pickle, reload, assert byte-identical predictions
-  on a cached fixture. Mirrors the test pattern from
-  [tests/test_hurdle_zinb.py](../tests/test_hurdle_zinb.py) test 3
-  ("Pickle round-trip preserves predictions exactly").
-- Live-path gate (catches behaviors only visible end-to-end): the
-  promoted strategy is confirmed through
-  [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py)
-  end-to-end (no `Model Skew`=NaN, EV not collapsed by the book blend),
-  not only on the dumped test set. Run live-path verification on one
-  representative market per league per affected distribution branch.
+**Full-verification phase** (before any default-flag flip or `--zinb-mode` config
+change): run the A/B on every market in every covered league for the affected branch
+(SkewNormal: 36 cells; ZINB: 23). SHIP only if it clears the universal threshold on every
+cell, OR the routing config records exceptions.
 
-**Cross-league determinism additions** (needed before the full-verification
-phase is meaningful on WNBA + NFL):
-- Add `test_deterministic_mode_is_bit_reproducible_wnba` (analog of the
-  existing NBA test, on `WNBA_FGA.parquet`) to
-  [tests/integration/test_determinism_gate.py](../tests/integration/test_determinism_gate.py).
-- Add `test_deterministic_mode_is_bit_reproducible_nfl` on a representative
-  NFL SkewNormal market (`NFL_passing-yards.parquet`).
-- Add `test_deterministic_mode_hurdle_is_bit_reproducible_wnba` and
-  `_nfl` on WNBA FG3M + an NFL ZINB market (e.g. `NFL_interceptions.parquet`).
-- Without these, the cross-league A/B verdict is noise on the new
-  leagues — P1's hard-learned lesson, see `CENTERED_TARGET_NEGATIVE_RESULT.md`.
+- **Inference-path test** (required for any change touching the prediction-side schema —
+  every "Per-change-type inference checklist" row except training-only): a live-path
+  integration test under `tests/integration/` loading the new pickle, running `model_prob`
+  on a cached 100-row fixture, asserting (a) `Model EV` finite; (b) `Model Gate ∈ [0,1]`
+  if ZI-class; (c) two `DETERMINISTIC_SEED` runs identical; (d) legacy pickles still load.
+  Exists **before promotion to test production**.
+- **Pickle round-trip test** (required for any new `_build_filedict` key): save, reload,
+  assert byte-identical predictions on a cached fixture. Mirrors
+  [tests/test_hurdle_zinb.py](../tests/test_hurdle_zinb.py) test 3.
+- **Live-path gate** (catches end-to-end-only behaviors): the promoted strategy confirmed
+  through [model_prob.py](../src/sportstradamus/prediction/model_prob.py) end-to-end (no
+  `Model Skew`=NaN, EV not collapsed by the book blend), one representative market per
+  league per affected branch.
+
+**Cross-league determinism additions** (needed before full-verification is meaningful on
+WNBA + NFL): add `test_deterministic_mode_is_bit_reproducible_wnba` (on
+`WNBA_FGA.parquet`) and `_nfl` (on `NFL_passing-yards.parquet`) to
+[test_determinism_gate.py](../tests/integration/test_determinism_gate.py), plus
+`test_deterministic_mode_hurdle_is_bit_reproducible_wnba` / `_nfl` (WNBA FG3M + e.g.
+`NFL_interceptions.parquet`). Without them the cross-league verdict is noise on the new
+leagues (P1's lesson, `CENTERED_TARGET_NEGATIVE_RESULT.md`).
 
 ## Session handoff
 
 ### Per-session rules
 
-- One strategy/experiment per session where feasible (aligns with CLAUDE.md
-  "one module per subagent" — the per-strategy scope discipline, not the
-  serial execution); commit + push to `claude/fix-gbdt-mean-regression-GcY1g`
-  and update the harness run log so the next session sees the scorecard history.
-- Keep the default strategy = current production behavior until an experiment
-  clears the threshold, so `devel`-tracking production is never regressed
-  mid-project.
-- Record each experiment's scorecard verdict (ship/kill) in the run log committed
-  to the repo (not a scratch doc), and update the **Status / progress log** table
-  at the top of this file.
-- Track A and Track B can be worked in separate sessions / by separate
-  subagents; they share no mutable state beyond the harness. The strategic
-  fork in Stage B3 is the only place where a single decision blocks
-  multiple downstream sessions.
+- One strategy/experiment per session where feasible (aligns with CLAUDE.md "one module
+  per subagent"); commit + push to `claude/fix-gbdt-mean-regression-GcY1g` and update the
+  harness run log so the next session sees the scorecard history.
+- Keep the default strategy = current production behavior until an experiment clears the
+  threshold, so `devel`-tracking production is never regressed mid-project.
+- Record each experiment's ship/kill verdict in the committed run log (not a scratch doc)
+  and update the **Status / progress log** table.
+- Track A and Track B can be worked in separate sessions / subagents; they share no
+  mutable state beyond the harness. The B3 strategic fork is the only place a single
+  decision blocks multiple downstream sessions.
 
 ### Phase-to-phase handoff prompts
 
-Each completed phase produces the handoff prompt for the next phase as
-part of its Definition-of-Done. The repo ships a
-[prompt-engineer subagent](../.claude/agents/prompt-engineer.md) for
-this purpose — invoke it via the `Agent` tool with
-`subagent_type: "prompt-engineer"` at the end of each phase. The agent's
-project-specific addendum documents the required reading list, the
-standard 10-section structure (opener / reading list / scope / locked
-decisions / inference-path checklist / decision threshold / verification
-gates / branch state / out-of-scope / definition-of-done), and the
-`/tmp/{stage}_handoff_prompt.md` output convention.
-
-Handoff prompts are scratch artifacts until the next session accepts
-them; on acceptance they move to `docs/handoffs/{stage}.md` for durable
-git history. The handoff for **Stage 0** lives at
-`/tmp/stage0_handoff_prompt.md` after this plan revision (initial
-production by the prompt-engineer agent in commit
+Each completed phase produces the next phase's handoff prompt as part of its
+Definition-of-Done, via the [prompt-engineer subagent](../.claude/agents/prompt-engineer.md)
+(`subagent_type: "prompt-engineer"`). The agent's addendum documents the reading list, the
+standard 10-section structure (opener / reading list / scope / locked decisions /
+inference-path checklist / decision threshold / verification gates / branch state /
+out-of-scope / definition-of-done), and the `/tmp/{stage}_handoff_prompt.md` convention.
+Handoff prompts are scratch until accepted; on acceptance they move to
+`docs/handoffs/{stage}.md`. The Stage 0 handoff lives at `/tmp/stage0_handoff_prompt.md`
+after this plan revision (initial production by the prompt-engineer agent in commit
 `{stage0-handoff-commit}`).
 
-### Research handoffs (in-repo)
-
-When a diagnostic result is ambiguous or a path-forward decision needs
-literature + statistical synthesis, dispatch the
-[research-analyst subagent](../.claude/agents/research-analyst.md) via the
-`Agent` tool with `subagent_type: "research-analyst"`. It is the in-repo
-replacement for the claude.ai research round-trip: it reads the actual
-diagnostic outputs (and may re-run read-only diagnostics), searches the primary
-literature, and writes a cited statistician's brief — the same role the two seed
-briefs in "Research handoffs that fed this plan" played.
-
-- **Input** (optional): a research prompt at `/tmp/{topic}_research_prompt.md`,
-  or the question passed inline in the dispatch.
-- **Output**: a brief at `/tmp/researcher_{topic}.md` in the house format
-  (TL;DR / Key Findings with DOIs / Recommendation / Reality checks / Open
-  questions / Bibliography), ending with a "Load-bearing conclusions for the
-  plan" list.
-- **Distillation**: the main session copies the load-bearing conclusions into
-  this plan's "research verdict" / "Open questions" / "Cross-league caveats"
-  sections. The brief is the full archive; the agent does not edit the plan.
-
-The agent is read-only w.r.t. production (no pickles, no default flips, no
-inference-path or `src/` edits).
+> **Research handoffs (in-repo)** — how to dispatch the `research-analyst` subagent,
+> its input/output convention, and the distillation rule — moved to the context doc →
+> **Research handoffs that fed this plan**.
 
 ### Tooling note: `gh` is a userspace install on this workstation
 
-PR #46 CI status and review-comment monitoring use the GitHub CLI. `gh` is
-**not a system package** — it lives at `~/.local/bin/gh` (installed
-2026-05-19 via the official static tarball release, since `sudo apt` would
-have required an interactive password). Future sessions must ensure
-`~/.local/bin` is on `PATH`; on this workstation it already is (set in
-`~/.profile` / `~/.bashrc`), but a sandboxed or non-login shell may not
-inherit it. If `gh --version` fails, run:
+`gh` is **not a system package** — it lives at `~/.local/bin/gh` (installed 2026-05-19 via
+the official static tarball). Future sessions must ensure `~/.local/bin` is on `PATH`; on
+this workstation it already is (`~/.profile` / `~/.bashrc`), but a sandboxed/non-login
+shell may not inherit it. If `gh --version` fails:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Authentication is also a one-time setup the user completes locally
-(`gh auth login` interactive, or `export GH_TOKEN=…` from a PAT with `repo`
-scope). Agent sessions don't have credentials by default — if `gh api …`
-returns `HTTP 401`, the user needs to re-auth.
+Authentication is a one-time local setup (`gh auth login` interactive, or `export
+GH_TOKEN=…` from a PAT with `repo` scope). Agent sessions lack credentials by default — if
+`gh api …` returns `HTTP 401`, the user needs to re-auth.
 
 ### Branch / PR / commit refs
 
-See **"Branches & model-promotion flow"** above for the four-branch pipeline
-(`model-research` → `devel-foundation` → `devel` → `main`) and why the `model-research`
-rename is deferred behind PR #46.
+See **"Branches & model-promotion flow"** for the four-branch pipeline (`model-research` →
+`devel-foundation` → `devel` → `main`) and why the `model-research` rename is deferred
+behind PR #46.
 
 - Branch: `claude/fix-gbdt-mean-regression-GcY1g` (the intended future `model-research`).
 - PR: #46 (→ `devel`); HEAD `fbec3cc` ("feat(ship): per-cell `zinb_mode` plumbing + lock
@@ -2119,7 +844,12 @@ rename is deferred behind PR #46.
   negative result").
 - Latest shipped: 13 NBA + 10 WNBA + 13 NFL baselines locked in `data/ship_config.json`
   (`b5d2609` / `c9fcf01` / `fbec3cc`); P2.B HurdleZINB (`cee5625` ships
-  `centered_additive_eb_meanyr_k10`); P1 follow-up `1d0e65e` adds
-  `centered_additive_mean10` as the path-wide A/B counterexample.
+  `centered_additive_eb_meanyr_k10`); P1 follow-up `1d0e65e` adds `centered_additive_mean10`
+  as the path-wide A/B counterexample.
 - This breadth-led docs reorg + roadmap sync landed on `claude/roadmap-rework-docs-h13so`
   (cut off `fbec3cc`; PR → `devel`, stacked on PR #46).
+
+---
+
+**Decision history, prior-phase results, research verdicts, and references:** see
+[`gbdt_mean_regression_context.md`](gbdt_mean_regression_context.md).
