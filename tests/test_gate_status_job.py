@@ -24,6 +24,7 @@ def test_gate_status_dry_run_invokes_generator_and_skips_git(tmp_path):
         capture_output=True,
         text=True,
         cwd=str(_REPO),
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "generate-ship-config-stub" in result.stdout
