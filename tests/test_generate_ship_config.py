@@ -130,11 +130,16 @@ def test_cli_devel_writes_active_plus_withheld(tmp_path):
     out = tmp_path / "ship_config.json"
     result = _invoke(
         [
-            "--branch", "devel",
-            "--decisions", str(dpath),
-            "--out", str(out),
-            "--model-stats", str(tmp_path / "ms.parquet"),
-            "--live-metrics", str(tmp_path / "lm.parquet"),
+            "--branch",
+            "devel",
+            "--decisions",
+            str(dpath),
+            "--out",
+            str(out),
+            "--model-stats",
+            str(tmp_path / "ms.parquet"),
+            "--live-metrics",
+            str(tmp_path / "lm.parquet"),
         ]
     )
     assert result.exit_code == 0, result.output
@@ -151,11 +156,16 @@ def test_cli_main_no_data_all_withheld(tmp_path):
     out = tmp_path / "ship_config.json"
     result = _invoke(
         [
-            "--branch", "main",
-            "--decisions", str(dpath),
-            "--out", str(out),
-            "--model-stats", str(tmp_path / "ms.parquet"),
-            "--live-metrics", str(tmp_path / "lm.parquet"),
+            "--branch",
+            "main",
+            "--decisions",
+            str(dpath),
+            "--out",
+            str(out),
+            "--model-stats",
+            str(tmp_path / "ms.parquet"),
+            "--live-metrics",
+            str(tmp_path / "lm.parquet"),
         ]
     )
     assert result.exit_code == 0, result.output
@@ -169,11 +179,16 @@ def test_cli_dry_run_does_not_write(tmp_path):
     out = tmp_path / "ship_config.json"
     result = _invoke(
         [
-            "--branch", "devel",
-            "--decisions", str(dpath),
-            "--out", str(out),
-            "--model-stats", str(tmp_path / "ms.parquet"),
-            "--live-metrics", str(tmp_path / "lm.parquet"),
+            "--branch",
+            "devel",
+            "--decisions",
+            str(dpath),
+            "--out",
+            str(out),
+            "--model-stats",
+            str(tmp_path / "ms.parquet"),
+            "--live-metrics",
+            str(tmp_path / "lm.parquet"),
             "--dry-run",
         ]
     )
@@ -196,11 +211,16 @@ def test_cli_prune_deletes_only_non_active_pickles(tmp_path, monkeypatch):
     out = tmp_path / "ship_config.json"
     result = _invoke(
         [
-            "--branch", "devel",
-            "--decisions", str(dpath),
-            "--out", str(out),
-            "--model-stats", str(tmp_path / "ms.parquet"),
-            "--live-metrics", str(tmp_path / "lm.parquet"),
+            "--branch",
+            "devel",
+            "--decisions",
+            str(dpath),
+            "--out",
+            str(out),
+            "--model-stats",
+            str(tmp_path / "ms.parquet"),
+            "--live-metrics",
+            str(tmp_path / "lm.parquet"),
             "--prune",
         ]
     )
