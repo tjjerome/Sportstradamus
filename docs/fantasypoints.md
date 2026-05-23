@@ -135,8 +135,39 @@ expired or missing. Refresh fantasypoints_authorization in
 creds/keys.json; see docs/fantasypoints.md.
 ```
 
-Re-run the token-capture step from §1 and rerun
-`poetry run fp-fetch run` once by hand to confirm.
+Refresh in one step:
+
+1. In DevTools, copy any logged-in XHR as cURL (the same recipe as
+   §1, step 4, but to a temp file):
+
+   ```bash
+   pbpaste > /tmp/fresh.curl   # macOS
+   wl-paste > /tmp/fresh.curl  # Wayland Linux
+   ```
+
+2. Update `creds/keys.json`:
+
+   ```bash
+   poetry run fp-fetch refresh-auth /tmp/fresh.curl
+   ```
+
+   Or pipe directly without the temp file:
+
+   ```bash
+   pbpaste | poetry run fp-fetch refresh-auth -
+   ```
+
+   The command extracts the `Authorization`, `Cookie`, and
+   `User-Agent` headers and writes them to `creds/keys.json`,
+   preserving every other field. It prints a redacted preview of
+   each value (first 24 chars) so you can confirm without leaking
+   the full token to a shared terminal.
+
+3. Confirm:
+
+   ```bash
+   poetry run fp-fetch run --only line_matchups
+   ```
 
 ## Output layout
 

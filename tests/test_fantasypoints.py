@@ -454,6 +454,72 @@ def test_cli_import_curl_appends_post_spec(tmp_path):
     assert loaded[0].json_body == {"useCache": True}
 
 
+def test_cli_refresh_auth_updates_keys_json(tmp_path):
+    keys_path = tmp_path / "keys.json"
+    keys_path.write_text(json.dumps({"odds_api": "PRESERVE_ME", "fantasypoints_cookie": "stale"}))
+    curl_path = tmp_path / "fresh.curl"
+    curl_path.write_text(
+        "curl 'https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups' "
+        "-X POST "
+        "-H 'Authorization: Bearer NEW_TOKEN_VALUE' "
+        "-H 'Cookie: _shopify_y=new-cookie-value' "
+        "-H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) Test' "
+        "--data-raw '{}'"
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["refresh-auth", str(curl_path), "--keys-path", str(keys_path)],
+    )
+    assert result.exit_code == 0, result.output
+    updated = json.loads(keys_path.read_text())
+    assert updated["fantasypoints_authorization"] == "Bearer NEW_TOKEN_VALUE"
+    assert updated["fantasypoints_cookie"] == "_shopify_y=new-cookie-value"
+    assert updated["fantasypoints_user_agent"].startswith("Mozilla/5.0 (X11")
+    assert updated["odds_api"] == "PRESERVE_ME", "non-FP keys must be preserved"
+
+
+def test_cli_refresh_auth_creates_keys_json_when_absent(tmp_path):
+    keys_path = tmp_path / "keys.json"
+    curl_path = tmp_path / "fresh.curl"
+    curl_path.write_text("curl 'https://x/' -H 'Authorization: Bearer ABC' -H 'Cookie: c=1'")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["refresh-auth", str(curl_path), "--keys-path", str(keys_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert keys_path.is_file()
+    assert json.loads(keys_path.read_text())["fantasypoints_authorization"] == "Bearer ABC"
+
+
+def test_cli_refresh_auth_errors_when_no_auth_headers(tmp_path):
+    keys_path = tmp_path / "keys.json"
+    keys_path.write_text("{}")
+    curl_path = tmp_path / "no_auth.curl"
+    curl_path.write_text("curl 'https://x/' -H 'Accept: application/json'")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["refresh-auth", str(curl_path), "--keys-path", str(keys_path)],
+    )
+    assert result.exit_code != 0
+    assert "no authorization" in result.output.lower()
+
+
+def test_cli_refresh_auth_reads_stdin(tmp_path):
+    keys_path = tmp_path / "keys.json"
+    keys_path.write_text("{}")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["refresh-auth", "-", "--keys-path", str(keys_path)],
+        input="curl 'https://x/' -H 'Authorization: Bearer STDIN_TOKEN'",
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(keys_path.read_text())["fantasypoints_authorization"] == "Bearer STDIN_TOKEN"
+
+
 def test_cli_import_curl_rejects_duplicate_name(tmp_path):
     catalog_path = tmp_path / "catalog.json"
     save_catalog(

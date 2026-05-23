@@ -1,12 +1,15 @@
 """``fp-fetch`` CLI — snapshot every registered Fantasy Points tool.
 
-Three subcommands:
+Four subcommands:
 
 * ``fp-fetch run`` — walks the catalog and writes per-tool snapshots.
 * ``fp-fetch list`` — prints the registered catalog entries.
 * ``fp-fetch import-curl`` — registers a new endpoint from a
   DevTools-copied curl command. Handles both GET and POST curls,
   including ``--data-raw`` JSON bodies.
+* ``fp-fetch refresh-auth`` — updates the Authorization / Cookie /
+  User-Agent fields in ``creds/keys.json`` from a fresh curl command
+  (or stdin), so token rotation is a one-paste operation.
 
 The runner resolves ``--season`` / ``--week`` (defaults inferred from
 the current date) and substitutes them into each endpoint's ``params``
@@ -27,7 +30,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import click
 from tqdm import tqdm
 
-from sportstradamus import data
+from sportstradamus import creds, data
 from sportstradamus.fantasypoints.catalog import (
     CATALOG_PATH,
     EndpointSpec,
@@ -101,6 +104,18 @@ _CURL_SKIP_VALUE_FLAGS = frozenset({"-b", "--cookie", "-A", "--user-agent", "-e"
 
 # Backslash-newline continuation in shell here-doc style curls.
 _LINE_CONTINUATION_RE = re.compile(r"\\\s*\r?\n")
+
+# Mapping from curl header name (lowercase) to the keys.json field
+# that `refresh-auth` writes when it sees that header.
+_AUTH_HEADER_TO_KEY = {
+    "authorization": "fantasypoints_authorization",
+    "cookie": "fantasypoints_cookie",
+    "user-agent": "fantasypoints_user_agent",
+}
+
+# Number of leading characters to echo when previewing a token value —
+# enough to confirm it changed without leaking the full secret.
+_TOKEN_PREVIEW_CHARS = 24
 
 
 @click.group()
@@ -218,6 +233,97 @@ def import_curl(curl_file, name, output_subdir, response_format, weekly, catalog
     save_catalog(existing, catalog_path)
     body_note = " + body" if spec.json_body else ""
     click.echo(f"Registered {spec.name} -> {spec.method} {spec.url}{body_note}")
+
+
+@fp_fetch.command("refresh-auth")
+@click.argument("curl_input", type=click.File("r"))
+@click.option(
+    "--keys-path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override keys.json path (default: bundled creds/keys.json).",
+)
+def refresh_auth(curl_input, keys_path) -> None:
+    """Update auth fields in creds/keys.json from a fresh curl command.
+
+    Capture any logged-in XHR in DevTools (Network → right-click →
+    Copy as cURL), save to a file, then run::
+
+        poetry run fp-fetch refresh-auth /tmp/fresh.curl
+
+    Or pipe from clipboard::
+
+        pbpaste | poetry run fp-fetch refresh-auth -
+
+    The command extracts the ``Authorization`` (and optionally
+    ``Cookie`` / ``User-Agent``) header values and writes them to
+    ``creds/keys.json``, preserving every other field.
+    """
+    extracted = _extract_auth_from_curl(curl_input.read())
+    if not extracted:
+        raise click.ClickException(
+            "No Authorization / Cookie / User-Agent headers found in input. "
+            "Did you paste a curl command from DevTools?"
+        )
+    path = _update_keys(extracted, path=keys_path)
+    for key, value in extracted.items():
+        preview = value[:_TOKEN_PREVIEW_CHARS] + (
+            "..." if len(value) > _TOKEN_PREVIEW_CHARS else ""
+        )
+        click.echo(f"Updated {key} ({len(value)} chars): {preview}")
+    click.echo(f"Wrote {path}")
+
+
+def _extract_auth_from_curl(curl_text: str) -> dict[str, str]:
+    """Pull auth-related header values out of a DevTools-copied curl.
+
+    Args:
+        curl_text: Raw text of the curl command.
+
+    Returns:
+        A dict keyed by ``creds/keys.json`` field name
+        (``fantasypoints_authorization``, ``fantasypoints_cookie``,
+        ``fantasypoints_user_agent``) for whichever headers were
+        present. Empty dict if none were found.
+    """
+    cleaned = _LINE_CONTINUATION_RE.sub(" ", curl_text.strip())
+    tokens = shlex.split(cleaned)
+    if not tokens or tokens[0] != "curl":
+        raise click.ClickException("Input does not look like a curl command.")
+    parsed = _parse_curl_tokens(tokens[1:])
+    out: dict[str, str] = {}
+    for key, value in parsed["headers"].items():
+        target = _AUTH_HEADER_TO_KEY.get(key.lower())
+        if target and value:
+            out[target] = value
+    return out
+
+
+def _update_keys(updates: dict[str, str], *, path: Path | None = None) -> Path:
+    """Merge ``updates`` into ``creds/keys.json`` atomically.
+
+    Preserves every other field; creates the file if absent.
+
+    Args:
+        updates: Dict of keys.json fields to overwrite.
+        path: Override target path (default: bundled creds/keys.json).
+
+    Returns:
+        The path that was written.
+    """
+    target = path or Path(str(pkg_resources.files(creds) / "keys.json"))
+    existing: dict[str, str] = {}
+    if target.is_file():
+        with target.open() as f:
+            existing = json.load(f)
+    existing.update(updates)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with tmp.open("w") as f:
+        json.dump(existing, f, indent=2)
+        f.write("\n")
+    tmp.replace(target)
+    return target
 
 
 def parse_curl_to_spec(
