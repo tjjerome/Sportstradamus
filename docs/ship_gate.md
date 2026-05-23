@@ -67,7 +67,7 @@ of N.
   `Line`, NOT `Odds`, so unpriced-but-lined markets still get a real ECE.
 - **Gate 4 blank** (sparse "tds"-style markets where `IQR(Result) = 0`): **fail**
   under strict — the compression yardstick is structurally undefined. Flagged in
-  `docs/gbdt_mean_regression_plan.md` for revisit (binary markets likely need a
+  `docs/operation_ship_75.md` Step 0.4 for revisit (binary markets likely need a
   different spread gate).
 - **Gates 2/3 blank**: fail (couldn't compute).
 
@@ -124,5 +124,5 @@ green for every league with cached parquets
 - **Quality too low** → tighten G4 (`> 0.6`) or G2/G3 (`< 0.3`).
 - **NFL low-N false KILLs on Gate 1** — the 95% CI is naturally wide on cells with
   < 1000 events, so a real-edge thin-N cell can straddle 0 and KILL. Tracked as an
-  open item in `docs/gbdt_mean_regression_plan.md`; consider a one-sided test or an
+  open item in `docs/operation_ship_75.md` Step 4 (gate-widening); consider a one-sided test or an
   N-aware floor on Gate 1 once breadth becomes the binding decision.

@@ -128,7 +128,7 @@ def meditate(
     # --deterministic implies --force: the input-freeze (new_M = empty)
     # otherwise short-circuits train_market when a prior model pickle exists,
     # which is precisely when the eval harness needs a fresh deterministic
-    # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
+    # rebuild. See docs/operation_ship_75.md (Step 0 verification) for the rationale.
     if deterministic and not force:
         force = True
     log = get_logger("meditate")
@@ -159,7 +159,7 @@ def meditate(
     # here so a bad entry fails before the expensive gamelog loads below.
     # Deterministic A/B runs ignore it: they target an explicit --market with an
     # explicit --target-strategy and must never mutate production pickles.
-    # See docs/gbdt_mean_regression_plan.md "Ship mechanism — per-cell strategy".
+    # See docs/operation_ship_75.md "Tier-1 supersession" for the ship mechanism.
     ship_config = {} if deterministic else load_ship_config()
 
     if reset_markets.strip():

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-20
 **Branch:** `claude/fix-gbdt-mean-regression-GcY1g` (PR #46 → `devel`)
-**Status:** P1 of `docs/gbdt_mean_regression_plan.md` is complete; result is a
+**Status:** P1 of `docs/archive/gbdt_mean_regression_plan.md` (superseded 2026-05-23 by `docs/operation_ship_75.md`) is complete; result is a
 strong negative finding. Handing off to a research agent to figure out where
 to take the project next.
 **Lineage:** Direct continuation of `docs/OVERCONFIDENCE_INVESTIGATION.md`
@@ -29,7 +29,7 @@ is now reproduced and strengthened across the path.
 
 LightGBMLSS predictions in this repo compress toward the global mean:
 high-volume players under-predicted, low-volume over-predicted
-(`docs/gbdt_mean_regression_plan.md` §Context). The hypothesis underlying
+(`docs/archive/gbdt_mean_regression_plan.md` §Context). The hypothesis underlying
 Phase A in `docs/OVERCONFIDENCE_INVESTIGATION.md` was that the SkewNormal
 branch's multiplicative target `y / MeanYr` (the only branch where
 normalization is currently applied) imposes a **multiplicative-amplification
@@ -191,7 +191,7 @@ FGA specifically.
 
 **What this means for the parent project's priority list:**
 
-The priority list in `docs/gbdt_mean_regression_plan.md` queued several
+The priority list in `docs/archive/gbdt_mean_regression_plan.md` queued several
 other levers in order. Re-reading them in light of this negative result:
 
 - **P2 — `init_score` baseline for NegBin/ZINB markets.** *Different
@@ -257,7 +257,7 @@ Ranked by likely leverage:
    actually doing differently.
 5. **Is the live-path bug (Model Skew=NaN, `model_prob.py`, FGA) a
    bigger contributor than any training-side fix?** Filed in
-   `docs/gbdt_mean_regression_plan.md` as "tackle when diminishing returns
+   `docs/archive/gbdt_mean_regression_plan.md` as "tackle when diminishing returns
    hit" — but if training-side levers have run out (P1 family dead, P3/P5/
    P6 expected to be marginal), this becomes the next-most-leveraged
    investigation. OVERCONFIDENCE_INVESTIGATION §3.4 has the symptoms
@@ -289,7 +289,7 @@ Ranked by likely leverage:
 | What | Where |
 |---|---|
 | Branch | `claude/fix-gbdt-mean-regression-GcY1g` (32 commits ahead of `origin`, not pushed) |
-| Master plan (durable) | `docs/gbdt_mean_regression_plan.md` |
+| Master plan (durable) | `docs/operation_ship_75.md` (this doc historicized under `docs/archive/gbdt_mean_regression_plan.md`) |
 | OVERCONFIDENCE_INVESTIGATION (lineage) | `docs/OVERCONFIDENCE_INVESTIGATION.md` |
 | Phase-A original spec | `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` |
 | P0.5 determinism design | `docs/superpowers/specs/2026-05-19-p0.5-determinism-gate-design.md` |

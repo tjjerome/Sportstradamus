@@ -90,7 +90,7 @@ class _ZeroTruncatedNB:
     ``q`` on most rows, which the frozen derived-π identity cannot represent (it
     clips π to 0, breaking the reconstruction). The joint/hurdle decode therefore
     stays on the full-support NB; see the Stage-B1 outcome + Track-B rescope in
-    ``docs/gbdt_mean_regression_plan.md``.
+    ``docs/operation_ship_references.md`` §6.
 
     Mechanics (for MZINB reuse): LightGBMLSS computes its loss as
     ``-Σ distribution(**params).log_prob(y)``, so assigning this class to a

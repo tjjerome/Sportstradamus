@@ -40,7 +40,7 @@ project's **active** work (Phases 1–6 keep their original numbers). Phase-1 fo
 (1.2, 1.6) and deferred Phases 4–6 are otherwise unchanged.
 
 **ACTIVE — Model Correctness & Market Breadth (IN PROGRESS).** Home of record:
-[`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md). Prompted by defects in
+[`docs/operation_ship_75.md`](operation_ship_75.md). Prompted by defects in
 the live implementation (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)),
 not optional polish. Shipped so far: P0 offline harness, P0.5 determinism gate, P1
 centered-target verdict (FGA ship / family kill), P2.B HurdleZINB (6/8 NBA ZINB ship), Stage 0
@@ -118,7 +118,7 @@ production via 1.2; the *per-market support audit* and discrete-PMF refinement a
 **This leads the remaining work**, ahead of deferred Phase 4 (alerts/dashboard) and Phase 5
 (best ball). It is not a Phase-6 refinement: it was prompted by **defects discovered in the
 live implementation**, making it production-quality *correction* work. Home of record:
-[`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md) — this entry is a pointer +
+[`docs/operation_ship_75.md`](operation_ship_75.md) — this entry is a pointer +
 status, not a duplicate of the stage detail.
 
 **Discovered defects (why it is urgent):**
@@ -594,7 +594,7 @@ profitability; all upside. **Estimated:** opportunistic, 1–4 weekends per item
 
 Phase 6 is the home for **deferred** model work of two kinds: (1) the **speculative tail** of the
 active model track — the post-diminishing-returns stages from
-[`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md): **Stage A4** (novel risky retries),
+[`docs/operation_ship_75.md`](operation_ship_75.md): **Stage A4** (novel risky retries),
 **Stage B4** (tuning/polish — optional), and any long-shot method; plus (2) the **original refinements**
 6.1–6.5 below. None of Phase 6 was ever the urgent work — the urgent work is fixing the discovered
 defects and reaching 75% breadth (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)).
@@ -662,7 +662,7 @@ narrow. Recommended order:
 1. **Model Correctness & Market Breadth — ACTIVE (lead).** Reach ≥ 75% baseline breadth per league
    (gap NBA −3, WNBA −4, NFL −2): Tier-0 audit code → Stage B1.6 feature/bias track → core depth
    A2/B2/B3. Follow until diminishing returns; the speculative tail (A4/B4) is deferred to Phase 6.
-   Home of record: [`docs/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md).
+   Home of record: [`docs/operation_ship_75.md`](operation_ship_75.md).
 2. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the `find_correlation`
    pairwise-EV unbounded score, replace inline magic numbers with named constants, swap substring
    same-player guarding for `player_id` joins, reconcile the `Boost`-column overwrite at

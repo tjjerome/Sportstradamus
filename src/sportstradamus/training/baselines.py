@@ -22,7 +22,7 @@ Each strategy bundles:
   using the same ``global_mean`` snapshot the model was trained against.
 
 Registered strategies (more queued as A/B follow-ups in
-``docs/gbdt_mean_regression_plan.md``):
+``docs/operation_ship_75.md`` Step 4):
 
 * ``ratio_meanyr`` — current production. ``y / MeanYr_clipped`` ratio
   target; decode multiplies ``loc`` and ``scale`` by ``MeanYr``.

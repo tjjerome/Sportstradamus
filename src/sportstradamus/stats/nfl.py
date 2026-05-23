@@ -366,7 +366,7 @@ class StatsNFL(Stats):
 
         Overrides the base no-op hook. Markets absent from ``NFL_MARKET_POSITIONS``
         (the fantasy-points composites) keep all four positions. See Stage A1.6 in
-        docs/gbdt_mean_regression_plan.md.
+        docs/operation_ship_references.md §9.
         """
         eligible = NFL_MARKET_POSITIONS.get(market)
         if eligible is None:

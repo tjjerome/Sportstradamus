@@ -632,7 +632,7 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
       ``P`` / ``Line``), and we don't credit the model for absence of evidence.
     * Gate 4 blank (``IQR(Result) = 0``): **fail** under this strict pass; the
       compression yardstick is structurally undefined for sparse ``tds``-style
-      binary markets, flagged in ``docs/gbdt_mean_regression_plan.md`` for revisit.
+      binary markets, flagged in ``docs/operation_ship_75.md`` Step 0.4 for revisit.
     """
     out = dict(row)
     g1_hi = out.get("g1_brier_diff_ci_hi")

@@ -1,5 +1,16 @@
 # Context: GBDT Mean-Regression Plan — Decision History & Research Detail
 
+> **⚠ SUPERSEDED 2026-05-23 — read-only archive.** This context doc is
+> retired alongside its parent
+> [`gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md). The
+> new home-of-record is
+> [`docs/operation_ship_75.md`](../operation_ship_75.md), and the
+> load-bearing facts (research verdicts, citations [1]–[48], critical
+> files map, inference-path checklist, cross-league caveats) are
+> preserved in
+> [`docs/operation_ship_references.md`](../operation_ship_references.md).
+> Kept here verbatim only as historical record; do not edit.
+>
 > **Companion context doc** to [`gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md).
 > Decision history, completed-phase results, research verdicts, and references.
 > Implementation agents can usually skip this; research agents should read it.
