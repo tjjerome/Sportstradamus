@@ -28,11 +28,11 @@
         "BLK": "ratio_meanyr",
         "BLST": "withheld",
         "DREB": "withheld",
-        "FG3A": "withheld",
+        "FG3A": "ratio_meanyr",
         "FG3M": "withheld",
         "FGA": "withheld",
         "FGM": "withheld",
-        "FTM": "withheld",
+        "FTM": "ratio_meanyr",
         "MIN": "ratio_meanyr",
         "OREB": "ratio_meanyr",
         "PA": "ratio_meanyr",
@@ -65,7 +65,7 @@
         "rushing yards": "withheld",
         "sacks taken": "withheld",
         "targets": "withheld",
-        "tds": "withheld",
+        "tds": "ratio_meanyr",
         "yards": "ratio_meanyr"
     },
     "NHL": {
