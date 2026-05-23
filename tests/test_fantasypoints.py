@@ -127,24 +127,25 @@ def test_client_post_sends_json_body(monkeypatch):
     assert captured["json"] == body
 
 
-def test_client_omits_authorization_when_not_set(monkeypatch):
+def test_client_fails_fast_when_authorization_empty(monkeypatch):
     monkeypatch.delenv("FANTASYPOINTS_AUTHORIZATION", raising=False)
     monkeypatch.delenv("FANTASYPOINTS_COOKIE", raising=False)
-    captured = {}
+    called = {"n": 0}
 
-    def capture(method, url, headers=None, params=None, json=None):
-        captured["headers"] = headers
+    def fail_if_called(*a, **k):
+        called["n"] += 1
         return FakeResponse(200, body={})
 
-    _patch_request(monkeypatch, capture)
-    FantasyPointsClient(
+    _patch_request(monkeypatch, fail_if_called)
+    client = FantasyPointsClient(
         authorization="",
         cookie="",
         user_agent="UA",
         inter_request_sleep_s=0.0,
-    ).get("https://example/")
-    assert "Authorization" not in captured["headers"]
-    assert "Cookie" not in captured["headers"]
+    )
+    with pytest.raises(FantasyPointsAuthError, match="empty"):
+        client.get("https://example/")
+    assert called["n"] == 0, "no HTTP request should have been attempted"
 
 
 def test_parse_curl_get_strips_auth_headers_and_splits_query():

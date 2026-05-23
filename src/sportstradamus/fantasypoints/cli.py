@@ -345,10 +345,11 @@ def _fetch_all(
             log.error("auth failed", extra={"endpoint": spec.name, "error": str(exc)})
             click.echo(str(exc), err=True)
             raise click.ClickException(
-                "Authorization token expired. Refresh creds/keys.json and rerun."
+                "Authorization token missing or expired. Refresh " "creds/keys.json and rerun."
             ) from exc
         except Exception as exc:
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
+            click.echo(f"  {spec.name}: {exc}", err=True)
             failures.append(spec.name)
             continue
         _write_payload(target, body, spec.response_format)
