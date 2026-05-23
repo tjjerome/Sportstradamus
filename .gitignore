@@ -164,6 +164,10 @@ cython_debug/
 *.mdl
 docs/build
 *.csv*
+# Track the Tier-0 status snapshot so the per-cell "current metric vs goal vs pass"
+# is visible in the branch without re-running the audit (regenerated each full
+# compression_eval run). Research-branch only; denylisted from devel/main.
+!src/sportstradamus/data/tier0_scorecard.csv
 *.
 .lprof
 *refactor.py

@@ -13,9 +13,10 @@ signature. The compression ratio ``std(pred) / std(actual)`` summarizes it in
 one number (1.0 = no compression; Wheeler 2012 measured ~7.7x on raw NBA PPG).
 
 Two modes:
-  * single  — score one or more test sets, append a scorecard to the run log.
-  * diff    — compare a candidate test set against a baseline and emit a
-              ship/kill verdict against the Phase-0 threshold.
+  * single  — score one or more test sets: a per-cell five-gate scorecard (with an
+              "oracle" bound) to data/tier0_scorecard.csv, plus the compression run log.
+  * diff    — compare a candidate test set against a baseline, reporting the gate
+              metrics for both (the supersede ship verdict lands in a later phase).
 
 Usage
 -----
@@ -43,41 +44,68 @@ import pandas as pd
 from sportstradamus import data
 from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.io import read_history
+from sportstradamus.training.markets import ALL_MARKETS
 
-# Phase-0 ship gate (see plan): a strategy ships only if it cuts top-mean-decile
-# MAE by at least this fraction without regressing global MAE beyond the
-# tolerance below. Sourced from the attached report's "decision threshold".
-MIN_TOP_DECILE_MAE_IMPROVEMENT = 0.05
-MAX_GLOBAL_MAE_REGRESSION = 0.01
+# ---------------------------------------------------------------------------
+# Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
+# (set first baseline | supersede incumbent) x (research->devel offline |
+# devel->main live).
+#
+#   * research -> devel, set baseline: the FIVE offline gates computed here —
+#     Gate 1 Brier-vs-book paired bootstrap, Gates 2/3 star/bench bias-vs-spread
+#     match (denominator = segment σ, NOT σ/sqrt(N) — SE collapses on large-N
+#     low-variance bench segments), Gate 4 IQR spread, Gate 5 equal-mass ECE.
+#     This module is MEASUREMENT-ONLY for these five: the per-cell metrics (plus
+#     an "oracle" bound) go to tier0_scorecard.csv with no pass/fail. Thresholds
+#     (k, the Gate-1 CI rule, the IQR floor, the ECE ceiling) are chosen after
+#     reading the numbers, then the overall verdict is wired back in. Cells with
+#     no book Odds leave Gate 1 blank; the ship convention is that a blank Gate 1
+#     auto-passes — no book to beat, model wins by default. Gate 5 (model-only
+#     calibration) does NOT use Odds, so it still computes for those cells; Gate 5
+#     blank means "couldn't compute" (no P or no Line), not auto-pass.
+#   * research -> devel, supersede: pass all five + a paired Brier CI (current-new,
+#     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
+#     backdated Kelly sim (supersede_verdict, diff mode).
+#   * devel -> main: a profitability gate on live settled data (positive Kelly-sized
+#     ROI to set a baseline; >= +0.5% ROI over >= 2 weeks to supersede an incumbent)
+#     — see scripts/check_graduation.py.
+# ---------------------------------------------------------------------------
 
-# Brier-skill third gate (see CLAUDE.md "Kelly & blending" and the plan).
-# A strategy ships only if its brier_skill_score does not regress vs the
-# baseline (any worsening = KILL, even if the MAE gates pass).
-MAX_BRIER_SKILL_REGRESSION: float = 0.0
-
-# Calibration gate (Universal decision threshold condition 4 / Gate 1). Added
-# after the §7a pre-check found top-decile MAE "wins" that were really low-volume
-# over-prediction (FG3M bottom buckets predicted ~3.4x actual). Two parts:
-#   * RELATIVE — the candidate's bottom-quartile signed bias must not be more
-#     positive (worse) than the baseline's. The lowest 25% of players (bench
-#     warmers) are pooled coarsely on purpose: they generalize more than stars,
-#     so a quartile aggregate is more representative than a single decile.
-#   * ABSOLUTE backstops on BOTH ends, floored so low-mean count cells aren't held
-#     to an impossibly tight bound. The bottom-quartile bound is ONE-SIDED — only
-#     over-prediction (positive bias) of bench warmers is a failure mode;
-#     under-prediction is tolerated for now. The top-decile bound is BIDIRECTIONAL
-#     (on |bias|) — stars must not be systematically over- OR under-predicted. The
-#     backstop catches an egregious bias even when the baseline was itself bad
-#     enough to pass the relative check.
-# These bounds are deliberately WIDE for Phase 0 — the relative check does the
-# heavy lifting while the bias-correction track lands real improvements. Tighten
-# the fractions/floor as those improvements accrue (this is the knob the plan's
-# "wider as we get started" note refers to). The direction (a top-decile win must
-# not be financed by bottom-quartile over-prediction) is fixed.
+# Bottom-mean QUARTILE = the bench segment (Gate 3); the top-mean DECILE (N_DECILES)
+# is the star segment (Gate 2). Bench is pooled coarser on purpose — low-volume
+# players generalize more than stars.
 BOTTOM_QUARTILE_FRAC: float = 0.25
-BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC: float = 0.30
-TOP_DECILE_BIAS_MAGNITUDE_FRAC: float = 0.30
-BIAS_ABS_FLOOR: float = 0.10
+
+# Gate 1 / supersede-S2 paired bootstrap: resample count, RNG seed (fixed so the CI
+# is reproducible — the repo has a determinism gate), and the 95% two-sided
+# percentile bounds. Seed matches zinb_routing_diagnostics._DEFAULT_SEED.
+_GATE1_N_BOOT: int = 2000
+_GATE1_SEED: int = 1729
+_CI_LOW_PCT: float = 2.5
+_CI_HIGH_PCT: float = 97.5
+
+# Gate 5 ECE bins. EQUAL-MASS (qcut) — distinct from the equal-WIDTH bins in
+# training/pipeline.py:_expected_calibration_error; betting cares about calibration
+# where the predicted-probability mass actually sits, so equal-mass is the right cut.
+_ECE_BINS: int = 10
+
+# Strict starter thresholds for the research->devel set-baseline gate (see
+# docs/ship_gate.md). The 5-gate row carries the raw measurements; these set
+# pass/fail. A cell ships (research -> devel) iff all five pass.
+#   G1 ci_hi  < 0    : 95% CI strictly excludes 0 below (model Brier < book's at 95%)
+#   G2 star  z < 0.5 : top-mean-decile bias under half the segment's stdev of outcomes
+#   G3 bench z < 0.5 : bottom-quartile bias under half the segment's stdev of outcomes
+#   G4 iqr_ratio > 0.5: prediction IQR at least half the truth's (<= 50% compression)
+#   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5%
+_GATE1_CI_HI_MAX: float = 0.0
+_GATE2_STAR_Z_MAX: float = 0.5
+_GATE3_BENCH_Z_MAX: float = 0.5
+_GATE4_IQR_RATIO_MIN: float = 0.5
+_GATE5_ECE_MAX: float = 0.075
+
+# Breadth target — at least this fraction of each league's markets should clear the
+# 5 gates (docs/ship_gate.md "Top priority"). Drives the per-league rollup.
+BREADTH_TARGET_FRAC: float = 0.75
 
 # Probability clip mirrors training/pipeline.py:_PROBA_CLIP so Brier never sees
 # exact 0 or 1 from either model or book.
@@ -98,6 +126,13 @@ DEFAULT_PRED_COL = "EV"
 
 RUN_LOG_PATH = pkg_resources.files(data) / "compression_eval_log.csv"
 SCATTER_DIR = Path("/tmp")
+
+# Per-cell gate scorecard SNAPSHOT (not the append-only run log). write_gate_scorecard
+# overwrites this on every full audit with one row per evaluated cell: the five gate
+# metrics for the model alongside an "oracle" column set (model = the true score
+# exactly) that bounds each gate. Measurement-only — no pass/fail until thresholds
+# are set. Readable as plain CSV without re-running the audit.
+TIER0_SCORECARD_PATH = pkg_resources.files(data) / "tier0_scorecard.csv"
 
 # --live-window mode constants (Stage 0 deliverable 0.3).
 # Look-back window for MeanYr computation from the per-league gamelog. Matches
@@ -143,6 +178,10 @@ class Scorecard:
     bottom_quartile_bias: float
     bottom_quartile_mean: float
     top_decile_mean: float
+    # Bottom-quartile MAE — the bench-side companion to top_decile_mae. Track 2
+    # (supersede) requires both segment MAEs to improve >= 5%, so the bench MAE must
+    # be on the scorecard. Appended last for the same CSV-append back-compat reason.
+    bottom_quartile_mae: float
 
 
 def _git_sha() -> str:
@@ -235,15 +274,38 @@ def _corr(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.corrcoef(x, y)[0, 1])
 
 
-def _brier_skill_score(df: pd.DataFrame) -> float | None:
-    """1 - brier(model_P) / brier(book_over) on the test set, or None if cols absent.
+def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return ``(p_model, y)`` for the model-only calibration gate (Gate 5).
 
-    Requires ``P`` (calibrated model over-probability), ``Odds`` (book
-    under-probability so book over = ``1 - Odds``), ``Line`` and
-    ``Result``. The binary outcome is ``Result >= Line``. Returns
-    ``None`` if any column is missing or has all-NaN values, so older
-    CSVs without these columns are handled gracefully.
+    Needs ``P`` (calibrated model over-probability), ``Line`` (the posted prop line)
+    and ``Result`` to derive ``y = Result >= Line``. Independent of the book's
+    ``Odds`` — Gate 5 only asks whether the MODEL's own probabilities are calibrated
+    to outcomes; it does not compare against the book. Returns ``None`` when ``P`` or
+    ``Line`` is missing or every row is non-finite.
     """
+    needed = {"P", "Line"}
+    if not needed.issubset(df.columns):
+        return None
+    sub = df[["P", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
+    if len(sub) == 0:
+        return None
+    y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
+    p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
+    return p_model, y
+
+
+def _brier_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Return ``(p_model, p_book, y)`` for the priced Brier gates, or None if absent.
+
+    Layers the book's ``Odds`` (book under-probability ⇒ book over = ``1 - Odds``) on
+    top of :func:`_calibration_inputs`. The row set is re-filtered to drop rows with
+    non-finite ``Odds`` (so the Brier and ECE row sets can differ when some events
+    have a posted line but no book quote). Returns ``None`` when ``Odds`` is missing
+    entirely or every priced row is non-finite. Shared by
+    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`).
+    """
+    if "Odds" not in df.columns:
+        return None
     needed = {"P", "Odds", "Line"}
     if not needed.issubset(df.columns):
         return None
@@ -253,11 +315,39 @@ def _brier_skill_score(df: pd.DataFrame) -> float | None:
     y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
     p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     p_book = np.clip(1.0 - sub["Odds"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
+    return p_model, p_book, y
+
+
+def _brier_skill_score(df: pd.DataFrame) -> float | None:
+    """1 - brier(model_P) / brier(book_over) on the test set, or None if cols absent.
+
+    Informational summary kept on the :class:`Scorecard` / run log; the Gate-1 ship
+    signal is the paired bootstrap CI in :func:`_gate1_brier_ci`, not this ratio.
+    """
+    inputs = _brier_inputs(df)
+    if inputs is None:
+        return None
+    p_model, p_book, y = inputs
     brier_model = float(np.mean((p_model - y) ** 2))
     brier_book = float(np.mean((p_book - y) ** 2))
     if brier_book <= 0:
         return None
     return 1.0 - brier_model / brier_book
+
+
+def _segment_masks(df: pd.DataFrame, n_deciles: int = N_DECILES) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(star_mask, bench_mask)`` boolean arrays over ``df`` rows by ``MeanYr``.
+
+    ``star`` = the top-mean decile (value-quantile threshold, ties included); ``bench``
+    = the bottom-mean quartile (:data:`BOTTOM_QUARTILE_FRAC`, rank-based equal-frequency
+    so it is never empty on tiny frames). Shared by :func:`scorecard` and the segment
+    gates (:func:`_gate23_segment_se`) so both slice players identically.
+    """
+    star_mask = (df[DECILE_COL] >= df[DECILE_COL].quantile(1 - 1 / n_deciles)).to_numpy()
+    rank = df[DECILE_COL].rank(method="first").to_numpy()
+    n_bottom = max(1, int(np.ceil(BOTTOM_QUARTILE_FRAC * len(df))))
+    bench_mask = rank <= n_bottom
+    return star_mask, bench_mask
 
 
 def scorecard(
@@ -296,18 +386,10 @@ def scorecard(
 
     table = decile_table(df, pred_col, n_deciles)
     top = table.iloc[-1]
-    top_mask = df[DECILE_COL] >= df[DECILE_COL].quantile(1 - 1 / n_deciles)
-    # Bottom quartile = the lowest 25% of players by MeanYr (bench warmers),
-    # selected by rank for tie-robust equal-frequency pooling — matching the
-    # decile table's rank-based binning. The ship gate pools them this coarsely
-    # because low-volume players generalize more than stars.
-    rank = df[DECILE_COL].rank(method="first").to_numpy()
-    # ceil + floor-of-1 so the quartile is never empty on tiny frames (a NaN bias
-    # would silently defeat the gate); production test sets have thousands of rows.
-    n_bottom = max(1, int(np.ceil(BOTTOM_QUARTILE_FRAC * len(df))))
-    bq_mask = rank <= n_bottom
+    star_mask, bq_mask = _segment_masks(df, n_deciles)
     bottom_quartile_bias = float(np.mean(pred[bq_mask] - actual[bq_mask]))
     bottom_quartile_mean = float(np.mean(actual[bq_mask]))
+    bottom_quartile_mae = float(np.mean(np.abs(pred[bq_mask] - actual[bq_mask])))
     brier_skill = _brier_skill_score(df)
 
     return Scorecard(
@@ -322,110 +404,508 @@ def scorecard(
         top_decile_mae=float(top["mae"]),
         top_decile_bias=float(top["bias"]),
         compression_ratio=_compression_ratio(actual, pred),
-        top_decile_compression_ratio=_compression_ratio(
-            actual[top_mask.to_numpy()], pred[top_mask.to_numpy()]
-        ),
+        top_decile_compression_ratio=_compression_ratio(actual[star_mask], pred[star_mask]),
         pred_meanyr_corr=_corr(meanyr, pred - meanyr),
         result_meanyr_corr=_corr(meanyr, actual - meanyr),
         brier_skill_score=brier_skill,
         bottom_quartile_bias=bottom_quartile_bias,
         bottom_quartile_mean=bottom_quartile_mean,
         top_decile_mean=float(top["actual_mean"]),
+        bottom_quartile_mae=bottom_quartile_mae,
     )
 
 
-def verdict(baseline: Scorecard, candidate: Scorecard) -> tuple[bool, str]:
-    """Apply the offline ship gate comparing a candidate to a baseline.
+def _bootstrap_mean_ci(
+    values: np.ndarray, rng: np.random.Generator, n_boot: int = _GATE1_N_BOOT
+) -> tuple[float, float, float]:
+    """Percentile bootstrap of the mean of ``values``: ``(mean, ci_lo, ci_hi)``.
 
-    Returns:
-        ``(ship, reason)``. ``ship`` is True only if every gate condition holds:
-        (1) top-decile MAE improves by at least
-        :data:`MIN_TOP_DECILE_MAE_IMPROVEMENT`; (2) global MAE does not regress
-        by more than :data:`MAX_GLOBAL_MAE_REGRESSION`; (3) ``brier_skill_score``
-        does not regress (skipped if either card lacks it); (4) calibration — the
-        bottom-quartile signed bias is not more positive than the baseline's
-        (relative), the bottom-quartile bias does not over-predict beyond
-        :data:`BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC` of that quartile's empirical
-        mean (one-sided — under-prediction of bench warmers is tolerated), and the
-        top-decile bias magnitude stays within
-        :data:`TOP_DECILE_BIAS_MAGNITUDE_FRAC` of that decile's mean (bidirectional
-        — stars must not be systematically over- or under-predicted). Both
-        absolute bounds are floored at :data:`BIAS_ABS_FLOOR`. Condition (4) blocks
-        a top-decile win bought by low-volume over-prediction — the §7a failure
-        mode. The absolute bounds are wide for Phase 0 and tighten as the
-        bias-correction track improves.
+    Resamples ``values`` with replacement ``n_boot`` times (seeded ``rng`` for a
+    reproducible CI) and returns the point mean plus the 95% two-sided percentile
+    bounds. Sibling of ``zinb_routing_diagnostics._bootstrap_ci``, specialized to the
+    mean of an already-computed per-event statistic (Gate 1 here, supersede S2 later).
+    Returns ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
     """
-    if baseline.top_decile_mae == 0:
-        return False, "baseline top-decile MAE is zero; cannot compute improvement"
-    top_impr = (baseline.top_decile_mae - candidate.top_decile_mae) / baseline.top_decile_mae
-    global_reg = (candidate.global_mae - baseline.global_mae) / baseline.global_mae
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    n = len(values)
+    if n == 0:
+        return float("nan"), float("nan"), float("nan")
+    draws = np.empty(n_boot, dtype=float)
+    for i in range(n_boot):
+        draws[i] = values[rng.integers(0, n, n)].mean()
+    lo, hi = np.percentile(draws, [_CI_LOW_PCT, _CI_HIGH_PCT])
+    return float(values.mean()), float(lo), float(hi)
 
-    if top_impr < MIN_TOP_DECILE_MAE_IMPROVEMENT:
-        return False, (
-            f"KILL: top-decile MAE improved {top_impr:+.1%} "
-            f"(need >= {MIN_TOP_DECILE_MAE_IMPROVEMENT:.0%})"
+
+def _iqr(values: np.ndarray) -> float:
+    """Inter-quartile range (75th - 25th percentile) of ``values``."""
+    p75, p25 = np.percentile(np.asarray(values, dtype=float), [75, 25])
+    return float(p75 - p25)
+
+
+def _gate1_brier_ci(
+    p_model: np.ndarray, p_book: np.ndarray, y: np.ndarray, rng: np.random.Generator
+) -> tuple[float, float, float]:
+    """Gate 1 — paired bootstrap of the per-event (model - book) Brier difference.
+
+    ``d_i = (p_model_i - y_i)^2 - (p_book_i - y_i)^2``. Lower Brier is better, so a
+    bootstrap-mean CI entirely below 0 means the model beats the book. Returns
+    ``(mean, ci_lo, ci_hi)``.
+    """
+    d = (p_model - y) ** 2 - (p_book - y) ** 2
+    return _bootstrap_mean_ci(d, rng)
+
+
+def _gate23_segment_match(
+    pred: np.ndarray, actual: np.ndarray, mask: np.ndarray
+) -> tuple[float, float, float, float, float]:
+    """Gates 2/3 — bias-vs-spread match of predicted vs true mean on one segment.
+
+    Returns ``(pred_mean, true_mean, abs_diff, sigma, z)`` where ``sigma =
+    std(actual[mask], ddof=1)`` is the within-segment spread of true outcomes and
+    ``z = abs_diff / sigma`` measures the bias in units of that spread. The
+    denominator is the segment's STANDARD DEVIATION, not its standard error
+    (``sigma / sqrt(N)``) — Gate 3's bench segment has hundreds-to-thousands of
+    low-variance rows, so SE collapses to ~0 and the gate would fire on a negligible
+    bias; sigma keeps the yardstick at "what a typical event in the segment looks
+    like" regardless of N. ``sigma`` / ``z`` are ``nan`` for an empty or zero-variance
+    segment.
+    """
+    seg_pred = pred[mask]
+    seg_actual = actual[mask]
+    n = len(seg_actual)
+    if n == 0:
+        return float("nan"), float("nan"), float("nan"), float("nan"), float("nan")
+    pred_mean = float(seg_pred.mean())
+    true_mean = float(seg_actual.mean())
+    abs_diff = abs(pred_mean - true_mean)
+    sigma = float(np.std(seg_actual, ddof=1)) if n > 1 else float("nan")
+    z = abs_diff / sigma if sigma and np.isfinite(sigma) and sigma > 0 else float("nan")
+    return pred_mean, true_mean, abs_diff, sigma, z
+
+
+def _gate4_iqr_spread(actual: np.ndarray, pred: np.ndarray) -> tuple[float, float, float]:
+    """Gate 4 — IQR spread (compression) over the full population.
+
+    Returns ``(iqr_pred, iqr_true, ratio)`` with ``ratio = iqr_pred / iqr_true``
+    (1.0 = no compression, <1 = predictions compressed). IQR-robust sibling of the
+    std-based :func:`_compression_ratio`.
+    """
+    iqr_pred = _iqr(pred)
+    iqr_true = _iqr(actual)
+    ratio = iqr_pred / iqr_true if iqr_true > 0 else float("nan")
+    return iqr_pred, iqr_true, ratio
+
+
+def _gate5_ece_equal_mass(p_model: np.ndarray, y: np.ndarray, n_bins: int = _ECE_BINS) -> float:
+    """Gate 5 — equal-mass expected calibration error.
+
+    Bins ``p_model`` into ``n_bins`` equal-mass bins (``pd.qcut``) and returns the
+    mass-weighted ``sum_b (n_b / N) * |mean(p_model in b) - mean(y in b)|``. Equal
+    MASS (not equal width as in training/pipeline.py) so the bins track where the
+    predicted-probability mass actually sits. Returns ``nan`` for an empty input.
+    """
+    total = len(p_model)
+    if total == 0:
+        return float("nan")
+    # duplicates="drop" collapses ties (e.g. a spike of identical probabilities, or
+    # the deterministic 0/1 oracle) into fewer bins rather than raising. A fully
+    # degenerate vector (all probabilities equal) leaves no valid edges -> qcut
+    # returns all-NaN; fall back to a single bin over every row.
+    bins = np.asarray(pd.qcut(p_model, n_bins, labels=False, duplicates="drop"), dtype=float)
+    valid = ~np.isnan(bins)
+    if not valid.any():
+        return abs(float(p_model.mean()) - float(y.mean()))
+    ece = 0.0
+    for b in np.unique(bins[valid]):
+        m = bins == b
+        n = int(m.sum())
+        ece += (n / total) * abs(float(p_model[m].mean()) - float(y[m].mean()))
+    return float(ece)
+
+
+def gate_row(
+    df: pd.DataFrame, pred_col: str, *, league: str, market: str, strategy: str
+) -> dict[str, object]:
+    """Compute the five offline gates for one cell — a model row plus an oracle row.
+
+    The oracle assumes the model predicted the true score exactly (``pred = Result``;
+    over-probability ``1 if Result>=Line else 0``), giving each gate's idealistic
+    bound: Gate 1 diff = -book Brier, Gates 2/3 ``z = 0``, Gate 4 ratio ``1.0``, Gate 5
+    ``ece = 0``. The σ / IQR_true denominators equal the model row, so the oracle
+    columns size each gate's natural threshold. Measurement-only — no pass/fail. Gate
+    1 is **blank when ``Odds`` is missing** (no book to beat); the ship convention is
+    that a blank Gate 1 **auto-passes** — model wins by default. Gate 5 needs only
+    ``P`` + ``Line`` (not ``Odds``), so it still computes for book-unpriced cells; a
+    blank Gate 5 means "couldn't compute" (no P or no Line), NOT auto-pass.
+    """
+    actual = df[ACTUAL_COL].to_numpy()
+    pred = df[pred_col].to_numpy()
+    star_mask, bench_mask = _segment_masks(df)
+
+    # Gates 2/3 — model; the oracle (pred = actual) zeroes abs_diff / z, sigma unchanged.
+    g2_pred, g2_true, g2_abs, g2_sigma, g2_z = _gate23_segment_match(pred, actual, star_mask)
+    _, _, _, _, g2_z_oracle = _gate23_segment_match(actual, actual, star_mask)
+    g3_pred, g3_true, g3_abs, g3_sigma, g3_z = _gate23_segment_match(pred, actual, bench_mask)
+    _, _, _, _, g3_z_oracle = _gate23_segment_match(actual, actual, bench_mask)
+
+    # Gate 4 — IQR spread; the oracle (pred = actual) gives ratio 1.0.
+    g4_iqr_pred, g4_iqr_true, g4_ratio = _gate4_iqr_spread(actual, pred)
+    _, _, g4_ratio_oracle = _gate4_iqr_spread(actual, actual)
+
+    # Gate 1 — paired Brier vs book. Needs Odds; blank ⇒ "no book to beat, model wins
+    # by default" (the auto-pass convention is doc'd at the module-header and applied
+    # at verdict-wiring time). Oracle p_model = y (the deterministic 1/0 prediction).
+    brier_in = _brier_inputs(df)
+    if brier_in is None:
+        g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
+    else:
+        p_model_b, p_book, y_b = brier_in
+        g1_mean, g1_lo, g1_hi = _gate1_brier_ci(
+            p_model_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
         )
-    if global_reg > MAX_GLOBAL_MAE_REGRESSION:
-        return False, (
-            f"KILL: global MAE regressed {global_reg:+.1%} "
-            f"(max {MAX_GLOBAL_MAE_REGRESSION:.0%})"
+        g1_mean_o, g1_lo_o, g1_hi_o = _gate1_brier_ci(
+            y_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
         )
-    if baseline.brier_skill_score is not None and candidate.brier_skill_score is not None:
-        delta = candidate.brier_skill_score - baseline.brier_skill_score
-        if delta < -MAX_BRIER_SKILL_REGRESSION:
-            return False, (
-                f"KILL: brier_skill_score regressed "
-                f"{baseline.brier_skill_score:+.3f} → "
-                f"{candidate.brier_skill_score:+.3f} (Δ {delta:+.3f})"
-            )
-    # (4a) RELATIVE: the bottom quartile (bench warmers) must not be
-    # over-predicted more than the baseline already does. More positive = worse.
-    if candidate.bottom_quartile_bias > baseline.bottom_quartile_bias:
-        return False, (
-            f"KILL: bottom-quartile bias worsened "
-            f"{baseline.bottom_quartile_bias:+.3f} → {candidate.bottom_quartile_bias:+.3f} "
-            f"(low-volume over-prediction must not increase vs the default)"
+        bss = _brier_skill_score(df)
+
+    # Gate 5 — model-only calibration. Needs P + Line (NOT Odds) — Gate 5 checks the
+    # model's probabilities against outcomes; the book doesn't enter. Blank only if
+    # P or Line is missing entirely; that's "couldn't compute", NOT auto-pass.
+    cal_in = _calibration_inputs(df)
+    if cal_in is None:
+        g5_ece = g5_ece_o = None
+    else:
+        p_model_c, y_c = cal_in
+        g5_ece = _gate5_ece_equal_mass(p_model_c, y_c)
+        g5_ece_o = _gate5_ece_equal_mass(y_c, y_c)
+
+    def r(v: float | None) -> float | None:
+        """Round to 4 dp; map None / non-finite to a blank CSV cell."""
+        if v is None or not np.isfinite(v):
+            return None
+        return round(float(v), 4)
+
+    return {
+        "league": league,
+        "market": market,
+        "strategy": strategy,
+        "n_rows": len(df),
+        "g1_brier_diff_mean": r(g1_mean),
+        "g1_brier_diff_ci_lo": r(g1_lo),
+        "g1_brier_diff_ci_hi": r(g1_hi),
+        "g1_brier_diff_mean_oracle": r(g1_mean_o),
+        "g1_brier_diff_ci_lo_oracle": r(g1_lo_o),
+        "g1_brier_diff_ci_hi_oracle": r(g1_hi_o),
+        "g1_brier_skill_score": r(bss),
+        "g2_star_pred_mean": r(g2_pred),
+        "g2_star_true_mean": r(g2_true),
+        "g2_star_abs_diff": r(g2_abs),
+        "g2_star_sigma": r(g2_sigma),
+        "g2_star_z": r(g2_z),
+        "g2_star_z_oracle": r(g2_z_oracle),
+        "g3_bench_pred_mean": r(g3_pred),
+        "g3_bench_true_mean": r(g3_true),
+        "g3_bench_abs_diff": r(g3_abs),
+        "g3_bench_sigma": r(g3_sigma),
+        "g3_bench_z": r(g3_z),
+        "g3_bench_z_oracle": r(g3_z_oracle),
+        "g4_iqr_pred": r(g4_iqr_pred),
+        "g4_iqr_true": r(g4_iqr_true),
+        "g4_iqr_ratio": r(g4_ratio),
+        "g4_iqr_ratio_oracle": r(g4_ratio_oracle),
+        "g5_ece": r(g5_ece),
+        "g5_ece_oracle": r(g5_ece_o),
+    }
+
+
+def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
+    """Augment a :func:`gate_row` row with per-gate ``*_pass`` flags + overall ``ship``.
+
+    Applies the strict starter thresholds (:data:`_GATE1_CI_HI_MAX` etc.). Blank-cell
+    semantics — distinct because the gates fail for different structural reasons:
+
+    * Gate 1 blank (no ``Odds``): **auto-pass** — no book to beat, model wins by
+      default. The only "no book data" auto-pass.
+    * Gate 2/3/5 blank: **fail** — the cell couldn't compute the gate (e.g. missing
+      ``P`` / ``Line``), and we don't credit the model for absence of evidence.
+    * Gate 4 blank (``IQR(Result) = 0``): **fail** under this strict pass; the
+      compression yardstick is structurally undefined for sparse ``tds``-style
+      binary markets, flagged in ``docs/gbdt_mean_regression_plan.md`` for revisit.
+    """
+    out = dict(row)
+    g1_hi = out.get("g1_brier_diff_ci_hi")
+    g1_pass = g1_hi is None or g1_hi < _GATE1_CI_HI_MAX
+    g2 = out.get("g2_star_z")
+    g2_pass = g2 is not None and g2 < _GATE2_STAR_Z_MAX
+    g3 = out.get("g3_bench_z")
+    g3_pass = g3 is not None and g3 < _GATE3_BENCH_Z_MAX
+    g4 = out.get("g4_iqr_ratio")
+    g4_pass = g4 is not None and g4 > _GATE4_IQR_RATIO_MIN
+    g5 = out.get("g5_ece")
+    g5_pass = g5 is not None and g5 < _GATE5_ECE_MAX
+    out["g1_pass"] = g1_pass
+    out["g2_pass"] = g2_pass
+    out["g3_pass"] = g3_pass
+    out["g4_pass"] = g4_pass
+    out["g5_pass"] = g5_pass
+    out["ship"] = g1_pass and g2_pass and g3_pass and g4_pass and g5_pass
+    return out
+
+
+def write_gate_scorecard(rows: list[dict[str, object]], out_path: Path) -> pd.DataFrame:
+    """Write the per-cell five-gate scorecard snapshot to CSV, one row per cell.
+
+    Overwrites ``out_path`` each call — a *snapshot* of the latest audit (the five
+    gate metrics, the oracle bound, and the per-gate ``*_pass`` flags + overall
+    ``ship``), distinct from the append-only run log. Rows are sorted by
+    ``(league, market)`` for a stable git diff. Caller pre-applies thresholds via
+    :func:`apply_thresholds` so the ``ship`` column is always present on rows.
+    """
+    df = pd.DataFrame(rows).sort_values(["league", "market"]).reset_index(drop=True)
+    df.to_csv(out_path, index=False)
+    return df
+
+
+def _print_breadth_rollup(scorecard_df: pd.DataFrame) -> None:
+    """Print per-league SHIP counts against the breadth target."""
+    for league in sorted(scorecard_df["league"].unique()):
+        sub = scorecard_df[scorecard_df["league"] == league]
+        n_pass = int(sub["ship"].sum())
+        n_markets = len(ALL_MARKETS.get(league, {}))
+        target = int(np.ceil(BREADTH_TARGET_FRAC * n_markets)) if n_markets else 0
+        flag = "OK" if n_pass >= target else "SHORT"
+        click.echo(
+            f"  {league}: {n_pass}/{n_markets} markets ship "
+            f"(target >={target} for {BREADTH_TARGET_FRAC:.0%}; {len(sub)} evaluated) [{flag}]"
         )
-    # (4b) ABSOLUTE backstops, wide for Phase 0. Bottom quartile is ONE-SIDED:
-    # only over-prediction (positive bias) of bench warmers is a failure mode;
-    # under-prediction is tolerated for now, so the bound caps the positive side
-    # only. Top decile is BIDIRECTIONAL: stars must not be systematically over- OR
-    # under-predicted, so the bound is on |bias|.
-    bq_bound = max(
-        BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC * candidate.bottom_quartile_mean,
-        BIAS_ABS_FLOOR,
+
+
+def _gate_headline(row: dict[str, object]) -> str:
+    """One-line per-cell gate summary for stdout, with SHIP / KILL verdict.
+
+    Cells with no book ``Odds`` get a ``(no Odds; G1 auto-pass)`` note. When the row
+    has been augmented by :func:`apply_thresholds`, the line ends with ``[SHIP]``
+    or ``[KILL: g3 g4 ...]`` naming the failing gates.
+    """
+
+    def f(key: str, fmt: str = "+.4f") -> str:
+        v = row.get(key)
+        return "nan" if v is None else format(float(v), fmt)
+
+    head = (
+        f"G1 brier_diff {f('g1_brier_diff_mean')} "
+        f"[{f('g1_brier_diff_ci_lo')}, {f('g1_brier_diff_ci_hi')}]  "
+        f"G2 star_z {f('g2_star_z', '.2f')}  G3 bench_z {f('g3_bench_z', '.2f')}  "
+        f"G4 iqr_ratio {f('g4_iqr_ratio', '.3f')}  G5 ece {f('g5_ece', '.4f')}"
     )
-    if candidate.bottom_quartile_bias > bq_bound:
-        return False, (
-            f"KILL: bottom-quartile bias {candidate.bottom_quartile_bias:+.3f} over-predicts "
-            f"beyond +{bq_bound:.3f} "
-            f"({BOTTOM_QUARTILE_BIAS_MAGNITUDE_FRAC:.0%} of quartile mean "
-            f"{candidate.bottom_quartile_mean:.3f}, floor {BIAS_ABS_FLOOR:.2f}; "
-            f"under-prediction tolerated)"
-        )
-    td_bound = max(
-        TOP_DECILE_BIAS_MAGNITUDE_FRAC * candidate.top_decile_mean,
-        BIAS_ABS_FLOOR,
+    if row.get("g1_brier_diff_mean") is None:
+        head += "  (no Odds; G1 auto-pass)"
+    if "ship" in row:
+        if row["ship"]:
+            head += "  [SHIP]"
+        else:
+            failed = [g for g in ("g1", "g2", "g3", "g4", "g5") if not row.get(f"{g}_pass", True)]
+            head += f"  [KILL: {' '.join(failed)}]"
+    return head
+
+
+# Supersede gate (S2/S3) constants — see docs/ship_gate.md "research -> devel,
+# supersede an incumbent: S1 + S2 + S3".
+# Distinct from _GATE1_SEED so S2's bootstrap doesn't correlate with Gate 1's
+# resampling on the same events.
+_SUPERSEDE_S2_SEED: int = 2027
+# Book implied-probability floor/ceiling for the S3 Kelly sim — a book quote at
+# 0.01 implies a 100x payout that swamps a noisy model probability; clip to the
+# range a real prop bet actually quotes at.
+_SUPERSEDE_BOOK_P_FLOOR: float = 0.05
+_SUPERSEDE_BOOK_P_CEILING: float = 0.95
+# Initial bankroll for the paired Sharpe sim — units arbitrary; the gate compares
+# RATIOS (sharpe_new > sharpe_current), so absolute dollars are immaterial.
+_SUPERSEDE_S3_INITIAL_BANKROLL: float = 1000.0
+
+
+def _supersede_paired_brier_ci(
+    b_df: pd.DataFrame, c_df: pd.DataFrame
+) -> tuple[int, float, float, float] | None:
+    """S2 — paired Brier CI on the row-aligned intersection of two test sets.
+
+    ``d_i = brier_baseline_i - brier_candidate_i`` per shared event. Positive ``d``
+    ⇒ candidate has lower Brier; the gate fires when the 95% percentile CI of
+    ``mean(d)`` strictly excludes 0 from below (``ci_lo > 0``). Returns
+    ``(n_shared, mean, ci_lo, ci_hi)`` or ``None`` if either frame lacks the
+    requisite columns or the intersection is empty.
+    """
+    if _calibration_inputs(b_df) is None or _calibration_inputs(c_df) is None:
+        return None
+    shared = b_df.index.intersection(c_df.index)
+    if len(shared) == 0:
+        return None
+    b_aligned = b_df.loc[shared]
+    c_aligned = c_df.loc[shared]
+    p_b = np.clip(b_aligned["P"].astype(float).to_numpy(), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
+    p_c = np.clip(c_aligned["P"].astype(float).to_numpy(), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
+    # Outcome ``y`` is event-level (Result vs Line), so the candidate frame's view
+    # is authoritative — the supersede test is "did the new model do better on the
+    # same events". If the two frames disagree on (Result, Line) for shared rows
+    # the alignment is moot; bias the comparison toward the candidate's labels.
+    y = (
+        c_aligned["Result"].astype(float).to_numpy()
+        >= c_aligned["Line"].astype(float).to_numpy()
+    ).astype(float)
+    brier_b = (p_b - y) ** 2
+    brier_c = (p_c - y) ** 2
+    d = brier_b - brier_c
+    rng = np.random.default_rng(_SUPERSEDE_S2_SEED)
+    mean, lo, hi = _bootstrap_mean_ci(d, rng)
+    return len(shared), mean, lo, hi
+
+
+def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
+    """Adapt a test-set frame to the per-bet schema ``simulate_kelly_all`` expects.
+
+    For each event the model picks the **EV side** (``over`` if ``pred >= Line`` else
+    ``under``). The bet's ``Model P`` is the model's probability on that side;
+    ``Boost`` is the decimal-odds payout ``1 / clip(book_p)`` so
+    :func:`sportstradamus.strategies.profit_sim.compute_payout` (under
+    ``Platform="Sleeper"``, which returns ``boost``) yields a payout > 1 and the
+    sim's Kelly branch doesn't early-exit. Synthetic monotonic dates make each
+    event its own "day" so the resulting return series has per-event resolution.
+    Returns an empty frame when ``Odds`` / ``P`` / ``Line`` are absent.
+    """
+    if _calibration_inputs(df) is None or "Odds" not in df.columns:
+        return pd.DataFrame()
+    sub = df[["P", "Odds", "Line", ACTUAL_COL, pred_col]].replace(
+        [np.inf, -np.inf], np.nan
+    ).dropna()
+    if sub.empty:
+        return pd.DataFrame()
+    p_model_over = np.clip(sub["P"].to_numpy(dtype=float), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
+    p_book_over = np.clip(
+        1.0 - sub["Odds"].to_numpy(dtype=float),
+        _SUPERSEDE_BOOK_P_FLOOR,
+        _SUPERSEDE_BOOK_P_CEILING,
     )
-    if abs(candidate.top_decile_bias) > td_bound:
-        return False, (
-            f"KILL: top-decile bias {candidate.top_decile_bias:+.3f} exceeds "
-            f"bidirectional bound ±{td_bound:.3f} "
-            f"({TOP_DECILE_BIAS_MAGNITUDE_FRAC:.0%} of decile mean "
-            f"{candidate.top_decile_mean:.3f}, floor {BIAS_ABS_FLOOR:.2f})"
-        )
-    return True, (
-        f"SHIP: top-decile MAE {top_impr:+.1%}, global MAE {global_reg:+.1%}, "
-        f"bottom-quartile bias {candidate.bottom_quartile_bias:+.3f} "
-        f"(≤ base {baseline.bottom_quartile_bias:+.3f}), "
-        f"top-decile bias {candidate.top_decile_bias:+.3f}"
-        + (
-            f", brier_skill {baseline.brier_skill_score:+.3f} → "
-            f"{candidate.brier_skill_score:+.3f}"
-            if baseline.brier_skill_score is not None and candidate.brier_skill_score is not None
-            else ""
-        )
+    pred = sub[pred_col].to_numpy(dtype=float)
+    line = sub["Line"].to_numpy(dtype=float)
+    result = sub[ACTUAL_COL].to_numpy(dtype=float)
+
+    bet_over = pred >= line
+    p_model = np.where(bet_over, p_model_over, 1.0 - p_model_over)
+    p_book = np.where(bet_over, p_book_over, 1.0 - p_book_over)
+    payout_decimal = 1.0 / p_book
+    hit_over = result >= line
+    hit = np.where(bet_over, hit_over, ~hit_over)
+
+    n = len(sub)
+    base = pd.Timestamp("2026-01-01")
+    dates = [(base + pd.Timedelta(days=int(i))).date() for i in range(n)]
+    return pd.DataFrame(
+        {
+            "Player": [f"E{i}" for i in range(n)],
+            "Market": "supersede",
+            "Platform": "Sleeper",
+            "Boost": payout_decimal,
+            "Model P": p_model,
+            "Model": p_model,
+            "K": p_model * payout_decimal,
+            "Books": 1.0,
+            "Hit": hit,
+            "_date": dates,
+        }
     )
+
+
+def _supersede_paired_sharpe(
+    b_df: pd.DataFrame, c_df: pd.DataFrame, pred_col: str
+) -> tuple[float, float] | None:
+    """S3 — paired Sharpe from a Kelly-all sim on the shared events.
+
+    Returns ``(sharpe_baseline, sharpe_candidate)`` or ``None`` when either
+    frame can't be adapted to a bet frame (no ``Odds`` column or empty
+    intersection).
+    """
+    # Imported here to keep ``compression_eval``'s import surface minimal — the
+    # supersede path is the only one that needs the profit-sim lib.
+    from sportstradamus.strategies.profit_sim import simulate_kelly_all, summarize_runs
+
+    shared = b_df.index.intersection(c_df.index)
+    if len(shared) == 0:
+        return None
+    b_bets = _test_set_to_bet_frame(b_df.loc[shared], pred_col)
+    c_bets = _test_set_to_bet_frame(c_df.loc[shared], pred_col)
+    if b_bets.empty or c_bets.empty:
+        return None
+    b_sim = simulate_kelly_all(
+        b_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
+    )
+    c_sim = simulate_kelly_all(
+        c_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
+    )
+    s_b = summarize_runs(b_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)["sharpe"]
+    s_c = summarize_runs(c_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)["sharpe"]
+    return float(s_b), float(s_c)
+
+
+def supersede_verdict(
+    b_df: pd.DataFrame,
+    c_df: pd.DataFrame,
+    pred_col: str,
+    *,
+    league: str = "",
+    market: str = "",
+    strategy: str = "candidate",
+) -> dict[str, object]:
+    """Run S1 + S2 + S3 on a row-aligned baseline / candidate pair.
+
+    Returns a dict with all gate measurements plus ``ship`` (the AND of all
+    three). Missing inputs propagate as ``None``/``False`` for the affected
+    gates; the ``ship`` verdict is conservative — a ``None``-flagged gate
+    fails. See `docs/ship_gate.md`'s "research -> devel, supersede an incumbent"
+    table for the rules.
+    """
+    out: dict[str, object] = {}
+    c_row = apply_thresholds(
+        gate_row(c_df, pred_col, league=league, market=market, strategy=strategy)
+    )
+    out["s1_pass"] = bool(c_row.get("ship", False))
+
+    s2 = _supersede_paired_brier_ci(b_df, c_df)
+    if s2 is None:
+        out.update(s2_n=None, s2_mean=None, s2_ci_lo=None, s2_ci_hi=None, s2_pass=False)
+    else:
+        n, mean, lo, hi = s2
+        out.update(s2_n=n, s2_mean=mean, s2_ci_lo=lo, s2_ci_hi=hi, s2_pass=lo > 0)
+
+    s3 = _supersede_paired_sharpe(b_df, c_df, pred_col)
+    if s3 is None:
+        out.update(s3_sharpe_baseline=None, s3_sharpe_candidate=None, s3_pass=False)
+    else:
+        sb, sc = s3
+        out.update(s3_sharpe_baseline=sb, s3_sharpe_candidate=sc, s3_pass=sc > sb)
+
+    out["ship"] = bool(out["s1_pass"] and out["s2_pass"] and out["s3_pass"])
+    return out
+
+
+def _supersede_headline(v: dict[str, object]) -> str:
+    """One-line stdout headline for a supersede verdict."""
+
+    def f(key: str, fmt: str = "+.4f") -> str:
+        x = v.get(key)
+        return "nan" if x is None else format(float(x), fmt)
+
+    parts = [
+        f"S1={'PASS' if v.get('s1_pass') else 'FAIL'}",
+        f"S2 d_mean {f('s2_mean')} [{f('s2_ci_lo')}, {f('s2_ci_hi')}] "
+        f"n={v.get('s2_n', 'nan')} → {'PASS' if v.get('s2_pass') else 'FAIL'}",
+        f"S3 sharpe base→cand {f('s3_sharpe_baseline', '.3f')} → "
+        f"{f('s3_sharpe_candidate', '.3f')} "
+        f"→ {'PASS' if v.get('s3_pass') else 'FAIL'}",
+        f"[{'SUPERSEDE' if v.get('ship') else 'HOLD'}]",
+    ]
+    return "  ".join(parts)
 
 
 def append_run_log(card: Scorecard, log_path: Path) -> None:
@@ -663,6 +1143,18 @@ def _resolve_live_cells(
 )
 @click.option("--no-log", is_flag=True, default=False, help="Skip appending to the run log.")
 @click.option(
+    "--scorecard/--no-scorecard",
+    "write_scorecard",
+    default=True,
+    help="On a full audit, write the per-cell five-gate scorecard CSV (model + oracle).",
+)
+@click.option(
+    "--scorecard-out",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Gate scorecard CSV path (default data/tier0_scorecard.csv; only a full audit auto-writes).",
+)
+@click.option(
     "--live-window",
     type=int,
     default=None,
@@ -683,6 +1175,8 @@ def main(
     baseline: Path | None,
     candidate: Path | None,
     no_log: bool,
+    write_scorecard: bool,
+    scorecard_out: Path | None,
     live_window: int | None,
 ) -> None:
     """Score compression on dumped test sets, diff two strategies, or score live data."""
@@ -724,23 +1218,17 @@ def main(
             raise click.UsageError("--baseline and --candidate must be given together.")
         b_df = load_test_set(baseline, pred_col)
         c_df = load_test_set(candidate, pred_col)
-        b_card = scorecard(
-            b_df, pred_col, strategy="baseline", league="", market="", n_deciles=deciles
-        )
-        c_card = scorecard(
-            c_df, pred_col, strategy=strategy, league="", market="", n_deciles=deciles
-        )
+        b_row = apply_thresholds(gate_row(b_df, pred_col, league="", market="", strategy="baseline"))
+        c_row = apply_thresholds(gate_row(c_df, pred_col, league="", market="", strategy=strategy))
         click.echo(f"baseline : {baseline.name}")
         _print_table(decile_table(b_df, pred_col, deciles))
+        click.echo(_gate_headline(b_row))
         click.echo(f"\ncandidate: {candidate.name}")
         _print_table(decile_table(c_df, pred_col, deciles))
-        ship, reason = verdict(b_card, c_card)
-        click.echo(
-            f"\ncompression_ratio  base={b_card.compression_ratio:.3f}  "
-            f"cand={c_card.compression_ratio:.3f}"
-        )
-        click.echo(reason)
-        raise SystemExit(0 if ship else 1)
+        click.echo(_gate_headline(c_row))
+        verdict = supersede_verdict(b_df, c_df, pred_col, strategy=strategy)
+        click.echo(f"\nsupersede: {_supersede_headline(verdict)}")
+        return
 
     resolved_dir = test_sets_dir or Path(str(pkg_resources.files(data) / "test_sets"))
     if not resolved_dir.exists():
@@ -749,33 +1237,44 @@ def main(
     if not paths:
         raise click.UsageError("No matching test-set CSVs found.")
 
+    rows: list[dict[str, object]] = []
     for path in paths:
         stem = path.stem
         lg, _, mkt = stem.partition("_")
         df = load_test_set(path, pred_col)
         card = scorecard(df, pred_col, strategy=strategy, league=lg, market=mkt, n_deciles=deciles)
+        row = apply_thresholds(gate_row(df, pred_col, league=lg, market=mkt, strategy=strategy))
+        rows.append(row)
         click.echo(f"\n=== {stem}  ({pred_col}, n={card.n_rows}) ===")
         _print_table(decile_table(df, pred_col, deciles))
         click.echo(
-            f"global_mae={card.global_mae:.3f}  "
-            f"top_decile_mae={card.top_decile_mae:.3f}  "
-            f"top_decile_bias={card.top_decile_bias:+.3f}  "
-            f"bottom_quartile_bias={card.bottom_quartile_bias:+.3f}  "
             f"compression_ratio={card.compression_ratio:.3f} "
-            f"(top {card.top_decile_compression_ratio:.3f})"
-        )
-        click.echo(
+            f"(top {card.top_decile_compression_ratio:.3f})  "
             f"result_meanyr_corr={card.result_meanyr_corr:+.3f}  "
             f"pred_meanyr_corr={card.pred_meanyr_corr:+.3f}"
         )
-        if card.brier_skill_score is not None:
-            click.echo(f"brier_skill_score={card.brier_skill_score:+.3f}")
+        click.echo(_gate_headline(row))
         if scatter:
             out = SCATTER_DIR / f"compression_{stem}_{pred_col}.png"
             write_scatter(df, pred_col, out, f"{stem} — {strategy}")
             click.echo(f"scatter: {out}")
         if not no_log:
             append_run_log(card, log_path)
+
+    # Gate scorecard snapshot. Only a FULL audit (no league/market filter) auto-writes
+    # the canonical scorecard, so a filtered run can't clobber it down to a subset; a
+    # filtered run still writes when --scorecard-out is given explicitly.
+    if write_scorecard and rows:
+        if scorecard_out is not None:
+            sc_path: Path | None = scorecard_out
+        elif league is None and market is None:
+            sc_path = Path(str(TIER0_SCORECARD_PATH))
+        else:
+            sc_path = None
+        if sc_path is not None:
+            sc_df = write_gate_scorecard(rows, sc_path)
+            click.echo(f"\nGate scorecard ({len(sc_df)} cells): {sc_path}")
+            _print_breadth_rollup(sc_df)
 
 
 if __name__ == "__main__":

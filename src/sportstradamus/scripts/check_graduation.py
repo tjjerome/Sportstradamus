@@ -32,6 +32,14 @@ from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 _MIN_SETTLED_FOR_GRADUATION = 200
 # The 30d window is the canonical graduation gate (7d is too noisy for state).
 _GRADUATION_WINDOW_DAYS = 30
+# Phase 4 live ship-gate (set-baseline -> main): supersede an incumbent only if the
+# challenger's live ROI exceeds the incumbent's by at least this much over the
+# >= 2-week settled-data window. Surfaced as a helper today; the actual
+# challenger-vs-incumbent A/B tracking lives in ship_config.json + nightly's
+# aggregator, both of which need to record per-model-version ROI before the
+# comparison fires automatically. See plan Phase 4.
+_SUPERSEDE_LIVE_ROI_DELTA: float = 0.005
+_SUPERSEDE_LIVE_WINDOW_DAYS: int = 14
 # Color map for the lifecycle states, applied by click.secho per row.
 _STATE_COLORS = {
     "graduated": "green",
@@ -39,7 +47,7 @@ _STATE_COLORS = {
     "demoted": "red",
     "not-shipped": "cyan",
 }
-# Column order used by the printed table. 3 keys + 4 Gate 1 + 4 Gate 2 + 1 state.
+# Column order used by the printed table. 3 keys + 4 Gate 1 + 5 Gate 2 + 1 state.
 _DISPLAY_COLUMNS = (
     "league",
     "market",
@@ -52,17 +60,32 @@ _DISPLAY_COLUMNS = (
     "predicted_over_rate_live",
     "empirical_over_rate_live",
     "profit_sim_yield",
+    "profit_sim_kelly_yield",
     "lifecycle_state",
 )
 
 
-def _classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float) -> str:
-    """Map (Gate 1 BSS, n_settled, Gate 2 BSS) to a lifecycle state.
+def _classify_lifecycle(
+    gate1_bss: float,
+    n_settled: float,
+    book_bss_30d: float,
+    kelly_yield_30d: float | None = None,
+) -> str:
+    """Map (Gate 1 BSS, n_settled, Gate 2 BSS, Kelly ROI) to a lifecycle state.
 
-    See plan locked decision #15 for the rule table; in short:
-    NaN/negative Gate 1 → ``not-shipped``; positive Gate 1 but insufficient
-    live data → ``in-test``; live BSS non-negative → ``graduated``; live BSS
-    negative → ``demoted``.
+    Phase 4 set-baseline live gate: a cell graduates to ``main`` once the
+    rolling-window Kelly-sized ROI is positive (the live analog of the offline
+    set-baseline Gate 1 + S3 path). Demote when EITHER live BSS is negative OR
+    Kelly ROI is negative — Brier and ROI both diagnose live drift but from
+    different angles (calibration vs. profitability), and a cell that fails on
+    either signal stops earning live evidence.
+
+    Order of checks (matches plan locked decision #15 + Phase 4):
+      NaN/negative Gate 1 -> ``not-shipped``
+      Positive Gate 1 but insufficient settled data -> ``in-test``
+      Live BSS negative OR Kelly ROI negative -> ``demoted``
+      Live BSS non-negative AND Kelly ROI non-negative -> ``graduated``
+      Otherwise (missing live BSS / ROI) -> ``in-test``
     """
     if gate1_bss is None or (isinstance(gate1_bss, float) and math.isnan(gate1_bss)):
         return "not-shipped"
@@ -72,11 +95,45 @@ def _classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float)
     n_int = 0 if n_settled_nan else int(n_settled)
     if n_int < _MIN_SETTLED_FOR_GRADUATION:
         return "in-test"
-    if book_bss_30d is None or (isinstance(book_bss_30d, float) and math.isnan(book_bss_30d)):
+    bss_present = book_bss_30d is not None and not (
+        isinstance(book_bss_30d, float) and math.isnan(book_bss_30d)
+    )
+    kelly_present = kelly_yield_30d is not None and not (
+        isinstance(kelly_yield_30d, float) and math.isnan(kelly_yield_30d)
+    )
+    if not bss_present:
         return "in-test"
     if book_bss_30d < 0:
         return "demoted"
-    return "graduated"
+    if kelly_present and kelly_yield_30d < 0:
+        return "demoted"
+    if kelly_present:
+        return "graduated"
+    # BSS positive, Kelly ROI not yet computed (e.g. backfilled parquet pre-Phase 4)
+    # -> hold in-test rather than auto-graduate; the live gate needs both signals.
+    return "in-test"
+
+
+def supersede_live_delta(
+    challenger_kelly_yield: float | None, incumbent_kelly_yield: float | None
+) -> bool:
+    """Phase 4 supersede-live gate: challenger ROI - incumbent ROI >= 0.5%.
+
+    Wrapper helper so consumers (and tests) read the threshold from this module
+    instead of hard-coding 0.005. Requires a >= 2-week settled-data window per
+    the plan; the window-length check belongs to the caller because it owns
+    the rolling aggregator. Returns ``False`` when either input is missing.
+    """
+    if challenger_kelly_yield is None or incumbent_kelly_yield is None:
+        return False
+    if isinstance(challenger_kelly_yield, float) and math.isnan(challenger_kelly_yield):
+        return False
+    if isinstance(incumbent_kelly_yield, float) and math.isnan(incumbent_kelly_yield):
+        return False
+    return (
+        float(challenger_kelly_yield) - float(incumbent_kelly_yield)
+        >= _SUPERSEDE_LIVE_ROI_DELTA
+    )
 
 
 def _read_gate1(path: Path, league: str | None) -> pd.DataFrame:
@@ -106,7 +163,9 @@ def _read_gate2(path: Path) -> pd.DataFrame:
 
     Returns an empty frame (correct columns, zero rows) when the parquet is
     missing — the outer merge then classifies every Gate 1 row as ``in-test``
-    until the live aggregator catches up.
+    until the live aggregator catches up. ``profit_sim_kelly_yield`` (Phase 4)
+    NaN-fills for parquets written before that column existed so the lifecycle
+    classifier sees a uniform schema.
     """
     cols = [
         "league",
@@ -116,6 +175,7 @@ def _read_gate2(path: Path) -> pd.DataFrame:
         "predicted_over_rate_live",
         "empirical_over_rate_live",
         "profit_sim_yield",
+        "profit_sim_kelly_yield",
     ]
     if not path.exists():
         return pd.DataFrame(columns=cols)
@@ -128,10 +188,12 @@ def _read_gate2(path: Path) -> pd.DataFrame:
             "empirical_over_rate": "empirical_over_rate_live",
         }
     )
+    if "profit_sim_kelly_yield" not in df.columns:
+        df["profit_sim_kelly_yield"] = float("nan")
     return df[cols]
 
 
-def _format_metric(value) -> str:
+def _format_metric(value: float | None) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "    nan"
     return f"{float(value):+7.3f}"
@@ -141,7 +203,7 @@ def _print_header() -> None:
     click.echo(
         f"{'league':<6} {'market':<22} {'dist':<10} "
         f"{'g1_bss':>7} {'g1_p_or':>7} {'g1_e_or':>7} {'g1_kelly':>8} "
-        f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} {'g2_yield':>8} "
+        f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} {'g2_flat':>8} {'g2_kelly':>8} "
         f"{'state':<12}"
     )
 
@@ -158,6 +220,7 @@ def _print_row(row: pd.Series) -> None:
         f"{_format_metric(row.get('predicted_over_rate_live')):>7} "
         f"{_format_metric(row.get('empirical_over_rate_live')):>7} "
         f"{_format_metric(row.get('profit_sim_yield')):>8} "
+        f"{_format_metric(row.get('profit_sim_kelly_yield')):>8} "
         f"{row['lifecycle_state']:<12}"
     )
     color = _STATE_COLORS.get(row["lifecycle_state"], None)
@@ -202,6 +265,7 @@ def main(league: str | None, model_stats_path: Path | None, live_metrics_path: P
             r.get("gate1_bss", float("nan")),
             r.get("n_settled", float("nan")),
             r.get("gate2_book_bss", float("nan")),
+            r.get("profit_sim_kelly_yield", float("nan")),
         ),
         axis=1,
     )
