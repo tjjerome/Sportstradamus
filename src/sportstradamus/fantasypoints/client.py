@@ -194,6 +194,13 @@ class FantasyPointsClient:
             requests.HTTPError: When retries are exhausted on another
                 non-2xx status.
         """
+        if not self._authorization:
+            raise FantasyPointsAuthError(
+                "fantasypoints_authorization is empty. Paste the Authorization "
+                "header value from a logged-in DevTools session into "
+                "creds/keys.json (or set the FANTASYPOINTS_AUTHORIZATION env "
+                "var). See docs/fantasypoints.md."
+            )
         if not self._first_call:
             sleep(self._sleep_s)
         self._first_call = False
