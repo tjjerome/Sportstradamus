@@ -22,25 +22,44 @@ goes to production once it proves it — Tier-0 gate offline → 14-day
 Gate-2 soak live → graduate. A cell promoted but still in 14-day soak
 counts toward the 75% numerator (ship-incrementally).
 
-## Current state (scorecard snapshot 2026-05-22)
+## Current state (scorecard snapshot 2026-05-23, post-Step-0 audit)
 
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
-| NBA | 7 | 21 | 33% | 16 | **−9** |
-| NFL | 5 | 20 | 25% | 15 | **−10** |
+| NBA | 13 | 21 | 62% | 16 | **−3** |
+| NFL | 9 | 20 | 45% | 15 | **−6** |
 | WNBA | 10 | 18 | 56% | 14 | **−4** |
 
-Source: [`data/tier0_scorecard.csv`](../src/sportstradamus/data/tier0_scorecard.csv),
-strategy `post-refresh-v2gate-2026-05-22`. `ship = g1_pass AND g2_pass AND
+Source: [`data/training/tier0_scorecard.csv`](../src/sportstradamus/data/training/tier0_scorecard.csv),
+strategy `ship75-step0-g4audit-2026-05-23`. `ship = g1_pass AND g2_pass AND
 g3_pass AND g4_pass AND g5_pass`
 ([compression_eval.py:653](../src/sportstradamus/scripts/compression_eval.py)).
 
-**Dominant failure mode: G4 IQR ratio.** ≥ 24 cells fail because
-`g4_iqr_pred / g4_iqr_true < 0.5`. The current G4 measurement uses
-`p75(point_predictions) − p25(point_predictions)`; point predictions are
-structurally smoother than draws from the predicted distribution, so the
-gate may be measuring a measurement artifact rather than a model failure.
-**Step 0 is to audit this before building.**
+**Step 0 verdict: G4 was measuring a measurement artifact.** The old
+gate `_iqr(point_pred) / _iqr(actual)` compared point-prediction spread
+to realized-outcome spread — a sharpness-vs-calibration category error
+([Gneiting & Raftery 2007], brief at `/tmp/researcher_g4_audit.md`).
+Step 0.2 replaced the predicted-IQR estimator with the **pooled
+analytical IQR** of the per-row predictive distribution via
+`scipy.stats.<dist>.ppf(0.75) − ppf(0.25)`. Outcome: 10 cells flipped
+to ship with no retrain (NBA +6, NFL +4, WNBA +0). WNBA cells now pass
+G4 but multi-gate failures (mostly G5 ECE) hold them; that's Step 1
+territory.
+
+**Step 0 G4 audit recovery (2026-05-23):**
+
+- NBA flips (6): AST, BLK, FG3A, FTM, OREB, STL — promote via Step 0.3.
+- NFL flips (4): passing-tds, receiving-tds, rushing-tds, tds — the
+  last three are the degenerate `IQR(actual) = 0` cells; the new
+  `0/0 → 1.0` convention from Step 0.4 ships them.
+- WNBA flips (0): G4 now passes for 5 of 8 WNBA failing cells, but each
+  still fails G5 (ECE) — passes flipped but the cell still kills, so
+  the count is unchanged until Step 1 attacks G5.
+
+**Dominant failure mode after Step 0: G5 ECE.** ≥ 14 cells now fail on
+the equal-mass ECE ceiling (0.075). Step 1 (post-hoc bias correction)
+must extend to ECE-driven post-hoc calibration of `P` (probabilities),
+not just mean bias.
 
 ## Lifecycle table (operator maintains this)
 
@@ -60,7 +79,7 @@ Lever-attempts counter is the safety on the per-cell pivot policy. User
 mandate: *push every cell until it ships OR fails ≥ 4 levers — no easy
 out.*
 
-**NBA — 7/21 shipped, need +9 to hit 16/21**
+**NBA — 13/21 shipped post-Step-0, need +3 to hit 16/21**
 
 | Market | Family | Status | Strategy | Gates failing | Next step | Levers |
 |---|---|---|---|---|---|---|
@@ -71,22 +90,26 @@ out.*
 | PTS | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
 | RA | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
 | REB | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
-| AST | SkewNormal | g4-fail | `ratio_meanyr` | g4 (0.46) | Step 0 audit | 0 |
-| BLK | ZINB | g4-fail | `ratio_meanyr` | g4 (0.28) | Step 0 audit | 0 |
-| BLST | ZINB | g4-fail | `ratio_meanyr` | g4 (0.25), g5 (0.09) | Step 0 + Step 1 | 0 |
-| DREB | SkewNormal | g4-fail | `ratio_meanyr` | g4 (0.34), g5 (0.087) | Step 0 + Step 1 | 0 |
-| FG3A | SkewNormal | g4-fail | `ratio_meanyr` | g4 (0.47) | Step 0 audit | 0 |
-| FG3M | ZINB | g4-fail | `ratio_meanyr` | g4 (0.43) | Step 0 audit | 0 |
-| FGA | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.91, star bias) | Step 1 isotonic | 0 |
-| FGM | SkewNormal | g4-fail | `ratio_meanyr` | g4 (0.47), g5 (0.08) | Step 0 + Step 1 | 0 |
-| FTM | ZINB | g4-fail | `ratio_meanyr` | g4 (0.36) | Step 0 audit | 0 |
-| OREB | ZINB | g1-blank | `ratio_meanyr` | g1 (no odds), g4 (0.49) | Step 0 + odds refresh | 0 |
-| PF | ZINB | multi-fail | `ratio_meanyr` | g1 (no odds), g4 (0.23), g5 (0.147) | Step 0 + Step 1 | 0 |
-| STL | ZINB | g4-fail | `ratio_meanyr` | g4 (0.41) | Step 0 audit | 0 |
-| TOV | ZINB | g4-fail | `ratio_meanyr` | g4 (0.37), g5 (0.078) | Step 0 + Step 1 | 0 |
-| fantasy-points-prizepicks | SkewNormal | multi-fail | `ratio_meanyr` | g2 (z=0.52), g4 (0.41) | Step 1 + Step 0 | 0 |
+| AST | SkewNormal | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.46→0.68) | Step 0.3 promote | 0 |
+| BLK | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.28→1.00) | Step 0.3 promote | 0 |
+| FG3A | SkewNormal | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.47→0.67) | Step 0.3 promote | 0 |
+| FTM | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.36→0.67) | Step 0.3 promote | 0 |
+| OREB | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g1 auto-pass, g4 0.49→1.00) | Step 0.3 promote | 0 |
+| STL | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.41→1.00) | Step 0.3 promote | 0 |
+| BLST | ZINB | g5-fail | `ratio_meanyr` | g5 (0.09); g4 now 1.00 | Step 1 ECE calibration | 0 |
+| DREB | SkewNormal | g5-fail | `ratio_meanyr` | g5 (0.087); g4 0.65 | Step 1 ECE calibration | 0 |
+| FG3M | ZINB | g5-fail | `ratio_meanyr` | g5 (0.077); g4 now 1.00 | Step 1 ECE calibration | 0 |
+| FGA | SkewNormal | g2+g5-fail | `ratio_meanyr` | g2 (z=0.91 star bias), g5 (0.093) | Step 1 isotonic + ECE | 0 |
+| FGM | SkewNormal | g5-fail | `ratio_meanyr` | g5 (0.08); g4 0.66 | Step 1 ECE calibration | 0 |
+| PF | ZINB | g5-fail | `ratio_meanyr` | g1 (no odds → auto-pass), g5 (0.147) | Step 1 ECE calibration | 0 |
+| TOV | ZINB | g5-fail | `ratio_meanyr` | g5 (0.078); g4 now 1.00 | Step 1 ECE calibration | 0 |
+| fantasy-points-prizepicks | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52); g4 now 0.76 | Step 1 isotonic | 0 |
 
-**WNBA — 10/18 shipped, need +4 to hit 14/18**
+**WNBA — 10/18 (no change post-Step-0), need +4 to hit 14/18**
+
+WNBA G4 audit recovered 5/8 failing cells onto G4-pass, but every one
+still fails another gate (mostly G5 ECE). No net shipping recovery yet;
+Step 1 is the lever.
 
 | Market | Family | Status | Strategy | Gates failing | Next step | Levers |
 |---|---|---|---|---|---|---|
@@ -100,16 +123,16 @@ out.*
 | RA | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
 | REB | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
 | fantasy-points-prizepicks | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
-| AST | SkewNormal | g3+g4-fail | `ratio_meanyr` | g3 (z=0.59), g4 (0.46) | Step 1 affine + Step 0 | 0 |
-| BLK | ZINB | g3+g4-fail | `ratio_meanyr` | g3 (z=0.61), g4 (0.29) | Step 1 + Step 0 | 0 |
-| BLST | ZINB | g4+g5-fail | `ratio_meanyr` | g4 (0.25), g5 (0.12) | Step 0 + Step 1 | 0 |
-| DREB | SkewNormal | g4+g5-fail | `centered_additive_mean10` | g4 (0.41), g5 (0.083) | Step 0 + Step 1 | 0 |
-| FG3M | ZINB | g4-fail | `ratio_meanyr` | g4 (0.35) | Step 0 audit | 0 |
+| AST | SkewNormal | g3-fail | `ratio_meanyr` | g3 (z=0.59); g4 now 0.70 | Step 1 affine ROE (bench) | 0 |
+| BLK | ZINB | g3+g4-fail | `ratio_meanyr` | g3 (z=0.61), g4 (0.00 — under-spread, model over-pinned at 0) | Step 1 + dispersion review | 0 |
+| BLST | ZINB | g5-fail | `ratio_meanyr` | g5 (0.12); g4 now 1.00 | Step 1 ECE calibration | 0 |
+| DREB | SkewNormal | g5-fail | `centered_additive_mean10` | g5 (0.083); g4 now 0.64 | Step 1 ECE calibration | 0 |
+| FG3M | ZINB | g4-fail | `ratio_meanyr` | g4 (0.50, borderline) | Step 1 + Step 4 widen | 0 |
 | PRA | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI=0.0028, barely fails) | Step 4 widen OR retrain | 0 |
-| STL | ZINB | g4+g5-fail | `ratio_meanyr` | g4 (0.30), g5 (0.096) | Step 0 + Step 1 | 0 |
-| TOV | ZINB | g4+g5-fail | `ratio_meanyr` | g4 (0.30), g5 (0.12) | Step 0 + Step 1 | 0 |
+| STL | ZINB | g5-fail | `ratio_meanyr` | g5 (0.096); g4 now 1.00 | Step 1 ECE calibration | 0 |
+| TOV | ZINB | g5-fail | `ratio_meanyr` | g5 (0.12); g4 now 1.00 | Step 1 ECE calibration | 0 |
 
-**NFL — 5/20 shipped, need +10 to hit 15/20**
+**NFL — 9/20 shipped post-Step-0, need +6 to hit 15/20**
 
 | Market | Family | Status | Strategy | Gates failing | Next step | Levers |
 |---|---|---|---|---|---|---|
@@ -118,31 +141,54 @@ out.*
 | receiving-yards | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
 | receptions | SkewNormal | shipped | `centered_additive_mean10` | — | Gate-2 soak | 0 |
 | yards | SkewNormal | shipped | `ratio_meanyr` | — | Gate-2 soak | 0 |
-| attempts | SkewNormal | g1+g4-fail | `ratio_meanyr` | g1 (CI_HI>0), g4 (0.48) | Step 4 small-n + Step 0 | 0 |
-| carries | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0) | Step 4 small-n widen | 0 |
-| completions | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0) | Step 4 small-n widen | 0 |
-| interceptions | ZINB | multi-fail | `ratio_meanyr` | g1, g4 (0.28), g5 (0.09) | Step 1 affine + Step 0 | 0 |
-| passing-first-downs | SkewNormal | g4+g5-fail | `centered_additive_eb_meanyr_k10` | g4 (0.33), g5 (0.095) | Step 0 + Step 1 | 0 |
-| passing-tds | ZINB | g4-fail | `ratio_meanyr` | g4 (0.23) | Step 0 + Step 1 | 0 |
+| passing-tds | ZINB | ready (Step 0.2 flip) | `ratio_meanyr` | — (g4 0.23→1.14) | Step 0.3 promote | 0 |
+| receiving-tds | ZINB | ready (Step 0.4 degenerate-pass) | `ratio_meanyr` | — (g4 0/0→1.0) | Step 0.3 promote | 0 |
+| rushing-tds | ZINB | ready (Step 0.4 degenerate-pass) | `ratio_meanyr` | — (g4 0/0→1.0) | Step 0.3 promote | 0 |
+| tds | ZINB | ready (Step 0.4 degenerate-pass) | `ratio_meanyr` | — (g4 0/0→1.0) | Step 0.3 promote | 0 |
+| attempts | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 now 0.73 | Step 4 small-n widen | 0 |
+| carries | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.89 | Step 4 small-n widen | 0 |
+| completions | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.76 | Step 4 small-n widen | 0 |
+| interceptions | ZINB | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.09); g4 now 1.00 | Step 1 affine + Step 4 | 0 |
+| passing-first-downs | SkewNormal | g5-fail | `centered_additive_eb_meanyr_k10` | g5 (0.095); g4 now 0.69 | Step 1 ECE calibration | 0 |
 | passing-yards | SkewNormal | g5-fail | `ratio_meanyr` | g5 (0.093) | Step 1 affine ROE | 0 |
-| qb-tds | ZINB | multi-fail | `ratio_meanyr` | g2 (z=0.83), g4 (0.49), g5 (0.096) | Step 1 + Step 0 | 0 |
-| qb-yards | SkewNormal | g2+g5-fail | `ratio_meanyr` | g2 (z=0.68), g5 (0.174) | Step 1 isotonic | 0 |
-| receiving-tds | ZINB | g4-degenerate | `ratio_meanyr` | g4 (IQR_true=0, NaN) | Step 0.4 decision | 0 |
-| rushing-tds | ZINB | g4-degenerate | `ratio_meanyr` | g4 (IQR_true=0, NaN) | Step 0.4 decision | 0 |
-| rushing-yards | SkewNormal | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.092) | Step 4 + Step 1 | 0 |
-| sacks-taken | ZINB | multi-fail | `ratio_meanyr` | g1, g2 (z=0.55), g4 (0.16), g5 (0.084) | Step 4 (likely defer-90) | 0 |
-| targets | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52) | Step 1 isotonic | 0 |
-| tds | ZINB | g4-degenerate | `ratio_meanyr` | g4 (IQR_true=0, NaN) | Step 0.4 decision | 0 |
+| qb-tds | ZINB | g2+g5-fail | `ratio_meanyr` | g2 (z=0.83), g5 (0.096); g4 now 1.00 | Step 1 isotonic + ECE | 0 |
+| qb-yards | SkewNormal | g2+g5-fail | `ratio_meanyr` | g2 (z=0.68), g5 (0.174); g4 1.18 | Step 1 isotonic | 0 |
+| rushing-yards | SkewNormal | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.092); g4 18.7 (over-spread) | Step 4 + dispersion ceiling | 0 |
+| sacks-taken | ZINB | multi-fail | `ratio_meanyr` | g1, g2 (z=0.55), g5 (0.084); g4 now 1.00 | Step 4 (likely defer-90) | 0 |
+| targets | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52); g4 0.89 | Step 1 isotonic | 0 |
 
 > Update this table after every `compression_eval` re-run. The
 > `lever_attempts` column is the safety on the per-cell pivot policy.
+> Step 0 gate-definition changes do NOT count as a lever attempt.
 
 ## Step plan (cheapest-first, ships per cell on Gate-1 pass)
 
-### Step 0 — G4 IQR gate audit (PRECONDITION; ≤ 1 week)
+### Step 0 — G4 IQR gate audit (PRECONDITION; DONE 2026-05-23)
 
-The single highest-EV step. If the audit changes the G4 measurement,
-≥ 10 cells may flip to ship with **no retrain.**
+**Verdict: Outcome B (analytical IQR, pooled across rows) shipped.**
+10 cells flipped to ship under the new gate with no retrain — NBA +6,
+NFL +4, WNBA +0 (WNBA cells flipped G4 but stayed killed on G5 ECE).
+Per the recovery in the 5–11 band, Step 1 proceeds with **reduced
+scope** focused on the G5-only failures (now the dominant mode).
+
+Full deliverables:
+- Research brief: `/tmp/researcher_g4_audit.md`
+  (Outcome B, pooled, `0/0 → 1.0` for degenerate cells)
+- Reproducible numerical experiment: `/tmp/g4_iqr_experiment.py`
+- New helpers in
+  [scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py):
+  `_zinb_ppf`, `_infer_dist_from_columns`, `_decode_sn_loc_scale`,
+  `_iqr_pred_analytical`, extended `_gate4_iqr_spread` signature.
+- Golden tests: 14 new in
+  [tests/golden/test_compression_eval.py](../tests/golden/test_compression_eval.py)
+  covering NB / ZINB / SkewNormal / Gamma analytical IQR, degenerate
+  `0/0 → 1.0`, oracle back-compat, gate_row column-detection dispatch.
+- Per-cell ship_config strategy lookup wired in compression_eval main
+  (the SkewNormal decode mirrors `baselines._ratio_decode_scale`).
+- `tier0_scorecard.csv` regenerated as
+  `ship75-step0-g4audit-2026-05-23`.
+
+Historic plan (for the record):
 
 **0.1 — Dispatch `research-analyst` subagent.** Question: is
 `_iqr(point_pred) / _iqr(actual)` a fair sharpness gate for discrete
