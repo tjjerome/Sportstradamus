@@ -188,6 +188,15 @@ pickem-build (Phase 3)
   dashboard "Today's Recommendations" tab  ← live review
 ```
 
+**NFL comp data:** Player-comp aggregates for NFL come from FantasyPoints
+season exports (manually refreshed to
+`src/sportstradamus/data/player_data/NFL/{year}/`) plus PBP-derived
+aggregates from `nfl_data_py` via `stats/nfl_pbp_agg.py`. These are
+distinct from the `nfl_data_py` weekly logs that drive training features.
+The comp feature list is evidence-based per established stickiness
+research; `scripts/comp_feature_stability.py` validates Y/Y stability as
+a gate before `optimize_comp_weights.py --save`.
+
 ---
 
 ## Where to Find Things
