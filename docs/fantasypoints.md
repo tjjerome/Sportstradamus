@@ -1,0 +1,134 @@
+# Fantasy Points Data Suite snapshotter
+
+`fp-fetch` walks a catalog of Fantasy Points Data Suite endpoints and
+writes each tool's response to disk every week. The catalog and the
+session cookie are the only two things you maintain.
+
+## Before you start: legal
+
+Fantasy Points' Terms of Service may restrict automated access to the
+Data Suite even for paying subscribers. Read them and decide whether to
+proceed; the scraper does nothing to evade detection (single-process,
+2 s pause between calls, realistic User-Agent, no parallelism), so
+account suspension is a realistic risk if their ToS forbids this.
+
+## One-time setup
+
+### 1. Grab a fresh session cookie
+
+In Chromium or Firefox:
+
+1. Log in to <https://data.fantasypoints.com/>.
+2. Open DevTools → **Network** tab.
+3. Reload the page; click any request to `data.fantasypoints.com` in
+   the list.
+4. In the **Headers** panel scroll to **Request Headers** and copy the
+   full `Cookie:` value (everything after `Cookie: `, no quotes).
+5. Paste it into `src/sportstradamus/creds/keys.json`:
+
+```json
+{
+  "fantasypoints_cookie": "session=...; csrftoken=...; ..."
+}
+```
+
+Optionally set `fantasypoints_user_agent` to your browser's UA in the
+same file — the default Chrome UA is fine for most users.
+
+### 2. Register the endpoints you want snapshotted
+
+For each tool you care about:
+
+1. Open the tool in your browser with DevTools' **Network** tab open
+   and filter by `Fetch/XHR`.
+2. Click around until the tool fires its data call (often on page
+   load, sometimes on a filter change).
+3. Right-click the XHR row → **Copy** → **Copy as cURL (bash)**.
+4. Paste into a temp file:
+
+   ```bash
+   pbpaste > /tmp/line_matchups.curl   # macOS
+   wl-paste > /tmp/line_matchups.curl  # Wayland Linux
+   ```
+
+5. Register:
+
+   ```bash
+   poetry run fp-fetch import-curl /tmp/line_matchups.curl \
+       --name line_matchups \
+       --output-subdir team/line_matchups
+   ```
+
+   The endpoint lands in
+   `src/sportstradamus/data/config/fantasypoints_endpoints.json`.
+
+If the captured URL contains week/season query params, `import-curl`
+keeps them literally — open the catalog JSON and rewrite them as
+`"{week}"` / `"{season}"` so the runner substitutes the current week:
+
+```json
+{
+  "name": "line_matchups",
+  "url": "https://data.fantasypoints.com/api/nfl/team/line-matchups",
+  "params": {"week": "{week}", "season": "{season}"},
+  "output_subdir": "team/line_matchups"
+}
+```
+
+For season-long aggregates that should not be refetched per week, pass
+`--season-long` at `import-curl` time (or set `"weekly": false` in the
+catalog entry).
+
+### 3. Verify locally
+
+```bash
+poetry run fp-fetch list
+poetry run fp-fetch run --week 5 --season 2025 --dry-run
+poetry run fp-fetch run --week 5 --season 2025 --only line_matchups
+```
+
+The snapshot lands at
+`src/sportstradamus/data/fantasypoints/2025/week_05/team/line_matchups.json`.
+
+## Weekly cron
+
+On the production box (see `CLAUDE.md` for the full crontab):
+
+```cron
+0 10 * * 3   /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
+```
+
+Wednesday 10:00 server time — after Monday/Tuesday stat corrections
+settle, well before Sunday games. Set `HEALTHCHECK_URL_FP_FETCH` in
+the environment so cookie-expiry failures alert via Healthchecks.io.
+
+## When the cookie expires
+
+The healthcheck alert (`/fail` ping with the last 50 log lines) will
+quote a message like:
+
+```
+FP returned 401 for https://...  — session cookie is expired or missing.
+Refresh it in creds/keys.json; see docs/fantasypoints.md.
+```
+
+Re-run the cookie-capture step from §1 and rerun
+`poetry run fp-fetch run` once by hand to confirm.
+
+## Output layout
+
+```
+src/sportstradamus/data/fantasypoints/
+  YYYY/                       # season
+    week_NN/                  # 01..18
+      <output_subdir>.<ext>   # one file per catalog entry
+    season/                   # entries flagged "weekly": false
+      <output_subdir>.<ext>
+```
+
+Re-running the same week overwrites; nothing is appended.
+
+## Adding new endpoints later
+
+Re-run `fp-fetch import-curl` whenever Fantasy Points adds a new tool
+you want snapshotted. Existing catalog entries are untouched.

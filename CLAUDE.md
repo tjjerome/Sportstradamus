@@ -140,7 +140,17 @@ Python 3.11 required. PyTorch CPU-only (2.1.2) via custom Poetry source.
   0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
   */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
   0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
+  0 10 * * 3             /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
   ```
+
+  The `fp-fetch` job runs weekly during NFL season: it walks the
+  Fantasy Points Data Suite endpoint catalog
+  (`src/sportstradamus/data/config/fantasypoints_endpoints.json`) and
+  writes per-tool snapshots to
+  `src/sportstradamus/data/fantasypoints/{season}/week_NN/`. Needs a
+  fresh session cookie in `creds/keys.json` (see
+  `docs/fantasypoints.md`) and `HEALTHCHECK_URL_FP_FETCH` set so
+  cookie-expiry surfaces as an immediate alert.
 
   The `gate-status` job runs monthly: it promotes/demotes cells in `main`'s
   `stat_meta.json` based on live Gate-2 graduation and opens a PR (a human
