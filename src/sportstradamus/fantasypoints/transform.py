@@ -8,19 +8,27 @@ camelCase with a source prefix (``playerStats...``, ``teamStats...``,
 
 This module turns that response into a pandas DataFrame and routes
 the parquet output to ``player_data/`` vs ``team_data/`` based on
-which context the catalog entry was generated for
-(``player_<tool>`` / ``team_<tool>`` / ``opponent_<tool>``).
+the spec's context. Routing prefers (in order): the catalog name
+prefix (``player_`` / ``team_`` / ``opponent_`` — what
+``discover.py`` writes), then the URL path
+(``.../tools/{context}/{slug}`` — covers hand-imported entries
+from before the prefix convention existed), then the first segment
+of ``output_subdir``.
 """
 
 from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import json
+import re
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 import pandas as pd
 
 from sportstradamus import data
+from sportstradamus.fantasypoints.catalog import EndpointSpec
 
 # Base of the package data tree. Matches the layout the existing
 # Stats classes use (``data/player_data/{LEAGUE}/{YEAR}/``); we just
@@ -37,6 +45,21 @@ TEAM_DATA_BASE = _DATA_BASE / "team_data"
 _PLAYER_PREFIX = "player_"
 _TEAM_PREFIX = "team_"
 _OPPONENT_PREFIX = "opponent_"
+
+# Contexts we know how to route. Matches `_KNOWN_CONTEXTS` in
+# discover.py — anything else (``other``) routes to team_data with
+# the raw context as a filename suffix, since we have no evidence
+# of where ``other``-context tools should live.
+_CONTEXT_TO_PREFIX = {
+    "player": _PLAYER_PREFIX,
+    "team": _TEAM_PREFIX,
+    "opponent": _OPPONENT_PREFIX,
+}
+
+# URL fragment that identifies the routing context on hand-imported
+# entries that predate the discover-prefix convention. Pattern:
+# ``/v2/ds/{league}/tools/{context}/{slug}`` — captures both.
+_TOOL_URL_RE = re.compile(r"/tools/(?P<context>[^/]+)/(?P<slug>[^/?#]+)")
 
 
 def parse_table_response(payload: dict) -> pd.DataFrame:
@@ -67,7 +90,7 @@ def parse_table_response(payload: dict) -> pd.DataFrame:
 
 
 def parquet_path_for_spec(
-    spec_name: str,
+    spec: EndpointSpec,
     *,
     season: int,
     week: int,
@@ -75,44 +98,66 @@ def parquet_path_for_spec(
 ) -> Path:
     """Compute the on-disk parquet path for one catalog entry's snapshot.
 
-    Routing rules:
+    Routing rules (applied in order):
 
-    - ``player_<tool>``   → ``player_data/{league}/{season}/<tool>_week_NN.parquet``
-    - ``team_<tool>``     → ``team_data/{league}/{season}/<tool>_week_NN.parquet``
-    - ``opponent_<tool>`` → ``team_data/{league}/{season}/<tool>_opp_week_NN.parquet``
+    1. **Name prefix** — ``player_X`` → ``player_data/.../X_week_NN``,
+       ``team_X`` → ``team_data/.../X_week_NN``, ``opponent_X`` →
+       ``team_data/.../X_opp_week_NN``. Discover-generated entries
+       always match this case.
+    2. **URL path** — for hand-imported entries that pre-date the
+       prefix convention, parse ``/tools/{context}/{slug}`` out of
+       ``spec.url`` and route on ``context``.
+    3. **output_subdir** — fall back to the first path segment of
+       the catalog's ``output_subdir`` field (e.g. ``team/line_matchups``
+       → ``team``).
 
     Args:
-        spec_name: Catalog entry name (``{context}_{slug_underscore}``).
+        spec: Catalog entry.
         season: NFL season year, used as the directory name.
         week: NFL week (1-18), zero-padded into the filename.
-        league: League code (default ``NFL``). The directory uses the
-            upper-case form to match the existing
-            ``data/player_data/NFL/`` convention.
+        league: League code (default ``NFL``).
 
     Raises:
-        ValueError: When ``spec_name`` doesn't start with a known
-            context prefix — discover-generated entries always do;
-            hand-imported entries that don't match either prefix
-            should be renamed before they're parquetised.
+        ValueError: When none of the three routing sources match a
+            known context. Rename the spec (recommended:
+            ``player_/team_/opponent_<slug>``) and re-run.
     """
-    if spec_name.startswith(_PLAYER_PREFIX):
-        tool = spec_name[len(_PLAYER_PREFIX) :]
+    context, tool = _route_spec(spec)
+    if context == "player":
         base = PLAYER_DATA_BASE / league / str(season)
         filename = f"{tool}_week_{week:02d}.parquet"
-    elif spec_name.startswith(_TEAM_PREFIX):
-        tool = spec_name[len(_TEAM_PREFIX) :]
+    elif context == "team":
         base = TEAM_DATA_BASE / league / str(season)
         filename = f"{tool}_week_{week:02d}.parquet"
-    elif spec_name.startswith(_OPPONENT_PREFIX):
-        tool = spec_name[len(_OPPONENT_PREFIX) :]
+    elif context == "opponent":
         base = TEAM_DATA_BASE / league / str(season)
         filename = f"{tool}_opp_week_{week:02d}.parquet"
     else:
         raise ValueError(
-            f"Catalog name {spec_name!r} doesn't start with "
-            f"player_/team_/opponent_ — can't route its parquet."
+            f"Catalog entry {spec.name!r} (url={spec.url!r}, "
+            f"output_subdir={spec.output_subdir!r}) has no recognisable "
+            f"context. Rename it player_/team_/opponent_<slug>."
         )
     return base / filename
+
+
+def _route_spec(spec: EndpointSpec) -> tuple[str, str]:
+    """Return ``(context, tool_slug)`` for one spec, trying three routing sources."""
+    for prefix, ctx in (
+        (_PLAYER_PREFIX, "player"),
+        (_TEAM_PREFIX, "team"),
+        (_OPPONENT_PREFIX, "opponent"),
+    ):
+        if spec.name.startswith(prefix):
+            return ctx, spec.name[len(prefix) :]
+    match = _TOOL_URL_RE.search(urlsplit(spec.url).path)
+    if match and match["context"] in _CONTEXT_TO_PREFIX:
+        return match["context"], match["slug"].replace("-", "_")
+    first_segment = (spec.output_subdir or "").split("/", 1)[0]
+    if first_segment in _CONTEXT_TO_PREFIX:
+        tool_slug = spec.name.removeprefix(f"{first_segment}_")
+        return first_segment, tool_slug
+    return "", spec.name
 
 
 def write_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -122,6 +167,11 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
 
 
 def _extract_rows(payload: dict) -> list[dict]:
+    """Return the row list from an FP response, tolerating both dict and list shapes.
+
+    FP uses ``rows: {count, values: [...]}`` in most tools but falls back to a
+    bare list in a few legacy endpoints — handle both so callers don't need to.
+    """
     if not isinstance(payload, dict):
         return []
     table = payload.get("content", {}).get("table", {})
@@ -135,7 +185,7 @@ def _extract_rows(payload: dict) -> list[dict]:
     return [v for v in values if isinstance(v, dict)]
 
 
-def _to_json_string(value):
+def _to_json_string(value: Any) -> Any:
     if isinstance(value, list | dict):
         return json.dumps(value, separators=(",", ":"), default=str)
     return value

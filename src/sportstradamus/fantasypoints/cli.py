@@ -162,7 +162,10 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
     if dry_run:
         for spec in specs:
             url = _build_url(spec.url, spec.render_params(season=season, week=week))
-            path = parquet_path_for_spec(spec.name, season=season, week=week)
+            try:
+                path = parquet_path_for_spec(spec, season=season, week=week)
+            except ValueError as exc:
+                path = f"<unrouted: {exc}>"
             click.echo(f"{spec.name}: {spec.method} {url} -> {path}")
         return
     client = FantasyPointsClient()
@@ -580,14 +583,23 @@ def _fetch_and_write_one(
     paste a fresh DevTools curl and retries once. In non-TTY contexts
     (cron) the auth error propagates so run_job.sh pings ``/fail``.
     """
-    target = parquet_path_for_spec(spec.name, season=season, week=week)
+    try:
+        target = parquet_path_for_spec(spec, season=season, week=week)
+    except ValueError as exc:
+        log.error("routing failed", extra={"endpoint": spec.name, "error": str(exc)})
+        click.echo(f"  {spec.name}: {exc}", err=True)
+        return False
     body = _dispatch_with_auth_refresh(spec, client, season=season, week=week, log=log)
     if body is None:
         return False
     df = parse_table_response(body)
     if df.empty:
-        log.warning("empty response", extra={"endpoint": spec.name, "season": season, "week": week})
+        log.warning(
+            "empty response — writing empty parquet anyway",
+            extra={"endpoint": spec.name, "season": season, "week": week, "path": str(target)},
+        )
     write_parquet(df, target)
+    click.echo(f"  {spec.name}: wrote {len(df)} rows -> {target}", err=True)
     log.info(
         "wrote parquet",
         extra={"endpoint": spec.name, "path": str(target), "rows": len(df)},
