@@ -726,11 +726,73 @@ def test_expand_registry_generates_valid_url_and_body():
     specs = expand_registry(_registry_sample())
     spec = next(s for s in specs if s.name == "player_passing_basic")
     assert spec.method == "POST"
-    assert spec.url == "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic"
+    # v2 endpoint: ``/values`` suffix on every URL.
+    assert (
+        spec.url
+        == "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic/values"
+    )
     assert spec.output_subdir == "player/passing_basic"
-    assert spec.json_body["context"]["routeContext"] == "player"
-    assert spec.json_body["context"]["grouping"] == "$player.playerId"
+    ctx = spec.json_body["context"]
+    assert ctx["tableProperty"] == "passingBasic"
+    assert ctx["routeContext"] == "player"
+    assert ctx["routeContextTarget"] == "player"
+    assert ctx["modelContext"] == "player"
+    assert ctx["grouping"] == "$player.playerId"
+    # Sentinel placeholders that body_substitute rewrites at call time.
+    assert ctx["weeks"] == {"REG": ["__WEEK_INT__"]}
+    assert ctx["filterMatch"] == {"game.season": {"eq": "__SEASON_INT__"}}
     assert spec.json_body["useCache"] is True
+
+
+def test_expand_registry_routes_team_to_offense_url():
+    specs = expand_registry(_registry_sample())
+    spec = next(s for s in specs if s.name == "team_passing_basic")
+    assert (
+        spec.url
+        == "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/passing-basic/values"
+    )
+    ctx = spec.json_body["context"]
+    assert ctx["routeContext"] == "team"
+    assert ctx["routeContextTarget"] == "offense"
+    assert ctx["modelContext"] == "team"
+
+
+def test_expand_registry_routes_opponent_to_defense_url():
+    specs = expand_registry(_registry_sample())
+    spec = next(s for s in specs if s.name == "opponent_passing_basic")
+    assert (
+        spec.url
+        == "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/passing-basic/values"
+    )
+    ctx = spec.json_body["context"]
+    assert ctx["routeContext"] == "team"
+    assert ctx["routeContextTarget"] == "defense"
+    assert ctx["modelContext"] == "opponent"
+
+
+def test_expand_registry_passes_registry_requires_charting_and_roles():
+    registry = {
+        "content": {
+            "tables": {
+                "values": [
+                    {
+                        "isPublished": True,
+                        "isPrivate": False,
+                        "property": "passingBasic",
+                        "context": ["player"],
+                        "requiresCharting": True,
+                        "requiresPlayByPlay": False,
+                        "roles": ["role_uJb30OfZpu4pFfS7VQEq"],
+                    },
+                ]
+            }
+        }
+    }
+    spec = expand_registry(registry)[0]
+    ctx = spec.json_body["context"]
+    assert ctx["requiresCharting"] is True
+    assert ctx["requiresPlayByPlay"] is False
+    assert ctx["requiredRoles"] == ["role_uJb30OfZpu4pFfS7VQEq"]
 
 
 def test_expand_registry_handles_empty_or_malformed_payload():
@@ -1420,3 +1482,210 @@ def test_cli_backfill_uses_request_pause_within_a_week(monkeypatch, tmp_path):
     #   before (s23,w2,b): same week -> request range (5,8)
     assert uniform_calls == [(5.0, 8.0), (60.0, 120.0), (5.0, 8.0)]
     assert len(sleep_calls) == 3
+
+
+# ---------------------------------------------------------------------------
+# body_substitute
+# ---------------------------------------------------------------------------
+
+
+def _v2_body():
+    """A representative discover-generated catalog body with sentinels."""
+    return {
+        "context": {
+            "tableProperty": "passingBasic",
+            "grouping": "$player.playerId",
+            "weeks": {"REG": ["__WEEK_INT__"]},
+            "filterMatch": {"game.season": {"eq": "__SEASON_INT__"}},
+        },
+        "useCache": True,
+        "flatten": True,
+    }
+
+
+def test_substitute_runtime_replaces_int_sentinels():
+    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+
+    out = substitute_runtime(_v2_body(), season=2023, week=8, mode="weekly")
+    assert out["context"]["weeks"] == {"REG": [8]}
+    assert out["context"]["filterMatch"]["game.season"]["eq"] == 2023
+    # Values are ints, not strings.
+    assert isinstance(out["context"]["weeks"]["REG"][0], int)
+    assert isinstance(out["context"]["filterMatch"]["game.season"]["eq"], int)
+
+
+def test_substitute_runtime_s2d_expands_weeks_to_range():
+    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+
+    out = substitute_runtime(_v2_body(), season=2023, week=8, mode="season_to_date")
+    assert out["context"]["weeks"] == {"REG": [1, 2, 3, 4, 5, 6, 7, 8]}
+
+
+def test_substitute_runtime_postseason_uses_post_block():
+    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+
+    out = substitute_runtime(_v2_body(), season=2023, week=3, mode="postseason")
+    assert out["context"]["weeks"] == {"POST": [3]}
+
+
+def test_substitute_runtime_does_not_mutate_input():
+    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+
+    src = _v2_body()
+    snapshot = json.dumps(src, sort_keys=True)
+    _ = substitute_runtime(src, season=2023, week=8, mode="weekly")
+    assert json.dumps(src, sort_keys=True) == snapshot
+
+
+def test_substitute_runtime_passes_through_legacy_body_without_sentinels():
+    """Legacy hand-imported entries with no v2 sentinels are untouched."""
+    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+
+    legacy = {"context": {"week": "5"}, "useCache": True}
+    out = substitute_runtime(legacy, season=2023, week=8, mode="weekly")
+    assert out == legacy
+
+
+# ---------------------------------------------------------------------------
+# Mode-aware parquet filename suffix
+# ---------------------------------------------------------------------------
+
+
+def test_parquet_path_weekly_mode_has_no_suffix(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec(
+        _spec("player_passing_basic"), season=2023, week=8, mode="weekly"
+    )
+    assert p.name == "passing_basic.parquet"
+
+
+def test_parquet_path_s2d_mode_adds_s2d_suffix(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec(
+        _spec("player_passing_basic"), season=2023, week=8, mode="season_to_date"
+    )
+    assert p.name == "passing_basic_s2d.parquet"
+
+
+def test_parquet_path_postseason_mode_adds_post_suffix(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec(
+        _spec("opponent_coverage_matrix"), season=2023, week=3, mode="postseason"
+    )
+    assert p.name == "coverage_matrix_opp_post.parquet"
+
+
+def test_parquet_path_rejects_unknown_mode(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    with pytest.raises(ValueError, match="Unknown mode"):
+        parquet_path_for_spec(
+            _spec("player_passing_basic"), season=2023, week=8, mode="bogus"
+        )
+
+
+# ---------------------------------------------------------------------------
+# CLI --mode flag end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_cli_run_mode_s2d_sends_expanded_weeks(monkeypatch, tmp_path):
+    """`--mode season_to_date` rewrites context.weeks to [1..N] and writes _s2d filename."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="player_passing_basic",
+                url="https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic/values",
+                method="POST",
+                json_body={
+                    "context": {
+                        "tableProperty": "passingBasic",
+                        "weeks": {"REG": ["__WEEK_INT__"]},
+                        "filterMatch": {"game.season": {"eq": "__SEASON_INT__"}},
+                    },
+                    "useCache": True,
+                },
+                output_subdir="player/passing_basic",
+            )
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    captured = {}
+
+    def capture(method, url, headers=None, params=None, json=None):
+        captured["json"] = json
+        return FakeResponse(
+            200, body={"content": {"table": {"rows": {"values": [{"a": 1}]}}}}
+        )
+
+    monkeypatch.setattr(client_mod.requests, "request", capture)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "run",
+            "--season",
+            "2023",
+            "--week",
+            "5",
+            "--mode",
+            "season_to_date",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["context"]["weeks"] == {"REG": [1, 2, 3, 4, 5]}
+    assert captured["json"]["context"]["filterMatch"]["game.season"]["eq"] == 2023
+    parquet = tmp_path / "player_data" / "NFL" / "2023" / "week_05" / "passing_basic_s2d.parquet"
+    assert parquet.is_file(), f"expected {parquet} to exist"
+
+
+def test_cli_discover_replace_flag_discards_existing_catalog(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import client as client_mod
+
+    catalog_path = tmp_path / "catalog.json"
+    # Seed catalog with a legacy entry that --replace should evict.
+    save_catalog(
+        [
+            EndpointSpec(
+                name="legacy_thing",
+                url="https://old.example/",
+                method="POST",
+                output_subdir="legacy/thing",
+            )
+        ],
+        catalog_path,
+    )
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        return FakeResponse(200, body=_registry_sample())
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setenv("FANTASYPOINTS_COOKIE", "c=1")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch, ["discover", "--catalog", str(catalog_path), "--replace"]
+    )
+    assert result.exit_code == 0, result.output
+    names = [s.name for s in load_catalog(catalog_path)]
+    assert "legacy_thing" not in names, "legacy entry must be evicted on --replace"
+    assert "player_passing_basic" in names
