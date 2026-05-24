@@ -102,12 +102,18 @@ def parquet_path_for_spec(
 ) -> Path:
     """Compute the on-disk parquet path for one catalog entry's snapshot.
 
+    Layout: ``{base}/{league}/{season}/week_NN/{tool}.parquet`` —
+    one subfolder per week so 45 per-tool files stay grouped instead
+    of cluttering the season directory. Opponent-context tools keep
+    the ``_opp`` suffix in the filename so they don't collide with
+    the offensive view of the same tool.
+
     Routing rules (applied in order):
 
-    1. **Name prefix** — ``player_X`` → ``player_data/.../X_week_NN``,
-       ``team_X`` → ``team_data/.../X_week_NN``, ``opponent_X`` →
-       ``team_data/.../X_opp_week_NN``. Discover-generated entries
-       always match this case.
+    1. **Name prefix** — ``player_X`` → ``player_data/.../week_NN/X.parquet``,
+       ``team_X`` → ``team_data/.../week_NN/X.parquet``, ``opponent_X`` →
+       ``team_data/.../week_NN/X_opp.parquet``. Discover-generated
+       entries always match this case.
     2. **URL path** — for hand-imported entries that pre-date the
        prefix convention, parse ``/tools/{context}/{slug}`` out of
        ``spec.url`` and route on ``context``.
@@ -118,7 +124,7 @@ def parquet_path_for_spec(
     Args:
         spec: Catalog entry.
         season: NFL season year, used as the directory name.
-        week: NFL week (1-18), zero-padded into the filename.
+        week: NFL week (1-18), zero-padded into the subfolder name.
         league: League code (default ``NFL``).
 
     Raises:
@@ -127,15 +133,16 @@ def parquet_path_for_spec(
             ``player_/team_/opponent_<slug>``) and re-run.
     """
     context, tool = _route_spec(spec)
+    week_dir = f"week_{week:02d}"
     if context == "player":
-        base = PLAYER_DATA_BASE / league / str(season)
-        filename = f"{tool}_week_{week:02d}.parquet"
+        base = PLAYER_DATA_BASE / league / str(season) / week_dir
+        filename = f"{tool}.parquet"
     elif context == "team":
-        base = TEAM_DATA_BASE / league / str(season)
-        filename = f"{tool}_week_{week:02d}.parquet"
+        base = TEAM_DATA_BASE / league / str(season) / week_dir
+        filename = f"{tool}.parquet"
     elif context == "opponent":
-        base = TEAM_DATA_BASE / league / str(season)
-        filename = f"{tool}_opp_week_{week:02d}.parquet"
+        base = TEAM_DATA_BASE / league / str(season) / week_dir
+        filename = f"{tool}_opp.parquet"
     else:
         raise ValueError(
             f"Catalog entry {spec.name!r} (url={spec.url!r}, "
