@@ -132,11 +132,46 @@ in the catalog entry).
 ```bash
 poetry run fp-fetch list
 poetry run fp-fetch run --week 5 --season 2025 --dry-run
-poetry run fp-fetch run --week 5 --season 2025 --only line_matchups
+poetry run fp-fetch run --week 5 --season 2025 --only team_line_matchups
 ```
 
-The snapshot lands at
-`src/sportstradamus/data/fantasypoints/2025/week_05/team/line_matchups.json`.
+`run` fetches each endpoint, parses `content.table.rows.values` into
+a pandas DataFrame, and writes one parquet per (tool, week):
+
+- player-context entries →
+  `src/sportstradamus/data/player_data/NFL/{season}/{tool}_week_NN.parquet`
+- team-context entries →
+  `src/sportstradamus/data/team_data/NFL/{season}/{tool}_week_NN.parquet`
+- opponent-context entries → same `team_data/` directory with an
+  `_opp` suffix in the filename.
+
+Re-running the same week overwrites. Raw JSON is not persisted —
+the parquet is the deliverable. If a parse fails, the diagnostic
+includes Content-Type / Content-Encoding so you can spot a stale
+catalog Accept-Encoding or a wholesale API change.
+
+### Token expired mid-run
+
+If the Authorization or Cookie expires partway through `fp-fetch
+run`, the CLI pauses, prints a banner, and waits for you to paste
+a fresh DevTools curl on stdin (end with EOF / Ctrl+D). It updates
+`creds/keys.json` and the in-memory client, then retries the
+failing call and resumes the batch. Non-TTY contexts (cron) skip
+the prompt and fail fast so Healthchecks.io pings `/fail`.
+
+## Historical backfill
+
+```bash
+poetry run fp-fetch backfill \
+    --start-season 2021 --end-season 2024 \
+    --start-week 1 --end-week 18
+```
+
+Iterates every (season, week) pair and runs the same fetch +
+parse + write as `run`. For ~45 tools × 18 weeks × 4 seasons at
+the 2 s inter-request pause this takes roughly three hours per
+season — designed for an overnight one-time grab, not a cron
+job. `--only` and `--dry-run` work the same as on `run`.
 
 ## Weekly cron
 

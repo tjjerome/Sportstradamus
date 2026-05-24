@@ -164,6 +164,31 @@ class FantasyPointsClient:
         """GET ``url`` with auth, inter-request pause, and backoff."""
         return self._request("GET", url, params=params, headers=headers, accept=accept)
 
+    def refresh_credentials(
+        self,
+        *,
+        authorization: str | None = None,
+        cookie: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """Swap in fresh auth values in-place; subsequent calls use them.
+
+        Used by the CLI's interactive auth-refresh path: when a long-
+        running ``fp-fetch run`` hits a 401 mid-batch, the user pastes
+        a fresh DevTools curl, the CLI parses out the new headers and
+        calls this — no need to recreate the client or restart the run.
+        """
+        if authorization is not None:
+            self._authorization = authorization
+        if cookie is not None:
+            self._cookie = cookie
+        if user_agent is not None:
+            self._user_agent = user_agent
+        # Reset the inter-request sleep guard so the first post-refresh
+        # call doesn't wait unnecessarily — the user already paused
+        # while pasting the curl.
+        self._first_call = True
+
     def post(
         self,
         url: str,
