@@ -922,6 +922,155 @@ def test_parquet_path_rejects_unrouted_spec():
         parquet_path_for_spec(spec, season=2025, week=1)
 
 
+def _read_latest_report() -> dict:
+    """Find the most recent fp_fetch_report_*.json in tempdir and load it."""
+    import tempfile
+    from pathlib import Path
+
+    tmpdir = Path(tempfile.gettempdir())
+    candidates = sorted(tmpdir.glob("fp_fetch_report_*.json"))
+    assert candidates, f"no report file found in {tmpdir}"
+    return json.loads(candidates[-1].read_text())
+
+
+def test_cli_run_writes_report_with_per_spec_outcomes(monkeypatch, tmp_path):
+    """Run with a mix of ok/empty/failed specs and verify the report captures each."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="player_passing_basic",
+                url="https://fp/v2/ds/nfl/tools/player/passing-basic",
+                method="POST",
+                json_body={"useCache": True},
+                output_subdir="player/passing_basic",
+            ),
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://fp/v2/ds/nfl/tools/team/line-matchups",
+                method="POST",
+                json_body={"useCache": True},
+                output_subdir="team/line_matchups",
+            ),
+            EndpointSpec(
+                name="player_will_fail",
+                url="https://fp/v2/ds/nfl/tools/player/will-fail",
+                method="POST",
+                json_body={"useCache": True},
+                output_subdir="player/will_fail",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    monkeypatch.setattr(client_mod, "_RETRY_BACKOFF_S", (0.0, 0.0, 0.0))
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        if "passing-basic" in url:
+            return FakeResponse(
+                200,
+                body={
+                    "content": {
+                        "table": {"rows": {"count": 1, "values": [{"playerFirstName": "Q"}]}}
+                    }
+                },
+            )
+        if "line-matchups" in url:
+            return FakeResponse(200, body={"content": {"table": {"rows": {"values": []}}}})
+        # will-fail: HTTP 500 (retried 3x then raises HTTPError).
+        return FakeResponse(500, text="upstream is having a moment")
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "run",
+            "--season",
+            "2025",
+            "--week",
+            "5",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    # One spec failed → non-zero exit code, but the other two were
+    # still written and the report still got dumped.
+    assert result.exit_code != 0
+    assert "Report:" in result.output
+    report = _read_latest_report()
+    assert report["command"] == "run"
+    assert report["summary"]["total"] == 3
+    assert report["summary"]["ok"] == 1
+    assert report["summary"]["empty"] == 1
+    assert report["summary"]["fetch_failed"] == 1
+    by_name = {r["name"]: r for r in report["results"]}
+    assert by_name["player_passing_basic"]["status"] == "ok"
+    assert by_name["player_passing_basic"]["rows"] == 1
+    assert by_name["team_line_matchups"]["status"] == "empty"
+    assert by_name["player_will_fail"]["status"] == "fetch_failed"
+    # HTTP status surfaced for the failed spec:
+    assert by_name["player_will_fail"]["http_status"] == 500
+    # Response preview included so I can diagnose the failure mode:
+    assert "upstream is having a moment" in (by_name["player_will_fail"]["response_preview"] or "")
+    # Request body captured so I can verify what we sent:
+    assert by_name["player_passing_basic"]["request_body"] == {"useCache": True}
+
+
+def test_cli_run_records_routing_failure_in_report_without_aborting_batch(monkeypatch, tmp_path):
+    """A spec with an unroutable name fails alone; other specs still write."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="misc_thing",
+                url="https://opaque/api",
+                method="POST",
+                json_body={"useCache": True},
+                output_subdir="misc/thing",
+            ),
+            EndpointSpec(
+                name="player_passing_basic",
+                url="https://fp/v2/ds/nfl/tools/player/passing-basic",
+                method="POST",
+                json_body={"useCache": True},
+                output_subdir="player/passing_basic",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        return FakeResponse(
+            200,
+            body={"content": {"table": {"rows": {"count": 1, "values": [{"x": 1}]}}}},
+        )
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["run", "--season", "2025", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code != 0  # one routing failure
+    report = _read_latest_report()
+    by_name = {r["name"]: r for r in report["results"]}
+    assert by_name["misc_thing"]["status"] == "routing_failed"
+    # The OTHER spec still wrote its parquet:
+    assert by_name["player_passing_basic"]["status"] == "ok"
+    parquet = tmp_path / "player_data" / "NFL" / "2025" / "passing_basic_week_05.parquet"
+    assert parquet.is_file()
+
+
 def test_write_parquet_creates_parent_dirs(tmp_path):
     target = tmp_path / "a" / "b" / "c.parquet"
     write_parquet(pd.DataFrame({"x": [1, 2, 3]}), target)

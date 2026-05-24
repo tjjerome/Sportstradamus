@@ -28,8 +28,11 @@ import logging
 import re
 import shlex
 import sys
-from datetime import date, timedelta
+import tempfile
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import click
@@ -110,6 +113,11 @@ _AUTH_HEADER_TO_KEY = {
 # enough to confirm it changed without leaking the full secret.
 _TOKEN_PREVIEW_CHARS = 24
 
+# One initial attempt plus one retry after an interactive auth-refresh.
+# Cron runs never see the second attempt (stdin is not a TTY), so the
+# effective retry count in production is 1.
+_AUTH_MAX_ATTEMPTS = 2
+
 
 @click.group()
 def fp_fetch():
@@ -169,9 +177,25 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
             click.echo(f"{spec.name}: {spec.method} {url} -> {path}")
         return
     client = FantasyPointsClient()
-    failures = _fetch_all(specs, client, season=season, week=week, log=log)
+    results: list[_RunResult] = []
+    for spec in tqdm(specs, desc="fp-fetch", unit="endpoint"):
+        results.append(_fetch_and_write_one(spec, client, season=season, week=week, log=log))
+    report_path = _write_run_report(
+        results,
+        command="run",
+        extra={"season": season, "week": week},
+    )
+    failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
+    click.echo("", err=True)
+    click.echo(f"Report: {report_path}", err=True)
+    click.echo(
+        f"Summary: {sum(1 for r in results if r.status == _RESULT_OK)} ok, "
+        f"{sum(1 for r in results if r.status == _RESULT_EMPTY)} empty, "
+        f"{len(failures)} failed.",
+        err=True,
+    )
     if failures:
-        raise click.ClickException(f"Failed to fetch: {failures}")
+        raise click.ClickException(f"{len(failures)} spec(s) failed — see report at {report_path}")
 
 
 @fp_fetch.command("backfill")
@@ -242,19 +266,33 @@ def backfill(
         )
         return
     client = FantasyPointsClient()
-    failures: list[tuple[int, int, str]] = []
+    results: list[_RunResult] = []
     with tqdm(total=total, desc="fp-backfill", unit="call") as bar:
         for season in seasons:
             for week in weeks:
                 for spec in specs:
-                    ok = _fetch_and_write_one(spec, client, season=season, week=week, log=log)
-                    if not ok:
-                        failures.append((season, week, spec.name))
+                    results.append(
+                        _fetch_and_write_one(spec, client, season=season, week=week, log=log)
+                    )
                     bar.update(1)
+    report_path = _write_run_report(
+        results,
+        command="backfill",
+        extra={"seasons": list(seasons), "weeks": list(weeks)},
+    )
+    failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
+    click.echo("", err=True)
+    click.echo(f"Report: {report_path}", err=True)
+    click.echo(
+        f"Summary: {sum(1 for r in results if r.status == _RESULT_OK)} ok, "
+        f"{sum(1 for r in results if r.status == _RESULT_EMPTY)} empty, "
+        f"{len(failures)} failed.",
+        err=True,
+    )
     if failures:
-        log.warning("backfill completed with failures", extra={"count": len(failures)})
-        click.echo(f"Done with {len(failures)} failures (see log).", err=True)
-        raise click.ClickException(f"{len(failures)} backfill calls failed.")
+        raise click.ClickException(
+            f"{len(failures)} of {len(results)} backfill calls failed — see {report_path}"
+        )
 
 
 @fp_fetch.command("list")
@@ -553,20 +591,79 @@ def _filter_by_name(specs: list[EndpointSpec], names: tuple[str, ...]) -> list[E
     return filtered
 
 
-def _fetch_all(
-    specs: list[EndpointSpec],
-    client: FantasyPointsClient,
+# Status values for `_RunResult.status` — also the dict keys in the
+# report summary. ``ok`` = wrote rows; ``empty`` = wrote a zero-row
+# parquet; ``fetch_failed`` = HTTP error / decode error / etc;
+# ``routing_failed`` = parquet_path_for_spec couldn't resolve a
+# context for the catalog entry.
+_RESULT_OK = "ok"
+_RESULT_EMPTY = "empty"
+_RESULT_FETCH_FAILED = "fetch_failed"
+_RESULT_ROUTING_FAILED = "routing_failed"
+
+# Body preview length in the failure report. Long enough to spot
+# HTML error pages, JSON error envelopes, or compressed binary blobs
+# at a glance; short enough not to inflate the report file when a
+# tool returns a huge body that happens to be unparseable.
+_REPORT_PREVIEW_CHARS = 500
+
+
+@dataclass
+class _RunResult:
+    """One spec's outcome from a single ``run`` / ``backfill`` iteration.
+
+    Serialised verbatim into the report file so the human (or me) has
+    everything needed to diagnose failing specs without re-running.
+    """
+
+    name: str
+    url: str
+    method: str
+    status: str
+    season: int
+    week: int
+    rows: int = 0
+    path: str | None = None
+    error_class: str | None = None
+    error_message: str | None = None
+    http_status: int | None = None
+    response_preview: str | None = None
+    request_body: dict | list | None = None
+
+
+def _write_run_report(
+    results: list[_RunResult],
     *,
-    season: int,
-    week: int,
-    log: logging.Logger,
-) -> list[str]:
-    failures: list[str] = []
-    for spec in tqdm(specs, desc="fp-fetch", unit="endpoint"):
-        ok = _fetch_and_write_one(spec, client, season=season, week=week, log=log)
-        if not ok:
-            failures.append(spec.name)
-    return failures
+    command: str,
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Dump the per-spec results to ``/tmp/fp_fetch_report_<ts>.json``.
+
+    The report is overwriteable, transient debug output — it lives
+    under tempdir so users (and CI) don't accidentally commit it.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = Path(tempfile.gettempdir()) / f"fp_fetch_report_{timestamp}.json"
+    summary = {
+        "total": len(results),
+        _RESULT_OK: sum(1 for r in results if r.status == _RESULT_OK),
+        _RESULT_EMPTY: sum(1 for r in results if r.status == _RESULT_EMPTY),
+        _RESULT_FETCH_FAILED: sum(1 for r in results if r.status == _RESULT_FETCH_FAILED),
+        _RESULT_ROUTING_FAILED: sum(1 for r in results if r.status == _RESULT_ROUTING_FAILED),
+    }
+    payload: dict[str, Any] = {
+        "command": command,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "summary": summary,
+        "results": [asdict(r) for r in results],
+    }
+    # ``extra`` is namespaced under "context" so callers can't silently
+    # clobber the top-level "command" / "summary" / "results" fields
+    # by passing a conflicting key.
+    if extra:
+        payload["context"] = extra
+    path.write_text(json.dumps(payload, indent=2, default=str))
+    return path
 
 
 def _fetch_and_write_one(
@@ -576,65 +673,105 @@ def _fetch_and_write_one(
     season: int,
     week: int,
     log: logging.Logger,
-) -> bool:
-    """Fetch one endpoint, parse to DataFrame, write parquet. Return True on success.
+) -> _RunResult:
+    """Fetch one endpoint, parse to DataFrame, write parquet, return outcome.
 
-    On a 401/403 in an interactive terminal, prompts the user to
-    paste a fresh DevTools curl and retries once. In non-TTY contexts
-    (cron) the auth error propagates so run_job.sh pings ``/fail``.
+    Any failure (routing, fetch, decode) is captured into the returned
+    :class:`_RunResult` so the outer loop can keep going and the
+    report can show exactly what broke per spec.
     """
+    method = spec.method.upper()
+    rendered_url = _build_url(spec.url, spec.render_params(season=season, week=week))
+    base_result = _RunResult(
+        name=spec.name,
+        url=rendered_url,
+        method=method,
+        season=season,
+        week=week,
+        status=_RESULT_FETCH_FAILED,
+        request_body=spec.render_json_body(season=season, week=week),
+    )
     try:
         target = parquet_path_for_spec(spec, season=season, week=week)
     except ValueError as exc:
         log.error("routing failed", extra={"endpoint": spec.name, "error": str(exc)})
         click.echo(f"  {spec.name}: {exc}", err=True)
-        return False
-    body = _dispatch_with_auth_refresh(spec, client, season=season, week=week, log=log)
-    if body is None:
-        return False
+        base_result.status = _RESULT_ROUTING_FAILED
+        base_result.error_class = exc.__class__.__name__
+        base_result.error_message = str(exc)
+        return base_result
+    body, err = _dispatch_capturing_errors(spec, client, season=season, week=week, log=log)
+    if err is not None:
+        click.echo(f"  {spec.name}: {err['error_message']}", err=True)
+        base_result.status = _RESULT_FETCH_FAILED
+        base_result.error_class = err.get("error_class")
+        base_result.error_message = err.get("error_message")
+        base_result.http_status = err.get("http_status")
+        base_result.response_preview = err.get("response_preview")
+        return base_result
     df = parse_table_response(body)
+    write_parquet(df, target)
+    base_result.path = str(target)
+    base_result.rows = len(df)
+    base_result.status = _RESULT_EMPTY if df.empty else _RESULT_OK
     if df.empty:
         log.warning(
             "empty response — writing empty parquet anyway",
             extra={"endpoint": spec.name, "season": season, "week": week, "path": str(target)},
         )
-    write_parquet(df, target)
     click.echo(f"  {spec.name}: wrote {len(df)} rows -> {target}", err=True)
     log.info(
         "wrote parquet",
         extra={"endpoint": spec.name, "path": str(target), "rows": len(df)},
     )
-    return True
+    return base_result
 
 
-def _dispatch_with_auth_refresh(
+def _dispatch_capturing_errors(
     spec: EndpointSpec,
     client: FantasyPointsClient,
     *,
     season: int,
     week: int,
     log: logging.Logger,
-) -> dict | list | str | bytes | None:
-    """Run :func:`_dispatch`; on 401/403 try one interactive refresh + retry."""
-    for attempt in (1, 2):
+) -> tuple[Any | None, dict[str, Any] | None]:
+    """Dispatch with auth-refresh; return ``(body, None)`` or ``(None, err_dict)``.
+
+    On 401/403 in a TTY, prompts for a fresh curl and retries once.
+    In non-TTY contexts (cron) the auth failure is returned as an
+    error so the caller can record it in the report and continue —
+    the calling command surfaces the aggregate failure as a non-zero
+    exit so run_job.sh still pings ``/fail``.
+    """
+    for attempt in range(1, _AUTH_MAX_ATTEMPTS + 1):
         try:
-            return _dispatch(client, spec, season=season, week=week)
+            return _dispatch(client, spec, season=season, week=week), None
         except FantasyPointsAuthError as exc:
             log.warning(
                 "auth error",
                 extra={"endpoint": spec.name, "attempt": attempt, "error": str(exc)},
             )
-            if attempt == 2 or not _refresh_auth_interactively(client):
-                click.echo(str(exc), err=True)
-                raise click.ClickException(
-                    "Authorization token expired and refresh aborted. "
-                    "Update creds/keys.json and rerun."
-                ) from exc
+            if attempt == _AUTH_MAX_ATTEMPTS or not _refresh_auth_interactively(client):
+                return None, _exc_to_err_dict(exc)
         except Exception as exc:
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
-            click.echo(f"  {spec.name}: {exc}", err=True)
-            return None
-    return None
+            return None, _exc_to_err_dict(exc)
+    return None, {"error_class": "Unknown", "error_message": "retries exhausted"}
+
+
+def _exc_to_err_dict(exc: BaseException) -> dict[str, Any]:
+    """Convert an exception into the JSON-friendly fields the report needs."""
+    info: dict[str, Any] = {
+        "error_class": exc.__class__.__name__,
+        "error_message": str(exc),
+    }
+    response = getattr(exc, "response", None)
+    if response is not None:
+        info["http_status"] = getattr(response, "status_code", None)
+        text = getattr(response, "text", None)
+        if isinstance(text, str):
+            info["response_preview"] = text[:_REPORT_PREVIEW_CHARS]
+    return info
 
 
 def _refresh_auth_interactively(client: FantasyPointsClient) -> bool:
