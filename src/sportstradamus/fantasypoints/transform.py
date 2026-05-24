@@ -18,7 +18,6 @@ of ``output_subdir``.
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 import json
 import re
 from pathlib import Path
@@ -30,10 +29,15 @@ import pandas as pd
 from sportstradamus import data
 from sportstradamus.fantasypoints.catalog import EndpointSpec
 
-# Base of the package data tree. Matches the layout the existing
-# Stats classes use (``data/player_data/{LEAGUE}/{YEAR}/``); we just
-# add a sibling ``team_data/`` for team/opponent contexts.
-_DATA_BASE = Path(str(pkg_resources.files(data)))
+# Base of the package data tree. ``sportstradamus.data`` is a namespace
+# package — its ``importlib.resources.files()`` returns a
+# ``MultiplexedPath`` whose ``str()`` is ``MultiplexedPath('/real/path')``
+# (literally with the wrapper text), not the path itself. Using that
+# directly silently writes parquets into a directory named
+# ``MultiplexedPath('...')`` and the user can't find anything.
+# ``__path__[0]`` gives the real filesystem path of the package's
+# first search location, which is what we want.
+_DATA_BASE = Path(data.__path__[0])
 PLAYER_DATA_BASE = _DATA_BASE / "player_data"
 TEAM_DATA_BASE = _DATA_BASE / "team_data"
 
