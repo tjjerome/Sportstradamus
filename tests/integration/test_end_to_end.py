@@ -102,16 +102,16 @@ def test_pipeline_smoke(
         archive_obj._connection.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
     )
     assert second_poll_rows > first_poll_rows, (
-        f"second confer poll did not append new rows: " f"{first_poll_rows} -> {second_poll_rows}"
+        f"second confer poll did not append new rows: {first_poll_rows} -> {second_poll_rows}"
     )
 
     sample_player = next(iter(pts_df.index))[1] if not pts_df.empty else None
     if sample_player is not None:
         history = archive_obj.get_ev_history("WNBA", "PTS", "2026-05-08", sample_player)
         if not history.empty:
-            assert history[
-                "observed_at"
-            ].is_monotonic_increasing, "get_ev_history must return rows ordered by observed_at"
+            assert history["observed_at"].is_monotonic_increasing, (
+                "get_ev_history must return rows ordered by observed_at"
+            )
 
     # ----- Phase 2: meditate (CLI invoked; ML stubbed; no writes) -----
     from sportstradamus.training import cli as training_cli
@@ -144,9 +144,9 @@ def test_pipeline_smoke(
 
     result = runner.invoke(meditate, ["--league", "WNBA"], catch_exceptions=False)
     assert result.exit_code == 0, f"meditate failed: {result.output}"
-    assert (
-        ("WNBA", "PTS") in train_market_calls
-    ), f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
+    assert ("WNBA", "PTS") in train_market_calls, (
+        f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
+    )
 
     # ----- Phase 3: prophecize (CLI invoked; parquet snapshot + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
@@ -208,9 +208,9 @@ def test_pipeline_smoke(
     assert captured, "process_offers was never invoked"
     underdog_offers, _ = captured.get("Underdog", (pd.DataFrame(), pd.DataFrame()))
     assert len(underdog_offers) >= 10, f"expected >= 10 offers with EV, got {len(underdog_offers)}"
-    assert (
-        underdog_offers["Model EV"].notna().sum() >= 10
-    ), "fewer than 10 offers had a populated Model EV column"
+    assert underdog_offers["Model EV"].notna().sum() >= 10, (
+        "fewer than 10 offers had a populated Model EV column"
+    )
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
 

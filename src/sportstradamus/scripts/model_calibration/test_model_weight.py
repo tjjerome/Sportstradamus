@@ -513,9 +513,9 @@ def main():
     }
 
     for league, market in markets:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f" {league} {market}")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         try:
             data = load_market(league, market)
@@ -530,15 +530,15 @@ def main():
         )
         if data["alpha"] is not None:
             print(
-                f"  mean_model_alpha={data['alpha'].mean():.2f}, book_alpha={1/data['cv']**2:.2f}"
+                f"  mean_model_alpha={data['alpha'].mean():.2f}, book_alpha={1 / data['cv'] ** 2:.2f}"
             )
         if data["r"] is not None:
-            print(f"  mean_model_r={data['r'].mean():.2f}, book_r={1/data['cv']:.2f}")
+            print(f"  mean_model_r={data['r'].mean():.2f}, book_r={1 / data['cv']:.2f}")
 
         # --- CURRENT PIPELINE: blend first, then dispersion cal ---
         print("\n  === CURRENT: blend → dispersion_cal ===")
         print(f"  {'Objective':<20} {'Opt w':>8}  {'Acc@opt':>8}  {'Cov@opt':>8}")
-        print(f"  {'-'*50}")
+        print(f"  {'-' * 50}")
         for name, fn in objectives.items():
             try:
                 w_opt = optimize_weight(data, fn, name)
@@ -558,7 +558,7 @@ def main():
             if data_dc["r"] is not None:
                 print(f"  corrected_r={data_dc['r'].mean():.2f} (was {data['r'].mean():.2f})")
             print(f"  {'Objective':<20} {'Opt w':>8}  {'Acc@opt':>8}  {'Cov@opt':>8}")
-            print(f"  {'-'*50}")
+            print(f"  {'-' * 50}")
             for name, fn in objectives.items():
                 try:
                     w_opt = optimize_weight(data_dc, fn, name)

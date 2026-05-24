@@ -408,7 +408,7 @@ if has_crps:
         cov_display = pd.DataFrame(
             [
                 {
-                    "Nominal Level": f"{int(level*100)}%",
+                    "Nominal Level": f"{int(level * 100)}%",
                     "Actual Coverage": f"{cov:.1%}",
                     "Status": "Good"
                     if abs(cov - level) < 0.05
@@ -451,7 +451,7 @@ if has_crps:
                         y=nom,
                         line_dash="dot",
                         line_color="gray",
-                        annotation_text=f"{int(nom*100)}% target",
+                        annotation_text=f"{int(nom * 100)}% target",
                     )
                 fig_cov.update_layout(height=400)
                 st.plotly_chart(fig_cov, use_container_width=True)
