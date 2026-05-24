@@ -142,8 +142,7 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
             for league, market, old, new in changes:
                 click.echo(f"  {league}/{market}: shipped {old} -> {new}")
             click.echo(
-                f"# branch=main: {len(changes)} shipping changes "
-                f"(graduated={len(graduated)} cells)"
+                f"# branch=main: {len(changes)} shipping changes (graduated={len(graduated)} cells)"
             )
         if not dry_run and changes:
             _write_meta(meta_path, meta_map)

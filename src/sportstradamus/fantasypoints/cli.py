@@ -1,6 +1,6 @@
 """``fp-fetch`` CLI — snapshot every registered Fantasy Points tool.
 
-Six subcommands:
+Seven subcommands:
 
 * ``fp-fetch run`` — fetch all (or ``--only``) catalog endpoints for a
   given week/season, parse the response tables, write one parquet per
@@ -11,6 +11,9 @@ Six subcommands:
   same fetch+parse+write for each cell. One-time historical grab.
 * ``fp-fetch discover`` — auto-populate the catalog from FP's tool
   registry.
+* ``fp-fetch verify`` — spot-check downloaded parquets against the
+  requested (season, week, mode). Catches the "wrong week / no
+  filter applied" class of bug before it pollutes downstream models.
 * ``fp-fetch list`` — prints the registered catalog entries.
 * ``fp-fetch import-curl`` — registers a new endpoint from a
   DevTools-copied curl command. Handles both GET and POST curls,
@@ -41,6 +44,11 @@ import click
 from tqdm import tqdm
 
 from sportstradamus import creds
+from sportstradamus.fantasypoints.body_substitute import (
+    DEFAULT_MODE,
+    Mode,
+    substitute_runtime,
+)
 from sportstradamus.fantasypoints.catalog import (
     CATALOG_PATH,
     EndpointSpec,
@@ -61,6 +69,7 @@ from sportstradamus.fantasypoints.transform import (
     parse_table_response,
     write_parquet,
 )
+from sportstradamus.fantasypoints.verify import verify_catalog
 from sportstradamus.helpers.logging import get_logger
 
 # NFL regular season is 18 weeks. The default-week inference clamps to
@@ -137,6 +146,14 @@ def fp_fetch():
 @click.option("--season", type=int, default=None, help="NFL season (year). Defaults to current.")
 @click.option("--week", type=int, default=None, help="NFL week (1-18). Defaults to inferred.")
 @click.option("--only", multiple=True, help="Only fetch these endpoint names (repeatable).")
+@click.option(
+    "--mode",
+    type=click.Choice(["weekly", "season_to_date", "postseason"]),
+    default=DEFAULT_MODE,
+    show_default=True,
+    help="``weekly`` = just this week. ``season_to_date`` = cumulative through "
+    "this week. ``postseason`` = playoffs (week 1-4 = wildcard..super bowl).",
+)
 @click.option("--dry-run", is_flag=True, help="Print resolved URLs and parquet paths only.")
 @click.option(
     "--catalog",
@@ -150,13 +167,15 @@ def fp_fetch():
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
 )
-def run(season, week, only, dry_run, catalog_path, log_level) -> None:
+def run(season, week, only, mode, dry_run, catalog_path, log_level) -> None:
     """Walk the catalog, fetch every endpoint, write one parquet per tool.
 
     Player-context entries land in
-    ``data/player_data/NFL/{season}/<tool>_week_NN.parquet``; team /
-    opponent entries land in ``data/team_data/NFL/{season}/`` (with
-    ``_opp`` suffix for opponent context). Re-runs overwrite.
+    ``data/player_data/NFL/{season}/week_NN/<tool>.parquet``; team /
+    opponent entries land in ``data/team_data/NFL/{season}/week_NN/``
+    (with ``_opp`` suffix for opponent context). Non-weekly modes
+    add a ``_s2d`` or ``_post`` suffix to the filename. Re-runs
+    overwrite.
     """
     log = get_logger("fp-fetch")
     log.setLevel(log_level)
@@ -164,7 +183,7 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
     week = week or _default_week(season)
     log.info(
         "fp-fetch run",
-        extra={"season": season, "week": week, "dry_run": dry_run},
+        extra={"season": season, "week": week, "mode": mode, "dry_run": dry_run},
     )
     specs = load_catalog(catalog_path)
     if not specs:
@@ -180,7 +199,7 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
         for spec in specs:
             url = _build_url(spec.url, spec.render_params(season=season, week=week))
             try:
-                path = parquet_path_for_spec(spec, season=season, week=week)
+                path = parquet_path_for_spec(spec, season=season, week=week, mode=mode)
             except ValueError as exc:
                 path = f"<unrouted: {exc}>"
             click.echo(f"{spec.name}: {spec.method} {url} -> {path}")
@@ -188,11 +207,13 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
     client = FantasyPointsClient()
     results: list[_RunResult] = []
     for spec in tqdm(specs, desc="fp-fetch", unit="endpoint"):
-        results.append(_fetch_and_write_one(spec, client, season=season, week=week, log=log))
+        results.append(
+            _fetch_and_write_one(spec, client, season=season, week=week, mode=mode, log=log)
+        )
     report_path = _write_run_report(
         results,
         command="run",
-        extra={"season": season, "week": week},
+        extra={"season": season, "week": week, "mode": mode},
     )
     failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
     click.echo("", err=True)
@@ -259,6 +280,13 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
     help="Max seconds (random uniform) when transitioning to a new week.",
 )
 @click.option(
+    "--mode",
+    type=click.Choice(["weekly", "season_to_date", "postseason"]),
+    default=DEFAULT_MODE,
+    show_default=True,
+    help="Same modes as ``fp-fetch run``. Applies to every (season, week) cell.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -280,6 +308,7 @@ def backfill(
     request_pause_max,
     week_pause_min,
     week_pause_max,
+    mode,
     catalog_path,
     log_level,
 ) -> None:
@@ -331,14 +360,16 @@ def backfill(
                         log=log,
                     )
                     results.append(
-                        _fetch_and_write_one(spec, client, season=season, week=week, log=log)
+                        _fetch_and_write_one(
+                            spec, client, season=season, week=week, mode=mode, log=log
+                        )
                     )
                     prev_week_key = week_key
                     bar.update(1)
     report_path = _write_run_report(
         results,
         command="backfill",
-        extra={"seasons": list(seasons), "weeks": list(weeks)},
+        extra={"seasons": list(seasons), "weeks": list(weeks), "mode": mode},
     )
     failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
     click.echo("", err=True)
@@ -381,6 +412,12 @@ def list_endpoints(catalog_path) -> None:
     help="Include tools flagged isPrivate=true (debug/VIP tables).",
 )
 @click.option(
+    "--replace",
+    is_flag=True,
+    help="Discard the existing catalog and rewrite from scratch. Use when the body "
+    "schema changes (catalogs from before the v2 ``/values`` rewrite need this).",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Print discovered specs without writing to the catalog.",
@@ -391,16 +428,18 @@ def list_endpoints(catalog_path) -> None:
     type=click.Path(path_type=Path, dir_okay=False),
     default=None,
 )
-def discover(league, include_private, dry_run, catalog_path) -> None:
+def discover(league, include_private, replace, dry_run, catalog_path) -> None:
     """Auto-populate the catalog from Fantasy Points' tool registry.
 
     Hits ``POST /v2/ds/all/tools``, walks the published-tool list,
-    and adds one catalog entry per (tool, context) pair. Existing
-    entries are preserved — re-run safely when FP adds new tools.
+    and adds one catalog entry per (tool, context) pair. By default
+    existing entries are preserved — re-run safely when FP adds new
+    tools. Pass ``--replace`` to discard the existing catalog first
+    (use this when the body schema or URL pattern changes).
     """
     client = FantasyPointsClient()
     registry = client.post(REGISTRY_URL, json_body=REGISTRY_BODY)
-    existing = load_catalog(catalog_path)
+    existing = [] if replace else load_catalog(catalog_path)
     existing_names = {s.name for s in existing}
     new_specs = expand_registry(
         registry,
@@ -414,13 +453,79 @@ def discover(league, include_private, dry_run, catalog_path) -> None:
     if dry_run:
         for spec in new_specs:
             click.echo(f"  + {spec.name:40s} {spec.method:5s} {spec.url}")
-        click.echo(f"Would add {len(new_specs)} new endpoints.")
+        verb = "Would replace catalog with" if replace else "Would add"
+        click.echo(f"{verb} {len(new_specs)} endpoints.")
         return
     save_catalog(existing + new_specs, catalog_path)
+    verb = "Wrote" if replace else "Added"
     click.echo(
-        f"Added {len(new_specs)} new endpoints "
+        f"{verb} {len(new_specs)} endpoints "
         f"(catalog now has {len(existing) + len(new_specs)} entries)."
     )
+
+
+@fp_fetch.command("verify")
+@click.option("--season", type=int, default=None, help="NFL season. Defaults to inferred current.")
+@click.option("--week", type=int, default=None, help="NFL week. Defaults to inferred.")
+@click.option(
+    "--mode",
+    type=click.Choice(["weekly", "season_to_date", "postseason"]),
+    default=DEFAULT_MODE,
+    show_default=True,
+    help="Same modes as ``run`` — picks which parquet variant to spot-check.",
+)
+@click.option("--only", multiple=True, help="Only check these endpoint names (repeatable).")
+@click.option(
+    "--catalog",
+    "catalog_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+)
+def verify(season, week, mode, only, catalog_path) -> None:
+    """Spot-check downloaded parquets against the requested season / week / mode.
+
+    For every spec in the catalog (or just the ``--only`` subset),
+    loads the parquet that ``run`` should have written, confirms
+    ``gameSeason`` and ``gameWeek`` columns hold exactly the
+    expected values, and reports anything off. Exits non-zero if any
+    spec yielded an error-severity issue so cron / scripts can
+    detect a botched download without parsing stdout.
+
+    Output format: one line per spec, prefixed with ``OK`` / ``WARN``
+    / ``FAIL``, followed by one indented line per issue. The summary
+    line at the end lists counts per status.
+    """
+    season = season or _default_season()
+    week = week or _default_week(season)
+    specs = load_catalog(catalog_path)
+    if not specs:
+        click.echo("Catalog is empty. Nothing to verify.", err=True)
+        return
+    if only:
+        specs = _filter_by_name(specs, only)
+    results = verify_catalog(specs, season=season, week=week, mode=mode)
+    ok = warn = fail = 0
+    for name, issues in results.items():
+        if not issues:
+            ok += 1
+            click.echo(f"OK   {name}")
+            continue
+        has_error = any(i.severity == "error" for i in issues)
+        prefix = "FAIL" if has_error else "WARN"
+        if has_error:
+            fail += 1
+        else:
+            warn += 1
+        click.echo(f"{prefix} {name}")
+        for issue in issues:
+            click.echo(f"     [{issue.severity}/{issue.code}] {issue.message}")
+            click.echo(f"        at {issue.path}")
+    click.echo("")
+    click.echo(
+        f"Summary: {ok} ok, {warn} warn, {fail} fail (season={season}, week={week}, mode={mode})."
+    )
+    if fail:
+        raise click.ClickException(f"{fail} spec(s) failed verification.")
 
 
 @fp_fetch.command("import-curl")
@@ -733,6 +838,7 @@ def _fetch_and_write_one(
     season: int,
     week: int,
     log: logging.Logger,
+    mode: Mode = DEFAULT_MODE,
 ) -> _RunResult:
     """Fetch one endpoint, parse to DataFrame, write parquet, return outcome.
 
@@ -742,6 +848,12 @@ def _fetch_and_write_one(
     """
     method = spec.method.upper()
     rendered_url = _build_url(spec.url, spec.render_params(season=season, week=week))
+    legacy_body = spec.render_json_body(season=season, week=week)
+    rendered_body = (
+        substitute_runtime(legacy_body, season=season, week=week, mode=mode)
+        if legacy_body is not None
+        else None
+    )
     base_result = _RunResult(
         name=spec.name,
         url=rendered_url,
@@ -749,10 +861,10 @@ def _fetch_and_write_one(
         season=season,
         week=week,
         status=_RESULT_FETCH_FAILED,
-        request_body=spec.render_json_body(season=season, week=week),
+        request_body=rendered_body,
     )
     try:
-        target = parquet_path_for_spec(spec, season=season, week=week)
+        target = parquet_path_for_spec(spec, season=season, week=week, mode=mode)
     except ValueError as exc:
         log.error("routing failed", extra={"endpoint": spec.name, "error": str(exc)})
         click.echo(f"  {spec.name}: {exc}", err=True)
@@ -760,7 +872,9 @@ def _fetch_and_write_one(
         base_result.error_class = exc.__class__.__name__
         base_result.error_message = str(exc)
         return base_result
-    body, err = _dispatch_capturing_errors(spec, client, season=season, week=week, log=log)
+    body, err = _dispatch_capturing_errors(
+        spec, client, season=season, week=week, mode=mode, log=log
+    )
     if err is not None:
         click.echo(f"  {spec.name}: {err['error_message']}", err=True)
         base_result.status = _RESULT_FETCH_FAILED
@@ -827,6 +941,7 @@ def _dispatch_capturing_errors(
     season: int,
     week: int,
     log: logging.Logger,
+    mode: Mode = DEFAULT_MODE,
 ) -> tuple[Any | None, dict[str, Any] | None]:
     """Dispatch with auth-refresh; return ``(body, None)`` or ``(None, err_dict)``.
 
@@ -838,7 +953,7 @@ def _dispatch_capturing_errors(
     """
     for attempt in range(1, _AUTH_MAX_ATTEMPTS + 1):
         try:
-            return _dispatch(client, spec, season=season, week=week), None
+            return _dispatch(client, spec, season=season, week=week, mode=mode), None
         except FantasyPointsAuthError as exc:
             log.warning(
                 "auth error",
@@ -913,8 +1028,17 @@ def _dispatch(
     *,
     season: int,
     week: int,
+    mode: Mode = DEFAULT_MODE,
 ) -> dict | list | str | bytes:
-    """Call the right verb on the client for one endpoint spec."""
+    """Call the right verb on the client for one endpoint spec.
+
+    For POST requests we apply the legacy ``{week}`` / ``{season}``
+    string substitution first (covers hand-imported entries), then
+    the v2 runtime substitution from :mod:`body_substitute` (covers
+    discover-generated entries — int sentinels and the per-mode
+    ``context.weeks`` rewrite). The two are independent: bodies that
+    use one shape are pass-through under the other.
+    """
     params = spec.render_params(season=season, week=week)
     # Map catalog response_format to the client's accept token.
     if spec.response_format == "json":
@@ -925,9 +1049,12 @@ def _dispatch(
         accept = "bytes"
     method = spec.method.upper()
     if method == "POST":
+        json_body = spec.render_json_body(season=season, week=week)
+        if json_body is not None:
+            json_body = substitute_runtime(json_body, season=season, week=week, mode=mode)
         return client.post(
             spec.url,
-            json_body=spec.render_json_body(season=season, week=week),
+            json_body=json_body,
             params=params or None,
             headers=spec.extra_headers,
             accept=accept,
