@@ -169,10 +169,17 @@ poetry run fp-fetch backfill \
 ```
 
 Iterates every (season, week) pair and runs the same fetch +
-parse + write as `run`. For ~45 tools × 18 weeks × 4 seasons at
-the 2 s inter-request pause this takes roughly three hours per
-season — designed for an overnight one-time grab, not a cron
-job. `--only` and `--dry-run` work the same as on `run`.
+parse + write as `run`. Pacing is conservative by default:
+
+- **10–20 s** random pause between endpoints in the same week
+  (`--request-pause-min` / `--request-pause-max`).
+- **30–90 s** random pause when transitioning to a new week
+  (`--week-pause-min` / `--week-pause-max`).
+
+With ~45 tools × 18 weeks × N seasons at the defaults plan for
+several hours per season — designed for an overnight one-time
+grab, not a cron job. `--only` and `--dry-run` work the same as
+on `run`.
 
 ## Weekly cron
 

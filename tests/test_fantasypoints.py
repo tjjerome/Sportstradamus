@@ -1217,10 +1217,31 @@ def test_cli_backfill_dry_run_reports_call_count(tmp_path):
     assert "30" in result.output
 
 
+def _patch_backfill_pacing(monkeypatch):
+    """Replace random.uniform + time.sleep in cli with no-op recorders.
+
+    Returns the lists each gets appended to so tests can assert on
+    the pacing ranges and number of sleeps.
+    """
+    from sportstradamus.fantasypoints import cli as cli_mod
+
+    uniform_calls: list[tuple[float, float]] = []
+    sleep_calls: list[float] = []
+
+    def fake_uniform(a, b):
+        uniform_calls.append((a, b))
+        return (a + b) / 2
+
+    monkeypatch.setattr(cli_mod.random, "uniform", fake_uniform)
+    monkeypatch.setattr(cli_mod.time, "sleep", sleep_calls.append)
+    return uniform_calls, sleep_calls
+
+
 def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import client as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
+    _patch_backfill_pacing(monkeypatch)
     catalog_path = tmp_path / "catalog.json"
     save_catalog(
         [
@@ -1283,3 +1304,119 @@ def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
     assert sent_weeks == ["1", "2", "3"]
     sent_seasons = {b["filters"]["season"] for b in seen_bodies}
     assert sent_seasons == {"2023"}
+
+
+def test_cli_backfill_uses_week_pause_on_week_transition(monkeypatch, tmp_path):
+    """One spec x 3 weeks → 0 same-week pauses, 2 week-transition pauses."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    uniform_calls, sleep_calls = _patch_backfill_pacing(monkeypatch)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="player_passing_basic",
+                url="https://example/",
+                method="POST",
+                output_subdir="player/passing_basic",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+
+    def ok(*a, **k):
+        return FakeResponse(200, body={"content": {"table": {"rows": {"values": []}}}})
+
+    monkeypatch.setattr(client_mod.requests, "request", ok)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "backfill",
+            "--start-season",
+            "2023",
+            "--end-season",
+            "2023",
+            "--start-week",
+            "1",
+            "--end-week",
+            "3",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # 3 calls -> 2 pauses (none before the first). Both should be
+    # week-transition pauses (each spec change is also a week change
+    # since there's only one spec).
+    assert uniform_calls == [(30.0, 90.0), (30.0, 90.0)]
+    assert len(sleep_calls) == 2
+
+
+def test_cli_backfill_uses_request_pause_within_a_week(monkeypatch, tmp_path):
+    """Two specs x 2 weeks → 1 same-week pause per week + 1 week pause = 3 sleeps."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    uniform_calls, sleep_calls = _patch_backfill_pacing(monkeypatch)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="player_a",
+                url="https://example/a",
+                method="POST",
+                output_subdir="player/a",
+            ),
+            EndpointSpec(
+                name="player_b",
+                url="https://example/b",
+                method="POST",
+                output_subdir="player/b",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+
+    def ok(*a, **k):
+        return FakeResponse(200, body={"content": {"table": {"rows": {"values": []}}}})
+
+    monkeypatch.setattr(client_mod.requests, "request", ok)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "backfill",
+            "--start-season",
+            "2023",
+            "--end-season",
+            "2023",
+            "--start-week",
+            "1",
+            "--end-week",
+            "2",
+            "--request-pause-min",
+            "5",
+            "--request-pause-max",
+            "8",
+            "--week-pause-min",
+            "60",
+            "--week-pause-max",
+            "120",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # 4 calls in order: (s23,w1,a), (s23,w1,b), (s23,w2,a), (s23,w2,b)
+    # Pauses between consecutive calls:
+    #   before (s23,w1,b): same week -> request range (5,8)
+    #   before (s23,w2,a): week transition -> week range (60,120)
+    #   before (s23,w2,b): same week -> request range (5,8)
+    assert uniform_calls == [(5.0, 8.0), (60.0, 120.0), (5.0, 8.0)]
+    assert len(sleep_calls) == 3
