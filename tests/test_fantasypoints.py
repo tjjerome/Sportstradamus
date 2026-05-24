@@ -855,6 +855,26 @@ def _spec(name="x", url="https://example/", output_subdir="x/x") -> EndpointSpec
     return EndpointSpec(name=name, url=url, output_subdir=output_subdir)
 
 
+def test_data_base_resolves_to_filesystem_path_not_multiplexed_repr():
+    """Regression: namespace-package data dir must resolve to a real filesystem path.
+
+    `pkg_resources.files(data)` returns a MultiplexedPath whose `str()`
+    is `"MultiplexedPath('/real/path')"` (with the wrapper text),
+    which silently lands parquets in a literal `MultiplexedPath('...')`
+    directory the user can't find. Using `data.__path__[0]` instead
+    gives the real path.
+    """
+    from sportstradamus.fantasypoints.transform import (
+        PLAYER_DATA_BASE,
+        TEAM_DATA_BASE,
+    )
+
+    assert "MultiplexedPath" not in str(PLAYER_DATA_BASE)
+    assert "MultiplexedPath" not in str(TEAM_DATA_BASE)
+    assert str(PLAYER_DATA_BASE).endswith("/data/player_data")
+    assert str(TEAM_DATA_BASE).endswith("/data/team_data")
+
+
 def test_parquet_path_routes_player_to_player_data(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import transform as tm
 
