@@ -65,6 +65,15 @@ _CONTEXT_TO_PREFIX = {
 # ``/v2/ds/{league}/tools/{context}/{slug}`` — captures both.
 _TOOL_URL_RE = re.compile(r"/tools/(?P<context>[^/]+)/(?P<slug>[^/?#]+)")
 
+# Per-mode filename suffix. Empty for the default weekly mode so
+# existing parquets don't have to be renamed; the non-default modes
+# get explicit markers so the user can tell them apart at a glance.
+_MODE_SUFFIX = {
+    "weekly": "",
+    "season_to_date": "_s2d",
+    "postseason": "_post",
+}
+
 
 def parse_table_response(payload: dict) -> pd.DataFrame:
     """Extract ``content.table.rows.values`` from an FP response into a DataFrame.
@@ -158,16 +167,6 @@ def parquet_path_for_spec(
     return base / filename
 
 
-# Per-mode filename suffix. Empty for the default weekly mode so
-# existing parquets don't have to be renamed; the non-default modes
-# get explicit markers so the user can tell them apart at a glance.
-_MODE_SUFFIX = {
-    "weekly": "",
-    "season_to_date": "_s2d",
-    "postseason": "_post",
-}
-
-
 def _route_spec(spec: EndpointSpec) -> tuple[str, str]:
     """Return ``(context, tool_slug)`` for one spec, trying three routing sources."""
     for prefix, ctx in (
@@ -188,7 +187,13 @@ def _route_spec(spec: EndpointSpec) -> tuple[str, str]:
 
 
 def write_parquet(df: pd.DataFrame, path: Path) -> None:
-    """Write the DataFrame to ``path``, creating parent dirs as needed."""
+    """Write ``df`` to ``path`` as a parquet file, creating parent dirs as needed.
+
+    Args:
+        df: DataFrame to serialise.
+        path: Destination path (absolute). Parent directories are created
+            automatically if they don't exist.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(path, index=False)
 

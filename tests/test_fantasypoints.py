@@ -727,10 +727,7 @@ def test_expand_registry_generates_valid_url_and_body():
     spec = next(s for s in specs if s.name == "player_passing_basic")
     assert spec.method == "POST"
     # v2 endpoint: ``/values`` suffix on every URL.
-    assert (
-        spec.url
-        == "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic/values"
-    )
+    assert spec.url == "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic/values"
     assert spec.output_subdir == "player/passing_basic"
     ctx = spec.json_body["context"]
     assert ctx["tableProperty"] == "passingBasic"
@@ -1556,9 +1553,7 @@ def test_parquet_path_weekly_mode_has_no_suffix(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
-    p = parquet_path_for_spec(
-        _spec("player_passing_basic"), season=2023, week=8, mode="weekly"
-    )
+    p = parquet_path_for_spec(_spec("player_passing_basic"), season=2023, week=8, mode="weekly")
     assert p.name == "passing_basic.parquet"
 
 
@@ -1590,9 +1585,7 @@ def test_parquet_path_rejects_unknown_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
     with pytest.raises(ValueError, match="Unknown mode"):
-        parquet_path_for_spec(
-            _spec("player_passing_basic"), season=2023, week=8, mode="bogus"
-        )
+        parquet_path_for_spec(_spec("player_passing_basic"), season=2023, week=8, mode="bogus")
 
 
 # ---------------------------------------------------------------------------
@@ -1631,9 +1624,7 @@ def test_cli_run_mode_s2d_sends_expanded_weeks(monkeypatch, tmp_path):
 
     def capture(method, url, headers=None, params=None, json=None):
         captured["json"] = json
-        return FakeResponse(
-            200, body={"content": {"table": {"rows": {"values": [{"a": 1}]}}}}
-        )
+        return FakeResponse(200, body={"content": {"table": {"rows": {"values": [{"a": 1}]}}}})
 
     monkeypatch.setattr(client_mod.requests, "request", capture)
     runner = CliRunner()
@@ -1682,9 +1673,7 @@ def test_cli_discover_replace_flag_discards_existing_catalog(monkeypatch, tmp_pa
     monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
     monkeypatch.setenv("FANTASYPOINTS_COOKIE", "c=1")
     runner = CliRunner()
-    result = runner.invoke(
-        fp_fetch, ["discover", "--catalog", str(catalog_path), "--replace"]
-    )
+    result = runner.invoke(fp_fetch, ["discover", "--catalog", str(catalog_path), "--replace"])
     assert result.exit_code == 0, result.output
     names = [s.name for s in load_catalog(catalog_path)]
     assert "legacy_thing" not in names, "legacy entry must be evicted on --replace"

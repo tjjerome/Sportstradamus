@@ -58,6 +58,13 @@ def substitute_runtime(
 
 
 def _replace_int_sentinels(node, *, season: int, week: int):
+    """Walk ``node`` recursively; swap sentinel strings with their int values.
+
+    FP's API rejects string-typed week/season in the v2 request body, but
+    the catalog is JSON so we can't store bare ints as placeholders. The
+    sentinels act as typed stand-ins that survive JSON serialisation and are
+    replaced here at call time.
+    """
     if isinstance(node, dict):
         return {k: _replace_int_sentinels(v, season=season, week=week) for k, v in node.items()}
     if isinstance(node, list):
