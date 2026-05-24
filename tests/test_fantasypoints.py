@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -737,8 +739,33 @@ def test_expand_registry_generates_valid_url_and_body():
     assert ctx["grouping"] == "$player.playerId"
     # Sentinel placeholders that body_substitute rewrites at call time.
     assert ctx["weeks"] == {"REG": ["__WEEK_INT__"]}
-    assert ctx["filterMatch"] == {"game.season": {"eq": "__SEASON_INT__"}}
+    # ``isGamePlayed`` + ``game.season`` are both required for FP to
+    # return any rows. ``filterPlay.teamRoles`` selects offense vs
+    # defense plays — without it FP returns 0 plays.
+    assert ctx["filterMatch"] == {
+        "isGamePlayed": {"eq": True},
+        "game.season": {"eq": "__SEASON_INT__"},
+    }
+    assert ctx["filterPlay"] == {
+        "teamRoles": {"in": ["offense", {"$ifNull": ["$$play.team.roles", []]}]}
+    }
     assert spec.json_body["useCache"] is True
+
+
+def test_expand_registry_opponent_context_uses_defense_team_roles():
+    specs = expand_registry(_registry_sample())
+    spec = next(s for s in specs if s.name == "opponent_passing_basic")
+    assert spec.json_body["context"]["filterPlay"] == {
+        "teamRoles": {"in": ["defense", {"$ifNull": ["$$play.team.roles", []]}]}
+    }
+
+
+def test_expand_registry_team_context_uses_offense_team_roles():
+    specs = expand_registry(_registry_sample())
+    spec = next(s for s in specs if s.name == "team_passing_basic")
+    assert spec.json_body["context"]["filterPlay"] == {
+        "teamRoles": {"in": ["offense", {"$ifNull": ["$$play.team.roles", []]}]}
+    }
 
 
 def test_expand_registry_routes_team_to_offense_url():
@@ -1003,9 +1030,6 @@ def test_parquet_path_rejects_unrouted_spec():
 
 def _read_latest_report() -> dict:
     """Find the most recent fp_fetch_report_*.json in tempdir and load it."""
-    import tempfile
-    from pathlib import Path
-
     tmpdir = Path(tempfile.gettempdir())
     candidates = sorted(tmpdir.glob("fp_fetch_report_*.json"))
     assert candidates, f"no report file found in {tmpdir}"
