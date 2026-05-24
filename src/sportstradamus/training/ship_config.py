@@ -111,9 +111,7 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
         )
 
 
-def load_ship_config(
-    branch: str = "devel", path: Path | None = None
-) -> ShipConfig:
+def load_ship_config(branch: str = "devel", path: Path | None = None) -> ShipConfig:
     """Project ``stat_meta.json`` into the legacy ship-config shape.
 
     Args:
@@ -137,9 +135,7 @@ def load_ship_config(
             :func:`_validate_cell`).
     """
     if branch not in _ALLOWED_FOR_BRANCH:
-        raise ValueError(
-            f"Unknown branch {branch!r}; valid: {sorted(_ALLOWED_FOR_BRANCH)}"
-        )
+        raise ValueError(f"Unknown branch {branch!r}; valid: {sorted(_ALLOWED_FOR_BRANCH)}")
     path = Path(str(STAT_META_PATH)) if path is None else Path(path)
     meta = _load_stat_meta(path)
     allowed = _ALLOWED_FOR_BRANCH[branch]
