@@ -71,9 +71,9 @@ def test_hurdle_gate_recovers_true_zero_rate() -> None:
     # ZINB identity reconstruction of P(Y=0)
     reconstructed_pzero = gate + (1 - gate) * nb0
 
-    assert abs(reconstructed_pzero.mean() - 0.35) < 0.10, (
-        f"Reconstructed P(Y=0)={reconstructed_pzero.mean():.3f} deviates >0.10 from 0.35"
-    )
+    assert (
+        abs(reconstructed_pzero.mean() - 0.35) < 0.10
+    ), f"Reconstructed P(Y=0)={reconstructed_pzero.mean():.3f} deviates >0.10 from 0.35"
     # Gate should be well above the ~0.18 the joint ZINB produces.
     assert gate.mean() > 0.20, f"gate.mean()={gate.mean():.3f} unexpectedly low"
 
