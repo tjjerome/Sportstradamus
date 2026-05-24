@@ -231,7 +231,7 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
         results["over_pct"] = float("nan")
 
     results["n_confident"] = int(conf_mask.sum())
-    results["n_total"] = int(len(y_true))
+    results["n_total"] = len(y_true)
 
     return results
 
@@ -458,7 +458,7 @@ def main():
         print(f"  {market_name}  (current dist: {cfg['dist']})")
         print(f"{'=' * 60}")
 
-        X_train, X_val, X_test, y_train, y_val, y_test, meta_val, meta_test = load_market(
+        X_train, X_val, X_test, y_train, y_val, y_test, _meta_val, meta_test = load_market(
             cfg["file"], cfg["zi"], cfg["continuous"]
         )
 

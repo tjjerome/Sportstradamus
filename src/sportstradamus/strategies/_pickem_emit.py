@@ -93,6 +93,5 @@ def _lazy_import(name: str) -> Any:
         return __import__(name)
     except ImportError as exc:
         raise ImportError(
-            f"`{name}` is required for pickem-build. Install with "
-            f"`poetry install --with strategy`."
+            f"`{name}` is required for pickem-build. Install with `poetry install --with strategy`."
         ) from exc

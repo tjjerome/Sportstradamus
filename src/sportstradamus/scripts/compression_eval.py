@@ -1343,7 +1343,7 @@ def write_scatter(df: pd.DataFrame, pred_col: str, out_path: Path, title: str) -
 def _print_table(table: pd.DataFrame) -> None:
     """Pretty-print the decile table to stdout."""
     click.echo(
-        f"{'decile':>6} {'meanyr':>8} {'n':>6} {'mae':>8} " f"{'bias':>8} {'pred':>8} {'actual':>8}"
+        f"{'decile':>6} {'meanyr':>8} {'n':>6} {'mae':>8} {'bias':>8} {'pred':>8} {'actual':>8}"
     )
     for _, r in table.iterrows():
         click.echo(

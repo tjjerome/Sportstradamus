@@ -289,8 +289,7 @@ def run_marginal_analysis(
         current_features, full_profile, position, lookups, min_comps, max_comps
     )
     print(
-        f"  Baseline: {baseline_score:.5f} "
-        f"({baseline_n} players, {len(current_features)} features)"
+        f"  Baseline: {baseline_score:.5f} ({baseline_n} players, {len(current_features)} features)"
     )
 
     unused = [f for f in available_features if f not in current_features]
@@ -342,7 +341,7 @@ def greedy_forward_selection(
             break
 
         best_feat, best_delta = None, 0.0
-        for feat in tqdm(unused, desc=f"  Fwd step {step+1}", leave=False):
+        for feat in tqdm(unused, desc=f"  Fwd step {step + 1}", leave=False):
             test = [*features, feat]
             s, _ = score_feature_set(test, full_profile, position, lookups, min_comps, max_comps)
             delta = s - score
@@ -350,14 +349,14 @@ def greedy_forward_selection(
                 best_feat, best_delta = feat, delta
 
         if best_delta < threshold:
-            print(f"    Step {step+1}: no feature improves score by >= {threshold}")
+            print(f"    Step {step + 1}: no feature improves score by >= {threshold}")
             break
 
         features.append(best_feat)
         unused.remove(best_feat)
         score += best_delta
         history.append((f"+{best_feat}", score, len(features)))
-        print(f"    Step {step+1}: +{best_feat} -> {score:.5f} ({best_delta:+.5f})")
+        print(f"    Step {step + 1}: +{best_feat} -> {score:.5f} ({best_delta:+.5f})")
 
     return features, score, history
 
@@ -383,7 +382,7 @@ def greedy_backward_elimination(
             break
 
         best_feat, best_delta = None, 0.0
-        for feat in tqdm(features, desc=f"  Bwd step {step+1}", leave=False):
+        for feat in tqdm(features, desc=f"  Bwd step {step + 1}", leave=False):
             test = [f for f in features if f != feat]
             s, _ = score_feature_set(test, full_profile, position, lookups, min_comps, max_comps)
             delta = s - score
@@ -391,13 +390,13 @@ def greedy_backward_elimination(
                 best_feat, best_delta = feat, delta
 
         if best_delta < threshold:
-            print(f"    Step {step+1}: no removal improves score by >= {threshold}")
+            print(f"    Step {step + 1}: no removal improves score by >= {threshold}")
             break
 
         features.remove(best_feat)
         score += best_delta
         history.append((f"-{best_feat}", score, len(features)))
-        print(f"    Step {step+1}: -{best_feat} -> {score:.5f} ({best_delta:+.5f})")
+        print(f"    Step {step + 1}: -{best_feat} -> {score:.5f} ({best_delta:+.5f})")
 
     return features, score, history
 
@@ -474,9 +473,9 @@ def main():
     positions = args.position or list(current_weights.get(args.league, {}).keys())
 
     for position in positions:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"{args.league} {position}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         if position not in current_weights.get(args.league, {}):
             print(f"  No current weights found for {args.league} {position}")
@@ -525,7 +524,7 @@ def main():
 
         # ── Phase 1: Marginal analysis ──
         print("\n  Phase 1: Marginal Analysis")
-        print(f"  {'-'*50}")
+        print(f"  {'-' * 50}")
         baseline, additions, removals = run_marginal_analysis(
             current_features,
             available_names,
@@ -552,8 +551,8 @@ def main():
 
         # ── Phase 2: Greedy forward selection ──
         print("\n  Phase 2: Greedy Forward Selection")
-        print(f"  {'-'*50}")
-        fwd_features, fwd_score, fwd_history = greedy_forward_selection(
+        print(f"  {'-' * 50}")
+        fwd_features, _fwd_score, _fwd_history = greedy_forward_selection(
             current_features,
             available_names,
             pos_profile,
@@ -566,8 +565,8 @@ def main():
 
         # ── Phase 3: Greedy backward elimination ──
         print("\n  Phase 3: Greedy Backward Elimination")
-        print(f"  {'-'*50}")
-        best_features, best_score, bwd_history = greedy_backward_elimination(
+        print(f"  {'-' * 50}")
+        best_features, best_score, _bwd_history = greedy_backward_elimination(
             fwd_features,
             pos_profile,
             position,
@@ -578,9 +577,9 @@ def main():
         )
 
         # ── Summary ──
-        print(f"\n  {'='*50}")
+        print(f"\n  {'=' * 50}")
         print(f"  RESULTS for {args.league} {position}")
-        print(f"  {'='*50}")
+        print(f"  {'=' * 50}")
         print(f"  Baseline score: {baseline:.5f} ({len(current_features)} features)")
         print(f"  Best score:     {best_score:.5f} ({len(best_features)} features)")
         print(f"  Improvement:    {best_score - baseline:+.5f}")
@@ -602,7 +601,7 @@ def main():
         # ── Phase 4: Optional weight optimization ──
         if args.optimize and (best_score > baseline or added or removed):
             print("\n  Phase 4: Weight Optimization on best feature set")
-            print(f"  {'-'*50}")
+            print(f"  {'-' * 50}")
 
             profile = pos_profile[best_features].copy()
             for col in profile.columns:
