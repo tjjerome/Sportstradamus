@@ -93,11 +93,7 @@ stat_std: dict[str, dict[str, float | None]] = {
     for league, markets in stat_meta.items()
 }
 stat_zi: dict[str, dict[str, float]] = {
-    league: {
-        market: cell["zi"]
-        for market, cell in markets.items()
-        if cell.get("zi") is not None
-    }
+    league: {market: cell["zi"] for market, cell in markets.items() if cell.get("zi") is not None}
     for league, markets in stat_meta.items()
 }
 

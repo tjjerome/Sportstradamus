@@ -142,8 +142,7 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
             for league, market, old, new in changes:
                 click.echo(f"  {league}/{market}: shipped {old} -> {new}")
             click.echo(
-                f"# branch=main: {len(changes)} shipping changes "
-                f"(graduated={len(graduated)} cells)"
+                f"# branch=main: {len(changes)} shipping changes (graduated={len(graduated)} cells)"
             )
         if not dry_run and changes:
             _write_meta(meta_path, meta_map)
@@ -153,12 +152,8 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
     else:
         # branch == "devel": validate + summarize.
         config = load_ship_config(branch="devel", path=meta_path)
-        n_active = sum(
-            1 for lg in config for mk in config[lg] if config[lg][mk] != WITHHELD
-        )
-        n_withheld = sum(
-            1 for lg in config for mk in config[lg] if config[lg][mk] == WITHHELD
-        )
+        n_active = sum(1 for lg in config for mk in config[lg] if config[lg][mk] != WITHHELD)
+        n_withheld = sum(1 for lg in config for mk in config[lg] if config[lg][mk] == WITHHELD)
         click.echo(
             f"# branch=devel: active={n_active} withheld={n_withheld} "
             f"(stat_meta.json validated; no mutation)"
