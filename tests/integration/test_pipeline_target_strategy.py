@@ -163,6 +163,6 @@ def test_centered_loc_meanyr_correlation_differs_from_ratio_loc():
     # Different correlations to MeanYr is the load-bearing signal — the
     # ratio target builds in division by MeanYr, the centered target does
     # not, so the GBDT learns a structurally different mapping.
-    assert abs(corr_ratio - corr_centered) > 0.05, (
-        f"corr(loc, MeanYr) barely moved: ratio={corr_ratio:.3f}, centered={corr_centered:.3f}"
-    )
+    assert (
+        abs(corr_ratio - corr_centered) > 0.05
+    ), f"corr(loc, MeanYr) barely moved: ratio={corr_ratio:.3f}, centered={corr_centered:.3f}"

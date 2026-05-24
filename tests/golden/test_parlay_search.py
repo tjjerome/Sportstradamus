@@ -172,9 +172,9 @@ def test_push_aware_payout_independent_two_leg_power() -> None:
     # No-loss outcomes other than both-win: WIN-PUSH, PUSH-WIN, PUSH-PUSH.
     refund_prob = p_win[0] * p_push[1] + p_push[0] * p_win[1] + p_push[0] * p_push[1]
     expected = 3.0 * p_win[0] * p_win[1] + 1.0 * refund_prob
-    assert ev == pytest.approx(expected, rel=0.02), (
-        f"expected ~{expected:.4f}, got {ev:.4f}; p_lose={p_lose}"
-    )
+    assert ev == pytest.approx(
+        expected, rel=0.02
+    ), f"expected ~{expected:.4f}, got {ev:.4f}; p_lose={p_lose}"
 
 
 def test_push_aware_payout_one_leg_pushes_promotes_to_refund() -> None:
