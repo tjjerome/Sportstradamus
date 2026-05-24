@@ -149,12 +149,23 @@ def _url_for(context: str, *, league: str, slug: str) -> str:
 def _default_body(prop: str, context: str, *, table: dict) -> dict:
     """Build the v2 ``/values`` request body for one (tool, context) pair.
 
-    The body shape was reverse-engineered from real DevTools curls
-    (one player-context, one team-defense-context). Per-tool flags
-    (``requiresCharting``, ``requiresPlayByPlay``, ``requiredRoles``,
-    etc.) are passed through from the registry entry. The ``weeks``
-    block uses a single-int sentinel that
+    The body shape was reverse-engineered from real DevTools curls.
+    Per-tool flags (``requiresCharting``, ``requiresPlayByPlay``,
+    ``requiredRoles``, etc.) are passed through from the registry
+    entry. The ``weeks`` block uses a single-int sentinel that
     :mod:`body_substitute` rewrites per call based on mode.
+
+    Two filters are non-obvious and required for FP to return any
+    rows at all:
+
+    - ``filterMatch.isGamePlayed = true`` — drops scheduled-but-not-
+      played games. Without it FP aggregates over nothing.
+    - ``filterPlay.teamRoles.in = ["offense" | "defense", ...]`` — tells
+      FP which play context to aggregate (``offense`` for player/team
+      tools, ``defense`` for opponent tools). Without this filter, FP
+      returns 0 plays for every tool — the original "every parquet is
+      1 KB / 0 rows" symptom. The ``$$play.team.roles`` placeholder is
+      the SPA's literal value; FP rejects the call without it.
     """
     route_context, route_target, model_context, grouping = _context_routing(context)
     return {
@@ -166,8 +177,11 @@ def _default_body(prop: str, context: str, *, table: dict) -> dict:
             "routeContext": route_context,
             "routeContextTarget": route_target,
             "weeks": {"REG": [_WEEK_INT_SENTINEL]},
-            "filterMatch": {"game.season": {"eq": _SEASON_INT_SENTINEL}},
-            "filterPlay": {},
+            "filterMatch": {
+                "isGamePlayed": {"eq": True},
+                "game.season": {"eq": _SEASON_INT_SENTINEL},
+            },
+            "filterPlay": {"teamRoles": _team_roles_filter(context)},
             "filterResult": {},
             "qualifiers": {},
             "splits": {},
@@ -185,6 +199,20 @@ def _default_body(prop: str, context: str, *, table: dict) -> dict:
         "flatten": True,
         "debug": False,
     }
+
+
+# Universal play-context filter. The first element selects offense or
+# defense plays; the ``$$play.team.roles`` reference is FP's SPA
+# placeholder for the team's role on the play and is required (FP
+# returns 0 rows if it's missing). Player- and team-offense tools
+# aggregate offensive plays; opponent (team-defense) tools aggregate
+# defensive plays.
+_PLAY_ROLE_PLACEHOLDER = {"$ifNull": ["$$play.team.roles", []]}
+
+
+def _team_roles_filter(context: str) -> dict:
+    role = "defense" if context == "opponent" else "offense"
+    return {"in": [role, _PLAY_ROLE_PLACEHOLDER]}
 
 
 def _context_routing(context: str) -> tuple[str, str, str, str]:
