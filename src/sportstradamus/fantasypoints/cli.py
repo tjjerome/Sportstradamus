@@ -1,8 +1,16 @@
 """``fp-fetch`` CLI — snapshot every registered Fantasy Points tool.
 
-Four subcommands:
+Six subcommands:
 
-* ``fp-fetch run`` — walks the catalog and writes per-tool snapshots.
+* ``fp-fetch run`` — fetch all (or ``--only``) catalog endpoints for a
+  given week/season, parse the response tables, write one parquet per
+  tool under ``data/{player,team}_data/NFL/{season}/``. Defaults to
+  the most recently completed week. On a 401 mid-batch in an
+  interactive terminal, prompts for a fresh curl and resumes.
+* ``fp-fetch backfill`` — iterate (season × week) pairs and run the
+  same fetch+parse+write for each cell. One-time historical grab.
+* ``fp-fetch discover`` — auto-populate the catalog from FP's tool
+  registry.
 * ``fp-fetch list`` — prints the registered catalog entries.
 * ``fp-fetch import-curl`` — registers a new endpoint from a
   DevTools-copied curl command. Handles both GET and POST curls,
@@ -10,10 +18,6 @@ Four subcommands:
 * ``fp-fetch refresh-auth`` — updates the Authorization / Cookie /
   User-Agent fields in ``creds/keys.json`` from a fresh curl command
   (or stdin), so token rotation is a one-paste operation.
-
-The runner resolves ``--season`` / ``--week`` (defaults inferred from
-the current date) and substitutes them into each endpoint's ``params``
-and ``json_body`` templates before calling :class:`FantasyPointsClient`.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import json
 import logging
 import re
 import shlex
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -30,7 +35,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import click
 from tqdm import tqdm
 
-from sportstradamus import creds, data
+from sportstradamus import creds
 from sportstradamus.fantasypoints.catalog import (
     CATALOG_PATH,
     EndpointSpec,
@@ -46,11 +51,12 @@ from sportstradamus.fantasypoints.discover import (
     REGISTRY_URL,
     expand_registry,
 )
+from sportstradamus.fantasypoints.transform import (
+    parquet_path_for_spec,
+    parse_table_response,
+    write_parquet,
+)
 from sportstradamus.helpers.logging import get_logger
-
-# Snapshots live alongside the rest of the runtime data tree and are
-# gitignored. Co-located with helpers/io.py's _RUNTIME_DIR convention.
-OUTPUT_BASE = Path(str(pkg_resources.files(data) / "fantasypoints"))
 
 # NFL regular season is 18 weeks. The default-week inference clamps to
 # this range; the user can always pass --week explicitly.
@@ -86,28 +92,6 @@ _STRIPPED_CURL_HEADERS = frozenset(
     }
 )
 
-# Curl option tokens whose next argument is a value we want to capture
-# rather than skip outright.
-_CURL_VALUE_FLAGS = frozenset(
-    {
-        "-H",
-        "--header",
-        "-X",
-        "--request",
-        "-d",
-        "--data",
-        "--data-raw",
-        "--data-binary",
-        "--data-ascii",
-        "-b",
-        "--cookie",
-        "-A",
-        "--user-agent",
-        "-e",
-        "--referer",
-    }
-)
-
 # Curl option tokens that take a value but whose value we never need.
 _CURL_SKIP_VALUE_FLAGS = frozenset({"-b", "--cookie", "-A", "--user-agent", "-e", "--referer"})
 
@@ -136,7 +120,7 @@ def fp_fetch():
 @click.option("--season", type=int, default=None, help="NFL season (year). Defaults to current.")
 @click.option("--week", type=int, default=None, help="NFL week (1-18). Defaults to inferred.")
 @click.option("--only", multiple=True, help="Only fetch these endpoint names (repeatable).")
-@click.option("--dry-run", is_flag=True, help="Print resolved URLs without fetching.")
+@click.option("--dry-run", is_flag=True, help="Print resolved URLs and parquet paths only.")
 @click.option(
     "--catalog",
     "catalog_path",
@@ -145,19 +129,18 @@ def fp_fetch():
     help="Override catalog path (default: bundled config).",
 )
 @click.option(
-    "--output",
-    "output_base",
-    type=click.Path(path_type=Path, file_okay=False),
-    default=None,
-    help="Override output base directory.",
-)
-@click.option(
     "--log-level",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
 )
-def run(season, week, only, dry_run, catalog_path, output_base, log_level) -> None:
-    """Walk the catalog and write per-tool snapshots for the given week."""
+def run(season, week, only, dry_run, catalog_path, log_level) -> None:
+    """Walk the catalog, fetch every endpoint, write one parquet per tool.
+
+    Player-context entries land in
+    ``data/player_data/NFL/{season}/<tool>_week_NN.parquet``; team /
+    opponent entries land in ``data/team_data/NFL/{season}/`` (with
+    ``_opp`` suffix for opponent context). Re-runs overwrite.
+    """
     log = get_logger("fp-fetch")
     log.setLevel(log_level)
     season = season or _default_season()
@@ -169,24 +152,106 @@ def run(season, week, only, dry_run, catalog_path, output_base, log_level) -> No
     specs = load_catalog(catalog_path)
     if not specs:
         click.echo(
-            "Catalog is empty. Register endpoints with `fp-fetch import-curl` "
-            "(see docs/fantasypoints.md).",
+            "Catalog is empty. Run `fp-fetch discover` or "
+            "`fp-fetch import-curl` first (see docs/fantasypoints.md).",
             err=True,
         )
         return
     if only:
         specs = _filter_by_name(specs, only)
-    out_base = output_base or OUTPUT_BASE
     if dry_run:
         for spec in specs:
             url = _build_url(spec.url, spec.render_params(season=season, week=week))
-            path = spec.output_path(base=out_base, season=season, week=week)
+            path = parquet_path_for_spec(spec.name, season=season, week=week)
             click.echo(f"{spec.name}: {spec.method} {url} -> {path}")
         return
     client = FantasyPointsClient()
-    failures = _fetch_all(specs, client, season=season, week=week, base=out_base, log=log)
+    failures = _fetch_all(specs, client, season=season, week=week, log=log)
     if failures:
         raise click.ClickException(f"Failed to fetch: {failures}")
+
+
+@fp_fetch.command("backfill")
+@click.option("--start-season", type=int, required=True, help="First season to fetch (inclusive).")
+@click.option("--end-season", type=int, required=True, help="Last season to fetch (inclusive).")
+@click.option(
+    "--start-week",
+    type=int,
+    default=1,
+    show_default=True,
+    help="First week of each season (1-18).",
+)
+@click.option(
+    "--end-week",
+    type=int,
+    default=NFL_REGULAR_SEASON_WEEKS,
+    show_default=True,
+    help="Last week of each season (1-18).",
+)
+@click.option("--only", multiple=True, help="Only fetch these endpoint names (repeatable).")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print the total call count and exit without fetching.",
+)
+@click.option(
+    "--catalog",
+    "catalog_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+)
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
+    default="INFO",
+)
+def backfill(
+    start_season,
+    end_season,
+    start_week,
+    end_week,
+    only,
+    dry_run,
+    catalog_path,
+    log_level,
+) -> None:
+    """Iterate (season × week) and write per-tool parquets for each.
+
+    With ~45 catalog entries × 18 weeks × N seasons at the client's
+    2 s inter-request pause, plan for several hours per season —
+    suitable for an overnight run, not a cron job.
+    """
+    log = get_logger("fp-fetch")
+    log.setLevel(log_level)
+    specs = load_catalog(catalog_path)
+    if not specs:
+        click.echo("Catalog is empty. Run `fp-fetch discover` first.", err=True)
+        return
+    if only:
+        specs = _filter_by_name(specs, only)
+    seasons = list(range(start_season, end_season + 1))
+    weeks = list(range(start_week, end_week + 1))
+    total = len(seasons) * len(weeks) * len(specs)
+    if dry_run:
+        click.echo(
+            f"Would fetch {total} ({len(specs)} tools x "
+            f"{len(weeks)} weeks x {len(seasons)} seasons)."
+        )
+        return
+    client = FantasyPointsClient()
+    failures: list[tuple[int, int, str]] = []
+    with tqdm(total=total, desc="fp-backfill", unit="call") as bar:
+        for season in seasons:
+            for week in weeks:
+                for spec in specs:
+                    ok = _fetch_and_write_one(spec, client, season=season, week=week, log=log)
+                    if not ok:
+                        failures.append((season, week, spec.name))
+                    bar.update(1)
+    if failures:
+        log.warning("backfill completed with failures", extra={"count": len(failures)})
+        click.echo(f"Done with {len(failures)} failures (see log).", err=True)
+        raise click.ClickException(f"{len(failures)} backfill calls failed.")
 
 
 @fp_fetch.command("list")
@@ -425,7 +490,11 @@ def parse_curl_to_spec(
     url_parts = urlsplit(parsed["url"])
     params = dict(parse_qsl(url_parts.query, keep_blank_values=True))
     bare_url = urlunsplit((url_parts.scheme, url_parts.netloc, url_parts.path, "", ""))
-    json_body = _decode_body(parsed["body"])
+    raw_body = parsed["body"]
+    try:
+        json_body = json.loads(raw_body) if raw_body is not None else None
+    except json.JSONDecodeError:
+        json_body = None
     method = (parsed["method"] or ("POST" if json_body is not None else "GET")).upper()
     return EndpointSpec(
         name=name,
@@ -472,15 +541,6 @@ def _parse_curl_tokens(tokens: list[str]) -> dict:
     return {"url": url, "method": method, "headers": headers, "body": body}
 
 
-def _decode_body(body: str | None):
-    """Parse a curl body string as JSON. Return ``None`` if not JSON."""
-    if body is None:
-        return None
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError:
-        return None
-
 
 def _filter_by_name(specs: list[EndpointSpec], names: tuple[str, ...]) -> list[EndpointSpec]:
     wanted = set(names)
@@ -497,29 +557,113 @@ def _fetch_all(
     *,
     season: int,
     week: int,
-    base: Path,
     log: logging.Logger,
 ) -> list[str]:
     failures: list[str] = []
     for spec in tqdm(specs, desc="fp-fetch", unit="endpoint"):
-        target = spec.output_path(base=base, season=season, week=week)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        ok = _fetch_and_write_one(spec, client, season=season, week=week, log=log)
+        if not ok:
+            failures.append(spec.name)
+    return failures
+
+
+def _fetch_and_write_one(
+    spec: EndpointSpec,
+    client: FantasyPointsClient,
+    *,
+    season: int,
+    week: int,
+    log: logging.Logger,
+) -> bool:
+    """Fetch one endpoint, parse to DataFrame, write parquet. Return True on success.
+
+    On a 401/403 in an interactive terminal, prompts the user to
+    paste a fresh DevTools curl and retries once. In non-TTY contexts
+    (cron) the auth error propagates so run_job.sh pings ``/fail``.
+    """
+    target = parquet_path_for_spec(spec.name, season=season, week=week)
+    body = _dispatch_with_auth_refresh(spec, client, season=season, week=week, log=log)
+    if body is None:
+        return False
+    df = parse_table_response(body)
+    if df.empty:
+        log.warning("empty response", extra={"endpoint": spec.name, "season": season, "week": week})
+    write_parquet(df, target)
+    log.info(
+        "wrote parquet",
+        extra={"endpoint": spec.name, "path": str(target), "rows": len(df)},
+    )
+    return True
+
+
+def _dispatch_with_auth_refresh(
+    spec: EndpointSpec,
+    client: FantasyPointsClient,
+    *,
+    season: int,
+    week: int,
+    log: logging.Logger,
+) -> dict | list | str | bytes | None:
+    """Run :func:`_dispatch`; on 401/403 try one interactive refresh + retry."""
+    for attempt in (1, 2):
         try:
-            body = _dispatch(client, spec, season=season, week=week)
+            return _dispatch(client, spec, season=season, week=week)
         except FantasyPointsAuthError as exc:
-            log.error("auth failed", extra={"endpoint": spec.name, "error": str(exc)})
-            click.echo(str(exc), err=True)
-            raise click.ClickException(
-                "Authorization token missing or expired. Refresh " "creds/keys.json and rerun."
-            ) from exc
+            log.warning(
+                "auth error",
+                extra={"endpoint": spec.name, "attempt": attempt, "error": str(exc)},
+            )
+            if attempt == 2 or not _refresh_auth_interactively(client):
+                click.echo(str(exc), err=True)
+                raise click.ClickException(
+                    "Authorization token expired and refresh aborted. "
+                    "Update creds/keys.json and rerun."
+                ) from exc
         except Exception as exc:
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
             click.echo(f"  {spec.name}: {exc}", err=True)
-            failures.append(spec.name)
-            continue
-        _write_payload(target, body, spec.response_format)
-        log.info("wrote snapshot", extra={"endpoint": spec.name, "path": str(target)})
-    return failures
+            return None
+    return None
+
+
+def _refresh_auth_interactively(client: FantasyPointsClient) -> bool:
+    """Prompt for a fresh curl on stdin; update keys + client in place.
+
+    Returns ``False`` (without prompting) when stdin is not a TTY, so
+    cron runs fail fast instead of hanging on input that will never
+    arrive.
+    """
+    if not sys.stdin.isatty():
+        return False
+    click.echo("", err=True)
+    click.echo("=" * 60, err=True)
+    click.echo("Authorization expired.", err=True)
+    click.echo("Paste a fresh DevTools curl below, then send EOF (Ctrl+D):", err=True)
+    click.echo("=" * 60, err=True)
+    try:
+        curl_text = sys.stdin.read()
+    except KeyboardInterrupt:
+        click.echo("Aborted.", err=True)
+        return False
+    if not curl_text.strip():
+        click.echo("Empty input. Aborting.", err=True)
+        return False
+    try:
+        updates = _extract_auth_from_curl(curl_text)
+    except click.ClickException as exc:
+        click.echo(f"Failed to parse curl: {exc.message}", err=True)
+        return False
+    if not updates.get("fantasypoints_authorization"):
+        click.echo("No Authorization header found in pasted curl.", err=True)
+        return False
+    _update_keys(updates)
+    client.refresh_credentials(
+        authorization=updates.get("fantasypoints_authorization"),
+        cookie=updates.get("fantasypoints_cookie"),
+        user_agent=updates.get("fantasypoints_user_agent"),
+    )
+    click.echo("Auth refreshed. Resuming...", err=True)
+    return True
 
 
 def _dispatch(
@@ -531,7 +675,13 @@ def _dispatch(
 ) -> dict | list | str | bytes:
     """Call the right verb on the client for one endpoint spec."""
     params = spec.render_params(season=season, week=week)
-    accept = _client_accept(spec.response_format)
+    # Map catalog response_format to the client's accept token.
+    if spec.response_format == "json":
+        accept = "json"
+    elif spec.response_format in ("csv", "html"):
+        accept = "text"
+    else:
+        accept = "bytes"
     method = spec.method.upper()
     if method == "POST":
         return client.post(
@@ -551,33 +701,10 @@ def _dispatch(
     raise click.ClickException(f"Unsupported method {method!r} for endpoint {spec.name!r}")
 
 
-def _client_accept(response_format: str) -> str:
-    if response_format == "json":
-        return "json"
-    if response_format in ("csv", "html"):
-        return "text"
-    return "bytes"
-
-
 def _build_url(url: str, params: dict[str, str]) -> str:
     parsed = urlsplit(url)
     query = urlencode(params) if params else ""
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
-
-
-def _write_payload(path: Path, body: dict | list | str | bytes, fmt: str) -> None:
-    if fmt == "json":
-        with path.open("w") as f:
-            json.dump(body, f, indent=2, default=str)
-        return
-    if fmt in ("csv", "html"):
-        text = body if isinstance(body, str) else body.decode()
-        with path.open("w") as f:
-            f.write(text)
-        return
-    raw = body if isinstance(body, bytes) else body.encode()
-    with path.open("wb") as f:
-        f.write(raw)
 
 
 def _default_season() -> int:

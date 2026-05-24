@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pandas as pd
 import pytest
 import requests
 from click.testing import CliRunner
@@ -25,6 +26,11 @@ from sportstradamus.fantasypoints.client import (
 from sportstradamus.fantasypoints.discover import (
     _camel_to_kebab,
     expand_registry,
+)
+from sportstradamus.fantasypoints.transform import (
+    parquet_path_for_spec,
+    parse_table_response,
+    write_parquet,
 )
 
 
@@ -357,12 +363,20 @@ def test_endpoint_spec_season_long_path(tmp_path):
     assert path == tmp_path / "2025" / "season" / "summary.json"
 
 
+def _redirect_parquet_dirs(monkeypatch, tmp_path):
+    """Point PLAYER_DATA_BASE / TEAM_DATA_BASE at tmp_path so tests don't write to the package."""
+    from sportstradamus.fantasypoints import transform as transform_mod
+
+    monkeypatch.setattr(transform_mod, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(transform_mod, "TEAM_DATA_BASE", tmp_path / "team_data")
+
+
 def test_cli_run_dry_run_prints_method_and_url(tmp_path):
     catalog_path = tmp_path / "catalog.json"
     save_catalog(
         [
             EndpointSpec(
-                name="line_matchups",
+                name="team_line_matchups",
                 url="https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
                 method="POST",
                 json_body={"useCache": True},
@@ -383,23 +397,22 @@ def test_cli_run_dry_run_prints_method_and_url(tmp_path):
             "--dry-run",
             "--catalog",
             str(catalog_path),
-            "--output",
-            str(tmp_path),
         ],
     )
     assert result.exit_code == 0, result.output
     assert "POST" in result.output
-    assert "line_matchups" in result.output
+    assert "team_line_matchups" in result.output
 
 
-def test_cli_run_writes_snapshot_via_post(monkeypatch, tmp_path):
+def test_cli_run_writes_parquet_via_post(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import client as client_mod
 
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
     save_catalog(
         [
             EndpointSpec(
-                name="line_matchups",
+                name="team_line_matchups",
                 url="https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
                 method="POST",
                 json_body={"context": {"week": "{week}"}, "useCache": True},
@@ -415,7 +428,22 @@ def test_cli_run_writes_snapshot_via_post(monkeypatch, tmp_path):
     def capture(method, url, headers=None, params=None, json=None):
         captured["method"] = method
         captured["json"] = json
-        return FakeResponse(200, body={"content": {"table": {"rows": []}}, "week": 5})
+        return FakeResponse(
+            200,
+            body={
+                "content": {
+                    "table": {
+                        "rows": {
+                            "count": 2,
+                            "values": [
+                                {"teamAbbreviation": "BAL", "gameWeek": 5},
+                                {"teamAbbreviation": "DEN", "gameWeek": 5},
+                            ],
+                        }
+                    }
+                }
+            },
+        )
 
     monkeypatch.setattr(client_mod.requests, "request", capture)
     runner = CliRunner()
@@ -429,26 +457,28 @@ def test_cli_run_writes_snapshot_via_post(monkeypatch, tmp_path):
             "5",
             "--catalog",
             str(catalog_path),
-            "--output",
-            str(tmp_path),
         ],
     )
     assert result.exit_code == 0, result.output
     assert captured["method"] == "POST"
     assert captured["json"] == {"context": {"week": "5"}, "useCache": True}
-    snapshot = tmp_path / "2025" / "week_05" / "team" / "line_matchups.json"
-    assert snapshot.is_file()
-    assert json.loads(snapshot.read_text())["week"] == 5
+    parquet = tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+    assert parquet.is_file(), f"expected parquet at {parquet}"
+    df = pd.read_parquet(parquet)
+    assert len(df) == 2
+    assert list(df.columns) == ["teamAbbreviation", "gameWeek"]
+    assert set(df["teamAbbreviation"]) == {"BAL", "DEN"}
 
 
 def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import client as client_mod
 
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
     save_catalog(
         [
             EndpointSpec(
-                name="line_matchups",
+                name="team_line_matchups",
                 url="https://example/",
                 output_subdir="team/line_matchups",
             ),
@@ -458,6 +488,8 @@ def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
     monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer expired")
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
     monkeypatch.setattr(client_mod.requests, "request", lambda *a, **k: FakeResponse(401))
+    # In a non-TTY context (CliRunner default), the auth-refresh prompt
+    # is bypassed and the error propagates as today.
     runner = CliRunner()
     result = runner.invoke(
         fp_fetch,
@@ -469,8 +501,6 @@ def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
             "5",
             "--catalog",
             str(catalog_path),
-            "--output",
-            str(tmp_path),
         ],
     )
     assert result.exit_code != 0
@@ -773,3 +803,275 @@ def test_cli_discover_writes_catalog_and_skips_existing(monkeypatch, tmp_path):
     # Private/unpublished still skipped:
     assert "player_debug" not in names
     assert "player_draft_only" not in names
+
+
+def test_parse_table_response_extracts_rows_and_columns():
+    payload = {
+        "content": {
+            "table": {
+                "rows": {
+                    "count": 2,
+                    "values": [
+                        {"playerFirstName": "A", "gameWeek": 5, "yards": 100},
+                        {"playerFirstName": "B", "gameWeek": 5, "yards": 80},
+                    ],
+                }
+            }
+        }
+    }
+    df = parse_table_response(payload)
+    assert len(df) == 2
+    assert set(df.columns) == {"playerFirstName", "gameWeek", "yards"}
+    assert list(df["yards"]) == [100, 80]
+
+
+def test_parse_table_response_serialises_nested_columns_to_json():
+    payload = {
+        "content": {
+            "table": {
+                "rows": {
+                    "values": [
+                        {
+                            "playerId": "X1",
+                            "opponentsPlayed": [{"abbr": "CIN"}, {"abbr": "DET"}],
+                        },
+                    ]
+                }
+            }
+        }
+    }
+    df = parse_table_response(payload)
+    assert df["opponentsPlayed"].iloc[0] == '[{"abbr":"CIN"},{"abbr":"DET"}]'
+
+
+def test_parse_table_response_empty_on_missing_paths():
+    assert parse_table_response({}).empty
+    assert parse_table_response({"content": {}}).empty
+    assert parse_table_response({"content": {"table": {}}}).empty
+    assert parse_table_response({"content": {"table": {"rows": {"values": []}}}}).empty
+
+
+def test_parquet_path_routes_player_to_player_data(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec("player_passing_advanced", season=2025, week=11)
+    assert p == tmp_path / "player_data" / "NFL" / "2025" / "passing_advanced_week_11.parquet"
+
+
+def test_parquet_path_routes_team_to_team_data(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec("team_line_matchups", season=2025, week=5)
+    assert p == tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+
+
+def test_parquet_path_routes_opponent_with_opp_suffix(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec("opponent_passing_advanced", season=2024, week=18)
+    assert p == tmp_path / "team_data" / "NFL" / "2024" / "passing_advanced_opp_week_18.parquet"
+
+
+def test_parquet_path_rejects_unrouted_name():
+    with pytest.raises(ValueError, match="player_/team_/opponent_"):
+        parquet_path_for_spec("misc_thing", season=2025, week=1)
+
+
+def test_write_parquet_creates_parent_dirs(tmp_path):
+    target = tmp_path / "a" / "b" / "c.parquet"
+    write_parquet(pd.DataFrame({"x": [1, 2, 3]}), target)
+    assert target.is_file()
+    assert list(pd.read_parquet(target)["x"]) == [1, 2, 3]
+
+
+def test_client_refresh_credentials_updates_in_place(monkeypatch):
+    client = _client()
+    monkeypatch.setattr(client, "_authorization", "Bearer OLD")
+    monkeypatch.setattr(client, "_cookie", "old=1")
+    client.refresh_credentials(authorization="Bearer NEW", cookie="new=2")
+    assert client._authorization == "Bearer NEW"
+    assert client._cookie == "new=2"
+    # Sleep guard reset so the post-refresh call doesn't pause.
+    assert client._first_call is True
+
+
+def test_cli_run_interactive_refresh_resumes_after_401(monkeypatch, tmp_path):
+    """On 401, the interactive refresh hook runs, updates the client, and the retry succeeds."""
+    from sportstradamus.fantasypoints import cli as cli_mod
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://example/",
+                method="POST",
+                json_body={"useCache": True},
+                output_subdir="team/line_matchups",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer expired")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+
+    call_count = {"n": 0}
+    good_body = {
+        "content": {"table": {"rows": {"count": 1, "values": [{"teamAbbreviation": "CIN"}]}}}
+    }
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        call_count["n"] += 1
+        # First call fails 401, second succeeds (after the refresh).
+        if call_count["n"] == 1:
+            return FakeResponse(401)
+        return FakeResponse(200, body=good_body)
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+
+    # Stub the prompt helper so CliRunner's faked stdin doesn't interfere.
+    # The stub simulates a successful paste-and-update by swapping in a
+    # fresh token via refresh_credentials.
+    refresh_calls = {"n": 0}
+
+    def fake_prompt(client):
+        refresh_calls["n"] += 1
+        client.refresh_credentials(authorization="Bearer NEW", cookie="new=1")
+        return True
+
+    monkeypatch.setattr(cli_mod, "_refresh_auth_interactively", fake_prompt)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "run",
+            "--season",
+            "2025",
+            "--week",
+            "5",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert refresh_calls["n"] == 1
+    assert call_count["n"] == 2
+    parquet = tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+    assert parquet.is_file()
+
+
+def test_cli_backfill_dry_run_reports_call_count(tmp_path):
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://example/",
+                output_subdir="team/line_matchups",
+            ),
+            EndpointSpec(
+                name="player_passing_basic",
+                url="https://example/",
+                output_subdir="player/passing_basic",
+            ),
+        ],
+        catalog_path,
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "backfill",
+            "--start-season",
+            "2022",
+            "--end-season",
+            "2024",
+            "--start-week",
+            "1",
+            "--end-week",
+            "5",
+            "--catalog",
+            str(catalog_path),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # 2 tools x 5 weeks x 3 seasons = 30 calls
+    assert "30" in result.output
+
+
+def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="player_passing_basic",
+                url="https://example/",
+                method="POST",
+                json_body={
+                    "filters": {"week": "{week}", "season": "{season}"},
+                    "useCache": True,
+                },
+                output_subdir="player/passing_basic",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+
+    seen_bodies = []
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        seen_bodies.append(json)
+        return FakeResponse(
+            200,
+            body={
+                "content": {
+                    "table": {
+                        "rows": {"count": 1, "values": [{"playerFirstName": "Q"}]},
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "backfill",
+            "--start-season",
+            "2023",
+            "--end-season",
+            "2023",
+            "--start-week",
+            "1",
+            "--end-week",
+            "3",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # One file per week:
+    base = tmp_path / "player_data" / "NFL" / "2023"
+    for w in (1, 2, 3):
+        assert (base / f"passing_basic_week_{w:02d}.parquet").is_file()
+    # And each call's body had the substituted week/season:
+    sent_weeks = [b["filters"]["week"] for b in seen_bodies]
+    assert sent_weeks == ["1", "2", "3"]
+    sent_seasons = {b["filters"]["season"] for b in seen_bodies}
+    assert sent_seasons == {"2023"}

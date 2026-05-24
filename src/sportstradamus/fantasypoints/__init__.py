@@ -6,7 +6,8 @@ a browser, the session cookie is enough to call those endpoints
 directly. The user discovers each endpoint once via DevTools'
 "Copy as cURL" action and registers it with :func:`cli.import_curl`;
 the weekly ``fp-fetch run`` cron then walks the catalog and writes
-each endpoint's response to ``data/fantasypoints/{season}/week_NN/``.
+each endpoint's response to ``data/player_data/NFL/{season}/`` or
+``data/team_data/NFL/{season}/`` depending on context prefix.
 
 See ``docs/fantasypoints.md`` for the end-user runbook (capturing a
 fresh cookie, adding endpoints, refresh schedule).
@@ -28,6 +29,13 @@ from sportstradamus.fantasypoints.discover import (
     REGISTRY_URL,
     expand_registry,
 )
+from sportstradamus.fantasypoints.transform import (
+    PLAYER_DATA_BASE,
+    TEAM_DATA_BASE,
+    parquet_path_for_spec,
+    parse_table_response,
+    write_parquet,
+)
 
 __all__ = [
     "CATALOG_PATH",
@@ -35,9 +43,14 @@ __all__ = [
     "FantasyPointsAuthError",
     "FantasyPointsClient",
     "FantasyPointsDecodeError",
+    "PLAYER_DATA_BASE",
     "REGISTRY_BODY",
     "REGISTRY_URL",
+    "TEAM_DATA_BASE",
     "expand_registry",
     "load_catalog",
+    "parquet_path_for_spec",
+    "parse_table_response",
     "save_catalog",
+    "write_parquet",
 ]
