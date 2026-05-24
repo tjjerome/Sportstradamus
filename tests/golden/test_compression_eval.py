@@ -174,7 +174,7 @@ def test_gate1_ci_below_zero_when_model_beats_book():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.9, 0.1)  # close to truth
     p_book = np.full_like(y, 0.5)  # near-random
-    mean, lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    mean, _lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
     assert mean < 0  # model Brier lower than book
     assert hi < 0  # 95% CI entirely below 0
 
@@ -184,7 +184,7 @@ def test_gate1_ci_above_zero_when_book_beats_model():
     y = (rng.uniform(size=4000) < 0.5).astype(float)
     p_model = np.where(y == 1, 0.1, 0.9)  # anti-correlated
     p_book = np.where(y == 1, 0.9, 0.1)  # nails it
-    mean, lo, hi = _gate1_brier_ci(p_model, p_book, y, rng)
+    mean, lo, _hi = _gate1_brier_ci(p_model, p_book, y, rng)
     assert mean > 0
     assert lo > 0  # CI excludes 0 on the book's side
 
@@ -195,7 +195,7 @@ def test_gate1_oracle_equals_negative_book_brier():
     rng = np.random.default_rng(2)
     y = (rng.uniform(size=3000) < 0.5).astype(float)
     p_book = rng.uniform(0.2, 0.8, size=3000)
-    mean, lo, hi = _gate1_brier_ci(y, p_book, y, rng)
+    mean, _lo, hi = _gate1_brier_ci(y, p_book, y, rng)
     assert mean == pytest.approx(-float(np.mean((p_book - y) ** 2)))
     assert hi < 0
 
@@ -211,7 +211,7 @@ def test_gate23_segment_match_z_matches_known_bias():
     mask[:30] = True
     pred = actual.copy()
     pred[:30] += 2.0  # over-predict the segment by a constant +2.0
-    pred_mean, true_mean, abs_diff, sigma, z = _gate23_segment_match(pred, actual, mask)
+    _pred_mean, _true_mean, abs_diff, sigma, z = _gate23_segment_match(pred, actual, mask)
     expected_sigma = float(np.std(actual[:30], ddof=1))
     assert abs_diff == pytest.approx(2.0)
     assert sigma == pytest.approx(expected_sigma)
@@ -1344,7 +1344,7 @@ def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
     monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history", lambda: history)
     monkeypatch.setattr(
         "sportstradamus.scripts.compression_eval._load_league_stats_lookup",
-        lambda league: (lambda player, market, date: 20.0),
+        lambda league: lambda player, market, date: 20.0,
     )
     runner = CliRunner()
     result = runner.invoke(

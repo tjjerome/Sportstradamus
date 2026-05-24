@@ -524,9 +524,7 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
         # power-back RBs (e.g. rec_adv_YPRR with no routes run) mean "no
         # receiving role", not "missing data". dropna() here would drop those
         # rows and starve the RB block below the min-count threshold.
-        positionProfile = (
-            positionProfile[features].replace([np.nan, np.inf, -np.inf], 0).fillna(0)
-        )
+        positionProfile = positionProfile[features].replace([np.nan, np.inf, -np.inf], 0).fillna(0)
 
         if len(positionProfile) < 10:
             continue
@@ -999,7 +997,7 @@ def main():
         print("COMPOSITE SCORE SUMMARY")
         print("=" * 60)
         print(f"  {'Group':<15s}  {'Current':>10s}  {'Optimized':>10s}  {'Change':>10s}")
-        print(f"  {'-'*15}  {'-'*10}  {'-'*10}  {'-'*10}")
+        print(f"  {'-' * 15}  {'-' * 10}  {'-' * 10}  {'-' * 10}")
         for group, (cur, opt) in sorted(score_report.items()):
             delta = opt - cur
             print(f"  {group:<15s}  {cur:>10.5f}  {opt:>10.5f}  {delta:>+10.5f}")

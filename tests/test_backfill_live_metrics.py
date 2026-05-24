@@ -112,9 +112,7 @@ def test_backfill_merges_with_existing_parquet(monkeypatch, tmp_path):
 
 
 def test_backfill_empty_history_exits_zero(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "sportstradamus.scripts.backfill_live_metrics.read_history", lambda: pd.DataFrame()
-    )
+    monkeypatch.setattr("sportstradamus.scripts.backfill_live_metrics.read_history", pd.DataFrame)
     runner = CliRunner()
     out = tmp_path / "out.parquet"
     result = runner.invoke(main, ["--days", "30", "--output", str(out)])
@@ -123,9 +121,7 @@ def test_backfill_empty_history_exits_zero(monkeypatch, tmp_path):
 
 
 def test_backfill_rejects_step_zero(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "sportstradamus.scripts.backfill_live_metrics.read_history", lambda: pd.DataFrame()
-    )
+    monkeypatch.setattr("sportstradamus.scripts.backfill_live_metrics.read_history", pd.DataFrame)
     runner = CliRunner()
     out = tmp_path / "out.parquet"
     result = runner.invoke(main, ["--days", "30", "--step", "0", "--output", str(out)])

@@ -476,8 +476,7 @@ class Archive:
         devig_over = np.nan if not over_probs else float(np.mean(over_probs))
 
         sample_sql = (
-            "SELECT observed_at FROM odds "
-            "WHERE league=? AND market=? AND game_date=? AND entity=?"
+            "SELECT observed_at FROM odds WHERE league=? AND market=? AND game_date=? AND entity=?"
         )
         sample_params: list = [league, market, d, entity]
         if at is not None:
@@ -603,7 +602,7 @@ class Archive:
             out["close_line"] = float(line_hist["line"].iloc[-1])
             out["peak_line"] = float(line_hist["line"].max())
             out["trough_line"] = float(line_hist["line"].min())
-            out["n_obs"] = int(len(line_hist))
+            out["n_obs"] = len(line_hist)
             out["n_moves"] = int(line_hist["line"].diff().fillna(0).ne(0).sum())
             span = line_hist["observed_at"].iloc[-1] - line_hist["observed_at"].iloc[0]
             out["time_span_minutes"] = float(span.total_seconds() / 60.0)

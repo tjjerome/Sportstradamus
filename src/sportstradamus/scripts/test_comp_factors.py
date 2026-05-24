@@ -45,9 +45,9 @@ for position in ["QB", "RB", "WR", "TE"]:
         )
         playerFolder = pkg_resources.files(data) / f"player_data/NFL/{year}"
         if os.path.exists(playerFolder):
-            for file in os.listdir(playerFolder):
-                if file.endswith(".csv"):
-                    df = pd.read_csv(playerFolder / file)
+            for file in playerFolder.iterdir():
+                if file.name.endswith(".csv"):
+                    df = pd.read_csv(file)
                     df.index = df.player_id
                     playerProfile = playerProfile.combine_first(df)
 
