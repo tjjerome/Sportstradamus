@@ -462,7 +462,7 @@ def test_cli_run_writes_parquet_via_post(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     assert captured["method"] == "POST"
     assert captured["json"] == {"context": {"week": "5"}, "useCache": True}
-    parquet = tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+    parquet = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
     assert parquet.is_file(), f"expected parquet at {parquet}"
     df = pd.read_parquet(parquet)
     assert len(df) == 2
@@ -881,7 +881,7 @@ def test_parquet_path_routes_player_to_player_data(monkeypatch, tmp_path):
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
     p = parquet_path_for_spec(_spec("player_passing_advanced"), season=2025, week=11)
-    assert p == tmp_path / "player_data" / "NFL" / "2025" / "passing_advanced_week_11.parquet"
+    assert p == tmp_path / "player_data" / "NFL" / "2025" / "week_11" / "passing_advanced.parquet"
 
 
 def test_parquet_path_routes_team_to_team_data(monkeypatch, tmp_path):
@@ -890,7 +890,7 @@ def test_parquet_path_routes_team_to_team_data(monkeypatch, tmp_path):
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
     p = parquet_path_for_spec(_spec("team_line_matchups"), season=2025, week=5)
-    assert p == tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+    assert p == tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
 
 
 def test_parquet_path_routes_opponent_with_opp_suffix(monkeypatch, tmp_path):
@@ -899,7 +899,7 @@ def test_parquet_path_routes_opponent_with_opp_suffix(monkeypatch, tmp_path):
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
     p = parquet_path_for_spec(_spec("opponent_passing_advanced"), season=2024, week=18)
-    assert p == tmp_path / "team_data" / "NFL" / "2024" / "passing_advanced_opp_week_18.parquet"
+    assert p == tmp_path / "team_data" / "NFL" / "2024" / "week_18" / "passing_advanced_opp.parquet"
 
 
 def test_parquet_path_falls_back_to_url_for_legacy_unprefixed_name(monkeypatch, tmp_path):
@@ -914,7 +914,7 @@ def test_parquet_path_falls_back_to_url_for_legacy_unprefixed_name(monkeypatch, 
         output_subdir="team/line_matchups",
     )
     p = parquet_path_for_spec(spec, season=2025, week=5)
-    assert p == tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+    assert p == tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
 
 
 def test_parquet_path_falls_back_to_output_subdir_when_url_is_opaque(monkeypatch, tmp_path):
@@ -929,7 +929,7 @@ def test_parquet_path_falls_back_to_output_subdir_when_url_is_opaque(monkeypatch
     )
     p = parquet_path_for_spec(spec, season=2025, week=1)
     # Name prefix wins (first routing source).
-    assert p == tmp_path / "player_data" / "NFL" / "2025" / "some_thing_week_01.parquet"
+    assert p == tmp_path / "player_data" / "NFL" / "2025" / "week_01" / "some_thing.parquet"
 
 
 def test_parquet_path_rejects_unrouted_spec():
@@ -1087,7 +1087,7 @@ def test_cli_run_records_routing_failure_in_report_without_aborting_batch(monkey
     assert by_name["misc_thing"]["status"] == "routing_failed"
     # The OTHER spec still wrote its parquet:
     assert by_name["player_passing_basic"]["status"] == "ok"
-    parquet = tmp_path / "player_data" / "NFL" / "2025" / "passing_basic_week_05.parquet"
+    parquet = tmp_path / "player_data" / "NFL" / "2025" / "week_05" / "passing_basic.parquet"
     assert parquet.is_file()
 
 
@@ -1173,7 +1173,7 @@ def test_cli_run_interactive_refresh_resumes_after_401(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     assert refresh_calls["n"] == 1
     assert call_count["n"] == 2
-    parquet = tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+    parquet = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
     assert parquet.is_file()
 
 
@@ -1277,7 +1277,7 @@ def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
     # One file per week:
     base = tmp_path / "player_data" / "NFL" / "2023"
     for w in (1, 2, 3):
-        assert (base / f"passing_basic_week_{w:02d}.parquet").is_file()
+        assert (base / f"week_{w:02d}" / "passing_basic.parquet").is_file()
     # And each call's body had the substituted week/season:
     sent_weeks = [b["filters"]["week"] for b in seen_bodies]
     assert sent_weeks == ["1", "2", "3"]

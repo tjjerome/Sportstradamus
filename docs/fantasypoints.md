@@ -136,14 +136,15 @@ poetry run fp-fetch run --week 5 --season 2025 --only team_line_matchups
 ```
 
 `run` fetches each endpoint, parses `content.table.rows.values` into
-a pandas DataFrame, and writes one parquet per (tool, week):
+a pandas DataFrame, and writes one parquet per (tool, week), grouped
+into a per-week subfolder so 45 files don't clutter the season dir:
 
 - player-context entries →
-  `src/sportstradamus/data/player_data/NFL/{season}/{tool}_week_NN.parquet`
+  `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}.parquet`
 - team-context entries →
-  `src/sportstradamus/data/team_data/NFL/{season}/{tool}_week_NN.parquet`
+  `src/sportstradamus/data/team_data/NFL/{season}/week_NN/{tool}.parquet`
 - opponent-context entries → same `team_data/` directory with an
-  `_opp` suffix in the filename.
+  `_opp` suffix in the filename (e.g. `passing_basic_opp.parquet`).
 
 Re-running the same week overwrites. Raw JSON is not persisted —
 the parquet is the deliverable. If a parse fails, the diagnostic
