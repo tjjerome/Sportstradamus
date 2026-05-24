@@ -23,6 +23,11 @@ from sportstradamus.fantasypoints.client import (
     FantasyPointsClient,
     FantasyPointsDecodeError,
 )
+from sportstradamus.fantasypoints.discover import (
+    REGISTRY_BODY,
+    REGISTRY_URL,
+    expand_registry,
+)
 
 __all__ = [
     "CATALOG_PATH",
@@ -30,6 +35,9 @@ __all__ = [
     "FantasyPointsAuthError",
     "FantasyPointsClient",
     "FantasyPointsDecodeError",
+    "REGISTRY_BODY",
+    "REGISTRY_URL",
+    "expand_registry",
     "load_catalog",
     "save_catalog",
 ]

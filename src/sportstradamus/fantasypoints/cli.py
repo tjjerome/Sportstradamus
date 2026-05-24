@@ -41,6 +41,11 @@ from sportstradamus.fantasypoints.client import (
     FantasyPointsAuthError,
     FantasyPointsClient,
 )
+from sportstradamus.fantasypoints.discover import (
+    REGISTRY_BODY,
+    REGISTRY_URL,
+    expand_registry,
+)
 from sportstradamus.helpers.logging import get_logger
 
 # Snapshots live alongside the rest of the runtime data tree and are
@@ -200,6 +205,56 @@ def list_endpoints(catalog_path) -> None:
     for spec in specs:
         cadence = "weekly" if spec.weekly else "season"
         click.echo(f"{spec.name:30s} {spec.method:5s} {cadence:7s} {spec.url}")
+
+
+@fp_fetch.command("discover")
+@click.option("--league", default="nfl", show_default=True, help="League segment in tool URLs.")
+@click.option(
+    "--include-private",
+    is_flag=True,
+    help="Include tools flagged isPrivate=true (debug/VIP tables).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print discovered specs without writing to the catalog.",
+)
+@click.option(
+    "--catalog",
+    "catalog_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+)
+def discover(league, include_private, dry_run, catalog_path) -> None:
+    """Auto-populate the catalog from Fantasy Points' tool registry.
+
+    Hits ``POST /v2/ds/all/tools``, walks the published-tool list,
+    and adds one catalog entry per (tool, context) pair. Existing
+    entries are preserved — re-run safely when FP adds new tools.
+    """
+    client = FantasyPointsClient()
+    registry = client.post(REGISTRY_URL, json_body=REGISTRY_BODY)
+    existing = load_catalog(catalog_path)
+    existing_names = {s.name for s in existing}
+    new_specs = expand_registry(
+        registry,
+        league=league,
+        existing_names=existing_names,
+        include_private=include_private,
+    )
+    if not new_specs:
+        click.echo(f"No new endpoints (catalog already has {len(existing)} entries).")
+        return
+    if dry_run:
+        for spec in new_specs:
+            click.echo(f"  + {spec.name:40s} {spec.method:5s} {spec.url}")
+        click.echo(f"Would add {len(new_specs)} new endpoints.")
+        return
+    save_catalog(existing + new_specs, catalog_path)
+    click.echo(
+        f"Added {len(new_specs)} new endpoints "
+        f"(catalog now has {len(existing) + len(new_specs)} entries)."
+    )
 
 
 @fp_fetch.command("import-curl")
