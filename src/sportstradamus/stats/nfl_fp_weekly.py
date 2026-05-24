@@ -185,8 +185,7 @@ def load_snapshot(
     """
     if file_kind not in FILE_KINDS:
         raise ValueError(
-            f"unknown FP weekly file_kind: {file_kind!r}; "
-            f"valid kinds: {sorted(FILE_KINDS)}"
+            f"unknown FP weekly file_kind: {file_kind!r}; " f"valid kinds: {sorted(FILE_KINDS)}"
         )
 
     directory = snapshot_dir(season, snapshot_week)
@@ -202,7 +201,10 @@ def load_snapshot(
     except Exception as exc:
         logger.warning(
             "failed to read %s for season=%s week=%s: %s",
-            file_kind, season, snapshot_week, exc,
+            file_kind,
+            season,
+            snapshot_week,
+            exc,
         )
         return None
 
@@ -293,9 +295,7 @@ def snapshot_inventory(seasons: Iterable[int] | None = None) -> pd.DataFrame:
         nfl_dir = pkg_resources.files(data) / _NFL_DIR
         if not os.path.exists(nfl_dir):
             return pd.DataFrame(columns=["season", "snapshot_week", *FILE_KINDS])
-        season_entries = sorted(
-            int(name) for name in os.listdir(nfl_dir) if name.isdigit()
-        )
+        season_entries = sorted(int(name) for name in os.listdir(nfl_dir) if name.isdigit())
     else:
         season_entries = sorted(seasons)
 
