@@ -136,6 +136,8 @@ def match_offers(offers, league, market, platform, stat_data):
 
             filename = "_".join([league, market]).replace(" ", "-")
             filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+            if not filepath.is_file():
+                return pd.DataFrame()
             with open(filepath, "rb") as infile:
                 expected_cols = pickle.load(infile)["expected_columns"]
             playerStats = playerStats[expected_cols]
