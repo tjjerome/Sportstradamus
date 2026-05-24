@@ -997,7 +997,7 @@ def main():
         print("COMPOSITE SCORE SUMMARY")
         print("=" * 60)
         print(f"  {'Group':<15s}  {'Current':>10s}  {'Optimized':>10s}  {'Change':>10s}")
-        print(f"  {'-'*15}  {'-'*10}  {'-'*10}  {'-'*10}")
+        print(f"  {'-' * 15}  {'-' * 10}  {'-' * 10}  {'-' * 10}")
         for group, (cur, opt) in sorted(score_report.items()):
             delta = opt - cur
             print(f"  {group:<15s}  {cur:>10.5f}  {opt:>10.5f}  {delta:>+10.5f}")

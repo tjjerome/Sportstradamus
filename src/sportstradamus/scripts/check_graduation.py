@@ -76,7 +76,7 @@ def _print_row(row: pd.Series) -> None:
         f"{_format_metric(row.get('profit_sim_yield')):>8} "
         f"{row['lifecycle_state']:<12}"
     )
-    color = _STATE_COLORS.get(row["lifecycle_state"], None)
+    color = _STATE_COLORS.get(row["lifecycle_state"])
     click.secho(line, fg=color)
 
 
