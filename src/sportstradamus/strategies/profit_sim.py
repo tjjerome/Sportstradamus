@@ -189,10 +189,12 @@ def extract_sim_returns(sim_df: pd.DataFrame, initial_bankroll: float) -> np.nda
     if sim_df.empty:
         return np.array([], dtype=float)
     series = sim_df.groupby("run", group_keys=False)[["daily_pnl", "bankroll"]].apply(
-        lambda x: x["daily_pnl"].values
-        / np.maximum(
-            x["bankroll"].shift(1).fillna(initial_bankroll).values,
-            1,
+        lambda x: (
+            x["daily_pnl"].values
+            / np.maximum(
+                x["bankroll"].shift(1).fillna(initial_bankroll).values,
+                1,
+            )
         )
     )
     return np.concatenate(series.values)
@@ -232,8 +234,10 @@ def summarize_runs(result: pd.DataFrame, initial_bankroll: float) -> dict[str, f
     max_drawdown = float(np.mean(drawdowns)) if drawdowns else 0.0
 
     daily_returns = result.groupby("run", group_keys=False)[["daily_pnl", "bankroll"]].apply(
-        lambda x: x["daily_pnl"].values
-        / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
+        lambda x: (
+            x["daily_pnl"].values
+            / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
+        )
     )
     all_returns = np.concatenate(daily_returns.values)
     sharpe = float(np.mean(all_returns) / np.std(all_returns)) if np.std(all_returns) > 0 else 0.0

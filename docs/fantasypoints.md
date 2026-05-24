@@ -57,19 +57,34 @@ poetry run fp-fetch discover              # write them
 `discover` hits `POST /v2/ds/all/tools`, walks every published tool,
 and adds one catalog entry per `(tool, context)` pair (e.g.
 `passingBasic` with `context: ["player","team","opponent"]` becomes
-three entries). Existing names are preserved — re-run any time and
-only new tools land.
+three entries):
+
+- `player` → `POST .../tools/player/{slug}/values`
+- `team` → `POST .../tools/team/offense/{slug}/values` (team's
+  offensive view)
+- `opponent` → `POST .../tools/team/defense/{slug}/values` (team's
+  defensive view, one row per opponent faced)
+
+Existing names are preserved by default — re-run any time and only
+new tools land. Pass `--replace` to discard the existing catalog
+and regenerate from scratch; needed once after upgrading from a
+pre-v2 catalog so old bodies pick up the integer week/season
+sentinels (otherwise FP keeps returning whole-season data
+regardless of `--week`).
 
 Defaults: skips `isPrivate: true` (debug / VIP-only / concept
 tables); pass `--include-private` to keep them. Skips the `other`
 context (no observed URL pattern). League defaults to `nfl`; override
 with `--league wnba` etc. once FP launches one.
 
-Per-tool body uses the larger of the two observed request shapes
-(`useCache`/`flatten`/`isInitial`/`withValues`/`compress` + a
-`context` block). If a tool needs a `filters.{week,season}` body
-instead, re-run `import-curl` on its curl to override the auto-
-generated entry.
+Per-tool body matches the v2 `/values` contract observed via
+DevTools: `tableProperty`, `routeContextTarget`, integer
+`weeks: {"REG": [N]}`, `filterMatch.game.season.eq`, plus the
+per-tool `requires*` and `requiredRoles` flags pulled from the
+registry entry. Week + season are stored as sentinel strings
+(`__WEEK_INT__`, `__SEASON_INT__`) and rewritten to integers per
+call by `body_substitute.substitute_runtime`. The `weeks` block is
+also re-shaped per mode (see `--mode` below).
 
 **Manual: `fp-fetch import-curl`** — for the per-tool path:
 
@@ -101,27 +116,15 @@ with a `--data-raw '{...}'` JSON body are parsed and stored in the
 catalog as `json_body`. `Authorization`, `Cookie`, and `User-Agent`
 headers are stripped automatically (they come from `creds/keys.json`).
 
-If you want week/season substitution into the JSON body (FP's v2
-endpoints we've seen so far don't need this — the response carries
-all weeks and the SPA filters client-side), open the catalog JSON and
-replace literal values with `"{week}"` / `"{season}"`:
+Two substitution paths coexist for hand-imported entries:
 
-```json
-{
-  "name": "line_matchups",
-  "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
-  "method": "POST",
-  "output_subdir": "team/line_matchups",
-  "json_body": {
-    "context": {"grouping": "$team.teamId", "routeContext": "team"},
-    "filters": {"week": "{week}", "season": "{season}"},
-    "useCache": true
-  }
-}
-```
-
-Substitution works recursively through nested dicts and lists; only
-strings that contain `{week}` or `{season}` are touched.
+- **Legacy `{week}` / `{season}` string substitution** — recursive
+  through nested dicts and lists; only strings containing the literal
+  placeholders are touched. Useful for v1-style endpoints with a
+  `filters.{week,season}` shape.
+- **Integer sentinels** (`__WEEK_INT__`, `__SEASON_INT__`) — used by
+  discover-generated entries. Rewritten to integers per call so FP's
+  v2 schema (which type-checks these as ints) accepts the body.
 
 For season-long aggregates that should not be re-fetched per week,
 pass `--season-long` at `import-curl` time (or set `"weekly": false`
@@ -136,20 +139,79 @@ poetry run fp-fetch run --week 5 --season 2025 --only team_line_matchups
 ```
 
 `run` fetches each endpoint, parses `content.table.rows.values` into
-a pandas DataFrame, and writes one parquet per (tool, week), grouped
-into a per-week subfolder so 45 files don't clutter the season dir:
+a pandas DataFrame, and writes one parquet per (tool, week, mode),
+grouped into a per-week subfolder so 45 files don't clutter the
+season dir:
 
 - player-context entries →
-  `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}.parquet`
+  `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet`
 - team-context entries →
-  `src/sportstradamus/data/team_data/NFL/{season}/week_NN/{tool}.parquet`
+  `src/sportstradamus/data/team_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet`
 - opponent-context entries → same `team_data/` directory with an
-  `_opp` suffix in the filename (e.g. `passing_basic_opp.parquet`).
+  `_opp` infix in the filename (e.g.
+  `passing_basic_opp.parquet`, `passing_basic_opp_s2d.parquet`).
 
-Re-running the same week overwrites. Raw JSON is not persisted —
-the parquet is the deliverable. If a parse fails, the diagnostic
-includes Content-Type / Content-Encoding so you can spot a stale
-catalog Accept-Encoding or a wholesale API change.
+`mode_suffix` is empty for `--mode weekly` (the default, kept blank
+so existing weekly parquets don't have to be renamed), `_s2d` for
+`--mode season_to_date`, `_post` for `--mode postseason`. Modes for
+the same `(tool, week)` write to different files and do not
+overwrite each other.
+
+#### `--mode` flag
+
+```bash
+# default — one regular-season week only (REG: [N])
+poetry run fp-fetch run --week 5 --season 2025
+
+# season-to-date through week N (REG: [1..N])
+poetry run fp-fetch run --week 5 --season 2025 --mode season_to_date
+
+# postseason week N (POST: [N])
+poetry run fp-fetch run --week 1 --season 2025 --mode postseason
+```
+
+The mode rewrites `context.weeks` in the request body so FP returns
+exactly the slice you ask for. Bodies in the catalog ship with
+`weeks: {"REG": ["__WEEK_INT__"]}` as the canonical shape and
+`body_substitute.substitute_runtime` rewrites both the int and the
+mode shape per call.
+
+Re-running the same (week, mode) overwrites. Raw JSON is not
+persisted — the parquet is the deliverable. If a parse fails, the
+diagnostic includes Content-Type / Content-Encoding so you can spot
+a stale catalog Accept-Encoding or a wholesale API change.
+
+### 4. Spot-check the download
+
+After a run, sanity-check what landed on disk against what you
+asked for:
+
+```bash
+poetry run fp-fetch verify --week 5 --season 2025
+poetry run fp-fetch verify --week 5 --season 2025 --mode season_to_date
+poetry run fp-fetch verify --week 5 --season 2025 --only player_passing_basic
+```
+
+For every catalog entry the verifier:
+
+- Confirms the expected parquet exists at the routed path.
+- Loads the file and checks ``gameSeason`` matches the requested
+  season exactly (no stray rows from other years).
+- Checks ``gameWeek`` matches the week set implied by ``--mode``:
+  ``{N}`` for ``weekly`` / ``postseason``, ``{1..N}`` for
+  ``season_to_date``.
+- When ``gameType`` is present, confirms ``weekly`` /
+  ``season_to_date`` carries only regular-season games and
+  ``postseason`` carries only playoff games.
+
+Output is one line per spec (``OK`` / ``WARN`` / ``FAIL``) with
+indented issue detail when something's off. Exit code is non-zero
+if any spec hits an error so you can chain it into a script.
+
+This is the check that catches the pre-v2 "no week filter" bug —
+if you upgrade an older catalog without running ``discover
+--replace``, ``verify`` will FAIL every spec with ``week_mismatch``
+pointing at the same fix.
 
 ### Token expired mid-run
 
@@ -178,8 +240,9 @@ parse + write as `run`. Pacing is conservative by default:
 
 With ~45 tools × 18 weeks × N seasons at the defaults plan for
 several hours per season — designed for an overnight one-time
-grab, not a cron job. `--only` and `--dry-run` work the same as
-on `run`.
+grab, not a cron job. `--only`, `--dry-run`, and `--mode` work the
+same as on `run` (e.g. `--mode season_to_date` to backfill
+cumulative weekly snapshots).
 
 ## Weekly cron
 
@@ -241,15 +304,16 @@ Refresh in one step:
 ## Output layout
 
 ```
-src/sportstradamus/data/fantasypoints/
-  YYYY/                       # season
-    week_NN/                  # 01..18
-      <output_subdir>.<ext>   # one file per catalog entry
-    season/                   # entries flagged "weekly": false
-      <output_subdir>.<ext>
+src/sportstradamus/data/
+  player_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet
+  team_data/NFL/{season}/week_NN/
+      {tool}{mode_suffix}.parquet         # team-offense view
+      {tool}_opp{mode_suffix}.parquet     # opponent (team-defense) view
 ```
 
-Re-running the same week overwrites; nothing is appended.
+`mode_suffix` is `""` (weekly, default), `_s2d` (season-to-date),
+or `_post` (postseason). Re-running the same `(week, mode)`
+overwrites; different modes coexist in the same folder.
 
 ## Adding new endpoints later
 

@@ -247,7 +247,38 @@ st.plotly_chart(fig_bank, use_container_width=True)
 st.subheader("Strategy Summary")
 summary_rows = []
 for name, result in all_results.items():
-    summary = summarize_runs(result, initial_bankroll)
+    final_runs = result.groupby("run").last()
+
+    final_bankrolls = final_runs["bankroll"].values
+    mean_final = final_bankrolls.mean()
+    roi = (mean_final - initial_bankroll) / initial_bankroll
+
+    # Drawdown: compute per-run max drawdown and average
+    drawdowns = []
+    for run_i in range(N_MONTE_CARLO):
+        run_data = result.loc[result["run"] == run_i, "bankroll"].values
+        if len(run_data) == 0:
+            continue
+        peak = np.maximum.accumulate(run_data)
+        dd = (peak - run_data) / np.where(peak > 0, peak, 1)
+        drawdowns.append(dd.max())
+
+    mean_dd = np.mean(drawdowns) if drawdowns else 0
+
+    # Sharpe-like ratio
+    daily_returns = result.groupby("run").apply(
+        lambda x: (
+            x["daily_pnl"].values
+            / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
+        )
+    )
+    all_returns = np.concatenate(daily_returns.values)
+    sharpe = np.mean(all_returns) / np.std(all_returns) if np.std(all_returns) > 0 else 0
+
+    # Win rate
+    daily_outcomes = result.groupby(["run", "date"])["daily_pnl"].sum().reset_index()
+    win_rate = (daily_outcomes["daily_pnl"] > 0).mean()
+
     summary_rows.append(
         {
             "Strategy": name,

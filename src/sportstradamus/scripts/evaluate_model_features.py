@@ -210,9 +210,9 @@ def print_market_report(league: str, market: str, result: dict, drop_threshold: 
     adds = result["add_candidates"]
 
     model_tag = "[model]" if has_model else "[no model]"
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"  {league}  {market}  {model_tag}  (n={n_train:,})")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Current features table
     hdr = f"  {'Feature':<45s} {'Score':>6s}"
@@ -386,9 +386,9 @@ def main():
     # ── Save ──
     if args.save:
         if changes:
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print("SAVING changes to feature_filter.json")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
             for market, ch in changes.items():
                 print(f"  {args.league}/{market}:")
                 for f in ch["removed"]:

@@ -2,19 +2,28 @@
 
 FP's SPA fetches a tool registry at ``POST /v2/ds/all/tools`` on login.
 The response shape is ``{content: {tables: {values: [{property,
-context, isPublished, isPrivate, roles, ...}]}}}`` — enough to build
-:class:`EndpointSpec` entries for every published tool without the
-user copying a curl per tool.
+context, isPublished, isPrivate, roles, requiresCharting, ...}]}}}``
+— enough to build :class:`EndpointSpec` entries for every published
+tool without the user copying a curl per tool.
 
 For each registry entry we expand ``context[]`` (player / team /
 opponent) into one URL each — the SPA picks the URL prefix from
-``routeContext``, so ``passingBasic`` with context ``["player",
-"team", "opponent"]`` becomes three endpoints. ``other`` and any
-unknown context are skipped (no URL pattern observed).
+``routeContext`` + ``routeContextTarget``:
 
-The body template is taken from the larger of the two observed
-shapes (player/passing-advanced); the smaller (team/line-matchups)
-shape is a subset, and the server tolerates the extra keys.
+- ``player`` → ``/v2/ds/{league}/tools/player/{slug}/values``
+- ``team``   → ``/v2/ds/{league}/tools/team/offense/{slug}/values``
+  (team-side offensive view)
+- ``opponent`` → ``/v2/ds/{league}/tools/team/defense/{slug}/values``
+  (team-side defensive view; one team's row per opponent it faced)
+
+``other`` and any unknown context are skipped (no observed URL
+pattern). The body shape follows the v2 ``/values`` endpoint
+contract observed via DevTools — ``tableProperty``,
+``routeContextTarget``, integer ``weeks: {"REG": [N]}`` block,
+``filterMatch.game.season.eq``, and the per-tool ``requires*`` /
+``requiredRoles`` flags pulled straight from the registry entry.
+Per-call substitution (week → int, season → int, weeks block per
+mode) is handled by :mod:`body_substitute` at request time.
 """
 
 from __future__ import annotations
@@ -29,22 +38,31 @@ from sportstradamus.fantasypoints.catalog import EndpointSpec
 REGISTRY_URL = "https://data.fantasypoints.com/v2/ds/all/tools"
 REGISTRY_BODY: dict = {"filters": {"filter": {"tableIsPublished": {"eq": True}}}}
 
-# URL template for the per-tool calls. The ``context`` segment is the
-# routeContext (player/team/opponent); ``slug`` is the property in
-# kebab-case (``lineMatchups`` -> ``line-matchups``).
-_TOOL_URL_TEMPLATE = "https://data.fantasypoints.com/v2/ds/{league}/tools/{context}/{slug}"
+# Per-tool URL templates — observed from real DevTools curls.
+# All FP v2 tool data is fetched from a ``/values`` sub-endpoint.
+_BASE_URL = "https://data.fantasypoints.com/v2/ds/{league}/tools"
+_PLAYER_URL_TEMPLATE = _BASE_URL + "/player/{slug}/values"
+_TEAM_URL_TEMPLATE = _BASE_URL + "/team/offense/{slug}/values"
+_OPPONENT_URL_TEMPLATE = _BASE_URL + "/team/defense/{slug}/values"
 
 # Contexts FP exposes through the routeContext URL segment. ``other``
 # appears in the registry but maps to no observed URL — skip it so
-# discover doesn't generate 404s. Users can add ``other`` endpoints
-# manually via import-curl if they find one.
+# discover doesn't generate 404s.
 _KNOWN_CONTEXTS: tuple[str, ...] = ("player", "team", "opponent")
 
 # Default sub-directory layout: snapshots land at
-# ``{context}/{slug}.json`` — keeps player/team/opponent versions of
-# the same tool side by side and matches the on-disk hierarchy already
-# used for the hand-imported entries.
+# ``{context}/{slug}.json`` — kept for backward compatibility with
+# the legacy raw-snapshot path; the parquet routing in
+# :mod:`transform` reads name+url+output_subdir.
 _OUTPUT_SUBDIR_TEMPLATE = "{context}/{slug_underscore}"
+
+# Sentinel strings the runtime body builder
+# (:func:`body_substitute.substitute_runtime`) recognises and
+# replaces with ``int`` values at call time. FP rejects string-typed
+# week / season here, but the catalog file is JSON — so we store
+# sentinels and substitute at call time.
+_WEEK_INT_SENTINEL = "__WEEK_INT__"
+_SEASON_INT_SENTINEL = "__SEASON_INT__"
 
 
 def expand_registry(
@@ -88,7 +106,7 @@ def expand_registry(
         for ctx in contexts:
             if ctx not in _KNOWN_CONTEXTS:
                 continue
-            spec = _make_spec(prop, ctx, league=league)
+            spec = _make_spec(prop, ctx, league=league, table=table)
             if spec.name in existing_names:
                 continue
             out.append(spec)
@@ -102,51 +120,92 @@ def _should_include(table: dict, *, include_private: bool) -> bool:
     return include_private or not table.get("isPrivate", False)
 
 
-def _make_spec(prop: str, context: str, *, league: str) -> EndpointSpec:
+def _make_spec(prop: str, context: str, *, league: str, table: dict) -> EndpointSpec:
     slug = _camel_to_kebab(prop)
     slug_underscore = slug.replace("-", "_")
     return EndpointSpec(
         name=f"{context}_{slug_underscore}",
-        url=_TOOL_URL_TEMPLATE.format(league=league, context=context, slug=slug),
+        url=_url_for(context, league=league, slug=slug),
         output_subdir=_OUTPUT_SUBDIR_TEMPLATE.format(
             context=context, slug_underscore=slug_underscore
         ),
         method="POST",
-        json_body=_default_body(context),
+        json_body=_default_body(prop, context, table=table),
         response_format="json",
         weekly=True,
     )
 
 
-def _default_body(context: str) -> dict:
-    """Per-tool request body inferred from observed FP calls.
+def _url_for(context: str, *, league: str, slug: str) -> str:
+    if context == "player":
+        return _PLAYER_URL_TEMPLATE.format(league=league, slug=slug)
+    if context == "team":
+        return _TEAM_URL_TEMPLATE.format(league=league, slug=slug)
+    if context == "opponent":
+        return _OPPONENT_URL_TEMPLATE.format(league=league, slug=slug)
+    raise ValueError(f"Unknown context: {context}")
 
-    Two observed shapes:
 
-    - ``team/line-matchups``: minimal — ``context.grouping``,
-      ``context.routeContext``, ``filters.{week,season}``, ``useCache``.
-    - ``player/passing-advanced``: fuller — adds ``dualContext``,
-      ``modelContext``, ``flatten``, ``isInitial``, ``withValues``,
-      ``compress``; no ``filters`` block (server returns all weeks).
+def _default_body(prop: str, context: str, *, table: dict) -> dict:
+    """Build the v2 ``/values`` request body for one (tool, context) pair.
 
-    The fuller shape is a strict superset of the minimal one for the
-    fields they share, so we send the fuller shape for all tools. If
-    a particular tool needs ``filters``, re-import its curl to
-    override the auto-generated entry.
+    The body shape was reverse-engineered from real DevTools curls
+    (one player-context, one team-defense-context). Per-tool flags
+    (``requiresCharting``, ``requiresPlayByPlay``, ``requiredRoles``,
+    etc.) are passed through from the registry entry. The ``weeks``
+    block uses a single-int sentinel that
+    :mod:`body_substitute` rewrites per call based on mode.
     """
+    route_context, route_target, model_context, grouping = _context_routing(context)
     return {
         "context": {
-            "grouping": f"${context}.{context}Id",
+            "tableProperty": prop,
+            "grouping": grouping,
             "dualContext": False,
-            "modelContext": context,
-            "routeContext": context,
+            "modelContext": model_context,
+            "routeContext": route_context,
+            "routeContextTarget": route_target,
+            "weeks": {"REG": [_WEEK_INT_SENTINEL]},
+            "filterMatch": {"game.season": {"eq": _SEASON_INT_SENTINEL}},
+            "filterPlay": {},
+            "filterResult": {},
+            "qualifiers": {},
+            "splits": {},
+            "disabled": {"filterMatch": {}, "filterPlay": {}, "filterResult": {}},
+            "requiresSchedule": None,
+            "requiresCharting": bool(table.get("requiresCharting", False)),
+            "requiresPlayByPlay": bool(table.get("requiresPlayByPlay", False)),
+            "requiresPreTotals": bool(table.get("requiresPreTotals", False)),
+            "requiresPostTotals": bool(table.get("requiresPostTotals", False)),
+            "requiresMultiplePipelines": table.get("requiresMultiplePipelines"),
+            "requiredRoles": list(table.get("roles") or []),
+            "isFreePreview": bool(table.get("isFreePreview", False)),
         },
         "useCache": True,
         "flatten": True,
-        "isInitial": True,
-        "withValues": True,
-        "compress": False,
+        "debug": False,
     }
+
+
+def _context_routing(context: str) -> tuple[str, str, str, str]:
+    """Return ``(routeContext, routeContextTarget, modelContext, grouping)``.
+
+    Mirrors the per-context URL choice in :func:`_url_for`:
+
+    - player → routes to ``/player/...`` with grouping by playerId.
+    - team   → routes to ``/team/offense/...`` (team's offensive view),
+      grouping by teamId.
+    - opponent → routes to ``/team/defense/...`` (team's defensive
+      view), grouping by teamId, ``modelContext=opponent`` so FP
+      returns defensive aggregates.
+    """
+    if context == "player":
+        return "player", "player", "player", "$player.playerId"
+    if context == "team":
+        return "team", "offense", "team", "$team.teamId"
+    if context == "opponent":
+        return "team", "defense", "opponent", "$team.teamId"
+    raise ValueError(f"Unknown context: {context}")
 
 
 # Inserts a ``-`` at every lowercase-then-uppercase boundary
