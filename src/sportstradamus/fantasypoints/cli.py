@@ -25,10 +25,12 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import json
 import logging
+import random
 import re
 import shlex
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -64,6 +66,13 @@ from sportstradamus.helpers.logging import get_logger
 # NFL regular season is 18 weeks. The default-week inference clamps to
 # this range; the user can always pass --week explicitly.
 NFL_REGULAR_SEASON_WEEKS = 18
+
+# Backfill pacing — overnight job, much more conservative than `run`'s
+# 2 s default. Randomised inside each range to avoid a regular drumbeat.
+# Between endpoints in the same week: 10–20 s. Between weeks (a longer
+# pause that mimics a human switching tools and scrolling): 30–90 s.
+_BACKFILL_REQUEST_PAUSE_S: tuple[float, float] = (10.0, 20.0)
+_BACKFILL_WEEK_PAUSE_S: tuple[float, float] = (30.0, 90.0)
 
 # A "NFL season" labelled by year Y starts in September of year Y.
 # Before July we're still in the prior year's playoff/offseason tail.
@@ -222,6 +231,34 @@ def run(season, week, only, dry_run, catalog_path, log_level) -> None:
     help="Print the total call count and exit without fetching.",
 )
 @click.option(
+    "--request-pause-min",
+    type=float,
+    default=_BACKFILL_REQUEST_PAUSE_S[0],
+    show_default=True,
+    help="Min seconds (random uniform) between endpoints in the same week.",
+)
+@click.option(
+    "--request-pause-max",
+    type=float,
+    default=_BACKFILL_REQUEST_PAUSE_S[1],
+    show_default=True,
+    help="Max seconds (random uniform) between endpoints in the same week.",
+)
+@click.option(
+    "--week-pause-min",
+    type=float,
+    default=_BACKFILL_WEEK_PAUSE_S[0],
+    show_default=True,
+    help="Min seconds (random uniform) when transitioning to a new week.",
+)
+@click.option(
+    "--week-pause-max",
+    type=float,
+    default=_BACKFILL_WEEK_PAUSE_S[1],
+    show_default=True,
+    help="Max seconds (random uniform) when transitioning to a new week.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -239,14 +276,23 @@ def backfill(
     end_week,
     only,
     dry_run,
+    request_pause_min,
+    request_pause_max,
+    week_pause_min,
+    week_pause_max,
     catalog_path,
     log_level,
 ) -> None:
     """Iterate (season × week) and write per-tool parquets for each.
 
-    With ~45 catalog entries × 18 weeks × N seasons at the client's
-    2 s inter-request pause, plan for several hours per season —
-    suitable for an overnight run, not a cron job.
+    Designed for an overnight one-time grab. Pacing is conservative
+    by default: 10-20 s random pause between endpoints in the same
+    week, 30-90 s when transitioning to a new week. Override via the
+    ``--request-pause-{min,max}`` / ``--week-pause-{min,max}`` flags
+    if you need slower (or faster) traffic.
+
+    With ~45 catalog entries × 18 weeks × N seasons at the defaults,
+    plan for roughly ~3 hours per season.
     """
     log = get_logger("fp-fetch")
     log.setLevel(log_level)
@@ -265,15 +311,29 @@ def backfill(
             f"{len(weeks)} weeks x {len(seasons)} seasons)."
         )
         return
-    client = FantasyPointsClient()
+    # Drive pacing from this orchestrator instead of the client so the
+    # week-transition pause is visible alongside the per-spec pause.
+    client = FantasyPointsClient(inter_request_sleep_s=0)
     results: list[_RunResult] = []
+    request_range = (request_pause_min, request_pause_max)
+    week_range = (week_pause_min, week_pause_max)
+    prev_week_key: tuple[int, int] | None = None
     with tqdm(total=total, desc="fp-backfill", unit="call") as bar:
         for season in seasons:
             for week in weeks:
+                week_key = (season, week)
                 for spec in specs:
+                    _backfill_pause(
+                        prev_week_key,
+                        week_key,
+                        request_range=request_range,
+                        week_range=week_range,
+                        log=log,
+                    )
                     results.append(
                         _fetch_and_write_one(spec, client, season=season, week=week, log=log)
                     )
+                    prev_week_key = week_key
                     bar.update(1)
     report_path = _write_run_report(
         results,
@@ -725,6 +785,39 @@ def _fetch_and_write_one(
         extra={"endpoint": spec.name, "path": str(target), "rows": len(df)},
     )
     return base_result
+
+
+def _backfill_pause(
+    prev_week_key: tuple[int, int] | None,
+    next_week_key: tuple[int, int],
+    *,
+    request_range: tuple[float, float],
+    week_range: tuple[float, float],
+    log: logging.Logger,
+) -> None:
+    """Sleep before the next backfill call: long pause on week change, short otherwise.
+
+    No-op on the very first iteration (``prev_week_key is None``) — the
+    client itself adds no internal pause in backfill mode, so the first
+    call goes through immediately.
+    """
+    if prev_week_key is None:
+        return
+    if next_week_key != prev_week_key:
+        pause = random.uniform(*week_range)
+        season, week = next_week_key
+        click.echo(
+            f"\n[pausing {pause:.0f}s before {season} week {week:02d}]",
+            err=True,
+        )
+        log.info(
+            "week transition pause",
+            extra={"pause_s": round(pause, 1), "next_season": season, "next_week": week},
+        )
+    else:
+        pause = random.uniform(*request_range)
+        log.debug("request pause", extra={"pause_s": round(pause, 1)})
+    time.sleep(pause)
 
 
 def _dispatch_capturing_errors(
