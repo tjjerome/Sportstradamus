@@ -1,12 +1,17 @@
 """JSON-to-parquet pipeline for Fantasy Points tool responses.
 
-Every observed FP Data Suite response carries its row data at
-``content.table.rows.values`` as a list of flat dicts, with each row
-including ``gameSeason`` / ``gameWeek`` columns. Columns are
-camelCase with a source prefix (``playerStats...``, ``teamStats...``,
-``opponentStats...``, ``game*``).
+FP Data Suite responses carry row data in one of two shapes:
 
-This module turns that response into a pandas DataFrame and routes
+- v2 ``/values`` endpoints (every discover-generated entry):
+  ``content.rows.values``.
+- Legacy tool endpoints (hand-imported entries that pre-date v2):
+  ``content.table.rows.values``.
+
+Each row is a flat dict with ``gameSeason`` / ``gameWeek`` columns;
+column names are camelCase with a source prefix (``playerStats...``,
+``teamStats...``, ``opponentStats...``, ``game*``).
+
+This module turns either response into a pandas DataFrame and routes
 the parquet output to ``player_data/`` vs ``team_data/`` based on
 the spec's context. Routing prefers (in order): the catalog name
 prefix (``player_`` / ``team_`` / ``opponent_`` — what
@@ -76,16 +81,18 @@ _MODE_SUFFIX = {
 
 
 def parse_table_response(payload: dict) -> pd.DataFrame:
-    """Extract ``content.table.rows.values`` from an FP response into a DataFrame.
+    """Extract the FP response's row list into a DataFrame.
 
-    Columns whose cells contain a ``list`` or ``dict`` are serialised
-    to JSON strings so the parquet writer doesn't have to materialise
-    nested arrow types (which work but balloon the file size and make
-    downstream pandas reads slower).
+    Reads ``content.rows.values`` (v2 ``/values`` endpoints) or
+    ``content.table.rows.values`` (legacy endpoints) — see
+    :func:`_extract_rows`. Columns whose cells contain a ``list`` or
+    ``dict`` are serialised to JSON strings so the parquet writer
+    doesn't have to materialise nested arrow types (which work but
+    balloon the file size and make downstream pandas reads slower).
 
     Args:
         payload: Decoded JSON body returned by any
-            ``POST /v2/ds/{league}/tools/{context}/{slug}`` call.
+            ``POST /v2/ds/{league}/tools/{context}/{slug}/values`` call.
 
     Returns:
         DataFrame with one row per ``values[]`` entry. Returns an
@@ -139,6 +146,9 @@ def parquet_path_for_spec(
         league: League code (default ``NFL``).
         mode: ``weekly`` (default) | ``season_to_date`` | ``postseason``.
             Drives the filename suffix.
+
+    Returns:
+        Absolute path to the parquet file (not yet created).
 
     Raises:
         ValueError: When none of the three routing sources match a
@@ -199,15 +209,27 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
 
 
 def _extract_rows(payload: dict) -> list[dict]:
-    """Return the row list from an FP response, tolerating both dict and list shapes.
+    """Return the row list from an FP response, tolerating both response shapes.
 
-    FP uses ``rows: {count, values: [...]}`` in most tools but falls back to a
-    bare list in a few legacy endpoints — handle both so callers don't need to.
+    Two observed shapes for ``rows``:
+
+    - v2 ``/values`` endpoints: ``content.rows.values`` (no ``table``
+      wrapper). This is what every discover-generated entry hits.
+    - Legacy tool endpoints: ``content.table.rows.values`` — kept for
+      hand-imported entries that predate the v2 contract.
+
+    ``rows`` itself is normally ``{count, values: [...]}`` but a few
+    legacy endpoints return a bare list — handle both so callers
+    don't need to.
     """
     if not isinstance(payload, dict):
         return []
-    table = payload.get("content", {}).get("table", {})
-    rows_node = table.get("rows")
+    content = payload.get("content", {})
+    if not isinstance(content, dict):
+        return []
+    rows_node = content.get("rows")
+    if rows_node is None and isinstance(content.get("table"), dict):
+        rows_node = content["table"].get("rows")
     if isinstance(rows_node, dict):
         values = rows_node.get("values", [])
     elif isinstance(rows_node, list):
