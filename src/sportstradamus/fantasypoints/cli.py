@@ -1,6 +1,6 @@
 """``fp-fetch`` CLI — snapshot every registered Fantasy Points tool.
 
-Six subcommands:
+Seven subcommands:
 
 * ``fp-fetch run`` — fetch all (or ``--only``) catalog endpoints for a
   given week/season, parse the response tables, write one parquet per
@@ -11,6 +11,9 @@ Six subcommands:
   same fetch+parse+write for each cell. One-time historical grab.
 * ``fp-fetch discover`` — auto-populate the catalog from FP's tool
   registry.
+* ``fp-fetch verify`` — spot-check downloaded parquets against the
+  requested (season, week, mode). Catches the "wrong week / no
+  filter applied" class of bug before it pollutes downstream models.
 * ``fp-fetch list`` — prints the registered catalog entries.
 * ``fp-fetch import-curl`` — registers a new endpoint from a
   DevTools-copied curl command. Handles both GET and POST curls,
@@ -66,6 +69,7 @@ from sportstradamus.fantasypoints.transform import (
     parse_table_response,
     write_parquet,
 )
+from sportstradamus.fantasypoints.verify import verify_catalog
 from sportstradamus.helpers.logging import get_logger
 
 # NFL regular season is 18 weeks. The default-week inference clamps to
@@ -458,6 +462,70 @@ def discover(league, include_private, replace, dry_run, catalog_path) -> None:
         f"{verb} {len(new_specs)} endpoints "
         f"(catalog now has {len(existing) + len(new_specs)} entries)."
     )
+
+
+@fp_fetch.command("verify")
+@click.option("--season", type=int, default=None, help="NFL season. Defaults to inferred current.")
+@click.option("--week", type=int, default=None, help="NFL week. Defaults to inferred.")
+@click.option(
+    "--mode",
+    type=click.Choice(["weekly", "season_to_date", "postseason"]),
+    default=DEFAULT_MODE,
+    show_default=True,
+    help="Same modes as ``run`` — picks which parquet variant to spot-check.",
+)
+@click.option("--only", multiple=True, help="Only check these endpoint names (repeatable).")
+@click.option(
+    "--catalog",
+    "catalog_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+)
+def verify(season, week, mode, only, catalog_path) -> None:
+    """Spot-check downloaded parquets against the requested season / week / mode.
+
+    For every spec in the catalog (or just the ``--only`` subset),
+    loads the parquet that ``run`` should have written, confirms
+    ``gameSeason`` and ``gameWeek`` columns hold exactly the
+    expected values, and reports anything off. Exits non-zero if any
+    spec yielded an error-severity issue so cron / scripts can
+    detect a botched download without parsing stdout.
+
+    Output format: one line per spec, prefixed with ``OK`` / ``WARN``
+    / ``FAIL``, followed by one indented line per issue. The summary
+    line at the end lists counts per status.
+    """
+    season = season or _default_season()
+    week = week or _default_week(season)
+    specs = load_catalog(catalog_path)
+    if not specs:
+        click.echo("Catalog is empty. Nothing to verify.", err=True)
+        return
+    if only:
+        specs = _filter_by_name(specs, only)
+    results = verify_catalog(specs, season=season, week=week, mode=mode)
+    ok = warn = fail = 0
+    for name, issues in results.items():
+        if not issues:
+            ok += 1
+            click.echo(f"OK   {name}")
+            continue
+        has_error = any(i.severity == "error" for i in issues)
+        prefix = "FAIL" if has_error else "WARN"
+        if has_error:
+            fail += 1
+        else:
+            warn += 1
+        click.echo(f"{prefix} {name}")
+        for issue in issues:
+            click.echo(f"     [{issue.severity}/{issue.code}] {issue.message}")
+            click.echo(f"        at {issue.path}")
+    click.echo("")
+    click.echo(
+        f"Summary: {ok} ok, {warn} warn, {fail} fail (season={season}, week={week}, mode={mode})."
+    )
+    if fail:
+        raise click.ClickException(f"{fail} spec(s) failed verification.")
 
 
 @fp_fetch.command("import-curl")

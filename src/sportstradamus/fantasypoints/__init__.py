@@ -41,24 +41,32 @@ from sportstradamus.fantasypoints.transform import (
     parse_table_response,
     write_parquet,
 )
+from sportstradamus.fantasypoints.verify import (
+    VerificationIssue,
+    verify_catalog,
+    verify_spec,
+)
 
 __all__ = [
     "CATALOG_PATH",
     "DEFAULT_MODE",
+    "PLAYER_DATA_BASE",
+    "REGISTRY_BODY",
+    "REGISTRY_URL",
+    "TEAM_DATA_BASE",
     "EndpointSpec",
     "FantasyPointsAuthError",
     "FantasyPointsClient",
     "FantasyPointsDecodeError",
     "Mode",
-    "PLAYER_DATA_BASE",
-    "REGISTRY_BODY",
-    "REGISTRY_URL",
-    "TEAM_DATA_BASE",
+    "VerificationIssue",
     "expand_registry",
     "load_catalog",
     "parquet_path_for_spec",
     "parse_table_response",
     "save_catalog",
     "substitute_runtime",
+    "verify_catalog",
+    "verify_spec",
     "write_parquet",
 ]

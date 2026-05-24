@@ -181,6 +181,38 @@ persisted — the parquet is the deliverable. If a parse fails, the
 diagnostic includes Content-Type / Content-Encoding so you can spot
 a stale catalog Accept-Encoding or a wholesale API change.
 
+### 4. Spot-check the download
+
+After a run, sanity-check what landed on disk against what you
+asked for:
+
+```bash
+poetry run fp-fetch verify --week 5 --season 2025
+poetry run fp-fetch verify --week 5 --season 2025 --mode season_to_date
+poetry run fp-fetch verify --week 5 --season 2025 --only player_passing_basic
+```
+
+For every catalog entry the verifier:
+
+- Confirms the expected parquet exists at the routed path.
+- Loads the file and checks ``gameSeason`` matches the requested
+  season exactly (no stray rows from other years).
+- Checks ``gameWeek`` matches the week set implied by ``--mode``:
+  ``{N}`` for ``weekly`` / ``postseason``, ``{1..N}`` for
+  ``season_to_date``.
+- When ``gameType`` is present, confirms ``weekly`` /
+  ``season_to_date`` carries only regular-season games and
+  ``postseason`` carries only playoff games.
+
+Output is one line per spec (``OK`` / ``WARN`` / ``FAIL``) with
+indented issue detail when something's off. Exit code is non-zero
+if any spec hits an error so you can chain it into a script.
+
+This is the check that catches the pre-v2 "no week filter" bug —
+if you upgrade an older catalog without running ``discover
+--replace``, ``verify`` will FAIL every spec with ``week_mismatch``
+pointing at the same fix.
+
 ### Token expired mid-run
 
 If the Authorization or Cookie expires partway through `fp-fetch
