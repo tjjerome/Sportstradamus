@@ -9,7 +9,6 @@ repository = "https://github.com/tjjerome/sportstradamus"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-python-snappy = "^0.6.1"
 google-auth-oauthlib = ">=1.0.0"
 gspread = ">=5.8.0"
 mlb-statsapi = ">=1.6.1"
