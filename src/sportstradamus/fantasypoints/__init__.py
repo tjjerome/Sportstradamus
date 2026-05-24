@@ -13,6 +13,11 @@ See ``docs/fantasypoints.md`` for the end-user runbook (capturing a
 fresh cookie, adding endpoints, refresh schedule).
 """
 
+from sportstradamus.fantasypoints.body_substitute import (
+    DEFAULT_MODE,
+    Mode,
+    substitute_runtime,
+)
 from sportstradamus.fantasypoints.catalog import (
     CATALOG_PATH,
     EndpointSpec,
@@ -39,10 +44,12 @@ from sportstradamus.fantasypoints.transform import (
 
 __all__ = [
     "CATALOG_PATH",
+    "DEFAULT_MODE",
     "EndpointSpec",
     "FantasyPointsAuthError",
     "FantasyPointsClient",
     "FantasyPointsDecodeError",
+    "Mode",
     "PLAYER_DATA_BASE",
     "REGISTRY_BODY",
     "REGISTRY_URL",
@@ -52,5 +59,6 @@ __all__ = [
     "parquet_path_for_spec",
     "parse_table_response",
     "save_catalog",
+    "substitute_runtime",
     "write_parquet",
 ]

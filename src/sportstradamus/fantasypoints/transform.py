@@ -99,50 +99,56 @@ def parquet_path_for_spec(
     season: int,
     week: int,
     league: str = "NFL",
+    mode: str = "weekly",
 ) -> Path:
     """Compute the on-disk parquet path for one catalog entry's snapshot.
 
-    Layout: ``{base}/{league}/{season}/week_NN/{tool}.parquet`` —
+    Layout: ``{base}/{league}/{season}/week_NN/{tool}{mode_suffix}{opp_suffix}.parquet`` —
     one subfolder per week so 45 per-tool files stay grouped instead
     of cluttering the season directory. Opponent-context tools keep
     the ``_opp`` suffix in the filename so they don't collide with
-    the offensive view of the same tool.
+    the offensive view of the same tool. Non-weekly modes get a
+    ``_s2d`` (season-to-date) or ``_post`` (postseason) suffix
+    so different modes for the same (tool, week) don't overwrite.
 
     Routing rules (applied in order):
 
-    1. **Name prefix** — ``player_X`` → ``player_data/.../week_NN/X.parquet``,
-       ``team_X`` → ``team_data/.../week_NN/X.parquet``, ``opponent_X`` →
-       ``team_data/.../week_NN/X_opp.parquet``. Discover-generated
-       entries always match this case.
+    1. **Name prefix** — ``player_X`` → ``player_data/...``,
+       ``team_X`` → ``team_data/...``, ``opponent_X`` →
+       ``team_data/.../X_opp...``. Discover-generated entries
+       always match this case.
     2. **URL path** — for hand-imported entries that pre-date the
        prefix convention, parse ``/tools/{context}/{slug}`` out of
        ``spec.url`` and route on ``context``.
     3. **output_subdir** — fall back to the first path segment of
-       the catalog's ``output_subdir`` field (e.g. ``team/line_matchups``
-       → ``team``).
+       the catalog's ``output_subdir`` field.
 
     Args:
         spec: Catalog entry.
         season: NFL season year, used as the directory name.
         week: NFL week (1-18), zero-padded into the subfolder name.
         league: League code (default ``NFL``).
+        mode: ``weekly`` (default) | ``season_to_date`` | ``postseason``.
+            Drives the filename suffix.
 
     Raises:
         ValueError: When none of the three routing sources match a
-            known context. Rename the spec (recommended:
-            ``player_/team_/opponent_<slug>``) and re-run.
+            known context, or when ``mode`` is not recognised.
     """
     context, tool = _route_spec(spec)
     week_dir = f"week_{week:02d}"
+    mode_suffix = _MODE_SUFFIX.get(mode)
+    if mode_suffix is None:
+        raise ValueError(f"Unknown mode {mode!r}. Use weekly / season_to_date / postseason.")
     if context == "player":
         base = PLAYER_DATA_BASE / league / str(season) / week_dir
-        filename = f"{tool}.parquet"
+        filename = f"{tool}{mode_suffix}.parquet"
     elif context == "team":
         base = TEAM_DATA_BASE / league / str(season) / week_dir
-        filename = f"{tool}.parquet"
+        filename = f"{tool}{mode_suffix}.parquet"
     elif context == "opponent":
         base = TEAM_DATA_BASE / league / str(season) / week_dir
-        filename = f"{tool}_opp.parquet"
+        filename = f"{tool}_opp{mode_suffix}.parquet"
     else:
         raise ValueError(
             f"Catalog entry {spec.name!r} (url={spec.url!r}, "
@@ -150,6 +156,16 @@ def parquet_path_for_spec(
             f"context. Rename it player_/team_/opponent_<slug>."
         )
     return base / filename
+
+
+# Per-mode filename suffix. Empty for the default weekly mode so
+# existing parquets don't have to be renamed; the non-default modes
+# get explicit markers so the user can tell them apart at a glance.
+_MODE_SUFFIX = {
+    "weekly": "",
+    "season_to_date": "_s2d",
+    "postseason": "_post",
+}
 
 
 def _route_spec(spec: EndpointSpec) -> tuple[str, str]:
