@@ -22,6 +22,10 @@ from sportstradamus.fantasypoints.client import (
     FantasyPointsClient,
     FantasyPointsDecodeError,
 )
+from sportstradamus.fantasypoints.discover import (
+    _camel_to_kebab,
+    expand_registry,
+)
 
 
 class FakeResponse:
@@ -604,3 +608,168 @@ def test_cli_import_curl_rejects_duplicate_name(tmp_path):
     )
     assert result.exit_code != 0
     assert "already exists" in result.output
+
+
+def _registry_sample() -> dict:
+    """Minimal registry payload mirroring FP's tool index response shape."""
+    return {
+        "content": {
+            "tables": {
+                "values": [
+                    {
+                        "isPublished": True,
+                        "isPrivate": False,
+                        "property": "passingBasic",
+                        "context": ["player", "team", "opponent"],
+                    },
+                    {
+                        "isPublished": True,
+                        "isPrivate": False,
+                        "property": "lineMatchups",
+                        "context": ["team", "other"],
+                    },
+                    {
+                        "isPublished": True,
+                        "isPrivate": True,
+                        "property": "debug",
+                        "context": ["player"],
+                    },
+                    {
+                        "isPublished": False,
+                        "isPrivate": False,
+                        "property": "draftOnly",
+                        "context": ["player"],
+                    },
+                ]
+            }
+        }
+    }
+
+
+def test_camel_to_kebab_simple():
+    assert _camel_to_kebab("passingBasic") == "passing-basic"
+    assert _camel_to_kebab("lineMatchups") == "line-matchups"
+    assert _camel_to_kebab("receivingSeparationByRoutes") == "receiving-separation-by-routes"
+    # No-camel input is returned untouched (still lowercased).
+    assert _camel_to_kebab("efficiency") == "efficiency"
+
+
+def test_expand_registry_filters_unpublished_and_private_by_default():
+    specs = expand_registry(_registry_sample())
+    names = {s.name for s in specs}
+    assert "player_debug" not in names, "isPrivate tables must be skipped by default"
+    assert "player_draft_only" not in names, "isPublished=false tables must be skipped"
+
+
+def test_expand_registry_include_private_keeps_debug_tables():
+    specs = expand_registry(_registry_sample(), include_private=True)
+    names = {s.name for s in specs}
+    assert "player_debug" in names
+
+
+def test_expand_registry_creates_one_entry_per_context_and_skips_other():
+    specs = expand_registry(_registry_sample())
+    by_name = {s.name: s for s in specs}
+    # passingBasic exposes 3 known contexts:
+    assert "player_passing_basic" in by_name
+    assert "team_passing_basic" in by_name
+    assert "opponent_passing_basic" in by_name
+    # lineMatchups exposes team + "other"; "other" must be skipped:
+    assert "team_line_matchups" in by_name
+    assert "other_line_matchups" not in by_name
+
+
+def test_expand_registry_skips_names_already_in_catalog():
+    specs = expand_registry(
+        _registry_sample(),
+        existing_names={"team_line_matchups", "player_passing_basic"},
+    )
+    names = {s.name for s in specs}
+    assert "team_line_matchups" not in names
+    assert "player_passing_basic" not in names
+    # Other contexts of the same tool still come through:
+    assert "team_passing_basic" in names
+    assert "opponent_passing_basic" in names
+
+
+def test_expand_registry_generates_valid_url_and_body():
+    specs = expand_registry(_registry_sample())
+    spec = next(s for s in specs if s.name == "player_passing_basic")
+    assert spec.method == "POST"
+    assert spec.url == "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic"
+    assert spec.output_subdir == "player/passing_basic"
+    assert spec.json_body["context"]["routeContext"] == "player"
+    assert spec.json_body["context"]["grouping"] == "$player.playerId"
+    assert spec.json_body["useCache"] is True
+
+
+def test_expand_registry_handles_empty_or_malformed_payload():
+    assert expand_registry({}) == []
+    assert expand_registry({"content": {}}) == []
+    assert expand_registry({"content": {"tables": {"values": []}}}) == []
+
+
+def test_cli_discover_dry_run_lists_new_endpoints(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import client as client_mod
+
+    catalog_path = tmp_path / "catalog.json"
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        assert method == "POST"
+        return FakeResponse(200, body=_registry_sample())
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setenv("FANTASYPOINTS_COOKIE", "c=1")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["discover", "--catalog", str(catalog_path), "--dry-run"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "player_passing_basic" in result.output
+    assert "team_line_matchups" in result.output
+    assert "Would add" in result.output
+    assert not catalog_path.exists(), "dry-run must not write"
+
+
+def test_cli_discover_writes_catalog_and_skips_existing(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import client as client_mod
+
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://example/preexisting",
+                output_subdir="team/line_matchups",
+                method="POST",
+            )
+        ],
+        catalog_path,
+    )
+
+    def fake_request(method, url, headers=None, params=None, json=None):
+        return FakeResponse(200, body=_registry_sample())
+
+    monkeypatch.setattr(client_mod.requests, "request", fake_request)
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setenv("FANTASYPOINTS_COOKIE", "c=1")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["discover", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code == 0, result.output
+    on_disk = load_catalog(catalog_path)
+    names = [s.name for s in on_disk]
+    # Pre-existing entry kept with its custom URL:
+    line = next(s for s in on_disk if s.name == "team_line_matchups")
+    assert line.url == "https://example/preexisting"
+    # New entries added:
+    assert "player_passing_basic" in names
+    assert "team_passing_basic" in names
+    assert "opponent_passing_basic" in names
+    # Private/unpublished still skipped:
+    assert "player_debug" not in names
+    assert "player_draft_only" not in names

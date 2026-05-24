@@ -43,9 +43,35 @@ same file — the default Firefox UA is fine for most users.
 The tokens rotate on a schedule we don't control. When they expire the
 weekly job alerts via Healthchecks.io and you redo this step.
 
-### 2. Register the endpoints you want snapshotted
+### 2. Register endpoints
 
-For each tool you care about:
+Two paths — pick one (or combine):
+
+**Bulk: `fp-fetch discover`** — auto-populates from FP's tool registry.
+
+```bash
+poetry run fp-fetch discover --dry-run    # preview new entries
+poetry run fp-fetch discover              # write them
+```
+
+`discover` hits `POST /v2/ds/all/tools`, walks every published tool,
+and adds one catalog entry per `(tool, context)` pair (e.g.
+`passingBasic` with `context: ["player","team","opponent"]` becomes
+three entries). Existing names are preserved — re-run any time and
+only new tools land.
+
+Defaults: skips `isPrivate: true` (debug / VIP-only / concept
+tables); pass `--include-private` to keep them. Skips the `other`
+context (no observed URL pattern). League defaults to `nfl`; override
+with `--league wnba` etc. once FP launches one.
+
+Per-tool body uses the larger of the two observed request shapes
+(`useCache`/`flatten`/`isInitial`/`withValues`/`compress` + a
+`context` block). If a tool needs a `filters.{week,season}` body
+instead, re-run `import-curl` on its curl to override the auto-
+generated entry.
+
+**Manual: `fp-fetch import-curl`** — for the per-tool path:
 
 1. Open the tool in your browser with DevTools' **Network** tab open
    and filter by `Fetch/XHR`.
