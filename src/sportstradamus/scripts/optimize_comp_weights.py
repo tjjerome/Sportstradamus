@@ -524,9 +524,7 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
         # power-back RBs (e.g. rec_adv_YPRR with no routes run) mean "no
         # receiving role", not "missing data". dropna() here would drop those
         # rows and starve the RB block below the min-count threshold.
-        positionProfile = (
-            positionProfile[features].replace([np.nan, np.inf, -np.inf], 0).fillna(0)
-        )
+        positionProfile = positionProfile[features].replace([np.nan, np.inf, -np.inf], 0).fillna(0)
 
         if len(positionProfile) < 10:
             continue
