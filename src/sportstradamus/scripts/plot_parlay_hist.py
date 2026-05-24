@@ -121,7 +121,7 @@ def reflect():
 
                     if result.empty or result.iat[0] == line:
                         legs -= 1
-                    elif result.iat[0] < line and over or result.iat[0] > line and not over:
+                    elif (result.iat[0] < line and over) or (result.iat[0] > line and not over):
                         misses += 1
 
             return legs, misses
@@ -132,13 +132,15 @@ def reflect():
     parlays.dropna(subset=["Legs"], inplace=True)
     parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
     parlays["Profit"] = parlays.apply(
-        lambda x: np.clip(
-            payout_table[x.Platform][x.Legs][x.Misses]
-            * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
-            None,
-            100,
-        )
-        - 1,
+        lambda x: (
+            np.clip(
+                payout_table[x.Platform][x.Legs][x.Misses]
+                * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
+                None,
+                100,
+            )
+            - 1
+        ),
         axis=1,
     )
 

@@ -82,7 +82,9 @@ def save_zi_config(config: dict) -> None:
     cal = _load(_STAT_CAL_PATH)
     for league, markets in config.items():
         for market, zi in markets.items():
-            cell = cal.setdefault(league, {}).setdefault(market, {"cv": 1.0, "std": None, "zi": None})
+            cell = cal.setdefault(league, {}).setdefault(
+                market, {"cv": 1.0, "std": None, "zi": None}
+            )
             cell["zi"] = zi
     _write(_STAT_CAL_PATH, cal)
 
@@ -96,10 +98,14 @@ def save_cv_std_config(cv_config: dict, std_config: dict) -> None:
     cal = _load(_STAT_CAL_PATH)
     for league, markets in cv_config.items():
         for market, cv in markets.items():
-            cell = cal.setdefault(league, {}).setdefault(market, {"cv": 1.0, "std": None, "zi": None})
+            cell = cal.setdefault(league, {}).setdefault(
+                market, {"cv": 1.0, "std": None, "zi": None}
+            )
             cell["cv"] = cv
     for league, markets in std_config.items():
         for market, std in markets.items():
-            cell = cal.setdefault(league, {}).setdefault(market, {"cv": 1.0, "std": None, "zi": None})
+            cell = cal.setdefault(league, {}).setdefault(
+                market, {"cv": 1.0, "std": None, "zi": None}
+            )
             cell["std"] = std
     _write(_STAT_CAL_PATH, cal)

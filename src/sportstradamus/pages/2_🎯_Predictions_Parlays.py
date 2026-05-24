@@ -163,7 +163,7 @@ for game, group in view.groupby("Game", sort=False):
             fam_group = group.loc[group["Family"] == fam]
             shown = fam_group.head(int(top_n))
             # Always show the family name — single-family games included.
-            st.markdown(f"**{labels[fam]}** — showing {len(shown)} of " f"{len(fam_group)} parlays")
+            st.markdown(f"**{labels[fam]}** — showing {len(shown)} of {len(fam_group)} parlays")
             for _, row in shown.iterrows():
                 _render_parlay(row, offers)
 

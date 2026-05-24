@@ -42,14 +42,14 @@ def _build_corrupt_wal(tmp_path: Path) -> Path:
         "entity TEXT, book TEXT, ev DOUBLE, sample_ts TIMESTAMP)"
     )
     con.execute(
-        "CREATE TABLE lines (league TEXT, market TEXT, game_date DATE, " "entity TEXT, line DOUBLE)"
+        "CREATE TABLE lines (league TEXT, market TEXT, game_date DATE, entity TEXT, line DOUBLE)"
     )
     con.execute("CHECKPOINT")
     con.close()
 
     victim_script = (
         "import duckdb, os\n"
-        f'con = duckdb.connect({str(tmp_path / "victim.duckdb")!r})\n'
+        f"con = duckdb.connect({str(tmp_path / 'victim.duckdb')!r})\n"
         'con.execute("CREATE TABLE odds (league TEXT, market TEXT, '
         "game_date DATE, entity TEXT, book TEXT, ev DOUBLE, "
         'sample_ts TIMESTAMP)")\n'
@@ -93,16 +93,16 @@ def test_archive_recovers_from_stale_wal(tmp_path, monkeypatch):
             archive = Archive()
 
         recovery_warnings = [w for w in caught if "Discarded stale DuckDB WAL" in str(w.message)]
-        assert (
-            len(recovery_warnings) == 1
-        ), f"expected exactly one recovery warning, got {[str(w.message) for w in caught]}"
+        assert len(recovery_warnings) == 1, (
+            f"expected exactly one recovery warning, got {[str(w.message) for w in caught]}"
+        )
 
         quarantined = [
             p for p in tmp_path.iterdir() if p.name.startswith("archive.duckdb.wal.corrupt-")
         ]
-        assert (
-            len(quarantined) == 1
-        ), f"expected one quarantined WAL, got {sorted(p.name for p in tmp_path.iterdir())}"
+        assert len(quarantined) == 1, (
+            f"expected one quarantined WAL, got {sorted(p.name for p in tmp_path.iterdir())}"
+        )
 
         assert archive._connection.execute("SELECT COUNT(*) FROM odds").fetchone() == (0,)
     finally:

@@ -535,10 +535,12 @@ class StatsNBA(Stats):
             bad_pos = ~self.gamelog[pos_col].apply(lambda x: isinstance(x, str))
             if bad_pos.any():
                 self.gamelog.loc[bad_pos, pos_col] = self.gamelog.loc[bad_pos].apply(
-                    lambda x: self.players.get(x.SEASON_YEAR, {})
-                    .get(x.TEAM_ABBREVIATION, {})
-                    .get(x.PLAYER_NAME, {})
-                    .get("POS"),
+                    lambda x: (
+                        self.players.get(x.SEASON_YEAR, {})
+                        .get(x.TEAM_ABBREVIATION, {})
+                        .get(x.PLAYER_NAME, {})
+                        .get("POS")
+                    ),
                     axis=1,
                 )
 
@@ -1326,10 +1328,12 @@ class StatsNBA(Stats):
                 axis=1,
             )
             self.gamelog.loc[:, self.log_strings["position"]] = self.gamelog.apply(
-                lambda x: self.players.get(x.SEASON_YEAR, {})
-                .get(x.TEAM_ABBREVIATION, {})
-                .get(x.PLAYER_NAME, {})
-                .get("POS", x.POS),
+                lambda x: (
+                    self.players.get(x.SEASON_YEAR, {})
+                    .get(x.TEAM_ABBREVIATION, {})
+                    .get(x.PLAYER_NAME, {})
+                    .get("POS", x.POS)
+                ),
                 axis=1,
             )
 

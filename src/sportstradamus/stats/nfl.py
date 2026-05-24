@@ -712,17 +712,21 @@ class StatsNFL(Stats):
         six_years_ago = datetime.today().date() - timedelta(days=_GAMELOG_RETENTION_DAYS)
         self.gamelog = self.gamelog[
             self.gamelog["gameday"].apply(
-                lambda x: six_years_ago
-                <= datetime.strptime(x, "%Y-%m-%d").date()
-                <= datetime.today().date()
+                lambda x: (
+                    six_years_ago
+                    <= datetime.strptime(x, "%Y-%m-%d").date()
+                    <= datetime.today().date()
+                )
             )
         ]
         self.gamelog = self.gamelog[~self.gamelog["opponent"].isin(["AFC", "NFC"])]
         self.teamlog = self.teamlog[
             self.teamlog["gameday"].apply(
-                lambda x: six_years_ago
-                <= datetime.strptime(x, "%Y-%m-%d").date()
-                <= datetime.today().date()
+                lambda x: (
+                    six_years_ago
+                    <= datetime.strptime(x, "%Y-%m-%d").date()
+                    <= datetime.today().date()
+                )
             )
         ]
         self.gamelog.drop_duplicates(inplace=True)

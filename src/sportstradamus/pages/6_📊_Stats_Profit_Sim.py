@@ -384,8 +384,10 @@ for name, result in all_results.items():
 
     # Sharpe-like ratio
     daily_returns = result.groupby("run").apply(
-        lambda x: x["daily_pnl"].values
-        / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
+        lambda x: (
+            x["daily_pnl"].values
+            / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
+        )
     )
     all_returns = np.concatenate(daily_returns.values)
     sharpe = np.mean(all_returns) / np.std(all_returns) if np.std(all_returns) > 0 else 0
