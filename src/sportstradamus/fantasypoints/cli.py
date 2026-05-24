@@ -541,7 +541,6 @@ def _parse_curl_tokens(tokens: list[str]) -> dict:
     return {"url": url, "method": method, "headers": headers, "body": body}
 
 
-
 def _filter_by_name(specs: list[EndpointSpec], names: tuple[str, ...]) -> list[EndpointSpec]:
     wanted = set(names)
     filtered = [s for s in specs if s.name in wanted]
