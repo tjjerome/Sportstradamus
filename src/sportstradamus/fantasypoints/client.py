@@ -31,7 +31,7 @@ from sportstradamus.spiderLogger import logger
 # Conservative defaults: a realistic Firefox UA so requests look like a
 # logged-in browser, and a 2 s pause between catalog endpoints so a
 # weekly walk of ~50 tools stays well under any plausible rate ceiling.
-_DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) " "Gecko/20100101 Firefox/150.0"
+_DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
 _INTER_REQUEST_SLEEP_S = 2.0
 
 # Exponential backoff schedule for retryable failures. Each entry is

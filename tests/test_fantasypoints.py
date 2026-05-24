@@ -1678,3 +1678,173 @@ def test_cli_discover_replace_flag_discards_existing_catalog(monkeypatch, tmp_pa
     names = [s.name for s in load_catalog(catalog_path)]
     assert "legacy_thing" not in names, "legacy entry must be evicted on --replace"
     assert "player_passing_basic" in names
+
+
+# ---------------------------------------------------------------------------
+# verify subcommand + verify_spec / verify_catalog
+# ---------------------------------------------------------------------------
+
+
+def _write_fake_parquet(
+    monkeypatch,
+    tmp_path,
+    *,
+    spec_name: str = "player_passing_basic",
+    season: int = 2023,
+    week: int = 5,
+    mode: str = "weekly",
+    rows: list[dict] | None = None,
+):
+    """Write a parquet at the path verify_spec will look at, return (spec, path)."""
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    spec = _spec(
+        name=spec_name,
+        url=f"https://data.fantasypoints.com/v2/ds/nfl/tools/player/{spec_name}/values",
+        output_subdir="player/passing_basic",
+    )
+    path = parquet_path_for_spec(spec, season=season, week=week, mode=mode)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(rows or [{"gameSeason": season, "gameWeek": week, "playerId": 1, "v": 1.0}])
+    df.to_parquet(path, index=False)
+    return spec, path
+
+
+def test_verify_spec_passes_when_data_matches(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    spec, _ = _write_fake_parquet(monkeypatch, tmp_path)
+    assert verify_spec(spec, season=2023, week=5) == []
+
+
+def test_verify_spec_flags_missing_file(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    spec = _spec(name="player_passing_basic", output_subdir="player/passing_basic")
+    issues = verify_spec(spec, season=2023, week=5)
+    assert len(issues) == 1
+    assert issues[0].code == "file_missing"
+    assert issues[0].severity == "error"
+
+
+def test_verify_spec_flags_wrong_week_in_data(monkeypatch, tmp_path):
+    """The original bug: parquet at week_05 path but rows are gameWeek=18."""
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    spec, _ = _write_fake_parquet(
+        monkeypatch,
+        tmp_path,
+        rows=[{"gameSeason": 2023, "gameWeek": 18, "playerId": 1}],
+    )
+    issues = verify_spec(spec, season=2023, week=5, mode="weekly")
+    codes = [i.code for i in issues]
+    assert "week_mismatch" in codes
+    assert any(i.severity == "error" for i in issues)
+
+
+def test_verify_spec_s2d_accepts_week_range(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    spec, _ = _write_fake_parquet(
+        monkeypatch,
+        tmp_path,
+        mode="season_to_date",
+        rows=[{"gameSeason": 2023, "gameWeek": w, "playerId": 1} for w in (1, 2, 3, 4, 5)],
+    )
+    assert verify_spec(spec, season=2023, week=5, mode="season_to_date") == []
+
+
+def test_verify_spec_s2d_flags_week_beyond_requested(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    spec, _ = _write_fake_parquet(
+        monkeypatch,
+        tmp_path,
+        mode="season_to_date",
+        rows=[{"gameSeason": 2023, "gameWeek": w, "playerId": 1} for w in (1, 2, 6)],
+    )
+    issues = verify_spec(spec, season=2023, week=5, mode="season_to_date")
+    assert any(i.code == "week_mismatch" for i in issues)
+
+
+def test_verify_spec_flags_wrong_season(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    spec, _ = _write_fake_parquet(
+        monkeypatch,
+        tmp_path,
+        rows=[{"gameSeason": 2022, "gameWeek": 5, "playerId": 1}],
+    )
+    issues = verify_spec(spec, season=2023, week=5)
+    assert any(i.code == "season_mismatch" for i in issues)
+
+
+def test_verify_spec_warns_on_empty_parquet(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    spec = _spec(name="player_passing_basic", output_subdir="player/passing_basic")
+    path = parquet_path_for_spec(spec, season=2023, week=5, mode="weekly")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame().to_parquet(path, index=False)
+    issues = verify_spec(spec, season=2023, week=5)
+    assert len(issues) == 1
+    assert issues[0].code == "file_empty"
+    assert issues[0].severity == "warn"
+
+
+def test_verify_spec_flags_postseason_mode_seeing_regular_game_type(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_spec
+
+    spec, _ = _write_fake_parquet(
+        monkeypatch,
+        tmp_path,
+        week=1,
+        mode="postseason",
+        rows=[{"gameSeason": 2023, "gameWeek": 1, "gameType": "REG", "playerId": 1}],
+    )
+    issues = verify_spec(spec, season=2023, week=1, mode="postseason")
+    assert any(i.code == "game_type_not_postseason" for i in issues)
+
+
+def test_verify_catalog_returns_dict_keyed_by_name(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints.verify import verify_catalog
+
+    spec_ok, _ = _write_fake_parquet(monkeypatch, tmp_path)
+    spec_missing = _spec(name="player_other", output_subdir="player/other")
+    results = verify_catalog([spec_ok, spec_missing], season=2023, week=5)
+    assert set(results.keys()) == {"player_passing_basic", "player_other"}
+    assert results["player_passing_basic"] == []
+    assert any(i.code == "file_missing" for i in results["player_other"])
+
+
+def test_cli_verify_reports_per_spec_status(monkeypatch, tmp_path):
+    spec, _ = _write_fake_parquet(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog([spec], catalog_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["verify", "--season", "2023", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "OK   player_passing_basic" in result.output
+    assert "1 ok" in result.output
+
+
+def test_cli_verify_exits_nonzero_on_error(monkeypatch, tmp_path):
+    spec, _ = _write_fake_parquet(
+        monkeypatch,
+        tmp_path,
+        rows=[{"gameSeason": 2023, "gameWeek": 18, "playerId": 1}],
+    )
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog([spec], catalog_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["verify", "--season", "2023", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code != 0
+    assert "FAIL" in result.output
+    assert "week_mismatch" in result.output

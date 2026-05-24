@@ -36,6 +36,7 @@ import os
 import re
 from collections.abc import Iterable
 from importlib import resources as pkg_resources
+from pathlib import Path
 
 import pandas as pd
 
@@ -127,8 +128,8 @@ def available_snapshots(season: int) -> list[int]:
         return []
 
     weeks: list[int] = []
-    for entry in os.listdir(season_dir):
-        match = _WEEK_DIR_RE.match(entry)
+    for entry in Path(str(season_dir)).iterdir():
+        match = _WEEK_DIR_RE.match(entry.name)
         if match:
             weeks.append(int(match.group(1)))
     weeks.sort()
@@ -185,7 +186,7 @@ def load_snapshot(
     """
     if file_kind not in FILE_KINDS:
         raise ValueError(
-            f"unknown FP weekly file_kind: {file_kind!r}; " f"valid kinds: {sorted(FILE_KINDS)}"
+            f"unknown FP weekly file_kind: {file_kind!r}; valid kinds: {sorted(FILE_KINDS)}"
         )
 
     directory = snapshot_dir(season, snapshot_week)
@@ -295,7 +296,9 @@ def snapshot_inventory(seasons: Iterable[int] | None = None) -> pd.DataFrame:
         nfl_dir = pkg_resources.files(data) / _NFL_DIR
         if not os.path.exists(nfl_dir):
             return pd.DataFrame(columns=["season", "snapshot_week", *FILE_KINDS])
-        season_entries = sorted(int(name) for name in os.listdir(nfl_dir) if name.isdigit())
+        season_entries = sorted(
+            int(entry.name) for entry in Path(str(nfl_dir)).iterdir() if entry.name.isdigit()
+        )
     else:
         season_entries = sorted(seasons)
 
