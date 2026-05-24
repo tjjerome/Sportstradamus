@@ -851,12 +851,16 @@ def test_parse_table_response_empty_on_missing_paths():
     assert parse_table_response({"content": {"table": {"rows": {"values": []}}}}).empty
 
 
+def _spec(name="x", url="https://example/", output_subdir="x/x") -> EndpointSpec:
+    return EndpointSpec(name=name, url=url, output_subdir=output_subdir)
+
+
 def test_parquet_path_routes_player_to_player_data(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
-    p = parquet_path_for_spec("player_passing_advanced", season=2025, week=11)
+    p = parquet_path_for_spec(_spec("player_passing_advanced"), season=2025, week=11)
     assert p == tmp_path / "player_data" / "NFL" / "2025" / "passing_advanced_week_11.parquet"
 
 
@@ -865,7 +869,7 @@ def test_parquet_path_routes_team_to_team_data(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
-    p = parquet_path_for_spec("team_line_matchups", season=2025, week=5)
+    p = parquet_path_for_spec(_spec("team_line_matchups"), season=2025, week=5)
     assert p == tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
 
 
@@ -874,13 +878,48 @@ def test_parquet_path_routes_opponent_with_opp_suffix(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
-    p = parquet_path_for_spec("opponent_passing_advanced", season=2024, week=18)
+    p = parquet_path_for_spec(_spec("opponent_passing_advanced"), season=2024, week=18)
     assert p == tmp_path / "team_data" / "NFL" / "2024" / "passing_advanced_opp_week_18.parquet"
 
 
-def test_parquet_path_rejects_unrouted_name():
-    with pytest.raises(ValueError, match="player_/team_/opponent_"):
-        parquet_path_for_spec("misc_thing", season=2025, week=1)
+def test_parquet_path_falls_back_to_url_for_legacy_unprefixed_name(monkeypatch, tmp_path):
+    """Hand-imported entries without the discover-prefix still route via URL path."""
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    spec = _spec(
+        name="line_matchups",
+        url="https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
+        output_subdir="team/line_matchups",
+    )
+    p = parquet_path_for_spec(spec, season=2025, week=5)
+    assert p == tmp_path / "team_data" / "NFL" / "2025" / "line_matchups_week_05.parquet"
+
+
+def test_parquet_path_falls_back_to_output_subdir_when_url_is_opaque(monkeypatch, tmp_path):
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    spec = _spec(
+        name="player_some_thing",
+        url="https://opaque-cdn.example/api?id=xyz",
+        output_subdir="player/some_thing",
+    )
+    p = parquet_path_for_spec(spec, season=2025, week=1)
+    # Name prefix wins (first routing source).
+    assert p == tmp_path / "player_data" / "NFL" / "2025" / "some_thing_week_01.parquet"
+
+
+def test_parquet_path_rejects_unrouted_spec():
+    spec = _spec(
+        name="misc_thing",
+        url="https://opaque-cdn.example/api?id=xyz",
+        output_subdir="misc/whatever",
+    )
+    with pytest.raises(ValueError, match="no recognisable context"):
+        parquet_path_for_spec(spec, season=2025, week=1)
 
 
 def test_write_parquet_creates_parent_dirs(tmp_path):
