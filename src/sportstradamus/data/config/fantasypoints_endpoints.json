@@ -179,7 +179,7 @@
         "routeContextTarget": "player",
         "weeks": {
           "REG": [
-            "__WEEK_INT__"
+            5
           ]
         },
         "filterMatch": {
@@ -188,6 +188,11 @@
           },
           "game.season": {
             "eq": "__SEASON_INT__"
+          },
+          "player.position": {
+            "in": [
+              "QB"
+            ]
           }
         },
         "filterPlay": {
@@ -203,7 +208,14 @@
             ]
           }
         },
-        "filterResult": {},
+        "filterResult": {
+          "playerStats.gamesPlayed": {
+            "gte": 1
+          },
+          "playerStats.passing.dropbacks.total": {
+            "gte": 1
+          }
+        },
         "qualifiers": {},
         "splits": {},
         "disabled": {
@@ -213,7 +225,7 @@
         },
         "requiresSchedule": null,
         "requiresCharting": true,
-        "requiresPlayByPlay": false,
+        "requiresPlayByPlay": true,
         "requiresPreTotals": false,
         "requiresPostTotals": false,
         "requiresMultiplePipelines": null,
@@ -225,6 +237,18 @@
       "useCache": true,
       "flatten": true,
       "debug": false
+    },
+    "extra_headers": {
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Referer": "https://data.fantasypoints.com/nfl/tools/player/passing-advanced",
+      "Content-Type": "application/json",
+      "Origin": "https://data.fantasypoints.com",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-GPC": "1",
+      "Priority": "u=4"
     },
     "response_format": "json",
     "weekly": true
@@ -804,7 +828,7 @@
         "routeContextTarget": "player",
         "weeks": {
           "REG": [
-            "__WEEK_INT__"
+            5
           ]
         },
         "filterMatch": {
@@ -813,6 +837,12 @@
           },
           "game.season": {
             "eq": "__SEASON_INT__"
+          },
+          "player.position": {
+            "in": [
+              "WR",
+              "TE"
+            ]
           }
         },
         "filterPlay": {
@@ -828,7 +858,14 @@
             ]
           }
         },
-        "filterResult": {},
+        "filterResult": {
+          "playerStats.gamesPlayed": {
+            "gte": 1
+          },
+          "playerStats.receiving.targets.total": {
+            "gte": 1
+          }
+        },
         "qualifiers": {},
         "splits": {},
         "disabled": {
@@ -850,6 +887,18 @@
       "useCache": true,
       "flatten": true,
       "debug": false
+    },
+    "extra_headers": {
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Referer": "https://data.fantasypoints.com/nfl/tools/player/receiving-basic",
+      "Content-Type": "application/json",
+      "Origin": "https://data.fantasypoints.com",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-GPC": "1",
+      "Priority": "u=4"
     },
     "response_format": "json",
     "weekly": true
@@ -1709,7 +1758,7 @@
         "routeContextTarget": "player",
         "weeks": {
           "REG": [
-            "__WEEK_INT__"
+            5
           ]
         },
         "filterMatch": {
@@ -1718,6 +1767,14 @@
           },
           "game.season": {
             "eq": "__SEASON_INT__"
+          },
+          "player.position": {
+            "in": [
+              "RB",
+              "FB",
+              "WR",
+              "TE"
+            ]
           }
         },
         "filterPlay": {
@@ -1733,7 +1790,14 @@
             ]
           }
         },
-        "filterResult": {},
+        "filterResult": {
+          "playerStats.gamesPlayed": {
+            "gte": 1
+          },
+          "playerStats.receiving.separation.routes.total": {
+            "gte": 1
+          }
+        },
         "qualifiers": {},
         "splits": {},
         "disabled": {
@@ -1755,6 +1819,18 @@
       "useCache": true,
       "flatten": true,
       "debug": false
+    },
+    "extra_headers": {
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Referer": "https://data.fantasypoints.com/nfl/tools/player/receiving-separation-by-routes",
+      "Content-Type": "application/json",
+      "Origin": "https://data.fantasypoints.com",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-GPC": "1",
+      "Priority": "u=4"
     },
     "response_format": "json",
     "weekly": true
