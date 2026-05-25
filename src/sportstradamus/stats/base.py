@@ -39,6 +39,11 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.spiderLogger import logger
 
+# Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
+# ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
+# produced by 2-comp players whose means nearly coincide. See profile_market.
+_COMP_Z_CLIP: float = 10.0
+
 archive = Archive()
 scraper = Scrape()
 
@@ -539,9 +544,14 @@ class Stats:
                     .replace(0, np.nan)
                     .reindex(self.playerProfile.index)
                 )
+                # ``replace(0, np.nan)`` only catches exact zeros (1-comp
+                # case). Near-zero stds (2+ comps with coincident means,
+                # wtd_sq ~1e-30) slip through and produce outliers like
+                # -1.89e14 (observed NFL passing yards regen). Clip guards
+                # against that numerical edge case; see _COMP_Z_CLIP.
                 self.playerProfile["comps z"] = (
-                    _all_mean.reindex(self.playerProfile.index) - _comp_wmean
-                ) / _comp_wstd
+                    (_all_mean.reindex(self.playerProfile.index) - _comp_wmean) / _comp_wstd
+                ).clip(-_COMP_Z_CLIP, _COMP_Z_CLIP)
 
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
