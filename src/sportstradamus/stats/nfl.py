@@ -20,7 +20,12 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import nfl_fp_loader, nfl_fp_weekly_aggregate
+from sportstradamus.stats import (
+    nfl_fp_loader,
+    nfl_fp_team_weekly,
+    nfl_fp_team_weekly_aggregate,
+    nfl_fp_weekly_aggregate,
+)
 from sportstradamus.stats.base import Stats, archive, clean_data
 
 # Phase-1.5 lookback rule:
@@ -1425,6 +1430,41 @@ class StatsNFL(Stats):
             self._comp_cache: dict[tuple[int, int | None], pd.DataFrame] = {}
         return self._comp_cache
 
+    def _join_fp_team_features(
+        self, date: datetime | date
+    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        """Phase-2 NFL hook: aggregate FP team-grain snapshots into team / defense feature frames.
+
+        Resolves ``date`` to ``(season, target_week)`` via
+        ``_lookup_season_week``, applies the Phase-1.5 lookback rule via
+        ``_lookback_windows`` (post-week-4 = current-season only;
+        pre-week-5 = prior season weeks 11..18 BLENDED with current
+        partial), and hands the windows + the target snapshot to the
+        bridge. The bridge handles Pattern A (rate stats pooled across
+        windows) and Pattern B (``line_matchups`` single-snapshot at
+        target week).
+
+        Returns ``(None, None)`` when the team-data fetcher hasn't
+        backfilled any snapshots for the target season AND the prior
+        season -- the existing nfl_data_py-derived teamlog aggregates
+        carry the run alone, so production stays live on mixed-fill data.
+        """
+        season, target_week = self._lookup_season_week(date)
+        pattern_a_windows = self._lookback_windows(season, target_week)
+        has_data = any(
+            nfl_fp_team_weekly.available_snapshots(window_season)
+            for window_season, _, _ in pattern_a_windows
+        ) or bool(nfl_fp_team_weekly.available_snapshots(season))
+        if not has_data:
+            return None, None
+        team_features, defense_features = (
+            nfl_fp_team_weekly_aggregate.load_team_and_defense_features(
+                pattern_a_windows=pattern_a_windows,
+                pattern_b_snapshot=(season, target_week),
+            )
+        )
+        return team_features, defense_features
+
     def _compute_comp_profile(self, cache_key: tuple[int, int | None]) -> pd.DataFrame:
         """Aggregate the per-game snapshots into a comp-profile frame for one cell.
 
@@ -1517,9 +1557,37 @@ class StatsNFL(Stats):
         Encodes the Phase-1.5 rule. Documented case-by-case so future
         edits to the cutoff land here in one place rather than scattered
         across the aggregation path.
+
+        **Postseason-clean contract** (pinned by
+        ``tests/golden/test_nfl_lookback_windows.py``):
+
+        * Regular-season targets (``target_week`` in 1..18) MUST NOT pull
+          any window past ``NFL_REGULAR_SEASON_WEEKS = 18``. The
+          prior-season window caps at 18 explicitly; the current-season
+          window caps at ``target_week - 1 <= 17``. Postseason rows are a
+          measurably different distribution at team grain (2022 W11-18
+          vs W19-22 measured PROE +8.4pp, ``def_two_high_pct`` +7.7pp,
+          dropbacks/game +9.2%); blending them into a reg-season prior
+          biases the feature in the wrong direction. Full diagnostic +
+          cross-sport precedent: Phase 2.1 section of the team-features
+          plan doc.
+        * Postseason targets (``target_week`` in 19..22) pass through the
+          post-cutoff branch and pull ``(target_season, 1, target_week - 1)``,
+          which DOES include this season's earlier postseason rows. That
+          is the symmetric rule's INCLUDE branch -- a postseason target
+          should see postseason priors. The branch is unreachable today
+          (no postseason props are priced), but the test pins it so a
+          future tightening does not kill it before the operator decides
+          to price one.
+
+        Pattern B (``line_matchups``) is NOT routed through this method;
+        the single-snapshot lookup at ``(target_season, target_week)``
+        applies whether the target is reg-season or postseason.
         """
         if target_week is None:
             # Legacy fallback -- full-season aggregates for prior 3 + current.
+            # Cap at NFL_REGULAR_SEASON_WEEKS so optimize_comp_weights' default
+            # path inherits the postseason-clean contract above.
             return [
                 (s, 1, NFL_REGULAR_SEASON_WEEKS)
                 for s in range(
@@ -1528,8 +1596,13 @@ class StatsNFL(Stats):
                 )
             ]
         if target_week >= COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK:
+            # Post-cutoff -- current season only. For target_week in 5..18 the
+            # ``target_week - 1`` end is <= 17 (reg-season only); for
+            # target_week in 19..22 (postseason target) the end >= 18 and
+            # postseason rows are intentionally included per the symmetric rule.
             return [(target_season, 1, target_week - 1)]
-        # Pre-week-5 -- prior season's back half + current partial (if any).
+        # Pre-week-5 -- prior season's back half (clipped at 18 -- the cap is
+        # load-bearing, not cosmetic) + current partial (if any).
         windows = [
             (
                 target_season - 1,
@@ -1542,6 +1615,18 @@ class StatsNFL(Stats):
         return windows
 
     def update_player_comps(self, year: int | None = None) -> None:
+        """Rebuild comp clusters for each NFL position and write to ``comps.json``.
+
+        Applies the Phase-1.5 lookback rule via ``build_comp_profile``: after
+        week 4 of the current season, the comp pool is restricted to
+        current-season weeks 1..W-1; pre-week-5, the prior season's back half
+        (weeks 11..18) is blended with any current-season games. Writes the
+        result to ``data/leagues/nfl/comps.json`` for reuse by the prediction
+        pipeline.
+
+        Args:
+            year: Override the season year. Defaults to ``self.season_start.year``.
+        """
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
@@ -1569,9 +1654,9 @@ class StatsNFL(Stats):
                 positionProfile[filterStat[position]]
                 >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
             ]
-            positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace(
-                [np.nan, np.inf, -np.inf], 0
-            )
+            positionProfile = positionProfile.reindex(
+                columns=list(stats["NFL"][position].keys())
+            ).replace([np.nan, np.inf, -np.inf], 0)
             positionProfile = positionProfile.apply(
                 lambda x: (x - x.mean()) / x.std(), axis=0
             ).fillna(0)
@@ -1610,9 +1695,9 @@ class StatsNFL(Stats):
                 positionProfile[filterStat[position]]
                 >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
             ]
-            positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace(
-                [np.nan, np.inf, -np.inf], 0
-            )
+            positionProfile = positionProfile.reindex(
+                columns=list(stats["NFL"][position].keys())
+            ).replace([np.nan, np.inf, -np.inf], 0)
             if len(positionProfile) < _COMP_POOL_MIN_PLAYERS:
                 continue
             positionProfile = positionProfile.apply(
