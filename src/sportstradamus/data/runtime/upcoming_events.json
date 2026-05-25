@@ -1,1 +1,42 @@
-[]
+[
+  {
+    "sport_key": "basketball_nba",
+    "event_id": "a752ca36635e2ccb1bb5a9f387282e1c",
+    "league": "NBA",
+    "commence_time": "2026-05-26T00:10:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "cbbb0fa95f5a21e66505280c6fe4b394",
+    "league": "WNBA",
+    "commence_time": "2026-05-26T02:10:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  }
+]

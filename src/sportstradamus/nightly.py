@@ -64,6 +64,8 @@ LIVE_METRICS_COLUMNS = (
     "book_bss",
     "empirical_over_rate",
     "predicted_over_rate",
+    "precision_over_live",
+    "precision_under_live",
     "top_decile_mae",
     "profit_sim_yield",
     "profit_sim_kelly_yield",
@@ -71,6 +73,11 @@ LIVE_METRICS_COLUMNS = (
 # Minimum offers needed in a window before _top_decile_mae returns a value;
 # below this, the top decile would be a single row and the metric is noise.
 _TOP_DECILE_MIN_OFFERS = 10
+# Minimum bets-on-a-side needed before precision_{over,under}_live is reported.
+# Below 30, the conditional hit rate is dominated by sampling noise (~9pp se).
+# This is the per-side analogue of MIN_SETTLED_FOR_GRADUATION (which is the
+# whole-cell threshold used by graduation.py).
+_MIN_BETS_FOR_PRECISION = 30
 # Clip bookmaker probabilities to avoid divide-by-zero in fair-odds payouts.
 _BOOKS_P_CLIP = 1e-3
 # Phase 4 live ship-gate (set-baseline -> main): Kelly stake fraction cap, mirroring
@@ -91,11 +98,28 @@ def _empty_live_metrics_frame() -> pd.DataFrame:
             "book_bss": pd.Series(dtype="float64"),
             "empirical_over_rate": pd.Series(dtype="float64"),
             "predicted_over_rate": pd.Series(dtype="float64"),
+            "precision_over_live": pd.Series(dtype="float64"),
+            "precision_under_live": pd.Series(dtype="float64"),
             "top_decile_mae": pd.Series(dtype="float64"),
             "profit_sim_yield": pd.Series(dtype="float64"),
             "profit_sim_kelly_yield": pd.Series(dtype="float64"),
         }
     )
+
+
+def _side_precision(group: pd.DataFrame, side: str) -> float:
+    """Hit rate among ``Bet == side`` rows (i.e. precision of side recommendations).
+
+    ``side`` is ``"Over"`` or ``"Under"``. Returns NaN when fewer than
+    :data:`_MIN_BETS_FOR_PRECISION` rows recommended that side — the conditional
+    hit rate is too noisy at small n to gate a graduation decision.
+    """
+    side_mask = (group["Bet"] == side).to_numpy()
+    n_side = int(side_mask.sum())
+    if n_side < _MIN_BETS_FOR_PRECISION:
+        return float("nan")
+    side_hits = ((group["Bet"] == side) & (group["Result"] == side)).sum()
+    return float(side_hits / n_side)
 
 
 def _top_decile_mae(group: pd.DataFrame) -> float:
@@ -179,6 +203,8 @@ def _build_cell_row(cell: tuple[str, str], group: pd.DataFrame, *, now: pd.Times
             "book_bss": float("nan"),
             "empirical_over_rate": float("nan"),
             "predicted_over_rate": float("nan"),
+            "precision_over_live": float("nan"),
+            "precision_under_live": float("nan"),
             "top_decile_mae": float("nan"),
             "profit_sim_yield": float("nan"),
             "profit_sim_kelly_yield": float("nan"),
@@ -192,6 +218,8 @@ def _build_cell_row(cell: tuple[str, str], group: pd.DataFrame, *, now: pd.Times
         "book_bss": float(compute_book_brier_skill_score(group)),
         "empirical_over_rate": float((group["Result"] == "Over").mean()),
         "predicted_over_rate": float((group["Bet"] == "Over").mean()),
+        "precision_over_live": _side_precision(group, "Over"),
+        "precision_under_live": _side_precision(group, "Under"),
         "top_decile_mae": _top_decile_mae(group),
         "profit_sim_yield": _profit_sim_yield(group),
         "profit_sim_kelly_yield": _profit_sim_kelly_yield(group),
@@ -210,6 +238,8 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
         "book_bss",
         "empirical_over_rate",
         "predicted_over_rate",
+        "precision_over_live",
+        "precision_under_live",
         "top_decile_mae",
         "profit_sim_yield",
         "profit_sim_kelly_yield",
