@@ -10,10 +10,14 @@ docstrings on the loader modules spell out which file_kinds need which
 pattern, and Phase-1.5 / Phase-2 build features by dispatching through
 the four helpers here:
 
-- :func:`weighted_rate` — Pattern A, the default for rate stats.
-  ``sum(numerator) / sum(denominator)`` per group. The right way to
-  derive a season-to-date rate from per-game totals; mean-of-rates
-  silently up-weights low-volume games.
+- :func:`weighted_rate` — Pattern A, the default when both numerator and
+  denominator are exposed as per-game raw totals. ``sum(numerator) /
+  sum(denominator)`` per group; mean-of-rates would silently up-weight
+  low-volume games.
+- :func:`weighted_mean` — Pattern A variant for when only the per-game
+  rate is exposed (e.g. aDOT, pressure-rate-over-expected). Computes
+  ``sum(rate * weight) / sum(weight)``, mathematically identical to
+  ``weighted_rate`` if ``weight`` is the rate's true denominator.
 - :func:`total_sum` — raw season-to-date counts (no rate derivation).
   The simplest aggregation; correct for any stat that's a pure tally.
 - :func:`game_mean` — Pattern C, average of per-game outcomes.
@@ -86,6 +90,55 @@ def weighted_rate(
     den = grouped[denominator_col].sum(min_count=1)
     out = num.divide(den).where(den != 0, other=np.nan)
     out.name = f"{numerator_col}_per_{denominator_col}"
+    return out
+
+
+def weighted_mean(
+    df: pd.DataFrame,
+    value_col: str,
+    weight_col: str,
+    *,
+    group_col: str = PLAYER_GROUP_COL,
+) -> pd.Series:
+    """Compute ``sum(value * weight) / sum(weight)`` per group.
+
+    Pattern A variant for stats whose per-game row exposes only the rate
+    (e.g. ``playerStatsPassingAverageDepthOfTarget``) without its
+    underlying numerator. Equivalent to :func:`weighted_rate` when
+    ``weight`` is the rate's true denominator: ``aDOT * attempts ==
+    sum(target_depths)``, so ``sum(aDOT*attempts)/sum(attempts) ==
+    sum(depths)/sum(attempts)``.
+
+    Groups whose summed weight is zero (or where every value is NaN)
+    produce ``NaN`` in the output rather than divide-by-zero. The product
+    ``value * weight`` propagates NaN — a per-game row missing the rate
+    contributes nothing to either numerator or denominator, which is the
+    correct behaviour (FP omits the rate when sample size is too small).
+
+    Args:
+        df: Per-game rows.
+        value_col: Column with the per-game rate.
+        weight_col: Column with the per-game weight (target's true
+            denominator: attempts, dropbacks, routes, etc.).
+        group_col: Group key. Defaults to ``"playerPlayerId"``.
+
+    Returns:
+        Series indexed by ``group_col`` value with the per-group weighted
+        mean. Empty Series if ``df`` is empty or either required column
+        is missing.
+    """
+    if df.empty or value_col not in df.columns or weight_col not in df.columns:
+        return pd.Series(dtype="float64", name=f"{value_col}_wmean")
+
+    weight = df[weight_col]
+    weighted = df[value_col] * weight
+    work = pd.DataFrame({"_weighted": weighted, "_weight": weight.where(df[value_col].notna())})
+    work[group_col] = df[group_col].values
+    grouped = work.groupby(group_col, dropna=False)
+    num = grouped["_weighted"].sum(min_count=1)
+    den = grouped["_weight"].sum(min_count=1)
+    out = num.divide(den).where(den != 0, other=np.nan)
+    out.name = f"{value_col}_wmean"
     return out
 
 

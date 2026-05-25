@@ -4,7 +4,7 @@ import importlib.resources as pkg_resources
 import json
 import os.path
 import pickle
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import nfl_data_py as nfl
 import nflreadpy as nflr
@@ -20,8 +20,27 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import nfl_fp_loader
+from sportstradamus.stats import nfl_fp_loader, nfl_fp_weekly_aggregate
 from sportstradamus.stats.base import Stats, archive, clean_data
+
+# Phase-1.5 lookback rule: after week 4 of the target's season, the comp
+# pool is restricted to current-season weeks (no prior seasons). Pre-week-5
+# the prior 3 seasons are blended in to provide enough sample for the KNN.
+# Threshold encodes the user-confirmed cutoff; pulling it out as a constant
+# documents the rule rather than burying it as a magic literal inside
+# build_comp_profile.
+COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK = 5
+
+# Default NFL regular-season length in weeks; the season-CSV path used 17
+# (pre-2021) / 18 (2021+). Phase-1.5 always reads the per-game weekly
+# snapshots, so 18 is the right ceiling for the comp lookback window.
+NFL_REGULAR_SEASON_WEEKS = 18
+
+# Number of prior NFL seasons blended into the pre-week-5 comp pool. Matches
+# the pre-Phase-1.5 ``range(year - 3, year + 1)`` window in
+# build_comp_profile, so the saved comps.json shape stays stable across
+# the migration.
+COMP_PRIOR_SEASON_DEPTH = 3
 
 # Positions that actually accrue each market stat. Rows for other positions are
 # all-zero (or wrong-population) noise that depresses MeanYr and inflates the zero
@@ -1248,38 +1267,159 @@ class StatsNFL(Stats):
                 "first_downs": first_downs,
             }
 
-    def build_comp_profile(self):
-        """Build the NFL player comp profile from FantasyPoints + PBP aggregates.
+    def build_comp_profile(self, target_game_date: date | None = None) -> pd.DataFrame:
+        """Build the NFL player comp profile from per-game FP snapshots + PBP aggregates.
 
-        Phase 1A+1D of the PFF -> FantasyPoints migration. Per-year FP CSVs
-        + PBP/NGS aggregates arrive from
-        :func:`sportstradamus.stats.nfl_fp_loader.load_one_year` already
-        derived and joined with age/height/bmi (Phase 1G surfaces the same
-        derived columns to the Y/Y stability diagnostic). Per-year frames
-        are concatenated with a ``season`` tag, the Phase 1G rolling
-        transform smooths the moderate-stability features over the lookback
-        window, then the most-recent row per player is selected for the
-        downstream KNN join.
+        Phase-1.5 of the PFF -> FantasyPoints migration. Inputs come from
+        the per-game weekly parquets via
+        :func:`sportstradamus.stats.nfl_fp_weekly_aggregate.load_through_one_year`,
+        which season-to-dates per-game rows using the Pattern A / B / C
+        helpers in :mod:`sportstradamus.stats.nfl_fp_aggregation`. PBP/NGS
+        aggregates are joined the same way the legacy season-CSV path
+        did. The Phase-1G rolling transform smooths moderate-stability
+        features across the lookback window, then the most-recent row per
+        player is selected for the downstream KNN join.
+
+        The lookback window enforces the operator's Phase-1.5 rule:
+        after week 4 of ``target_game_date``'s season the comp pool is
+        current-season-only (no prior seasons blended in). Pre-week-5
+        the three prior seasons are blended to keep the KNN's sample size
+        usable. When ``target_game_date`` is None the function falls
+        back to a full-season aggregate across the prior three seasons +
+        the current season's complete window -- preserving the legacy
+        contract for callers that haven't been migrated to per-game-date
+        comp profiles yet.
+
+        Results are cached per ``(season, week)`` cell on ``self`` so
+        repeated calls within a training loop don't re-aggregate the same
+        snapshots.
+
+        Args:
+            target_game_date: Date of the game the comp profile is being
+                built for. When provided, the lookback window cuts off
+                at ``target_week - 1`` of the corresponding season; when
+                ``None``, full-season aggregates land for the prior three
+                seasons + current season.
 
         Returns:
             DataFrame indexed by accent-stripped player name with
             ``position``, ``player_game_count``, the comp-filter aliases
             (``dropbacks`` / ``attempts`` / ``routes``), every FP-prefixed
             metric, every ``pbp_*`` aggregate, and (when available)
-            ``age`` / ``height`` / ``bmi``. Empty DataFrame if no FP files
-            are found in the lookback window.
+            ``age`` / ``height`` / ``bmi``. Empty DataFrame if no FP
+            snapshots are found in the lookback window.
         """
         if self.playerProfile.empty:
             self.profile_market("snap pct")
 
-        year = self.season_start.year
+        cache_key = self._resolve_comp_cache_key(target_game_date)
+        cache = self._comp_profile_cache()
+        if cache_key not in cache:
+            cache[cache_key] = self._compute_comp_profile(cache_key)
+        playerProfile = cache[cache_key]
+        if playerProfile.empty:
+            return playerProfile
+
+        playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
+        return playerProfile
+
+    def _resolve_comp_cache_key(self, target_game_date: date | None) -> tuple[int, int | None]:
+        """Translate the public ``target_game_date`` arg into a cache key + lookback spec.
+
+        Returns a ``(target_season, target_week)`` tuple. ``target_week``
+        carries a sentinel ``None`` for the "no date given" mode --
+        triggers the full-season fallback inside
+        :meth:`_compute_comp_profile`. ``target_season`` defaults to
+        ``self.season_start.year`` so callers without a date still see
+        the right season for the current cron run.
+        """
+        if target_game_date is None:
+            return self.season_start.year, None
+        target_season, target_week = self._lookup_season_week(target_game_date)
+        return target_season, target_week
+
+    def _lookup_season_week(self, target_game_date: datetime | date) -> tuple[int, int]:
+        """Resolve a calendar date to ``(season, week)`` via nfl_data_py's schedule.
+
+        Builds + caches a date → (season, week) index across the
+        seasons that overlap the requested date. For dates in the
+        regular-season window the schedule lookup is exact; for
+        bye-week / off-season dates the function returns the next
+        scheduled game's week so the comp pool covers everything the
+        target player could plausibly have played in already.
+        """
+        if isinstance(target_game_date, datetime):
+            target_game_date = target_game_date.date()
+
+        sched_index = self._schedule_index()
+        if sched_index.empty:
+            return self.season_start.year, NFL_REGULAR_SEASON_WEEKS
+
+        match = sched_index.loc[sched_index["gameday"] >= target_game_date].head(1)
+        if match.empty:
+            # All schedule rows are in the past -> use the season's last week.
+            last = sched_index.iloc[-1]
+            return int(last["season"]), int(last["week"])
+        row = match.iloc[0]
+        return int(row["season"]), int(row["week"])
+
+    def _schedule_index(self) -> pd.DataFrame:
+        """Cached ``(gameday, season, week)`` index spanning the comp lookback."""
+        if getattr(self, "_sched_index", None) is None:
+            years = list(
+                range(
+                    self.season_start.year - COMP_PRIOR_SEASON_DEPTH,
+                    self.season_start.year + 2,
+                )
+            )
+            try:
+                sched = nfl.import_schedules(years)
+            except Exception as exc:
+                logger.warning("import_schedules(%s) failed: %s", years, exc)
+                self._sched_index = pd.DataFrame(columns=["gameday", "season", "week"])
+                return self._sched_index
+            sched = sched.dropna(subset=["gameday", "season", "week"]).copy()
+            sched["gameday"] = pd.to_datetime(sched["gameday"]).dt.date
+            self._sched_index = (
+                sched[["gameday", "season", "week"]]
+                .drop_duplicates()
+                .sort_values("gameday", kind="stable")
+                .reset_index(drop=True)
+            )
+        return self._sched_index
+
+    def _comp_profile_cache(self) -> dict[tuple[int, int | None], pd.DataFrame]:
+        """Lazily-initialised per-(season, week) comp profile cache."""
+        if getattr(self, "_comp_cache", None) is None:
+            self._comp_cache: dict[tuple[int, int | None], pd.DataFrame] = {}
+        return self._comp_cache
+
+    def _compute_comp_profile(self, cache_key: tuple[int, int | None]) -> pd.DataFrame:
+        """Aggregate the per-game snapshots into a comp-profile frame for one cell.
+
+        Applies the Phase-1.5 lookback rule:
+
+        * ``target_week is None`` -> legacy fallback. Load full-season
+          aggregates for the prior 3 seasons + current season.
+        * ``target_week < 5`` -> pre-cutoff. Same window as legacy plus
+          the current season's partial weeks through ``target_week - 1``.
+        * ``target_week >= 5`` -> post-cutoff. Current season only,
+          weeks ``1..target_week - 1``. Prior seasons drop out because
+          ~4 in-season games are more predictive of the next game than
+          last year's full-season number for the same player (the comp
+          pool also restricts to current-season players who have a
+          meaningful in-season sample).
+        """
+        target_season, target_week = cache_key
+        windows = self._lookback_windows(target_season, target_week)
+
         per_year_frames: list[pd.DataFrame] = []
-        for y in range(year - 3, year + 1):
-            per_year = nfl_fp_loader.load_one_year(y)
+        for season, through_week in windows:
+            per_year = nfl_fp_weekly_aggregate.load_through_one_year(season, through_week)
             if per_year.empty:
                 continue
             per_year = per_year.copy()
-            per_year["season"] = y
+            per_year["season"] = season
             per_year_frames.append(per_year)
 
         if not per_year_frames:
@@ -1287,24 +1427,56 @@ class StatsNFL(Stats):
 
         stacked = pd.concat(per_year_frames)
         stacked = nfl_fp_loader.apply_rolling_transforms(stacked)
-
-        # Take the most-recent row per player so the KNN sees the
-        # rolling-smoothed current-season value (and the latest snapshot of
-        # every other column).
         stacked = stacked.sort_values("season", kind="stable")
         playerProfile = stacked.loc[~stacked.index.duplicated(keep="last")]
 
         # The downstream short-window join expects the index to be the
-        # accent-stripped player name. ``load_one_year`` already builds it
+        # accent-stripped player name. The aggregator already builds it
         # that way but the concat/sort chain can lose the name attribute --
         # rebuild it from ``Name`` defensively and mirror it into ``player``
         # so legacy callers that look for the old PFF column name still work.
         if "Name" in playerProfile.columns:
+            # The concat-then-sort can leave a NaN ``Name`` cell for any
+            # row whose player only appeared in one of the lookback's
+            # seasons; remove_accents chokes on NaN. Drop those before
+            # re-indexing rather than letting the dispatch fail.
+            playerProfile = playerProfile.dropna(subset=["Name"])
+            if playerProfile.empty:
+                return playerProfile
             playerProfile = playerProfile.assign(player=playerProfile["Name"])
             playerProfile.index = playerProfile["Name"].apply(remove_accents)
-
-        playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
         return playerProfile
+
+    @staticmethod
+    def _lookback_windows(target_season: int, target_week: int | None) -> list[tuple[int, int]]:
+        """Return the ``[(season, through_week), ...]`` list for the comp lookback.
+
+        Encodes the Phase-1.5 rule. Documented case-by-case so future
+        edits to the cutoff land here in one place rather than scattered
+        across the aggregation path.
+        """
+        if target_week is None:
+            # Legacy fallback -- full-season aggregates for prior 3 + current.
+            return [
+                (s, NFL_REGULAR_SEASON_WEEKS)
+                for s in range(
+                    target_season - COMP_PRIOR_SEASON_DEPTH,
+                    target_season + 1,
+                )
+            ]
+        if target_week >= COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK:
+            return [(target_season, target_week - 1)]
+        # Pre-week-5 -- prior 3 full seasons + current partial (if any).
+        windows = [
+            (s, NFL_REGULAR_SEASON_WEEKS)
+            for s in range(
+                target_season - COMP_PRIOR_SEASON_DEPTH,
+                target_season,
+            )
+        ]
+        if target_week > 1:
+            windows.append((target_season, target_week - 1))
+        return windows
 
     def update_player_comps(self, year=None):
         if year is None:
@@ -1314,7 +1486,12 @@ class StatsNFL(Stats):
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
 
-        playerProfile = self.build_comp_profile()
+        # Pass today's date so the Phase-1.5 lookback rule applies: after
+        # week 4 of the current season the comp pool is restricted to
+        # current-season weeks 1..W-1 (`_lookback_windows`), which is the
+        # operator-confirmed cron behaviour. Pre-week-5 (or off-season),
+        # the prior three seasons are blended back in.
+        playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
         if playerProfile.empty:
             return
 
@@ -1349,7 +1526,11 @@ class StatsNFL(Stats):
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
 
-        playerProfile = self.build_comp_profile()
+        # Same Phase-1.5 lookback rule the cron path applies: today's date
+        # routes through ``_lookback_windows`` so post-week-4 comps use
+        # current-season-only candidates. This is the inference fallback
+        # when ``comps.json`` is missing.
+        playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
         if playerProfile.empty:
             return
 
