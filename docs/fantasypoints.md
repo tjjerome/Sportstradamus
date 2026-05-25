@@ -164,10 +164,10 @@ poetry run fp-fetch run --week 5 --season 2025 --dry-run
 poetry run fp-fetch run --week 5 --season 2025 --only team_line_matchups
 ```
 
-`run` fetches each endpoint, parses `content.table.rows.values` into
-a pandas DataFrame, and writes one parquet per (tool, week, mode),
-grouped into a per-week subfolder so 45 files don't clutter the
-season dir:
+`run` fetches each endpoint, parses `content.rows.values` (v2
+endpoints) or `content.table.rows.values` (legacy) into a pandas
+DataFrame, and writes one parquet per (tool, week, mode), grouped
+into a per-week subfolder so 45 files don't clutter the season dir:
 
 - player-context entries →
   `src/sportstradamus/data/player_data/NFL/{season}/week_NN/{tool}{mode_suffix}.parquet`
@@ -178,10 +178,18 @@ season dir:
   `passing_basic_opp.parquet`, `passing_basic_opp_s2d.parquet`).
 
 `mode_suffix` is empty for `--mode weekly` (the default, kept blank
-so existing weekly parquets don't have to be renamed), `_s2d` for
-`--mode season_to_date`, `_post` for `--mode postseason`. Modes for
-the same `(tool, week)` write to different files and do not
+so existing weekly parquets don't have to be renamed) and for
+`--mode postseason` (postseason rounds live in their own
+`week_19`..`week_22` folders so no filename collision is possible).
+`_s2d` is used for `--mode season_to_date` because it shares the
+regular-season `week_NN` folder with `weekly`. Modes for the same
+`(tool, week)` write to different files / folders and do not
 overwrite each other.
+
+Postseason folder mapping: postseason round 1 (wildcard) → `week_19`,
+2 (divisional) → `week_20`, 3 (conference championship) → `week_21`,
+4 (super bowl) → `week_22`. The CLI continues to take `--week 1..4`
+for postseason mode; the `+18` shift happens during path resolution.
 
 #### `--mode` flag
 
@@ -343,9 +351,14 @@ src/sportstradamus/data/
       {tool}_opp{mode_suffix}.parquet     # opponent (team-defense) view
 ```
 
-`mode_suffix` is `""` (weekly, default), `_s2d` (season-to-date),
-or `_post` (postseason). Re-running the same `(week, mode)`
-overwrites; different modes coexist in the same folder.
+`week_NN` is `01..18` for regular-season modes and `19..22` for
+postseason rounds (wildcard / divisional / conf championship /
+super bowl). `mode_suffix` is `""` (weekly, default), `_s2d`
+(season-to-date), or `""` (postseason — distinguished by its
+`week_19..22` folder, no suffix needed). Re-running the same
+`(week, mode)` overwrites; different modes coexist without
+collision because they target different filenames (`_s2d`) or
+different folders (postseason).
 
 ## Adding new endpoints later
 

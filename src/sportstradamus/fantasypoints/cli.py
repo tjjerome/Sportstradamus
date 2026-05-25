@@ -192,9 +192,12 @@ def run(season, week, only, mode, dry_run, no_cache, refetch, catalog_path, log_
     Player-context entries land in
     ``data/player_data/NFL/{season}/week_NN/<tool>.parquet``; team /
     opponent entries land in ``data/team_data/NFL/{season}/week_NN/``
-    (with ``_opp`` suffix for opponent context). Non-weekly modes
-    add a ``_s2d`` or ``_post`` suffix to the filename. Re-runs
-    overwrite.
+    (with ``_opp`` suffix for opponent context). ``--mode
+    season_to_date`` adds an ``_s2d`` suffix so it can coexist with
+    weekly in the regular-season ``week_NN`` folder. ``--mode
+    postseason`` writes to ``week_19``..``week_22`` (round 1..4) with
+    no filename suffix — each playoff round gets its own folder.
+    Re-runs overwrite.
     """
     log = get_logger("fp-fetch")
     log.setLevel(log_level)
