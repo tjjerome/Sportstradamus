@@ -736,6 +736,49 @@ feature apply, but count-family reasoning does not (treat as Track-A). New refs 
    overfit, and percent-calibration error is worst in low-base-rate groups [48]. Use the
    global affine `y ~ a + b·ŷ` form there; reserve isotonic / per-decile for the
    higher-mean NBA/WNBA count cells. (B1.6 research verdict, 2026-05-22.)
+10. **Training and live `predicted_over_rate` / `empirical_over_rate` are not the same
+    quantity — never compare them directly to diagnose model drift.** Training computes
+    `(P > 0.5).mean()` and `(Result >= Line).mean()` over **all** validation rows;
+    live computes `(Bet == "Over").mean()` and `(Result == "Over").mean()` over **only
+    the Sleeper/Underdog offers that survived publication filtering** (`Boost ≤ 3.65`,
+    `head(3)` per player by Distance). On NBA/FG3M 2026-05-24 this produced a fake 28pp
+    "drift" signal that was 90% a measurement artifact + 9pp the `>=` vs `>` push
+    convention asymmetry. The like-for-like metric is `Bet=Over hit rate` (= training
+    `precision_over` ↔ live `precision_over_live`, added 2026-05-24); compare those.
+    See `/tmp/researcher_fg3m_calibration_divergence.md` and
+    `nightly._side_precision` / `graduation.MIN_PRECISION_OVER`.
+
+## Open follow-ups from the 2026-05-24 FG3M-calibration researcher brief
+
+Cited file: `/tmp/researcher_fg3m_calibration_divergence.md`. None of these are
+shipping critical paths yet — they're tracked here so they don't drop.
+
+1. **Align push convention across pipelines.** `pipeline.py:1451` builds
+   `y_class_val = (Result >= Line)`; live `analysis.py:296` uses strict `>` and
+   labels equality as `Push`. On integer-line markets this inflates training
+   `empirical_over_rate` ~9pp and can flip the perceived sign of model bias.
+   Fix: switch training to strict `>` and account for pushes as a 3-class
+   outcome (or carry a `Push` column the loss treats as half-Brier). Affects
+   `_step_calibrate_temperature` and `_compute_metrics`.
+2. **Add publication-filtered `Bet=Over` rate to training metrics.** Today
+   training reports `predicted_over_rate = (P > 0.5).mean()` over every validation
+   row, but live reports `(Bet == "Over").mean()` over only the published Sleeper/UD
+   offers (`prediction/model_prob.py:519-524`). The right offline analogue is to
+   apply the same filter against validation rows that have a Sleeper/UD line in
+   the Archive, then report `Bet=Over` rate on that subset. ~1-day change in
+   `_step_compute_metrics`; would have caught the FG3M pseudo-drift offline.
+3. **Re-run HurdleZINB pickup for FTM, BLK, OREB.** The 2026-05 hurdle ship
+   skipped these on the old gate set; the brief shows they still exhibit the
+   joint-ZINB under-fit signature in **both** training and live data (FTM
+   training pred 0.10 vs empirical 0.41; BLK pred 0.09 vs empirical 0.34; OREB
+   similar). Lever is `--zinb-mode=hurdle` (per `p2_hurdle_zinb_verdict.md`);
+   re-evaluate against the new gates.
+4. **Sleeper Under-boost asymmetry investigation.** `prediction/cli.py:155-157`
+   computes Sleeper's Under-side boost as `1.78² / over_boost`, which on a 3×
+   Over-boosted line yields an Under boost of ~1.06 — never recommendable. This
+   structurally biases FG3M / BLK / OREB recommendations to Over regardless of
+   what the model thinks. Decide: accept (correct payout math), or build a
+   platform-aware EV threshold that handles asymmetric two-sided markets.
 
 ## Critical files
 
