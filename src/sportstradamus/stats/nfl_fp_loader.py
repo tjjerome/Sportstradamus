@@ -261,7 +261,7 @@ def derive_comp_metrics(profile: pd.DataFrame) -> pd.DataFrame:
     # ``SEP SCORE`` column (canonicalized + auto-suffixed).
     route_sep_cols = [c for c in profile.columns if c.startswith("rec_sep_route_SEP_SCORE")]
     qb_man = profile.get("qb_cov_QB_MAN_pct")
-    tm_man = profile.get("tm_cov_off_MAN_pct")
+    tm_man = profile.get("off_faced_man_pct")
     rush_success = profile.get("rush_adv_Success_pct")
     exp_run = profile.get("rush_adv_EXP_RUN_pct")
     bell_att = profile.get("rush_bellcow_ATT_pct")

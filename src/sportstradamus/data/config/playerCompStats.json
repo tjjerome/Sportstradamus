@@ -258,7 +258,7 @@
             "rec_routes_WIDE_RTE_pct": 1.2,
             "rec_routes_SLOT_RTE_pct": 2.8,
             "rec_adv_aDOT": 6.0,
-            "tm_cov_off_MAN_pct": 0.5,
+            "off_faced_man_pct": 0.5,
             "eff_FP_G": 2.8
         },
         "TE": {
@@ -273,7 +273,7 @@
             "rec_routes_SLOT_RTE_pct": 1.0,
             "rec_adv_DRP_pct": 1.0,
             "off_snaps_Snap_pct": 1.0,
-            "tm_cov_off_ZONE_pct": 1.0,
+            "off_faced_zone_pct": 1.0,
             "block_pct_proxy": 1.0
         }
     },

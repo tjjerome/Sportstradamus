@@ -37,6 +37,7 @@ a ``target_game_date`` was passed.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -45,7 +46,7 @@ import pandas as pd
 
 from sportstradamus.helpers.text import remove_accents
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import nfl_fp_weekly
+from sportstradamus.stats import nfl_fp_team_weekly_aggregate, nfl_fp_weekly
 from sportstradamus.stats.nfl_fp_aggregation import (
     PLAYER_GROUP_COL,
     game_mean,
@@ -442,6 +443,14 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
             "playerStatsGamesPlayed",
         ),
     ),
+    # offense_snaps -- raw offensive snap total; denominator for the
+    # TE ``block_pct_proxy`` derivation in ``_derive_aggregate_metrics``.
+    _Recipe(
+        "off_snaps_TOTAL",
+        "offense_snaps",
+        "sum",
+        ("playerStatsSnapsOffenseTotal",),
+    ),
     # efficiency -- WR / RB fantasy efficiency
     _Recipe(
         "eff_FP_G",
@@ -470,9 +479,39 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
 # routes file. Aggregating per (player, route_bucket) and meaning the
 # SEP_SCORE across routes gives the per-player ``rec_sep_route_SEP_SCORE``
 # family the season CSV exposes as ``.0`` ... ``.6`` auto-suffixed cols.
+# The FP weekly parquet packs route-stratified SEP data inside the
+# JSON-encoded ``bucket`` column rather than top-level fields; the
+# parser below mirrors Phase 2's ``_rpr_bucket_pass_rate`` shape
+# (`stats/nfl_fp_team_weekly_aggregate.py`).
 _SEP_BY_ROUTES_KIND = "receiving_separation_by_routes"
-_SEP_BY_ROUTES_VALUE_COL = "playerStatsReceivingSeparationByScoreStep"
-_SEP_BY_ROUTES_WEIGHT_COL = "playerStatsReceivingSeparationRoutesTotal"
+_SEP_BY_ROUTES_VALUE_KEY = "playerStatsReceivingSeparationScorePercentage"
+_SEP_BY_ROUTES_WEIGHT_KEY = "playerStatsReceivingSeparationRoutesTotal"
+
+# Canonical route-bucket order for the ``rec_sep_route_SEP_SCORE`` positional
+# suffix. The season-CSV publishes these columns left-to-right in the order
+# below (``Overall`` first per FP's convention, then the per-route slices in
+# the order the original CSV header carried them). Pinning the order here
+# instead of falling back to ``sorted()`` keeps the ``.0`` / ``.1`` / ``.N``
+# pairing stable across runs AND across the season-CSV / weekly-parquet
+# paths, so any future consumer that references a specific suffix sees the
+# same route in both. Unknown route keys observed in the JSON but absent
+# from this tuple still get a suffix (appended in observation order) -- a
+# new route bucket adds a column rather than silently dropping data.
+_ROUTE_BUCKET_ORDER: tuple[str, ...] = (
+    "bucketReceivingSeparationRouteOverall",
+    "bucketReceivingSeparationRouteSlant",
+    "bucketReceivingSeparationRouteOut",
+    "bucketReceivingSeparationRouteInDig",
+    "bucketReceivingSeparationRouteHitch",
+    "bucketReceivingSeparationRouteComeback",
+    "bucketReceivingSeparationRouteCorner",
+    "bucketReceivingSeparationRoutePost",
+    "bucketReceivingSeparationRouteGo",
+    "bucketReceivingSeparationRouteCrossers",
+    "bucketReceivingSeparationRouteFlat",
+    "bucketReceivingSeparationRouteScreens",
+    "bucketReceivingSeparationRouteBackfield",
+)
 
 # Metadata cols carried straight through (filtered, not aggregated). One
 # representative row per player is sufficient since these don't change
@@ -587,6 +626,7 @@ def load_multi_window_one_year(
         by_player_id.loc[by_player_id["POS"].isin(_RB_ROLE_ALIASES), "POS"] = "RB"
         by_player_id = by_player_id.loc[by_player_id["POS"].isin(_COMP_POSITIONS)]
     by_player_id = by_player_id.rename(columns={"POS": "position", "G": "player_game_count"})
+    by_player_id = _broadcast_team_coverage(by_player_id, windows)
     by_player_id = derive_comp_metrics(by_player_id)
 
     target_season = max(w[0] for w in windows)
@@ -596,6 +636,48 @@ def load_multi_window_one_year(
 
     by_player_id = _join_nfl_players(by_player_id)
     return by_player_id
+
+
+def _broadcast_team_coverage(
+    profile: pd.DataFrame, windows: Sequence[tuple[int, int, int]]
+) -> pd.DataFrame:
+    """Project the team-grain ``off_faced_{man,zone}_pct`` rates onto every player row.
+
+    The KNN comp config (``data/config/playerCompStats.json``) weights WR
+    on ``off_faced_man_pct`` and TE on ``off_faced_zone_pct`` -- the share
+    of own-team dropbacks the player's offense faces vs each coverage
+    shell. These rates exist only at team grain in the FP weekly drop;
+    the player-comp profile broadcasts them onto each player via the
+    player's ``Team`` so the KNN distance metric can see them.
+
+    Uses the Pattern-A-only entry point on the team bridge to avoid
+    pulling matchup-specific ``lm_*`` columns (Pattern B) into the
+    comp profile -- those are forecasts for a specific game, not
+    season-to-date features.
+
+    Args:
+        profile: Per-player wide frame indexed by accent-stripped name
+            with a ``Team`` column carrying the player's team abbreviation.
+        windows: Same ``(season, start_week, end_week)`` tuples the
+            recipe aggregation pooled, so the broadcast rate aligns
+            with the rest of the player's season-to-date features.
+
+    Returns:
+        ``profile`` with two columns added (or left NaN-filled): the
+        ``off_faced_man_pct`` and ``off_faced_zone_pct`` values for
+        each player's team. Missing-team rows are NaN.
+    """
+    if profile.empty or "Team" not in profile.columns:
+        return profile
+    team_features = nfl_fp_team_weekly_aggregate.load_pattern_a_team_features(windows)
+    if team_features.empty:
+        return profile
+    keep_cols = [c for c in ("off_faced_man_pct", "off_faced_zone_pct") if c in team_features.columns]
+    if not keep_cols:
+        return profile
+    return profile.merge(
+        team_features[keep_cols], left_on="Team", right_index=True, how="left"
+    )
 
 
 def _aggregate_recipes(windows: Sequence[tuple[int, int, int]]) -> pd.DataFrame:
@@ -672,42 +754,82 @@ def _aggregate_separation_by_routes(
 
     The season CSV publishes per-route SEP buckets as
     ``rec_sep_route_SEP_SCORE``, ``.1``, ``.2`` ... ``.N`` auto-suffixed
-    columns. The weekly parquet stratifies routes via the ``bucket``
-    column; this helper pivots them so the downstream
-    ``derive_comp_metrics`` per-route mean
-    (``sep_routes_mean = mean(rec_sep_route_SEP_SCORE*)``) yields the
-    same number as the season-CSV path. Pools per-game rows across every
-    window before pivoting -- a player with games in two seasons gets
-    one per-bucket aggregate.
+    columns. The FP weekly parquet packs the route-stratified SEP data
+    inside the JSON-encoded ``bucket`` column (one game row carries one
+    JSON cell mapping route names to per-route stat dicts) rather than
+    exposing it as top-level fields. This helper parses the JSON cell-
+    by-cell, explodes one long-form row per (player, game, route_bucket),
+    then computes the volume-weighted mean per (player, route_bucket)
+    across every pooled window before pivoting wide. A player with
+    games in two seasons gets one per-bucket aggregate -- the "blend"
+    semantics the Phase-1.5 pre-cutoff rule asks for.
+
+    Sparse-by-design: each game's JSON only carries route buckets the
+    player actually ran. Empty-stats buckets (missing
+    ``playerStatsReceivingSeparationScorePercentage``) are skipped at
+    row explosion time, leaving the wide-pivot column NaN.
     """
     df = _load_kind_multi(windows, _SEP_BY_ROUTES_KIND)
-    if df.empty:
-        return pd.DataFrame()
-    if "bucket" not in df.columns or _SEP_BY_ROUTES_VALUE_COL not in df.columns:
+    if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
 
-    work = df.dropna(subset=["bucket", _SEP_BY_ROUTES_VALUE_COL])
+    long_rows: list[dict[str, object]] = []
+    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
+        if not isinstance(bucket_str, str) or not bucket_str:
+            continue
+        try:
+            payload = json.loads(bucket_str)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for route_key, route_payload in payload.items():
+            if not isinstance(route_payload, dict):
+                continue
+            value = route_payload.get(_SEP_BY_ROUTES_VALUE_KEY)
+            weight = route_payload.get(_SEP_BY_ROUTES_WEIGHT_KEY)
+            if value is None or weight is None:
+                continue
+            long_rows.append(
+                {
+                    PLAYER_GROUP_COL: player_id,
+                    "route_bucket": route_key,
+                    "value": value,
+                    "weight": weight,
+                }
+            )
+    if not long_rows:
+        return pd.DataFrame()
+
+    work = pd.DataFrame(long_rows)
+    work["value"] = pd.to_numeric(work["value"], errors="coerce")
+    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
+    work = work.dropna(subset=["value", "weight"])
     if work.empty:
         return pd.DataFrame()
 
-    grouped = work.groupby([PLAYER_GROUP_COL, "bucket"], dropna=False)
+    grouped = work.groupby([PLAYER_GROUP_COL, "route_bucket"], dropna=False)
     weighted_num = grouped.apply(
-        lambda g: (g[_SEP_BY_ROUTES_VALUE_COL] * g[_SEP_BY_ROUTES_WEIGHT_COL]).sum(
-            min_count=1
-        ),
+        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
         include_groups=False,
     )
-    weighted_den = grouped[_SEP_BY_ROUTES_WEIGHT_COL].sum(min_count=1)
+    weighted_den = grouped["weight"].sum(min_count=1)
     per_bucket = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
-    wide = per_bucket.unstack("bucket")
+    wide = per_bucket.unstack("route_bucket")
     if wide.empty:
         return wide
 
-    # Match the season-CSV's ``.0``, ``.1`` ... ``.N`` auto-suffix scheme:
-    # first bucket gets no suffix, subsequent buckets ``.1`` ``.2`` ...
-    columns = list(wide.columns)
-    rename: dict[object, str] = {columns[0]: "rec_sep_route_SEP_SCORE"}
-    for i, bucket in enumerate(columns[1:], start=1):
+    # Match the season-CSV's ``.0``, ``.1`` ... ``.N`` auto-suffix scheme.
+    # Order by ``_ROUTE_BUCKET_ORDER`` first so suffix N maps to the same
+    # route both here and in the legacy season-CSV path. Unknown route keys
+    # (not in the canonical tuple) append after, in observation order, so
+    # a new route bucket grows the family rather than silently dropping data.
+    known = [b for b in _ROUTE_BUCKET_ORDER if b in wide.columns]
+    unknown = [b for b in wide.columns if b not in _ROUTE_BUCKET_ORDER]
+    ordered = known + unknown
+    wide = wide.reindex(ordered, axis=1)
+    rename: dict[object, str] = {ordered[0]: "rec_sep_route_SEP_SCORE"}
+    for i, bucket in enumerate(ordered[1:], start=1):
         rename[bucket] = f"rec_sep_route_SEP_SCORE.{i}"
     return wide.rename(columns=rename)
 
@@ -847,6 +969,21 @@ def _derive_aggregate_metrics(profile: pd.DataFrame) -> pd.DataFrame:
         # FP weekly doesn't expose an equivalent of the FP-season-CSV
         # "COV GRADE"; leave NaN and the downstream fillna(0) absorbs it.
         profile["qb_cov_COV_GRADE"] = np.nan
+
+    # TE block-pct proxy: pass snaps the player did NOT run a route on,
+    # normalized by total offensive snaps. The legacy season-CSV path
+    # at ``nfl_pbp_agg._te_block_pct_proxy`` computed the same ratio
+    # from two CSVs that the FP weekly drop replaced; keeping the
+    # ``block_pct_proxy`` name preserves the rolling-mean transform in
+    # ``nfl_fp_loader.TRANSFORM_FEATURES`` (otherwise the comp config
+    # weight on this column would NaN out on every TE row).
+    snaps = profile.get("off_snaps_TOTAL")
+    routes = profile.get("rec_adv_RTE")
+    if snaps is not None and routes is not None:
+        diff = (snaps - routes.fillna(0)).clip(lower=0)
+        profile["block_pct_proxy"] = diff.divide(snaps).where(
+            snaps > 0, other=np.nan
+        )
 
     return profile
 
