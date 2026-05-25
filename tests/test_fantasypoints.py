@@ -781,6 +781,96 @@ def test_cli_import_curl_rejects_duplicate_name(tmp_path):
     )
     assert result.exit_code != 0
     assert "already exists" in result.output
+    assert "--replace" in result.output
+
+
+def test_cli_import_curl_replace_overwrites_body_and_sentinelises_season(tmp_path):
+    """``--replace`` swaps the body in place and rewrites the literal season.
+
+    Use case: a discover-generated body returns 0 rows because the SPA
+    injects per-tool position + qualifier filters. The user pastes the
+    working curl and uses ``--replace`` to overlay the correct body
+    onto the existing entry — output_subdir is preserved, the literal
+    ``game.season.eq: 2025`` becomes the int sentinel so the entry
+    stays usable for any season.
+    """
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="player_passing_advanced",
+                url="https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-advanced/values",
+                method="POST",
+                json_body={"context": {"filterMatch": {}}, "useCache": True},
+                output_subdir="player/passing_advanced",
+            ),
+        ],
+        catalog_path,
+    )
+    curl_path = tmp_path / "passing_advanced.curl"
+    # Real working curl body with position + qualifiers + literal 2025 season.
+    curl_path.write_text(
+        "curl 'https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-advanced/values' "
+        "-X POST "
+        '--data-raw \'{"context":{"tableProperty":"passingAdvanced",'
+        '"filterMatch":{"isGamePlayed":{"eq":true},"game.season":{"eq":2025},'
+        '"player.position":{"in":["QB"]}},'
+        '"filterResult":{"playerStats.passing.dropbacks.total":{"gte":1}}},'
+        '"useCache":true}\''
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "import-curl",
+            str(curl_path),
+            "--name",
+            "player_passing_advanced",
+            "--replace",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Replaced" in result.output
+    catalog = load_catalog(catalog_path)
+    assert len(catalog) == 1
+    spec = catalog[0]
+    # output_subdir preserved from the original entry.
+    assert spec.output_subdir == "player/passing_advanced"
+    # New body landed.
+    fm = spec.json_body["context"]["filterMatch"]
+    assert fm["player.position"] == {"in": ["QB"]}
+    # Season rewritten to the sentinel that body_substitute consumes.
+    assert fm["game.season"] == {"eq": "__SEASON_INT__"}
+    # Other filterMatch keys preserved untouched.
+    assert fm["isGamePlayed"] == {"eq": True}
+    # filterResult qualifier carried over.
+    assert spec.json_body["context"]["filterResult"] == {
+        "playerStats.passing.dropbacks.total": {"gte": 1}
+    }
+
+
+def test_cli_import_curl_replace_errors_on_missing_name(tmp_path):
+    """``--replace`` without an existing name and no --output-subdir is an error."""
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog([], catalog_path)
+    curl_path = tmp_path / "snippet.curl"
+    curl_path.write_text("curl 'https://x/' -X POST")
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "import-curl",
+            str(curl_path),
+            "--name",
+            "never_existed",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--output-subdir" in result.output
 
 
 def _registry_sample() -> dict:
