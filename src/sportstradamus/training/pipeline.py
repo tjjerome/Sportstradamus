@@ -588,7 +588,16 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
         ``B_validation``, ``y_train_labels``.
     """
     y = M[["Result"]]
-    X = M[stat_data.get_stat_columns(market)]
+    # ``reindex`` over ``M[cols]`` so a stale cached parquet that hasn't been
+    # regenerated since the last ``feature_filter.json`` schema addition fills
+    # the new columns with NaN instead of raising KeyError. LightGBM treats
+    # NaN as a missing-value category deterministically, so the deterministic
+    # gate (``test_deterministic_mode_hurdle_is_bit_reproducible_*``) remains
+    # bit-reproducible when running against an older cache. Production
+    # non-``--deterministic`` runs rebuild new_M with the current schema and
+    # concat-fill old cached rows the same way, so behavior is identical on
+    # the happy path.
+    X = M.reindex(columns=stat_data.get_stat_columns(market))
 
     categories = ["Home", "Player position"]
     if "Player position" not in X.columns:

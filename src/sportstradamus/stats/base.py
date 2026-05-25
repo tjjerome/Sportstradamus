@@ -195,6 +195,18 @@ class Stats:
         with open(filepath, "w") as f:
             json.dump(self.comps, f, indent=4)
 
+    def _join_fp_team_features(self, date) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        """League hook: return ``(team_features, defense_features)`` for ``date``.
+
+        Default no-op returns ``(None, None)``. Override on a league subclass
+        to plug an external team-grain data source into ``teamProfile`` /
+        ``defenseProfile``. The frames must be indexed by the same key the
+        gamelog uses for the team / opponent columns (abbreviation for NFL).
+        ``base_profile`` join-left-merges them after the existing teamlog
+        aggregation so absent teams degrade to NaN-then-zero downstream.
+        """
+        return None, None
+
     @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
         if isinstance(date, str):
@@ -306,12 +318,24 @@ class Stats:
         _team_last10 = self.short_teamlog.groupby(_team_col).tail(10)
         teamstats = _team_last10.groupby(_team_last10[_team_col])[team_stat_types].mean()
 
+        # League hook: per-league augmentation of teamstats / defenseProfile with
+        # external-data-source features (e.g. NFL FP team-grain weekly snapshots).
+        # Default no-op returns ``None``; NFL overrides return abbreviation-indexed
+        # ``(team_features, defense_features)`` frames merged in below.
+        fp_team_features, fp_defense_features = self._join_fp_team_features(date)
+        if fp_team_features is not None and not fp_team_features.empty:
+            teamstats = teamstats.join(fp_team_features, how="left")
+
         self.defenseProfile = (
             self.defenseProfile.join(teamstats, how="right").fillna(0).infer_objects(copy=False)
         )
         self.defenseProfile.index.name = self.log_strings["opponent"]
+        if fp_defense_features is not None and not fp_defense_features.empty:
+            self.defenseProfile = self.defenseProfile.join(
+                fp_defense_features, how="left"
+            ).fillna(0).infer_objects(copy=False)
 
-        self.teamProfile = teamstats[team_stat_types]
+        self.teamProfile = teamstats
 
         self.playerProfile = (
             self.playerProfile.join(playerstats, how="right").fillna(0).infer_objects(copy=False)
