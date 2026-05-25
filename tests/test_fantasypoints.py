@@ -1869,7 +1869,8 @@ def test_parquet_path_s2d_mode_adds_s2d_suffix(monkeypatch, tmp_path):
     assert p.name == "passing_basic_s2d.parquet"
 
 
-def test_parquet_path_postseason_mode_adds_post_suffix(monkeypatch, tmp_path):
+def test_parquet_path_postseason_mode_uses_continuation_week_folder(monkeypatch, tmp_path):
+    """Postseason rounds 1-4 map to folder weeks 19-22; no filename suffix."""
     from sportstradamus.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
@@ -1877,7 +1878,19 @@ def test_parquet_path_postseason_mode_adds_post_suffix(monkeypatch, tmp_path):
     p = parquet_path_for_spec(
         _spec("opponent_coverage_matrix"), season=2023, week=3, mode="postseason"
     )
-    assert p.name == "coverage_matrix_opp_post.parquet"
+    assert p.name == "coverage_matrix_opp.parquet"
+    assert p.parent.name == "week_21"
+
+
+def test_parquet_path_postseason_mode_round_one_is_week_19(monkeypatch, tmp_path):
+    """Wildcard round (postseason week 1) writes to ``week_19/`` folder."""
+    from sportstradamus.fantasypoints import transform as tm
+
+    monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
+    monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
+    p = parquet_path_for_spec(_spec("player_passing_basic"), season=2023, week=1, mode="postseason")
+    assert p.name == "passing_basic.parquet"
+    assert p.parent.name == "week_19"
 
 
 def test_parquet_path_rejects_unknown_mode(monkeypatch, tmp_path):
