@@ -80,8 +80,8 @@ NFL_REGULAR_SEASON_WEEKS = 18
 # 2 s default. Randomised inside each range to avoid a regular drumbeat.
 # Between endpoints in the same week: 10–20 s. Between weeks (a longer
 # pause that mimics a human switching tools and scrolling): 30–90 s.
-_BACKFILL_REQUEST_PAUSE_S: tuple[float, float] = (10.0, 20.0)
-_BACKFILL_WEEK_PAUSE_S: tuple[float, float] = (30.0, 90.0)
+_BACKFILL_REQUEST_PAUSE_S: tuple[float, float] = (2.0, 8.0)
+_BACKFILL_WEEK_PAUSE_S: tuple[float, float] = (8.0, 28.0)
 
 # A "NFL season" labelled by year Y starts in September of year Y.
 # Before July we're still in the prior year's playoff/offseason tail.
@@ -136,6 +136,10 @@ _TOKEN_PREVIEW_CHARS = 24
 # effective retry count in production is 1.
 _AUTH_MAX_ATTEMPTS = 2
 
+# Width of the separator bar printed on auth-refresh prompts — purely
+# cosmetic, but extracted so it doesn't look like a meaningful threshold.
+_AUTH_PROMPT_SEPARATOR_WIDTH = 60
+
 
 @click.group()
 def fp_fetch():
@@ -156,6 +160,14 @@ def fp_fetch():
 )
 @click.option("--dry-run", is_flag=True, help="Print resolved URLs and parquet paths only.")
 @click.option(
+    "--no-cache",
+    "no_cache",
+    is_flag=True,
+    help="Flip ``useCache`` to ``False`` on every v2 body — bypasses FP's "
+    "server-side result cache. Use when a previous broken-body run may have "
+    "cached an empty result under the same query hash.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -167,7 +179,7 @@ def fp_fetch():
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
 )
-def run(season, week, only, mode, dry_run, catalog_path, log_level) -> None:
+def run(season, week, only, mode, dry_run, no_cache, catalog_path, log_level) -> None:
     """Walk the catalog, fetch every endpoint, write one parquet per tool.
 
     Player-context entries land in
@@ -208,12 +220,20 @@ def run(season, week, only, mode, dry_run, catalog_path, log_level) -> None:
     results: list[_RunResult] = []
     for spec in tqdm(specs, desc="fp-fetch", unit="endpoint"):
         results.append(
-            _fetch_and_write_one(spec, client, season=season, week=week, mode=mode, log=log)
+            _fetch_and_write_one(
+                spec,
+                client,
+                season=season,
+                week=week,
+                mode=mode,
+                log=log,
+                use_cache=not no_cache,
+            )
         )
     report_path = _write_run_report(
         results,
         command="run",
-        extra={"season": season, "week": week, "mode": mode},
+        extra={"season": season, "week": week, "mode": mode, "use_cache": not no_cache},
     )
     failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
     click.echo("", err=True)
@@ -287,6 +307,12 @@ def run(season, week, only, mode, dry_run, catalog_path, log_level) -> None:
     help="Same modes as ``fp-fetch run``. Applies to every (season, week) cell.",
 )
 @click.option(
+    "--no-cache",
+    "no_cache",
+    is_flag=True,
+    help="Same as ``fp-fetch run --no-cache`` — bypass FP's server-side cache.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -309,6 +335,7 @@ def backfill(
     week_pause_min,
     week_pause_max,
     mode,
+    no_cache,
     catalog_path,
     log_level,
 ) -> None:
@@ -361,7 +388,13 @@ def backfill(
                     )
                     results.append(
                         _fetch_and_write_one(
-                            spec, client, season=season, week=week, mode=mode, log=log
+                            spec,
+                            client,
+                            season=season,
+                            week=week,
+                            mode=mode,
+                            log=log,
+                            use_cache=not no_cache,
                         )
                     )
                     prev_week_key = week_key
@@ -369,7 +402,12 @@ def backfill(
     report_path = _write_run_report(
         results,
         command="backfill",
-        extra={"seasons": list(seasons), "weeks": list(weeks), "mode": mode},
+        extra={
+            "seasons": list(seasons),
+            "weeks": list(weeks),
+            "mode": mode,
+            "use_cache": not no_cache,
+        },
     )
     failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
     click.echo("", err=True)
@@ -839,6 +877,7 @@ def _fetch_and_write_one(
     week: int,
     log: logging.Logger,
     mode: Mode = DEFAULT_MODE,
+    use_cache: bool = True,
 ) -> _RunResult:
     """Fetch one endpoint, parse to DataFrame, write parquet, return outcome.
 
@@ -854,6 +893,8 @@ def _fetch_and_write_one(
         if legacy_body is not None
         else None
     )
+    if not use_cache and isinstance(rendered_body, dict) and "useCache" in rendered_body:
+        rendered_body["useCache"] = False
     base_result = _RunResult(
         name=spec.name,
         url=rendered_url,
@@ -873,7 +914,7 @@ def _fetch_and_write_one(
         base_result.error_message = str(exc)
         return base_result
     body, err = _dispatch_capturing_errors(
-        spec, client, season=season, week=week, mode=mode, log=log
+        spec, client, season=season, week=week, mode=mode, log=log, use_cache=use_cache
     )
     if err is not None:
         click.echo(f"  {spec.name}: {err['error_message']}", err=True)
@@ -889,6 +930,12 @@ def _fetch_and_write_one(
     base_result.rows = len(df)
     base_result.status = _RESULT_EMPTY if df.empty else _RESULT_OK
     if df.empty:
+        # Capture a truncated preview of FP's response so the user can
+        # diff against a working browser curl. The empty-rows case
+        # ("filters too restrictive" vs. "different response shape" vs.
+        # "cached empty from a previous bad query") is invisible without
+        # this — we'd otherwise know only that 0 rows came back.
+        base_result.response_preview = _truncate_for_preview(body)
         log.warning(
             "empty response — writing empty parquet anyway",
             extra={"endpoint": spec.name, "season": season, "week": week, "path": str(target)},
@@ -942,6 +989,7 @@ def _dispatch_capturing_errors(
     week: int,
     log: logging.Logger,
     mode: Mode = DEFAULT_MODE,
+    use_cache: bool = True,
 ) -> tuple[Any | None, dict[str, Any] | None]:
     """Dispatch with auth-refresh; return ``(body, None)`` or ``(None, err_dict)``.
 
@@ -953,7 +1001,10 @@ def _dispatch_capturing_errors(
     """
     for attempt in range(1, _AUTH_MAX_ATTEMPTS + 1):
         try:
-            return _dispatch(client, spec, season=season, week=week, mode=mode), None
+            return (
+                _dispatch(client, spec, season=season, week=week, mode=mode, use_cache=use_cache),
+                None,
+            )
         except FantasyPointsAuthError as exc:
             log.warning(
                 "auth error",
@@ -965,6 +1016,20 @@ def _dispatch_capturing_errors(
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
             return None, _exc_to_err_dict(exc)
     return None, {"error_class": "Unknown", "error_message": "retries exhausted"}
+
+
+def _truncate_for_preview(body: Any) -> str:
+    """JSON-encode ``body`` and truncate to ``_REPORT_PREVIEW_CHARS``.
+
+    Used on the empty-rows path so the report carries enough of FP's
+    actual response to tell apart "filters too restrictive" (rows: [])
+    from "different response shape" from "cached empty result".
+    """
+    try:
+        text = json.dumps(body, default=str)
+    except (TypeError, ValueError):
+        text = repr(body)
+    return text[:_REPORT_PREVIEW_CHARS]
 
 
 def _exc_to_err_dict(exc: BaseException) -> dict[str, Any]:
@@ -992,10 +1057,10 @@ def _refresh_auth_interactively(client: FantasyPointsClient) -> bool:
     if not sys.stdin.isatty():
         return False
     click.echo("", err=True)
-    click.echo("=" * 60, err=True)
+    click.echo("=" * _AUTH_PROMPT_SEPARATOR_WIDTH, err=True)
     click.echo("Authorization expired.", err=True)
     click.echo("Paste a fresh DevTools curl below, then send EOF (Ctrl+D):", err=True)
-    click.echo("=" * 60, err=True)
+    click.echo("=" * _AUTH_PROMPT_SEPARATOR_WIDTH, err=True)
     try:
         curl_text = sys.stdin.read()
     except KeyboardInterrupt:
@@ -1029,6 +1094,7 @@ def _dispatch(
     season: int,
     week: int,
     mode: Mode = DEFAULT_MODE,
+    use_cache: bool = True,
 ) -> dict | list | str | bytes:
     """Call the right verb on the client for one endpoint spec.
 
@@ -1038,6 +1104,11 @@ def _dispatch(
     discover-generated entries — int sentinels and the per-mode
     ``context.weeks`` rewrite). The two are independent: bodies that
     use one shape are pass-through under the other.
+
+    When ``use_cache=False``, the top-level ``useCache`` field on a v2
+    body is flipped to ``False`` so FP recomputes instead of returning
+    a cached response (used to diagnose stale empty-result caches from
+    earlier broken queries).
     """
     params = spec.render_params(season=season, week=week)
     # Map catalog response_format to the client's accept token.
@@ -1052,6 +1123,8 @@ def _dispatch(
         json_body = spec.render_json_body(season=season, week=week)
         if json_body is not None:
             json_body = substitute_runtime(json_body, season=season, week=week, mode=mode)
+            if not use_cache and isinstance(json_body, dict) and "useCache" in json_body:
+                json_body["useCache"] = False
         return client.post(
             spec.url,
             json_body=json_body,

@@ -937,6 +937,41 @@ def test_parse_table_response_empty_on_missing_paths():
     assert parse_table_response({"content": {"table": {"rows": {"values": []}}}}).empty
 
 
+def test_parse_table_response_handles_v2_values_shape_without_table_wrapper():
+    """v2 ``/values`` endpoints return ``content.rows.values`` directly.
+
+    Symptom on regression: parquets land at the right path but every
+    file is 1 KB with 0 rows because the parser looks at
+    ``content.table.rows`` (the legacy shape).
+    """
+    payload = {
+        "content": {
+            "rows": {
+                "count": 2,
+                "values": [
+                    {"playerFirstName": "Patrick", "gameWeek": 5, "passingYards": 312},
+                    {"playerFirstName": "Josh", "gameWeek": 5, "passingYards": 287},
+                ],
+            }
+        }
+    }
+    df = parse_table_response(payload)
+    assert len(df) == 2
+    assert list(df["passingYards"]) == [312, 287]
+
+
+def test_parse_table_response_prefers_v2_shape_when_both_present():
+    """If both shapes are present, the v2 one wins — that's what FP sends today."""
+    payload = {
+        "content": {
+            "rows": {"values": [{"id": "new"}]},
+            "table": {"rows": {"values": [{"id": "old"}]}},
+        }
+    }
+    df = parse_table_response(payload)
+    assert list(df["id"]) == ["new"]
+
+
 def _spec(name="x", url="https://example/", output_subdir="x/x") -> EndpointSpec:
     return EndpointSpec(name=name, url=url, output_subdir=output_subdir)
 
