@@ -472,6 +472,147 @@ def test_cli_run_writes_parquet_via_post(monkeypatch, tmp_path):
     assert set(df["teamAbbreviation"]) == {"BAL", "DEN"}
 
 
+def test_cli_run_skips_when_nonempty_parquet_already_on_disk(monkeypatch, tmp_path):
+    """Default behavior: don't re-fetch a cell that already has rows.
+
+    Lets a half-finished backfill resume cheaply — and a regular `run`
+    re-execute after a partial failure without paying for the calls
+    that succeeded the first time.
+    """
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
+                method="POST",
+                json_body={"context": {"week": "{week}"}, "useCache": True},
+                output_subdir="team/line_matchups",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    # Plant a non-empty parquet at the cell's expected path.
+    target = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"teamAbbreviation": ["BAL", "DEN"]}).to_parquet(target, index=False)
+    call_count = {"n": 0}
+
+    def fail_if_called(*_args, **_kwargs):
+        call_count["n"] += 1
+        raise AssertionError("HTTP must not be called when a non-empty parquet exists")
+
+    monkeypatch.setattr(client_mod.requests, "request", fail_if_called)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["run", "--season", "2025", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code == 0, result.output
+    assert call_count["n"] == 0
+    assert "skip" in result.output.lower()
+    # Parquet untouched — same two rows we wrote.
+    df = pd.read_parquet(target)
+    assert set(df["teamAbbreviation"]) == {"BAL", "DEN"}
+
+
+def test_cli_run_refetch_flag_overrides_skip(monkeypatch, tmp_path):
+    """``--refetch`` ignores the on-disk parquet and re-fetches anyway."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
+                method="POST",
+                json_body={"context": {"week": "{week}"}, "useCache": True},
+                output_subdir="team/line_matchups",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    target = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"teamAbbreviation": ["OLD"]}).to_parquet(target, index=False)
+
+    def respond(*_args, **_kwargs):
+        return FakeResponse(
+            200,
+            body={"content": {"rows": {"values": [{"teamAbbreviation": "NEW", "gameWeek": 5}]}}},
+        )
+
+    monkeypatch.setattr(client_mod.requests, "request", respond)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        [
+            "run",
+            "--season",
+            "2025",
+            "--week",
+            "5",
+            "--refetch",
+            "--catalog",
+            str(catalog_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    df = pd.read_parquet(target)
+    assert list(df["teamAbbreviation"]) == ["NEW"]
+
+
+def test_cli_run_zero_row_parquet_does_not_skip(monkeypatch, tmp_path):
+    """A 0-row parquet (previous failed fetch) is treated as not-yet-fetched."""
+    from sportstradamus.fantasypoints import client as client_mod
+
+    _redirect_parquet_dirs(monkeypatch, tmp_path)
+    catalog_path = tmp_path / "catalog.json"
+    save_catalog(
+        [
+            EndpointSpec(
+                name="team_line_matchups",
+                url="https://data.fantasypoints.com/v2/ds/nfl/tools/team/line-matchups",
+                method="POST",
+                json_body={"context": {}},
+                output_subdir="team/line_matchups",
+            ),
+        ],
+        catalog_path,
+    )
+    monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
+    monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
+    target = tmp_path / "team_data" / "NFL" / "2025" / "week_05" / "line_matchups.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"teamAbbreviation": pd.Series(dtype="object")}).to_parquet(target, index=False)
+    assert pd.read_parquet(target).empty
+
+    def respond(*_args, **_kwargs):
+        return FakeResponse(
+            200,
+            body={"content": {"rows": {"values": [{"teamAbbreviation": "BAL"}]}}},
+        )
+
+    monkeypatch.setattr(client_mod.requests, "request", respond)
+    runner = CliRunner()
+    result = runner.invoke(
+        fp_fetch,
+        ["run", "--season", "2025", "--week", "5", "--catalog", str(catalog_path)],
+    )
+    assert result.exit_code == 0, result.output
+    df = pd.read_parquet(target)
+    assert list(df["teamAbbreviation"]) == ["BAL"]
+
+
 def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import client as client_mod
 
@@ -1481,7 +1622,7 @@ def test_cli_backfill_uses_week_pause_on_week_transition(monkeypatch, tmp_path):
     # 3 calls -> 2 pauses (none before the first). Both should be
     # week-transition pauses (each spec change is also a week change
     # since there's only one spec).
-    assert uniform_calls == [(30.0, 90.0), (30.0, 90.0)]
+    assert uniform_calls == [(8.0, 28.0), (8.0, 28.0)]
     assert len(sleep_calls) == 2
 
 

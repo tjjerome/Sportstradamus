@@ -78,8 +78,8 @@ NFL_REGULAR_SEASON_WEEKS = 18
 
 # Backfill pacing — overnight job, much more conservative than `run`'s
 # 2 s default. Randomised inside each range to avoid a regular drumbeat.
-# Between endpoints in the same week: 10–20 s. Between weeks (a longer
-# pause that mimics a human switching tools and scrolling): 30–90 s.
+# Between endpoints in the same week: 2–8 s. Between weeks (a longer
+# pause that mimics a human switching tools and scrolling): 8–28 s.
 _BACKFILL_REQUEST_PAUSE_S: tuple[float, float] = (2.0, 8.0)
 _BACKFILL_WEEK_PAUSE_S: tuple[float, float] = (8.0, 28.0)
 
@@ -168,6 +168,13 @@ def fp_fetch():
     "cached an empty result under the same query hash.",
 )
 @click.option(
+    "--refetch",
+    is_flag=True,
+    help="Re-download even if a non-empty parquet already exists for "
+    "this (spec, season, week, mode) cell. Default is to skip existing "
+    "non-empty files; zero-row parquets are always re-fetched.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -179,7 +186,7 @@ def fp_fetch():
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
     default="INFO",
 )
-def run(season, week, only, mode, dry_run, no_cache, catalog_path, log_level) -> None:
+def run(season, week, only, mode, dry_run, no_cache, refetch, catalog_path, log_level) -> None:
     """Walk the catalog, fetch every endpoint, write one parquet per tool.
 
     Player-context entries land in
@@ -213,8 +220,10 @@ def run(season, week, only, mode, dry_run, no_cache, catalog_path, log_level) ->
             try:
                 path = parquet_path_for_spec(spec, season=season, week=week, mode=mode)
             except ValueError as exc:
-                path = f"<unrouted: {exc}>"
-            click.echo(f"{spec.name}: {spec.method} {url} -> {path}")
+                click.echo(f"{spec.name}: {spec.method} {url} -> <unrouted: {exc}>")
+                continue
+            skip_marker = "  [SKIP]" if not refetch and _existing_parquet_rows(path) > 0 else ""
+            click.echo(f"{spec.name}: {spec.method} {url} -> {path}{skip_marker}")
         return
     client = FantasyPointsClient()
     results: list[_RunResult] = []
@@ -228,18 +237,26 @@ def run(season, week, only, mode, dry_run, no_cache, catalog_path, log_level) ->
                 mode=mode,
                 log=log,
                 use_cache=not no_cache,
+                refetch=refetch,
             )
         )
     report_path = _write_run_report(
         results,
         command="run",
-        extra={"season": season, "week": week, "mode": mode, "use_cache": not no_cache},
+        extra={
+            "season": season,
+            "week": week,
+            "mode": mode,
+            "use_cache": not no_cache,
+            "refetch": refetch,
+        },
     )
     failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
     click.echo("", err=True)
     click.echo(f"Report: {report_path}", err=True)
     click.echo(
         f"Summary: {sum(1 for r in results if r.status == _RESULT_OK)} ok, "
+        f"{sum(1 for r in results if r.status == _RESULT_SKIPPED)} skip, "
         f"{sum(1 for r in results if r.status == _RESULT_EMPTY)} empty, "
         f"{len(failures)} failed.",
         err=True,
@@ -313,6 +330,14 @@ def run(season, week, only, mode, dry_run, no_cache, catalog_path, log_level) ->
     help="Same as ``fp-fetch run --no-cache`` — bypass FP's server-side cache.",
 )
 @click.option(
+    "--refetch",
+    is_flag=True,
+    help="Re-download even if a non-empty parquet already exists for a "
+    "given (spec, season, week, mode) cell. Default is to skip — useful "
+    "for resuming a backfill that stopped midway. Zero-row parquets are "
+    "always re-fetched.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -336,14 +361,15 @@ def backfill(
     week_pause_max,
     mode,
     no_cache,
+    refetch,
     catalog_path,
     log_level,
 ) -> None:
     """Iterate (season × week) and write per-tool parquets for each.
 
     Designed for an overnight one-time grab. Pacing is conservative
-    by default: 10-20 s random pause between endpoints in the same
-    week, 30-90 s when transitioning to a new week. Override via the
+    by default: 2–8 s random pause between endpoints in the same
+    week, 8–28 s when transitioning to a new week. Override via the
     ``--request-pause-{min,max}`` / ``--week-pause-{min,max}`` flags
     if you need slower (or faster) traffic.
 
@@ -369,6 +395,9 @@ def backfill(
         return
     # Drive pacing from this orchestrator instead of the client so the
     # week-transition pause is visible alongside the per-spec pause.
+    # When ``--refetch`` is off and a cell already has a non-empty
+    # parquet, the pause is also skipped — resuming a half-finished
+    # backfill should be near-instant for the cells already on disk.
     client = FantasyPointsClient(inter_request_sleep_s=0)
     results: list[_RunResult] = []
     request_range = (request_pause_min, request_pause_max)
@@ -379,13 +408,15 @@ def backfill(
             for week in weeks:
                 week_key = (season, week)
                 for spec in specs:
-                    _backfill_pause(
-                        prev_week_key,
-                        week_key,
-                        request_range=request_range,
-                        week_range=week_range,
-                        log=log,
-                    )
+                    if not _would_skip(spec, season=season, week=week, mode=mode, refetch=refetch):
+                        _backfill_pause(
+                            prev_week_key,
+                            week_key,
+                            request_range=request_range,
+                            week_range=week_range,
+                            log=log,
+                        )
+                        prev_week_key = week_key
                     results.append(
                         _fetch_and_write_one(
                             spec,
@@ -395,9 +426,9 @@ def backfill(
                             mode=mode,
                             log=log,
                             use_cache=not no_cache,
+                            refetch=refetch,
                         )
                     )
-                    prev_week_key = week_key
                     bar.update(1)
     report_path = _write_run_report(
         results,
@@ -407,6 +438,7 @@ def backfill(
             "weeks": list(weeks),
             "mode": mode,
             "use_cache": not no_cache,
+            "refetch": refetch,
         },
     )
     failures = [r for r in results if r.status in (_RESULT_FETCH_FAILED, _RESULT_ROUTING_FAILED)]
@@ -414,6 +446,7 @@ def backfill(
     click.echo(f"Report: {report_path}", err=True)
     click.echo(
         f"Summary: {sum(1 for r in results if r.status == _RESULT_OK)} ok, "
+        f"{sum(1 for r in results if r.status == _RESULT_SKIPPED)} skip, "
         f"{sum(1 for r in results if r.status == _RESULT_EMPTY)} empty, "
         f"{len(failures)} failed.",
         err=True,
@@ -798,11 +831,14 @@ def _filter_by_name(specs: list[EndpointSpec], names: tuple[str, ...]) -> list[E
 # report summary. ``ok`` = wrote rows; ``empty`` = wrote a zero-row
 # parquet; ``fetch_failed`` = HTTP error / decode error / etc;
 # ``routing_failed`` = parquet_path_for_spec couldn't resolve a
-# context for the catalog entry.
+# context for the catalog entry; ``skipped`` = a non-empty parquet
+# already exists for this (spec, season, week, mode) cell and the
+# user didn't pass ``--refetch``.
 _RESULT_OK = "ok"
 _RESULT_EMPTY = "empty"
 _RESULT_FETCH_FAILED = "fetch_failed"
 _RESULT_ROUTING_FAILED = "routing_failed"
+_RESULT_SKIPPED = "skipped"
 
 # Body preview length in the failure report. Long enough to spot
 # HTML error pages, JSON error envelopes, or compressed binary blobs
@@ -853,6 +889,7 @@ def _write_run_report(
         _RESULT_EMPTY: sum(1 for r in results if r.status == _RESULT_EMPTY),
         _RESULT_FETCH_FAILED: sum(1 for r in results if r.status == _RESULT_FETCH_FAILED),
         _RESULT_ROUTING_FAILED: sum(1 for r in results if r.status == _RESULT_ROUTING_FAILED),
+        _RESULT_SKIPPED: sum(1 for r in results if r.status == _RESULT_SKIPPED),
     }
     payload: dict[str, Any] = {
         "command": command,
@@ -878,12 +915,20 @@ def _fetch_and_write_one(
     log: logging.Logger,
     mode: Mode = DEFAULT_MODE,
     use_cache: bool = True,
+    refetch: bool = False,
 ) -> _RunResult:
     """Fetch one endpoint, parse to DataFrame, write parquet, return outcome.
 
     Any failure (routing, fetch, decode) is captured into the returned
     :class:`_RunResult` so the outer loop can keep going and the
     report can show exactly what broke per spec.
+
+    When ``refetch=False`` (the default), a non-empty parquet already
+    on disk for the same ``(spec, season, week, mode)`` short-circuits
+    the network call — the file is treated as already-fetched and the
+    result is recorded as ``_RESULT_SKIPPED``. Zero-row parquets are
+    treated as failed downloads and re-fetched anyway. Pass
+    ``refetch=True`` to force a re-download regardless.
     """
     method = spec.method.upper()
     rendered_url = _build_url(spec.url, spec.render_params(season=season, week=week))
@@ -913,6 +958,18 @@ def _fetch_and_write_one(
         base_result.error_class = exc.__class__.__name__
         base_result.error_message = str(exc)
         return base_result
+    if not refetch:
+        existing_rows = _existing_parquet_rows(target)
+        if existing_rows > 0:
+            base_result.path = str(target)
+            base_result.rows = existing_rows
+            base_result.status = _RESULT_SKIPPED
+            click.echo(f"  {spec.name}: skip ({existing_rows} rows on disk)", err=True)
+            log.info(
+                "skip (already on disk)",
+                extra={"endpoint": spec.name, "path": str(target), "rows": existing_rows},
+            )
+            return base_result
     body, err = _dispatch_capturing_errors(
         spec, client, season=season, week=week, mode=mode, log=log, use_cache=use_cache
     )
@@ -1016,6 +1073,44 @@ def _dispatch_capturing_errors(
             log.error("fetch failed", extra={"endpoint": spec.name, "error": str(exc)})
             return None, _exc_to_err_dict(exc)
     return None, {"error_class": "Unknown", "error_message": "retries exhausted"}
+
+
+def _would_skip(spec: EndpointSpec, *, season: int, week: int, mode: Mode, refetch: bool) -> bool:
+    """Pre-check used by backfill to skip the pre-call pause for cached cells.
+
+    Returns ``True`` when a non-empty parquet is already on disk for
+    this ``(spec, season, week, mode)`` and the user hasn't asked for
+    a refetch — the loop then bypasses the request/week pause so
+    resuming a half-finished backfill is near-instant. Routing
+    failures fall through to ``_fetch_and_write_one`` where they get
+    their proper error path.
+    """
+    if refetch:
+        return False
+    try:
+        target = parquet_path_for_spec(spec, season=season, week=week, mode=mode)
+    except ValueError:
+        return False
+    return _existing_parquet_rows(target) > 0
+
+
+def _existing_parquet_rows(path: Path) -> int:
+    """Return the row count of an existing parquet, or 0 if missing / unreadable.
+
+    Reads only parquet metadata (microseconds per file), not the full
+    data, so this is cheap enough to call once per (spec, week) cell.
+    A 0 return means "treat as not yet fetched" — either the file
+    doesn't exist or it's a previous failed run that wrote a header
+    with no rows.
+    """
+    if not path.is_file():
+        return 0
+    try:
+        import pyarrow.parquet as pq
+
+        return pq.read_metadata(path).num_rows
+    except (OSError, ValueError):
+        return 0
 
 
 def _truncate_for_preview(body: Any) -> str:
