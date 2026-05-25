@@ -23,23 +23,32 @@ from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nfl_fp_loader, nfl_fp_weekly_aggregate
 from sportstradamus.stats.base import Stats, archive, clean_data
 
-# Phase-1.5 lookback rule: after week 4 of the target's season, the comp
-# pool is restricted to current-season weeks (no prior seasons). Pre-week-5
-# the prior 3 seasons are blended in to provide enough sample for the KNN.
-# Threshold encodes the user-confirmed cutoff; pulling it out as a constant
-# documents the rule rather than burying it as a magic literal inside
-# build_comp_profile.
+# Phase-1.5 lookback rule:
+#   - Post-week-4 (target_week >= 5) of the target's season: comp pool is
+#     restricted to current-season weeks 1..target_week-1 (no prior season).
+#     ~4 in-season games are more predictive of the next game than last
+#     year's full-season number for the same player.
+#   - Pre-week-5 (target_week 1..4): not enough current-season sample to
+#     stand alone, so the prior season's BACK HALF (weeks 11..18 -- last
+#     8 weeks of the regular season) is blended with any current-season
+#     games already played. The back-half-only choice trims early-season
+#     noise from the prior year on the assumption that late-season form
+#     is more representative of the player's current talent level.
+# These thresholds encode the operator-confirmed rule; the named constants
+# document the policy rather than burying it as a magic literal inside
+# build_comp_profile / _lookback_windows.
 COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK = 5
+COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK = 11
 
 # Default NFL regular-season length in weeks; the season-CSV path used 17
 # (pre-2021) / 18 (2021+). Phase-1.5 always reads the per-game weekly
 # snapshots, so 18 is the right ceiling for the comp lookback window.
 NFL_REGULAR_SEASON_WEEKS = 18
 
-# Number of prior NFL seasons blended into the pre-week-5 comp pool. Matches
-# the pre-Phase-1.5 ``range(year - 3, year + 1)`` window in
-# build_comp_profile, so the saved comps.json shape stays stable across
-# the migration.
+# Number of prior NFL seasons retained in the legacy (None-date) fallback
+# path. Only used when ``build_comp_profile`` is called without a
+# ``target_game_date`` -- the post-Phase-1.5 production path uses the
+# back-half rule above instead.
 COMP_PRIOR_SEASON_DEPTH = 3
 
 # Positions that actually accrue each market stat. Rows for other positions are
@@ -104,6 +113,24 @@ _TARGET_CAP: int = 20  # absolute single-player target ceiling per game
 # (~6 seasons). Keeping more than 6 seasons of NFL data inflates storage and
 # includes pre-analytics-era play-by-play that is noisier than modern data.
 _GAMELOG_RETENTION_DAYS: int = 2191  # 6 * 365 + 1 leap day
+
+# KNN comp-pool filtering thresholds. The percentile gate removes very
+# low-usage players who would pollute the nearest-neighbor set with
+# small-sample noise. The min-players guard avoids fitting a BallTree
+# with too few points to produce meaningful comps.
+_COMP_POOL_MIN_USAGE_PERCENTILE: float = 0.25  # bottom quartile filtered out
+_COMP_POOL_MIN_PLAYERS: int = 7  # skip position if fewer candidates survive filter
+
+# BallTree KNN comp count bounds. min_comps prevents degenerate 1-comp
+# matches; max_comps caps the neighborhood to avoid averaging over
+# players who are barely similar.
+_COMP_KNN_MIN: int = 5
+_COMP_KNN_MAX: int = 15
+
+# Volume-normalization scale-ratio clip bounds. Prevents runaway
+# adjustments when a player's projected mean is near zero.
+_VOLUME_SCALE_RATIO_FLOOR: float = 0.1
+_VOLUME_SCALE_RATIO_CAP: float = 10.0
 
 
 class StatsNFL(Stats):
@@ -1280,11 +1307,13 @@ class StatsNFL(Stats):
         features across the lookback window, then the most-recent row per
         player is selected for the downstream KNN join.
 
-        The lookback window enforces the operator's Phase-1.5 rule:
+        The lookback window enforces the operator's Phase-1.5 v2 rule:
         after week 4 of ``target_game_date``'s season the comp pool is
         current-season-only (no prior seasons blended in). Pre-week-5
-        the three prior seasons are blended to keep the KNN's sample size
-        usable. When ``target_game_date`` is None the function falls
+        the prior season's BACK HALF (weeks
+        ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..18``) is pooled with
+        any current-season games already played so the KNN has enough
+        sample. When ``target_game_date`` is None the function falls
         back to a full-season aggregate across the prior three seasons +
         the current season's complete window -- preserving the legacy
         contract for callers that haven't been migrated to per-game-date
@@ -1297,9 +1326,11 @@ class StatsNFL(Stats):
         Args:
             target_game_date: Date of the game the comp profile is being
                 built for. When provided, the lookback window cuts off
-                at ``target_week - 1`` of the corresponding season; when
-                ``None``, full-season aggregates land for the prior three
-                seasons + current season.
+                at ``target_week - 1`` of the corresponding season (post-
+                week-4: current season only; pre-week-5: prior-season
+                back half + current partial). When ``None``, full-season
+                aggregates land for the prior three seasons + current
+                season (legacy path).
 
         Returns:
             DataFrame indexed by accent-stripped player name with
@@ -1400,9 +1431,20 @@ class StatsNFL(Stats):
         Applies the Phase-1.5 lookback rule:
 
         * ``target_week is None`` -> legacy fallback. Load full-season
-          aggregates for the prior 3 seasons + current season.
-        * ``target_week < 5`` -> pre-cutoff. Same window as legacy plus
-          the current season's partial weeks through ``target_week - 1``.
+          aggregates for the prior 3 seasons + current season,
+          season-by-season, then rolling-transform + latest-row dedupe.
+          Per-season independent aggregation matches the pre-Phase-1.5
+          contract for callers (e.g. ``optimize_comp_weights``) that
+          haven't been migrated to per-game-date comp profiles yet.
+        * ``target_week < 5`` -> pre-cutoff. Prior season's back half
+          (weeks ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..18``) BLENDED
+          with the current season's partial weeks through
+          ``target_week - 1``. "Blended" here means a player's per-game
+          rows from BOTH seasons land in one aggregate row -- the
+          aggregator pools raw per-game data across windows before the
+          per-player groupby, so a player with 8 prior-back-half games
+          + 2 current-season games gets one 10-game aggregate (not
+          most-recent-season-wins).
         * ``target_week >= 5`` -> post-cutoff. Current season only,
           weeks ``1..target_week - 1``. Prior seasons drop out because
           ~4 in-season games are more predictive of the next game than
@@ -1412,10 +1454,34 @@ class StatsNFL(Stats):
         """
         target_season, target_week = cache_key
         windows = self._lookback_windows(target_season, target_week)
+        if target_week is None:
+            return self._compute_comp_profile_legacy(windows)
 
+        playerProfile = nfl_fp_weekly_aggregate.load_multi_window_one_year(windows)
+        if playerProfile.empty:
+            return playerProfile
+        playerProfile = playerProfile.copy()
+        playerProfile["season"] = target_season
+
+        if "Name" in playerProfile.columns:
+            playerProfile = playerProfile.assign(player=playerProfile["Name"])
+        return playerProfile
+
+    @staticmethod
+    def _compute_comp_profile_legacy(
+        windows: list[tuple[int, int, int]],
+    ) -> pd.DataFrame:
+        """Per-season aggregation + rolling-transform path used by the None-date fallback.
+
+        Preserves the pre-Phase-1.5 contract: aggregate each season
+        independently, stack, run ``apply_rolling_transforms`` for
+        cross-season smoothing, then keep the most-recent row per
+        player. Callers that pass a ``target_game_date`` route through
+        the pooled aggregator instead.
+        """
         per_year_frames: list[pd.DataFrame] = []
-        for season, through_week in windows:
-            per_year = nfl_fp_weekly_aggregate.load_through_one_year(season, through_week)
+        for season, start_week, end_week in windows:
+            per_year = nfl_fp_weekly_aggregate.load_window_one_year(season, start_week, end_week)
             if per_year.empty:
                 continue
             per_year = per_year.copy()
@@ -1430,11 +1496,6 @@ class StatsNFL(Stats):
         stacked = stacked.sort_values("season", kind="stable")
         playerProfile = stacked.loc[~stacked.index.duplicated(keep="last")]
 
-        # The downstream short-window join expects the index to be the
-        # accent-stripped player name. The aggregator already builds it
-        # that way but the concat/sort chain can lose the name attribute --
-        # rebuild it from ``Name`` defensively and mirror it into ``player``
-        # so legacy callers that look for the old PFF column name still work.
         if "Name" in playerProfile.columns:
             # The concat-then-sort can leave a NaN ``Name`` cell for any
             # row whose player only appeared in one of the lookback's
@@ -1448,8 +1509,10 @@ class StatsNFL(Stats):
         return playerProfile
 
     @staticmethod
-    def _lookback_windows(target_season: int, target_week: int | None) -> list[tuple[int, int]]:
-        """Return the ``[(season, through_week), ...]`` list for the comp lookback.
+    def _lookback_windows(
+        target_season: int, target_week: int | None
+    ) -> list[tuple[int, int, int]]:
+        """Return the ``[(season, start_week, end_week), ...]`` list for the comp lookback.
 
         Encodes the Phase-1.5 rule. Documented case-by-case so future
         edits to the cutoff land here in one place rather than scattered
@@ -1458,27 +1521,27 @@ class StatsNFL(Stats):
         if target_week is None:
             # Legacy fallback -- full-season aggregates for prior 3 + current.
             return [
-                (s, NFL_REGULAR_SEASON_WEEKS)
+                (s, 1, NFL_REGULAR_SEASON_WEEKS)
                 for s in range(
                     target_season - COMP_PRIOR_SEASON_DEPTH,
                     target_season + 1,
                 )
             ]
         if target_week >= COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK:
-            return [(target_season, target_week - 1)]
-        # Pre-week-5 -- prior 3 full seasons + current partial (if any).
+            return [(target_season, 1, target_week - 1)]
+        # Pre-week-5 -- prior season's back half + current partial (if any).
         windows = [
-            (s, NFL_REGULAR_SEASON_WEEKS)
-            for s in range(
-                target_season - COMP_PRIOR_SEASON_DEPTH,
-                target_season,
+            (
+                target_season - 1,
+                COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK,
+                NFL_REGULAR_SEASON_WEEKS,
             )
         ]
         if target_week > 1:
-            windows.append((target_season, target_week - 1))
+            windows.append((target_season, 1, target_week - 1))
         return windows
 
-    def update_player_comps(self, year=None):
+    def update_player_comps(self, year: int | None = None) -> None:
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
@@ -1490,7 +1553,8 @@ class StatsNFL(Stats):
         # week 4 of the current season the comp pool is restricted to
         # current-season weeks 1..W-1 (`_lookback_windows`), which is the
         # operator-confirmed cron behaviour. Pre-week-5 (or off-season),
-        # the prior three seasons are blended back in.
+        # the prior season's back half (weeks 11..18) is blended with
+        # any current-season games already played.
         playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
         if playerProfile.empty:
             return
@@ -1503,7 +1567,7 @@ class StatsNFL(Stats):
             )
             positionProfile = positionProfile.loc[
                 positionProfile[filterStat[position]]
-                >= positionProfile[filterStat[position]].quantile(0.25)
+                >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
             ]
             positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace(
                 [np.nan, np.inf, -np.inf], 0
@@ -1513,7 +1577,9 @@ class StatsNFL(Stats):
             ).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
+            comps[position] = self._build_comps(
+                knn, positionProfile, min_comps=_COMP_KNN_MIN, max_comps=_COMP_KNN_MAX
+            )
 
         filepath = pkg_resources.files(data) / "leagues" / "nfl" / "comps.json"
         with open(filepath, "w") as outfile:
@@ -1542,26 +1608,28 @@ class StatsNFL(Stats):
             )
             positionProfile = positionProfile.loc[
                 positionProfile[filterStat[position]]
-                >= positionProfile[filterStat[position]].quantile(0.25)
+                >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
             ]
             positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace(
                 [np.nan, np.inf, -np.inf], 0
             )
-            if len(positionProfile) < 7:
+            if len(positionProfile) < _COMP_POOL_MIN_PLAYERS:
                 continue
             positionProfile = positionProfile.apply(
                 lambda x: (x - x.mean()) / x.std(), axis=0
             ).fillna(0)
             positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
             knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
+            comps[position] = self._build_comps(
+                knn, positionProfile, min_comps=_COMP_KNN_MIN, max_comps=_COMP_KNN_MAX
+            )
 
         self.comps = comps
 
-    def check_combo_markets(self, market, player, date=datetime.today().date()):
+    def check_combo_markets(self, market: str, player: str, date: date = datetime.today().date()) -> int:
         return 0  # combo-market EV pending reimplementation
 
-    def get_volume_stats(self, offers, date=datetime.today().date()):
+    def get_volume_stats(self, offers: dict, date: date = datetime.today().date()) -> None:
         flat_offers = {}
         if isinstance(offers, dict):
             for players in offers.values():
@@ -1740,7 +1808,7 @@ class StatsNFL(Stats):
 
                 # SkewNormal: scale both loc and scale to preserve CV
                 ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+                ratio = ratio.fillna(1.0).clip(lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP)
                 new_scale = scale * ratio
                 new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 

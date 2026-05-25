@@ -497,6 +497,11 @@ def load_through_one_year(season: int, target_week: int) -> pd.DataFrame:
     metrics, the derived columns from :func:`derive_comp_metrics`, and
     age/height/bmi).
 
+    Convenience wrapper for :func:`load_window_one_year` anchored at
+    week 1. Use the windowed primitive when the caller needs a non-
+    anchored slice (e.g. the comp profile's pre-week-5 fallback that
+    pulls only the prior season's back half).
+
     The caller is responsible for the time-capsule semantics -- pass
     ``target_week = actual_target_week - 1`` to make the target game's
     own snapshot invisible to the comp pool.
@@ -511,20 +516,65 @@ def load_through_one_year(season: int, target_week: int) -> pd.DataFrame:
         DataFrame keyed by accent-stripped player name. Empty if no
         snapshots are available for the window.
     """
-    by_player_id = _aggregate_recipes(season, target_week)
+    return load_window_one_year(season, 1, target_week)
+
+
+def load_window_one_year(season: int, start_week: int, end_week: int) -> pd.DataFrame:
+    """Aggregate per-game FP snapshots for a single closed week range.
+
+    Convenience wrapper for :func:`load_multi_window_one_year` with a
+    one-window list. Used when the caller wants a single-season window
+    (e.g. legacy fallback paths that aggregate season-by-season).
+    """
+    return load_multi_window_one_year([(season, start_week, end_week)])
+
+
+def load_multi_window_one_year(
+    windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
+    """Aggregate per-game FP snapshots across one or more (season, start, end) windows.
+
+    Pools raw per-game rows from every window BEFORE applying the
+    per-player aggregation. A player with games across two windows
+    (e.g. 2024 weeks 11-18 + 2025 weeks 1-2 for a pre-week-5 comp
+    lookback) gets one aggregated row whose numerator + denominator
+    sums span every per-game appearance -- the "blend" semantics the
+    Phase-1.5 pre-cutoff rule asks for.
+
+    PBP/NGS aggregates and age/height/bmi are joined for the LATEST
+    season in the window set (the one whose comp pool we're really
+    computing for). Players who only appear in earlier seasons inherit
+    NaN on the PBP columns, which the downstream ``fillna(0)`` chain
+    in ``update_player_comps`` absorbs.
+
+    Args:
+        windows: List of ``(season, start_week, end_week)`` triples.
+            Empty list returns an empty DataFrame. Windows with
+            ``start_week > end_week`` are skipped silently.
+
+    Returns:
+        DataFrame keyed by accent-stripped player name with the same
+        column shape as :func:`load_window_one_year`. Empty if every
+        window produced no snapshots.
+    """
+    windows = [w for w in windows if w[1] <= w[2]]
+    if not windows:
+        return pd.DataFrame()
+
+    by_player_id = _aggregate_recipes(windows)
     if by_player_id.empty:
         return pd.DataFrame()
 
-    sep_routes = _aggregate_separation_by_routes(season, target_week)
+    sep_routes = _aggregate_separation_by_routes(windows)
     if not sep_routes.empty:
         by_player_id = by_player_id.combine_first(sep_routes)
 
-    metadata = _player_metadata(season, target_week)
+    metadata = _player_metadata(windows)
     if metadata.empty:
         return pd.DataFrame()
     by_player_id = by_player_id.join(metadata, how="left")
 
-    games_played = _player_game_counts(season, target_week)
+    games_played = _player_game_counts(windows)
     if not games_played.empty:
         by_player_id["G"] = games_played
 
@@ -539,7 +589,8 @@ def load_through_one_year(season: int, target_week: int) -> pd.DataFrame:
     by_player_id = by_player_id.rename(columns={"POS": "position", "G": "player_game_count"})
     by_player_id = derive_comp_metrics(by_player_id)
 
-    pbp = _load_pbp_named_by_player(season)
+    target_season = max(w[0] for w in windows)
+    pbp = _load_pbp_named_by_player(target_season)
     if pbp is not None and not by_player_id.empty:
         by_player_id = by_player_id.combine_first(pbp)
 
@@ -547,15 +598,19 @@ def load_through_one_year(season: int, target_week: int) -> pd.DataFrame:
     return by_player_id
 
 
-def _aggregate_recipes(season: int, target_week: int) -> pd.DataFrame:
-    """Apply :data:`_AGGREGATE_RECIPES`, grouping reads by file_kind to avoid duplicate IO."""
+def _aggregate_recipes(windows: Sequence[tuple[int, int, int]]) -> pd.DataFrame:
+    """Apply :data:`_AGGREGATE_RECIPES`, grouping reads by file_kind to avoid duplicate IO.
+
+    Pools per-game rows across every window before per-recipe aggregation
+    so a player's stats from multiple seasons land in one aggregate row.
+    """
     by_kind: dict[str, list[_Recipe]] = {}
     for recipe in _AGGREGATE_RECIPES:
         by_kind.setdefault(recipe.file_kind, []).append(recipe)
 
     out = pd.DataFrame()
     for file_kind, recipes in by_kind.items():
-        df = _load_kind(season, target_week, file_kind)
+        df = _load_kind_multi(windows, file_kind)
         if df.empty:
             continue
         kind_frame = _apply_recipes(df, recipes)
@@ -563,6 +618,20 @@ def _aggregate_recipes(season: int, target_week: int) -> pd.DataFrame:
             continue
         out = out.combine_first(kind_frame) if not out.empty else kind_frame
     return out
+
+
+def _load_kind_multi(
+    windows: Sequence[tuple[int, int, int]], file_kind: str
+) -> pd.DataFrame:
+    """Concatenate per-game rows from every (season, start, end) window for ``file_kind``."""
+    frames = []
+    for season, start_week, end_week in windows:
+        df = _load_kind(season, start_week, end_week, file_kind)
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_Recipe]) -> pd.DataFrame:
@@ -596,7 +665,9 @@ def _dispatch(df: pd.DataFrame, recipe: _Recipe) -> pd.Series | None:
     return None
 
 
-def _aggregate_separation_by_routes(season: int, target_week: int) -> pd.DataFrame:
+def _aggregate_separation_by_routes(
+    windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
     """Per-route SEP score per player, output as ``rec_sep_route_SEP_SCORE.*`` columns.
 
     The season CSV publishes per-route SEP buckets as
@@ -605,9 +676,11 @@ def _aggregate_separation_by_routes(season: int, target_week: int) -> pd.DataFra
     column; this helper pivots them so the downstream
     ``derive_comp_metrics`` per-route mean
     (``sep_routes_mean = mean(rec_sep_route_SEP_SCORE*)``) yields the
-    same number as the season-CSV path.
+    same number as the season-CSV path. Pools per-game rows across every
+    window before pivoting -- a player with games in two seasons gets
+    one per-bucket aggregate.
     """
-    df = _load_kind(season, target_week, _SEP_BY_ROUTES_KIND)
+    df = _load_kind_multi(windows, _SEP_BY_ROUTES_KIND)
     if df.empty:
         return pd.DataFrame()
     if "bucket" not in df.columns or _SEP_BY_ROUTES_VALUE_COL not in df.columns:
@@ -639,39 +712,49 @@ def _aggregate_separation_by_routes(season: int, target_week: int) -> pd.DataFra
     return wide.rename(columns=rename)
 
 
-def _load_kind(season: int, target_week: int, file_kind: str) -> pd.DataFrame:
-    """Read one file_kind through ``target_week``, log + swallow loader errors.
+def _load_kind(
+    season: int, start_week: int, end_week: int, file_kind: str
+) -> pd.DataFrame:
+    """Read one file_kind for the closed week range, log + swallow loader errors.
 
     Normalises the loader's ``DataFrame | None`` return to an empty
     DataFrame so downstream recipe dispatch doesn't have to special-case
     the None branch (every recipe already short-circuits on ``empty``).
     """
     try:
-        df = nfl_fp_weekly.load_through(season, target_week, file_kind)
+        df = nfl_fp_weekly.load_window(season, start_week, end_week, file_kind)
     except Exception as exc:
-        logger.warning("load_through(%s, %s, %s) failed: %s", season, target_week, file_kind, exc)
+        logger.warning(
+            "load_window(%s, %s, %s, %s) failed: %s",
+            season,
+            start_week,
+            end_week,
+            file_kind,
+            exc,
+        )
         return pd.DataFrame()
     return df if df is not None else pd.DataFrame()
 
 
-def _player_metadata(season: int, target_week: int) -> pd.DataFrame:
-    """Carry First/Last/POS/Team from the most-recent snapshot in the window.
+def _player_metadata(windows: Sequence[tuple[int, int, int]]) -> pd.DataFrame:
+    """Carry First/Last/POS/Team from the most-recent snapshot in the window set.
 
-    Picks the latest week each player appeared; mid-season trades resolve to
-    the player's last-known team rather than the season-opener.
+    Picks the latest (season, week) each player appeared across every
+    pooled window; mid-season trades resolve to the player's last-known
+    team rather than the season-opener.
     """
     # offense_snaps is the highest-coverage kind, with one row per player who
     # took a single offensive snap. receiving_basic is the fallback for
     # weeks where snap data didn't fetch.
     for kind in ("offense_snaps", "receiving_basic", "passing_advanced", "rushing_basic"):
-        df = _load_kind(season, target_week, kind)
+        df = _load_kind_multi(windows, kind)
         if df.empty or PLAYER_GROUP_COL not in df.columns:
             continue
         if not all(col in df.columns for col in _PLAYER_METADATA_COLS):
             continue
-        if "gameWeek" not in df.columns:
+        if "gameWeek" not in df.columns or "gameSeason" not in df.columns:
             continue
-        sorted_df = df.sort_values("gameWeek", kind="stable")
+        sorted_df = df.sort_values(["gameSeason", "gameWeek"], kind="stable")
         latest = sorted_df.drop_duplicates(subset=PLAYER_GROUP_COL, keep="last")
         meta = latest.set_index(PLAYER_GROUP_COL)[list(_PLAYER_METADATA_COLS)].copy()
         meta.columns = ["First", "Last", "POS", "Team"]
@@ -679,9 +762,9 @@ def _player_metadata(season: int, target_week: int) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def _player_game_counts(season: int, target_week: int) -> pd.Series:
-    """Per-player count of games appeared across the lookback window."""
-    df = _load_kind(season, target_week, "offense_snaps")
+def _player_game_counts(windows: Sequence[tuple[int, int, int]]) -> pd.Series:
+    """Per-player count of games appeared across every pooled lookback window."""
+    df = _load_kind_multi(windows, "offense_snaps")
     if df.empty or PLAYER_GROUP_COL not in df.columns:
         return pd.Series(dtype="int64")
     games = df.groupby(PLAYER_GROUP_COL).size()
@@ -768,4 +851,8 @@ def _derive_aggregate_metrics(profile: pd.DataFrame) -> pd.DataFrame:
     return profile
 
 
-__all__ = ("load_through_one_year",)
+__all__ = (
+    "load_through_one_year",
+    "load_window_one_year",
+    "load_multi_window_one_year",
+)
