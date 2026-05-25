@@ -177,10 +177,16 @@ exactly the slice you ask for. Bodies in the catalog ship with
 `body_substitute.substitute_runtime` rewrites both the int and the
 mode shape per call.
 
-Re-running the same (week, mode) overwrites. Raw JSON is not
-persisted — the parquet is the deliverable. If a parse fails, the
-diagnostic includes Content-Type / Content-Encoding so you can spot
-a stale catalog Accept-Encoding or a wholesale API change.
+Re-running the same (week, mode) **skips** cells that already have a
+non-empty parquet — `run` and `backfill` both default to "don't
+re-download what's already on disk", so re-executing after a partial
+failure (or resuming a half-finished backfill) is near-instant for
+the cells that already succeeded. Pass `--refetch` to force a
+re-download regardless. Zero-row parquets (failed previous fetches)
+are always re-fetched. Raw JSON is not persisted — the parquet is the
+deliverable. If a parse fails, the diagnostic includes Content-Type /
+Content-Encoding so you can spot a stale catalog Accept-Encoding or a
+wholesale API change.
 
 ### 4. Spot-check the download
 
@@ -234,9 +240,9 @@ poetry run fp-fetch backfill \
 Iterates every (season, week) pair and runs the same fetch +
 parse + write as `run`. Pacing is conservative by default:
 
-- **10–20 s** random pause between endpoints in the same week
+- **2–8 s** random pause between endpoints in the same week
   (`--request-pause-min` / `--request-pause-max`).
-- **30–90 s** random pause when transitioning to a new week
+- **8–28 s** random pause when transitioning to a new week
   (`--week-pause-min` / `--week-pause-max`).
 
 With ~45 tools × 18 weeks × N seasons at the defaults plan for
