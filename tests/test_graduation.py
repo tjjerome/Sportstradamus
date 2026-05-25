@@ -9,8 +9,10 @@ import pandas as pd
 import pytest
 
 from sportstradamus.training.graduation import (
+    MIN_PRECISION_OVER,
     classify_lifecycle,
     graduated_cells,
+    lifecycle_table,
     read_gate1,
     read_gate2,
 )
@@ -30,6 +32,35 @@ from sportstradamus.training.graduation import (
 )
 def test_classify_lifecycle(gate1_bss, n_settled, book_bss_30d, expected):
     assert classify_lifecycle(gate1_bss, n_settled, book_bss_30d) == expected
+
+
+@pytest.mark.parametrize(
+    ("precision_over", "expected"),
+    [
+        # Above threshold -> graduated.
+        (0.60, "graduated"),
+        (0.51, "graduated"),
+        # Exactly at threshold is still graduated (strict "<" demote).
+        (MIN_PRECISION_OVER, "graduated"),
+        # Below threshold -> demoted.
+        (MIN_PRECISION_OVER - 1e-6, "demoted"),
+        (0.40, "demoted"),
+        # NaN (too few Over bets to estimate) skips the check -> graduated
+        # since the other gates pass.
+        (math.nan, "graduated"),
+    ],
+)
+def test_classify_lifecycle_precision_over_gate(precision_over, expected):
+    """precision_over-based gate: demote when Bet=Over recommendations lose more than they win."""
+    assert (
+        classify_lifecycle(
+            gate1_bss=0.10,
+            n_settled=500,
+            book_bss_30d=0.05,
+            precision_over_live=precision_over,
+        )
+        == expected
+    )
 
 
 def _seed_model_stats(path):
@@ -139,3 +170,59 @@ def test_graduated_cells(tmp_path):
 
 def test_graduated_cells_missing_model_stats_is_empty(tmp_path):
     assert graduated_cells(tmp_path / "nope.parquet", tmp_path / "nolive.parquet") == set()
+
+
+def _seed_live_metrics_with_precision(path):
+    """Seed two cells: one with healthy Over precision, one losing on its Over recs."""
+    rows = []
+    for league, market, n, bss, prec_over, prec_under in [
+        ("NBA", "PTS", 300, 0.05, 0.55, 0.52),  # graduated
+        ("NBA", "FG3M", 1300, 0.054, 0.42, 0.45),  # precision_over < 0.50 -> demoted
+    ]:
+        for window in (7, 30):
+            rows.append(
+                {
+                    "league": league,
+                    "market": market,
+                    "computed_at": pd.Timestamp("2026-05-24"),
+                    "window_days": np.int16(window),
+                    "n_settled": np.int64(n),
+                    "book_bss": bss,
+                    "empirical_over_rate": 0.50,
+                    "predicted_over_rate": 0.50,
+                    "precision_over_live": prec_over,
+                    "precision_under_live": prec_under,
+                    "top_decile_mae": 2.1,
+                    "profit_sim_yield": 0.04,
+                }
+            )
+    pd.DataFrame(rows).to_parquet(path, engine="pyarrow", index=False)
+
+
+def test_lifecycle_table_demotes_on_precision_over_below_breakeven(tmp_path):
+    """A positive-book_bss cell must still demote if live Bet=Over hit rate is below 50%.
+
+    Regression guard for NBA/FG3M circa 2026-05-24: cell had +0.054 live book_bss
+    but its Over recommendations were losing money. The Brier-based gate let it
+    through; the precision-over gate must catch it.
+    """
+    ms = tmp_path / "model_stats.parquet"
+    lm = tmp_path / "live.parquet"
+    _seed_model_stats(ms)
+    _seed_live_metrics_with_precision(lm)
+    table = lifecycle_table(ms, lm, league="NBA")
+    states = dict(zip(table["market"], table["lifecycle_state"], strict=False))
+    assert states["PTS"] == "graduated"
+    assert states["FG3M"] == "demoted"
+
+
+def test_read_gate2_back_fills_precision_columns_for_old_parquets(tmp_path):
+    """Live parquets written before the precision columns shipped get NaN-filled."""
+    # _seed_live_metrics writes the pre-precision schema (no precision_*_live cols).
+    p = tmp_path / "old_live.parquet"
+    _seed_live_metrics(p)
+    df = read_gate2(p)
+    assert "precision_over_live" in df.columns
+    assert "precision_under_live" in df.columns
+    assert df["precision_over_live"].isna().all()
+    assert df["precision_under_live"].isna().all()
