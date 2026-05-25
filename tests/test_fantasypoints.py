@@ -752,29 +752,40 @@ def test_expand_registry_generates_valid_url_and_body():
     assert spec.json_body["useCache"] is True
 
 
-def test_expand_registry_opponent_context_uses_defense_team_roles():
+def test_expand_registry_team_body_omits_player_only_filters():
+    """Team-context tools must NOT carry isGamePlayed / teamRoles.
+
+    Working DevTools curls for team-offense tools (line_matchups,
+    run_pass_report) have empty filterMatch (apart from season) and
+    empty filterPlay. Sending the player-style filters here makes FP
+    return 0 rows.
+    """
+    specs = expand_registry(_registry_sample())
+    spec = next(s for s in specs if s.name == "team_passing_basic")
+    ctx = spec.json_body["context"]
+    assert ctx["filterMatch"] == {"game.season": {"eq": "__SEASON_INT__"}}
+    assert ctx["filterPlay"] == {}
+
+
+def test_expand_registry_opponent_body_omits_player_only_filters():
+    """Opponent-context tools also omit the player-only filterPlay default."""
     specs = expand_registry(_registry_sample())
     spec = next(s for s in specs if s.name == "opponent_passing_basic")
-    assert spec.json_body["context"]["filterPlay"] == {
-        "teamRoles": {"in": ["defense", {"$ifNull": ["$$play.team.roles", []]}]}
-    }
+    ctx = spec.json_body["context"]
+    assert ctx["filterMatch"] == {"game.season": {"eq": "__SEASON_INT__"}}
+    assert ctx["filterPlay"] == {}
 
 
-def test_expand_registry_team_context_uses_offense_team_roles():
+def test_expand_registry_routes_team_to_bare_team_url():
+    """Team-context URL is ``/team/{slug}/values`` — no ``/offense/`` segment.
+
+    The SPA shows ``/team/{slug}`` for offense views and only inserts
+    ``defense`` for the opponent view; ``/team/offense/{slug}`` doesn't
+    exist and silently returns empty.
+    """
     specs = expand_registry(_registry_sample())
     spec = next(s for s in specs if s.name == "team_passing_basic")
-    assert spec.json_body["context"]["filterPlay"] == {
-        "teamRoles": {"in": ["offense", {"$ifNull": ["$$play.team.roles", []]}]}
-    }
-
-
-def test_expand_registry_routes_team_to_offense_url():
-    specs = expand_registry(_registry_sample())
-    spec = next(s for s in specs if s.name == "team_passing_basic")
-    assert (
-        spec.url
-        == "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/passing-basic/values"
-    )
+    assert spec.url == "https://data.fantasypoints.com/v2/ds/nfl/tools/team/passing-basic/values"
     ctx = spec.json_body["context"]
     assert ctx["routeContext"] == "team"
     assert ctx["routeContextTarget"] == "offense"

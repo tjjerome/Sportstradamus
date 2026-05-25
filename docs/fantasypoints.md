@@ -60,8 +60,9 @@ and adds one catalog entry per `(tool, context)` pair (e.g.
 three entries):
 
 - `player` → `POST .../tools/player/{slug}/values`
-- `team` → `POST .../tools/team/offense/{slug}/values` (team's
-  offensive view)
+- `team` → `POST .../tools/team/{slug}/values` (team's offensive
+  view — there is no `/offense/` segment, the SPA hits the bare
+  `/team/{slug}` path for offense)
 - `opponent` → `POST .../tools/team/defense/{slug}/values` (team's
   defensive view, one row per opponent faced)
 
