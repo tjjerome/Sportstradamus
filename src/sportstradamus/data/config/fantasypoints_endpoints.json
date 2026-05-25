@@ -1,1 +1,2862 @@
-[]
+[
+  {
+    "name": "player_passing_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-basic/values",
+    "output_subdir": "player/passing_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingBasic",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_passing_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/passing-basic/values",
+    "output_subdir": "team/passing_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingBasic",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_passing_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/passing-basic/values",
+    "output_subdir": "opponent/passing_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingBasic",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_passing_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-advanced/values",
+    "output_subdir": "player/passing_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingAdvanced",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_passing_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/passing-advanced/values",
+    "output_subdir": "team/passing_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingAdvanced",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_passing_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/passing-advanced/values",
+    "output_subdir": "opponent/passing_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingAdvanced",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_passing_depth",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/passing-depth/values",
+    "output_subdir": "player/passing_depth",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "passingDepth",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_rushing_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/rushing-basic/values",
+    "output_subdir": "player/rushing_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingBasic",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_rushing_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/rushing-basic/values",
+    "output_subdir": "team/rushing_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingBasic",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_rushing_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/rushing-basic/values",
+    "output_subdir": "opponent/rushing_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingBasic",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_rushing_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/rushing-advanced/values",
+    "output_subdir": "player/rushing_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingAdvanced",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_rushing_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/rushing-advanced/values",
+    "output_subdir": "team/rushing_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingAdvanced",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_rushing_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/rushing-advanced/values",
+    "output_subdir": "opponent/rushing_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingAdvanced",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_rushing_bell_cow",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/rushing-bell-cow/values",
+    "output_subdir": "player/rushing_bell_cow",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "rushingBellCow",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-basic/values",
+    "output_subdir": "player/receiving_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingBasic",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_receiving_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/receiving-basic/values",
+    "output_subdir": "team/receiving_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingBasic",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_receiving_basic",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/receiving-basic/values",
+    "output_subdir": "opponent/receiving_basic",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingBasic",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-advanced/values",
+    "output_subdir": "player/receiving_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingAdvanced",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_receiving_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/receiving-advanced/values",
+    "output_subdir": "team/receiving_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingAdvanced",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_receiving_advanced",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/receiving-advanced/values",
+    "output_subdir": "opponent/receiving_advanced",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingAdvanced",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_offense_snaps",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/offense-snaps/values",
+    "output_subdir": "player/offense_snaps",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "offenseSnaps",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_separation_by_routes",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-separation-by-routes/values",
+    "output_subdir": "player/receiving_separation_by_routes",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingSeparationByRoutes",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_efficiency",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/efficiency/values",
+    "output_subdir": "player/efficiency",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "efficiency",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_wr_coverage_matchup",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/wr-coverage-matchup/values",
+    "output_subdir": "player/wr_coverage_matchup",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "wrCoverageMatchup",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_run_pass_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/run-pass-report/values",
+    "output_subdir": "team/run_pass_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "runPassReport",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_coverage_matrix",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/coverage-matrix/values",
+    "output_subdir": "team/coverage_matrix",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "coverageMatrix",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_coverage_matrix",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/coverage-matrix/values",
+    "output_subdir": "opponent/coverage_matrix",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "coverageMatrix",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_proe_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/proe-report/values",
+    "output_subdir": "team/proe_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "proeReport",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_proe_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/proe-report/values",
+    "output_subdir": "opponent/proe_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "proeReport",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_route_share_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-route-share-report/values",
+    "output_subdir": "player/receiving_route_share_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingRouteShareReport",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_routes_run",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-routes-run/values",
+    "output_subdir": "player/receiving_routes_run",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingRoutesRun",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_separation_by_coverage",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-separation-by-coverage/values",
+    "output_subdir": "player/receiving_separation_by_coverage",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingSeparationByCoverage",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_target_share_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-target-share-report/values",
+    "output_subdir": "player/receiving_target_share_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingTargetShareReport",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_offense_snap_share_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/offense-snap-share-report/values",
+    "output_subdir": "player/offense_snap_share_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "offenseSnapShareReport",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_fantasy_points_allowed",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/fantasy-points-allowed/values",
+    "output_subdir": "player/fantasy_points_allowed",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "fantasyPointsAllowed",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_line_matchups",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/line-matchups/values",
+    "output_subdir": "team/line_matchups",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "lineMatchups",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_qb_coverage_matchup",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/qb-coverage-matchup/values",
+    "output_subdir": "player/qb_coverage_matchup",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "qbCoverageMatchup",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_separation_by_breaks",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-separation-by-breaks/values",
+    "output_subdir": "player/receiving_separation_by_breaks",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingSeparationByBreaks",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_man_vs_zone",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-man-vs-zone/values",
+    "output_subdir": "player/receiving_man_vs_zone",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingManVsZone",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_fantasy_points_scored",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/fantasy-points-scored/values",
+    "output_subdir": "player/fantasy_points_scored",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "fantasyPointsScored",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "team_fantasy_points_scored",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/offense/fantasy-points-scored/values",
+    "output_subdir": "team/fantasy_points_scored",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "fantasyPointsScored",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "team",
+        "routeContext": "team",
+        "routeContextTarget": "offense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "opponent_fantasy_points_scored",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/team/defense/fantasy-points-scored/values",
+    "output_subdir": "opponent/fantasy_points_scored",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "fantasyPointsScored",
+        "grouping": "$team.teamId",
+        "dualContext": false,
+        "modelContext": "opponent",
+        "routeContext": "team",
+        "routeContextTarget": "defense",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "defense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_fpts_scored_report",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/fpts-scored-report/values",
+    "output_subdir": "player/fpts_scored_report",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "fptsScoredReport",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": false,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_anonymous"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  },
+  {
+    "name": "player_receiving_separation_by_alignment",
+    "url": "https://data.fantasypoints.com/v2/ds/nfl/tools/player/receiving-separation-by-alignment/values",
+    "output_subdir": "player/receiving_separation_by_alignment",
+    "method": "POST",
+    "json_body": {
+      "context": {
+        "tableProperty": "receivingSeparationByAlignment",
+        "grouping": "$player.playerId",
+        "dualContext": false,
+        "modelContext": "player",
+        "routeContext": "player",
+        "routeContextTarget": "player",
+        "weeks": {
+          "REG": [
+            "__WEEK_INT__"
+          ]
+        },
+        "filterMatch": {
+          "isGamePlayed": {
+            "eq": true
+          },
+          "game.season": {
+            "eq": "__SEASON_INT__"
+          }
+        },
+        "filterPlay": {
+          "teamRoles": {
+            "in": [
+              "offense",
+              {
+                "$ifNull": [
+                  "$$play.team.roles",
+                  []
+                ]
+              }
+            ]
+          }
+        },
+        "filterResult": {},
+        "qualifiers": {},
+        "splits": {},
+        "disabled": {
+          "filterMatch": {},
+          "filterPlay": {},
+          "filterResult": {}
+        },
+        "requiresSchedule": null,
+        "requiresCharting": true,
+        "requiresPlayByPlay": false,
+        "requiresPreTotals": false,
+        "requiresPostTotals": false,
+        "requiresMultiplePipelines": null,
+        "requiredRoles": [
+          "role_uJb30OfZpu4pFfS7VQEq"
+        ],
+        "isFreePreview": false
+      },
+      "useCache": true,
+      "flatten": true,
+      "debug": false
+    },
+    "response_format": "json",
+    "weekly": true
+  }
+]
