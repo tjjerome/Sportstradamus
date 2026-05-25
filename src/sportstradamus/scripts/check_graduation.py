@@ -30,7 +30,9 @@ _STATE_COLORS = {
     "demoted": "red",
     "not-shipped": "cyan",
 }
-# Column order used by the printed table. 3 keys + 4 Gate 1 + 4 Gate 2 + 1 state.
+# Column order used by the printed table. 3 keys + 4 Gate 1 + 5 Gate 2 + 1 state.
+# precision_over_live is the new Gate-2 demote driver (see
+# graduation.MIN_PRECISION_OVER); precision_under_live is informational.
 _DISPLAY_COLUMNS = (
     "league",
     "market",
@@ -42,6 +44,8 @@ _DISPLAY_COLUMNS = (
     "gate2_book_bss",
     "predicted_over_rate_live",
     "empirical_over_rate_live",
+    "precision_over_live",
+    "precision_under_live",
     "profit_sim_yield",
     "lifecycle_state",
 )
@@ -57,7 +61,8 @@ def _print_header() -> None:
     click.echo(
         f"{'league':<6} {'market':<22} {'dist':<10} "
         f"{'g1_bss':>7} {'g1_p_or':>7} {'g1_e_or':>7} {'g1_kelly':>8} "
-        f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} {'g2_yield':>8} "
+        f"{'g2_bss':>7} {'g2_p_or':>7} {'g2_e_or':>7} "
+        f"{'g2_prec_o':>9} {'g2_prec_u':>9} {'g2_yield':>8} "
         f"{'state':<12}"
     )
 
@@ -73,6 +78,8 @@ def _print_row(row: pd.Series) -> None:
         f"{_format_metric(row.get('gate2_book_bss')):>7} "
         f"{_format_metric(row.get('predicted_over_rate_live')):>7} "
         f"{_format_metric(row.get('empirical_over_rate_live')):>7} "
+        f"{_format_metric(row.get('precision_over_live')):>9} "
+        f"{_format_metric(row.get('precision_under_live')):>9} "
         f"{_format_metric(row.get('profit_sim_yield')):>8} "
         f"{row['lifecycle_state']:<12}"
     )
