@@ -605,7 +605,12 @@ def verify(season, week, mode, only, catalog_path) -> None:
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option("--name", required=True, help="Catalog name for this endpoint.")
-@click.option("--output-subdir", required=True, help="Relative output path (no extension).")
+@click.option(
+    "--output-subdir",
+    default=None,
+    help="Relative output path (no extension). Required for new entries; "
+    "with ``--replace`` it defaults to the existing entry's value.",
+)
 @click.option(
     "--response-format",
     type=click.Choice(["json", "csv", "html"]),
@@ -613,27 +618,87 @@ def verify(season, week, mode, only, catalog_path) -> None:
 )
 @click.option("--weekly/--season-long", default=True)
 @click.option(
+    "--replace",
+    is_flag=True,
+    help="Overwrite an existing entry of this name instead of erroring. "
+    "Use to patch a discover-generated body with the SPA's tool-specific "
+    "filters (position, qualifier, etc.) from a working DevTools curl.",
+)
+@click.option(
     "--catalog",
     "catalog_path",
     type=click.Path(path_type=Path, dir_okay=False),
     default=None,
 )
-def import_curl(curl_file, name, output_subdir, response_format, weekly, catalog_path) -> None:
-    """Register a new endpoint from a DevTools-copied curl command."""
+def import_curl(
+    curl_file, name, output_subdir, response_format, weekly, replace, catalog_path
+) -> None:
+    """Register a new endpoint from a DevTools-copied curl command.
+
+    With ``--replace``, overwrite an existing catalog entry instead of
+    appending a new one — useful when a tool needs per-tool filters
+    (position + filterResult qualifier) the SPA injects per tool but
+    discover can't infer from the registry. The pasted body's literal
+    ``game.season`` value is rewritten to the integer sentinel so the
+    entry stays usable across seasons; the ``weeks`` block doesn't
+    need sentinelisation because ``body_substitute`` overrides it per
+    call based on ``--mode``.
+    """
+    existing = load_catalog(catalog_path)
+    existing_by_name = {s.name: i for i, s in enumerate(existing)}
+    if name in existing_by_name and not replace:
+        raise click.ClickException(
+            f"Endpoint named {name!r} already exists. Pass --replace to overwrite."
+        )
+    if not replace and name not in existing_by_name and not output_subdir:
+        raise click.ClickException("--output-subdir is required when registering a new entry.")
+    effective_subdir = output_subdir or existing[existing_by_name[name]].output_subdir
     spec = parse_curl_to_spec(
         curl_file.read_text(),
         name=name,
-        output_subdir=output_subdir,
+        output_subdir=effective_subdir,
         response_format=response_format,
         weekly=weekly,
     )
-    existing = load_catalog(catalog_path)
-    if any(s.name == spec.name for s in existing):
-        raise click.ClickException(f"Endpoint named {spec.name!r} already exists.")
-    existing.append(spec)
+    _sentinelize_season(spec.json_body)
+    if name in existing_by_name:
+        existing[existing_by_name[name]] = spec
+        verb = "Replaced"
+    else:
+        existing.append(spec)
+        verb = "Registered"
     save_catalog(existing, catalog_path)
     body_note = " + body" if spec.json_body else ""
-    click.echo(f"Registered {spec.name} -> {spec.method} {spec.url}{body_note}")
+    click.echo(f"{verb} {spec.name} -> {spec.method} {spec.url}{body_note}")
+
+
+# Sentinel string :mod:`body_substitute` recognises and rewrites to
+# the integer season at call time. Mirrors the constant in
+# :mod:`discover` — kept duplicated here (rather than imported) so
+# ``import-curl`` doesn't depend on the discover module.
+_SEASON_INT_SENTINEL = "__SEASON_INT__"
+
+
+def _sentinelize_season(body: Any) -> None:
+    """Rewrite a literal ``context.filterMatch.game.season.eq`` int to the sentinel.
+
+    The curl the user pastes was captured for one specific season; if
+    we stored that literal in the catalog the entry would be locked to
+    that season forever. Walking just the canonical path keeps the
+    rewrite surgical — other ``season`` fields elsewhere in the body
+    (if any) stay as the user captured them.
+    """
+    if not isinstance(body, dict):
+        return
+    ctx = body.get("context")
+    if not isinstance(ctx, dict):
+        return
+    filter_match = ctx.get("filterMatch")
+    if not isinstance(filter_match, dict):
+        return
+    season_node = filter_match.get("game.season")
+    if isinstance(season_node, dict) and isinstance(season_node.get("eq"), int):
+        season_node["eq"] = _SEASON_INT_SENTINEL
 
 
 @fp_fetch.command("refresh-auth")
