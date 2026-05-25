@@ -334,6 +334,36 @@ def _rpr_bucket_recipes() -> tuple[_TeamRecipe, ...]:
 _ALL_RECIPES: tuple[_TeamRecipe, ...] = _RECIPES + _rpr_bucket_recipes()
 
 
+def load_pattern_a_team_features(
+    pattern_a_windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
+    """Pattern-A-only team features for callers that need rate stats without Pattern B.
+
+    The player-comp broadcast (``nfl_fp_weekly_aggregate.load_multi_window_one_year``)
+    needs the team's season-to-date ``off_faced_man_pct`` /
+    ``off_faced_zone_pct`` to project onto every player in the comp pool,
+    but does NOT want the matchup-specific ``lm_*`` columns Pattern B
+    would attach -- comps are season-to-date snapshots, not forecasts for
+    a specific game.
+
+    Args:
+        pattern_a_windows: Per-window ``(season, start_week, end_week)``
+            tuples to pool. Same semantics as
+            :func:`load_team_and_defense_features`.
+
+    Returns:
+        DataFrame indexed by team abbreviation with Pattern-A team
+        features only. Empty when no usable snapshots were found.
+    """
+    if not pattern_a_windows:
+        return pd.DataFrame()
+    abbr_season = max(season for season, _, _ in pattern_a_windows)
+    abbr_map = _build_team_abbreviation_map(abbr_season)
+    if abbr_map.empty:
+        return pd.DataFrame()
+    return _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
+
+
 def load_team_and_defense_features(
     pattern_a_windows: Sequence[tuple[int, int, int]],
     pattern_b_snapshot: tuple[int, int],
@@ -770,4 +800,4 @@ def _load_kind_window(
     return df if df is not None else pd.DataFrame()
 
 
-__all__ = ("load_team_and_defense_features",)
+__all__ = ("load_pattern_a_team_features", "load_team_and_defense_features")
