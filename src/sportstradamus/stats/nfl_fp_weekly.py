@@ -2,32 +2,51 @@
 
 The Phase-1 PFF -> FantasyPoints migration consumed FP *season-aggregate*
 CSVs (one per stat-type per season). The hooks here read the
-*weekly-snapshot* parquets that the operator is in the process of
-downloading -- one snapshot per (season, snapshot_week), each holding
-season-to-date player rows as FP knew them at the end of that snapshot
-week. With these snapshots we can build true time-capsule features
-(season-to-date as-of-game-date) and close the comp-candidate-pool
-leakage flagged in Phase 1.
+*weekly-snapshot* parquets the operator is downloading -- one snapshot
+per (season, snapshot_week), each holding **per-player-per-game** rows
+for the games played in that week (NOT season-to-date totals).
 
-Layout on disk (post-Phase-1K canonical slot):
+Spot-check on the 2022 backfill confirms per-game grain:
+``2022/week_01/receiving_basic.parquet`` row for Justin Jefferson shows
+``targets=11 receptions=9 yards=184`` (his actual week-1 line) and
+``2022/week_02/receiving_basic.parquet`` shows ``targets=12 receptions=6
+yards=48`` (his week-2 line). Each row is one player's stat line for one
+game. The ``gameWeek`` column matches the snapshot directory week.
 
-::
+Time-capsule semantics under per-game grain
+-------------------------------------------
+
+To get "season-to-date through week N" for player-comp inputs or
+training features, **concatenate snapshots 1..N** with
+:func:`load_through`, then aggregate (sum numerators, sum denominators
+for rate stats). For leakage-safe queries on a game in week ``W``, pass
+``W - 1`` -- the loader never returns rows from the target game itself.
+
+Use :func:`load_window` when the desired range is not anchored at week 1
+(e.g. "last 4 weeks of form" for trend features).
+
+Layout on disk::
 
     data/player_data/NFL/{season}/
         {season-aggregate}.csv         <-- Phase-1 inputs (legacy)
         week_{NN}/
             efficiency.parquet
-            fantasy_points_allowed.parquet
-            fantasy_points_scored.parquet
-            ...                        <-- 24 file_kinds total
+            fantasy_points_allowed.parquet  <-- see PLACEHOLDER caveat
+            fantasy_points_scored.parquet   <-- see PLACEHOLDER caveat
+            ...                             <-- 24 file_kinds total
 
-This module is read-only. It does NOT wire into ``build_comp_profile`` or
-``base_profile`` yet -- that swap happens in the Phase 1.5 / 2 / 3 / 4
+Most file_kinds publish per-player-per-game rows. Two kinds currently
+land as 1-row placeholders showing a single (team, opponent, position)
+tile with full-season-looking numbers -- see
+:data:`PLACEHOLDER_SINGLE_TILE_KINDS`. Their final semantics will be
+confirmed once the FP fetcher in :mod:`sportstradamus.fantasypoints`
+finishes parameterizing those endpoints.
+
+This module is read-only. It does NOT wire into ``build_comp_profile``
+or ``base_profile`` yet -- that swap happens in the Phase 1.5 / 2 / 3 / 4
 plans (see ``.claude/plans/nfl-fp-phase-2-3-4-followups.md``) once the
-2025 weekly download is complete and the historical seasons (2022-2024)
-are backfilled with their per-season per-snapshot data. Until then the
-hooks return whatever's present so downstream callers can be developed
-against partial fixtures.
+historical seasons (2022-2024) and the in-flight 2025 season finish
+backfilling.
 """
 
 from __future__ import annotations
@@ -36,6 +55,7 @@ import os
 import re
 from collections.abc import Iterable
 from importlib import resources as pkg_resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 import pandas as pd
@@ -73,28 +93,27 @@ FILE_KINDS: dict[str, str] = {
     "wr_coverage_matchup": "wr_coverage_matchup.parquet",
 }
 
-# Logical kinds that key on team rather than player. Defense-allowed
-# fantasy points are aggregated per (opponent, position) tile, not per
-# attacking player. Consumers should join these on ``opponentTeamId``
-# rather than ``playerPlayerId``.
-TEAM_LEVEL_KINDS: frozenset[str] = frozenset({"fantasy_points_allowed"})
+# File_kinds whose current parquets contain a single placeholder row
+# (a tile pull rather than the full per-game enumeration). Aggregating
+# these through :func:`load_window` will produce a useless result until
+# the fetcher's endpoint parameterization is finalized. Consumers should
+# special-case or skip these for now; the constant lets a downstream
+# auditor flag the anomaly without re-discovering it.
+PLACEHOLDER_SINGLE_TILE_KINDS: frozenset[str] = frozenset(
+    {"fantasy_points_allowed", "fantasy_points_scored"}
+)
 
-# Snapshot directory naming convention. The folder ``week_{NN}`` holds the
-# FP database state at the end of week NN of the parent season's reporting
-# calendar. Two-digit zero-padded; week numbers run 1..18 in regular
-# season (playoff snapshots, if/when they appear, would extend this).
+# Snapshot directory naming convention. The folder ``week_{NN}`` holds
+# per-game rows for week NN of the parent season; the data inside is
+# NOT season-to-date. Two-digit zero-padded; week numbers run 1..18 in
+# regular season (playoff snapshots, if/when they appear, extend this).
 _WEEK_DIR_RE = re.compile(r"^week_(\d{2})$")
 _WEEK_DIR_FMT = "week_{week:02d}"
 _NFL_DIR = "player_data/NFL"
 
 
-def snapshot_dir(season: int, snapshot_week: int) -> object | None:
+def snapshot_dir(season: int, snapshot_week: int) -> Traversable | None:
     """Return the snapshot directory for ``(season, snapshot_week)`` or None.
-
-    Returns the importlib-resources path object (so the caller can keep
-    using ``/`` joins) when the directory exists; returns ``None`` if the
-    snapshot has not been downloaded yet. ``None`` is the expected
-    interim state for in-flight seasons.
 
     Args:
         season: NFL season year (e.g. 2024).
@@ -103,6 +122,8 @@ def snapshot_dir(season: int, snapshot_week: int) -> object | None:
     Returns:
         An importlib-resources path object pointing at the
         ``week_{NN}/`` directory, or ``None`` if the directory is absent.
+        ``None`` is the expected interim state for weeks that haven't
+        been downloaded yet.
     """
     week_dir = _WEEK_DIR_FMT.format(week=snapshot_week)
     directory = pkg_resources.files(data) / f"{_NFL_DIR}/{season}/{week_dir}"
@@ -111,10 +132,6 @@ def snapshot_dir(season: int, snapshot_week: int) -> object | None:
 
 def available_snapshots(season: int) -> list[int]:
     """Return sorted list of snapshot weeks present on disk for ``season``.
-
-    Empty list means no weekly snapshots have been downloaded for this
-    season; callers should fall back to the season-aggregate CSVs at the
-    season's top-level directory.
 
     Args:
         season: NFL season year (e.g. 2024).
@@ -136,27 +153,6 @@ def available_snapshots(season: int) -> list[int]:
     return weeks
 
 
-def resolve_asof_snapshot(season: int, target_week: int) -> int | None:
-    """Return the largest available snapshot week N with N <= ``target_week``.
-
-    This is the time-capsule resolver: a feature being built for a game
-    in week ``target_week`` of ``season`` should consult the snapshot
-    returned here, never anything more recent. Returns ``None`` when no
-    snapshot at or before ``target_week`` exists for this season.
-
-    Args:
-        season: NFL season year (e.g. 2024).
-        target_week: The game week for which features are being built.
-            The resolver never returns a snapshot newer than this.
-
-    Returns:
-        The largest snapshot week <= ``target_week`` that exists on disk,
-        or ``None`` if no eligible snapshot is present.
-    """
-    candidates = [w for w in available_snapshots(season) if w <= target_week]
-    return max(candidates) if candidates else None
-
-
 def load_snapshot(
     season: int,
     snapshot_week: int,
@@ -164,22 +160,23 @@ def load_snapshot(
 ) -> pd.DataFrame | None:
     """Load one parquet from the ``(season, snapshot_week)`` directory.
 
-    Returns ``None`` when the snapshot directory or the requested file is
-    missing. Returns an empty DataFrame when the parquet exists but
-    holds no rows (FP sometimes writes empty files during in-flight
-    weeks). Callers should treat ``None`` and empty the same.
+    Returns the per-player-per-game rows for the games played in
+    ``snapshot_week`` of ``season``. To stitch multiple weeks together
+    into a season-to-date view, use :func:`load_through` or
+    :func:`load_window` instead.
 
     Args:
         season: NFL season year (e.g. 2024).
-        snapshot_week: Exact snapshot week number to load (not a target;
-            use :func:`load_asof` for time-capsule resolution).
+        snapshot_week: Exact snapshot week number to load.
         file_kind: Logical kind name from :data:`FILE_KINDS`
-            (e.g. ``"efficiency"``).
+            (e.g. ``"receiving_basic"``).
 
     Returns:
         The parquet contents as a DataFrame, or ``None`` if the snapshot
         directory or the requested file is absent, or if the parquet
-        cannot be parsed.
+        cannot be parsed. Returns an empty DataFrame when the parquet
+        exists but holds no rows (FP sometimes writes empty files
+        during in-flight weeks).
 
     Raises:
         ValueError: If ``file_kind`` is not a key in :data:`FILE_KINDS`.
@@ -210,36 +207,93 @@ def load_snapshot(
         return None
 
 
-def load_asof(
+def load_window(
     season: int,
-    target_week: int,
+    start_week: int,
+    end_week: int,
     file_kind: str,
 ) -> pd.DataFrame | None:
-    """Load the time-capsule snapshot of ``file_kind`` as-of ``target_week``.
+    """Concatenate per-game snapshots over ``[start_week, end_week]`` inclusive.
 
-    Resolves to the largest snapshot week N <= ``target_week`` (via
-    :func:`resolve_asof_snapshot`) and returns that parquet, or ``None``
-    if no eligible snapshot exists. This is the entry point a leakage-
-    safe training-feature builder should call: pass the target game's
-    ``(season, week)`` and you get FP's view of the world strictly
-    before that game.
+    The returned DataFrame stacks per-player-per-game rows from every
+    snapshot whose week is in the closed interval. Snapshots that are
+    missing or empty are silently skipped; the function returns
+    ``None`` only when no snapshot in the window produced any rows.
+
+    The caller is responsible for aggregation. For rate stats, the
+    correct pattern is ``sum(numerator) / sum(denominator)`` across the
+    concatenated rows -- see ``.claude/plans/nfl-fp-phase-2-3-4-
+    followups.md`` for the per-kind denominator recommendations.
 
     Args:
         season: NFL season year (e.g. 2024).
-        target_week: The game week. The loader returns FP's view of the
-            world as of the most recent snapshot at or before this week.
-        file_kind: Logical kind name from :data:`FILE_KINDS`
-            (e.g. ``"efficiency"``).
+        start_week: Inclusive lower bound on snapshot week.
+        end_week: Inclusive upper bound on snapshot week.
+        file_kind: Logical kind name from :data:`FILE_KINDS`.
 
     Returns:
-        The parquet contents as a DataFrame for the resolved snapshot
-        week, or ``None`` if no eligible snapshot exists or the file is
-        absent/unreadable.
+        Concatenated DataFrame of every available snapshot in the
+        window, or ``None`` if the window resolved to zero non-empty
+        snapshots.
+
+    Raises:
+        ValueError: If ``file_kind`` is not a key in :data:`FILE_KINDS`,
+            or if ``start_week > end_week``.
     """
-    snapshot_week = resolve_asof_snapshot(season, target_week)
-    if snapshot_week is None:
+    if file_kind not in FILE_KINDS:
+        raise ValueError(
+            f"unknown FP weekly file_kind: {file_kind!r}; valid kinds: {sorted(FILE_KINDS)}"
+        )
+    if start_week > end_week:
+        raise ValueError(
+            f"start_week={start_week} must be <= end_week={end_week}"
+        )
+
+    frames: list[pd.DataFrame] = []
+    for week in available_snapshots(season):
+        if not start_week <= week <= end_week:
+            continue
+        df = load_snapshot(season, week, file_kind)
+        if df is not None and not df.empty:
+            frames.append(df)
+
+    if not frames:
         return None
-    return load_snapshot(season, snapshot_week, file_kind)
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_through(
+    season: int,
+    last_week: int,
+    file_kind: str,
+) -> pd.DataFrame | None:
+    """Concatenate snapshots 1..``last_week`` inclusive -- season-to-date helper.
+
+    Thin convenience wrapper over :func:`load_window` anchored at week 1.
+    The leakage-safe time-capsule pattern for a game in week ``W`` is::
+
+        load_through(season, W - 1, kind)
+
+    so the target game itself is excluded from the lookback.
+
+    Args:
+        season: NFL season year (e.g. 2024).
+        last_week: Inclusive upper bound on snapshot week. Pass
+            ``target_game_week - 1`` for leakage-safe lookbacks.
+        file_kind: Logical kind name from :data:`FILE_KINDS`.
+
+    Returns:
+        Concatenated DataFrame of every available snapshot from week 1
+        through ``last_week``, or ``None`` if no snapshots in the range
+        produced any rows.
+
+    Raises:
+        ValueError: If ``file_kind`` is not a key in :data:`FILE_KINDS`,
+            or if ``last_week < 1``.
+    """
+    if last_week < 1:
+        raise ValueError(f"last_week={last_week} must be >= 1")
+    return load_window(season, 1, last_week, file_kind)
 
 
 def load_all_snapshots(
@@ -248,20 +302,16 @@ def load_all_snapshots(
 ) -> dict[int, pd.DataFrame]:
     """Load every available snapshot of ``file_kind`` for ``season``.
 
-    Returns ``{snapshot_week: DataFrame}`` for the snapshots that exist
-    and parsed successfully. Useful for offline analysis (snapshot drift
-    diagnostics, feature stability checks) -- the production code paths
-    use :func:`load_asof` instead.
-
     Args:
         season: NFL season year (e.g. 2024).
-        file_kind: Logical kind name from :data:`FILE_KINDS`
-            (e.g. ``"efficiency"``).
+        file_kind: Logical kind name from :data:`FILE_KINDS`.
 
     Returns:
         Mapping of snapshot week → DataFrame for every week that is
-        present on disk and parses without error. Empty dict when no
-        snapshots exist for the season.
+        present on disk and parses without error. Production paths use
+        :func:`load_window` / :func:`load_through`; this returns the
+        snapshots un-concatenated for diagnostics and snapshot-drift
+        analysis.
     """
     out: dict[int, pd.DataFrame] = {}
     for week in available_snapshots(season):
@@ -273,10 +323,6 @@ def load_all_snapshots(
 
 def snapshot_inventory(seasons: Iterable[int] | None = None) -> pd.DataFrame:
     """Return a DataFrame inventorying which snapshots+files exist on disk.
-
-    Columns: ``season``, ``snapshot_week``, plus one boolean column per
-    logical file_kind (True iff that parquet is present in the snapshot
-    directory). ``seasons=None`` scans every season subdir present.
 
     Used by operator tools (and future tests) to confirm a download is
     complete before swapping production over.

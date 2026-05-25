@@ -5,15 +5,8 @@ player-grain snapshots at ``data/player_data/NFL/``). This module reads
 the team-grain snapshots that the operator is downloading into
 ``data/team_data/NFL/{season}/week_{NN}/``. Each parquet here has one
 row per (team, game) -- i.e. **per-game team aggregates**, NOT
-season-to-date totals.
-
-The grain difference matters: player snapshots are season-to-date and
-already collapse to one row per player per snapshot week, while team
-snapshots accumulate one row per game played. Time-capsule consumers
-need to filter team rows by ``gameWeek < target_week`` themselves,
-typically using a volume-weighted aggregation; the resolution helpers
-here just pick the right snapshot directory, they don't reshape the
-data.
+season-to-date totals. Same per-game grain as the sibling player loader;
+the time-capsule semantics described here mirror that module's.
 
 Layout on disk::
 
@@ -34,14 +27,25 @@ allowed on the ground"). Consumers should join offensive features on
 the team's own ``teamTeamId`` and defensive features on the opponent's
 ``teamTeamId``.
 
+Time-capsule semantics
+----------------------
+
+To get "season-to-date through week N" for any rolling team feature,
+:func:`load_through` concatenates snapshots 1..N and the caller
+aggregates. For leakage-safe queries on a game in week ``W``, pass
+``W - 1`` -- the loader never returns rows from the target game itself.
+Use :func:`load_window` when the desired range is not anchored at
+week 1 (e.g. "last 4 weeks of defense form").
+
 Aggregation guidance for downstream consumers
 ---------------------------------------------
 
 Most team-level stats are **rate stats with a denominator** -- they
 should be aggregated as ``sum(numerator) / sum(denominator)`` across
-the included games, NOT as ``mean(rate)`` across games. The mean-of-
-rates form silently up-weights low-volume games (e.g. a snowed-out
-17-attempt rushing game). Recommended denominators per family:
+the concatenated games, NOT as ``mean(rate)`` across games. The
+mean-of-rates form silently up-weights low-volume games (a snowed-out
+17-attempt rushing game gets the same vote as a 35-attempt division
+game). Recommended denominators per family:
 
 - passing_*: weight by ``teamStatsPassingDropbacksTotal``
 - receiving_*: weight by ``teamStatsReceivingRoutesTotal`` (or
@@ -56,12 +60,15 @@ rates form silently up-weights low-volume games (e.g. a snowed-out
 
 A few kinds are **matchup-dependent forecasts**, not historical
 aggregates -- they're FP's expert view of the upcoming game and must
-NOT be averaged. The current row IS the feature; pull it as-of the
-target game's week and join on ``(team, opponent, week)``:
+NOT be averaged. Pull the row at the target game's snapshot directly
+via :func:`load_snapshot` and join on ``(team, opponent, week)``:
 
 - line_matchups -- both ``teamStats*`` (this team's protection-line
   baseline) and ``opponentStats*`` (the opponent's pass-rush profile
   for this matchup) are forward-looking and game-specific
+  (final semantics pending fetcher-side schema confirmation; the
+  ``opponentStats*`` interpretation is currently best-guess and should
+  be re-checked once the team-data backfill populates)
 
 And a few are **game outcomes** that average game-to-game (the
 denominator is just games):
@@ -86,15 +93,17 @@ import os
 import re
 from collections.abc import Iterable
 from importlib import resources as pkg_resources
+from importlib.resources.abc import Traversable
+from pathlib import Path
 
 import pandas as pd
 
 from sportstradamus import data
 from sportstradamus.spiderLogger import logger
 
-# Logical kind name -> on-disk basename. Same encapsulation pattern as the
-# player-grain loader: callers reference logical names so a future FP
-# schema rename ripples through this constant only.
+# Logical kind name -> on-disk basename. Same encapsulation pattern as
+# the player-grain loader: callers reference logical names so a future
+# FP schema rename ripples through this constant only.
 FILE_KINDS: dict[str, str] = {
     "coverage_matrix": "coverage_matrix.parquet",
     "coverage_matrix_opp": "coverage_matrix_opp.parquet",
@@ -119,9 +128,8 @@ FILE_KINDS: dict[str, str] = {
 }
 
 # Logical kinds that are forward-looking matchup forecasts rather than
-# historical aggregates. Volume-weighted rolling aggregation is WRONG for
-# these -- consumers must look up the row at the target game's snapshot
-# and use it directly. See the module docstring for the full rationale.
+# historical aggregates. Concatenating these across weeks is WRONG --
+# consumers must call :func:`load_snapshot` for the target week directly.
 MATCHUP_FORECAST_KINDS: frozenset[str] = frozenset({"line_matchups"})
 
 # Logical kinds whose ``*_opp`` mirror is the defense-faced equivalent.
@@ -148,7 +156,7 @@ _WEEK_DIR_FMT = "week_{week:02d}"
 _TEAM_DIR = "team_data/NFL"
 
 
-def snapshot_dir(season: int, snapshot_week: int) -> object | None:
+def snapshot_dir(season: int, snapshot_week: int) -> Traversable | None:
     """Return the team-snapshot directory for ``(season, snapshot_week)``.
 
     Args:
@@ -180,28 +188,12 @@ def available_snapshots(season: int) -> list[int]:
         return []
 
     weeks: list[int] = []
-    for entry in os.listdir(season_dir):
-        match = _WEEK_DIR_RE.match(entry)
+    for entry in Path(str(season_dir)).iterdir():
+        match = _WEEK_DIR_RE.match(entry.name)
         if match:
             weeks.append(int(match.group(1)))
     weeks.sort()
     return weeks
-
-
-def resolve_asof_snapshot(season: int, target_week: int) -> int | None:
-    """Return the largest available team-snapshot week N with N <= ``target_week``.
-
-    Args:
-        season: NFL season year (e.g. 2024).
-        target_week: The game week for which features are being built.
-            The resolver never returns a snapshot newer than this.
-
-    Returns:
-        The largest snapshot week <= ``target_week`` that exists on
-        disk, or ``None`` if no eligible snapshot is present.
-    """
-    candidates = [w for w in available_snapshots(season) if w <= target_week]
-    return max(candidates) if candidates else None
 
 
 def load_snapshot(
@@ -211,10 +203,16 @@ def load_snapshot(
 ) -> pd.DataFrame | None:
     """Load one team-grain parquet from the ``(season, snapshot_week)`` dir.
 
+    Returns the per-team-per-game rows for the games played in
+    ``snapshot_week`` of ``season``. To stitch multiple weeks together
+    into a season-to-date view, use :func:`load_through` or
+    :func:`load_window` instead. For matchup-forecast kinds
+    (:data:`MATCHUP_FORECAST_KINDS`), this single-snapshot accessor IS
+    the right entry point -- those rows must not be concatenated.
+
     Args:
         season: NFL season year (e.g. 2024).
-        snapshot_week: Exact snapshot week number to load (not a target;
-            use :func:`load_asof` for time-capsule resolution).
+        snapshot_week: Exact snapshot week number to load.
         file_kind: Logical kind name from :data:`FILE_KINDS`
             (e.g. ``"line_matchups"``).
 
@@ -254,31 +252,96 @@ def load_snapshot(
         return None
 
 
-def load_asof(
+def load_window(
     season: int,
-    target_week: int,
+    start_week: int,
+    end_week: int,
     file_kind: str,
 ) -> pd.DataFrame | None:
-    """Load the time-capsule team-snapshot of ``file_kind`` as-of ``target_week``.
+    """Concatenate per-game team snapshots over ``[start_week, end_week]`` inclusive.
+
+    The returned DataFrame stacks per-team-per-game rows from every
+    snapshot whose week is in the closed interval. Snapshots that are
+    missing or empty are silently skipped; the function returns
+    ``None`` only when no snapshot in the window produced any rows.
+
+    The caller is responsible for aggregation. For rate stats, the
+    correct pattern is ``sum(numerator) / sum(denominator)`` across the
+    concatenated rows -- see the module docstring for the per-kind
+    denominator recommendations. For matchup-forecast kinds
+    (:data:`MATCHUP_FORECAST_KINDS`), call :func:`load_snapshot`
+    directly instead -- aggregating those rows is a bug.
 
     Args:
         season: NFL season year (e.g. 2024).
-        target_week: The game week for which features are being built.
-            Resolver picks the largest snapshot week <= this value.
+        start_week: Inclusive lower bound on snapshot week.
+        end_week: Inclusive upper bound on snapshot week.
         file_kind: Logical kind name from :data:`FILE_KINDS`.
 
     Returns:
-        The parquet contents from the resolved snapshot, or ``None`` if
-        no eligible snapshot exists. **Important:** the returned frame
-        is per-team-per-game and is NOT pre-aggregated -- consumers must
-        filter by ``gameWeek <= target_week - 1`` (the time-capsule
-        boundary) and apply volume-weighted aggregation themselves.
-        See the module docstring for the per-kind aggregation pattern.
+        Concatenated DataFrame of every available snapshot in the
+        window, or ``None`` if the window resolved to zero non-empty
+        snapshots.
+
+    Raises:
+        ValueError: If ``file_kind`` is not a key in :data:`FILE_KINDS`,
+            or if ``start_week > end_week``.
     """
-    snapshot_week = resolve_asof_snapshot(season, target_week)
-    if snapshot_week is None:
+    if file_kind not in FILE_KINDS:
+        raise ValueError(
+            f"unknown FP team weekly file_kind: {file_kind!r}; "
+            f"valid kinds: {sorted(FILE_KINDS)}"
+        )
+    if start_week > end_week:
+        raise ValueError(
+            f"start_week={start_week} must be <= end_week={end_week}"
+        )
+
+    frames: list[pd.DataFrame] = []
+    for week in available_snapshots(season):
+        if not start_week <= week <= end_week:
+            continue
+        df = load_snapshot(season, week, file_kind)
+        if df is not None and not df.empty:
+            frames.append(df)
+
+    if not frames:
         return None
-    return load_snapshot(season, snapshot_week, file_kind)
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_through(
+    season: int,
+    last_week: int,
+    file_kind: str,
+) -> pd.DataFrame | None:
+    """Concatenate snapshots 1..``last_week`` inclusive -- season-to-date helper.
+
+    Thin convenience wrapper over :func:`load_window` anchored at week 1.
+    The leakage-safe time-capsule pattern for a game in week ``W`` is::
+
+        load_through(season, W - 1, kind)
+
+    so the target game itself is excluded from the lookback.
+
+    Args:
+        season: NFL season year (e.g. 2024).
+        last_week: Inclusive upper bound on snapshot week. Pass
+            ``target_game_week - 1`` for leakage-safe lookbacks.
+        file_kind: Logical kind name from :data:`FILE_KINDS`.
+
+    Returns:
+        Concatenated DataFrame of every available snapshot from week 1
+        through ``last_week``, or ``None`` if no snapshots in the range
+        produced any rows.
+
+    Raises:
+        ValueError: If ``file_kind`` is not a key in :data:`FILE_KINDS`,
+            or if ``last_week < 1``.
+    """
+    if last_week < 1:
+        raise ValueError(f"last_week={last_week} must be >= 1")
+    return load_window(season, 1, last_week, file_kind)
 
 
 def load_all_snapshots(
@@ -293,8 +356,9 @@ def load_all_snapshots(
 
     Returns:
         ``{snapshot_week: DataFrame}`` for snapshots that exist and
-        parsed successfully. Production paths use :func:`load_asof`;
-        this is for diagnostics and snapshot-drift analysis.
+        parsed successfully. Production paths use :func:`load_window` /
+        :func:`load_through`; this returns the snapshots un-concatenated
+        for diagnostics and snapshot-drift analysis.
     """
     out: dict[int, pd.DataFrame] = {}
     for week in available_snapshots(season):
@@ -321,7 +385,9 @@ def snapshot_inventory(seasons: Iterable[int] | None = None) -> pd.DataFrame:
         team_dir = pkg_resources.files(data) / _TEAM_DIR
         if not os.path.exists(team_dir):
             return pd.DataFrame(columns=["season", "snapshot_week", *FILE_KINDS])
-        season_entries = sorted(int(name) for name in os.listdir(team_dir) if name.isdigit())
+        season_entries = sorted(
+            int(entry.name) for entry in Path(str(team_dir)).iterdir() if entry.name.isdigit()
+        )
     else:
         season_entries = sorted(seasons)
 
