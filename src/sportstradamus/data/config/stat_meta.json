@@ -149,7 +149,7 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "none"
         },
         "FGA": {

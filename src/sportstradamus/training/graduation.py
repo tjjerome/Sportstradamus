@@ -27,6 +27,18 @@ import pandas as pd
 MIN_SETTLED_FOR_GRADUATION = 200
 # The 30d window is the canonical graduation gate (7d is too noisy for state).
 GRADUATION_WINDOW_DAYS = 30
+# Demote a cell when the Bet=Over hit rate (precision_over) falls below this.
+# Precision_over = P(Result=Over | Bet=Over) is the like-for-like metric that
+# matches the training pipeline's `precision_over` column — comparing the
+# aggregate `predicted_over_rate` vs `empirical_over_rate` instead conflates
+# publication-selection bias (Sleeper/UD push Over-skewed offers) with real
+# model bias and produces false-positive demotes (see
+# `/tmp/researcher_fg3m_calibration_divergence.md`, 2026-05-24). Below 0.50
+# the model's Over recommendations lose more often than they win, which is a
+# losing strategy at any boost ≤ 2.0×. Live precision_over is NaN when fewer
+# than `_MIN_BETS_FOR_PRECISION` Over bets exist in the window (see
+# `nightly.py`); the check is skipped in that case.
+MIN_PRECISION_OVER = 0.50
 
 
 def _is_nan_like(x: object) -> bool:
@@ -35,17 +47,27 @@ def _is_nan_like(x: object) -> bool:
     return x is None or (isinstance(x, float) and math.isnan(x))
 
 
-def classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float) -> str:
-    """Map (Gate-1 BSS, n_settled, Gate-2 BSS) to a lifecycle state.
+def classify_lifecycle(
+    gate1_bss: float,
+    n_settled: float,
+    book_bss_30d: float,
+    precision_over_live: float = float("nan"),
+) -> str:
+    """Map (Gate-1 BSS, n_settled, Gate-2 BSS, precision_over) to a lifecycle state.
 
     NaN/negative Gate-1 BSS -> ``not-shipped``; positive Gate-1 BSS but
-    insufficient live data -> ``in-test``; non-negative live BSS ->
-    ``graduated``; negative live BSS -> ``demoted``.
+    insufficient live data -> ``in-test``; negative live BSS or live
+    precision_over below :data:`MIN_PRECISION_OVER` -> ``demoted``;
+    otherwise -> ``graduated``.
 
     Args:
         gate1_bss: Offline calibrated brier-skill-score vs the book baseline.
         n_settled: Settled offer count in the graduation window.
         book_bss_30d: Live 30-day book-relative brier-skill-score.
+        precision_over_live: Live 30d hit rate among ``Bet="Over"`` rows
+            (i.e. P(Result=Over | Bet=Over)). NaN -> precision check skipped
+            (typically because the cell has fewer Over bets than
+            ``nightly._MIN_BETS_FOR_PRECISION``).
 
     Returns:
         One of ``"not-shipped"``, ``"in-test"``, ``"graduated"``, ``"demoted"``.
@@ -60,6 +82,8 @@ def classify_lifecycle(gate1_bss: float, n_settled: float, book_bss_30d: float) 
     if _is_nan_like(book_bss_30d):
         return "in-test"
     if book_bss_30d < 0:
+        return "demoted"
+    if not _is_nan_like(precision_over_live) and precision_over_live < MIN_PRECISION_OVER:
         return "demoted"
     return "graduated"
 
@@ -119,6 +143,8 @@ def read_gate2(path: Path) -> pd.DataFrame:
         "gate2_book_bss",
         "predicted_over_rate_live",
         "empirical_over_rate_live",
+        "precision_over_live",
+        "precision_under_live",
         "profit_sim_yield",
     ]
     if not path.exists():
@@ -132,6 +158,12 @@ def read_gate2(path: Path) -> pd.DataFrame:
             "empirical_over_rate": "empirical_over_rate_live",
         }
     )
+    # Older live_metrics parquets predate the precision_{over,under}_live
+    # columns; default to NaN so classify_lifecycle's precision gate skips
+    # those rows instead of erroring.
+    for missing in ("precision_over_live", "precision_under_live"):
+        if missing not in df.columns:
+            df[missing] = float("nan")
     return df[cols]
 
 
@@ -163,6 +195,7 @@ def lifecycle_table(
             r.get("gate1_bss", float("nan")),
             r.get("n_settled", float("nan")),
             r.get("gate2_book_bss", float("nan")),
+            r.get("precision_over_live", float("nan")),
         ),
         axis=1,
     )
