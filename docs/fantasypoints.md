@@ -131,6 +131,31 @@ For season-long aggregates that should not be re-fetched per week,
 pass `--season-long` at `import-curl` time (or set `"weekly": false`
 in the catalog entry).
 
+#### Patching a discover-generated entry (`--replace`)
+
+A handful of FP tools return 0 rows when called with the minimal
+body discover generates, because the SPA injects per-tool filters
+(position, stat-availability qualifier) that the registry doesn't
+expose. Symptom: those tools land in the report with `status: "empty"`
+and a `response_preview` showing `"count": 0`.
+
+Fix: capture a working DevTools curl for the failing tool, then
+overlay it onto the existing catalog entry with `--replace`:
+
+```bash
+pbpaste > /tmp/passing_advanced.curl
+poetry run fp-fetch import-curl /tmp/passing_advanced.curl \
+    --name player_passing_advanced \
+    --replace
+```
+
+`--replace` preserves the existing `output_subdir` (so you don't
+have to re-specify it) and rewrites the captured body's literal
+`game.season.eq` value to the `__SEASON_INT__` sentinel — the entry
+stays usable across seasons even though you captured it on one
+specific week. The `weeks` block doesn't need sentinelisation: the
+runtime substitutor overrides it per call based on `--mode`.
+
 ### 3. Verify locally
 
 ```bash
