@@ -80,8 +80,8 @@ NFL_REGULAR_SEASON_WEEKS = 18
 # 2 s default. Randomised inside each range to avoid a regular drumbeat.
 # Between endpoints in the same week: 10–20 s. Between weeks (a longer
 # pause that mimics a human switching tools and scrolling): 30–90 s.
-_BACKFILL_REQUEST_PAUSE_S: tuple[float, float] = (10.0, 20.0)
-_BACKFILL_WEEK_PAUSE_S: tuple[float, float] = (30.0, 90.0)
+_BACKFILL_REQUEST_PAUSE_S: tuple[float, float] = (2.0, 8.0)
+_BACKFILL_WEEK_PAUSE_S: tuple[float, float] = (8.0, 28.0)
 
 # A "NFL season" labelled by year Y starts in September of year Y.
 # Before July we're still in the prior year's playoff/offseason tail.
