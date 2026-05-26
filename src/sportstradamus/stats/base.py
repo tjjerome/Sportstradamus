@@ -44,6 +44,19 @@ from sportstradamus.spiderLogger import logger
 # produced by 2-comp players whose means nearly coincide. See profile_market.
 _COMP_Z_CLIP: float = 10.0
 
+# Empirical-Bayes prior count for the ``comps mean (EB)`` shrinkage. The
+# shrinkage weight is ``K / (K + n_eff)`` where ``n_eff`` is the sum of
+# distance-weighted comp memberships (Efron & Morris 1975 JASA). At the
+# NFL-weekly granularity Albert (2008) and the comp-research brief
+# recommend K in the 8-12 band; 10 is the middle of that band.
+_COMP_EB_PRIOR_K: float = 10.0
+
+# Quantile bands for the ``comps p25`` / ``comps p75`` signals. Use the
+# distance-weighted comp distribution rather than the raw comp set: a
+# closer comp gets more vote, matching how ``comps mean`` is built.
+_COMP_QUANTILE_LO: float = 0.25
+_COMP_QUANTILE_HI: float = 0.75
+
 archive = Archive()
 scraper = Scrape()
 
@@ -404,7 +417,6 @@ class Stats:
                 "moneyline gain",
                 "totals gain",
                 "position",
-                "comps",
                 "comp n",
                 "comp distance",
             ]
@@ -509,8 +521,16 @@ class Stats:
             _denom_dt = (_n_def * _SX2_dt - _SX_dt**2).replace(0, np.nan)
             self.defenseProfile["totals gain"] = (_n_def * _SXY_dt - _SX_dt * _SY_def) / _denom_dt
 
-        # Player comps mean: distance-weighted average of comps' market means
-        # Player comps z: how the player performs vs their comp peer group
+        # Player comps mean: distance-weighted average of comps' market means.
+        # Player comps mean (EB): Efron-Morris shrinkage of comps mean toward
+        #   the position baseline. Reduces tail noise on low-sample players.
+        # Player comps p25 / p75: distance-weighted quantiles of comp means.
+        #   Lets the GBDT discriminate "tight cluster, confident estimate" vs
+        #   "wide cluster, uncertain estimate" without emitting a redundant std.
+        # The static ``comps z`` (player vs comp-pool level ranking) was
+        # removed -- it carries no matchup signal and is redundant with
+        # ``comps mean`` next to ``MeanYr`` for the GBDT. The matchup-conditional
+        # ``Player comps z`` is computed per-prediction in ``get_stats``.
         self._ensure_comps()
         if self.comps:
             _comp_records_p = []
@@ -531,27 +551,60 @@ class Stats:
                 _wcnt_p = _cp_df_p["weight"].groupby(_cp_df_p["player"]).sum()
                 _comp_wmean = (_wsum_p / _wcnt_p).reindex(self.playerProfile.index)
                 self.playerProfile["comps mean"] = _comp_wmean
-                _cp_df_p["wtd_sq"] = (
-                    _cp_df_p["weight"]
-                    * (_cp_df_p["comp_mean"] - _cp_df_p["player"].map(_comp_wmean.fillna(0))) ** 2
+
+                # Empirical-Bayes shrinkage of the comp mean toward the
+                # position baseline. ``_comp_wmean`` is the distance-
+                # weighted estimator; ``n_eff`` (weight mass) substitutes
+                # for sample size in the K/(K+n) shrinkage factor. The
+                # baseline is the population mean of comp means rather
+                # than the global market mean -- that's the right anchor
+                # because the comp pool already filters on the position's
+                # usage band.
+                _baseline = float(_cp_df_p["comp_mean"].mean())
+                _shrinkage = _wcnt_p / (_wcnt_p + _COMP_EB_PRIOR_K)
+                _comp_eb = (_shrinkage * _comp_wmean + (1.0 - _shrinkage) * _baseline).reindex(
+                    self.playerProfile.index
                 )
-                _comp_wstd = (
-                    np.sqrt(
-                        (_cp_df_p["wtd_sq"].groupby(_cp_df_p["player"]).sum() / _wcnt_p).astype(
-                            float
-                        )
-                    )
-                    .replace(0, np.nan)
+                self.playerProfile["comps mean (EB)"] = _comp_eb
+
+                # Distance-weighted comp p25 / p75: built by sorting each
+                # player's comp set by ``comp_mean`` and walking the
+                # cumulative weight to the requested quantile. This is
+                # numpy's standard weighted-quantile recipe via
+                # ``np.interp(q, cum_w, sorted_vals)``.
+                def _weighted_q(g: pd.DataFrame, q: float) -> float:
+                    """Distance-weighted quantile of ``comp_mean`` values.
+
+                    Args:
+                        g: per-player group with ``comp_mean`` and ``weight``
+                            columns.
+                        q: target quantile in [0, 1].
+
+                    Returns:
+                        Interpolated quantile value, or ``nan`` when the
+                        cumulative weight is non-positive (no usable comps).
+                    """
+                    order = g["comp_mean"].argsort()
+                    vals = g["comp_mean"].to_numpy()[order]
+                    wts = g["weight"].to_numpy()[order]
+                    cum = np.cumsum(wts)
+                    if cum[-1] <= 0:
+                        return float("nan")
+                    cum /= cum[-1]
+                    return float(np.interp(q, cum, vals))
+
+                _p_lo = (
+                    _cp_df_p.groupby("player")
+                    .apply(lambda g: _weighted_q(g, _COMP_QUANTILE_LO), include_groups=False)
                     .reindex(self.playerProfile.index)
                 )
-                # ``replace(0, np.nan)`` only catches exact zeros (1-comp
-                # case). Near-zero stds (2+ comps with coincident means,
-                # wtd_sq ~1e-30) slip through and produce outliers like
-                # -1.89e14 (observed NFL passing yards regen). Clip guards
-                # against that numerical edge case; see _COMP_Z_CLIP.
-                self.playerProfile["comps z"] = (
-                    (_all_mean.reindex(self.playerProfile.index) - _comp_wmean) / _comp_wstd
-                ).clip(-_COMP_Z_CLIP, _COMP_Z_CLIP)
+                _p_hi = (
+                    _cp_df_p.groupby("player")
+                    .apply(lambda g: _weighted_q(g, _COMP_QUANTILE_HI), include_groups=False)
+                    .reindex(self.playerProfile.index)
+                )
+                self.playerProfile["comps p25"] = _p_lo
+                self.playerProfile["comps p75"] = _p_hi
 
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
@@ -828,11 +881,16 @@ class Stats:
             defstats["position"] = np.diag(defstats.iloc[:, stats["Player position"] + 5])
             defstats.drop(columns=self.positions, inplace=True)
 
-        defstats["comps"] = defstats["comps"].astype(np.float64)
-
         defstats.index = stats.index
 
-        # Pre-compute per-player zscore of market column for comps lookups
+        # The matchup-conditional residual signal now writes to
+        # ``stats["Player comps z"]`` (was the misnamed ``defstats["comps"]``
+        # under the ``Defense `` prefix). The count + uniqueness signals stay
+        # on the defstats side under their legacy names (``Defense comp n``,
+        # ``Defense comp distance``) so cached training matrices and the
+        # SHAP-rebuild filter survive without a regeneration pass.
+        #
+        # Pre-compute per-player zscore of market column for comps lookups.
         _opp_col = self.log_strings["opponent"]
         _player_col = self.log_strings["player"]
         _gl_z = self.short_gamelog[[_player_col, _opp_col, market]].copy()
@@ -840,6 +898,7 @@ class Stats:
         _gl_groups = _gl_z.groupby(_player_col)[market]
         _std = _gl_groups.transform("std").replace(0, np.nan)
         _gl_z["_mkt_zscore"] = ((_gl_z[market] - _gl_groups.transform("mean")) / _std).fillna(0)
+        stats["Player comps z"] = 0.0
 
         if self.league == "MLB":
             _is_pitch_market = any(s in market for s in ["allowed", "pitch"])
@@ -898,7 +957,7 @@ class Stats:
                 scores.index = scores.index.droplevel(0)
                 compGames[market] = scores
                 opp_comp_games = compGames.loc[compGames[_opp_col] == opponents[player], market]
-                defstats.loc[player, "comps"] = opp_comp_games.mean()
+                stats.loc[player, "Player comps z"] = opp_comp_games.mean()
                 defstats.loc[player, "comp n"] = opp_comp_games.count()
         else:
             # Vectorized comps lookup for non-MLB leagues with distance weighting
@@ -920,10 +979,16 @@ class Stats:
                 _cp_df = pd.DataFrame(
                     _comp_records, columns=["target", "comp", "opp", "weight", "dist"]
                 )
-                # Defense comp distance: mean distance to player's comps (uniqueness signal)
+                # Mean distance to comps (player-side uniqueness signal --
+                # not matchup-dependent). Carried on defstats only because
+                # cached training matrices know it under the ``Defense `` prefix.
                 defstats["comp distance"] = (
                     _cp_df.groupby("target")["dist"].mean().reindex(defstats.index)
                 )
+                # Inner-join comp games vs the opponent. The result is the
+                # matchup-conditional residual signal: each comp's outcome
+                # vs this opponent z-scored against the comp's own per-player
+                # baseline, distance-weighted across the comp set.
                 _merged = _cp_df.merge(
                     _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
                     left_on=["comp", "opp"],
@@ -934,8 +999,10 @@ class Stats:
                 _comp_wsum = _merged.groupby("target")["weighted_z"].sum()
                 _comp_wcount = _merged.groupby("target")["weight"].sum()
                 _comp_means = _comp_wsum / _comp_wcount
-                defstats["comps"] = _comp_means.reindex(defstats.index)
-                # Defense comp n: number of comp-opponent game observations in this estimate
+                stats["Player comps z"] = _comp_means.reindex(stats.index).fillna(0.0)
+                # Count of (comp, opponent) game observations backing each
+                # ``Player comps z`` estimate. Stays on defstats for cached-
+                # matrix compatibility.
                 defstats["comp n"] = _merged.groupby("target").size().reindex(defstats.index)
 
         stats = stats.join(defstats.add_prefix("Defense "))
