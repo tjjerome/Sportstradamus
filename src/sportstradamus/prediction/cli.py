@@ -24,7 +24,7 @@ from tqdm import tqdm
 
 from sportstradamus import creds
 from sportstradamus.books import get_sleeper, get_ud
-from sportstradamus.helpers import Archive, get_logger, stat_map
+from sportstradamus.helpers import LazyArchive, get_logger, stat_map
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
@@ -40,7 +40,9 @@ pd.set_option("mode.chained_assignment", None)
 pd.set_option("future.no_silent_downcasting", True)
 os.environ["LINE_PROFILE"] = "0"
 
-archive = Archive()
+# LazyArchive defers DuckDB lock acquisition until the first attribute
+# access. See LazyArchive docstring in helpers/archive.py.
+archive = LazyArchive()
 
 _HISTORY_RETENTION_DAYS = 365
 

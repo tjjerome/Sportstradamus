@@ -269,14 +269,6 @@ class Archive:
         self._connection.commit()
 
     # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-
-    def _mark_changed(self, league, market):
-        """Retained for backwards compatibility — DuckDB needs no change-tracking."""
-        return
-
-    # ------------------------------------------------------------------ #
     # Read API
     # ------------------------------------------------------------------ #
 
@@ -825,3 +817,28 @@ class Archive:
         con.commit()
         self._pending_odds.clear()
         self._pending_lines.clear()
+
+
+class LazyArchive:
+    """Proxy that defers :class:`Archive` instantiation until first use.
+
+    DuckDB takes an exclusive file lock the moment a read-write connection
+    is opened, and holds it for the connection's lifetime. The production
+    modules historically bound ``archive = Archive()`` at module top, which
+    meant any process that merely imported them — most importantly the
+    long-lived Streamlit dashboard — grabbed the lock at startup and held
+    it forever, blocking every cron job that opened the archive.
+
+    ``LazyArchive`` looks and quacks exactly like an :class:`Archive`
+    instance — every attribute read forwards to the live singleton — but
+    constructing it does not touch the database. The lock is only acquired
+    on the first attribute access from a code path that actually queries
+    or writes the archive. :class:`Archive` is itself a singleton, so the
+    forwarded call is bit-identical to the legacy direct binding.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str):
+        """Forward attribute lookups to the live :class:`Archive` singleton."""
+        return getattr(Archive(), name)
