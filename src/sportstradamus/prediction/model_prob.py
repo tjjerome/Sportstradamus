@@ -17,7 +17,7 @@ import pandas as pd
 from scipy.special import expit, logit
 
 from sportstradamus.helpers import (
-    Archive,
+    LazyArchive,
     fused_loc,
     get_ev,
     get_odds,
@@ -30,7 +30,9 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 
-archive = Archive()
+# LazyArchive defers DuckDB lock acquisition until the first attribute
+# access. See LazyArchive docstring in helpers/archive.py.
+archive = LazyArchive()
 
 # Maximum allowed model confidence before applying a boost.
 _MAX_CONFIDENCE = 0.90

@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
+    LazyArchive,
     Scrape,
     abbreviations,
     combo_props,
@@ -39,7 +39,11 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.spiderLogger import logger
 
-archive = Archive()
+# LazyArchive defers DuckDB lock acquisition until the first attribute
+# access so processes that merely import this module — most importantly
+# the long-lived Streamlit dashboard — do not hold the archive lock for
+# their entire lifetime. See LazyArchive docstring in helpers/archive.py.
+archive = LazyArchive()
 scraper = Scrape()
 
 # flag to clean up gamelogs

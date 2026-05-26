@@ -25,7 +25,7 @@ submodule path in new code.
 
 import requests
 
-from sportstradamus.helpers.archive import Archive, clean_archive
+from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
 from sportstradamus.helpers.config import (
     abbreviations,
     banned,
@@ -68,6 +68,7 @@ from sportstradamus.helpers.text import (
 __all__ = [
     "Archive",
     "JsonFormatter",
+    "LazyArchive",
     "Scrape",
     "abbreviations",
     "banned",
