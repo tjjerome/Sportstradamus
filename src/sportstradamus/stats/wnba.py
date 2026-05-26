@@ -548,8 +548,21 @@ class StatsWNBA(StatsNBA):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
+    def _compute_comps(self, target_game_date: "datetime | None" = None) -> None:
+        """Build comps from loaded data at runtime (no JSON I/O).
+
+        ``target_game_date`` is accepted for signature compatibility with
+        :meth:`Stats._ensure_comps` but currently ignored -- WNBA still
+        builds a today()-bound snapshot, so training rows continue to see
+        future-season player aggregates. Migrating WNBA to point-in-time
+        comp pools is a separate piece of work.
+        """
+        # TODO(comp-leakage-cross-league): NFL was migrated to per-(season,
+        # week) comp regeneration via build_comp_profile(target_game_date=...);
+        # WNBA still binds to today(). Training matrices for WNBA inherit the
+        # look-ahead leakage where a prior-season row's comps "know" the
+        # current-season player population. See StatsNFL._compute_comps for
+        # the pattern to replicate.
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 

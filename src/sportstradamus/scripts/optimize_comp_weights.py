@@ -1,30 +1,26 @@
 """
 Optimize player-comp construction.
 
-Supports two metric backends via ``--metric``:
+Runs ``scipy.optimize.differential_evolution`` over the per-position diagonal
+weight vector. The objective is:
 
-* ``nca`` (default, NFL only): fit a Mahalanobis metric per position using
-  ``sklearn.neighbors.NeighborhoodComponentsAnalysis`` (with a Ledoit-Wolf
-  shrunk-inverse-covariance fallback for pools below the NCA convergence
-  floor). The learned transform matrix is persisted to
-  ``data/leagues/nfl/comps_metric.npz`` and consumed by
-  ``StatsNFL._apply_comp_metric``. The brief at
-  ``/tmp/researcher_comp_construction.md`` motivates this path: NCA
-  generalises the current ``mul(sqrt(weight))`` construction as the diagonal
-  special case of a learned ``A``, and rotates the basis so collinear
-  features pool.
+1. Apply weight vector to z-scored player profiles
+2. Build BallTree comps using the weighted profiles
+3. Measure mean Spearman correlation of the comp signal vs actual outcomes
+   across the configured target markets
 
-* ``de``: legacy ``scipy.optimize.differential_evolution`` over the weight
-  vector. The objective is:
-    1. Apply weight vector to z-scored player profiles
-    2. Build BallTree comps using the weighted profiles
-    3. Measure mean Spearman correlation of the comp signal vs actual outcomes
-       across multiple target markets
-  Retained so non-NFL leagues (NBA/WNBA/NHL) keep their existing tuning
-  surface and so the NFL path can fall back if NCA destabilises.
-
-Also runs per-feature diagnostics and reports the composite predictive score
+Writes optimized weights back to
+``src/sportstradamus/data/config/playerCompStats.json`` when ``--save`` is
+passed. Also prints per-feature diagnostics and a composite predictive score
 for both current and optimized weights.
+
+A previous variant ran a low-rank Mahalanobis metric fit (originally
+``NeighborhoodComponentsAnalysis``, later re-objectived to a DE-on-Mahalanobis
+fit using this same Spearman score). The Mahalanobis form lost on every NFL
+position on a held-out 2025 val fold (low-rank compression of 25 features
+into 4 components dropped too much signal), so the backend was retired. See
+``git log -- src/sportstradamus/scripts/optimize_comp_weights.py`` for the
+retirement commit.
 """
 
 import argparse
@@ -33,12 +29,9 @@ import json
 import warnings
 
 import numpy as np
-import pandas as pd
-import scipy.linalg
 from scipy.optimize import differential_evolution
 from scipy.stats import spearmanr
-from sklearn.covariance import LedoitWolf
-from sklearn.neighbors import BallTree, NeighborhoodComponentsAnalysis
+from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
@@ -46,45 +39,18 @@ from sportstradamus.stats import Stats, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 warnings.filterwarnings("ignore")
 
-# NCA convergence floor: with fewer players the supervised NN classification
-# loss surface is too thin to fit reliably (Goldberger et al. 2004 floor; brief
-# §recommendation #2). Falls through to Ledoit-Wolf Mahalanobis instead.
-_NCA_MIN_PLAYERS: int = 60
+# Minimum (prediction, actual) pairs required before the Spearman correlation
+# is computed in measure_comp_quality. Below this count the rank correlation
+# is unreliable. Goldberger et al. 2004 and the comp-research brief both
+# recommend 30–50 game pairs as the floor; 50 is the conservative choice.
+_MIN_SPEARMAN_OBSERVATIONS: int = 50
 
-# NCA-on-regression-target recipe: bin continuous targets into quintiles for
-# the supervised loss. Five bins matches the brief's recommendation; smaller
-# bins over-fit small pools, larger bins under-resolve the rank structure.
-_NCA_QUANTILE_BINS: int = 5
-
-# NCA rank cap: limit ``n_components`` so the BallTree stays cheap. Brief
-# recommends ~8 per position.
-_NCA_MAX_COMPONENTS: int = 8
-
-# Markets the NCA target column is averaged over per position. Mirrors the
-# four-market objective in the brief: rec-yds, rec-tds, passing-yds,
-# fantasy-points-prizepicks. Falls back to the underdog FP markets the legacy
-# DE objective uses if a position lacks one of these markets in the gamelog.
-_NCA_NFL_TARGET_MARKETS = {
-    "QB": ["passing yards", "passing tds", "fantasy points prizepicks", "fantasy points underdog"],
-    "RB": [
-        "rushing yards",
-        "receiving yards",
-        "fantasy points prizepicks",
-        "fantasy points underdog",
-    ],
-    "WR": [
-        "receiving yards",
-        "receiving tds",
-        "fantasy points prizepicks",
-        "fantasy points underdog",
-    ],
-    "TE": [
-        "receiving yards",
-        "receiving tds",
-        "fantasy points prizepicks",
-        "fantasy points underdog",
-    ],
-}
+# Raw search-space bounds for the DE weight optimisation. Weights below 0.1
+# become numerically indistinguishable from zero after sqrt(); 8.0 is a
+# practical ceiling that keeps the BallTree distances in a sensible range
+# while still allowing one feature to dominate at 4× the average weight.
+_DE_WEIGHT_LO: float = 0.1
+_DE_WEIGHT_HI: float = 8.0
 
 
 def build_weighted_comps(z_profile, weights, min_comps=5, max_comps=15):
@@ -174,7 +140,7 @@ def measure_comp_quality(
                     predictions.append(weighted_z / total_weight)
                     actuals.append(actual_z)
 
-        if len(predictions) >= 50:
+        if len(predictions) >= _MIN_SPEARMAN_OBSERVATIONS:
             corr, pval = spearmanr(predictions, actuals)
             if not np.isnan(corr):
                 n_obs = len(predictions)
@@ -325,18 +291,18 @@ def optimize_position_weights(
     current_score = -objective(np.array(current_weights))
     print(f"    Current weights score: {current_score:.5f}")
 
-    # Bounds: each weight in [0.1, 8.0]
-    bounds = [(0.1, 8.0)] * n_features
+    # Bounds: each weight in [_DE_WEIGHT_LO, _DE_WEIGHT_HI]
+    bounds = [(_DE_WEIGHT_LO, _DE_WEIGHT_HI)] * n_features
 
     # Seed the initial population with the current weights + random perturbations
     rng = np.random.default_rng(42)
     pop_count = popsize * n_features
-    init_pop = rng.uniform(0.1, 8.0, size=(pop_count, n_features))
+    init_pop = rng.uniform(_DE_WEIGHT_LO, _DE_WEIGHT_HI, size=(pop_count, n_features))
     init_pop[0] = np.array(current_weights)  # include current as first member
     # Add several perturbations of current
     for i in range(1, min(5, pop_count)):
         noise = rng.normal(0, 0.5, n_features)
-        init_pop[i] = np.clip(np.array(current_weights) + noise, 0.1, 8.0)
+        init_pop[i] = np.clip(np.array(current_weights) + noise, _DE_WEIGHT_LO, _DE_WEIGHT_HI)
 
     pbar = tqdm(
         total=maxiter,
@@ -465,264 +431,6 @@ def run_per_feature_diagnostic(
     return scores
 
 
-# ─── NCA (Neighbourhood Components Analysis) metric learning ──────────────────
-
-
-def _build_nca_target(
-    gamelog,
-    player_col,
-    market_cols,
-    z_profile,
-):
-    """Build the per-player NCA target from gamelog season aggregates.
-
-    For each market in ``market_cols`` (skipped if absent from the gamelog),
-    compute per-player season-mean, z-score across the player pool, and
-    average across markets. The result is a 1-d Series indexed by player.
-
-    Players with missing aggregates for all markets are dropped from the
-    Series; callers must align ``z_profile`` to the surviving index.
-
-    Args:
-        gamelog: per-game DataFrame.
-        player_col: column holding the player identifier.
-        market_cols: list of market column names to aggregate.
-        z_profile: z-scored profile DataFrame whose index defines the NCA pool.
-
-    Returns:
-        ``pandas.Series`` of mean z-scored season aggregates, indexed by player.
-    """
-    if not market_cols:
-        return pd.Series(dtype=float)
-
-    pool = z_profile.index
-    accum = []
-    for market in market_cols:
-        if market not in gamelog.columns:
-            continue
-        s = gamelog.groupby(player_col)[market].mean()
-        s = s.reindex(pool)
-        # Drop columns where the entire pool has no observations to avoid
-        # injecting an all-NaN dimension into the average.
-        if s.notna().sum() < _NCA_QUANTILE_BINS:
-            continue
-        # z-score across the pool so each market contributes on the same scale
-        mu = s.mean(skipna=True)
-        sigma = s.std(skipna=True)
-        if sigma is None or np.isnan(sigma) or sigma == 0:
-            continue
-        accum.append((s - mu) / sigma)
-
-    if not accum:
-        return pd.Series(dtype=float)
-
-    target = pd.concat(accum, axis=1).mean(axis=1, skipna=True)
-    return target.dropna()
-
-
-def _bin_target_quintiles(y_series):
-    """Bin a continuous target Series into quintile class labels.
-
-    ``pd.qcut(..., duplicates='drop')`` handles ties / collapsed bins
-    gracefully. Returns ``(class_labels_int, n_bins_used)``; callers should
-    skip NCA fitting if ``n_bins_used < 2``.
-    """
-    if len(y_series) < _NCA_QUANTILE_BINS:
-        return None, 0
-    try:
-        bins = pd.qcut(y_series, q=_NCA_QUANTILE_BINS, labels=False, duplicates="drop")
-    except ValueError:
-        return None, 0
-    if bins is None:
-        return None, 0
-    labels = bins.astype("Int64")
-    n_unique = labels.dropna().nunique()
-    if n_unique < 2:
-        return None, 0
-    return labels, int(n_unique)
-
-
-def _ledoitwolf_metric(X):
-    """Return a Mahalanobis transform matrix from a Ledoit-Wolf shrunk Σ.
-
-    The transform ``A`` satisfies ``A.T @ A ≈ inv(Σ_shrunk)`` so the squared
-    Euclidean distance in the transformed space equals the Mahalanobis
-    distance under the shrunk covariance estimate. Implementation routes
-    through ``scipy.linalg.cholesky`` for numeric stability on near-singular
-    Σ_shrunk (the small-n regime this fallback exists for).
-    """
-    lw = LedoitWolf().fit(X)
-    sigma = lw.covariance_
-    # Add a tiny ridge to guarantee positive-definiteness for cholesky on
-    # degenerate pools (n < n_features); same epsilon as the brier-blend ridge
-    # used elsewhere in the codebase.
-    eps = 1e-8
-    sigma_ridged = sigma + eps * np.eye(sigma.shape[0])
-    L = scipy.linalg.cholesky(sigma_ridged, lower=True)
-    # inv(L) gives us A such that A.T @ A = inv(Σ); solve_triangular over an
-    # identity is the canonical stable form.
-    A = scipy.linalg.solve_triangular(L, np.eye(L.shape[0]), lower=True)
-    return A
-
-
-def _fit_position_metric(
-    z_profile,
-    gamelog,
-    player_col,
-    market_cols,
-    current_weights,
-    position,
-):
-    """Fit a Mahalanobis metric for one position.
-
-    Returns ``(A, method, feature_names)``:
-      * ``A``: transform matrix of shape (n_components, n_features). The
-        comp construction uses ``profile @ A.T``.
-      * ``method``: ``"nca"`` if NCA converged, ``"ledoitwolf"`` if the
-        small-n fallback fired, ``"skipped"`` if neither path could fit.
-      * ``feature_names``: list aligned with ``A.shape[1]``; persisted
-        alongside ``A`` so the runtime loader can verify column order.
-
-    Falls back to ``"ledoitwolf"`` when ``n_players < _NCA_MIN_PLAYERS`` or
-    when the quintile target collapses to <2 classes. Returns
-    ``(None, "skipped", features)`` when neither path produces a valid
-    metric (e.g., no overlap between profile and gamelog).
-    """
-    features = list(z_profile.columns)
-    n_players = len(z_profile)
-    if n_players < _NCA_QUANTILE_BINS + 1:
-        return None, "skipped", features
-
-    y = _build_nca_target(gamelog, player_col, market_cols, z_profile)
-    aligned = z_profile.loc[z_profile.index.intersection(y.index)]
-    y = y.loc[aligned.index]
-    if len(aligned) < _NCA_QUANTILE_BINS + 1:
-        return None, "skipped", features
-
-    X = aligned.values
-    use_nca = len(aligned) >= _NCA_MIN_PLAYERS
-    method = None
-    A = None
-
-    if use_nca:
-        labels, n_bins = _bin_target_quintiles(y)
-        if labels is None or n_bins < 2:
-            use_nca = False
-        else:
-            labels_arr = labels.dropna().astype(int).values
-            mask = labels.notna().values
-            X_fit = X[mask]
-            y_fit = labels_arr
-            # When ``init='lda'`` (the default seed), sklearn caps
-            # ``n_components <= n_classes - 1``. We cap by both the LDA
-            # constraint and the brief's ~8-component recommendation so the
-            # BallTree stays cheap and the fit stays well-conditioned.
-            lda_cap = max(1, n_bins - 1)
-            n_components = min(_NCA_MAX_COMPONENTS, X_fit.shape[1], lda_cap)
-
-            # Seed init: if existing weights are non-trivial (not all == 1.0),
-            # build A_init = diag(sqrt(|weights|)). Otherwise let LDA init.
-            init = "lda"
-            if current_weights is not None and len(current_weights) == X_fit.shape[1]:
-                cw = np.asarray(current_weights, dtype=float)
-                if not np.allclose(cw, np.ones_like(cw)):
-                    diag_seed = np.diag(np.sqrt(np.abs(cw)))
-                    # NCA wants init shape (n_components, n_features). Take
-                    # the top-``n_components`` rows of the diag seed; for a
-                    # diagonal seed this just selects the first
-                    # ``n_components`` features, which is the same ordering
-                    # the BallTree saw in the legacy weighted path. A custom
-                    # init matrix is not subject to the LDA n_components
-                    # constraint, so raise the cap to the brief's recommended
-                    # ~8 components when seeding from the existing weights.
-                    n_components = min(_NCA_MAX_COMPONENTS, X_fit.shape[1])
-                    init = diag_seed[:n_components, :]
-
-            try:
-                nca = NeighborhoodComponentsAnalysis(
-                    n_components=n_components,
-                    init=init,
-                    random_state=42,
-                    max_iter=200,
-                )
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    nca.fit(X_fit, y_fit)
-                A = nca.components_
-                method = "nca"
-            except (ValueError, np.linalg.LinAlgError) as exc:
-                print(f"    NCA fit failed for {position}: {exc}; falling back to LedoitWolf")
-                use_nca = False
-
-    if not use_nca or A is None:
-        try:
-            A = _ledoitwolf_metric(X)
-            method = "ledoitwolf"
-        except (ValueError, np.linalg.LinAlgError) as exc:
-            print(f"    LedoitWolf fit failed for {position}: {exc}")
-            return None, "skipped", features
-
-    return A, method, features
-
-
-def _measure_metric_quality(
-    z_profile,
-    A,
-    player_opp_z_lookup,
-    player_games_lookup,
-    player_positions,
-    position,
-    min_comps,
-    max_comps,
-):
-    """Score a metric ``A`` with the existing Spearman comp-quality probe.
-
-    Reuses ``measure_comp_quality`` so the new NCA path is directly comparable
-    to the legacy DE numbers. Returns ``(score, market_details)``.
-    """
-    if A is None or z_profile.empty:
-        return 0.0, {}
-    transformed = pd.DataFrame(
-        z_profile.values @ A.T,
-        index=z_profile.index,
-    )
-    knn = BallTree(transformed.values)
-    comps = Stats._build_comps(knn, transformed, min_comps, max_comps)
-    if not comps:
-        return 0.0, {}
-    return measure_comp_quality(
-        {position: comps},
-        player_opp_z_lookup,
-        player_games_lookup,
-        player_positions,
-        [position],
-        detailed=True,
-    )
-
-
-def _write_nfl_metric(metric_by_position):
-    """Persist the per-position NCA / LedoitWolf transform matrices.
-
-    Layout follows the brief: a single ``.npz`` keyed by
-    ``{position}_A``, ``{position}_features``, ``{position}_method``.
-    """
-    out = {}
-    for position, payload in metric_by_position.items():
-        A, method, features = payload
-        if A is None:
-            continue
-        out[f"{position}_A"] = A.astype(np.float64)
-        out[f"{position}_features"] = np.asarray(features, dtype=object)
-        out[f"{position}_method"] = np.asarray(method, dtype=object)
-    if not out:
-        return None
-    target_dir = pkg_resources.files(data) / "leagues" / "nfl"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    filepath = target_dir / "comps_metric.npz"
-    np.savez(filepath, **out)
-    return filepath
-
-
 # ─── League-specific data preparation ─────────────────────────────────────────
 
 
@@ -799,11 +507,9 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
 
     Returns:
         ``{position: payload}`` where ``payload`` is a dict with keys
-        ``z_profile``, ``gamelog`` (the per-position filtered DataFrame),
-        ``lookups`` (legacy) when ``validation_cutoff is None``, else
-        ``train_lookups`` and ``val_lookups``. The legacy tuple shape is also
-        accepted by callers that destructure 2- or 3-tuples; see helpers
-        ``_nfl_train_lookups`` / ``_nfl_val_lookups`` for compatibility.
+        ``z_profile`` and either ``lookups`` (legacy) when
+        ``validation_cutoff is None``, else ``train_lookups`` and
+        ``val_lookups``.
     """
     stats_obj.load()
 
@@ -860,7 +566,6 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
             )
             position_data[position] = {
                 "z_profile": z_profile,
-                "gamelog": pos_gamelog,
                 "lookups": lookups,
             }
             continue
@@ -887,7 +592,6 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
         )
         position_data[position] = {
             "z_profile": z_profile,
-            "gamelog": pos_gamelog,
             "train_lookups": train_lookups,
             "val_lookups": val_lookups,
         }
@@ -996,18 +700,6 @@ def main():
             "NFL only. Held-out validation cutoff year: fit weights on seasons "
             "<= cutoff, score them on seasons > cutoff. --save is gated on the "
             "val score being > 0. Omit for the legacy in-sample behavior."
-        ),
-    )
-    parser.add_argument(
-        "--metric",
-        choices=["nca", "de"],
-        default="nca",
-        help=(
-            "NFL metric backend. ``nca`` fits a learned Mahalanobis metric "
-            "(NCA with Ledoit-Wolf shrinkage fallback for small pools) and "
-            "writes data/leagues/nfl/comps_metric.npz. ``de`` runs the legacy "
-            "differential-evolution weight optimizer and rewrites "
-            "playerCompStats.json. Non-NFL leagues always use ``de``."
         ),
     )
     args = parser.parse_args()
@@ -1141,25 +833,17 @@ def main():
     # ── NFL ──
     if "NFL" in args.leagues:
         print("\n" + "=" * 60)
-        print(f"NFL (metric={args.metric})")
+        print("NFL")
         print("=" * 60)
         features_by_pos = {
             pos: list(current_weights["NFL"][pos].keys()) for pos in ["QB", "RB", "WR", "TE"]
         }
-        # NCA backend uses a richer per-position market vector (rec-yds /
-        # rec-tds / passing-yds / FP-prizepicks per the brief); DE keeps the
-        # single-market objective the legacy optimizer was tuned against.
-        if args.metric == "nca":
-            target_markets_by_pos = {
-                pos: _NCA_NFL_TARGET_MARKETS[pos] for pos in ["QB", "RB", "WR", "TE"]
-            }
-        else:
-            target_markets_by_pos = {
-                "QB": ["fantasy points underdog"],
-                "RB": ["fantasy points underdog"],
-                "WR": ["fantasy points underdog"],
-                "TE": ["fantasy points underdog"],
-            }
+        target_markets_by_pos = {
+            "QB": ["fantasy points underdog"],
+            "RB": ["fantasy points underdog"],
+            "WR": ["fantasy points underdog"],
+            "TE": ["fantasy points underdog"],
+        }
 
         nfl_stats = StatsNFL()
         pos_data = prepare_nfl(
@@ -1170,7 +854,6 @@ def main():
         )
 
         nfl_weights = {}
-        nfl_metric_payload = {}  # {position: (A, method, features)}
         for position in ["QB", "RB", "WR", "TE"]:
             if position not in pos_data:
                 print(f"\n  {position}: insufficient data, skipping")
@@ -1179,7 +862,6 @@ def main():
 
             payload = pos_data[position]
             z_profile = payload["z_profile"]
-            pos_gamelog = payload["gamelog"]
             if args.validation_cutoff is None:
                 train_lookups = payload["lookups"]
                 val_lookups = None
@@ -1228,76 +910,6 @@ def main():
                 nfl_weights[position] = current_weights["NFL"][position]
                 continue
 
-            if args.metric == "nca":
-                # Train-fold metric fit. Use train-fold gamelog when val split
-                # is active so future-season rows never leak into the target.
-                if args.validation_cutoff is not None:
-                    train_gamelog = pos_gamelog[pos_gamelog["season"] <= args.validation_cutoff]
-                else:
-                    train_gamelog = pos_gamelog
-                print(f"\n  Metric fit ({position}, NCA backend):")
-                A, method, feat_names = _fit_position_metric(
-                    z_profile=z_profile,
-                    gamelog=train_gamelog,
-                    player_col="player display name",
-                    market_cols=target_markets_by_pos[position],
-                    current_weights=cur_w,
-                    position=position,
-                )
-                if A is None:
-                    print(
-                        f"    {position}: metric fit returned no transform; "
-                        "skipping (legacy weights stay in playerCompStats.json)"
-                    )
-                    nfl_weights[position] = current_weights["NFL"][position]
-                    continue
-                print(f"    method={method}  shape={A.shape}  features={len(feat_names)}")
-                nfl_metric_payload[position] = (A, method, feat_names)
-
-                # Score the fitted metric against train + val (or train alone)
-                cur_score, _ = _measure_metric_quality(
-                    z_profile=z_profile,
-                    A=np.diag(np.sqrt(np.abs(np.asarray(cur_w, dtype=float)))),
-                    player_opp_z_lookup=opp_z,
-                    player_games_lookup=games,
-                    player_positions=positions,
-                    position=position,
-                    min_comps=5,
-                    max_comps=15,
-                )
-                train_score, train_details = _measure_metric_quality(
-                    z_profile=z_profile,
-                    A=A,
-                    player_opp_z_lookup=opp_z,
-                    player_games_lookup=games,
-                    player_positions=positions,
-                    position=position,
-                    min_comps=5,
-                    max_comps=15,
-                )
-                print(f"    legacy DE score:  {cur_score:.5f}")
-                print(f"    learned  score:   {train_score:.5f}  (train fold)")
-                if val_lookups is not None:
-                    val_opp_z, val_games, val_positions = val_lookups
-                    val_score, val_details = _measure_metric_quality(
-                        z_profile=z_profile,
-                        A=A,
-                        player_opp_z_lookup=val_opp_z,
-                        player_games_lookup=val_games,
-                        player_positions=val_positions,
-                        position=position,
-                        min_comps=5,
-                        max_comps=15,
-                    )
-                    print(f"    learned  score:   {val_score:.5f}  (val fold)")
-                    score_report[f"NFL-{position}"] = (cur_score, val_score)
-                else:
-                    score_report[f"NFL-{position}"] = (cur_score, train_score)
-                # Legacy weights stay untouched in NCA mode -- the metric is
-                # consumed via comps_metric.npz, not playerCompStats.json.
-                nfl_weights[position] = current_weights["NFL"][position]
-                continue
-
             print(f"\n  Joint optimization ({position}):")
             opt_result = optimize_position_weights(
                 z_profile,
@@ -1333,18 +945,6 @@ def main():
             score_report[f"NFL-{position}"] = (cur_s, val_s)
 
         optimized["NFL"] = nfl_weights
-
-        # Persist learned metric matrices when NCA backend ran.
-        if args.metric == "nca" and nfl_metric_payload and not args.diagnostic_only:
-            if args.save:
-                metric_path = _write_nfl_metric(nfl_metric_payload)
-                if metric_path is not None:
-                    print(f"\nSaved learned NFL comp metric to {metric_path}")
-            else:
-                print(
-                    "\nNCA matrices fitted but --save not supplied; "
-                    "re-run with --save to persist data/leagues/nfl/comps_metric.npz"
-                )
 
     # ── NHL ──
     if "NHL" in args.leagues:

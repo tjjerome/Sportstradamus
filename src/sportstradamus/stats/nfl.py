@@ -132,13 +132,6 @@ _COMP_POOL_MIN_PLAYERS: int = 7  # skip position if fewer candidates survive fil
 _COMP_KNN_MIN: int = 5
 _COMP_KNN_MAX: int = 15
 
-# Learned-metric artifact: per-position Mahalanobis transform matrices
-# emitted by ``scripts/optimize_comp_weights.py --metric nca`` and consumed
-# by ``StatsNFL._apply_comp_metric``. Optional -- absence falls back to the
-# legacy ``sqrt(weight)`` scaling so production runs without the artifact
-# behave exactly as before.
-_COMPS_METRIC_FILENAME: str = "comps_metric.npz"
-
 # Volume-normalization scale-ratio clip bounds. Prevents runaway
 # adjustments when a player's projected mean is near zero.
 _VOLUME_SCALE_RATIO_FLOOR: float = 0.1
@@ -416,12 +409,6 @@ class StatsNFL(Stats):
         self.usage_stat = "snap pct"
         self.tiebreaker_stat = "route participation short"
         self._volume_model_cache = None
-        # Cache for the learned comp Mahalanobis metric loaded from
-        # ``data/leagues/nfl/comps_metric.npz``. ``None`` means "not yet
-        # attempted"; an empty dict means "load attempted but artifact
-        # missing or unreadable, fall back to weighted Euclidean";
-        # populated dicts hold per-position transform payloads.
-        self._comps_metric_cache: dict | None = None
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Restrict the training gamelog to positions that accrue ``market``'s stat.
@@ -1387,6 +1374,18 @@ class StatsNFL(Stats):
         target_season, target_week = self._lookup_season_week(target_game_date)
         return target_season, target_week
 
+    def _comp_target_key(self, date: "date | None") -> "tuple[int, int | None]":
+        """NFL override: cache the per-week comp pool on ``(season, week)``.
+
+        The base implementation buckets on the most-recent Wednesday's week
+        index. NFL has authoritative schedule weeks that already align with
+        the Wed→Wed window (games Thu/Sun/Mon; Tue/Wed = retrain idle), so
+        reusing :meth:`_resolve_comp_cache_key` keeps the comp cache aligned
+        with both :meth:`build_comp_profile`'s ``_comp_profile_cache`` and
+        the operator's confirmed retrain cadence.
+        """
+        return self._resolve_comp_cache_key(date)
+
     def _lookup_season_week(self, target_game_date: datetime | date) -> tuple[int, int]:
         """Resolve a calendar date to ``(season, week)`` via nfl_data_py's schedule.
 
@@ -1627,106 +1626,6 @@ class StatsNFL(Stats):
             windows.append((target_season, 1, target_week - 1))
         return windows
 
-    def _load_comps_metric(self) -> dict:
-        """Load the learned per-position Mahalanobis metric, if present.
-
-        Returns a dict ``{position: {"A": matrix, "features": [name, ...],
-        "method": str}}``. An empty dict is returned when the artifact is
-        absent or unreadable -- the absent case is the common, expected one
-        (the legacy ``sqrt(weight)`` path is still production-default and
-        ``comps_metric.npz`` only appears after a
-        ``scripts/optimize_comp_weights.py --metric nca --save`` run).
-        """
-        if getattr(self, "_comps_metric_cache", None) is not None:
-            return self._comps_metric_cache
-
-        path = pkg_resources.files(data) / "leagues" / "nfl" / _COMPS_METRIC_FILENAME
-        if not path.is_file():
-            logger.info("comps_metric.npz unavailable -- falling back to weighted Euclidean")
-            self._comps_metric_cache = {}
-            return self._comps_metric_cache
-
-        try:
-            with np.load(path, allow_pickle=True) as npz:
-                bundle: dict = {}
-                for key in npz.files:
-                    if not key.endswith("_A"):
-                        continue
-                    position = key[:-2]
-                    A = np.asarray(npz[key])
-                    feats_key = f"{position}_features"
-                    method_key = f"{position}_method"
-                    if feats_key not in npz.files:
-                        continue
-                    features = [str(name) for name in npz[feats_key]]
-                    method = str(npz[method_key]) if method_key in npz.files else "unknown"
-                    bundle[position] = {"A": A, "features": features, "method": method}
-        except (OSError, ValueError, KeyError) as exc:
-            logger.warning(
-                f"comps_metric.npz failed to load ({exc}); falling back to weighted Euclidean"
-            )
-            self._comps_metric_cache = {}
-            return self._comps_metric_cache
-
-        self._comps_metric_cache = bundle
-        return bundle
-
-    def _apply_comp_metric(
-        self,
-        z_profile: pd.DataFrame,
-        position: str,
-        legacy_weights: dict[str, float],
-    ) -> pd.DataFrame:
-        """Project a z-scored player profile into the learned metric space.
-
-        When ``data/leagues/nfl/comps_metric.npz`` is present and its feature
-        list aligns with ``z_profile.columns`` for the given ``position``, the
-        profile is multiplied by the learned transform matrix ``A`` (returns
-        ``z_profile.values @ A.T`` packaged as a DataFrame). Otherwise the
-        legacy ``sqrt(weight)`` Euclidean scaling is applied -- this is the
-        production fallback that keeps environments without the .npz running
-        unchanged.
-
-        Args:
-            z_profile: z-scored player profile DataFrame (rows=players).
-            position: NFL position string (``"QB"``, ``"RB"``, ``"WR"``,
-                ``"TE"``).
-            legacy_weights: ``{feature: weight}`` map for the legacy fallback,
-                in the same column order as ``z_profile.columns``.
-
-        Returns:
-            Transformed profile DataFrame. Row index is preserved; column
-            count is ``A.shape[0]`` when the metric applies, otherwise
-            ``len(z_profile.columns)``.
-        """
-        bundle = self._load_comps_metric()
-        entry = bundle.get(position) if bundle else None
-
-        legacy_features = list(legacy_weights.keys())
-        profile_columns = list(z_profile.columns)
-
-        # Three-way alignment check: features in the artifact must match the
-        # columns in the runtime profile AND the legacy weight key order, so
-        # a stale .npz (e.g. fitted on yesterday's feature set) silently
-        # falls back instead of mis-multiplying mismatched columns.
-        artifact_aligned = (
-            entry is not None
-            and entry["features"] == profile_columns
-            and entry["features"] == legacy_features
-        )
-        if not artifact_aligned:
-            if entry is not None:
-                logger.info(
-                    f"comps_metric.npz position={position} feature mismatch -- "
-                    "falling back to weighted Euclidean"
-                )
-            weighted = z_profile.mul(np.sqrt(np.abs(np.asarray(list(legacy_weights.values())))))
-            return weighted
-
-        A = np.asarray(entry["A"], dtype=np.float64)
-        transformed = z_profile.values @ A.T
-        return pd.DataFrame(transformed, index=z_profile.index)
-
     def update_player_comps(self, year: int | None = None) -> None:
         """Rebuild comp clusters for each NFL position and write to ``comps.json``.
 
@@ -1773,8 +1672,8 @@ class StatsNFL(Stats):
             positionProfile = positionProfile.apply(
                 lambda x: (x - x.mean()) / x.std(), axis=0
             ).fillna(0)
-            positionProfile = self._apply_comp_metric(
-                positionProfile, position, stats["NFL"][position]
+            positionProfile = positionProfile.mul(
+                np.sqrt(np.abs(np.asarray(list(stats["NFL"][position].values()))))
             )
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(
@@ -1785,18 +1684,27 @@ class StatsNFL(Stats):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
+        """Build comps from loaded data at runtime (no JSON I/O).
+
+        Args:
+            target_game_date: Date the comps should reflect "as of". The
+                training-matrix path passes the per-gameday date so the comp
+                pool is bounded to games strictly before it (eliminates the
+                look-ahead leakage where a 2023 row's comps would otherwise
+                see the 2025 player population). When ``None`` (inference /
+                cron path), today's date is used and the Phase-1.5 lookback
+                rule routes through ``_lookback_windows`` to restrict comps
+                to current-season-only candidates after week 4.
+        """
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
 
-        # Same Phase-1.5 lookback rule the cron path applies: today's date
-        # routes through ``_lookback_windows`` so post-week-4 comps use
-        # current-season-only candidates. This is the inference fallback
-        # when ``comps.json`` is missing.
-        playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerProfile = self.build_comp_profile(target_game_date=target_game_date)
         if playerProfile.empty:
             return
 
@@ -1818,8 +1726,8 @@ class StatsNFL(Stats):
             positionProfile = positionProfile.apply(
                 lambda x: (x - x.mean()) / x.std(), axis=0
             ).fillna(0)
-            positionProfile = self._apply_comp_metric(
-                positionProfile, position, stats["NFL"][position]
+            positionProfile = positionProfile.mul(
+                np.sqrt(np.abs(np.asarray(list(stats["NFL"][position].values()))))
             )
             knn = BallTree(positionProfile)
             comps[position] = self._build_comps(
