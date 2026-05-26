@@ -44,22 +44,6 @@ from sportstradamus.spiderLogger import logger
 # produced by 2-comp players whose means nearly coincide. See profile_market.
 _COMP_Z_CLIP: float = 10.0
 
-# Empirical-Bayes prior count for the ``comps mean (EB)`` shrinkage.
-# Shrinkage weight is ``K / (K + n_eff)`` where ``n_eff`` is the sum of
-# distance-weighted comp memberships (Efron & Morris 1975 JASA). At the
-# NFL-weekly granularity Albert (2008) and the comp-research brief
-# recommend K in the 8-12 band; 10 is the middle of that band and matches
-# the per-position pool sizes the production pipeline serves (NFL pool
-# medians 50-160 players post-usage filter -> n_eff typically 5-15 for
-# k=5..15 comps with distance weights 1/(1+d) ranging 0.1-1.0).
-_COMP_EB_PRIOR_K: float = 10.0
-
-# Quantile bands for the ``comps p25`` / ``comps p75`` signals. Use the
-# distance-weighted comp distribution rather than the raw comp set: a
-# closer comp gets more vote, which matches how ``comps mean`` is built.
-_COMP_QUANTILE_LO: float = 0.25
-_COMP_QUANTILE_HI: float = 0.75
-
 archive = Archive()
 scraper = Scrape()
 
@@ -125,12 +109,6 @@ class Stats:
         self.usage_stat = ""
         self.tiebreaker_stat = ""
         self.comps = {}
-        # Defensive comps (Module D/E of the matchup-channel rebuild). NFL only
-        # today: keyed by defensive bucket (vs_QB / vs_RB / vs_WR / vs_TE) ->
-        # team abbreviation -> {"comps": [...], "distances": [...]}. Empty on
-        # other leagues; falls back to legacy opponent-team groupby in
-        # the get_stats Defense comps z block when missing.
-        self.defenseComps = {}
 
     def parse_game(self, game):
         """Parses a game and updates the gamelog.
@@ -214,45 +192,6 @@ class Stats:
         if not self.comps:
             self._compute_comps()
 
-    def update_defense_comps(self, year=None):
-        """Rebuild defensive comp clusters per position-bucket. Override in subclass.
-
-        Default no-op for leagues without a matchup-channel defensive comp pool
-        (currently NFL only -- see :meth:`StatsNFL.update_defense_comps`).
-        """
-        return
-
-    def _compute_defense_comps(self):
-        """Build defensive comps from loaded data. Override in subclass.
-
-        Default no-op for leagues without a matchup-channel defensive comp pool.
-        """
-        pass
-
-    def _ensure_defense_comps(self):
-        """Build defensive comps lazily on first access.
-
-        Module D/E of the matchup-channel rebuild. Mirrors :meth:`_ensure_comps`
-        for the defensive comp pool: NFL's subclass populates
-        ``self.defenseComps`` keyed by bucket; other leagues leave the dict
-        empty and the legacy opponent-team groupby in ``get_stats`` fires
-        as fallback.
-        """
-        if not self.defenseComps:
-            self._compute_defense_comps()
-
-    @staticmethod
-    def _defensive_bucket_for_position(position):
-        """Map an offensive position to its defensive bucket key. Override in subclass.
-
-        Default returns ``None`` for leagues without a position-grouped defensive
-        comp pool. NFL's subclass returns ``vs_QB`` / ``vs_RB`` / ``vs_WR`` /
-        ``vs_TE`` per the routing in ``_DEFENSIVE_BUCKETS``. When ``None`` is
-        returned, the matched-pair Defense comps z block in ``get_stats``
-        short-circuits to the legacy opponent-team groupby fallback.
-        """
-        return None
-
     def save_comps(self):
         """Write current comps to the league's JSON file for inspection."""
         if not self.comps:
@@ -272,20 +211,6 @@ class Stats:
         aggregation so absent teams degrade to NaN-then-zero downstream.
         """
         return None, None
-
-    def _join_fp_player_features(self, date) -> pd.DataFrame | None:
-        """League hook: return per-player feature frame for ``date``.
-
-        Default no-op returns ``None``. Override on a league subclass to
-        plug an external player-grain data source into ``playerProfile``.
-        The frame must be indexed by the same accent-stripped player name
-        the gamelog uses for the player column. ``base_profile``
-        join-left-merges it onto ``playerstats`` after the rolling-window
-        aggregates so absent players degrade to NaN-then-zero downstream.
-        NFL overrides this with the Phase 3+4 asof feature surface
-        derived from FP weekly snapshots.
-        """
-        return None
 
     @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
@@ -392,16 +317,6 @@ class Stats:
 
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
-
-        # League hook: per-league augmentation of playerstats with
-        # external-data-source player-grain features (e.g. NFL FP weekly
-        # snapshot asof features). Default no-op returns ``None``; NFL
-        # overrides return a player-name-indexed frame merged in below.
-        # NaN-on-missing players is absorbed by the ``fillna(0)`` chain
-        # in the ``playerProfile.join(playerstats, how="right")`` below.
-        fp_player_features = self._join_fp_player_features(date)
-        if fp_player_features is not None and not fp_player_features.empty:
-            playerstats = playerstats.join(fp_player_features, how="left")
 
         # Vectorized tail(10).mean() for team stats
         _team_col = self.log_strings["team"]
@@ -638,63 +553,6 @@ class Stats:
                     (_all_mean.reindex(self.playerProfile.index) - _comp_wmean) / _comp_wstd
                 ).clip(-_COMP_Z_CLIP, _COMP_Z_CLIP)
 
-                # Empirical-Bayes shrinkage of the comp mean toward the
-                # position baseline. ``_comp_wmean`` is the distance-
-                # weighted estimator; ``n_eff`` (weight mass) substitutes
-                # for sample size in the K/(K+n) shrinkage factor. The
-                # baseline is the population mean of comp means rather
-                # than the global market mean -- that's the right anchor
-                # because the comp pool already filters on the position's
-                # usage band.
-                _baseline = float(_cp_df_p["comp_mean"].mean())
-                _shrinkage = _wcnt_p / (_wcnt_p + _COMP_EB_PRIOR_K)
-                _comp_eb = (_shrinkage * _comp_wmean + (1.0 - _shrinkage) * _baseline).reindex(
-                    self.playerProfile.index
-                )
-                self.playerProfile["comps mean (EB)"] = _comp_eb
-
-                # Distance-weighted comp p25 / p75: built by sorting each
-                # player's comp set by ``comp_mean`` and walking the
-                # cumulative weight to the requested quantile. This is
-                # numpy's standard weighted-quantile recipe via
-                # ``np.interp(q, cum_w, sorted_vals)``.
-                def _weighted_q(g: pd.DataFrame, q: float) -> float:
-                    """Return the distance-weighted quantile ``q`` of comp means.
-
-                    Implements numpy's weighted-quantile recipe: sort comp means,
-                    form normalised cumulative weights, then interpolate at ``q``.
-
-                    Args:
-                        g: Per-player group from ``_cp_df_p`` with columns
-                            ``comp_mean`` (float) and ``weight`` (float >= 0).
-                        q: Target quantile in [0, 1].
-
-                    Returns:
-                        Interpolated quantile value, or ``nan`` when total
-                        weight is zero (player has no valid comps).
-                    """
-                    order = g["comp_mean"].argsort()
-                    vals = g["comp_mean"].to_numpy()[order]
-                    wts = g["weight"].to_numpy()[order]
-                    cum = np.cumsum(wts)
-                    if cum[-1] <= 0:
-                        return float("nan")
-                    cum /= cum[-1]
-                    return float(np.interp(q, cum, vals))
-
-                _p_lo = (
-                    _cp_df_p.groupby("player")
-                    .apply(lambda g: _weighted_q(g, _COMP_QUANTILE_LO), include_groups=False)
-                    .reindex(self.playerProfile.index)
-                )
-                _p_hi = (
-                    _cp_df_p.groupby("player")
-                    .apply(lambda g: _weighted_q(g, _COMP_QUANTILE_HI), include_groups=False)
-                    .reindex(self.playerProfile.index)
-                )
-                self.playerProfile["comps p25"] = _p_lo
-                self.playerProfile["comps p75"] = _p_hi
-
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
@@ -782,7 +640,6 @@ class Stats:
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
         self._ensure_comps()
-        self._ensure_defense_comps()
         stats = pd.DataFrame(
             columns=[
                 "Avg1",
@@ -1044,76 +901,29 @@ class Stats:
                 defstats.loc[player, "comps"] = opp_comp_games.mean()
                 defstats.loc[player, "comp n"] = opp_comp_games.count()
         else:
-            # Module F: matched-pair Defense comps. For each player, expand to
-            # (player_comp, def_comp) pairs by crossing the player's 10 comps with
-            # the opponent's 10 defensive comps. Look up games where p_comp played
-            # against d_comp and emit the joint-weighted z-score. The previous
-            # opponent-team groupby only got ~5-30 (comp, opponent_team) obs per
-            # estimate; matched pair targets ~30-100 by widening the opponent
-            # axis to a similarity neighborhood. Falls back to the legacy
-            # opponent-team groupby when defenseComps is missing (no defComps.json
-            # built yet, or non-NFL league).
+            # Vectorized comps lookup for non-MLB leagues with distance weighting
             _comp_records = []
-            _matched_records = []
-            _have_def_comps = bool(self.defenseComps)
             for player, row in stats.iterrows():
                 pos_idx = int(row.get("Player position", 1)) - 1
                 if pos_idx < 0 or pos_idx >= len(self.positions):
                     continue
-                position = self.positions[pos_idx]
-                comp_data = self.comps.get(position, {}).get(
+                comp_data = self.comps.get(self.positions[pos_idx], {}).get(
                     player, {"comps": [player], "distances": [0.0]}
                 )
                 opp = opponents.get(player, "")
-                bucket = self._defensive_bucket_for_position(position)
-                def_comp_data = (
-                    self.defenseComps.get(bucket, {}).get(opp) if bucket else None
-                )
-
-                # Always populate the legacy (player_comp, opp_team) record set --
-                # the comp distance signal AND the fallback aggregate use it.
-                for comp, dist in zip(
-                    comp_data["comps"], comp_data["distances"], strict=False
-                ):
+                for comp, dist in zip(comp_data["comps"], comp_data["distances"], strict=False):
                     if comp == player:
                         continue
                     _comp_records.append((player, comp, opp, 1.0 / (1.0 + dist), dist))
-
-                # Matched-pair branch -- expand to (player_comp, def_comp) pairs.
-                if def_comp_data is None:
-                    continue
-                def_comps = def_comp_data.get("comps", [])
-                def_dists = def_comp_data.get("distances", [])
-                for comp, p_dist in zip(
-                    comp_data["comps"], comp_data["distances"], strict=False
-                ):
-                    if comp == player:
-                        continue
-                    p_weight = 1.0 / (1.0 + p_dist)
-                    for d_comp, d_dist in zip(def_comps, def_dists, strict=False):
-                        if d_comp == opp:
-                            continue
-                        d_weight = 1.0 / (1.0 + d_dist)
-                        _matched_records.append(
-                            (player, comp, d_comp, p_weight * d_weight, p_dist + d_dist)
-                        )
 
             if _comp_records:
                 _cp_df = pd.DataFrame(
                     _comp_records, columns=["target", "comp", "opp", "weight", "dist"]
                 )
-                # Defense comp distance: mean distance to player's comps
-                # (player-side uniqueness signal; unaffected by the matched-pair
-                # rebuild because it summarises the same comp set the matched-pair
-                # join consumes).
+                # Defense comp distance: mean distance to player's comps (uniqueness signal)
                 defstats["comp distance"] = (
                     _cp_df.groupby("target")["dist"].mean().reindex(defstats.index)
                 )
-
-                # Legacy aggregate stays computed unconditionally -- it's the
-                # fallback when matched-pair returns no rows for a player AND
-                # the production-stable baseline the matched-pair channel
-                # is expected to beat.
                 _merged = _cp_df.merge(
                     _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
                     left_on=["comp", "opp"],
@@ -1123,54 +933,10 @@ class Stats:
                 _merged["weighted_z"] = _merged["_mkt_zscore"] * _merged["weight"]
                 _comp_wsum = _merged.groupby("target")["weighted_z"].sum()
                 _comp_wcount = _merged.groupby("target")["weight"].sum()
-                _legacy_means = _comp_wsum / _comp_wcount
-                _legacy_n = _merged.groupby("target").size()
-
-            if _have_def_comps and _matched_records:
-                _mp_df = pd.DataFrame(
-                    _matched_records,
-                    columns=["target", "comp", "d_comp", "weight", "dist"],
-                )
-                # Inner-merge against the per-player z-scored gamelog: each row
-                # ((p_comp, d_comp) game observation) carries the comp's
-                # market_zscore vs its own season baseline -- exactly the
-                # "residual vs comp's own baseline" the brief specifies, just
-                # variance-normalised so the value lives on the same scale
-                # across markets.
-                _matched = _mp_df.merge(
-                    _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
-                    left_on=["comp", "d_comp"],
-                    right_on=[_player_col, _opp_col],
-                    how="inner",
-                )
-                if not _matched.empty:
-                    _matched["weighted_z"] = _matched["_mkt_zscore"] * _matched["weight"]
-                    _m_wsum = _matched.groupby("target")["weighted_z"].sum()
-                    _m_wcount = _matched.groupby("target")["weight"].sum()
-                    defstats["comps"] = (_m_wsum / _m_wcount).reindex(defstats.index)
-                    defstats["comp n"] = _matched.groupby("target").size().reindex(
-                        defstats.index
-                    )
-                    # Players whose matched-pair join returned no rows fall
-                    # back to the legacy aggregate. ``combine_first`` only
-                    # fills NaN, so matched-pair takes precedence where it
-                    # produced a value.
-                    if _comp_records:
-                        defstats["comps"] = defstats["comps"].combine_first(
-                            _legacy_means.reindex(defstats.index)
-                        )
-                        defstats["comp n"] = defstats["comp n"].combine_first(
-                            _legacy_n.reindex(defstats.index)
-                        )
-                    _matched_filled = True
-                else:
-                    _matched_filled = False
-            else:
-                _matched_filled = False
-
-            if not _matched_filled and _comp_records:
-                defstats["comps"] = _legacy_means.reindex(defstats.index)
-                defstats["comp n"] = _legacy_n.reindex(defstats.index)
+                _comp_means = _comp_wsum / _comp_wcount
+                defstats["comps"] = _comp_means.reindex(defstats.index)
+                # Defense comp n: number of comp-opponent game observations in this estimate
+                defstats["comp n"] = _merged.groupby("target").size().reindex(defstats.index)
 
         stats = stats.join(defstats.add_prefix("Defense "))
 
