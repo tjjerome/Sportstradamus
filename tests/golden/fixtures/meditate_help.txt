@@ -52,4 +52,14 @@ Options:
                                   {devel, main}. 'main' only trains cells with
                                   shipped=main. See data/config/stat_meta.json.
                                   [default: devel]
+  --bypass-withholding / --no-bypass-withholding
+                                  One-shot escape from the ship gate: train
+                                  EVERY market in the registry regardless of
+                                  shipped status. Withheld SkewNormal cells fall
+                                  back to --target-strategy; non-SkewNormal
+                                  cells fall back to STRATEGY_NONE (count-branch
+                                  ignores the slug). Lets internal projection
+                                  markets (NFL attempts/carries/targets) train
+                                  so their pickles feed proj_* features into
+                                  downstream training matrices.
   --help                          Show this message and exit.

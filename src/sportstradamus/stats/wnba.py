@@ -3,7 +3,7 @@
 import importlib.resources as pkg_resources
 import json
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 from time import sleep
 
@@ -31,7 +31,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 from sportstradamus.stats.nba import StatsNBA
@@ -49,13 +49,6 @@ class StatsWNBA(StatsNBA):
         self.stat_types = [stat.replace("_48", "_40") for stat in self.stat_types]
 
         self.season = self.season_start.year
-
-    def load(self):
-        """Load data from files."""
-        wnba_data = read_gamelog("wnba")
-        self.players = wnba_data["players"]
-        self.gamelog = wnba_data["gamelog"]
-        self.teamlog = wnba_data["teamlog"]
 
     def update(self):
         team_abbr_map = {
@@ -143,7 +136,6 @@ class StatsWNBA(StatsNBA):
                 on=["PLAYER_NAME", "TEAM_ABBREVIATION"],
                 suffixes=(None, "_y"),
             )
-            # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
             player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
             player_df.POS = player_df.POS.str[0]
             player_df.index = player_df.PLAYER_NAME
@@ -459,56 +451,6 @@ class StatsWNBA(StatsNBA):
         # Save the updated player data
         write_gamelog("wnba", self.gamelog, self.teamlog, self.players)
 
-    def build_comp_profile(self, playerList=None):
-        """Build merged player profile DataFrame for comp computation.
-
-        Args:
-            playerList: Optional dict of {team: {player_name: stats_dict}}.
-                If None, uses all seasons from self.players.
-
-        Returns:
-            (playerProfile, playerDict) where playerProfile is indexed by
-            PLAYER_NAME, and playerDict maps player_name to stats_dict.
-        """
-        if self.playerProfile.empty:
-            self.profile_market("MIN")
-
-        if playerList is None:
-            playerList = {}
-            for season_key in self.players:
-                playerList.update(self.players[season_key])
-
-        players = []
-        for team in playerList:
-            players.extend(
-                [
-                    v | {"PLAYER_NAME": k, "TEAM_ABBREVIATION": team}
-                    for k, v in playerList[team].items()
-                ]
-            )
-
-        playerProfile = self.playerProfile.merge(
-            pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"),
-            on="PLAYER_NAME",
-            how="outer",
-            suffixes=("_x", None),
-        ).set_index("PLAYER_NAME")
-
-        # Coalesce _x columns (gamelog values shadowed by roster values during merge)
-        _x_cols = [c for c in playerProfile.columns if c.endswith("_x")]
-        for col in _x_cols:
-            base = col[:-2]
-            if base in playerProfile.columns:
-                playerProfile[base] = playerProfile[base].fillna(playerProfile[col])
-        playerProfile.drop(columns=_x_cols, inplace=True, errors="ignore")
-        playerProfile.fillna(0, inplace=True)
-
-        playerDict = {}
-        for team in playerList.values():
-            playerDict.update(team)
-
-        return playerProfile, playerDict
-
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
@@ -548,51 +490,13 @@ class StatsWNBA(StatsNBA):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self, target_game_date: "datetime | None" = None) -> None:
-        """Build comps from loaded data at runtime (no JSON I/O).
+    def _current_season_key(self, target_game_date: date) -> int:
+        """WNBA override: integer-year season keys.
 
-        ``target_game_date`` is accepted for signature compatibility with
-        :meth:`Stats._ensure_comps` but currently ignored -- WNBA still
-        builds a today()-bound snapshot, so training rows continue to see
-        future-season player aggregates. Migrating WNBA to point-in-time
-        comp pools is a separate piece of work.
+        WNBA seasons run May–Oct of a single calendar year, so the season
+        containing ``target_game_date`` is just its calendar year. ``int``
+        return type lets the inherited :meth:`StatsNBA._player_seasons_through`
+        compare against the int keys in ``self.players``.
         """
-        # TODO(comp-leakage-cross-league): NFL was migrated to per-(season,
-        # week) comp regeneration via build_comp_profile(target_game_date=...);
-        # WNBA still binds to today(). Training matrices for WNBA inherit the
-        # look-ahead leakage where a prior-season row's comps "know" the
-        # current-season player population. See StatsNFL._compute_comps for
-        # the pattern to replicate.
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
-            stats = json.load(f)
+        return target_game_date.year
 
-        all_features = set()
-        for pos_weights in stats["WNBA"].values():
-            all_features.update(pos_weights.keys())
-        all_features = list(all_features)
-
-        playerProfile, playerDict = self.build_comp_profile()
-        playerProfile = playerProfile[
-            [f for f in all_features if f in playerProfile.columns]
-        ].replace([np.nan, np.inf, -np.inf], 0)
-
-        comps = {}
-        for position in self.positions:
-            pos_weights = stats["WNBA"][position]
-            pos_features = list(pos_weights.keys())
-            pos_players = [
-                p
-                for p, v in playerDict.items()
-                if v["POS"] == position and p in playerProfile.index
-            ]
-            if len(pos_players) < 7:
-                continue
-            positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
-            knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
-
-        self.comps = comps

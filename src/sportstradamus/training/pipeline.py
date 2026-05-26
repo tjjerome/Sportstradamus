@@ -61,6 +61,41 @@ _ECE_BINS = 10
 _BRIER_SKILL_DENOM_FLOOR = 1e-9
 # Probability clip used so log_loss / Brier never see exact 0 or 1.
 _PROBA_CLIP = 1e-6
+# Confidence cutoff for the mode-stats and diagnostic masks: only rows where
+# the model's top-class probability exceeds this are counted in precision /
+# accuracy / over% statistics.  Mirrors the live scoring path in
+# prediction/scoring.py. Value from CLAUDE.md "Performance Table".
+_MODE_CONFIDENCE_THRESHOLD: float = 0.54
+# Temporal train/test split fraction: earliest 70% of the matrix goes to
+# training, latest 30% is held out for evaluation.  Temporal ordering (not
+# random split) prevents look-ahead leakage of player form.
+_TRAIN_FRACTION: float = 0.7
+# Minimum historical zero rate (hist_gate) to activate the zero-inflation gate
+# component during SkewNormal training and blending.  Below 2% the gate adds
+# more noise than signal — the model treats the stat as effectively continuous.
+_HIST_GATE_THRESHOLD: float = 0.02
+# Mean threshold separating SkewNormal (continuous, high-mean) from count
+# distributions (NegBin/ZINB).  Stats with global_mean < 2 are integer-like
+# enough that a count family fits better than SkewNormal.
+_SKEWNORMAL_MEAN_THRESHOLD: float = 2.0
+# hist_gate level above which the SkewNormal path filters to nonzero rows only.
+# Below this, zeros are rare enough to model directly without an offset pass.
+_SKEWNORMAL_HIST_GATE_THRESHOLD: float = 0.05
+# Minimum coefficient of variation for the SkewNormal branch.  Prevents
+# degenerate near-zero CV when all players have nearly identical outcomes.
+_SKEWNORMAL_CV_FLOOR: float = 0.05
+# Shape parameter cap for the NegBin / ZINB count branch.  Very large R values
+# collapse NegBin toward Poisson and destabilize optimization.
+_COUNT_BRANCH_R_CAP: int = 50
+# Quantile of per-player NegBin R estimates used as the marginal shape prior.
+# 95th-percentile trims outlier players without discarding the heavy tail.
+_MARGINAL_SHAPE_QUANTILE: float = 0.95
+# Floor on the marginal shape prior — avoids a degenerate shape_ceiling of ~0
+# when the market has near-zero variance across all players.
+_MARGINAL_SHAPE_FLOOR: float = 0.5
+# Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
+# headroom to exceed the prior while preventing runaway over-dispersion.
+_SHAPE_CEILING_MULTIPLIER: float = 2.0
 
 
 # Fixed RNG seed for --deterministic runs (debug/eval only).
@@ -605,10 +640,10 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     for c in categories:
         X[c] = X[c].astype("category")
 
-    # Temporal split: earliest 70% to train, latest 30% to test
+    # Temporal split: earliest _TRAIN_FRACTION to train, remainder to test
     M_sorted = M.sort_values("Date")
     n = len(M_sorted)
-    n_train = int(n * 0.7)
+    n_train = int(n * _TRAIN_FRACTION)
     train_idx = M_sorted.index[:n_train]
     test_idx = M_sorted.index[n_train:]
 
@@ -897,7 +932,7 @@ def _step_compute_mode_stats(
     """Compute the legacy prec/acc/sharp/ll/over_pct/under_prec arrays (length-3).
 
     Index 0 = raw, 1 = no_filt (post-blend, pre-temp), 2 = filt (post-temp).
-    Confidence mask is ``max(proba) > 0.54``.
+    Confidence mask is ``max(proba) > _MODE_CONFIDENCE_THRESHOLD``.
     """
     prec = np.zeros(3)
     acc = np.zeros(3)
@@ -907,7 +942,7 @@ def _step_compute_mode_stats(
     under_prec = np.zeros(3)
     for i, y_proba in enumerate([y_proba_raw, y_proba_no_filt, y_proba_filt]):
         y_pred = (y_proba > 0.5).astype(int)[:, 1]
-        mask = np.max(y_proba, axis=1) > 0.54
+        mask = np.max(y_proba, axis=1) > _MODE_CONFIDENCE_THRESHOLD
         prec[i] = precision_score(y_class[mask], y_pred[mask])
         acc[i] = accuracy_score(y_class[mask], y_pred[mask])
         sharp[i] = np.std(y_proba[:, 1])
@@ -998,7 +1033,7 @@ def _step_compute_diagnostics(
 
     ev_gt_mask = ev_minus_line_arr > 0
     ev_lt_mask = ev_minus_line_arr <= 0
-    conf_mask = np.max(y_proba_no_filt, axis=1) > 0.54
+    conf_mask = np.max(y_proba_no_filt, axis=1) > _MODE_CONFIDENCE_THRESHOLD
     diag_over_pct_ev_gt = (
         float(y_class[ev_gt_mask & conf_mask].mean())
         if (ev_gt_mask & conf_mask).sum() > 10
@@ -1033,7 +1068,7 @@ def _step_compute_diagnostics(
             )
         cf_over = 1 - cf_under
         cf_pred = (cf_over > 0.5).astype(int)
-        cf_mask = np.maximum(cf_under, cf_over) > 0.54
+        cf_mask = np.maximum(cf_under, cf_over) > _MODE_CONFIDENCE_THRESHOLD
         diag_cf_over_pct = (
             float(cf_pred[cf_mask].mean() / cf_mask.mean()) if cf_mask.sum() > 10 else float("nan")
         )
@@ -1206,7 +1241,7 @@ def _step_persist_artifacts(
         X_test["SN_Loc"] = prob_params["loc"]
         X_test["SN_Scale"] = prob_params["scale"]
         X_test["SN_Alpha"] = prob_params["alpha"]
-        if hist_gate > 0.02:
+        if hist_gate > _HIST_GATE_THRESHOLD:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
         base_ev = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
@@ -1359,7 +1394,7 @@ def _step_calibrate_dispersion(
             "SkewNormal",
             sigma=decoded["sn_sigma_val"],
             skew_alpha=decoded["sn_alpha_val"],
-            **(dict(gate_book=hist_gate) if hist_gate > 0.02 else {}),
+            **(dict(gate_book=hist_gate) if hist_gate > _HIST_GATE_THRESHOLD else {}),
         )
         out["val_weighted_mean_val"] = val_weighted_mean_val
         return out
@@ -1510,7 +1545,7 @@ def _step_decode_predictions(
     SkewNormal: applies the strategy's decode_loc/decode_scale then adds the
     skew-normal mean adjustment ``delta * sqrt(2/pi)``. NegBin/ZINB: EV = r·p/(1−p).
     Gamma/ZAGamma: EV = α/β. Synthesizes a constant ``gate_*`` vector for
-    SkewNormal when ``hist_gate > 0.02`` (no per-row gate from the model).
+    SkewNormal when ``hist_gate > _HIST_GATE_THRESHOLD`` (no per-row gate from the model).
 
     Returns:
         Dict with: ``ev``, ``ev_validation``, ``gate_test``, ``gate_validation``,
@@ -1561,7 +1596,7 @@ def _step_decode_predictions(
         out["sn_alpha_test"] = alpha_sn
         out["sn_alpha_val"] = alpha_sn_val
 
-        if hist_gate > 0.02:
+        if hist_gate > _HIST_GATE_THRESHOLD:
             out["gate_test"] = np.full_like(ev, hist_gate)
             out["gate_validation"] = np.full_like(ev_validation, hist_gate)
 
@@ -1651,7 +1686,7 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+        _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > _HIST_GATE_THRESHOLD else {}
         model_weight = fit_model_weight(
             ev_validation,
             book_ev_val,
@@ -1803,9 +1838,10 @@ def _step_select_distribution(
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Branch logic: ``global_mean >= 2.0`` → SkewNormal, otherwise NegBin (escalated
-    to ZINB when ``hist_gate > 0.02``). For SkewNormal, drops zero rows when
-    ``hist_gate > 0.05`` and applies the strategy's forward transform.
+    Branch logic: ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, otherwise
+    NegBin (escalated to ZINB when ``hist_gate > _HIST_GATE_THRESHOLD``). For SkewNormal,
+    drops zero rows when ``hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD`` and applies the
+    strategy's forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
@@ -1857,7 +1893,7 @@ def _step_select_distribution(
     strategy = baselines.get_strategy(target_strategy)
     dist_obj = None
 
-    if global_mean >= 2.0:
+    if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
         dist = "SkewNormal"
         dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
 
@@ -1867,11 +1903,11 @@ def _step_select_distribution(
             * player_stats.count()
             / player_stats.count().sum()
         ).sum()
-        cv = max(cv, 0.05)
+        cv = max(cv, _SKEWNORMAL_CV_FLOOR)
         shape_ceiling = None
         marginal_shape = None
 
-        if hist_gate > 0.05:
+        if hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD:
             nonzero_mask = y_train_labels > 0
             X_train = X_train[nonzero_mask]
             y_train_labels = y_train_labels[nonzero_mask]
@@ -1884,7 +1920,7 @@ def _step_select_distribution(
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
     else:
         dist = "NegBin"
-        if hist_gate > 0.02:
+        if hist_gate > _HIST_GATE_THRESHOLD:
             dist = "ZINB"
         if dist == "NegBin":
             dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
@@ -1893,15 +1929,16 @@ def _step_select_distribution(
             dist_obj = ZINB(stabilization="None", loss_fn="nll")
         # else: hurdle path — dist_obj is not constructed; HurdleZINB is built at fit time.
 
-        R_CAP = 50
         per_player_r = player_stats.mean() ** 2 / np.maximum(
             player_stats.var() - player_stats.mean(), 0.01
         )
-        per_player_r = np.minimum(per_player_r, R_CAP)
+        per_player_r = np.minimum(per_player_r, _COUNT_BRANCH_R_CAP)
 
-        marginal_shape = max(float(np.quantile(per_player_r, 0.95)), 0.5)
-        K_SHAPE = 2.0
-        shape_ceiling = marginal_shape * K_SHAPE
+        marginal_shape = max(
+            float(np.quantile(per_player_r, _MARGINAL_SHAPE_QUANTILE)),
+            _MARGINAL_SHAPE_FLOOR,
+        )
+        shape_ceiling = marginal_shape * _SHAPE_CEILING_MULTIPLIER
 
         cv = (1 / per_player_r * player_stats.count() / player_stats.count().sum()).sum()
         cv = max(cv, 1 / shape_ceiling)

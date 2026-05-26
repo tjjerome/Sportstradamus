@@ -11,6 +11,10 @@ from sportstradamus import data
 from sportstradamus import feature_selection as fs
 from sportstradamus.helpers import feature_filter
 
+# Temporal train/test split for the scouting regression pass; mirrors the same
+# 70/30 policy used in pipeline.py:_step_build_splits.
+_SCOUTING_TRAIN_FRACTION: float = 0.7
+
 # Distribution-specific columns to drop before SHAP analysis
 _DIST_DROP_COLS = {
     "Gamma": ["Alpha"],
@@ -62,7 +66,7 @@ def _refresh_all_aggregates(shap_df):
     return shap_df
 
 
-def compute_market_importance(league, market, model, test_df, distribution):
+def compute_market_importance(league: str, market: str, model, test_df, distribution: str) -> None:
     """Update one market column in feature_importances.csv + feature_correlations.csv.
     test_df must contain Result + features + (any dist params).
     """
@@ -89,7 +93,7 @@ def compute_market_importance(league, market, model, test_df, distribution):
     corr_df.to_csv(corr_path)
 
 
-def see_features():
+def see_features() -> None:
     """Batch: rebuild full feature_importances.csv + feature_correlations.csv from all saved models."""
     import pickle
 
@@ -162,7 +166,7 @@ def _scouting_shap_and_filter(league, market, M, stat_data):
     y = pd.to_numeric(M["Result"], errors="coerce").fillna(0).to_numpy()
 
     M_sorted = M.sort_values("Date")
-    n_train = int(len(M_sorted) * 0.7)
+    n_train = int(len(M_sorted) * _SCOUTING_TRAIN_FRACTION)
     if n_train < 50:
         return None
     train_idx = M_sorted.index[:n_train]
@@ -203,7 +207,7 @@ def _scouting_shap_and_filter(league, market, M, stat_data):
     return filter_market(league, market)
 
 
-def filter_market(league, market):
+def filter_market(league: str, market: str) -> dict:
     """Per-market filter rebuild. Updates feature_filter[league]['Filtered'][market]
     in memory + on disk. Returns diagnostic dict.
     """
@@ -222,7 +226,7 @@ def filter_market(league, market):
     return diag
 
 
-def filter_features():
+def filter_features() -> None:
     """Batch: rebuild Filtered bucket for every (league, market) seen in SHAP CSV.
     Reuses per-market path so logic stays single-source.
     """

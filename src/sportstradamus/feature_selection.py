@@ -25,6 +25,7 @@ warnings.filterwarnings("ignore")
 
 META_COLS = {
     "Date",
+    "GameTime",
     "Player",
     "Player team",
     "Result",
@@ -47,13 +48,25 @@ META_COLS = {
 # Composite weights — same as evaluate_model_features.py
 W_MODEL = dict(shap=0.35, corr=0.25, mi=0.20, stability=0.20)
 W_NO_MODEL = dict(shap=0.00, corr=0.40, mi=0.35, stability=0.25)
-REDUNDANCY_WEIGHT = 0.40
+# Redundancy penalty multiplier `composite *= (1 - REDUNDANCY_WEIGHT * max_|corr|)`.
+# Tuned 2026-05-26 from 0.40 to 0.15 per the receiving-yards sweep: dropping
+# from 0.40 → 0.15 recovers ~4 top-SHAP features per cell without busting the
+# KEEP_CAP=60. Tree models exploit correlated features at separate splits, so
+# heavy collinearity penalties strip incremental signal SHAP already credited.
+REDUNDANCY_WEIGHT = 0.15
 
 # Conservative defaults — err toward keeping features.
 DROP_CUTOFF = 0.10  # composite below this is hard-dropped
 ADD_THRESHOLD = 0.50  # candidate must score this high to come back
 KEEP_FLOOR = 25  # always keep top-N regardless of score
 KEEP_CAP = 60  # never keep more than this many Filtered features
+# Veto-on-drop: a current or candidate feature whose `|SHAP|` rank in the
+# trained model's per-cell column ranks at or above this position is immune
+# to composite-driven drop. SHAP is the model's revealed importance —
+# heuristics should not override its top-K judgment. Cap still applies.
+# 30 covers the ~25 top-KEEP_FLOOR features plus a small buffer for
+# cross-market shared features whose base rank shifts between rebuilds.
+SHAP_FLOOR_K = 30
 
 # Eval-script-style defaults (interactive review). Kept here so the interactive
 # script can import and override the conservative training-time defaults.
@@ -216,6 +229,24 @@ def composite_score(
     redundancy: float,
     has_model: bool,
 ) -> float:
+    """Weighted composite score for one feature, penalized by redundancy.
+
+    Args:
+        feat: Base feature name (no variant suffix).
+        shap_n: Normalized |SHAP| scores keyed by base feature name.
+        corr_n: Normalized correlation scores keyed by base feature name.
+        mi_n: Normalized mutual-information scores keyed by base feature name.
+        stab_n: Normalized temporal stability scores keyed by base feature name.
+        redundancy: Max |corr| of this feature against all other features in
+            the same pool. High value = highly collinear.
+        has_model: If True, use W_MODEL weights (SHAP carries 0.35); if False,
+            use W_NO_MODEL weights (SHAP weight is 0.00, signal split across
+            corr/MI/stability).
+
+    Returns:
+        Composite score in [0, 1] before redundancy penalty, then scaled by
+        ``(1 - REDUNDANCY_WEIGHT * redundancy)``.
+    """
     w = W_MODEL if has_model else W_NO_MODEL
     raw = (
         w["shap"] * shap_n.get(feat, 0)
@@ -258,14 +289,32 @@ def market_key(league: str, market: str) -> str:
     return f"{league}_{market.replace(' ', '-')}"
 
 
-def model_path(league: str, market: str):
+def model_path(league: str, market: str) -> pkg_resources.Traversable:
     fn = f"{league}_{market}".replace(" ", "-")
     return pkg_resources.files(data) / f"models/{fn}.mdl"
 
 
-def training_path(league: str, market: str):
+def training_path(league: str, market: str) -> pkg_resources.Traversable:
     fn = f"{league}_{market}".replace(" ", "-")
     return pkg_resources.files(data) / f"training_data/{fn}.parquet"
+
+
+def feat_has_shap_entry(feat: str, mkey: str, shap_df: pd.DataFrame) -> bool:
+    """True iff any variant of ``feat`` has a non-NaN SHAP entry in ``shap_df[mkey]``.
+
+    Lets the composite scorer apply SHAP-weighted weights per-feature: a
+    candidate that was scored by some prior training round (cross-market
+    shared feature) still has SHAP signal in the CSV even when the caller
+    flags it as a "candidate". Replaces the prior all-or-nothing
+    ``has_model`` switch that zeroed SHAP for every candidate.
+    """
+    if shap_df.empty or mkey not in shap_df.columns:
+        return False
+    col = shap_df[mkey]
+    for variant in (feat, feat + " short", feat + " growth"):
+        if variant in col.index and pd.notna(col[variant]):
+            return True
+    return False
 
 
 def _score_features(
@@ -277,12 +326,18 @@ def _score_features(
     target: pd.Series,
     has_model: bool,
 ) -> tuple[dict, dict]:
-    """Return (composite_scores, signal_breakdown)."""
+    """Return (composite_scores, signal_breakdown).
+
+    ``has_model`` is the market-level switch (does the trained model pickle
+    exist?). Within this function we still apply W_MODEL weights *per
+    feature* only when ``has_model`` AND the feature has a non-NaN SHAP
+    entry in ``shap_df``. Features without SHAP entries fall back to
+    W_NO_MODEL even when the market has a model — this is the right
+    behaviour for candidates added in the same regen pass.
+    """
     if not features:
         return {}, {}
-    shap_raw = (
-        compute_shap_scores(features, mkey, shap_df) if has_model else {f: 0.0 for f in features}
-    )
+    shap_raw = compute_shap_scores(features, mkey, shap_df)
     corr_pre = compute_corr_scores(features, mkey, corr_df)
     corr_train, mi_raw, stab_raw = compute_from_training(features, train_df, target)
     corr_raw = {f: max(corr_pre.get(f, 0), corr_train.get(f, 0)) for f in features}
@@ -297,7 +352,8 @@ def _score_features(
     breakdown = {}
     for feat in features:
         r = redund.get(feat, 0.0)
-        s = composite_score(feat, shap_n, corr_n, mi_n, stab_n, r, has_model)
+        feat_has_model = has_model and feat_has_shap_entry(feat, mkey, shap_df)
+        s = composite_score(feat, shap_n, corr_n, mi_n, stab_n, r, feat_has_model)
         scores[feat] = s
         breakdown[feat] = dict(
             shap=shap_raw.get(feat, 0.0),
@@ -306,8 +362,42 @@ def _score_features(
             stability=stab_raw.get(feat, 0.0),
             redundancy=r,
             composite=s,
+            has_model=feat_has_model,
         )
     return scores, breakdown
+
+
+def shap_floor_base_names(
+    mkey: str,
+    shap_df: pd.DataFrame,
+    available_bases: set[str],
+    locked: set[str],
+    k: int = SHAP_FLOOR_K,
+) -> set[str]:
+    """Base feature names whose ``|SHAP|`` rank is in the top-K for ``mkey``.
+
+    Used as a veto-on-drop layer: any base feature returned here is
+    immune to composite-driven drop, regardless of redundancy or other
+    composite-score penalties. Locked features are excluded (they live
+    on the Common/Always lists, not in the per-cell Filtered list).
+    """
+    if shap_df.empty or mkey not in shap_df.columns:
+        return set()
+    col = shap_df[mkey].dropna()
+    if col.empty:
+        return set()
+    ranked = col.abs().sort_values(ascending=False)
+    base_names: set[str] = set()
+    for variant_name in ranked.index:
+        if len(base_names) >= k:
+            break
+        base = strip_variant(variant_name)
+        if base in locked:
+            continue
+        if available_bases and base not in available_bases:
+            continue
+        base_names.add(base)
+    return base_names
 
 
 def filter_market_features(
@@ -320,6 +410,7 @@ def filter_market_features(
     add_threshold: float = ADD_THRESHOLD,
     keep_floor: int = KEEP_FLOOR,
     keep_cap: int = KEEP_CAP,
+    shap_floor_k: int = SHAP_FLOOR_K,
 ) -> tuple[list[str], dict]:
     """Compute new Filtered list for one market.
 
@@ -329,9 +420,14 @@ def filter_market_features(
       1. Score current Filtered features (composite of SHAP+corr+MI+stability,
          penalized by redundancy).
       2. Discover candidate features from training data not in Common/Always/Filtered;
-         score them by corr+MI+stability only.
-      3. Apply 3-gate decision: keep-floor (top-N always), drop-cutoff (hard floor),
-         add-threshold (candidates only above this score), keep-cap (max size).
+         score them by corr+MI+stability only (or by SHAP if a prior training
+         round left an entry in ``shap_df``).
+      3. Apply 5-gate decision:
+         - Layer 1 (KEEP_FLOOR): top-N by composite, always kept
+         - Layer 1.5 (SHAP_FLOOR_K): top-K by |SHAP|, immune to composite-drop
+         - Layer 2 (DROP_CUTOFF): anything above composite cutoff kept
+         - Layer 3 (ADD_THRESHOLD): candidates above this composite kept
+         - Layer 4 (KEEP_CAP): hard size ceiling, SHAP-floored survive last
     """
     league_filter = feature_filter.get(league, {})
     common = set(league_filter.get("Common", []))
@@ -368,21 +464,29 @@ def filter_market_features(
         current, mkey, shap_df, corr_df, train_df, target, has_model
     )
 
-    # Discover + score candidates (no SHAP signal — they were not in trained model)
+    # Discover + score candidates. Pass ``has_model`` so candidates with a
+    # SHAP entry in ``shap_df`` (cross-market shared features, or features
+    # that were in a prior training round) use W_MODEL weights per-feature;
+    # candidates with no SHAP fall back to W_NO_MODEL automatically.
     candidates = discover_candidates(train_df, locked, set(current))
     cand_scores, cand_breakdown = _score_features(
-        candidates, mkey, shap_df, corr_df, train_df, target, has_model=False
+        candidates, mkey, shap_df, corr_df, train_df, target, has_model
     )
 
-    # Decision: rank current by composite; keep top floor; then add anything
-    # at-or-above drop_cutoff; then add candidates >= add_threshold; cap at max.
+    # Decision: rank current by composite; keep top floor; layer in SHAP floor;
+    # then add anything at-or-above drop_cutoff; then add candidates >=
+    # add_threshold; cap at max with SHAP-floored features protected.
     ranked_current = sorted(cur_scores.items(), key=lambda kv: -kv[1])
 
     keep = set()
-    # Layer 1: floor
+    # Layer 1: composite top-N floor
     for feat, _ in ranked_current[:keep_floor]:
         keep.add(feat)
-    # Layer 2: anything above cutoff
+    # Layer 1.5: SHAP-rank floor — veto-on-drop for top-K |SHAP| features
+    available_bases = set(cur_scores) | set(cand_scores)
+    shap_floored = shap_floor_base_names(mkey, shap_df, available_bases, locked, shap_floor_k)
+    keep.update(shap_floored)
+    # Layer 2: anything above composite cutoff
     for feat, score in ranked_current:
         if score >= drop_cutoff:
             keep.add(feat)
@@ -392,10 +496,16 @@ def filter_market_features(
         if score < add_threshold:
             break
         keep.add(feat)
-    # Layer 4: cap (drop lowest-scoring beyond cap)
+    # Layer 4: cap. Rank survivors by composite; SHAP-floored features get a
+    # cap-survival boost so the heuristic-driven cap can't override the
+    # model's own importance attribution.
     if len(keep) > keep_cap:
         merged = {**cur_scores, **cand_scores}
-        ranked_keep = sorted(keep, key=lambda f: -merged.get(f, 0.0))
+        cap_rank: dict[str, float] = {}
+        for feat in keep:
+            base_score = merged.get(feat, 0.0)
+            cap_rank[feat] = base_score + (1.0 if feat in shap_floored else 0.0)
+        ranked_keep = sorted(keep, key=lambda f: -cap_rank.get(f, 0.0))
         keep = set(ranked_keep[:keep_cap])
 
     new_filtered = sorted(keep)
@@ -408,7 +518,9 @@ def filter_market_features(
         n_added=len([f for f in new_filtered if f not in current]),
         has_model=has_model,
         n_training=len(target),
+        n_shap_floored=len(shap_floored),
         scores=cur_breakdown,
         candidate_scores=cand_breakdown,
+        shap_floored=sorted(shap_floored),
     )
     return new_filtered, diag

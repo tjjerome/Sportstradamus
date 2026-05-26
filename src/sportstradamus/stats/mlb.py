@@ -33,9 +33,17 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+
+# Minimum Savant affinity match_score to include a player as a comparable.
+# Scores below this are weak matches that add noise to comp feature sets.
+_COMP_MATCH_SCORE_THRESHOLD: float = 0.6
+# Minimum hit rate for a market across a player's game log for them to be
+# included in the profiling group.  Filters out players with too few non-zero
+# occurrences to provide meaningful signal.
+_MARKET_HIT_RATE_MIN: float = 0.1
 
 
 class StatsMLB(Stats):
@@ -771,11 +779,17 @@ class StatsMLB(Stats):
         )
 
     def load(self):
-        """Loads MLB player statistics from a file."""
-        mlb_data = read_gamelog("mlb")
-        self.gamelog = mlb_data["gamelog"]
-        self.teamlog = mlb_data["teamlog"]
-        self.players = mlb_data["players"]
+        """Read the MLB gamelog bundle and the auxiliary park-factor / comp tables.
+
+        Calls :meth:`Stats.load` first to populate ``gamelog`` / ``teamlog`` /
+        ``players`` from the standard per-league artifact directory, then layers
+        on the MLB-specific extras: the static park-factor lookup and the
+        baseballsavant affinity CSVs that seed ``self.comps``. Other leagues
+        compute their comps from rolling z-scored profiles; MLB inherits a
+        fixed match-score table written by :meth:`update_player_comps`, so this
+        loader is responsible for materializing it into the in-memory mapping.
+        """
+        super().load()
 
         filepath = pkg_resources.files(data) / "config" / "park_factor.json"
         if os.path.isfile(filepath):
@@ -787,7 +801,7 @@ class StatsMLB(Stats):
         )
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
-            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= 0.6)]
+            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)]
             df.key1 = df.key1.str[:-2].astype(int)
             df.key2 = df.key2.str[:-2].astype(int)
             self.comps["pitchers"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
@@ -798,7 +812,7 @@ class StatsMLB(Stats):
         )
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
-            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= 0.6)]
+            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)]
             df.key1 = df.key1.str[:-2].astype(int)
             df.key2 = df.key2.str[:-2].astype(int)
             self.comps["hitters"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
@@ -950,7 +964,7 @@ class StatsMLB(Stats):
         # Filter players with at least 2 entries
         playerGroups = (
             gamelog.groupby("playerName")
-            .filter(lambda x: (x[market].clip(0, 1).mean() > 0.1) & (x[market].count() > 1))
+            .filter(lambda x: (x[market].clip(0, 1).mean() > _MARKET_HIT_RATE_MIN) & (x[market].count() > 1))
             .groupby("playerName")
         )
 
