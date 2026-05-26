@@ -132,10 +132,200 @@ _COMP_POOL_MIN_PLAYERS: int = 7  # skip position if fewer candidates survive fil
 _COMP_KNN_MIN: int = 5
 _COMP_KNN_MAX: int = 15
 
+# Defensive comp pool tuning. 32-team universe means smaller neighborhoods
+# than the player pool (160+ candidates per position). Floors at 5 to keep
+# the BallTree non-degenerate; ceiling at 10 because beyond that we're
+# averaging across nearly a third of the league which dilutes the matchup
+# signal we're trying to capture. Min-teams guard handles the early-season
+# case where the FP team-snapshot pool hasn't backfilled enough rows.
+_DEF_COMP_KNN_MIN: int = 5
+_DEF_COMP_KNN_MAX: int = 10
+_DEF_COMP_POOL_MIN_TEAMS: int = 8  # below this fall back to opponent-team groupby
+
+# Offensive position -> defensive bucket routing. Player at QB queries the
+# vs_QB bucket; WR queries vs_WR; etc. The bucket-keyed comp pools live in
+# data/config/defCompStats.json and are persisted in data/leagues/nfl/defComps.json
+# (Module E). When a position is absent from this map the caller falls back
+# to the legacy opponent-team groupby pipeline in stats/base.py.
+_DEFENSIVE_BUCKETS: dict[str, str] = {
+    "QB": "vs_QB",
+    "RB": "vs_RB",
+    "WR": "vs_WR",
+    "TE": "vs_TE",
+}
+
+# FP team-grain abbreviation -> gamelog/teamlog abbreviation. The FP feeds use
+# ``ARZ`` / ``BLT`` / ``CLV`` / ``HST`` / ``LA`` for five teams that
+# nfl-data-py keys as ``ARI`` / ``BAL`` / ``CLE`` / ``HOU`` / ``LAR``. The
+# defensive comp pool is built from FP team-grain features but the matched-pair
+# lookup joins against the gamelog opponent column, so we re-key here before
+# persisting. (The same five teams are silently 0'd in defenseProfile today
+# because the FP-to-defenseProfile join is keyed by FP abbreviation; the
+# upstream fix is out-of-scope for this rebuild but is tracked for follow-up.)
+_FP_TO_GAMELOG_ABBR: dict[str, str] = {
+    "ARZ": "ARI",
+    "BLT": "BAL",
+    "CLV": "CLE",
+    "HST": "HOU",
+    "LA": "LAR",
+}
+
 # Volume-normalization scale-ratio clip bounds. Prevents runaway
 # adjustments when a player's projected mean is near zero.
 _VOLUME_SCALE_RATIO_FLOOR: float = 0.1
 _VOLUME_SCALE_RATIO_CAP: float = 10.0
+
+# Cache-key prefixes for the two logical layers stored in ``_asof_cache``:
+# raw pre-recipe aggregates (keyed under ``_ASOF_CACHE_RAW``) vs. the
+# cooked asof/delta/trend frame (keyed under ``_ASOF_CACHE_COOKED``). Named
+# so a typo in one call-site surfaces as an obvious mismatch rather than a
+# silent cache miss.
+_ASOF_CACHE_RAW: str = "_raw"
+_ASOF_CACHE_COOKED: str = "asof"
+
+# Target-share jump required to flag a player as a "breakout" candidate.
+# Set at 10 pp based on the Phase 3+4 evaluation brief heuristic; revisit
+# if the gate-2 live-metrics step shows this threshold produces too many
+# false positives.
+_TARGET_SHARE_BREAKOUT_THRESHOLD: float = 0.10
+
+# Window width (in weeks) for the 2-week snap-share trend feature. Dividing
+# the raw delta by this constant annualises to a per-week rate, keeping the
+# feature scale consistent with single-week snap-share columns.
+_SNAP_SHARE_TREND_WEEKS: float = 2.0
+
+# Week offsets for the FP asof delta lookups inside _compute_fp_asof_features.
+# "4-week delta" uses week - 5 (4 weeks back + 1 for the leakage-clean cutoff).
+# "2-week trend" uses week - 3 (2 weeks back + 1 for the leakage-clean cutoff).
+# The +1 leakage offset matches the base lookup at week - 1.
+_FP_ASOF_DELTA_PRIOR_OFFSET: int = 5  # 4-week lookback for delta features
+_FP_ASOF_TREND_PRIOR_OFFSET: int = 3  # 2-week lookback for trend features
+
+# Phase 3+4 player-grain asof feature surface, projected from
+# ``nfl_fp_weekly_aggregate`` recipe-table outputs (LHS) onto the
+# ``Player {col}`` namespace the matrix exposes (RHS). Wired in
+# ``StatsNFL._compute_fp_asof_features``; the matching
+# ``feature_filter.json`` entries enumerate the prefixed names per cell
+# so the per-cell SHAP rebuild narrows from this candidate set rather
+# than pulling silently from a side table.
+_FP_ASOF_COLUMN_MAP: dict[str, str] = {
+    # QB
+    "qb_cpoe_asof": "pass_adv_CPOE",
+    "qb_pressure_dropback_pct_asof": "pass_adv_PrDB_pct",
+    "qb_throw_away_pct_asof": "pass_adv_TA_pct",
+    "qb_press_over_expected_asof": "pass_adv_PrROE",
+    "qb_two_way_throw_pct_asof": "pass_adv_TWT_pct",
+    "qb_rpo_pct_asof": "pass_adv_RPO_pct",
+    "qb_man_coverage_dropbacks_pct_asof": "qb_cov_QB_MAN_pct",
+    # RB
+    "rb_success_rate_asof": "rush_adv_Success_pct",
+    "rb_mtf_per_att_asof": "rush_adv_MTF_ATT",
+    "rb_yaco_per_att_asof": "rush_adv_YACO_ATT",
+    # WR/TE base
+    "rec_yprr_asof": "rec_adv_YPRR",
+    "rec_tprr_asof": "rec_adv_TPRR",
+    "rec_ay_share_asof": "rec_adv_AY_Share",
+    "sep_vs_man_asof": "rec_sep_vs_man",
+    "sep_vs_zone_asof": "rec_sep_vs_zone",
+    "sep_overall_asof": "rec_sep_align_overall_SEP_SCORE",
+    # Per-coverage YPRR
+    "rec_yprr_vs_man_asof": "rec_yprr_vs_man",
+    "rec_yprr_vs_zone_asof": "rec_yprr_vs_zone",
+    # Market-share
+    "snap_share_asof": "off_snaps_Snap_pct",
+    "target_share_asof": "rec_adv_TGT_pct",
+    "route_share_asof": "rec_route_share_pct",
+    # Wave-3 (cheap-win audit Tier 1): QB volume / accuracy / protection levels.
+    "pass_ay_asof": "pass_adv_AY",
+    "pass_fd_asof": "pass_adv_FD",
+    "pass_deep_pct_asof": "pass_adv_DEEP_pct",
+    "pass_ttt_asof": "pass_adv_TTT",
+    "pass_off_target_pct_asof": "pass_adv_OFFTARGET_pct",
+    "pass_hero_pct_asof": "pass_adv_HERO_pct",
+    "pass_catchable_pct_asof": "pass_adv_CATCHABLE_pct",
+    # Wave-3 Tier 1: RB volume + scheme split.
+    "rush_yds_asof": "rush_adv_YDS",
+    "rush_td_asof": "rush_adv_TD",
+    "rush_fd_asof": "rush_adv_FD",
+    "rush_exp_yds_asof": "rush_adv_EXP_YDS",
+    "rush_ybc_per_att_asof": "rush_adv_YBC_ATT",
+    "rush_zone_concept_pct_asof": "rush_adv_ZONE_pct",
+    "rush_man_concept_pct_asof": "rush_adv_MAN_pct",
+    # Wave-3 Tier 1: WR/TE volume + air-yards splits.
+    "rec_td_asof": "rec_adv_TD",
+    "rec_fd_asof": "rec_adv_FD",
+    "rec_yac_asof": "rec_adv_YAC",
+    "rec_yac_after_contact_asof": "rec_adv_YAC_after_contact",
+    "rec_deep_tgt_asof": "rec_adv_DEEP_TGT",
+    "rec_catch_pct_asof": "rec_adv_CATCH_pct",
+    "rec_ctgt_rec_asof": "rec_adv_CTGT_REC",
+    # Wave-3 Tier 1: red-zone target / carry volume for TD markets.
+    "rec_inside10_tgt_asof": "rec_basic_INSIDE10_TGT",
+    "rec_inside20_tgt_asof": "rec_basic_INSIDE20_TGT",
+    "rush_inside5_att_asof": "rush_basic_INSIDE5_ATT",
+    "rush_inside10_att_asof": "rush_basic_INSIDE10_ATT",
+    "rush_inside20_att_asof": "rush_basic_INSIDE20_ATT",
+    # Wave-3 Tier 1: red-zone snap volume + share.
+    "snaps_inside10_asof": "off_snaps_INSIDE10",
+    "snaps_inside20_asof": "off_snaps_INSIDE20",
+    "snaps_inside10_share_asof": "off_snaps_INSIDE10_pct",
+    # Wave-3 Tier 1: workload + efficiency.
+    "bellcow_xfp_pct_asof": "rush_bellcow_XFP_pct",
+    "eff_xfp_asof": "eff_XFP",
+    "eff_touches_asof": "eff_TOUCHES",
+    # Wave-3 Tier 2: per-shell coverage separation + YPRR un-folded.
+    "sep_vs_redzone_asof": "rec_sep_vs_redzone",
+    "sep_vs_cover2_asof": "rec_sep_vs_cover2",
+    "sep_vs_cover3_asof": "rec_sep_vs_cover3",
+    "sep_vs_cover4_asof": "rec_sep_vs_cover4",
+    "sep_vs_cover6_asof": "rec_sep_vs_cover6",
+    "yprr_vs_cover2_asof": "rec_yprr_vs_cover2",
+    "yprr_vs_cover3_asof": "rec_yprr_vs_cover3",
+    "yprr_vs_cover4_asof": "rec_yprr_vs_cover4",
+    "yprr_vs_cover6_asof": "rec_yprr_vs_cover6",
+    # Wave-3 Tier 2: per-route separation (SEP_SCORE.1..12, route names from
+    # ``_ROUTE_BUCKET_ORDER`` in nfl_fp_weekly_aggregate). The route helper
+    # already produces these columns; this map exposes them to the asof
+    # matrix without further helper work.
+    "sep_route_slant_asof": "rec_sep_route_SEP_SCORE.1",
+    "sep_route_out_asof": "rec_sep_route_SEP_SCORE.2",
+    "sep_route_indig_asof": "rec_sep_route_SEP_SCORE.3",
+    "sep_route_hitch_asof": "rec_sep_route_SEP_SCORE.4",
+    "sep_route_comeback_asof": "rec_sep_route_SEP_SCORE.5",
+    "sep_route_corner_asof": "rec_sep_route_SEP_SCORE.6",
+    "sep_route_post_asof": "rec_sep_route_SEP_SCORE.7",
+    "sep_route_go_asof": "rec_sep_route_SEP_SCORE.8",
+    "sep_route_crossers_asof": "rec_sep_route_SEP_SCORE.9",
+    "sep_route_flat_asof": "rec_sep_route_SEP_SCORE.10",
+    "sep_route_screens_asof": "rec_sep_route_SEP_SCORE.11",
+    "sep_route_backfield_asof": "rec_sep_route_SEP_SCORE.12",
+    # Wave-3 Tier 3: per-alignment separation (new bucket helper).
+    "sep_align_wide_sep_asof": "rec_sep_align_WIDE_SEP_SCORE",
+    "sep_align_wide_win_asof": "rec_sep_align_WIDE_WIN_RATE",
+    "sep_align_slot_sep_asof": "rec_sep_align_SLOT_SEP_SCORE",
+    "sep_align_slot_win_asof": "rec_sep_align_SLOT_WIN_RATE",
+    "sep_align_inline_sep_asof": "rec_sep_align_INLINE_SEP_SCORE",
+    "sep_align_inline_win_asof": "rec_sep_align_INLINE_WIN_RATE",
+    "sep_align_backfield_sep_asof": "rec_sep_align_BACKFIELD_SEP_SCORE",
+    "sep_align_backfield_win_asof": "rec_sep_align_BACKFIELD_WIN_RATE",
+    # Wave-3 Tier 3: per-shell YPRR via man-vs-zone bucket (new helper).
+    "yprr_mz_man_asof": "rec_mz_YPRR_MAN",
+    "yprr_mz_zone_asof": "rec_mz_YPRR_ZONE",
+    "yprr_mz_singlehigh_asof": "rec_mz_YPRR_SINGLEHIGH",
+    "yprr_mz_twohigh_asof": "rec_mz_YPRR_TWOHIGH",
+}
+
+# Wave-2 delta surface: column name (RHS LHS in the matrix output) →
+# the asof column whose 4-week-back lookup feeds the difference. Wired
+# inside ``_compute_fp_asof_features`` via the ``week - 5`` prior4
+# lookup. ``snap_share_2wk_trend`` and ``target_share_breakout_flag``
+# use distinct windowing (week - 3 and target-share-jump heuristic)
+# and are derived inline rather than via this map.
+_FP_DELTA_COLUMN_MAP: dict[str, str] = {
+    "rec_yprr_4wk_delta": "rec_yprr_asof",
+    "rb_success_rate_4wk_delta": "rb_success_rate_asof",
+    "qb_cpoe_4wk_delta": "qb_cpoe_asof",
+}
 
 
 class StatsNFL(Stats):
@@ -1430,6 +1620,106 @@ class StatsNFL(Stats):
             self._comp_cache: dict[tuple[int, int | None], pd.DataFrame] = {}
         return self._comp_cache
 
+    def _asof_features_cache(self) -> dict[tuple[str, int, int], pd.DataFrame]:
+        """Per-``(prefix, season, week)`` cache for raw and cooked asof frames.
+
+        Two logical layers share the same dict, distinguished by the string
+        prefix ``_ASOF_CACHE_RAW`` and ``_ASOF_CACHE_COOKED``.
+        """
+        if getattr(self, "_asof_cache", None) is None:
+            self._asof_cache: dict[tuple[str, int, int], pd.DataFrame] = {}
+        return self._asof_cache
+
+    def _lookup_asof_at(self, season: int, week: int) -> pd.DataFrame:
+        """Cached ``load_through_one_year(season, target_week=week)`` lookup.
+
+        ``week`` is the inclusive lookback cutoff -- i.e. for an inference
+        target at week N, pass ``week = N - 1`` for the leakage-clean view.
+        Returns the empty frame if no snapshots are available for the
+        window (early-season cells where prior4 lookups precede week 1).
+        """
+        if week < 1:
+            return pd.DataFrame()
+        cache = self._asof_features_cache()
+        key = (_ASOF_CACHE_RAW, season, week)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        frame = nfl_fp_weekly_aggregate.load_through_one_year(season, week)
+        cache[key] = frame
+        return frame
+
+    def _compute_fp_asof_features(self, season: int, week: int) -> pd.DataFrame:
+        """Phase 3+4 player-grain FP asof features for inference at ``(season, week)``.
+
+        Returns a DataFrame indexed by accent-stripped player name with
+        up to ``len(_FP_ASOF_COLUMN_MAP)`` ``{col}_asof`` columns plus the
+        ``{col}_delta`` / ``{col}_trend`` / ``{col}_flag`` wave-2 columns. Base asof view derives from
+        :func:`nfl_fp_weekly_aggregate.load_through_one_year` at
+        ``week - 1`` (leakage-clean cutoff); Wave-2 delta columns derive
+        from a second lookup at ``week - 5`` (4-week-prior) and a third
+        at ``week - 3`` (2-week-trend). Early-season cells where the
+        delta lookup precedes week 1 leave the delta columns NaN; the
+        downstream ``fillna(0)`` in ``base_profile.join`` absorbs them.
+
+        Cached per ``(season, week)`` -- a per-day :meth:`base_profile`
+        call hits the cache once across every market that day.
+        """
+        cache = self._asof_features_cache()
+        key = (_ASOF_CACHE_COOKED, season, week)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+
+        base = self._lookup_asof_at(season, week - 1)
+        if base.empty:
+            empty = pd.DataFrame()
+            cache[key] = empty
+            return empty
+
+        out = pd.DataFrame(index=base.index)
+        for asof_name, recipe_col in _FP_ASOF_COLUMN_MAP.items():
+            if recipe_col in base.columns:
+                out[asof_name] = base[recipe_col]
+
+        prior4 = self._lookup_asof_at(season, week - _FP_ASOF_DELTA_PRIOR_OFFSET)
+        if not prior4.empty:
+            for delta_name, asof_name in _FP_DELTA_COLUMN_MAP.items():
+                source_col = _FP_ASOF_COLUMN_MAP[asof_name]
+                if source_col in prior4.columns and asof_name in out.columns:
+                    prior_series = prior4[source_col].reindex(out.index)
+                    out[delta_name] = out[asof_name] - prior_series
+            if "target_share_asof" in out.columns and "rec_adv_TGT_pct" in prior4.columns:
+                prior_target = prior4["rec_adv_TGT_pct"].reindex(out.index)
+                jump = out["target_share_asof"] - prior_target
+                out["target_share_breakout_flag"] = (jump > _TARGET_SHARE_BREAKOUT_THRESHOLD).astype(float)
+
+        prior2 = self._lookup_asof_at(season, week - _FP_ASOF_TREND_PRIOR_OFFSET)
+        if not prior2.empty and "snap_share_asof" in out.columns and "off_snaps_Snap_pct" in prior2.columns:
+            prior_snap = prior2["off_snaps_Snap_pct"].reindex(out.index)
+            out["snap_share_2wk_trend"] = (out["snap_share_asof"] - prior_snap) / _SNAP_SHARE_TREND_WEEKS
+
+        cache[key] = out
+        return out
+
+    def _join_fp_player_features(self, date: datetime | date) -> pd.DataFrame | None:
+        """Phase 3+4 NFL hook: player-grain FP asof feature frame for ``date``.
+
+        Resolves ``date`` to ``(season, week)`` via
+        :meth:`_lookup_season_week`, then routes through
+        :meth:`_compute_fp_asof_features` for the cached frame. The
+        downstream ``base_profile`` joins this frame onto ``playerstats``
+        with a left-merge so missing players (rookies, mid-season
+        signings before their first snap) degrade to NaN-then-zero.
+        Returns ``None`` when the FP weekly snapshots are absent for the
+        target window so the base path keeps running.
+        """
+        season, week = self._lookup_season_week(date)
+        frame = self._compute_fp_asof_features(season, week)
+        if frame is None or frame.empty:
+            return None
+        return frame
+
     def _join_fp_team_features(
         self, date: datetime | date
     ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
@@ -1710,6 +2000,146 @@ class StatsNFL(Stats):
             )
 
         self.comps = comps
+
+    @staticmethod
+    def _defensive_bucket_for_position(position: str) -> str | None:
+        """Map an offensive position to its defensive bucket key.
+
+        Returns the bucket string (``vs_QB`` / ``vs_RB`` / ``vs_WR`` /
+        ``vs_TE``) the player's defense comps should be looked up under, or
+        ``None`` for positions outside the comp universe (kickers, punters,
+        long snappers). Centralised so the base-class matched-pair lookup
+        and the nfl.py builders agree on the routing.
+        """
+        return _DEFENSIVE_BUCKETS.get(position)
+
+    def _load_defense_profile_for_comps(self) -> pd.DataFrame:
+        """Build the season-to-date defensive profile feeding ``update_defense_comps``.
+
+        Pulls Pattern A defense features from
+        :func:`nfl_fp_team_weekly_aggregate.load_pattern_a_defense_features`
+        over the same Phase-1.5 lookback windows the player pool uses
+        (post-week-4 = current-season only; pre-week-5 = prior season's
+        back half blended with current partial). Empty DataFrame on
+        backfill miss -- caller short-circuits.
+
+        Re-keys the FP team-grain abbreviation index (ARZ/BLT/CLV/HST/LA)
+        onto the gamelog convention (ARI/BAL/CLE/HOU/LAR) via
+        ``_FP_TO_GAMELOG_ABBR`` so the matched-pair join in stats/base.py
+        finds rows for those five teams. Without the re-key, the join
+        against the gamelog opponent column would silently drop them.
+        """
+        target_game_date = datetime.today().date()
+        target_season, target_week = self._lookup_season_week(target_game_date)
+        pattern_a_windows = self._lookback_windows(target_season, target_week)
+        if not pattern_a_windows:
+            return pd.DataFrame()
+        profile = nfl_fp_team_weekly_aggregate.load_pattern_a_defense_features(
+            pattern_a_windows
+        )
+        if profile.empty:
+            return profile
+        profile.index = [_FP_TO_GAMELOG_ABBR.get(idx, idx) for idx in profile.index]
+        return profile
+
+    def _build_defense_comp_clusters(self) -> dict | None:
+        """Compute the per-bucket BallTree comp clusters for the defensive comp pool.
+
+        Shared core of :meth:`update_defense_comps` (writes ``defComps.json``) and
+        :meth:`_compute_defense_comps` (in-memory inference fallback). Reads the
+        bucket -> feature weights map from ``defCompStats.json``, pulls the
+        per-team season-to-date defensive profile via
+        :meth:`_load_defense_profile_for_comps`, then fits one BallTree per
+        bucket with weighted-Euclidean scaling.
+
+        Returns:
+            Dict mapping bucket name (``vs_QB`` / ``vs_RB`` / ``vs_WR`` /
+            ``vs_TE``) to ``{team_abbr: {"comps": [...], "distances": [...]}}``.
+            Returns ``None`` when ``defCompStats.json`` is missing, the
+            ``NFL`` block is absent, or the FP defense profile is empty --
+            both callers translate ``None`` to a no-op.
+        """
+        config_path = pkg_resources.files(data) / "config" / "defCompStats.json"
+        if not os.path.isfile(config_path):
+            return None
+
+        with open(config_path) as f:
+            stats = json.load(f)
+        if "NFL" not in stats:
+            return None
+
+        defenseProfile = self._load_defense_profile_for_comps()
+        if defenseProfile.empty:
+            return None
+
+        comps = {}
+        for bucket, feature_weights in stats["NFL"].items():
+            bucket_features = list(feature_weights.keys())
+            bucket_weights = list(feature_weights.values())
+            bucketProfile = defenseProfile.reindex(columns=bucket_features).replace(
+                [np.nan, np.inf, -np.inf], 0
+            )
+            if len(bucketProfile) < _DEF_COMP_POOL_MIN_TEAMS:
+                continue
+            bucketProfile = bucketProfile.apply(
+                lambda x: (x - x.mean()) / x.std(), axis=0
+            ).fillna(0)
+            bucketProfile = bucketProfile.mul(np.sqrt(bucket_weights))
+            knn = BallTree(bucketProfile)
+            comps[bucket] = self._build_comps(
+                knn,
+                bucketProfile,
+                min_comps=_DEF_COMP_KNN_MIN,
+                max_comps=_DEF_COMP_KNN_MAX,
+            )
+        return comps
+
+    def update_defense_comps(self, year: int | None = None) -> None:
+        """Rebuild defensive comp clusters per position-bucket and persist to ``defComps.json``.
+
+        Sibling of :meth:`update_player_comps` at team grain. For each bucket
+        in ``defCompStats.json`` (``vs_QB`` / ``vs_RB`` / ``vs_WR`` / ``vs_TE``),
+        z-scores the bucket-specific defensive features across the 32-team
+        universe, fits a weighted BallTree, and persists the comp lists keyed
+        by bucket -> team abbreviation. Same Phase-1.5 lookback semantics as
+        player comps (post-week-4 = current-season only; pre-week-5 = prior
+        season's back half + current partial), routed through the same
+        ``_lookback_windows`` helper.
+
+        Module D/E of the matchup-channel rebuild. Output feeds the
+        matched-pair Defense comps z block in :mod:`sportstradamus.stats.base`.
+
+        Args:
+            year: Override the season year. Defaults to ``self.season_start.year``.
+        """
+        if year is None:
+            year = self.season_start.year
+        comps = self._build_defense_comp_clusters()
+        if comps is None:
+            logger.info(
+                "defCompStats.json missing or FP defense profile unavailable for %s "
+                "-- skipping defense comp rebuild",
+                year,
+            )
+            return
+
+        filepath = pkg_resources.files(data) / "leagues" / "nfl" / "defComps.json"
+        with open(filepath, "w") as outfile:
+            json.dump(comps, outfile, indent=4)
+
+    def _compute_defense_comps(self) -> None:
+        """Build defensive comps from loaded data at runtime (no JSON I/O).
+
+        Lazy fallback for inference when ``defComps.json`` is missing -- same
+        relationship :meth:`_compute_comps` has to :meth:`update_player_comps`.
+        Populates ``self.defenseComps`` keyed by bucket so the matched-pair
+        Defense comps z block in ``stats/base.py`` can read it without a
+        disk hit.
+        """
+        comps = self._build_defense_comp_clusters()
+        if comps is None:
+            return
+        self.defenseComps = comps
 
     def check_combo_markets(self, market: str, player: str, date: date = datetime.today().date()) -> int:
         return 0  # combo-market EV pending reimplementation
