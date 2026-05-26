@@ -5,7 +5,7 @@ import json
 import os.path
 import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 from time import sleep
 
@@ -32,9 +32,16 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import (
+    _VOLUME_SCALE_RATIO_CAP,
+    _VOLUME_SCALE_RATIO_FLOOR,
+    Stats,
+    archive,
+    clean_data,
+    scraper,
+)
 
 
 class StatsNHL(Stats):
@@ -119,20 +126,6 @@ class StatsNHL(Stats):
         self.tiebreaker_stat = "Fenwick short"
         self._volume_model_cache = None
 
-    def load(self):
-        """Loads NHL skater and goalie data from files.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        nhl_data = read_gamelog("nhl")
-        self.players = nhl_data["players"]
-        self.gamelog = nhl_data["gamelog"]
-        self.teamlog = nhl_data["teamlog"]
-
     def build_comp_profile(self, playerDict=None):
         """Build NHL player comp profile from loaded player data.
 
@@ -192,25 +185,52 @@ class StatsNHL(Stats):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self, target_game_date: "datetime | None" = None) -> None:
+    def _current_season_key(self, target_game_date: date) -> int:
+        """Return the ``self.players`` key for the season containing ``target_game_date``.
+
+        NHL seasons run Oct–Jun and ``self.players`` is keyed by the season
+        *start* year (int). Oct–Dec dates belong to that year's season;
+        Jan–Sep dates belong to the prior year's season.
+        """
+        if target_game_date.month >= 10:
+            return target_game_date.year
+        return target_game_date.year - 1
+
+    def _player_seasons_through(self, target_game_date: date) -> dict:
+        """Merge ``self.players`` seasons ``<=`` ``target_game_date``'s season.
+
+        Returns a flat ``{player_id: stats_dict}`` mapping ready for
+        :meth:`build_comp_profile`. Iterates oldest → newest so the current
+        season's roster wins on dict-update conflicts (matches the
+        :meth:`update_player_comps` ``prior.update(current)`` order).
+        """
+        cutoff = self._current_season_key(target_game_date)
+        merged: dict = {}
+        for season_key in sorted(self.players.keys()):
+            if season_key > cutoff:
+                continue
+            merged.update(self.players[season_key])
+        return merged
+
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
         """Build comps from loaded data at runtime (no JSON I/O).
 
-        ``target_game_date`` is accepted for signature compatibility with
-        :meth:`Stats._ensure_comps` but currently ignored -- NHL still
-        builds a today()-bound snapshot, so training rows continue to see
-        future-season player aggregates. Migrating NHL to point-in-time
-        comp pools is a separate piece of work.
+        When ``target_game_date`` is provided, the player pool is bounded to
+        ``self.players`` seasons that started on or before the target date's
+        season-start year, so a 2022 training row's comps no longer pool
+        with 2024+ rookies. ``self.playerProfile`` is already date-bounded
+        by :meth:`base_profile` upstream (it filters ``short_gamelog`` to
+        the 300-day window ending at ``date``), so the gate here is on the
+        per-season roster set that feeds :meth:`build_comp_profile`.
+        Today() default preserves inference / cron behavior.
         """
-        # TODO(comp-leakage-cross-league): NFL was migrated to per-(season,
-        # week) comp regeneration via build_comp_profile(target_game_date=...);
-        # NHL still binds to today(). Training matrices for NHL inherit the
-        # look-ahead leakage where a prior-season row's comps "know" the
-        # current-season player population. See StatsNFL._compute_comps for
-        # the pattern to replicate.
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
-        playerProfile, all_players, id_to_name = self.build_comp_profile()
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerDict = self._player_seasons_through(target_game_date)
+        playerProfile, all_players, id_to_name = self.build_comp_profile(playerDict=playerDict)
         if playerProfile.empty:
             return
 
@@ -514,9 +534,9 @@ class StatsNHL(Stats):
         # Parse the game stats
         nhl_gamelog = []
         nhl_teamlog = []
-        for gameId, date in tqdm(ids, desc="Getting NHL Stats"):
-            if datetime.strptime(date, "%Y-%m-%d").date() < today:
-                gamelog, teamlog = self.parse_game(gameId, date)
+        for gameId, game_date_str in tqdm(ids, desc="Getting NHL Stats"):
+            if datetime.strptime(game_date_str, "%Y-%m-%d").date() < today:
+                gamelog, teamlog = self.parse_game(gameId, game_date_str)
                 if type(gamelog) is list:
                     nhl_gamelog.extend(gamelog)
                 if type(teamlog) is list:
@@ -694,9 +714,6 @@ class StatsNHL(Stats):
 
         else:
             skater_df = pd.DataFrame()
-
-        # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
-        # shot_df = pd.read_csv(StringIO(res.text))
 
         res = requests.get(
             f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv"
@@ -922,7 +939,7 @@ class StatsNHL(Stats):
 
                 # Scale both loc and scale to preserve coefficient of variation
                 ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+                ratio = ratio.fillna(1.0).clip(lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP)
                 new_scale = scale * ratio
                 new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 

@@ -5,7 +5,7 @@ import json
 import os.path
 import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 from time import sleep
 
@@ -33,9 +33,16 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import (
+    _VOLUME_SCALE_RATIO_CAP,
+    _VOLUME_SCALE_RATIO_FLOOR,
+    Stats,
+    archive,
+    clean_data,
+    scraper,
+)
 
 
 class StatsNBA(Stats):
@@ -376,13 +383,6 @@ class StatsNBA(Stats):
         self.tiebreaker_stat = "USG_PCT short"
         self._volume_model_cache = None
 
-    def load(self):
-        """Load data from files."""
-        nba_data = read_gamelog("nba")
-        self.players = nba_data["players"]
-        self.gamelog = nba_data["gamelog"]
-        self.teamlog = nba_data["teamlog"]
-
     def build_comp_profile(self, playerList=None):
         """Build merged player profile DataFrame for comp computation.
 
@@ -474,36 +474,68 @@ class StatsNBA(Stats):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self, target_game_date: "datetime | None" = None) -> None:
+    def _current_season_key(self, target_game_date: date) -> str:
+        """Return the ``self.players`` key for the season containing ``target_game_date``.
+
+        NBA seasons span Oct–Jun and ``self.players`` is keyed by the
+        ``"YYYY-YY"`` notation. Dates in Oct–Dec belong to the season that
+        started that calendar year; Jan–Sep dates belong to the season that
+        started the prior year.
+        """
+        year = target_game_date.year
+        if target_game_date.month >= 10:
+            return f"{year}-{(year + 1) % 100:02d}"
+        return f"{year - 1}-{year % 100:02d}"
+
+    def _player_seasons_through(self, target_game_date: date) -> dict:
+        """Merge ``self.players`` seasons whose key is ``<=`` ``target_game_date``'s season.
+
+        Returns a ``{team: {player_name: stats_dict}}`` mapping ready for
+        :meth:`build_comp_profile`. Iterates oldest → newest so the current
+        season's roster wins on dict-update conflicts (matches the
+        :meth:`update_player_comps` ``prior.update(current)`` order).
+        """
+        cutoff = self._current_season_key(target_game_date)
+        merged: dict = {}
+        for season_key in sorted(self.players.keys()):
+            if season_key > cutoff:
+                continue
+            for team, roster in self.players[season_key].items():
+                merged.setdefault(team, {}).update(roster)
+        return merged
+
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
         """Build comps from loaded data at runtime (no JSON I/O).
 
-        ``target_game_date`` is accepted for signature compatibility with
-        :meth:`Stats._ensure_comps` but currently ignored -- NBA still
-        builds a today()-bound snapshot, so training rows continue to see
-        future-season player aggregates. Migrating NBA to point-in-time
-        comp pools is a separate piece of work.
+        When ``target_game_date`` is provided, the player pool is bounded to
+        seasons whose key (NBA "YYYY-YY") is ``<=`` the target date's season,
+        so a 2022 training row's comps no longer pool with 2024+ rookies.
+        ``self.playerProfile`` is already date-bounded by
+        :meth:`base_profile` upstream (it filters ``short_gamelog`` to the
+        300-day window ending at ``date``), so this fix only needs to gate
+        the per-season roster set that feeds :meth:`build_comp_profile`.
+        Today() default preserves inference / cron behavior.
         """
-        # TODO(comp-leakage-cross-league): NFL was migrated to per-(season,
-        # week) comp regeneration via build_comp_profile(target_game_date=...);
-        # NBA still binds to today(). Training matrices for NBA inherit the
-        # look-ahead leakage where a 2022 row's comps "know" the 2024+ player
-        # population. See StatsNFL._compute_comps for the pattern to replicate.
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
+        league_weights = stats[self.league]
         all_features = set()
-        for pos_weights in stats["NBA"].values():
+        for pos_weights in league_weights.values():
             all_features.update(pos_weights.keys())
         all_features = list(all_features)
 
-        playerProfile, playerDict = self.build_comp_profile()
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerList = self._player_seasons_through(target_game_date)
+        playerProfile, playerDict = self.build_comp_profile(playerList=playerList)
         playerProfile = playerProfile[
             [f for f in all_features if f in playerProfile.columns]
         ].replace([np.nan, np.inf, -np.inf], 0)
 
         comps = {}
         for position in self.positions:
-            pos_weights = stats["NBA"][position]
+            pos_weights = league_weights[position]
             pos_features = list(pos_weights.keys())
             pos_players = [
                 p
@@ -1531,7 +1563,7 @@ class StatsNBA(Stats):
 
             # Scale both loc and scale to preserve coefficient of variation
             ratio = new_means / true_means.replace(0, np.nan)
-            ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+            ratio = ratio.fillna(1.0).clip(lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP)
             new_scale = scale * ratio
             new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 

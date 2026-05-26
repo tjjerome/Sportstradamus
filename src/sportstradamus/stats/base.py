@@ -37,6 +37,7 @@ from sportstradamus.helpers import (
     stat_dist,
 )
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
+from sportstradamus.helpers.io import read_gamelog
 from sportstradamus.spiderLogger import logger
 
 # Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
@@ -57,10 +58,17 @@ _COMP_EB_PRIOR_K: float = 10.0
 _COMP_QUANTILE_LO: float = 0.25
 _COMP_QUANTILE_HI: float = 0.75
 
+# Clip bounds for per-player projection scale ratios in get_volume_stats.
+# Floor prevents shrinking a player below 10% of their mean; cap prevents
+# inflating beyond 10×. Shared across NBA, WNBA, NHL, and NFL volume models.
+_VOLUME_SCALE_RATIO_FLOOR: float = 0.1
+_VOLUME_SCALE_RATIO_CAP: float = 10.0
+
 archive = Archive()
 scraper = Scrape()
 
-# flag to clean up gamelogs
+# When True, forces a full reload of all cached CSVs on the next load() /
+# update() call. Flipped manually by operators to clear corrupt gamelog state.
 clean_data = False
 pd.set_option("future.no_silent_downcasting", True)
 
@@ -131,7 +139,7 @@ class Stats:
         self._current_comps_key = None
 
     def parse_game(self, game):
-        """Parses a game and updates the gamelog.
+        """Parse a single game API response and update ``self.gamelog``.
 
         Args:
             game (dict): A dictionary representing a game.
@@ -139,29 +147,29 @@ class Stats:
         Returns:
             None
         """
-        # Implementation details...
 
     def load(self):
-        """Loads game logs from a file.
+        """Read cached gamelog / teamlog / players artifacts for this league.
 
-        Args:
-            file_path (str): The path to the file containing game logs.
-
-        Returns:
-            None
+        The on-disk shape is uniform across leagues (one parquet/JSON bundle
+        per league, see :mod:`sportstradamus.helpers.io`). Subclasses with
+        league-specific post-processing (NFL roster validation, MLB
+        affinity CSVs) override and either replace this body entirely or
+        call ``super().load()`` first. The league key is derived from
+        ``self.league`` so a single base implementation serves NBA, WNBA,
+        and NHL — see :ref:`STYLE_GUIDE §2.6 <three-occurrences>`.
         """
-        # Implementation details...
+        league_data = read_gamelog(self.league.lower())
+        self.gamelog = league_data["gamelog"]
+        self.teamlog = league_data["teamlog"]
+        self.players = league_data["players"]
 
     def update(self):
-        """Updates the gamelog with new game data.
-
-        Args:
-            None
+        """Fetch new game data from the league API and append to ``self.gamelog``.
 
         Returns:
             None
         """
-        # Implementation details...
 
     @staticmethod
     def _build_comps(knn, profile_df, min_comps=5, max_comps=20):
@@ -251,15 +259,16 @@ class Stats:
           bucket are O(1) swaps. This eliminates the look-ahead leakage where
           a 2023 training row's comps "know" the 2025 player population.
         """
-        # TODO(comp-leakage-cross-league): only StatsNFL honors
-        # ``target_game_date`` inside ``_compute_comps`` (via
-        # ``build_comp_profile``). StatsNBA / StatsWNBA / StatsNHL accept the
-        # kwarg for signature compatibility but ignore it, so their training
-        # matrices still carry the look-ahead leakage. Extend each league's
-        # ``_compute_comps`` to consume ``target_game_date`` and bound the
-        # source profile to games before that date. Search for
-        # ``comp-leakage-cross-league`` in this repo to find the per-league
-        # spots that need the patch.
+        # TODO(comp-leakage-mlb): StatsNFL, StatsNBA, StatsWNBA, and StatsNHL
+        # all honor ``target_game_date`` and gate their comp pool on the
+        # appropriate season-cut. StatsMLB still relies on the today() affinity
+        # match-score CSVs (``affinity_pitchersBySHV_matchScores.csv`` /
+        # ``affinity_hittersByHittingProfile_matchScores.csv``) loaded in
+        # ``StatsMLB.load`` and has no ``_compute_comps`` override; the
+        # training matrix path therefore reuses that fixed snapshot across
+        # every gameday. A true fix needs historical baseballsavant exports
+        # (the published CSV is current-state only) so this leakage stays
+        # open until that data source is wired in.
         if date is None:
             if not self.comps:
                 self._compute_comps()
@@ -298,6 +307,19 @@ class Stats:
         aggregation so absent teams degrade to NaN-then-zero downstream.
         """
         return None, None
+
+    def _join_fp_player_features(self, date) -> pd.DataFrame | None:
+        """League hook: return season-to-date per-player FP feature frame for ``date``.
+
+        Default no-op returns ``None``. Override on a league subclass to plug an
+        external player-grain data source into ``playerstats``. The frame must
+        be indexed by the same key ``base_profile``'s ``playerstats`` uses
+        (``log_strings['player']`` value, post-``remove_accents``) and column
+        names should already carry the ``Player {name}_asof`` prefix expected
+        by the model feature filter — base_profile joins straight into
+        playerstats without further renaming.
+        """
+        return None
 
     @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
@@ -404,6 +426,16 @@ class Stats:
 
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
+
+        # League hook: external player-grain feature source (e.g. NFL
+        # season-to-date FP aggregates from `load_through_one_year`). Override
+        # ``_join_fp_player_features`` to return a frame indexed by the same
+        # player-name key as ``playerstats``, with columns already prefixed
+        # ``Player {name}_asof`` — joined left so missing players degrade to
+        # NaN-then-zero downstream.
+        fp_player_features = self._join_fp_player_features(date)
+        if fp_player_features is not None and not fp_player_features.empty:
+            playerstats = playerstats.join(fp_player_features, how="left")
 
         # Vectorized tail(10).mean() for team stats
         _team_col = self.log_strings["team"]

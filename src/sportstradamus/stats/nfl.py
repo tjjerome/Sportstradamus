@@ -26,7 +26,13 @@ from sportstradamus.stats import (
     nfl_fp_team_weekly_aggregate,
     nfl_fp_weekly_aggregate,
 )
-from sportstradamus.stats.base import Stats, archive, clean_data
+from sportstradamus.stats.base import (
+    _VOLUME_SCALE_RATIO_CAP,
+    _VOLUME_SCALE_RATIO_FLOOR,
+    Stats,
+    archive,
+    clean_data,
+)
 
 # Phase-1.5 lookback rule:
 #   - Post-week-4 (target_week >= 5) of the target's season: comp pool is
@@ -131,11 +137,6 @@ _COMP_POOL_MIN_PLAYERS: int = 7  # skip position if fewer candidates survive fil
 # players who are barely similar.
 _COMP_KNN_MIN: int = 5
 _COMP_KNN_MAX: int = 15
-
-# Volume-normalization scale-ratio clip bounds. Prevents runaway
-# adjustments when a player's projected mean is near zero.
-_VOLUME_SCALE_RATIO_FLOOR: float = 0.1
-_VOLUME_SCALE_RATIO_CAP: float = 10.0
 
 
 class StatsNFL(Stats):
@@ -438,7 +439,16 @@ class StatsNFL(Stats):
         )
 
     def load(self):
-        """Load data from files."""
+        """Read the NFL gamelog bundle and apply NFL-specific cleanup.
+
+        Differs from the base :meth:`Stats.load` in two ways:
+
+        * The ``players`` payload is only assigned when non-empty, so a
+          stale or corrupt read does not blow away a previously populated
+          roster snapshot.
+        * The gamelog object-dtype numeric columns are coerced to real
+          numeric dtypes before downstream feature engineering.
+        """
         nfl_data = read_gamelog("nfl")
         self.gamelog = nfl_data["gamelog"]
         self.teamlog = nfl_data["teamlog"]
@@ -1476,6 +1486,77 @@ class StatsNFL(Stats):
             )
         )
         return team_features, defense_features
+
+    def _join_fp_player_features(self, date: datetime | date) -> pd.DataFrame | None:
+        """NFL hook: project FP per-player season-to-date aggregates to ``Player {col}_asof``.
+
+        Resolves ``date`` to ``(season, target_week)`` via
+        ``_lookup_season_week``, then loads the player-grain season-to-date
+        profile through ``load_through_one_year(season, target_week=week-1)``
+        — the "as of last week" snapshot, leakage-clean for the target row's
+        date. Each non-meta column is renamed to ``Player {col}_asof`` so the
+        base-class join in ``base_profile`` merges them straight into
+        ``playerstats`` without colliding with the legacy ``Player {col}``
+        gamelog-derived features.
+
+        Pre-week-5 falls back to the prior season's late weeks. Returns
+        ``None`` when no FP weekly snapshot exists for the resolved window —
+        the model falls back to gamelog-derived features alone.
+        """
+        season, target_week = self._lookup_season_week(date)
+        if getattr(self, "_fp_asof_cache", None) is None:
+            self._fp_asof_cache: dict[tuple[int, int], pd.DataFrame | None] = {}
+        key = (season, target_week)
+        if key in self._fp_asof_cache:
+            return self._fp_asof_cache[key]
+        frame = self._compute_fp_asof_features(season, target_week)
+        self._fp_asof_cache[key] = frame
+        return frame
+
+    def _compute_fp_asof_features(self, season: int, week: int) -> pd.DataFrame | None:
+        """Load FP season-to-date profile for ``(season, week-1)`` and rename to ``Player {col}_asof``.
+
+        Pre-week-5 routes to the prior season's late weeks via
+        ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..NFL_REGULAR_SEASON_WEEKS``;
+        this mirrors the comp-profile blend semantics so the early-season
+        asof view sees real signal instead of an empty frame.
+        """
+        lookback_week = max(week - 1, 0)
+        if lookback_week >= 1:
+            frame = nfl_fp_weekly_aggregate.load_through_one_year(
+                season, target_week=lookback_week
+            )
+        else:
+            # Early-season: fall back to prior season's late weeks.
+            frame = nfl_fp_weekly_aggregate.load_through_one_year(
+                season - 1, target_week=NFL_REGULAR_SEASON_WEEKS
+            )
+        if frame is None or frame.empty or "Name" not in frame.columns:
+            return None
+        frame = frame.copy()
+        # Drop rows with missing player names (rare aggregation artifacts).
+        frame = frame.loc[frame["Name"].notna()]
+        if frame.empty:
+            return None
+        # Join key matches the gamelog ``player display name`` after the
+        # ``remove_accents`` pass that ``base_profile`` applies to
+        # short_gamelog. Both sides must strip accents for the merge to land.
+        frame.index = frame["Name"].astype(str).apply(remove_accents)
+        frame.index.name = self.log_strings["player"]
+        meta = {"Name", "Team", "position"}
+        feat_cols = [c for c in frame.columns if c not in meta]
+        if not feat_cols:
+            return None
+        out = frame[feat_cols].copy()
+        # Drop duplicate-index rows (player traded mid-season -> two Team rows).
+        # Keep the row with the most non-NaN cells so we don't lose signal to
+        # the smaller-sample team's snapshot.
+        if out.index.has_duplicates:
+            non_na_rank = out.notna().sum(axis=1)
+            out = out.assign(_rank=non_na_rank).sort_values("_rank", ascending=False)
+            out = out[~out.index.duplicated(keep="first")].drop(columns="_rank")
+        out.columns = [f"Player {c}_asof" for c in out.columns]
+        return out
 
     def _compute_comp_profile(self, cache_key: tuple[int, int | None]) -> pd.DataFrame:
         """Aggregate the per-game snapshots into a comp-profile frame for one cell.

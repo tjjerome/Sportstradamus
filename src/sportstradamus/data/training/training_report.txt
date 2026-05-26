@@ -305,130 +305,220 @@ Calibrated  0.588977   0.717105    0.574594  0.135712   0.085456  0.677939
  HP rounds=298 leaves=127 lr=0.0216 min_child=148 L1=1.53e-01 L2=9.29e+00
 
 =============== NFL fantasy points prizepicks ================
- Distribution: SkewNormal | Historical Zero Rate: 0.0410
- BOOK BASELINE  brier=0.251 logloss=0.695 auc=0.505 ece=0.045
- MODEL          brier=0.225 logloss=0.654 auc=0.691 ece=0.042
- SKILL          brier_skill_score=+0.104  kelly_shrinkage=0.104
+ Distribution: SkewNormal | Historical Zero Rate: 0.0084
+ BOOK BASELINE  brier=0.250 logloss=0.694 auc=0.504 ece=0.051
+ MODEL          brier=0.219 logloss=0.660 auc=0.719 ece=0.071
+ SKILL          brier_skill_score=+0.125  kelly_shrinkage=0.125
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.670913   0.636452    0.712121  0.648936   0.187654  0.661687
-Corrected   0.674292   0.642351    0.711425  0.657337   0.168110  0.664434
-Calibrated  0.674292   0.642351    0.711425  0.657337   0.168110  0.644632
+Raw Model   0.703279   0.683975    0.733520  0.701773   0.202626  0.674545
+Corrected   0.706111   0.686703    0.736467  0.713022   0.180625  0.681019
+Calibrated  0.706111   0.686703    0.736467  0.713022   0.180624  0.631066
  DIAG model_weight=0.900
- DIAG start_scale=0.705 model_scale=8.354 empirical_scale=0.723 shape_ratio=11.5x
- DIAG start_mean=9.96 model_ev=9.30 mean_line=9.36 result_mean=9.36
- DIAG mean_ev_diff=-0.053 median_ev_diff=+0.355 frac_ev>line=57.6%
- DIAG Over%|ev>line=0.638 Over%|ev<line=0.287 CF_Over%(emp_shape)=nan
+ DIAG start_scale=0.705 model_scale=8.368 empirical_scale=0.650 shape_ratio=12.9x
+ DIAG start_mean=10.00 model_ev=9.38 mean_line=9.40 result_mean=9.57
+ DIAG mean_ev_diff=-0.014 median_ev_diff=+0.546 frac_ev>line=59.6%
+ DIAG Over%|ev>line=0.687 Over%|ev<line=0.262 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.536 result_meanyr_corr=-0.352
- HP rounds=125 leaves=8 lr=0.1184 min_child=126 L1=1.36e+00 L2=6.42e+00
+ DIAG ev_meanyr_corr=-0.630 result_meanyr_corr=-0.432
+ HP rounds=74 leaves=8 lr=0.1435 min_child=122 L1=9.95e-01 L2=1.13e-05
 
 ================ NFL fantasy points underdog =================
- Distribution: SkewNormal | Historical Zero Rate: 0.0426
- BOOK BASELINE  brier=0.253 logloss=0.698 auc=0.494 ece=0.078
- MODEL          brier=0.228 logloss=0.676 auc=0.668 ece=0.056
- SKILL          brier_skill_score=+0.099  kelly_shrinkage=0.099
+ Distribution: SkewNormal | Historical Zero Rate: 0.0053
+ BOOK BASELINE  brier=0.253 logloss=0.699 auc=0.497 ece=0.060
+ MODEL          brier=0.233 logloss=0.708 auc=0.663 ece=0.067
+ SKILL          brier_skill_score=+0.079  kelly_shrinkage=0.079
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.657745   0.600000    0.707758  0.592576   0.162499  0.752709
-Corrected   0.653166   0.606825    0.682113  0.491736   0.165889  0.767777
-Calibrated  0.653318   0.606241    0.682791  0.493819   0.164514  0.701108
+Raw Model   0.652274   0.585000    0.743555  0.694028   0.189806  0.748849
+Corrected   0.648256   0.590164    0.705543  0.604474   0.185258  0.763181
+Calibrated  0.646952   0.586797    0.705602  0.623857   0.168637  0.697321
  DIAG model_weight=0.900
- DIAG start_scale=0.756 model_scale=7.560 empirical_scale=0.788 shape_ratio=9.6x
- DIAG start_mean=8.60 model_ev=7.86 mean_line=8.18 result_mean=8.10
- DIAG mean_ev_diff=-0.323 median_ev_diff=-0.144 frac_ev>line=46.0%
- DIAG Over%|ev>line=0.603 Over%|ev<line=0.318 CF_Over%(emp_shape)=nan
+ DIAG start_scale=0.756 model_scale=8.229 empirical_scale=0.706 shape_ratio=11.7x
+ DIAG start_mean=8.74 model_ev=8.08 mean_line=8.30 result_mean=8.12
+ DIAG mean_ev_diff=-0.221 median_ev_diff=+0.008 frac_ev>line=50.2%
+ DIAG Over%|ev>line=0.591 Over%|ev<line=0.294 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.587 result_meanyr_corr=-0.339
- HP rounds=997 leaves=8 lr=0.0115 min_child=31 L1=1.34e-05 L2=9.78e-03
+ DIAG ev_meanyr_corr=-0.645 result_meanyr_corr=-0.431
+ HP rounds=122 leaves=8 lr=0.1122 min_child=91 L1=5.75e-06 L2=2.76e-04
+
+================== NFL passing first downs ===================
+ Distribution: SkewNormal | Historical Zero Rate: 0.0007
+ BOOK BASELINE  brier=0.259 logloss=0.712 auc=0.351 ece=0.070
+ MODEL          brier=0.234 logloss=0.673 auc=0.659 ece=0.067
+ SKILL          brier_skill_score=+0.095  kelly_shrinkage=0.095
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.640569   0.688235    0.567568  0.673877   0.230248  0.614883
+Corrected   0.579710   0.647059    0.495935  0.628663   0.227963  0.723409
+Calibrated  0.593284   0.657718    0.512605  0.649323   0.183235  0.689550
+ DIAG model_weight=0.900
+ DIAG start_scale=0.385 model_scale=7.058 empirical_scale=0.282 shape_ratio=25.0x
+ DIAG start_mean=8.80 model_ev=9.17 mean_line=8.80 result_mean=9.68
+ DIAG mean_ev_diff=+0.363 median_ev_diff=+0.240 frac_ev>line=55.3%
+ DIAG Over%|ev>line=0.647 Over%|ev<line=0.504 CF_Over%(emp_shape)=nan
+ DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
+ DIAG ev_meanyr_corr=-0.586 result_meanyr_corr=-0.666
+ HP rounds=50 leaves=73 lr=0.0693 min_child=30 L1=4.10e-02 L2=2.13e-03
 
 ====================== NFL passing tds =======================
- Distribution: ZINB | Historical Zero Rate: 0.2416
- BOOK BASELINE  brier=0.474 logloss=6.402 auc=0.429 ece=0.467
- MODEL          brier=0.261 logloss=0.716 auc=0.536 ece=0.115
- SKILL          brier_skill_score=+0.450  kelly_shrinkage=0.450
+ Distribution: ZINB | Historical Zero Rate: 0.2469
+ BOOK BASELINE  brier=0.449 logloss=6.038 auc=0.490 ece=0.449
+ MODEL          brier=0.253 logloss=0.699 auc=0.567 ece=0.099
+ SKILL          brier_skill_score=+0.436  kelly_shrinkage=0.436
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.475728   0.583333    0.435556  0.341345   0.124491  0.730007
-Corrected   0.557333   0.566766    0.473684  0.929820   0.134954  0.727464
-Calibrated  0.565934   0.574468    0.485714  0.963440   0.083827  0.690377
+Raw Model   0.513514   0.634146    0.467290  0.356579   0.123831  0.728624
+Corrected   0.545205   0.556231    0.444444  0.940882   0.139235  0.755562
+Calibrated  0.542936   0.553846    0.444444  0.950154   0.092748  0.709438
  DIAG model_weight=0.900
- DIAG start_r=50.000 model_r=45.760 empirical_r=50.000 shape_ratio=0.9x
- DIAG start_mean=1.37 model_ev=3.00 mean_line=1.39 result_mean=1.50
- DIAG mean_ev_diff=+1.609 median_ev_diff=+1.559 frac_ev>line=99.0%
- DIAG Over%|ev>line=0.563 Over%|ev<line=nan CF_Over%(emp_shape)=1.008
- DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=0.108
- DIAG ev_meanyr_corr=-0.279 result_meanyr_corr=-0.311
- HP rounds=83 leaves=56 lr=0.0650 min_child=40 L1=6.14e+00 L2=5.07e-04
+ DIAG start_r=50.000 model_r=45.769 empirical_r=50.000 shape_ratio=0.9x
+ DIAG start_mean=1.38 model_ev=3.07 mean_line=1.41 result_mean=1.51
+ DIAG mean_ev_diff=+1.655 median_ev_diff=+1.683 frac_ev>line=99.2%
+ DIAG Over%|ev>line=0.555 Over%|ev<line=nan CF_Over%(emp_shape)=0.986
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=0.103
+ DIAG ev_meanyr_corr=-0.249 result_meanyr_corr=-0.338
+ HP rounds=91 leaves=20 lr=0.0563 min_child=44 L1=6.98e+00 L2=2.61e+00
 
 ===================== NFL passing yards ======================
  Distribution: SkewNormal | Historical Zero Rate: 0.0051
- BOOK BASELINE  brier=0.250 logloss=0.694 auc=0.534 ece=0.016
- MODEL          brier=0.256 logloss=0.766 auc=0.526 ece=0.048
- SKILL          brier_skill_score=-0.022  kelly_shrinkage=0.000
+ BOOK BASELINE  brier=0.250 logloss=0.694 auc=0.511 ece=0.016
+ MODEL          brier=0.248 logloss=0.717 auc=0.537 ece=0.037
+ SKILL          brier_skill_score=+0.009  kelly_shrinkage=0.009
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.512658   0.525000    0.491379  0.761096   0.193490  1.017748
-Corrected   0.594595   0.581081    0.621622  2.282282   0.094778  0.744692
-Calibrated  0.597826   0.557377    0.677419  2.738658   0.091079  0.734874
- DIAG model_weight=0.122
- DIAG start_scale=0.402 model_scale=716.553 empirical_scale=0.353 shape_ratio=2028.4x
- DIAG start_mean=209.27 model_ev=222.18 mean_line=220.89 result_mean=222.31
- DIAG mean_ev_diff=+1.296 median_ev_diff=+1.886 frac_ev>line=63.4%
- DIAG Over%|ev>line=0.581 Over%|ev<line=0.378 CF_Over%(emp_shape)=nan
+Raw Model   0.535088   0.536946    0.532374  0.659519   0.246351  1.136407
+Corrected   0.626866   0.571429    0.687500  2.962798   0.093721  0.727352
+Calibrated  0.646154   0.588235    0.709677  3.057988   0.093295  0.726202
+ DIAG model_weight=0.050
+ DIAG start_scale=0.402 model_scale=876.271 empirical_scale=0.353 shape_ratio=2480.6x
+ DIAG start_mean=209.27 model_ev=221.19 mean_line=220.89 result_mean=222.31
+ DIAG mean_ev_diff=+0.303 median_ev_diff=+1.068 frac_ev>line=57.9%
+ DIAG Over%|ev>line=0.571 Over%|ev<line=0.312 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.836 result_meanyr_corr=-0.472
- HP rounds=329 leaves=69 lr=0.0149 min_child=30 L1=2.32e-02 L2=1.03e-04
+ DIAG ev_meanyr_corr=-0.828 result_meanyr_corr=-0.472
+ HP rounds=176 leaves=57 lr=0.0536 min_child=38 L1=9.88e-06 L2=3.83e-06
+
+===================== NFL receiving tds ======================
+ Distribution: ZINB | Historical Zero Rate: 0.8395
+ BOOK BASELINE  brier=0.248 logloss=0.690 auc=0.477 ece=0.346
+ MODEL          brier=0.121 logloss=0.410 auc=0.664 ece=0.012
+ SKILL          brier_skill_score=+0.515  kelly_shrinkage=0.515
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.831461        1.0    0.831385  0.000449   0.081389  0.488012
+Corrected   0.831385        0.0    0.831385  0.000000   0.068132  0.469891
+Calibrated  0.831385        0.0    0.831385  0.000000   0.070564  0.463952
+ DIAG model_weight=0.729
+ DIAG start_r=50.000 model_r=29.811 empirical_r=50.000 shape_ratio=0.6x
+ DIAG start_mean=0.19 model_ev=0.32 mean_line=0.50 result_mean=0.17
+ DIAG mean_ev_diff=-0.177 median_ev_diff=-0.147 frac_ev>line=9.9%
+ DIAG Over%|ev>line=0.292 Over%|ev<line=0.155 CF_Over%(emp_shape)=0.000
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.011
+ DIAG ev_meanyr_corr=-0.707 result_meanyr_corr=-0.355
+ HP rounds=80 leaves=27 lr=0.0996 min_child=142 L1=9.95e+00 L2=9.98e+00
 
 ==================== NFL receiving yards =====================
- Distribution: SkewNormal | Historical Zero Rate: 0.1257
- BOOK BASELINE  brier=0.249 logloss=0.692 auc=0.549 ece=0.018
- MODEL          brier=0.256 logloss=0.715 auc=0.523 ece=0.065
- SKILL          brier_skill_score=-0.028  kelly_shrinkage=0.000
+ Distribution: SkewNormal | Historical Zero Rate: 0.1256
+ BOOK BASELINE  brier=0.250 logloss=0.694 auc=0.551 ece=0.032
+ MODEL          brier=0.255 logloss=0.709 auc=0.526 ece=0.055
+ SKILL          brier_skill_score=-0.024  kelly_shrinkage=0.000
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.525801   0.522247    0.536170  0.908531   0.152089  0.755652
-Corrected   0.536119   0.532929    0.543186  0.923817   0.124594  0.732444
-Calibrated  0.540859   0.537166    0.549425  1.086842   0.094356  0.705608
+Raw Model   0.508568   0.498353    0.529412  0.833204   0.160059  0.785937
+Corrected   0.510769   0.506263    0.517241  0.814833   0.131505  0.756944
+Calibrated  0.516476   0.506716    0.530329  0.943893   0.100968  0.715650
  DIAG model_weight=0.900
- DIAG start_scale=0.757 model_scale=40.232 empirical_scale=1.052 shape_ratio=38.2x
- DIAG start_mean=29.69 model_ev=29.31 mean_line=25.59 result_mean=29.85
- DIAG mean_ev_diff=+3.722 median_ev_diff=+4.125 frac_ev>line=81.9%
- DIAG Over%|ev>line=0.528 Over%|ev<line=0.452 CF_Over%(emp_shape)=nan
+ DIAG start_scale=0.757 model_scale=36.236 empirical_scale=1.044 shape_ratio=34.7x
+ DIAG start_mean=29.20 model_ev=27.81 mean_line=25.37 result_mean=29.17
+ DIAG mean_ev_diff=+2.434 median_ev_diff=+3.115 frac_ev>line=75.9%
+ DIAG Over%|ev>line=0.507 Over%|ev<line=0.476 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.507 result_meanyr_corr=-0.193
- HP rounds=666 leaves=20 lr=0.0154 min_child=60 L1=3.88e-06 L2=7.59e+00
+ DIAG ev_meanyr_corr=-0.571 result_meanyr_corr=-0.191
+ HP rounds=77 leaves=11 lr=0.1208 min_child=82 L1=8.55e-05 L2=3.18e+00
 
 ======================= NFL receptions =======================
- Distribution: SkewNormal | Historical Zero Rate: 0.0964
- BOOK BASELINE  brier=0.243 logloss=0.679 auc=0.606 ece=0.038
- MODEL          brier=0.254 logloss=0.717 auc=0.536 ece=0.041
- SKILL          brier_skill_score=-0.044  kelly_shrinkage=0.000
+ Distribution: SkewNormal | Historical Zero Rate: 0.1154
+ BOOK BASELINE  brier=0.251 logloss=0.695 auc=0.553 ece=0.058
+ MODEL          brier=0.255 logloss=0.708 auc=0.530 ece=0.057
+ SKILL          brier_skill_score=-0.017  kelly_shrinkage=0.000
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.527635   0.532158    0.522124  0.695764   0.149448  0.745606
-Corrected   0.539457   0.554483    0.526188  0.674308   0.114012  0.720265
-Calibrated  0.547997   0.567398    0.529927  0.810290   0.089932  0.700723
- DIAG model_weight=0.694
- DIAG start_scale=0.570 model_scale=5.352 empirical_scale=0.789 shape_ratio=6.8x
- DIAG start_mean=3.04 model_ev=3.07 mean_line=2.91 result_mean=3.03
- DIAG mean_ev_diff=+0.156 median_ev_diff=+0.206 frac_ev>line=66.4%
- DIAG Over%|ev>line=0.546 Over%|ev<line=0.475 CF_Over%(emp_shape)=nan
+Raw Model   0.533103   0.557728    0.493213  0.781338   0.151440  0.755409
+Corrected   0.536937   0.563976    0.494607  0.804451   0.137177  0.747598
+Calibrated  0.543619   0.568054    0.500000  1.014340   0.101267  0.706919
+ DIAG model_weight=0.900
+ DIAG start_scale=0.570 model_scale=4.456 empirical_scale=0.829 shape_ratio=5.4x
+ DIAG start_mean=2.66 model_ev=2.90 mean_line=2.56 result_mean=2.69
+ DIAG mean_ev_diff=+0.349 median_ev_diff=+0.428 frac_ev>line=76.0%
+ DIAG Over%|ev>line=0.562 Over%|ev<line=0.497 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.541 result_meanyr_corr=-0.160
- HP rounds=405 leaves=20 lr=0.0144 min_child=117 L1=3.08e-06 L2=2.43e-01
+ DIAG ev_meanyr_corr=-0.692 result_meanyr_corr=-0.217
+ HP rounds=36 leaves=38 lr=0.1006 min_child=124 L1=2.45e-02 L2=1.18e-04
+
+====================== NFL rushing tds =======================
+ Distribution: ZINB | Historical Zero Rate: 0.8083
+ BOOK BASELINE  brier=0.248 logloss=0.688 auc=0.464 ece=0.312
+ MODEL          brier=0.139 logloss=0.459 auc=0.675 ece=0.018
+ SKILL          brier_skill_score=+0.440  kelly_shrinkage=0.440
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.833682        1.0    0.833508  0.001049   0.094318  0.505281
+Corrected   0.833160        0.0    0.833160  0.000000   0.072615  0.475231
+Calibrated  0.833160        0.0    0.833160  0.000000   0.076475  0.467227
+ DIAG model_weight=0.668
+ DIAG start_r=50.000 model_r=31.480 empirical_r=50.000 shape_ratio=0.6x
+ DIAG start_mean=0.25 model_ev=0.34 mean_line=0.54 result_mean=0.17
+ DIAG mean_ev_diff=-0.203 median_ev_diff=-0.181 frac_ev>line=9.4%
+ DIAG Over%|ev>line=0.189 Over%|ev<line=0.165 CF_Over%(emp_shape)=0.000
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=1.008
+ DIAG ev_meanyr_corr=-0.811 result_meanyr_corr=-0.503
+ HP rounds=468 leaves=88 lr=0.0439 min_child=103 L1=9.18e+00 L2=2.14e-06
+
+======================== NFL targets =========================
+ Distribution: SkewNormal | Historical Zero Rate: 0.0145
+ BOOK BASELINE  brier=0.250 logloss=0.693 auc=0.574 ece=0.172
+ MODEL          brier=0.203 logloss=0.595 auc=0.752 ece=0.097
+ SKILL          brier_skill_score=+0.187  kelly_shrinkage=0.187
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model    0.71529   0.744860    0.665620  0.761597   0.171172  0.605744
+Corrected    0.71933   0.746425    0.673633  0.779168   0.147838  0.621329
+Calibrated   0.71933   0.746425    0.673633  0.779168   0.147837  0.610612
+ DIAG model_weight=0.900
+ DIAG start_scale=0.577 model_scale=2.514 empirical_scale=0.639 shape_ratio=3.9x
+ DIAG start_mean=3.94 model_ev=3.81 mean_line=3.77 result_mean=3.91
+ DIAG mean_ev_diff=+0.041 median_ev_diff=+0.254 frac_ev>line=61.1%
+ DIAG Over%|ev>line=0.746 Over%|ev<line=0.326 CF_Over%(emp_shape)=nan
+ DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
+ DIAG ev_meanyr_corr=-0.718 result_meanyr_corr=-0.420
+ HP rounds=97 leaves=8 lr=0.1028 min_child=118 L1=5.47e-04 L2=1.59e-05
+
+========================== NFL tds ===========================
+ Distribution: ZINB | Historical Zero Rate: 0.7744
+ BOOK BASELINE  brier=0.770 logloss=10.617 auc=0.517 ece=0.770
+ MODEL          brier=0.155 logloss=0.484 auc=0.695 ece=0.089
+ SKILL          brier_skill_score=+0.798  kelly_shrinkage=0.798
+            Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
+Raw Model   0.806641   0.600000    0.809281  0.012806   0.104393  0.467922
+Corrected   0.807541   0.504762    0.822151  0.048757   0.127804  0.488704
+Calibrated  0.807541   0.504762    0.822151  0.048757   0.127804  0.488704
+ DIAG model_weight=0.900
+ DIAG start_r=50.000 model_r=30.882 empirical_r=50.000 shape_ratio=0.6x
+ DIAG start_mean=0.24 model_ev=0.78 mean_line=0.50 result_mean=0.24
+ DIAG mean_ev_diff=+0.283 median_ev_diff=+0.335 frac_ev>line=69.8%
+ DIAG Over%|ev>line=0.237 Over%|ev<line=0.099 CF_Over%(emp_shape)=0.051
+ DIAG shape_ceiling=100.0 marginal_shape=50.0 dispersion_cal=0.943
+ DIAG ev_meanyr_corr=0.075 result_meanyr_corr=-0.247
+ HP rounds=58 leaves=8 lr=0.0828 min_child=117 L1=9.62e+00 L2=4.93e+00
 
 ========================= NFL yards ==========================
- Distribution: SkewNormal | Historical Zero Rate: 0.0673
- BOOK BASELINE  brier=0.250 logloss=0.693 auc=0.569 ece=0.021
- MODEL          brier=0.232 logloss=0.662 auc=0.662 ece=0.032
+ Distribution: SkewNormal | Historical Zero Rate: 0.0687
+ BOOK BASELINE  brier=0.250 logloss=0.693 auc=0.574 ece=0.033
+ MODEL          brier=0.232 logloss=0.677 auc=0.670 ece=0.064
  SKILL          brier_skill_score=+0.071  kelly_shrinkage=0.071
             Accuracy  Over Prec  Under Prec     Over%  Sharpness       NLL
-Raw Model   0.626819   0.578431    0.734114  0.796651   0.186865  0.673084
-Corrected   0.632282   0.583596    0.734660  0.805576   0.159404  0.666496
-Calibrated  0.634226   0.585680    0.737201  0.826378   0.146779  0.663732
+Raw Model   0.643729   0.608871    0.720641  0.830179   0.176875  0.697474
+Corrected   0.637199   0.608084    0.692053  0.815278   0.148806  0.695605
+Calibrated  0.637991   0.608311    0.693844  0.819646   0.145462  0.676407
  DIAG model_weight=0.900
- DIAG start_scale=0.763 model_scale=46.027 empirical_scale=0.833 shape_ratio=55.3x
- DIAG start_mean=39.34 model_ev=38.10 mean_line=35.44 result_mean=36.62
- DIAG mean_ev_diff=+2.667 median_ev_diff=+4.392 frac_ev>line=72.1%
- DIAG Over%|ev>line=0.584 Over%|ev<line=0.265 CF_Over%(emp_shape)=nan
+ DIAG start_scale=0.763 model_scale=61.533 empirical_scale=0.809 shape_ratio=76.1x
+ DIAG start_mean=37.42 model_ev=35.75 mean_line=33.77 result_mean=34.94
+ DIAG mean_ev_diff=+1.988 median_ev_diff=+3.535 frac_ev>line=71.2%
+ DIAG Over%|ev>line=0.608 Over%|ev<line=0.308 CF_Over%(emp_shape)=nan
  DIAG shape_ceiling=None marginal_shape=None dispersion_cal=1.000
- DIAG ev_meanyr_corr=-0.546 result_meanyr_corr=-0.359
- HP rounds=886 leaves=85 lr=0.0142 min_child=114 L1=6.91e+00 L2=2.03e-03
+ DIAG ev_meanyr_corr=-0.631 result_meanyr_corr=-0.401
+ HP rounds=64 leaves=10 lr=0.1418 min_child=125 L1=1.76e-03 L2=4.85e+00
 
 ========================= WNBA DREB ==========================
  Distribution: SkewNormal | Historical Zero Rate: 0.1237
@@ -676,13 +766,18 @@ TOV              ZINB      0.148  0.9x   67.5%   +0.239   0.524   0.381  0.158
 ================================================================================
 Market           Dist      Over%  ShpR FracEV>  MedDiff  O%|EV>  O%|EV<  CF_O%
 --------------------------------------------------------------------------------
-fantasy points prizepicks SkewNo    0.657 11.5x   57.6%   +0.355   0.638   0.287    nan
-fantasy points underdog SkewNo    0.492  9.6x   46.0%   -0.144   0.603   0.318    nan
-passing tds      ZINB      0.930  0.9x   99.0%   +1.559   0.563     nan  1.008
-passing yards    SkewNo    2.282 2028.4x   63.4%   +1.886   0.581   0.378    nan
-receiving yards  SkewNo    0.924 38.2x   81.9%   +4.125   0.528   0.452    nan
-receptions       SkewNo    0.674  6.8x   66.4%   +0.206   0.546   0.475    nan
-yards            SkewNo    0.806 55.3x   72.1%   +4.392   0.584   0.265    nan
+fantasy points prizepicks SkewNo    0.713 12.9x   59.6%   +0.546   0.687   0.262    nan
+fantasy points underdog SkewNo    0.604 11.7x   50.2%   +0.008   0.591   0.294    nan
+passing first downs SkewNo    0.629 25.0x   55.3%   +0.240   0.647   0.504    nan
+passing tds      ZINB      0.941  0.9x   99.2%   +1.683   0.555     nan  0.986
+passing yards    SkewNo    2.963 2480.6x   57.9%   +1.068   0.571   0.312    nan
+receiving tds    ZINB      0.000  0.6x    9.9%   -0.147   0.292   0.155  0.000
+receiving yards  SkewNo    0.815 34.7x   75.9%   +3.115   0.507   0.476    nan
+receptions       SkewNo    0.804  5.4x   76.0%   +0.428   0.562   0.497    nan
+rushing tds      ZINB      0.000  0.6x    9.4%   -0.181   0.189   0.165  0.000
+targets          SkewNo    0.779  3.9x   61.1%   +0.254   0.746   0.326    nan
+tds              ZINB      0.049  0.6x   69.8%   +0.335   0.237   0.099  0.051
+yards            SkewNo    0.815 76.1x   71.2%   +3.535   0.608   0.308    nan
 
 
 ================================================================================

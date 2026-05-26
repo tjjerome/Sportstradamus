@@ -290,9 +290,9 @@
             "strategy": "none"
         },
         "passing first downs": {
-            "dist": "ZINB",
+            "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "none"
+            "strategy": "ratio_meanyr"
         },
         "passing tds": {
             "dist": "ZINB",
