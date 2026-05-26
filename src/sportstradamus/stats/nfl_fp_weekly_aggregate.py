@@ -135,6 +135,18 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
     _Recipe("pass_adv_YDS", "passing_advanced", "sum", ("playerStatsPassingYardsTotal",)),
     _Recipe("pass_adv_TD", "passing_advanced", "sum", ("playerStatsPassingTouchdownsTotal",)),
     _Recipe(
+        "pass_adv_AY",
+        "passing_advanced",
+        "sum",
+        ("playerStatsPassingYardsAirTotal",),
+    ),
+    _Recipe(
+        "pass_adv_FD",
+        "passing_advanced",
+        "sum",
+        ("playerStatsFirstDownsPassing",),
+    ),
+    _Recipe(
         "pass_adv_INT", "passing_advanced", "sum", ("playerStatsPassingInterceptionsTotal",)
     ),
     _Recipe(
@@ -156,6 +168,33 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         ),
     ),
     _Recipe(
+        "pass_adv_OFFTARGET_pct",
+        "passing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsPassingOffTargetThrowAttemptsPercentage",
+            "playerStatsPassingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
+        "pass_adv_HERO_pct",
+        "passing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsPassingHeroThrowPercentage",
+            "playerStatsPassingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
+        "pass_adv_CATCHABLE_pct",
+        "passing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsPassingAttemptsCatchablePercentage",
+            "playerStatsPassingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
         "pass_adv_aDOT",
         "passing_advanced",
         "weighted_mean",
@@ -165,11 +204,29 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         ),
     ),
     _Recipe(
+        "pass_adv_DEEP_pct",
+        "passing_advanced",
+        "weighted_rate",
+        (
+            "playerStatsPassingDeepThrowAttemptsTotal",
+            "playerStatsPassingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
         "pass_adv_PrROE",
         "passing_advanced",
         "weighted_rate",
         (
             "playerStatsPassingPressuredOverExpected",
+            "playerStatsPassingDropbacksTotal",
+        ),
+    ),
+    _Recipe(
+        "pass_adv_TTT",
+        "passing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsPassingAverageTimeToThrow",
             "playerStatsPassingDropbacksTotal",
         ),
     ),
@@ -201,14 +258,56 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "sum",
         ("playerStatsRushingYardsTotal",),
     ),
-    # rushing_basic -- RB volume input
+    # rushing_basic -- RB volume input + goal-line carry totals
     _Recipe(
         "rush_basic_ATT",
         "rushing_basic",
         "sum",
         ("playerStatsRushingAttemptsTotal",),
     ),
-    # rushing_advanced -- RB efficiency inputs
+    _Recipe(
+        "rush_basic_INSIDE5_ATT",
+        "rushing_basic",
+        "sum",
+        ("playerStatsInside5RushingAttemptsTotal",),
+    ),
+    _Recipe(
+        "rush_basic_INSIDE10_ATT",
+        "rushing_basic",
+        "sum",
+        ("playerStatsInside10RushingAttemptsTotal",),
+    ),
+    _Recipe(
+        "rush_basic_INSIDE20_ATT",
+        "rushing_basic",
+        "sum",
+        ("playerStatsInside20RushingAttemptsTotal",),
+    ),
+    # rushing_advanced -- RB volume + efficiency + scheme split
+    _Recipe(
+        "rush_adv_YDS",
+        "rushing_advanced",
+        "sum",
+        ("playerStatsRushingYardsTotal",),
+    ),
+    _Recipe(
+        "rush_adv_TD",
+        "rushing_advanced",
+        "sum",
+        ("playerStatsRushingTouchdownsTotal",),
+    ),
+    _Recipe(
+        "rush_adv_FD",
+        "rushing_advanced",
+        "sum",
+        ("playerStatsFirstDownsRushing",),
+    ),
+    _Recipe(
+        "rush_adv_EXP_YDS",
+        "rushing_advanced",
+        "sum",
+        ("playerStatsRushingYardsExplosiveTotal",),
+    ),
     _Recipe(
         "rush_adv_Success_pct",
         "rushing_advanced",
@@ -246,11 +345,38 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         ),
     ),
     _Recipe(
+        "rush_adv_YBC_ATT",
+        "rushing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsRushingYardsBeforeContactPerAttempt",
+            "playerStatsRushingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
         "rush_adv_STUFF_pct",
         "rushing_advanced",
         "weighted_mean",
         (
             "playerStatsRushingAttemptsStuffsPercentage",
+            "playerStatsRushingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
+        "rush_adv_ZONE_pct",
+        "rushing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsRushingConceptZoneAttemptsPercentage",
+            "playerStatsRushingAttemptsTotal",
+        ),
+    ),
+    _Recipe(
+        "rush_adv_MAN_pct",
+        "rushing_advanced",
+        "weighted_mean",
+        (
+            "playerStatsRushingConceptManAttemptsPercentage",
             "playerStatsRushingAttemptsTotal",
         ),
     ),
@@ -267,12 +393,30 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "weighted_mean",
         ("marketShareReceivingTargetsTotal", "teamStatsReceivingTargetsTotal"),
     ),
-    # receiving_basic -- volume input shared with RB derivation
+    _Recipe(
+        "rush_bellcow_XFP_pct",
+        "rushing_bell_cow",
+        "weighted_rate",
+        ("marketShareXfpPprTotal", "teamStatsXfpPprTotal"),
+    ),
+    # receiving_basic -- volume input shared with RB derivation + red-zone target totals
     _Recipe(
         "rec_basic_REC",
         "receiving_basic",
         "sum",
         ("playerStatsReceivingReceptionsTotal",),
+    ),
+    _Recipe(
+        "rec_basic_INSIDE10_TGT",
+        "receiving_basic",
+        "sum",
+        ("playerStatsInside10ReceivingTargetsTotal",),
+    ),
+    _Recipe(
+        "rec_basic_INSIDE20_TGT",
+        "receiving_basic",
+        "sum",
+        ("playerStatsInside20ReceivingTargetsTotal",),
     ),
     # receiving_advanced -- WR / TE / RB primary file
     _Recipe(
@@ -280,6 +424,36 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
     ),
     _Recipe(
         "rec_adv_TGT", "receiving_advanced", "sum", ("playerStatsReceivingTargetsTotal",)
+    ),
+    _Recipe(
+        "rec_adv_TD",
+        "receiving_advanced",
+        "sum",
+        ("playerStatsReceivingTouchdownsTotal",),
+    ),
+    _Recipe(
+        "rec_adv_FD",
+        "receiving_advanced",
+        "sum",
+        ("playerStatsFirstDownsReceiving",),
+    ),
+    _Recipe(
+        "rec_adv_YAC",
+        "receiving_advanced",
+        "sum",
+        ("playerStatsReceivingYardsAfterCatchTotal",),
+    ),
+    _Recipe(
+        "rec_adv_YAC_after_contact",
+        "receiving_advanced",
+        "sum",
+        ("playerStatsReceivingYardsAfterContactTotal",),
+    ),
+    _Recipe(
+        "rec_adv_DEEP_TGT",
+        "receiving_advanced",
+        "sum",
+        ("playerStatsReceivingDeepTargetTargetsTotal",),
     ),
     _Recipe(
         "rec_adv_YPRR",
@@ -327,6 +501,15 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         ),
     ),
     _Recipe(
+        "rec_adv_CATCH_pct",
+        "receiving_advanced",
+        "weighted_rate",
+        (
+            "playerStatsReceivingTargetsCatchableTotal",
+            "playerStatsReceivingTargetsTotal",
+        ),
+    ),
+    _Recipe(
         "rec_adv_DESIGN_pct",
         "receiving_advanced",
         "weighted_rate",
@@ -370,6 +553,12 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
             "playerStatsReceivingTargetsContestedTotal",
             "playerStatsReceivingTargetsTotal",
         ),
+    ),
+    _Recipe(
+        "rec_adv_CTGT_REC",
+        "receiving_advanced",
+        "sum",
+        ("playerStatsReceivingReceptionsContested",),
     ),
     # receiving_routes_run -- alignment shares
     _Recipe(
@@ -443,15 +632,37 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
             "playerStatsGamesPlayed",
         ),
     ),
-    # offense_snaps -- raw offensive snap total; denominator for the
-    # TE ``block_pct_proxy`` derivation in ``_derive_aggregate_metrics``.
+    # offense_snaps -- raw offensive snap total (denominator for the
+    # TE ``block_pct_proxy`` derivation in ``_derive_aggregate_metrics``)
+    # plus red-zone snap volume / share
     _Recipe(
         "off_snaps_TOTAL",
         "offense_snaps",
         "sum",
         ("playerStatsSnapsOffenseTotal",),
     ),
-    # efficiency -- WR / RB fantasy efficiency
+    _Recipe(
+        "off_snaps_INSIDE10",
+        "offense_snaps",
+        "sum",
+        ("playerStatsInside10SnapsOffenseTotal",),
+    ),
+    _Recipe(
+        "off_snaps_INSIDE20",
+        "offense_snaps",
+        "sum",
+        ("playerStatsInside20SnapsOffenseTotal",),
+    ),
+    _Recipe(
+        "off_snaps_INSIDE10_pct",
+        "offense_snaps",
+        "weighted_mean",
+        (
+            "marketShareInside10SnapsOffenseTotal",
+            "playerStatsGamesPlayed",
+        ),
+    ),
+    # efficiency -- WR / RB fantasy efficiency + xFP + workload totals
     _Recipe(
         "eff_FP_G",
         "efficiency",
@@ -464,6 +675,18 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "game_mean",
         ("playerStatsScrimmageYardsTotal",),
     ),
+    _Recipe(
+        "eff_XFP",
+        "efficiency",
+        "game_mean",
+        ("playerStatsXfpPprTotal",),
+    ),
+    _Recipe(
+        "eff_TOUCHES",
+        "efficiency",
+        "sum",
+        ("playerStatsScrimmageTouchesTotal",),
+    ),
     # qb_coverage_matchup -- QB-side man-coverage exposure. Per-game
     # rows in this file are (QB, opponent, week); for the comp profile
     # we want a per-QB season-to-date weighted mean across all matchups.
@@ -472,6 +695,34 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "qb_coverage_matchup",
         "weighted_mean",
         (_QB_COV_MAN_PCT_COL, _QB_COV_DROPBACKS_COL),
+    ),
+    # Phase 3+4 asof additions -- QB pressure & throw-away & route-share signal.
+    # These are recipe-only additions that the Phase 3+4
+    # ``_compute_fp_asof_features`` helper on ``StatsNFL`` projects to the
+    # ``Player {col}_asof`` namespace in the training matrix.
+    _Recipe(
+        "pass_adv_PrDB_pct",
+        "passing_advanced",
+        "weighted_rate",
+        (
+            "playerStatsPassingPressuredTotal",
+            "playerStatsPassingDropbacksTotal",
+        ),
+    ),
+    _Recipe(
+        "pass_adv_TA_pct",
+        "passing_advanced",
+        "weighted_rate",
+        (
+            "playerStatsPassingIncompletionsThrownAway",
+            "playerStatsPassingDropbacksTotal",
+        ),
+    ),
+    _Recipe(
+        "rec_route_share_pct",
+        "receiving_route_share_report",
+        "game_mean",
+        ("marketShareReceivingRoutesTotal",),
     ),
 )
 
@@ -512,6 +763,82 @@ _ROUTE_BUCKET_ORDER: tuple[str, ...] = (
     "bucketReceivingSeparationRouteScreens",
     "bucketReceivingSeparationRouteBackfield",
 )
+
+# Phase 3+4 per-coverage YPRR (wr_coverage_matchup). One column per
+# scheme exposes the per-game ``ReceivingYardsPerRoute`` rate plus
+# ``ReceivingRoutesTotal`` denominator. ``_aggregate_per_coverage_yprr``
+# weight-averages across games per (player, scheme) and rolls Cover 2/3/4/6
+# into the ``zone`` bucket for sample-sufficiency on low-route players.
+# Per-shell entries (``cover2`` .. ``cover6``) emit the un-folded shell rate
+# alongside the folded ``zone`` rollup -- both are useful: the rollup for
+# low-route players where individual shells are sparse, the per-shell for
+# matchup-specific signal when the defense leans on one coverage.
+_COVERAGE_YPRR_SCHEMES: dict[str, tuple[str, ...]] = {
+    "man": ("Man",),
+    "zone": ("Cover2", "Cover3", "Cover4", "Cover6"),
+    "cover2": ("Cover2",),
+    "cover3": ("Cover3",),
+    "cover4": ("Cover4",),
+    "cover6": ("Cover6",),
+}
+
+# Phase 3+4 per-coverage separation (receiving_separation_by_coverage).
+# Bucket JSON has scheme-keyed inner dicts with
+# ``playerStatsReceivingSeparationScorePercentage`` and
+# ``...RoutesTotal``. ``_aggregate_separation_by_coverage`` parses the JSON,
+# emits one column per scheme. ``rec_sep_vs_man`` and ``rec_sep_vs_zone``
+# are the FP-pre-aggregated rollups (Zone bucket is one of the inner keys --
+# FP publishes a pre-bucketed Zone alongside Man); ``rec_sep_vs_redzone``
+# and ``rec_sep_vs_cover{2,3,4,6}`` are the per-shell un-folded rates.
+_SEP_BY_COVERAGE_KIND = "receiving_separation_by_coverage"
+_SEP_BY_COVERAGE_SCHEMES: dict[str, str] = {
+    "man": "bucketReceivingSeparationMan",
+    "zone": "bucketReceivingSeparationZone",
+    "redzone": "bucketReceivingSeparationRedZone",
+    "cover2": "bucketReceivingSeparationCover2",
+    "cover3": "bucketReceivingSeparationCover3",
+    "cover4": "bucketReceivingSeparationCover4",
+    "cover6": "bucketReceivingSeparationCover6",
+}
+_SEP_BY_COVERAGE_VALUE_KEY = "playerStatsReceivingSeparationScorePercentage"
+_SEP_BY_COVERAGE_WEIGHT_KEY = "playerStatsReceivingSeparationRoutesTotal"
+
+# Per-alignment separation (receiving_separation_by_alignment.bucket).
+# The FP parquet emits one bucket per alignment family with the same
+# SEP_SCORE / WIN_RATE / Routes denominator schema as the by-coverage
+# helper above. The top-level row already produces the overall rate
+# (``rec_sep_align_overall_*``); this bucket helper produces the per-
+# alignment slices that the comp profile + asof surface can read.
+# ``Overall`` is intentionally omitted from this map -- it duplicates the
+# top-level recipe outputs and would just bloat the wide frame.
+_SEP_BY_ALIGNMENT_KIND = "receiving_separation_by_alignment"
+_SEP_BY_ALIGNMENT_BUCKETS: dict[str, str] = {
+    "WIDE": "bucketReceivingSeparationWide",
+    "SLOT": "bucketReceivingSeparationSlot",
+    "INLINE": "bucketReceivingSeparationInline",
+    "BACKFIELD": "bucketReceivingSeparationBackfield",
+}
+_SEP_BY_ALIGNMENT_SEP_KEY = "playerStatsReceivingSeparationScorePercentage"
+_SEP_BY_ALIGNMENT_WIN_KEY = "playerStatsReceivingSeparationWinsPercentage"
+_SEP_BY_ALIGNMENT_WEIGHT_KEY = "playerStatsReceivingSeparationRoutesTotal"
+
+# Per-coverage YPRR via the receiving_man_vs_zone bucket. The top-level
+# row produces an overall yards-per-route via ``rec_mz_YPRR_overall``;
+# this bucket helper produces the per-shell rates (Man / Zone /
+# SingleHigh / TwoHigh). The bucket key sets are FP-pre-aggregated --
+# Cover2/3/4/6 are NOT broken out here (they live in
+# ``wr_coverage_matchup`` per-scheme columns instead, which the
+# ``_aggregate_per_coverage_yprr`` helper above already consumes).
+# ``Overall`` is intentionally omitted -- duplicates the top-level recipe.
+_MZ_BUCKET_KIND = "receiving_man_vs_zone"
+_MZ_BUCKETS: dict[str, str] = {
+    "MAN": "bucketMan",
+    "ZONE": "bucketZone",
+    "SINGLEHIGH": "bucketSingleHigh",
+    "TWOHIGH": "bucketTwoHigh",
+}
+_MZ_VALUE_KEY = "playerStatsReceivingAveragesPerRouteYardsTotal"
+_MZ_WEIGHT_KEY = "playerStatsReceivingRoutesTotal"
 
 # Metadata cols carried straight through (filtered, not aggregated). One
 # representative row per player is sufficient since these don't change
@@ -607,6 +934,22 @@ def load_multi_window_one_year(
     sep_routes = _aggregate_separation_by_routes(windows)
     if not sep_routes.empty:
         by_player_id = by_player_id.combine_first(sep_routes)
+
+    coverage_yprr = _aggregate_per_coverage_yprr(windows)
+    if not coverage_yprr.empty:
+        by_player_id = by_player_id.combine_first(coverage_yprr)
+
+    sep_coverage = _aggregate_separation_by_coverage(windows)
+    if not sep_coverage.empty:
+        by_player_id = by_player_id.combine_first(sep_coverage)
+
+    sep_alignment = _aggregate_separation_by_alignment_bucket(windows)
+    if not sep_alignment.empty:
+        by_player_id = by_player_id.combine_first(sep_alignment)
+
+    mz_buckets = _aggregate_man_vs_zone_bucket(windows)
+    if not mz_buckets.empty:
+        by_player_id = by_player_id.combine_first(mz_buckets)
 
     metadata = _player_metadata(windows)
     if metadata.empty:
@@ -832,6 +1175,300 @@ def _aggregate_separation_by_routes(
     for i, bucket in enumerate(ordered[1:], start=1):
         rename[bucket] = f"rec_sep_route_SEP_SCORE.{i}"
     return wide.rename(columns=rename)
+
+
+def _aggregate_per_coverage_yprr(
+    windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
+    """Per-(player, coverage-bucket) YPRR from ``wr_coverage_matchup`` snapshots.
+
+    Emits two columns:
+
+    * ``rec_yprr_vs_man`` -- season-to-date Yards Per Route Run when faced
+      with man coverage (Pattern A weighted rate over the per-game
+      ``ReceivingYardsPerRoute`` rate, weighted by ``ReceivingRoutesTotal``).
+    * ``rec_yprr_vs_zone`` -- analogous rate bucketing
+      Cover 2 / 3 / 4 / 6 together. The FP per-game file exposes one column
+      per scheme; this helper folds the four zone schemes into a single
+      Pattern-A rate (sum of YPR * Routes across the zone schemes, divided
+      by sum of Routes across the same).
+
+    Bucketing Cover2/3/4/6 into zone follows the Phase 3+4 evaluation brief:
+    the per-scheme cells get sparse on low-route players, but the
+    man-vs-zone split is the load-bearing decomposition for the
+    pass-catcher matchup signal.
+    """
+    df = _load_kind_multi(windows, "wr_coverage_matchup")
+    if df.empty or PLAYER_GROUP_COL not in df.columns:
+        return pd.DataFrame()
+
+    pieces: dict[str, pd.Series] = {}
+    for bucket_name, schemes in _COVERAGE_YPRR_SCHEMES.items():
+        num = None
+        den = None
+        for scheme in schemes:
+            ypr_col = f"playerStatsCoverageScheme{scheme}ReceivingYardsPerRoute"
+            routes_col = f"playerStatsCoverageScheme{scheme}ReceivingRoutesTotal"
+            if ypr_col not in df.columns or routes_col not in df.columns:
+                continue
+            ypr = pd.to_numeric(df[ypr_col], errors="coerce")
+            routes = pd.to_numeric(df[routes_col], errors="coerce")
+            contrib_num = (ypr * routes).where(routes > 0, other=0)
+            contrib_den = routes.where(routes > 0, other=0)
+            num = contrib_num if num is None else num.add(contrib_num, fill_value=0)
+            den = contrib_den if den is None else den.add(contrib_den, fill_value=0)
+        if num is None or den is None:
+            continue
+        work = pd.DataFrame(
+            {PLAYER_GROUP_COL: df[PLAYER_GROUP_COL], "num": num, "den": den}
+        ).dropna(subset=[PLAYER_GROUP_COL])
+        grouped = work.groupby(PLAYER_GROUP_COL)
+        num_sum = grouped["num"].sum(min_count=1)
+        den_sum = grouped["den"].sum(min_count=1)
+        pieces[f"rec_yprr_vs_{bucket_name}"] = num_sum.divide(den_sum).where(
+            den_sum > 0, other=np.nan
+        )
+
+    if not pieces:
+        return pd.DataFrame()
+    return pd.DataFrame(pieces)
+
+
+def _aggregate_separation_by_coverage(
+    windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
+    """Per-(player, coverage-bucket) separation score from sep-by-coverage snapshots.
+
+    The FP ``receiving_separation_by_coverage`` parquet packs per-scheme
+    separation stats inside a JSON-encoded ``bucket`` column rather than as
+    top-level fields, mirroring the route-bucketed shape ``_aggregate_
+    separation_by_routes`` handles. This helper parses the JSON cell-by-
+    cell for every key in :data:`_SEP_BY_COVERAGE_SCHEMES` (Man / Zone are
+    FP-pre-aggregated rollups; RedZone is a situational slice; Cover 2/3/4/6
+    are per-shell un-foldings), computes the routes-weighted mean per
+    (player, scheme), and emits one ``rec_sep_vs_{name}`` column per scheme.
+
+    Skips inner buckets missing the value or weight key so partially-empty
+    rows don't poison the aggregation.
+    """
+    df = _load_kind_multi(windows, _SEP_BY_COVERAGE_KIND)
+    if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
+        return pd.DataFrame()
+
+    long_rows: list[dict[str, object]] = []
+    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
+        if not isinstance(bucket_str, str) or not bucket_str:
+            continue
+        try:
+            payload = json.loads(bucket_str)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for bucket_name, key in _SEP_BY_COVERAGE_SCHEMES.items():
+            inner = payload.get(key)
+            if not isinstance(inner, dict):
+                continue
+            value = inner.get(_SEP_BY_COVERAGE_VALUE_KEY)
+            weight = inner.get(_SEP_BY_COVERAGE_WEIGHT_KEY)
+            if value is None or weight is None:
+                continue
+            long_rows.append(
+                {
+                    PLAYER_GROUP_COL: player_id,
+                    "scheme": bucket_name,
+                    "value": value,
+                    "weight": weight,
+                }
+            )
+    if not long_rows:
+        return pd.DataFrame()
+
+    work = pd.DataFrame(long_rows)
+    work["value"] = pd.to_numeric(work["value"], errors="coerce")
+    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
+    work = work.dropna(subset=["value", "weight"])
+    if work.empty:
+        return pd.DataFrame()
+
+    grouped = work.groupby([PLAYER_GROUP_COL, "scheme"], dropna=False)
+    weighted_num = grouped.apply(
+        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
+        include_groups=False,
+    )
+    weighted_den = grouped["weight"].sum(min_count=1)
+    per_scheme = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
+    wide = per_scheme.unstack("scheme")
+    if wide.empty:
+        return wide
+    return wide.rename(
+        columns={name: f"rec_sep_vs_{name}" for name in _SEP_BY_COVERAGE_SCHEMES}
+    )
+
+
+def _aggregate_separation_by_alignment_bucket(
+    windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
+    """Per-(player, alignment) separation SEP_SCORE + WIN_RATE from bucket JSON.
+
+    The top-level ``receiving_separation_by_alignment`` row already produces
+    ``rec_sep_align_overall_SEP_SCORE`` and ``rec_sep_align_overall_WIN_RATE``
+    via the recipe table. The per-alignment buckets (Wide / Slot / Inline /
+    Backfield) live inside the JSON ``bucket`` column; this helper parses
+    them and emits ``rec_sep_align_{ALIGN}_SEP_SCORE`` +
+    ``rec_sep_align_{ALIGN}_WIN_RATE`` per alignment.
+
+    Same per-bucket weighted-mean shape as
+    :func:`_aggregate_separation_by_coverage`; uses the routes-total
+    inner key as the weight. ``Overall`` is intentionally not in
+    :data:`_SEP_BY_ALIGNMENT_BUCKETS` -- duplicates the top-level recipe.
+    """
+    df = _load_kind_multi(windows, _SEP_BY_ALIGNMENT_KIND)
+    if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
+        return pd.DataFrame()
+
+    long_rows: list[dict[str, object]] = []
+    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
+        if not isinstance(bucket_str, str) or not bucket_str:
+            continue
+        try:
+            payload = json.loads(bucket_str)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for align_name, key in _SEP_BY_ALIGNMENT_BUCKETS.items():
+            inner = payload.get(key)
+            if not isinstance(inner, dict):
+                continue
+            sep_value = inner.get(_SEP_BY_ALIGNMENT_SEP_KEY)
+            win_value = inner.get(_SEP_BY_ALIGNMENT_WIN_KEY)
+            weight = inner.get(_SEP_BY_ALIGNMENT_WEIGHT_KEY)
+            if weight is None:
+                continue
+            long_rows.append(
+                {
+                    PLAYER_GROUP_COL: player_id,
+                    "alignment": align_name,
+                    "sep_value": sep_value,
+                    "win_value": win_value,
+                    "weight": weight,
+                }
+            )
+    if not long_rows:
+        return pd.DataFrame()
+
+    work = pd.DataFrame(long_rows)
+    work["sep_value"] = pd.to_numeric(work["sep_value"], errors="coerce")
+    work["win_value"] = pd.to_numeric(work["win_value"], errors="coerce")
+    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
+    work = work.dropna(subset=["weight"])
+    if work.empty:
+        return pd.DataFrame()
+
+    grouped = work.groupby([PLAYER_GROUP_COL, "alignment"], dropna=False)
+    weight_sum = grouped["weight"].sum(min_count=1)
+    sep_num = grouped.apply(
+        lambda g: (g["sep_value"] * g["weight"]).sum(min_count=1),
+        include_groups=False,
+    )
+    win_num = grouped.apply(
+        lambda g: (g["win_value"] * g["weight"]).sum(min_count=1),
+        include_groups=False,
+    )
+    sep_wide = (
+        sep_num.divide(weight_sum)
+        .where(weight_sum != 0, other=np.nan)
+        .unstack("alignment")
+    )
+    win_wide = (
+        win_num.divide(weight_sum)
+        .where(weight_sum != 0, other=np.nan)
+        .unstack("alignment")
+    )
+    sep_wide = sep_wide.rename(
+        columns={a: f"rec_sep_align_{a}_SEP_SCORE" for a in _SEP_BY_ALIGNMENT_BUCKETS}
+    )
+    win_wide = win_wide.rename(
+        columns={a: f"rec_sep_align_{a}_WIN_RATE" for a in _SEP_BY_ALIGNMENT_BUCKETS}
+    )
+    return sep_wide.join(win_wide, how="outer")
+
+
+def _aggregate_man_vs_zone_bucket(
+    windows: Sequence[tuple[int, int, int]],
+) -> pd.DataFrame:
+    """Per-(player, coverage-shell) YPRR from receiving_man_vs_zone.bucket JSON.
+
+    The top-level row already produces ``rec_mz_YPRR_overall`` via the
+    recipe table. The per-shell buckets (Man / Zone / SingleHigh / TwoHigh)
+    live inside the JSON ``bucket`` column; each inner dict exposes the
+    per-game ``AveragesPerRouteYardsTotal`` rate and the
+    ``ReceivingRoutesTotal`` denominator (see
+    :data:`_MZ_VALUE_KEY` / :data:`_MZ_WEIGHT_KEY`). Helper emits
+    ``rec_mz_YPRR_{MAN,ZONE,SINGLEHIGH,TWOHIGH}`` per player.
+
+    Same per-bucket weighted-mean shape as the by-coverage / by-alignment
+    helpers above. ``Overall`` is intentionally not in
+    :data:`_MZ_BUCKETS` -- duplicates the top-level recipe.
+
+    Independent from the ``rec_mz_YPRR.1`` / ``rec_mz_YPRR.2`` placeholder
+    pair that :func:`_derive_aggregate_metrics` still emits: those placeholders
+    prevent ``derive_comp_metrics`` from short-circuiting on a missing
+    ``man_yprr_diff`` / ``zone_yprr_diff`` input when per-bucket data is sparse;
+    this helper adds the real per-shell rates alongside them.
+    """
+    df = _load_kind_multi(windows, _MZ_BUCKET_KIND)
+    if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
+        return pd.DataFrame()
+
+    long_rows: list[dict[str, object]] = []
+    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
+        if not isinstance(bucket_str, str) or not bucket_str:
+            continue
+        try:
+            payload = json.loads(bucket_str)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for shell_name, key in _MZ_BUCKETS.items():
+            inner = payload.get(key)
+            if not isinstance(inner, dict):
+                continue
+            value = inner.get(_MZ_VALUE_KEY)
+            weight = inner.get(_MZ_WEIGHT_KEY)
+            if value is None or weight is None:
+                continue
+            long_rows.append(
+                {
+                    PLAYER_GROUP_COL: player_id,
+                    "shell": shell_name,
+                    "value": value,
+                    "weight": weight,
+                }
+            )
+    if not long_rows:
+        return pd.DataFrame()
+
+    work = pd.DataFrame(long_rows)
+    work["value"] = pd.to_numeric(work["value"], errors="coerce")
+    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
+    work = work.dropna(subset=["value", "weight"])
+    if work.empty:
+        return pd.DataFrame()
+
+    grouped = work.groupby([PLAYER_GROUP_COL, "shell"], dropna=False)
+    weighted_num = grouped.apply(
+        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
+        include_groups=False,
+    )
+    weighted_den = grouped["weight"].sum(min_count=1)
+    per_shell = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
+    wide = per_shell.unstack("shell")
+    if wide.empty:
+        return wide
+    return wide.rename(columns={s: f"rec_mz_YPRR_{s}" for s in _MZ_BUCKETS})
 
 
 def _load_kind(
