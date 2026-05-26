@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import os
+import time
 import warnings
 from datetime import timedelta
 from pathlib import Path
@@ -67,6 +68,16 @@ TRAINING_LOOKBACK = timedelta(hours=TRAINING_LOOKBACK_HOURS)
 
 # Sharp books that anchor the movement-direction diagnostic in CLV.
 SHARP_BOOKS: tuple[str, ...] = ("pinnacle", "circa", "bookmaker")
+
+# Total seconds to wait for a conflicting writer (e.g. a confer pass that's
+# still flushing) to release the DuckDB file lock before giving up. DuckDB
+# holds the lock for the lifetime of the connection, so this is sized to
+# absorb a typical concurrent job wrapping up while the next one starts.
+# Override via ``SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS`` for tuning;
+# set to 0 to disable retries (the legacy behaviour).
+_LOCK_WAIT_SECONDS_DEFAULT: float = 120.0
+_LOCK_BACKOFF_INITIAL: float = 2.0
+_LOCK_BACKOFF_MAX: float = 16.0
 
 # No PRIMARY KEY: DuckDB's PK creates an ART index that bloats the DB ~10x for
 # this row count. Lookups don't need the index — zone-map pruning on naturally
@@ -137,7 +148,7 @@ class Archive:
     _instance: Archive | None = None
 
     @staticmethod
-    def _connect_with_wal_recovery(db_path: Path) -> duckdb.DuckDBPyConnection:
+    def _connect_once(db_path: Path) -> duckdb.DuckDBPyConnection:
         # DuckDB <=1.1.x can leave a .wal that replays a bare CREATE TABLE
         # against an already-checkpointed catalog after a hard kill — the
         # connection then refuses to open at all. Quarantine the stale WAL
@@ -160,6 +171,37 @@ class Archive:
                 stacklevel=2,
             )
             return duckdb.connect(str(db_path))
+
+    @staticmethod
+    def _connect_with_wal_recovery(db_path: Path) -> duckdb.DuckDBPyConnection:
+        # DuckDB's file lock is held for the entire lifetime of a peer
+        # connection (not just during writes), so two production jobs that
+        # overlap by a few seconds will collide. Retry with bounded
+        # exponential backoff before giving up so a confer pass wrapping up
+        # while prophecize starts no longer crashes the cron entry.
+        wait_budget = float(
+            os.environ.get("SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS", _LOCK_WAIT_SECONDS_DEFAULT)
+        )
+        deadline = time.monotonic() + wait_budget
+        backoff = _LOCK_BACKOFF_INITIAL
+        while True:
+            try:
+                return Archive._connect_once(db_path)
+            except duckdb.IOException as exc:
+                if "Could not set lock on file" not in str(exc):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or wait_budget <= 0:
+                    raise
+                sleep_for = min(backoff, remaining)
+                warnings.warn(
+                    f"DuckDB archive {db_path} is locked by another process; "
+                    f"retrying in {sleep_for:.1f}s ({remaining:.0f}s remaining "
+                    f"of {wait_budget:.0f}s budget): {exc}",
+                    stacklevel=2,
+                )
+                time.sleep(sleep_for)
+                backoff = min(backoff * 2, _LOCK_BACKOFF_MAX)
 
     def __new__(cls):
         if cls._instance is None:
