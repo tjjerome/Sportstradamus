@@ -364,38 +364,6 @@ def load_pattern_a_team_features(
     return _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
 
 
-def load_pattern_a_defense_features(
-    pattern_a_windows: Sequence[tuple[int, int, int]],
-) -> pd.DataFrame:
-    """Pattern-A-only defense features for the defensive comp pool builder.
-
-    Sibling of :func:`load_pattern_a_team_features` at the defense grain.
-    Module D's :class:`~sportstradamus.stats.nfl.StatsNFL.update_defense_comps`
-    needs the per-team season-to-date defensive rate features (``def_man_pct``,
-    ``def_two_high_pct``, ``def_rush_yaco_allowed_per_att``, ...) projected
-    over the same Phase-1.5 lookback window the player-comp pool uses --
-    but skipping Pattern B since matchup-specific ``lm_def_*`` cols are
-    forecasts not season-to-date snapshots and don't belong in a comp
-    pool's BallTree features.
-
-    Args:
-        pattern_a_windows: Per-window ``(season, start_week, end_week)``
-            tuples to pool. Same semantics as
-            :func:`load_team_and_defense_features`.
-
-    Returns:
-        DataFrame indexed by team abbreviation with Pattern-A defense
-        features only. Empty when no usable snapshots were found.
-    """
-    if not pattern_a_windows:
-        return pd.DataFrame()
-    abbr_season = max(season for season, _, _ in pattern_a_windows)
-    abbr_map = _build_team_abbreviation_map(abbr_season)
-    if abbr_map.empty:
-        return pd.DataFrame()
-    return _aggregate_pattern_a(pattern_a_windows, grain="defense", abbr_map=abbr_map)
-
-
 def load_team_and_defense_features(
     pattern_a_windows: Sequence[tuple[int, int, int]],
     pattern_b_snapshot: tuple[int, int],
@@ -832,8 +800,4 @@ def _load_kind_window(
     return df if df is not None else pd.DataFrame()
 
 
-__all__ = (
-    "load_pattern_a_team_features",
-    "load_pattern_a_defense_features",
-    "load_team_and_defense_features",
-)
+__all__ = ("load_pattern_a_team_features", "load_team_and_defense_features")
