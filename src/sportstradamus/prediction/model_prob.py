@@ -17,6 +17,7 @@ import pandas as pd
 from scipy.special import expit, logit
 
 from sportstradamus.helpers import (
+    UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     fused_loc,
     get_ev,
@@ -497,7 +498,7 @@ def model_prob(
             offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
         offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(
             0
-        ).infer_objects(copy=False) * (1.78 if platform == "Underdog" else 1)
+        ).infer_objects(copy=False) * (UNDERDOG_BOOST_BASELINE if platform == "Underdog" else 1)
         offer_df["Boost"] = offer_df.apply(
             lambda x: (
                 (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
@@ -514,7 +515,7 @@ def model_prob(
         offer_df["Books P"] = offer_df["Books"].fillna(0.5)
         offer_df["Books"] = offer_df["Books P"] * offer_df["Boost"]
         offer_df["K"] = (offer_df["Model"] - 1) / (offer_df["Boost"] - 1)
-        offer_df["Distance"] = offer_df["Boost"] / 1.78
+        offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
         offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
             1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
         )

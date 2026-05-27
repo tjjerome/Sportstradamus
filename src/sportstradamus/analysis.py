@@ -14,7 +14,7 @@ from scipy.stats import nbinom
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from tqdm import tqdm
 
-from sportstradamus.helpers import get_odds
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, get_odds
 
 LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
@@ -324,11 +324,18 @@ def explode_offers(history):
             exploded.loc[resolved.index, "Hit"] = (resolved["Bet"] == resolved["Result"]).astype(
                 int
             )
-    # Derive Kelly-relevant columns
+    # Derive Kelly-relevant columns. ``Boost`` on persisted rows is the raw
+    # promo multiplier (1.00 = no promo). For Underdog the per-$1 payout
+    # multiplier is ``Boost * UNDERDOG_BOOST_BASELINE``; other platforms are
+    # treated as already payout-inclusive (back-compat with the pre-fix
+    # callers that read ``Model = Model P × Boost`` directly).
     if "Model P" in exploded.columns and "Boost" in exploded.columns:
-        exploded["Model"] = exploded["Model P"] * exploded["Boost"]
-        exploded["Books"] = exploded["Books P"].fillna(0.5) * exploded["Boost"]
-        exploded["K"] = (exploded["Model"] - 1) / (exploded["Boost"] - 1).replace(0, np.nan)
+        platform = exploded.get("Platform", pd.Series(dtype=str))
+        baseline = np.where(platform == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
+        payout = exploded["Boost"] * baseline
+        exploded["Model"] = exploded["Model P"] * payout
+        exploded["Books"] = exploded["Books P"].fillna(0.5) * payout
+        exploded["K"] = (exploded["Model"] - 1) / (payout - 1).replace(0, np.nan)
     return exploded
 
 

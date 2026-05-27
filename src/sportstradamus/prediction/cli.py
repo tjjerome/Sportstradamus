@@ -24,7 +24,7 @@ from tqdm import tqdm
 
 from sportstradamus import creds
 from sportstradamus.books import get_sleeper, get_ud
-from sportstradamus.helpers import LazyArchive, get_logger, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, LazyArchive, get_logger, stat_map
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
@@ -128,12 +128,13 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         ud_offers["Stat"] = ud_offers[
             "Market"
         ]  # preserve gamelog key for dashboard history lookups
-        ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"] = (
-            1.78 * ud_offers.loc[ud_offers["Bet"] == "Over", "Boost"]
-        )
-        ud_offers.loc[ud_offers["Bet"] == "Under", "Boost"] = (
-            1.78 / ud_offers.loc[ud_offers["Bet"] == "Under", "Boost"]
-        )
+        # model_prob pre-multiplied Boost by UNDERDOG_BOOST_BASELINE so that
+        # ``Model = Model P * Boost`` is per-$1 EV. The persisted snapshot
+        # (current_offers.parquet, history.parquet) is consumed downstream
+        # (dashboard display, nightly profit-sim) as the raw UD promo
+        # multiplier, so divide the baseline back out here. Matches what the
+        # user sees on Underdog (1.00 = no promo, 1.05 = 5% promo).
+        ud_offers["Boost"] = ud_offers["Boost"] / UNDERDOG_BOOST_BASELINE
         ud_offers["Platform"] = "Underdog"
         all_offers.append(ud_offers)
         platforms_run.append("Underdog")
@@ -154,9 +155,10 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         sl_offers["Stat"] = sl_offers[
             "Market"
         ]  # preserve gamelog key for dashboard history lookups
-        sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"] = (
-            1.78 * 1.78 / sl_offers.loc[sl_offers["Bet"] == "Under", "Boost"]
-        )
+        # Sleeper Boost stays at the raw books.py value (model_prob only
+        # applies UNDERDOG_BOOST_BASELINE to platform == "Underdog"), so no
+        # division is needed here for display/storage to match the raw
+        # Sleeper promo multiplier.
         sl_offers["Platform"] = "Sleeper"
         all_offers.append(sl_offers)
         platforms_run.append("Sleeper")
