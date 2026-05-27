@@ -141,6 +141,11 @@ class Stats:
         # legacy lazy-once snapshot.
         self._comps_by_week: dict = {}
         self._current_comps_key = None
+        # Per-comp-pool cache of the static (player, comp, position, dist,
+        # weight) pairs DataFrame. Keyed by ``_current_comps_key`` so it
+        # invalidates in lockstep with ``self.comps``. Lets ``base_profile``
+        # and ``get_stats`` skip the Python tuple-loop rebuild per gameday.
+        self._comp_pairs_cache: dict = {}
 
     def parse_game(self, game):
         """Parse a single game API response and update ``self.gamelog``.
@@ -291,6 +296,86 @@ class Stats:
         self._compute_comps(target_game_date=date)
         self._comps_by_week[target_key] = self.comps
         self._current_comps_key = target_key
+
+    def _comp_pairs(self) -> pd.DataFrame:
+        """Return the static (player, comp, position, dist, weight) pairs DataFrame.
+
+        Cached per ``_current_comps_key`` so the Python tuple-loop that flattens
+        ``self.comps`` only runs once per comp-pool swap (i.e. once per training
+        week), not once per gameday. ``base_profile`` and ``get_stats`` consume
+        this to derive the per-day comp features via vectorized ops.
+
+        MLB-style comp structures (``{"pitchers": {pid: [id1, id2, ...]}}`` --
+        lists rather than ``{"comps": ..., "distances": ...}`` dicts) yield an
+        empty frame here; the MLB code path in ``get_stats`` operates directly
+        on ``self.comps`` and does not call into this helper.
+        """
+        key = self._current_comps_key
+        cached = self._comp_pairs_cache.get(key)
+        if cached is not None:
+            return cached
+
+        records = []
+        for position, pos_comps in self.comps.items():
+            if not isinstance(pos_comps, dict):
+                continue
+            for player, comp_data in pos_comps.items():
+                if not isinstance(comp_data, dict):
+                    continue
+                comps_list = comp_data.get("comps")
+                dist_list = comp_data.get("distances")
+                if not comps_list or dist_list is None:
+                    continue
+                for comp, dist in zip(comps_list, dist_list, strict=False):
+                    if comp == player:
+                        continue
+                    d = float(dist)
+                    records.append((player, comp, position, d, 1.0 / (1.0 + d)))
+
+        if not records:
+            pairs = pd.DataFrame(columns=["player", "comp", "position", "dist", "weight"])
+        else:
+            pairs = pd.DataFrame.from_records(
+                records, columns=["player", "comp", "position", "dist", "weight"]
+            )
+        self._comp_pairs_cache[key] = pairs
+        return pairs
+
+    @staticmethod
+    def _vectorized_weighted_quantiles(
+        df_sorted: pd.DataFrame, qs: list[float]
+    ) -> dict[float, pd.Series]:
+        """Per-player distance-weighted quantile of ``comp_mean``.
+
+        Replaces the per-group ``DataFrame.groupby.apply(_weighted_q)`` recipe
+        with a single sort + cumsum + np.interp pass. ``df_sorted`` must hold
+        ``['player', 'comp_mean', 'weight']`` already ordered by
+        ``('player', 'comp_mean')``. Returns ``{q: Series(indexed by player)}``.
+        """
+        if df_sorted.empty:
+            return {q: pd.Series(dtype=float) for q in qs}
+
+        grouper = df_sorted.groupby("player", sort=False)
+        group_sizes = grouper.size()
+        players_idx = group_sizes.index
+        sizes = group_sizes.to_numpy()
+        starts = np.concatenate([[0], np.cumsum(sizes)[:-1]])
+        ends = starts + sizes
+
+        cum_w = grouper["weight"].cumsum().to_numpy()
+        total_w = grouper["weight"].transform("sum").to_numpy()
+        cum_norm = np.divide(cum_w, total_w, out=np.zeros_like(cum_w), where=total_w > 0)
+        vals = df_sorted["comp_mean"].to_numpy()
+
+        results: dict[float, pd.Series] = {}
+        for q in qs:
+            out = np.full(len(players_idx), np.nan, dtype=np.float64)
+            for i, (s, e) in enumerate(zip(starts, ends, strict=False)):
+                if total_w[s] <= 0:
+                    continue
+                out[i] = np.interp(q, cum_norm[s:e], vals[s:e])
+            results[q] = pd.Series(out, index=players_idx)
+        return results
 
     def save_comps(self):
         """Write current comps to the league's JSON file for inspection."""
@@ -460,9 +545,11 @@ class Stats:
         )
         self.defenseProfile.index.name = self.log_strings["opponent"]
         if fp_defense_features is not None and not fp_defense_features.empty:
-            self.defenseProfile = self.defenseProfile.join(
-                fp_defense_features, how="left"
-            ).fillna(0).infer_objects(copy=False)
+            self.defenseProfile = (
+                self.defenseProfile.join(fp_defense_features, how="left")
+                .fillna(0)
+                .infer_objects(copy=False)
+            )
 
         self.teamProfile = teamstats
 
@@ -647,19 +734,18 @@ class Stats:
         # week (see :meth:`_ensure_comps`). The inference / cron path passes
         # today() and hits the lazy-once snapshot path.
         self._ensure_comps(date=date)
-        if self.comps:
-            _comp_records_p = []
-            for pos_comps in self.comps.values():
-                for player, comp_data in pos_comps.items():
-                    if player not in _all_mean.index:
-                        continue
-                    for comp, dist in zip(comp_data["comps"], comp_data["distances"], strict=False):
-                        if comp != player and comp in _all_mean.index:
-                            _comp_records_p.append((player, comp, 1.0 / (1.0 + dist)))
-            if _comp_records_p:
-                _cp_df_p = pd.DataFrame(_comp_records_p, columns=["player", "comp", "weight"])
-                _cp_df_p["comp_mean"] = _cp_df_p["comp"].map(_all_mean)
-                _cp_df_p = _cp_df_p.dropna(subset=["comp_mean"])
+        _pairs = self._comp_pairs()
+        if not _pairs.empty:
+            # Per-day dynamic step: bind market-specific ``_all_mean`` to the
+            # cached static pairs. The Python tuple-loop that flattens
+            # ``self.comps`` lives in ``_comp_pairs`` and only runs on
+            # comp-pool swap (per training week), not per gameday.
+            _cp_df_p = _pairs.loc[
+                _pairs["player"].isin(_all_mean.index), ["player", "comp", "weight"]
+            ].copy()
+            _cp_df_p["comp_mean"] = _cp_df_p["comp"].map(_all_mean)
+            _cp_df_p = _cp_df_p.dropna(subset=["comp_mean"])
+            if not _cp_df_p.empty:
                 _wsum_p = (
                     (_cp_df_p["comp_mean"] * _cp_df_p["weight"]).groupby(_cp_df_p["player"]).sum()
                 )
@@ -682,44 +768,26 @@ class Stats:
                 )
                 self.playerProfile["comps mean (EB)"] = _comp_eb
 
-                # Distance-weighted comp p25 / p75: built by sorting each
-                # player's comp set by ``comp_mean`` and walking the
-                # cumulative weight to the requested quantile. This is
-                # numpy's standard weighted-quantile recipe via
-                # ``np.interp(q, cum_w, sorted_vals)``.
-                def _weighted_q(g: pd.DataFrame, q: float) -> float:
-                    """Distance-weighted quantile of ``comp_mean`` values.
-
-                    Args:
-                        g: per-player group with ``comp_mean`` and ``weight``
-                            columns.
-                        q: target quantile in [0, 1].
-
-                    Returns:
-                        Interpolated quantile value, or ``nan`` when the
-                        cumulative weight is non-positive (no usable comps).
-                    """
-                    order = g["comp_mean"].argsort()
-                    vals = g["comp_mean"].to_numpy()[order]
-                    wts = g["weight"].to_numpy()[order]
-                    cum = np.cumsum(wts)
-                    if cum[-1] <= 0:
-                        return float("nan")
-                    cum /= cum[-1]
-                    return float(np.interp(q, cum, vals))
-
-                _p_lo = (
-                    _cp_df_p.groupby("player")
-                    .apply(lambda g: _weighted_q(g, _COMP_QUANTILE_LO), include_groups=False)
-                    .reindex(self.playerProfile.index)
+                # Distance-weighted comp p25 / p75: numpy's standard weighted-
+                # quantile recipe (np.interp(q, cum_w_norm, sorted_vals))
+                # vectorized across all players in a single sort + cumsum pass
+                # via :meth:`_vectorized_weighted_quantiles`. Replaces the
+                # per-group ``DataFrame.groupby.apply`` recipe that dominated
+                # the per-gameday cost on training matrix generation.
+                _sorted = (
+                    _cp_df_p[["player", "comp_mean", "weight"]]
+                    .sort_values(["player", "comp_mean"])
+                    .reset_index(drop=True)
                 )
-                _p_hi = (
-                    _cp_df_p.groupby("player")
-                    .apply(lambda g: _weighted_q(g, _COMP_QUANTILE_HI), include_groups=False)
-                    .reindex(self.playerProfile.index)
+                _qs = self._vectorized_weighted_quantiles(
+                    _sorted, [_COMP_QUANTILE_LO, _COMP_QUANTILE_HI]
                 )
-                self.playerProfile["comps p25"] = _p_lo
-                self.playerProfile["comps p75"] = _p_hi
+                self.playerProfile["comps p25"] = _qs[_COMP_QUANTILE_LO].reindex(
+                    self.playerProfile.index
+                )
+                self.playerProfile["comps p75"] = _qs[_COMP_QUANTILE_HI].reindex(
+                    self.playerProfile.index
+                )
 
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
@@ -1075,50 +1143,62 @@ class Stats:
                 stats.loc[player, "Player comps z"] = opp_comp_games.mean()
                 defstats.loc[player, "comp n"] = opp_comp_games.count()
         else:
-            # Vectorized comps lookup for non-MLB leagues with distance weighting
-            _comp_records = []
-            for player, row in stats.iterrows():
-                pos_idx = int(row.get("Player position", 1)) - 1
-                if pos_idx < 0 or pos_idx >= len(self.positions):
-                    continue
-                comp_data = self.comps.get(self.positions[pos_idx], {}).get(
-                    player, {"comps": [player], "distances": [0.0]}
-                )
-                opp = opponents.get(player, "")
-                for comp, dist in zip(comp_data["comps"], comp_data["distances"], strict=False):
-                    if comp == player:
-                        continue
-                    _comp_records.append((player, comp, opp, 1.0 / (1.0 + dist), dist))
-
-            if _comp_records:
-                _cp_df = pd.DataFrame(
-                    _comp_records, columns=["target", "comp", "opp", "weight", "dist"]
-                )
-                # Mean distance to comps (player-side uniqueness signal --
-                # not matchup-dependent). Carried on defstats only because
-                # cached training matrices know it under the ``Defense `` prefix.
-                defstats["comp distance"] = (
-                    _cp_df.groupby("target")["dist"].mean().reindex(defstats.index)
-                )
-                # Inner-join comp games vs the opponent. The result is the
-                # matchup-conditional residual signal: each comp's outcome
-                # vs this opponent z-scored against the comp's own per-player
-                # baseline, distance-weighted across the comp set.
-                _merged = _cp_df.merge(
-                    _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
-                    left_on=["comp", "opp"],
-                    right_on=[_player_col, _opp_col],
-                    how="inner",
-                )
-                _merged["weighted_z"] = _merged["_mkt_zscore"] * _merged["weight"]
-                _comp_wsum = _merged.groupby("target")["weighted_z"].sum()
-                _comp_wcount = _merged.groupby("target")["weight"].sum()
-                _comp_means = _comp_wsum / _comp_wcount
-                stats["Player comps z"] = _comp_means.reindex(stats.index).fillna(0.0)
-                # Count of (comp, opponent) game observations backing each
-                # ``Player comps z`` estimate. Stays on defstats for cached-
-                # matrix compatibility.
-                defstats["comp n"] = _merged.groupby("target").size().reindex(defstats.index)
+            # Non-MLB matchup-conditional comp lookup. The static
+            # ``(player, comp, position, dist, weight)`` table is built once
+            # per comp-pool swap by :meth:`_comp_pairs`; here we only attach
+            # the per-call opponent and merge against the per-day ``_gl_z``.
+            _pairs = self._comp_pairs()
+            if not _pairs.empty:
+                _pos_idx = stats["Player position"].astype(int) - 1
+                _valid = (_pos_idx >= 0) & (_pos_idx < len(self.positions))
+                if _valid.any():
+                    _expected_pos = pd.Series(
+                        np.asarray(self.positions)[_pos_idx[_valid].to_numpy()],
+                        index=stats.index[_valid],
+                        name="expected_pos",
+                    )
+                    # Keep only pairs whose position matches the stats-side
+                    # position assignment. Preserves the original lookup
+                    # semantics (``self.comps[stats_position].get(player, ...)``)
+                    # for players whose ``Player position`` disagrees with the
+                    # comp-pool assignment.
+                    _cp_df = _pairs.merge(
+                        _expected_pos.rename_axis("target_player").reset_index(),
+                        left_on="player",
+                        right_on="target_player",
+                        how="inner",
+                    )
+                    _cp_df = _cp_df[_cp_df["position"] == _cp_df["expected_pos"]]
+                    if not _cp_df.empty:
+                        _cp_df["opp"] = _cp_df["player"].map(opponents)
+                        # Mean distance to comps (player-side uniqueness signal --
+                        # not matchup-dependent). Carried on defstats only because
+                        # cached training matrices know it under the ``Defense `` prefix.
+                        defstats["comp distance"] = (
+                            _cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
+                        )
+                        # Inner-join comp games vs the opponent. The result is the
+                        # matchup-conditional residual signal: each comp's outcome
+                        # vs this opponent z-scored against the comp's own per-player
+                        # baseline, distance-weighted across the comp set.
+                        _merged = _cp_df.merge(
+                            _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
+                            left_on=["comp", "opp"],
+                            right_on=[_player_col, _opp_col],
+                            how="inner",
+                            suffixes=("", "_gl"),
+                        )
+                        _merged["weighted_z"] = _merged["_mkt_zscore"] * _merged["weight"]
+                        _comp_wsum = _merged.groupby("player")["weighted_z"].sum()
+                        _comp_wcount = _merged.groupby("player")["weight"].sum()
+                        _comp_means = _comp_wsum / _comp_wcount
+                        stats["Player comps z"] = _comp_means.reindex(stats.index).fillna(0.0)
+                        # Count of (comp, opponent) game observations backing each
+                        # ``Player comps z`` estimate. Stays on defstats for cached-
+                        # matrix compatibility.
+                        defstats["comp n"] = (
+                            _merged.groupby("player").size().reindex(defstats.index)
+                        )
 
         stats = stats.join(defstats.add_prefix("Defense "))
 

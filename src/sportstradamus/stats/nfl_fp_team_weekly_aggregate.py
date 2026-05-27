@@ -409,22 +409,14 @@ def load_team_and_defense_features(
     if abbr_map.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    team_features = _aggregate_pattern_a(
-        pattern_a_windows, grain="team", abbr_map=abbr_map
-    )
-    defense_features = _aggregate_pattern_a(
-        pattern_a_windows, grain="defense", abbr_map=abbr_map
-    )
+    team_features = _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
+    defense_features = _aggregate_pattern_a(pattern_a_windows, grain="defense", abbr_map=abbr_map)
     team_b, defense_b = _load_line_matchups(*pattern_b_snapshot, abbr_map=abbr_map)
     if not team_b.empty:
-        team_features = (
-            team_b if team_features.empty else team_features.join(team_b, how="outer")
-        )
+        team_features = team_b if team_features.empty else team_features.join(team_b, how="outer")
     if not defense_b.empty:
         defense_features = (
-            defense_b
-            if defense_features.empty
-            else defense_features.join(defense_b, how="outer")
+            defense_b if defense_features.empty else defense_features.join(defense_b, how="outer")
         )
     return team_features, defense_features
 
@@ -553,9 +545,7 @@ def _dispatch(df: pd.DataFrame, recipe: _TeamRecipe) -> pd.Series | None:
     if recipe.pattern == "rpr_bucket_pass_rate":
         (bucket_key,) = recipe.args
         return _rpr_bucket_pass_rate(df, bucket_key)
-    logger.warning(
-        "unknown team-recipe pattern %r for %s", recipe.pattern, recipe.output_col
-    )
+    logger.warning("unknown team-recipe pattern %r for %s", recipe.pattern, recipe.output_col)
     return None
 
 
