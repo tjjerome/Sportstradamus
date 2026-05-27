@@ -314,10 +314,11 @@ class Stats:
         Default no-op returns ``None``. Override on a league subclass to plug an
         external player-grain data source into ``playerstats``. The frame must
         be indexed by the same key ``base_profile``'s ``playerstats`` uses
-        (``log_strings['player']`` value, post-``remove_accents``) and column
-        names should already carry the ``Player {name}_asof`` prefix expected
-        by the model feature filter — base_profile joins straight into
-        playerstats without further renaming.
+        (``log_strings['player']`` value, post-``remove_accents``). Column
+        names should be RAW ``{name}_asof`` (no ``Player`` prefix) — the
+        ``add_prefix("Player ")`` step downstream in ``get_stats`` /
+        ``get_feature_columns`` prepends the namespace once, producing the
+        ``Player {name}_asof`` keys the feature filter expects.
         """
         return None
 
@@ -1153,11 +1154,19 @@ class Stats:
             )
             cols = list(dict.fromkeys(cols))  # de-dup, preserve order
 
+            # ``_asof`` features are per-week season-to-date snapshots, not
+            # per-game stats; they are joined into playerstats after the
+            # short/growth variant generators run, so no ``... short`` /
+            # ``... growth`` columns exist for them. Excluding ``_asof``
+            # here prevents the loop below from inserting non-existent
+            # variant names that would later KeyError on matrix slice.
             profile_cols = [
                 col
                 for col in (market_always + market_filtered)
                 if "Player " in col
-                and not any([string in col for string in [" age", " depth", " proj ", " position"]])
+                and not any(
+                    [string in col for string in [" age", " depth", " proj ", " position", "_asof"]]
+                )
             ]
 
             count = 1
