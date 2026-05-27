@@ -23,7 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import banned, stat_map
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
     _PSD_EIG_TOLERANCE,
     _expected_payout_with_pushes,
@@ -55,10 +55,6 @@ _DEFENSIVE_PAIR_WEIGHT: float = 1.0 - _OFFENSIVE_PAIR_WEIGHT
 # via the ``max_boost`` arg). Underdog promo stacking is tighter than the rest.
 _MAX_BOOST_UNDERDOG: float = 2.5
 _MAX_BOOST_OTHER: float = 60.0
-
-# Underdog "Boost" column on raw offers is pre-multiplied by a 1.78 platform
-# baseline; divide it out so per-game boost arithmetic operates on a pure modifier.
-_UNDERDOG_BOOST_BASELINE: float = 1.78
 
 # Pre-filter gates for offers entering the per-game beam search. Hand-tuned to
 # keep only book-supported, model-favored legs out of the cartesian explosion.
@@ -267,7 +263,7 @@ def find_correlation(
         team_mod_map = banned[platform][league]["team"]
         opp_mod_map = banned[platform][league]["opponent"]
         if platform == "Underdog":
-            league_df["Boost"] = league_df["Boost"] / _UNDERDOG_BOOST_BASELINE
+            league_df["Boost"] = league_df["Boost"] / UNDERDOG_BOOST_BASELINE
 
         if league != "MLB":
             league_df["Player position"] = league_df["Player position"].apply(
