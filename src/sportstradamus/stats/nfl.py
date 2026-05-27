@@ -1488,16 +1488,16 @@ class StatsNFL(Stats):
         return team_features, defense_features
 
     def _join_fp_player_features(self, date: datetime | date) -> pd.DataFrame | None:
-        """NFL hook: project FP per-player season-to-date aggregates to ``Player {col}_asof``.
+        """NFL hook: project FP per-player season-to-date aggregates to ``{col}_asof``.
 
         Resolves ``date`` to ``(season, target_week)`` via
         ``_lookup_season_week``, then loads the player-grain season-to-date
         profile through ``load_through_one_year(season, target_week=week-1)``
         — the "as of last week" snapshot, leakage-clean for the target row's
-        date. Each non-meta column is renamed to ``Player {col}_asof`` so the
-        base-class join in ``base_profile`` merges them straight into
-        ``playerstats`` without colliding with the legacy ``Player {col}``
-        gamelog-derived features.
+        date. Each non-meta column is renamed to raw ``{col}_asof`` (no
+        ``Player`` prefix) so the downstream ``add_prefix("Player ")`` step
+        prepends the namespace once, producing ``Player {col}_asof`` keys
+        that do not collide with the legacy gamelog ``Player {col}`` columns.
 
         Pre-week-5 falls back to the prior season's late weeks. Returns
         ``None`` when no FP weekly snapshot exists for the resolved window —
@@ -1514,7 +1514,7 @@ class StatsNFL(Stats):
         return frame
 
     def _compute_fp_asof_features(self, season: int, week: int) -> pd.DataFrame | None:
-        """Load FP season-to-date profile for ``(season, week-1)`` and rename to ``Player {col}_asof``.
+        """Load FP season-to-date profile for ``(season, week-1)`` and rename to raw ``{col}_asof``.
 
         Pre-week-5 routes to the prior season's late weeks via
         ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..NFL_REGULAR_SEASON_WEEKS``;
@@ -1555,7 +1555,11 @@ class StatsNFL(Stats):
             non_na_rank = out.notna().sum(axis=1)
             out = out.assign(_rank=non_na_rank).sort_values("_rank", ascending=False)
             out = out[~out.index.duplicated(keep="first")].drop(columns="_rank")
-        out.columns = [f"Player {c}_asof" for c in out.columns]
+        # Emit raw ``{col}_asof`` (no Player prefix). Downstream
+        # ``add_prefix("Player ")`` in get_stats / get_feature_columns
+        # prepends the namespace once, producing ``Player {col}_asof``.
+        # Prefixing here would double-prefix to ``Player Player {col}_asof``.
+        out.columns = [f"{c}_asof" for c in out.columns]
         return out
 
     def _compute_comp_profile(self, cache_key: tuple[int, int | None]) -> pd.DataFrame:
