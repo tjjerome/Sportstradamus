@@ -939,7 +939,9 @@ class StatsNHL(Stats):
 
                 # Scale both loc and scale to preserve coefficient of variation
                 ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP)
+                ratio = ratio.fillna(1.0).clip(
+                    lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
+                )
                 new_scale = scale * ratio
                 new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 

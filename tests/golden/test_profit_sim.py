@@ -183,8 +183,16 @@ def test_kelly_skips_minus_110_payout():
     # payouts directly rather than the dashboard's exploded-history Boost.
     df = _make_offers(n_days=1, hit_pattern=[True])
     result = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=0.0, use_kelly=True, initial_bankroll=1000.0, n_mc=1,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=0.0,
+        use_kelly=True,
+        initial_bankroll=1000.0,
+        n_mc=1,
     )
     assert result.iloc[0]["bankroll"] == pytest.approx(1000.0)
     assert result.iloc[0]["daily_pnl"] == pytest.approx(0.0)
@@ -218,12 +226,28 @@ def test_monte_carlo_seed_reproducibility():
     # trajectories — the sim is reproducible.
     df = _make_offers(n_days=4)
     r1 = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=1.0, use_kelly=False, initial_bankroll=1000.0, n_mc=3,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=1.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=3,
     )
     r2 = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=1.0, use_kelly=False, initial_bankroll=1000.0, n_mc=3,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=1.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=3,
     )
     pd.testing.assert_frame_equal(r1, r2)
 
@@ -250,14 +274,30 @@ def test_caller_rng_overrides_default_seed():
         )
     df = pd.DataFrame(rows)
     r1 = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.0, min_books_p=0.0,
-        max_bets_day=3, sizing_pct=1.0, use_kelly=False, initial_bankroll=1000.0,
-        n_mc=1, rng=np.random.default_rng(123),
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.0,
+        min_books_p=0.0,
+        max_bets_day=3,
+        sizing_pct=1.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
+        rng=np.random.default_rng(123),
     )
     r2 = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.0, min_books_p=0.0,
-        max_bets_day=3, sizing_pct=1.0, use_kelly=False, initial_bankroll=1000.0,
-        n_mc=1, rng=np.random.default_rng(123),
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.0,
+        min_books_p=0.0,
+        max_bets_day=3,
+        sizing_pct=1.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
+        rng=np.random.default_rng(123),
     )
     pd.testing.assert_frame_equal(r1, r2)
 
@@ -311,8 +351,16 @@ def test_summarize_empty_returns_zero_metrics():
 def test_summarize_winning_run_positive_roi():
     df = _make_offers(n_days=3, hit_pattern=[True, True, True])
     result = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=10.0, use_kelly=False, initial_bankroll=1000.0, n_mc=1,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=10.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
     )
     summary = summarize_runs(result, initial_bankroll=1000.0)
     # 3 winning bets at 10% flat sizing on -110 → mean_final > 1000
@@ -325,8 +373,16 @@ def test_summarize_winning_run_positive_roi():
 def test_summarize_losing_run_negative_roi_and_drawdown():
     df = _make_offers(n_days=3, hit_pattern=[False, False, False])
     result = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=10.0, use_kelly=False, initial_bankroll=1000.0, n_mc=1,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=10.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
     )
     summary = summarize_runs(result, initial_bankroll=1000.0)
     assert summary["roi"] < 0
@@ -338,8 +394,16 @@ def test_summarize_losing_run_negative_roi_and_drawdown():
 def test_summarize_sharpe_finite_on_mixed_outcomes():
     df = _make_offers(n_days=4, hit_pattern=[True, False, True, False])
     result = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=5.0, use_kelly=False, initial_bankroll=1000.0, n_mc=1,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=5.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
     )
     summary = summarize_runs(result, initial_bankroll=1000.0)
     assert np.isfinite(summary["sharpe"])
@@ -354,8 +418,16 @@ def test_summarize_default_n_mc_matches_constant():
 def test_summarize_aggregates_across_runs():
     df = _make_offers(n_days=2, hit_pattern=[True, False])
     result = simulate_strategy(
-        df, prob_col="Model P", ranking="Kelly", min_model_p=0.5, min_books_p=0.0,
-        max_bets_day=10, sizing_pct=1.0, use_kelly=False, initial_bankroll=1000.0, n_mc=5,
+        df,
+        prob_col="Model P",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=1.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=5,
     )
     summary = summarize_runs(result, initial_bankroll=1000.0)
     # mean_final is the average across the 5 runs' last bankrolls

@@ -134,7 +134,10 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     # line distribution.
     archived_mask = M["Archived"] == 1
     n_archived = archived_mask.sum()
-    if n_archived >= _MIN_ARCHIVED_FOR_CLIP and n_archived / len(M) > _MIN_ARCHIVED_FRACTION_FOR_CLIP:
+    if (
+        n_archived >= _MIN_ARCHIVED_FOR_CLIP
+        and n_archived / len(M) > _MIN_ARCHIVED_FRACTION_FOR_CLIP
+    ):
         line_floor = M.loc[archived_mask, "Line"].min()
         line_ceil = M.loc[archived_mask, "Line"].max()
     else:
