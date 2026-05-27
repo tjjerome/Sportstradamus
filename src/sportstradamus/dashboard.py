@@ -25,9 +25,15 @@ def run() -> None:
     app_path = Path(__file__).parent / "dashboard_app.py"
     subprocess.run(
         [
-            sys.executable, "-m", "streamlit", "run", str(app_path),
-            "--server.fileWatcherType", "none",
-            "--server.runOnSave", "false",
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(app_path),
+            "--server.fileWatcherType",
+            "none",
+            "--server.runOnSave",
+            "false",
         ],
         check=False,
     )
