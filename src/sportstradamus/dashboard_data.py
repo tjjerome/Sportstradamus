@@ -163,6 +163,7 @@ def load_history() -> pd.DataFrame:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading parlay history...")
 def _load_parlays_cached(mtime: float) -> pd.DataFrame:
+    """Cached read of the parlay-history parquet; ``mtime`` is the cache key."""
     parlays = read_parlay_hist()
     if parlays.empty:
         return parlays
@@ -261,7 +262,7 @@ def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> 
 
 
 @st.cache_resource(show_spinner="Loading league stats...")
-def load_stats():
+def load_stats() -> dict:
     """Load Stats objects from cached pickle files (no API calls).
 
     API updates are handled by the nightly script (poetry run reflect),
@@ -280,12 +281,13 @@ def load_stats():
 
 
 @st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner="Loading stat map...")
-def load_stat_map():
+def load_stat_map() -> dict:
+    """Load the stat name mapping config (static, long-lived cache)."""
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         return json.load(f)
 
 
-def load_resolve_meta():
+def load_resolve_meta() -> dict:
     """Load nightly resolution metadata (last run time, counts).
 
     Returns a dict with keys: last_run, history_resolved, parlays_resolved.
@@ -299,7 +301,7 @@ def load_resolve_meta():
         return {}
 
 
-def resolve_and_save(history, stats):
+def resolve_and_save(history: pd.DataFrame, stats: dict) -> pd.DataFrame:
     """Resolve pending predictions (fill Actual) and save back to parquet."""
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -313,7 +315,7 @@ def resolve_and_save(history, stats):
     return history
 
 
-def resolve_parlays_and_save(parlays, stats, stat_map):
+def resolve_parlays_and_save(parlays: pd.DataFrame, stats: dict, stat_map: dict) -> pd.DataFrame:
     """Resolve pending parlays and save back to parquet."""
     if parlays.empty or "Legs" not in parlays.columns:
         return parlays
@@ -334,8 +336,13 @@ def resolve_parlays_and_save(parlays, stats, stat_map):
 
 
 def get_filtered_history(
-    history, leagues=None, platforms=None, markets=None, date_range=None, min_model_p=None
-):
+    history: pd.DataFrame,
+    leagues: list | None = None,
+    platforms: list | None = None,
+    markets: list | None = None,
+    date_range: tuple | None = None,
+    min_model_p: float | None = None,
+) -> pd.DataFrame:
     """Explode offers and apply sidebar filters.
 
     Returns a per-offer DataFrame with columns: all prediction-level cols +
@@ -366,7 +373,11 @@ def get_filtered_history(
     return df
 
 
-def get_prediction_history(history, leagues=None, date_range=None):
+def get_prediction_history(
+    history: pd.DataFrame,
+    leagues: list | None = None,
+    date_range: tuple | None = None,
+) -> pd.DataFrame:
     """Return prediction-level rows (no explosion) for CRPS/coverage analysis.
 
     Filters by league and date range but does NOT explode offers.
