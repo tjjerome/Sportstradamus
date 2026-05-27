@@ -6,6 +6,7 @@ All pages import from here to get cached DataFrames and filters.
 import importlib.resources as pkg_resources
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -23,7 +24,9 @@ from sportstradamus.helpers.io import (
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
+    HISTORY_PATH,
     MODEL_STATS_PATH,
+    PARLAY_HIST_PATH,
     read_history,
     read_parlay_hist,
     read_parquet_safe,
@@ -84,6 +87,26 @@ GAMELOG_SCHEMA = {
 PRED_BANNER_COLOR = "#1f4e79"  # deep teal
 STATS_BANNER_COLOR = "#2d6a4f"  # forest green
 
+# Cache TTL for parquet/JSON loaders. mtime is the primary invalidation signal;
+# this is a safety net so a cache entry can't outlive 10 min even if the host
+# filesystem ever misreports mtime.
+_CACHE_TTL_SECONDS = 600
+
+# TTL for static config loaders (stat_map.json). No mtime key — these files
+# change only on deploy, so a 1-hour TTL is sufficient.
+_STATIC_CONFIG_TTL_SECONDS = 3600
+
+
+def _mtime(path) -> float:
+    """Return the parquet/JSON file's mtime, or 0.0 if absent.
+
+    Used as a cache key so Streamlit re-reads when cron rewrites a snapshot.
+    Passed by value into private ``_load_*_cached`` helpers; the function
+    body never touches the value, but Streamlit hashes it for the key.
+    """
+    p = Path(str(path))
+    return p.stat().st_mtime if p.is_file() else 0.0
+
 
 def format_ts(ts: str) -> str:
     """Convert a raw timestamp string to a friendly local-time label.
@@ -105,13 +128,12 @@ def format_ts(ts: str) -> str:
     return local_dt.strftime("%b %-d at %-I:%M %p")
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading prediction history...")
-def load_history():
-    """Load prediction history from parquet.
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading prediction history...")
+def _load_history_cached(mtime: float) -> pd.DataFrame:
+    """Cached read of the prediction-history parquet.
 
-    Migrates old flat schema (no Offers column) to the normalized one-row-per-
-    prediction shape with an Offers list, then writes the migrated frame back.
-    Offers round-trip as list[tuple] (CLV-aware 9-tuples; 6-tuples padded).
+    ``mtime`` is the file modification time; Streamlit hashes it as part of
+    the cache key so a fresh cron write invalidates the entry.
     """
     history = read_history()
     if history.empty:
@@ -129,9 +151,18 @@ def load_history():
     return history
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading parlay history...")
-def load_parlays():
-    """Load parlay history from parquet."""
+def load_history() -> pd.DataFrame:
+    """Load prediction history from parquet (mtime-keyed cache).
+
+    Migrates old flat schema (no Offers column) to the normalized one-row-per-
+    prediction shape with an Offers list, then writes the migrated frame back.
+    Offers round-trip as list[tuple] (CLV-aware 9-tuples; 6-tuples padded).
+    """
+    return _load_history_cached(_mtime(HISTORY_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading parlay history...")
+def _load_parlays_cached(mtime: float) -> pd.DataFrame:
     parlays = read_parlay_hist()
     if parlays.empty:
         return parlays
@@ -143,35 +174,53 @@ def load_parlays():
     return parlays
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading current offers...")
-def load_current_offers() -> pd.DataFrame:
-    """Today's scored offers, written by `prophecize`."""
+def load_parlays() -> pd.DataFrame:
+    """Load parlay history from parquet (mtime-keyed cache)."""
+    return _load_parlays_cached(_mtime(PARLAY_HIST_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")
+def _load_current_offers_cached(mtime: float) -> pd.DataFrame:
     return read_parquet_safe(CURRENT_OFFERS_PATH)
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading current parlays...")
-def load_current_parlays() -> pd.DataFrame:
-    """Today's parlay candidates, written by `prophecize`."""
+def load_current_offers() -> pd.DataFrame:
+    """Today's scored offers, written by ``prophecize`` (mtime-keyed cache)."""
+    return _load_current_offers_cached(_mtime(CURRENT_OFFERS_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current parlays...")
+def _load_current_parlays_cached(mtime: float) -> pd.DataFrame:
     return read_parquet_safe(CURRENT_PARLAYS_PATH)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_gamelog(league: str) -> pd.DataFrame:
-    """Load the full season gamelog parquet for a league.
+def load_current_parlays() -> pd.DataFrame:
+    """Today's parlay candidates, written by ``prophecize`` (mtime-keyed cache)."""
+    return _load_current_parlays_cached(_mtime(CURRENT_PARLAYS_PATH))
 
-    Returns an empty DataFrame if the league is unrecognised or the file is
-    missing.  Callers are responsible for filtering to the relevant player and
-    stat column.
-    """
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_gamelog_cached(league: str, mtime: float) -> pd.DataFrame:
     schema = GAMELOG_SCHEMA.get(league)
     if schema is None:
         return pd.DataFrame()
     return read_parquet_safe(pkg_resources.files(data) / schema["file"])
 
 
-@st.cache_data(ttl=3600)
-def load_current_meta() -> dict:
-    """Snapshot metadata (timestamp, leagues, platforms, row counts)."""
+def load_gamelog(league: str) -> pd.DataFrame:
+    """Load the full season gamelog parquet for a league (mtime-keyed cache).
+
+    Returns an empty DataFrame if the league is unrecognised or the file is
+    missing.  Callers are responsible for filtering to the relevant player and
+    stat column.
+    """
+    schema = GAMELOG_SCHEMA.get(league)
+    gamelog_path = pkg_resources.files(data) / schema["file"] if schema else None
+    return _load_gamelog_cached(league, _mtime(gamelog_path) if gamelog_path else 0.0)
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS)
+def _load_current_meta_cached(mtime: float) -> dict:
     if not CURRENT_META_PATH.is_file():
         return {}
     try:
@@ -181,10 +230,19 @@ def load_current_meta() -> dict:
         return {}
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading model training stats...")
-def load_model_stats() -> pd.DataFrame:
-    """Per-(league, market, metric_row) training diagnostics from `meditate`."""
+def load_current_meta() -> dict:
+    """Snapshot metadata (timestamp, leagues, platforms, row counts; mtime-keyed)."""
+    return _load_current_meta_cached(_mtime(CURRENT_META_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading model training stats...")
+def _load_model_stats_cached(mtime: float) -> pd.DataFrame:
     return read_parquet_safe(MODEL_STATS_PATH)
+
+
+def load_model_stats() -> pd.DataFrame:
+    """Per-(league, market, metric_row) training diagnostics from ``meditate``."""
+    return _load_model_stats_cached(_mtime(MODEL_STATS_PATH))
 
 
 def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
@@ -221,7 +279,7 @@ def load_stats():
     return stats
 
 
-@st.cache_data(ttl=3600, show_spinner="Loading stat map...")
+@st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner="Loading stat map...")
 def load_stat_map():
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         return json.load(f)
@@ -340,6 +398,13 @@ def _extract_platforms(history):
 
 def sidebar_filters(history, parlays=None, key_prefix=""):
     """Render sidebar filters and return filter values."""
+    if st.sidebar.button(
+        "Refresh data",
+        key=f"{key_prefix}refresh_data",
+        help="Force-reload all parquet snapshots, bypassing the data cache.",
+    ):
+        st.cache_data.clear()
+        st.rerun()
     st.sidebar.header("Filters")
 
     # Date range
