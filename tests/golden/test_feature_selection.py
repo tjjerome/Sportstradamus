@@ -18,6 +18,10 @@ the post-rebuild Filtered list.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -203,6 +207,74 @@ def test_candidate_with_prior_shap_uses_w_model(synthetic_filter_inputs):
     assert nh_breakdown.get("has_model") is False, (
         f"candidate {candidate_without_shap!r} has no SHAP entry but breakdown "
         f"reports has_model={nh_breakdown.get('has_model')!r}"
+    )
+
+
+def test_filter_market_features_is_deterministic_across_hash_seeds(synthetic_filter_inputs, tmp_path):
+    """Cross-process determinism: identical inputs must produce identical outputs.
+
+    Regression test for the 2026-05-27 NaN-roulette bug. NaN in composite
+    scores collapsed the KEEP_CAP sort to set-iteration order, which depends
+    on ``PYTHONHASHSEED`` and re-randomizes per process. The NaN-tolerant
+    patches (``_nanmax``, ``normalize_scores`` NaN coerce, KEEP_CAP cap_rank
+    NaN guard + name tiebreak) plus the ``_filter_finite_features`` screen
+    on input features eliminate every NaN source. The two outputs from two
+    invocations against the same inputs must match exactly.
+    """
+    inputs = synthetic_filter_inputs
+    # NaN-pollute: inject a constant-column feature into the training
+    # parquet (gets screened by _filter_finite_features) and into the
+    # candidate pool (would otherwise drive NaN into score normalization).
+    ff = inputs["feature_filter"].copy()
+    cell = inputs["market"].replace("-", " ")
+    current_with_constant = list(ff[inputs["league"]]["Filtered"][cell])
+    train_path = fs.training_path(inputs["league"], inputs["market"])
+    df = pd.read_parquet(train_path)
+    df["Player constant_zero"] = 0.0
+    df.to_parquet(train_path)
+    current_with_constant.append("Player constant_zero")
+    ff[inputs["league"]]["Filtered"][cell] = current_with_constant
+
+    # Persist inputs to disk so the subprocess can reload them
+    shap_pkl = tmp_path / "_shap.pkl"
+    corr_pkl = tmp_path / "_corr.pkl"
+    ff_pkl = tmp_path / "_ff.pkl"
+    stub_mdl = tmp_path / "stub.mdl"
+    inputs["shap_df"].to_pickle(shap_pkl)
+    inputs["corr_df"].to_pickle(corr_pkl)
+    pd.to_pickle(ff, ff_pkl)
+    stub_mdl.write_text("x")
+
+    src_root = str(fs.__file__).rsplit("/", 2)[0]
+    script = (
+        "import hashlib, json, sys\n"
+        "import pandas as pd\n"
+        f"sys.path.insert(0, {src_root!r})\n"
+        "from sportstradamus import feature_selection as fs\n"
+        f"shap_df = pd.read_pickle({str(shap_pkl)!r})\n"
+        f"corr_df = pd.read_pickle({str(corr_pkl)!r})\n"
+        f"ff = pd.read_pickle({str(ff_pkl)!r})\n"
+        f"fs.training_path = lambda *a, **k: {str(train_path)!r}\n"
+        f"fs.model_path = lambda *a, **k: {str(stub_mdl)!r}\n"
+        f"new, _ = fs.filter_market_features({inputs['league']!r}, "
+        f"{inputs['market']!r}, ff, shap_df, corr_df)\n"
+        "print(hashlib.md5(json.dumps(sorted(new)).encode()).hexdigest())\n"
+    )
+
+    env_base = os.environ.copy()
+    out1 = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**env_base, "PYTHONHASHSEED": "1"},
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    out2 = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**env_base, "PYTHONHASHSEED": "9999"},
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert out1 == out2, (
+        f"filter_market_features non-deterministic across hash seeds: "
+        f"PYTHONHASHSEED=1 -> {out1!r}, PYTHONHASHSEED=9999 -> {out2!r}"
     )
 
 
