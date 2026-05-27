@@ -190,7 +190,9 @@ def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
     return float(pnl.sum() / total_stake)
 
 
-def _build_cell_row(cell: tuple[str, str], group: pd.DataFrame, *, now: pd.Timestamp, window_days: int) -> dict:
+def _build_cell_row(
+    cell: tuple[str, str], group: pd.DataFrame, *, now: pd.Timestamp, window_days: int
+) -> dict:
     """Compute one (league, market, window) live-metrics row."""
     n = len(group)
     if n == 0:
