@@ -245,9 +245,7 @@ def load_window(
             f"unknown FP weekly file_kind: {file_kind!r}; valid kinds: {sorted(FILE_KINDS)}"
         )
     if start_week > end_week:
-        raise ValueError(
-            f"start_week={start_week} must be <= end_week={end_week}"
-        )
+        raise ValueError(f"start_week={start_week} must be <= end_week={end_week}")
 
     frames: list[pd.DataFrame] = []
     for week in available_snapshots(season):

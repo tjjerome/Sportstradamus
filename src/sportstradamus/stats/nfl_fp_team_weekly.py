@@ -227,8 +227,7 @@ def load_snapshot(
     """
     if file_kind not in FILE_KINDS:
         raise ValueError(
-            f"unknown FP team weekly file_kind: {file_kind!r}; "
-            f"valid kinds: {sorted(FILE_KINDS)}"
+            f"unknown FP team weekly file_kind: {file_kind!r}; valid kinds: {sorted(FILE_KINDS)}"
         )
 
     directory = snapshot_dir(season, snapshot_week)
@@ -289,13 +288,10 @@ def load_window(
     """
     if file_kind not in FILE_KINDS:
         raise ValueError(
-            f"unknown FP team weekly file_kind: {file_kind!r}; "
-            f"valid kinds: {sorted(FILE_KINDS)}"
+            f"unknown FP team weekly file_kind: {file_kind!r}; valid kinds: {sorted(FILE_KINDS)}"
         )
     if start_week > end_week:
-        raise ValueError(
-            f"start_week={start_week} must be <= end_week={end_week}"
-        )
+        raise ValueError(f"start_week={start_week} must be <= end_week={end_week}")
 
     frames: list[pd.DataFrame] = []
     for week in available_snapshots(season):

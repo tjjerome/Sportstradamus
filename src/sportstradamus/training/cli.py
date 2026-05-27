@@ -312,7 +312,9 @@ def meditate(
                     # families (ZINB/NegBin/Gamma/ZAGamma) ignore the slug,
                     # so STRATEGY_NONE is fine and the next clause will
                     # substitute the run-wide default for the pipeline call.
-                    cell_strategy = target_strategy if cell_dist == SKEW_NORMAL_DIST else STRATEGY_NONE
+                    cell_strategy = (
+                        target_strategy if cell_dist == SKEW_NORMAL_DIST else STRATEGY_NONE
+                    )
                     click.echo(
                         f"[{lg}] {market}: BYPASS withhold "
                         f"(dist={cell_dist!r}, strategy={cell_strategy!r})"

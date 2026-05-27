@@ -491,7 +491,7 @@ def _compute_cell_stats(
     row = {
         "league": league,
         "market": market,
-        "n": int(len(y)),
+        "n": len(y),
         "observed_mean": mean,
         "variance": variance,
         "var_mean_ratio": var_mean_ratio,
