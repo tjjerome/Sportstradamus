@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
+    LazyArchive,
     Scrape,
     abbreviations,
     combo_props,
@@ -64,7 +64,11 @@ _COMP_QUANTILE_HI: float = 0.75
 _VOLUME_SCALE_RATIO_FLOOR: float = 0.1
 _VOLUME_SCALE_RATIO_CAP: float = 10.0
 
-archive = Archive()
+# LazyArchive defers DuckDB lock acquisition until the first attribute
+# access so processes that merely import this module — most importantly
+# the long-lived Streamlit dashboard — do not hold the archive lock for
+# their entire lifetime. See LazyArchive docstring in helpers/archive.py.
+archive = LazyArchive()
 scraper = Scrape()
 
 # When True, forces a full reload of all cached CSVs on the next load() /

@@ -24,12 +24,14 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import Archive, stat_map
+from sportstradamus.helpers import LazyArchive, stat_map
 from sportstradamus.prediction.correlation import find_correlation
 from sportstradamus.prediction.model_prob import model_prob
 from sportstradamus.spiderLogger import logger
 
-archive = Archive()
+# LazyArchive defers DuckDB lock acquisition until the first attribute
+# access. See LazyArchive docstring in helpers/archive.py.
+archive = LazyArchive()
 
 
 @line_profiler.profile

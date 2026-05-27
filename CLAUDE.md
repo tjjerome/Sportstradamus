@@ -53,6 +53,20 @@ Do not undo that work:
   into the next refactor's surprise pile.
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
   See STYLE_GUIDE.md §9.
+* **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
+  pre-computed parquet snapshots only (`data/history.parquet`,
+  `data/parlay_hist.parquet`, `data/model_stats.parquet`). DuckDB holds an
+  exclusive file lock for the entire lifetime of any read-write connection;
+  the dashboard is the only long-lived process in the system, so any archive
+  connection it opens — even accidentally via a module-level `Archive()` in
+  a transitively-imported module — blocks every cron job (prophecize, confer,
+  close-lines) that needs to write odds. If a dashboard page ever needs
+  archive-derived data, export it to parquet from a cron job and read the
+  parquet from the dashboard; do not query DuckDB directly. New dashboard
+  pages must not import any module whose top-level code constructs
+  `Archive()` — use `LazyArchive` from `sportstradamus.helpers` if a module
+  needs an `archive` binding shared with the prediction or training pipelines.
+  Pinned by `tests/golden/test_dashboard_no_archive_lock.py`.
 
 ## MANDATORY: run refactoring-specialist before any push, PR update, or review
 
