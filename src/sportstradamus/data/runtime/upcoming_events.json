@@ -1,1 +1,162 @@
-[]
+[
+  {
+    "sport_key": "basketball_nba",
+    "event_id": "197dd95ba7880a2cd6a00df88014610b",
+    "league": "NBA",
+    "commence_time": "2026-05-27T00:40:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "dfe54a9d17adeb68700bb0f16a3ecb4c",
+    "league": "WNBA",
+    "commence_time": "2026-05-27T23:00:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "5a93d1b3dbf5d676d1412535ec2a4917",
+    "league": "WNBA",
+    "commence_time": "2026-05-28T00:00:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "a6c336ab186beb85ed430a73064a78b0",
+    "league": "WNBA",
+    "commence_time": "2026-05-28T01:00:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "e444497a21a00ff63e453cea4d12d8bc",
+    "league": "WNBA",
+    "commence_time": "2026-05-28T02:00:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "06c3852893a7b3c13bffc7ea386db2b7",
+    "league": "WNBA",
+    "commence_time": "2026-05-28T02:00:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "3ec18b0de6cf19b8a10dfeab22b2e54b",
+    "league": "WNBA",
+    "commence_time": "2026-05-29T00:10:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  },
+  {
+    "sport_key": "basketball_wnba",
+    "event_id": "3ffa5f5edc41dc48d3bee4ea1bdccc5a",
+    "league": "WNBA",
+    "commence_time": "2026-05-29T02:10:00Z",
+    "markets": [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_threes",
+      "player_blocks",
+      "player_steals",
+      "player_blocks_steals",
+      "player_turnovers",
+      "player_points_rebounds_assists",
+      "player_points_rebounds",
+      "player_points_assists",
+      "player_rebounds_assists"
+    ]
+  }
+]
