@@ -1238,18 +1238,32 @@ class Stats:
             )
             cols = list(dict.fromkeys(cols))  # de-dup, preserve order
 
-            # ``_asof`` features are per-week season-to-date snapshots, not
-            # per-game stats; they are joined into playerstats after the
-            # short/growth variant generators run, so no ``... short`` /
-            # ``... growth`` columns exist for them. Excluding ``_asof``
-            # here prevents the loop below from inserting non-existent
-            # variant names that would later KeyError on matrix slice.
+            # The variant generator (``add_suffix(" short"/" growth", 1)``
+            # in ``base_profile``) only fires on gamelog ``stat_types``.
+            # Any ``Player {col}`` that lands in playerProfile via another
+            # path — demographics (age/depth/position), volume projections
+            # (``proj * mean``), comp aggregates (``comps mean``,
+            # ``comps mean (EB)``, ``comps p25/p75``), or season-to-date
+            # ``_asof`` snapshots — has no ``... short``/``... growth``
+            # sibling. Listing those patterns here keeps the loop below
+            # from inserting phantom variant names that would later
+            # KeyError on matrix slice (strict-indexed in get_volume_stats).
             profile_cols = [
                 col
                 for col in (market_always + market_filtered)
                 if "Player " in col
                 and not any(
-                    [string in col for string in [" age", " depth", " proj ", " position", "_asof"]]
+                    [
+                        string in col
+                        for string in [
+                            " age",
+                            " depth",
+                            " proj ",
+                            " position",
+                            " comps",
+                            "_asof",
+                        ]
+                    ]
                 )
             ]
 

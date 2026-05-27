@@ -82,6 +82,24 @@ def strip_variant(col: str) -> str:
     return col.replace(" short", "").replace(" growth", "")
 
 
+def _nanmax(a: float, b: float) -> float:
+    """``max(a, b)`` with NaN treated as 0 (the "no-signal" default).
+
+    Built-in ``max`` is argument-order asymmetric with NaN — `max(NaN, x)`
+    returns NaN, `max(x, NaN)` returns x. Composite scoring downstream
+    needs a finite result; NaN poisons the whole min-max normalization.
+    """
+    a_nan = pd.isna(a)
+    b_nan = pd.isna(b)
+    if a_nan and b_nan:
+        return 0.0
+    if a_nan:
+        return float(b)
+    if b_nan:
+        return float(a)
+    return float(max(a, b))
+
+
 def variants_of(base: str, available_cols) -> list[str]:
     """Existing variants of a base feature: base, base short, base growth."""
     return [v for v in (base, base + " short", base + " growth") if v in available_cols]
@@ -210,14 +228,22 @@ def compute_redundancy(features: list[str], train_df: pd.DataFrame) -> dict[str,
 
 
 def normalize_scores(score_dict: dict[str, float]) -> dict[str, float]:
-    """Min-max normalize to [0, 1]. Constant vectors → 0.5."""
+    """Min-max normalize to [0, 1]. Constant vectors → 0.5.
+
+    NaN inputs are coerced to 0 before normalization. ``numpy.ndarray.min``
+    and ``.max`` propagate NaN, so a single NaN feature would otherwise
+    poison every output to NaN — which downstream collapses every keep-gate
+    layer to a hash-seed roulette in the KEEP_CAP sort. Treating NaN as
+    "feature contributes no signal" is the right semantic anyway.
+    """
     if not score_dict:
         return {}
-    vals = np.array(list(score_dict.values()))
+    cleaned = {k: (0.0 if pd.isna(v) else float(v)) for k, v in score_dict.items()}
+    vals = np.array(list(cleaned.values()))
     lo, hi = vals.min(), vals.max()
     if hi <= lo:
-        return {k: 0.5 for k in score_dict}
-    return {k: (v - lo) / (hi - lo) for k, v in score_dict.items()}
+        return {k: 0.5 for k in cleaned}
+    return {k: (v - lo) / (hi - lo) for k, v in cleaned.items()}
 
 
 def composite_score(
@@ -269,8 +295,18 @@ def discover_candidates(train_df: pd.DataFrame, locked: set[str], current: set[s
     all_cols = set(train_df.columns) - META_COLS
     base_names = {strip_variant(c) for c in all_cols}
     candidates = sorted(base_names - locked - current)
+    return _filter_finite_features(candidates, train_df)
+
+
+def _filter_finite_features(features: list[str], train_df: pd.DataFrame) -> list[str]:
+    """Drop features that have no usable column in ``train_df`` or whose
+    column is constant. Constant or absent columns produce NaN correlations
+    and NaN redundancy scores that downstream poison composite scoring.
+    """
+    if train_df.empty:
+        return list(features)
     out = []
-    for feat in candidates:
+    for feat in features:
         col = next(
             (c for c in (feat, feat + " short", feat + " growth") if c in train_df.columns), None
         )
@@ -337,10 +373,24 @@ def _score_features(
     """
     if not features:
         return {}, {}
+    # Screen out constant / absent base features. ``discover_candidates``
+    # filters these for the candidate path, but ``current`` (passed from
+    # feature_filter.json) bypasses that screen — a stale or constant entry
+    # there injects NaN into ``compute_redundancy`` / ``compute_from_training``,
+    # which then propagates into composite scoring. Drop them here so the
+    # composite is finite for every feature we score.
+    features = _filter_finite_features(features, train_df)
+    if not features:
+        return {}, {}
     shap_raw = compute_shap_scores(features, mkey, shap_df)
     corr_pre = compute_corr_scores(features, mkey, corr_df)
     corr_train, mi_raw, stab_raw = compute_from_training(features, train_df, target)
-    corr_raw = {f: max(corr_pre.get(f, 0), corr_train.get(f, 0)) for f in features}
+    # Built-in ``max(NaN, x)`` is argument-order asymmetric — it returns NaN if
+    # the first argument is NaN regardless of x. The corr CSV carries NaN for
+    # cross-league rows and constant-column training-side correlations are
+    # also NaN, so a naive ``max`` would poison ``corr_raw`` with NaN values
+    # that then collapse the entire composite to NaN downstream.
+    corr_raw = {f: _nanmax(corr_pre.get(f, 0), corr_train.get(f, 0)) for f in features}
     redund = compute_redundancy(features, train_df)
 
     shap_n = normalize_scores(shap_raw)
@@ -498,14 +548,21 @@ def filter_market_features(
         keep.add(feat)
     # Layer 4: cap. Rank survivors by composite; SHAP-floored features get a
     # cap-survival boost so the heuristic-driven cap can't override the
-    # model's own importance attribution.
+    # model's own importance attribution. NaN base scores collapse the +1.0
+    # boost (``NaN + 1.0 == NaN``) and degrade the sort to set iteration
+    # order, which is ``PYTHONHASHSEED``-dependent and non-deterministic
+    # across processes — coerce NaN to 0 and tiebreak by feature name so
+    # repeat invocations of the rebuild on the same inputs produce the
+    # same filter.
     if len(keep) > keep_cap:
         merged = {**cur_scores, **cand_scores}
         cap_rank: dict[str, float] = {}
         for feat in keep:
             base_score = merged.get(feat, 0.0)
+            if pd.isna(base_score):
+                base_score = 0.0
             cap_rank[feat] = base_score + (1.0 if feat in shap_floored else 0.0)
-        ranked_keep = sorted(keep, key=lambda f: -cap_rank.get(f, 0.0))
+        ranked_keep = sorted(keep, key=lambda f: (-cap_rank.get(f, 0.0), f))
         keep = set(ranked_keep[:keep_cap])
 
     new_filtered = sorted(keep)

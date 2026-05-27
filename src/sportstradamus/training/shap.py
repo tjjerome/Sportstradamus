@@ -129,7 +129,15 @@ def see_features() -> None:
 
 
 def _load_shap_corr_dfs():
-    """Read SHAP + corr CSVs, drop ALL aggregate cols, return (shap_df, corr_df)."""
+    """Read SHAP + corr CSVs, drop ALL aggregate cols, return (shap_df, corr_df).
+
+    Both frames have ``fillna(0)`` applied: the CSVs are wide-format with one
+    column per ``{league}_{market}`` cell, so any feature whose row is absent
+    from another league's market shows up as NaN. Downstream composite scoring
+    treats those NaN entries as zero correlation/importance — leaving the NaN
+    in place poisons ``normalize_scores`` (which uses ``ndarray.min/max`` that
+    propagate NaN) and silently destabilizes the KEEP_CAP sort.
+    """
     sp = pkg_resources.files(data) / "training" / "feature_importances.csv"
     cp = pkg_resources.files(data) / "training" / "feature_correlations.csv"
     shap_df = pd.read_csv(sp, index_col=0) if sp.is_file() else pd.DataFrame()
@@ -137,6 +145,8 @@ def _load_shap_corr_dfs():
     if not shap_df.empty:
         drop = [c for c in shap_df.columns if c == "ALL" or c.endswith("_ALL")]
         shap_df = shap_df.drop(columns=drop, errors="ignore").fillna(0)
+    if not corr_df.empty:
+        corr_df = corr_df.fillna(0)
     return shap_df, corr_df
 
 
