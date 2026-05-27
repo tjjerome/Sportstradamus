@@ -1523,9 +1523,7 @@ class StatsNFL(Stats):
         """
         lookback_week = max(week - 1, 0)
         if lookback_week >= 1:
-            frame = nfl_fp_weekly_aggregate.load_through_one_year(
-                season, target_week=lookback_week
-            )
+            frame = nfl_fp_weekly_aggregate.load_through_one_year(season, target_week=lookback_week)
         else:
             # Early-season: fall back to prior season's late weeks.
             frame = nfl_fp_weekly_aggregate.load_through_one_year(

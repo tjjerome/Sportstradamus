@@ -160,9 +160,7 @@ def load_stacked_seasons(min_games: int) -> pd.DataFrame:
     return stacked
 
 
-def collect_pairs(
-    stacked: pd.DataFrame, feature: str, position: str | None = None
-) -> pd.DataFrame:
+def collect_pairs(stacked: pd.DataFrame, feature: str, position: str | None = None) -> pd.DataFrame:
     """Build a (prev, next) DataFrame of within-player Y/Y values for one feature.
 
     When ``position`` is given, rows are restricted to players whose
@@ -203,9 +201,7 @@ def compute_pearson(pair_df: pd.DataFrame) -> float:
     return float(pair_df["prev"].corr(pair_df["next"]))
 
 
-def decide(
-    feature: str, position: str, r: float, n_pairs: int, min_pairs: int
-) -> str:
+def decide(feature: str, position: str, r: float, n_pairs: int, min_pairs: int) -> str:
     """Map (feature, position, r, n_pairs) onto a decision label per plan §1G thresholds."""
     if feature in _TRIVIAL_FEATURES:
         return "keep_metadata"
@@ -270,8 +266,7 @@ def build_results_table(
 
     if missing:
         click.echo(
-            f"[warn] {len(missing)} feature(s) not found in loader output: "
-            f"{sorted(missing)}",
+            f"[warn] {len(missing)} feature(s) not found in loader output: {sorted(missing)}",
             err=True,
         )
 
@@ -296,9 +291,7 @@ def format_per_position_table(results: pd.DataFrame, position: str) -> str:
     lines.append(f"  {'-' * 45} {'-' * 8} {'-' * 6}  {'-' * 22}")
     for _, row in sub.iterrows():
         r_str = "   nan" if pd.isna(row["r"]) else f"{row['r']:>8.4f}"
-        lines.append(
-            f"  {row['feature']:<45} {r_str} {row['n_pairs']:>6}  {row['decision']}"
-        )
+        lines.append(f"  {row['feature']:<45} {r_str} {row['n_pairs']:>6}  {row['decision']}")
     return "\n".join(lines)
 
 

@@ -45,7 +45,9 @@ def synthetic_filter_inputs(tmp_path, monkeypatch) -> dict:
     all_feats = current_feats + candidate_feats + locked_feats
 
     target = rng.normal(size=n_rows)
-    df_cols: dict[str, np.ndarray] = {"Date": pd.date_range("2024-01-01", periods=n_rows).astype(str)}
+    df_cols: dict[str, np.ndarray] = {
+        "Date": pd.date_range("2024-01-01", periods=n_rows).astype(str)
+    }
     df_cols["Result"] = target
     for i, feat in enumerate(all_feats):
         signal = rng.normal(size=n_rows) + (target * (0.5 if i < 10 else 0.05))
@@ -118,7 +120,9 @@ def test_shap_floor_k_pinned_at_30():
 
 def test_feat_has_shap_entry_detects_variants():
     """``feat_has_shap_entry`` finds SHAP via any of base, short, growth."""
-    shap_df = pd.DataFrame({"X": {"Player foo": np.nan, "Player foo short": 1.5, "Player bar": 2.0}})
+    shap_df = pd.DataFrame(
+        {"X": {"Player foo": np.nan, "Player foo short": 1.5, "Player bar": 2.0}}
+    )
     assert fs.feat_has_shap_entry("Player foo", "X", shap_df), "should match via 'short'"
     assert fs.feat_has_shap_entry("Player bar", "X", shap_df), "should match base"
     assert not fs.feat_has_shap_entry("Player baz", "X", shap_df)
