@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import os
+import time
 import warnings
 from datetime import timedelta
 from pathlib import Path
@@ -67,6 +68,16 @@ TRAINING_LOOKBACK = timedelta(hours=TRAINING_LOOKBACK_HOURS)
 
 # Sharp books that anchor the movement-direction diagnostic in CLV.
 SHARP_BOOKS: tuple[str, ...] = ("pinnacle", "circa", "bookmaker")
+
+# Total seconds to wait for a conflicting writer (e.g. a confer pass that's
+# still flushing) to release the DuckDB file lock before giving up. DuckDB
+# holds the lock for the lifetime of the connection, so this is sized to
+# absorb a typical concurrent job wrapping up while the next one starts.
+# Override via ``SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS`` for tuning;
+# set to 0 to disable retries (the legacy behaviour).
+_LOCK_WAIT_SECONDS_DEFAULT: float = 120.0
+_LOCK_BACKOFF_INITIAL: float = 2.0
+_LOCK_BACKOFF_MAX: float = 16.0
 
 # No PRIMARY KEY: DuckDB's PK creates an ART index that bloats the DB ~10x for
 # this row count. Lookups don't need the index — zone-map pruning on naturally
@@ -137,7 +148,7 @@ class Archive:
     _instance: Archive | None = None
 
     @staticmethod
-    def _connect_with_wal_recovery(db_path: Path) -> duckdb.DuckDBPyConnection:
+    def _connect_once(db_path: Path) -> duckdb.DuckDBPyConnection:
         # DuckDB <=1.1.x can leave a .wal that replays a bare CREATE TABLE
         # against an already-checkpointed catalog after a hard kill — the
         # connection then refuses to open at all. Quarantine the stale WAL
@@ -160,6 +171,37 @@ class Archive:
                 stacklevel=2,
             )
             return duckdb.connect(str(db_path))
+
+    @staticmethod
+    def _connect_with_wal_recovery(db_path: Path) -> duckdb.DuckDBPyConnection:
+        # DuckDB's file lock is held for the entire lifetime of a peer
+        # connection (not just during writes), so two production jobs that
+        # overlap by a few seconds will collide. Retry with bounded
+        # exponential backoff before giving up so a confer pass wrapping up
+        # while prophecize starts no longer crashes the cron entry.
+        wait_budget = float(
+            os.environ.get("SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS", _LOCK_WAIT_SECONDS_DEFAULT)
+        )
+        deadline = time.monotonic() + wait_budget
+        backoff = _LOCK_BACKOFF_INITIAL
+        while True:
+            try:
+                return Archive._connect_once(db_path)
+            except duckdb.IOException as exc:
+                if "Could not set lock on file" not in str(exc):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or wait_budget <= 0:
+                    raise
+                sleep_for = min(backoff, remaining)
+                warnings.warn(
+                    f"DuckDB archive {db_path} is locked by another process; "
+                    f"retrying in {sleep_for:.1f}s ({remaining:.0f}s remaining "
+                    f"of {wait_budget:.0f}s budget): {exc}",
+                    stacklevel=2,
+                )
+                time.sleep(sleep_for)
+                backoff = min(backoff * 2, _LOCK_BACKOFF_MAX)
 
     def __new__(cls):
         if cls._instance is None:
@@ -225,14 +267,6 @@ class Archive:
             if "sample_ts" in self._table_columns(table):
                 self._connection.execute(f"ALTER TABLE {table} DROP COLUMN sample_ts")
         self._connection.commit()
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-
-    def _mark_changed(self, league, market):
-        """Retained for backwards compatibility — DuckDB needs no change-tracking."""
-        return
 
     # ------------------------------------------------------------------ #
     # Read API
@@ -783,3 +817,28 @@ class Archive:
         con.commit()
         self._pending_odds.clear()
         self._pending_lines.clear()
+
+
+class LazyArchive:
+    """Proxy that defers :class:`Archive` instantiation until first use.
+
+    DuckDB takes an exclusive file lock the moment a read-write connection
+    is opened, and holds it for the connection's lifetime. The production
+    modules historically bound ``archive = Archive()`` at module top, which
+    meant any process that merely imported them — most importantly the
+    long-lived Streamlit dashboard — grabbed the lock at startup and held
+    it forever, blocking every cron job that opened the archive.
+
+    ``LazyArchive`` looks and quacks exactly like an :class:`Archive`
+    instance — every attribute read forwards to the live singleton — but
+    constructing it does not touch the database. The lock is only acquired
+    on the first attribute access from a code path that actually queries
+    or writes the archive. :class:`Archive` is itself a singleton, so the
+    forwarded call is bit-identical to the legacy direct binding.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str):
+        """Forward attribute lookups to the live :class:`Archive` singleton."""
+        return getattr(Archive(), name)

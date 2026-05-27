@@ -25,7 +25,7 @@ submodule path in new code.
 
 import requests
 
-from sportstradamus.helpers.archive import Archive, clean_archive
+from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
 from sportstradamus.helpers.config import (
     abbreviations,
     banned,
@@ -65,9 +65,19 @@ from sportstradamus.helpers.text import (
     remove_accents,
 )
 
+# Per-pick fair payout for an unboosted Underdog Power pick: power[4] ** (1/4)
+# = 10 ** 0.25 ≈ 1.778. Used by model_prob to convert the raw promo multiplier
+# from the Underdog API into a payout-inclusive value so ``Model = P × Boost``
+# yields true per-$1 expected return; consumers that want the raw modifier
+# (dashboard display, ``nightly.py`` profit-sim, parlay-search arithmetic in
+# ``correlation.py``) divide it back out.
+UNDERDOG_BOOST_BASELINE: float = 1.78
+
 __all__ = [
+    "UNDERDOG_BOOST_BASELINE",
     "Archive",
     "JsonFormatter",
+    "LazyArchive",
     "Scrape",
     "abbreviations",
     "banned",

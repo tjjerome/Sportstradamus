@@ -10,10 +10,10 @@ import pandas as pd
 import pytest
 
 from sportstradamus.nightly import (
+    _MIN_BETS_FOR_PRECISION,
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
-    _MIN_BETS_FOR_PRECISION,
     _side_precision,
 )
 
@@ -237,9 +237,7 @@ def test_compute_live_metrics_populates_precision_columns():
     metrics = _compute_live_metrics(history, now=NOW)
     # 30d window covers the full fixture (rng spans 0-40 days back).
     nba_pts_30d = metrics[
-        (metrics["league"] == "NBA")
-        & (metrics["market"] == "PTS")
-        & (metrics["window_days"] == 30)
+        (metrics["league"] == "NBA") & (metrics["market"] == "PTS") & (metrics["window_days"] == 30)
     ].iloc[0]
     # Both sides should report a finite precision in [0, 1].
     assert 0.0 <= nba_pts_30d["precision_over_live"] <= 1.0

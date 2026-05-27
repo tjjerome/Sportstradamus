@@ -13,6 +13,7 @@ import contextlib
 import shutil
 import subprocess
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -126,4 +127,103 @@ def test_unrelated_catalog_exception_propagates(tmp_path, monkeypatch):
         assert "Failure while replaying WAL" not in str(excinfo.value)
     finally:
         _reset_archive_singleton()
+        monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_DB", raising=False)
+
+
+def test_archive_retries_when_another_process_holds_lock(tmp_path, monkeypatch):
+    """A peer holding the DuckDB lock must trigger bounded retry, not immediate failure."""
+
+    archive_db = tmp_path / "archive.duckdb"
+    ready_file = tmp_path / "peer.ready"
+    release_file = tmp_path / "peer.release"
+
+    peer_script = (
+        "import duckdb, pathlib, time\n"
+        f"con = duckdb.connect({str(archive_db)!r})\n"
+        f"pathlib.Path({str(ready_file)!r}).touch()\n"
+        f"release = pathlib.Path({str(release_file)!r})\n"
+        "while not release.exists():\n"
+        "    time.sleep(0.05)\n"
+        "con.close()\n"
+    )
+    peer = subprocess.Popen([sys.executable, "-c", peer_script])
+    try:
+        deadline = time.monotonic() + 10
+        while not ready_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready_file.exists(), "peer process never acquired the lock"
+
+        monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_DB", str(archive_db))
+        monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS", "30")
+        _reset_archive_singleton()
+
+        import threading
+
+        from sportstradamus.helpers.archive import Archive
+
+        # Release the lock shortly after Archive() starts retrying.
+        def release_peer():
+            time.sleep(3.0)
+            release_file.touch()
+
+        releaser = threading.Thread(target=release_peer)
+        releaser.start()
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                archive = Archive()
+            lock_warnings = [w for w in caught if "is locked by another process" in str(w.message)]
+            assert lock_warnings, (
+                f"expected at least one lock-retry warning, got {[str(w.message) for w in caught]}"
+            )
+            assert archive._connection.execute("SELECT COUNT(*) FROM odds").fetchone() == (0,)
+        finally:
+            releaser.join()
+            _reset_archive_singleton()
+            monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS", raising=False)
+            monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_DB", raising=False)
+    finally:
+        release_file.touch()
+        peer.wait(timeout=10)
+
+
+def test_archive_lock_retry_gives_up_after_budget(tmp_path, monkeypatch):
+    """When the lock is never released, retry must surface the original IOException."""
+
+    archive_db = tmp_path / "archive.duckdb"
+    ready_file = tmp_path / "peer.ready"
+    release_file = tmp_path / "peer.release"
+
+    peer_script = (
+        "import duckdb, pathlib, time\n"
+        f"con = duckdb.connect({str(archive_db)!r})\n"
+        f"pathlib.Path({str(ready_file)!r}).touch()\n"
+        f"release = pathlib.Path({str(release_file)!r})\n"
+        "while not release.exists():\n"
+        "    time.sleep(0.05)\n"
+        "con.close()\n"
+    )
+    peer = subprocess.Popen([sys.executable, "-c", peer_script])
+    try:
+        deadline = time.monotonic() + 10
+        while not ready_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready_file.exists(), "peer process never acquired the lock"
+
+        monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_DB", str(archive_db))
+        # 1s budget — peer won't release in time, so we must fail fast.
+        monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS", "1")
+        _reset_archive_singleton()
+
+        from sportstradamus.helpers.archive import Archive
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with pytest.raises(duckdb.IOException, match="Could not set lock on file"):
+                Archive()
+    finally:
+        release_file.touch()
+        peer.wait(timeout=10)
+        _reset_archive_singleton()
+        monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_LOCK_WAIT_SECONDS", raising=False)
         monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_DB", raising=False)
