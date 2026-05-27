@@ -407,7 +407,11 @@ def _extract_platforms(history):
     return sorted(platforms)
 
 
-def sidebar_filters(history, parlays=None, key_prefix=""):
+def sidebar_filters(
+    history: pd.DataFrame,
+    parlays: pd.DataFrame | None = None,
+    key_prefix: str = "",
+) -> dict:
     """Render sidebar filters and return filter values."""
     if st.sidebar.button(
         "Refresh data",

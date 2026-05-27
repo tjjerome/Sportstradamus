@@ -12,7 +12,7 @@ import click
 
 
 @click.command()
-def run():
+def run() -> None:
     """Launch the Sportstradamus Streamlit dashboard.
 
     Production runs unattended under systemd, so the source-file watcher is
