@@ -499,4 +499,3 @@ class StatsWNBA(StatsNBA):
         compare against the int keys in ``self.players``.
         """
         return target_game_date.year
-

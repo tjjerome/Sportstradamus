@@ -125,12 +125,8 @@ class _Recipe:
 # computed in :func:`_derive_aggregate_metrics` after this table runs.
 _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
     # passing_advanced -- QB primary file
-    _Recipe(
-        "pass_adv_DB", "passing_advanced", "sum", ("playerStatsPassingDropbacksTotal",)
-    ),
-    _Recipe(
-        "pass_adv_SCRM", "passing_advanced", "sum", ("playerStatsPassingScramblesTotal",)
-    ),
+    _Recipe("pass_adv_DB", "passing_advanced", "sum", ("playerStatsPassingDropbacksTotal",)),
+    _Recipe("pass_adv_SCRM", "passing_advanced", "sum", ("playerStatsPassingScramblesTotal",)),
     _Recipe("pass_adv_ATT", "passing_advanced", "sum", ("playerStatsPassingAttemptsTotal",)),
     _Recipe("pass_adv_YDS", "passing_advanced", "sum", ("playerStatsPassingYardsTotal",)),
     _Recipe("pass_adv_TD", "passing_advanced", "sum", ("playerStatsPassingTouchdownsTotal",)),
@@ -146,12 +142,8 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         "sum",
         ("playerStatsFirstDownsPassing",),
     ),
-    _Recipe(
-        "pass_adv_INT", "passing_advanced", "sum", ("playerStatsPassingInterceptionsTotal",)
-    ),
-    _Recipe(
-        "pass_adv_SACK", "passing_advanced", "sum", ("playerStatsPassingSackedTotal",)
-    ),
+    _Recipe("pass_adv_INT", "passing_advanced", "sum", ("playerStatsPassingInterceptionsTotal",)),
+    _Recipe("pass_adv_SACK", "passing_advanced", "sum", ("playerStatsPassingSackedTotal",)),
     _Recipe(
         "pass_adv_SACK_YDS",
         "passing_advanced",
@@ -419,12 +411,8 @@ _AGGREGATE_RECIPES: tuple[_Recipe, ...] = (
         ("playerStatsInside20ReceivingTargetsTotal",),
     ),
     # receiving_advanced -- WR / TE / RB primary file
-    _Recipe(
-        "rec_adv_RTE", "receiving_advanced", "sum", ("playerStatsReceivingRoutesTotal",)
-    ),
-    _Recipe(
-        "rec_adv_TGT", "receiving_advanced", "sum", ("playerStatsReceivingTargetsTotal",)
-    ),
+    _Recipe("rec_adv_RTE", "receiving_advanced", "sum", ("playerStatsReceivingRoutesTotal",)),
+    _Recipe("rec_adv_TGT", "receiving_advanced", "sum", ("playerStatsReceivingTargetsTotal",)),
     _Recipe(
         "rec_adv_TD",
         "receiving_advanced",
@@ -1015,12 +1003,12 @@ def _broadcast_team_coverage(
     team_features = nfl_fp_team_weekly_aggregate.load_pattern_a_team_features(windows)
     if team_features.empty:
         return profile
-    keep_cols = [c for c in ("off_faced_man_pct", "off_faced_zone_pct") if c in team_features.columns]
+    keep_cols = [
+        c for c in ("off_faced_man_pct", "off_faced_zone_pct") if c in team_features.columns
+    ]
     if not keep_cols:
         return profile
-    return profile.merge(
-        team_features[keep_cols], left_on="Team", right_index=True, how="left"
-    )
+    return profile.merge(team_features[keep_cols], left_on="Team", right_index=True, how="left")
 
 
 def _aggregate_recipes(windows: Sequence[tuple[int, int, int]]) -> pd.DataFrame:
@@ -1045,9 +1033,7 @@ def _aggregate_recipes(windows: Sequence[tuple[int, int, int]]) -> pd.DataFrame:
     return out
 
 
-def _load_kind_multi(
-    windows: Sequence[tuple[int, int, int]], file_kind: str
-) -> pd.DataFrame:
+def _load_kind_multi(windows: Sequence[tuple[int, int, int]], file_kind: str) -> pd.DataFrame:
     """Concatenate per-game rows from every (season, start, end) window for ``file_kind``."""
     frames = []
     for season, start_week, end_week in windows:
@@ -1301,9 +1287,7 @@ def _aggregate_separation_by_coverage(
     wide = per_scheme.unstack("scheme")
     if wide.empty:
         return wide
-    return wide.rename(
-        columns={name: f"rec_sep_vs_{name}" for name in _SEP_BY_COVERAGE_SCHEMES}
-    )
+    return wide.rename(columns={name: f"rec_sep_vs_{name}" for name in _SEP_BY_COVERAGE_SCHEMES})
 
 
 def _aggregate_separation_by_alignment_bucket(
@@ -1376,16 +1360,8 @@ def _aggregate_separation_by_alignment_bucket(
         lambda g: (g["win_value"] * g["weight"]).sum(min_count=1),
         include_groups=False,
     )
-    sep_wide = (
-        sep_num.divide(weight_sum)
-        .where(weight_sum != 0, other=np.nan)
-        .unstack("alignment")
-    )
-    win_wide = (
-        win_num.divide(weight_sum)
-        .where(weight_sum != 0, other=np.nan)
-        .unstack("alignment")
-    )
+    sep_wide = sep_num.divide(weight_sum).where(weight_sum != 0, other=np.nan).unstack("alignment")
+    win_wide = win_num.divide(weight_sum).where(weight_sum != 0, other=np.nan).unstack("alignment")
     sep_wide = sep_wide.rename(
         columns={a: f"rec_sep_align_{a}_SEP_SCORE" for a in _SEP_BY_ALIGNMENT_BUCKETS}
     )
@@ -1471,9 +1447,7 @@ def _aggregate_man_vs_zone_bucket(
     return wide.rename(columns={s: f"rec_mz_YPRR_{s}" for s in _MZ_BUCKETS})
 
 
-def _load_kind(
-    season: int, start_week: int, end_week: int, file_kind: str
-) -> pd.DataFrame:
+def _load_kind(season: int, start_week: int, end_week: int, file_kind: str) -> pd.DataFrame:
     """Read one file_kind for the closed week range, log + swallow loader errors.
 
     Normalises the loader's ``DataFrame | None`` return to an empty
@@ -1618,15 +1592,13 @@ def _derive_aggregate_metrics(profile: pd.DataFrame) -> pd.DataFrame:
     routes = profile.get("rec_adv_RTE")
     if snaps is not None and routes is not None:
         diff = (snaps - routes.fillna(0)).clip(lower=0)
-        profile["block_pct_proxy"] = diff.divide(snaps).where(
-            snaps > 0, other=np.nan
-        )
+        profile["block_pct_proxy"] = diff.divide(snaps).where(snaps > 0, other=np.nan)
 
     return profile
 
 
 __all__ = (
+    "load_multi_window_one_year",
     "load_through_one_year",
     "load_window_one_year",
-    "load_multi_window_one_year",
 )

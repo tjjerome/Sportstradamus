@@ -801,7 +801,10 @@ class StatsMLB(Stats):
         )
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
-            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)]
+            df = df.loc[
+                (df.key1.str[-1] == df.key2.str[-1])
+                & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
+            ]
             df.key1 = df.key1.str[:-2].astype(int)
             df.key2 = df.key2.str[:-2].astype(int)
             self.comps["pitchers"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
@@ -812,7 +815,10 @@ class StatsMLB(Stats):
         )
         if os.path.isfile(filepath):
             df = pd.read_csv(filepath)
-            df = df.loc[(df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)]
+            df = df.loc[
+                (df.key1.str[-1] == df.key2.str[-1])
+                & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
+            ]
             df.key1 = df.key1.str[:-2].astype(int)
             df.key2 = df.key2.str[:-2].astype(int)
             self.comps["hitters"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
@@ -964,7 +970,11 @@ class StatsMLB(Stats):
         # Filter players with at least 2 entries
         playerGroups = (
             gamelog.groupby("playerName")
-            .filter(lambda x: (x[market].clip(0, 1).mean() > _MARKET_HIT_RATE_MIN) & (x[market].count() > 1))
+            .filter(
+                lambda x: (
+                    (x[market].clip(0, 1).mean() > _MARKET_HIT_RATE_MIN) & (x[market].count() > 1)
+                )
+            )
             .groupby("playerName")
         )
 
