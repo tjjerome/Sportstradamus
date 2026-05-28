@@ -430,6 +430,11 @@ def _residualize_gamelog(
         return gamelog.copy()
 
     out = gamelog.copy()
+    # Promote stat columns to float — residuals carry NaN (rolling-mean warmup)
+    # and NaN can't be assigned into an int column without a FutureWarning.
+    for stat in present:
+        if not pd.api.types.is_float_dtype(out[stat]):
+            out[stat] = out[stat].astype(float)
     order = out[[player_col, date_col]].astype({player_col: "string", date_col: "string"})
     sort_idx = order.sort_values([player_col, date_col], kind="stable").index
 

@@ -51,7 +51,7 @@ from sportstradamus.training.config import (
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, warm_start_hyper_opt
 from sportstradamus.training.report import report
-from sportstradamus.training.shap import _scouting_shap_and_filter
+from sportstradamus.training.shap import compute_market_importance
 
 logger = get_logger(__name__)
 
@@ -595,20 +595,6 @@ def _step_persist_matrix_and_comps(
     return M
 
 
-def _step_scout_features(
-    rebuild_filter: bool, league: str, market: str, M: pd.DataFrame, stat_data
-) -> None:
-    """Run the SHAP scouting pass if ``rebuild_filter`` is set."""
-    if not rebuild_filter:
-        return
-    print("  Scouting pass for filter rebuild...")
-    diag = _scouting_shap_and_filter(league, market, M, stat_data)
-    if diag is not None:
-        print(
-            f"  Filter: kept={diag['n_kept']} dropped={diag['n_dropped']} added={diag['n_added']}"
-        )
-
-
 def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     """Build feature matrix, temporal 70/30 split, then 50/50 test/validation.
 
@@ -1005,14 +991,17 @@ def _step_compute_diagnostics(
         diag_shape_label = "alpha"
     elif dist in ("NegBin", "ZINB"):
         diag_start_shape = float(
-            np.clip(test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6), 1, 50)
+            np.clip(
+                test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6),
+                1,
+                _COUNT_BRANCH_R_CAP,
+            )
         )
         diag_model_shape = float(prob_params["total_count"].mean())
-        R_CAP = 50
         per_player_emp_r = player_stats.mean() ** 2 / np.maximum(
             player_stats.var() - player_stats.mean(), 0.01
         )
-        per_player_emp_r = np.minimum(per_player_emp_r, R_CAP)
+        per_player_emp_r = np.minimum(per_player_emp_r, _COUNT_BRANCH_R_CAP)
         diag_empirical_shape = float(np.median(per_player_emp_r))
         diag_shape_label = "r"
 
@@ -1979,7 +1968,6 @@ def train_market(
     market: str,
     stat_data,
     force: bool,
-    rebuild_filter: bool,
     archive,
     league_start_date,
     deterministic: bool = False,
@@ -2003,8 +1991,6 @@ def train_market(
         market: Market name (e.g. ``"FGA"``, ``"PTS"``).
         stat_data: League-specific ``Stats`` instance.
         force: Retrain even when no new training rows arrived.
-        rebuild_filter: Run the SHAP scouting pass and rebuild the feature
-            filter; invalidates any warm-start hyperparameters.
         archive: ``Archive`` instance (passed through for book weights).
         league_start_date: Earliest cutoff for training rows.
         deterministic: Pin RNGs and replace Optuna with fixed hyperparams for
@@ -2049,7 +2035,6 @@ def train_market(
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
     M = _step_persist_matrix_and_comps(M, training_data_path, deterministic, stat_data)
-    _step_scout_features(rebuild_filter, league, market, M, stat_data)
 
     splits = _step_build_splits(M, stat_data, market)
     dist_info = _step_select_distribution(
@@ -2071,8 +2056,7 @@ def train_market(
         use_hurdle,
     )
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
-    # Under --rebuild-filter, warm-starting from old pickle hyperparams is invalid.
-    opt_params_in = None if rebuild_filter else filedict.get("params")
+    opt_params_in = filedict.get("params")
     opt_params, _ = _step_select_hyperparams(
         splits["X_train"],
         dist,
@@ -2196,6 +2180,18 @@ def train_market(
         target_strategy=target_strategy,
         zinb_mode=zinb_mode,
     )
+
+    # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the
+    # training/feature_importances.csv + feature_correlations.csv. After the
+    # 2026-05-27 no-filter rewire these CSVs are no longer used for selection;
+    # they survive purely so the dashboard can show importance drift over time.
+    # Skip in deterministic mode (artifacts must not leak from eval runs) and
+    # skip hurdle (HurdleZINB has two separate boosters; SHAP would need a
+    # custom path — defer to a follow-up if hurdle drift becomes interesting).
+    if not deterministic and not use_hurdle:
+        test_df = splits["X_test"].copy()
+        test_df["Result"] = splits["y_test"]["Result"].to_numpy()
+        compute_market_importance(league, market, model, test_df)
 
     if not deterministic:
         report()

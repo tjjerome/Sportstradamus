@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -552,12 +551,7 @@ class StatsNHL(Stats):
                 nhl_df = nhl_df[
                     ~nhl_df.apply(lambda x: (x["gameId"], x["playerName"]) in existing, axis=1)
                 ]
-            nhl_df.loc[:, "moneyline"] = nhl_df.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-            )
-            nhl_df.loc[:, "totals"] = nhl_df.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(nhl_df, date_col="gameDate", team_col="team")
         nhl_teamlog_df = pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False)
         if not nhl_teamlog_df.empty:
             nhl_teamlog_df.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
@@ -787,12 +781,7 @@ class StatsNHL(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         # Write to file
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)

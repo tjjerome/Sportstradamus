@@ -20,7 +20,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -1265,17 +1264,10 @@ class StatsNBA(Stats):
 
         if not nba_df.empty:
             # Retrieve moneyline and totals data
-            nba_df.loc[:, "moneyline"] = nba_df.apply(
-                lambda x: archive.get_moneyline(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
-            )
-            nba_df.loc[:, "totals"] = nba_df.apply(
-                lambda x: archive.get_total(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
+            self._enrich_team_markets(
+                nba_df,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
             )
 
             self.gamelog = (
@@ -1359,17 +1351,10 @@ class StatsNBA(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
+            self._enrich_team_markets(
+                self.gamelog,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
             )
             self.gamelog.loc[:, self.log_strings["position"]] = self.gamelog.apply(
                 lambda x: (

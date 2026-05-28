@@ -20,7 +20,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -625,12 +624,7 @@ class StatsMLB(Stats):
         }
 
         new_games = pd.DataFrame.from_records(new_games)
-        new_games.loc[:, "moneyline"] = new_games.apply(
-            lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-        )
-        new_games.loc[:, "totals"] = new_games.apply(
-            lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-        )
+        self._enrich_team_markets(new_games, date_col="gameDate", team_col="team")
         self.gamelog = pd.concat([self.gamelog, new_games], ignore_index=True)
 
         teams = [
@@ -938,12 +932,7 @@ class StatsMLB(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"][:10], x["team"]), axis=1
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"][:10], x["team"]), axis=1
-            )
+            self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         # Write to file
         write_gamelog("mlb", self.gamelog, self.teamlog, self.players)

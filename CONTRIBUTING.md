@@ -41,7 +41,6 @@ Sportstradamus/
 │   │   ├── nightly.py          # reflect command
 │   │   ├── dashboard.py        # dashboard command entry point
 │   │   ├── dashboard_app.py    # Streamlit app
-│   │   ├── feature_selection.py
 │   │   ├── skew_normal.py      # custom PyTorch distribution
 │   │   ├── analysis.py
 │   │   ├── creds/              # API keys + Google OAuth (git-ignored)
@@ -90,10 +89,10 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `cli.py` | `meditate` click command — thin orchestrator: reset-markets handling, stats init, league setup (book weights, comps, correlations), per-market loop calling `train_market` |
+| `cli.py` | `meditate` click command — thin orchestrator: stats init, league setup (book weights, comps, correlations), per-market loop calling `train_market` |
 | `pipeline.py` | `train_market(league, market, stat_data, ...)` — the full per-market training loop: data load, distribution selection, normalization, Optuna search, LightGBMLSS fit, dispersion calibration, temperature scaling, model save |
 | `calibration.py` | `fit_book_weights`, `fit_model_weight`, `select_distribution` |
-| `shap.py` | SHAP importance computation, feature filter management: `compute_market_importance`, `filter_market`, `filter_features`, `see_features`, `_scouting_shap_and_filter` |
+| `shap.py` | Post-train drift-monitoring SHAP only: `compute_market_importance` writes per-cell |SHAP| + corr columns to `feature_importances.csv` / `feature_correlations.csv` after each model trains. `see_features` rebuilds the CSVs from all pickles in batch. SHAP no longer drives feature selection (2026-05-27 no-filter rewire) |
 | `correlate.py` | `correlate(league, stat_data)` — builds `{LEAGUE}_corr.csv` from player stat history |
 | `report.py` | `report()` — reads model pickles, writes `training_report.txt` |
 | `data.py` | `count_training_rows`, `trim_matrix`, `_histogram_weights` |
@@ -137,7 +136,6 @@ Sportstradamus/
 | `nightly.py` | `reflect` | Historical parlay performance analysis |
 | `dashboard.py` / `dashboard_app.py` | `dashboard` | Streamlit dashboard |
 | `skew_normal.py` | — | Custom PyTorch `SkewNormal` distribution for LightGBMLSS |
-| `feature_selection.py` | — | Feature selection helpers used during training |
 
 ---
 
@@ -215,7 +213,7 @@ a gate before `optimize_comp_weights.py --save`.
 | Change the Optuna hyperparameter search space | `training/pipeline.py` → `train_market` objective |
 | Change how distributions are blended with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
 | Update the season start date for a league | `stats/{league}.py` → `Stats{League}.season_start` |
-| Change SHAP importance thresholds | `training/shap.py` → `filter_features` / run `meditate --rebuild-filter` |
+| Refresh per-cell SHAP diagnostic CSV from scratch | `training/shap.py:see_features` — re-runs SHAP on every saved pickle, rewrites `feature_importances.csv` + `feature_correlations.csv`. Does NOT change feature selection — selection is unfiltered since the 2026-05-27 rewire |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/book_weights.json` directly |
 | Find why a comp feature has a certain weight | `data/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
 | Read archived / removed code | `src/deprecated/` |
