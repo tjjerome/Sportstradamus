@@ -247,8 +247,16 @@ Distribution types (set per cell in `data/config/stat_meta.json`):
 **Player Comparables**: z-scored profiles → weighted BallTree KNN → comp outcomes as
 features. Weights optimized via `scripts/optimize_comp_weights.py`.
 
-**Feature filtering**: SHAP-based importance thresholds in `feature_filter.json`,
-updated by `meditate --rebuild-filter` via `training/shap.py`.
+**Feature selection**: None at training time. Per the 2026-05-27 no-filter rewire
+(researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 — tree ensembles
+statistically tie FS-filtered vs no-FS across 960 XGBoost experiments), every cell
+trains on the full unfiltered candidate set returned by
+`Stats.get_stat_columns(market)` (Common + per-league Common + ALL player/team/defense
+profile columns, ~440 features per NFL cell). `feature_filter.json` still ships the
+`Common`/`Always` buckets for shared/locked-in lists but `Filtered` is gone.
+`training/shap.py:compute_market_importance` runs after each cell trains, writing
+per-cell |SHAP| + corr to `feature_importances.csv` / `feature_correlations.csv` for
+drift monitoring only — those CSVs no longer drive selection.
 
 ### Training Report Diagnostics (`data/training_report.txt` + `data/model_stats.parquet`)
 
@@ -359,7 +367,7 @@ book-baseline row above each table and column-direction help text.
 | `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, strategy}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, training strategy slug) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
-| `config/feature_filter.json` | SHAP-based feature importance thresholds |
+| `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
 | `config/prop_books.json` | List of sportsbooks consulted for player-prop consensus |

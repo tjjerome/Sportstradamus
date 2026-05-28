@@ -54,7 +54,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
                 stat_data.log_strings["date"],
                 stat_data.log_strings["win"],
             ]
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates(
             [stat_data.log_strings["date"], stat_data.log_strings["team"]]
@@ -72,7 +72,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
                 stat_data.log_strings["date"],
                 stat_data.log_strings["score"],
             ]
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates(
             [stat_data.log_strings["date"], stat_data.log_strings["team"]]
@@ -87,7 +87,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
         log = stat_data.gamelog.loc[
             stat_data.gamelog["starting pitcher"],
             ["opponent", stat_data.log_strings["date"], "1st inning runs allowed"],
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], "opponent"]).set_index(
             [stat_data.log_strings["date"], "opponent"]
@@ -99,7 +99,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
     else:
         log = stat_data.gamelog[
             [stat_data.log_strings["player"], stat_data.log_strings["date"], market]
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates(
             [stat_data.log_strings["date"], stat_data.log_strings["player"]]

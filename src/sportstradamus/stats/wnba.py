@@ -18,7 +18,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -33,7 +32,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import Stats, clean_data, scraper
 from sportstradamus.stats.nba import StatsNBA
 
 
@@ -370,17 +369,10 @@ class StatsWNBA(StatsNBA):
             stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
 
             if not stat_df.empty:
-                stat_df.loc[:, "moneyline"] = stat_df.apply(
-                    lambda x: archive.get_moneyline(
-                        self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]
-                    ),
-                    axis=1,
-                )
-                stat_df.loc[:, "totals"] = stat_df.apply(
-                    lambda x: archive.get_total(
-                        self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]
-                    ),
-                    axis=1,
+                self._enrich_team_markets(
+                    stat_df,
+                    date_col=self.log_strings["date"],
+                    team_col="TEAM_ABBREVIATION",
                 )
                 self.gamelog = (
                     pd.concat([stat_df[self.gamelog.columns], self.gamelog])
@@ -433,17 +425,10 @@ class StatsWNBA(StatsNBA):
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
+            self._enrich_team_markets(
+                self.gamelog,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
             )
             self.gamelog["GAME_DATE"] = self.gamelog["GAME_DATE"].astype(str)
             self.teamlog["GAME_DATE"] = self.teamlog["GAME_DATE"].astype(str)

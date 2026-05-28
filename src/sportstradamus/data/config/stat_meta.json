@@ -291,7 +291,7 @@
         },
         "passing first downs": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "ratio_meanyr"
         },
         "passing tds": {
@@ -340,7 +340,7 @@
             "strategy": "none"
         },
         "sacks taken": {
-            "dist": "ZINB",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },

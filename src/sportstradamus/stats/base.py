@@ -180,6 +180,55 @@ class Stats:
             None
         """
 
+    def _enrich_team_markets(
+        self,
+        df: pd.DataFrame,
+        *,
+        date_col: str = "gameday",
+        team_col: str = "team",
+        mask: "np.ndarray | None" = None,
+    ) -> None:
+        """In-place: populate ``moneyline`` / ``totals`` columns from the archive.
+
+        Two bulk DuckDB queries (one per market) replace the per-row
+        ``archive.get_moneyline`` / ``archive.get_total`` ``DataFrame.apply``
+        loops that previously dominated ``update()`` wall time — point
+        lookups across a full-history gamelog ran into the millions of
+        serial queries and took minutes. The bulk path is two queries plus
+        an in-Python dict lookup per row.
+
+        Args:
+            df: Frame to enrich. Must have a date column and a team column;
+                values are written back via ``df.loc[mask, col]``.
+            date_col: Name of the date column (``gameday`` for NFL/MLB
+                shaped frames, ``gameDate`` for MLB game logs,
+                ``GAME_DATE`` for NBA-shaped frames).
+            team_col: Name of the team column.
+            mask: Optional boolean mask scoping enrichment to a subset.
+                ``None`` enriches the whole frame.
+
+        Fallback values match the per-row helpers: ``0.5`` for moneyline,
+        :attr:`Archive.default_totals` per league for totals.
+        """
+        if df.empty:
+            return
+        if mask is None:
+            mask = np.ones(len(df), dtype=bool)
+        if not mask.any():
+            return
+        subset = df.loc[mask]
+        unique_dates = subset[date_col].unique()
+        ml_map = archive.get_team_market_map(
+            self.league, "Moneyline", dates=unique_dates
+        )
+        tot_map = archive.get_team_market_map(
+            self.league, "Totals", dates=unique_dates
+        )
+        default_total = archive.default_totals.get(self.league, 1)
+        keys = list(zip(subset[date_col].astype(str).str[:10], subset[team_col], strict=False))
+        df.loc[mask, "moneyline"] = [ml_map.get(k, 0.5) for k in keys]
+        df.loc[mask, "totals"] = [tot_map.get(k, default_total) for k in keys]
+
     @staticmethod
     def _build_comps(knn, profile_df, min_comps=5, max_comps=20):
         """Build comp lists with distances using a hybrid k-NN + radius approach.
@@ -481,12 +530,17 @@ class Stats:
 
         _filled_gl = self.short_gamelog.fillna(0).infer_objects(copy=False)
         _player_col = self.log_strings["player"]
-        playerstats = _filled_gl.groupby(_player_col)[stat_types].mean(numeric_only=True)
+        # Intersect stat_types with available gamelog columns so partial fixtures
+        # (e.g. tests/integration's cached parquets that don't reload the full
+        # gamelog) don't KeyError. Production runs have all expected columns
+        # after Stats.update(); this is purely defensive for fixture mode.
+        _avail_stats = [s for s in stat_types if s in _filled_gl.columns]
+        playerstats = _filled_gl.groupby(_player_col)[_avail_stats].mean(numeric_only=True)
 
         # Vectorized tail(5).mean() — avoids per-group .apply()
         _last5 = _filled_gl.groupby(_player_col).tail(5)
         playershortstats = (
-            _last5.groupby(_last5[_player_col])[stat_types]
+            _last5.groupby(_last5[_player_col])[_avail_stats]
             .mean()
             .fillna(0)
             .infer_objects(copy=False)
@@ -1220,81 +1274,36 @@ class Stats:
     def get_volume_stats(self, offers, date=datetime.today().date()):
         return
 
-    def get_stat_columns(self, market, unfiltered=False):
+    def get_stat_columns(self, market):
+        """Return the candidate feature columns for ``market``.
+
+        Returns the full unfiltered candidate set: Common + league Common +
+        all playerProfile, teamProfile, and defenseProfile columns. The
+        Filtered SHAP-ranked bucket was removed in the 2026-05-27 no-filter
+        rewire (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 —
+        tree ensembles statistically tie FS-filtered vs no-FS across 960
+        XGBoost experiments). ``feature_filter.json`` still ships the Common /
+        Always buckets; the Filtered bucket is gone from disk.
+        """
         league_filter = feature_filter.get(self.league, {})
-        # Two-tier schema: Filtered (SHAP-ranked, refreshable) + Always (locked)
-        # Back-compat: if no "Filtered" key, treat the league block itself as the flat market list
-        filtered = league_filter.get("Filtered", league_filter)
-        always = league_filter.get("Always", {})
-
-        if market in filtered and not unfiltered:
-            market_always = list(always.get(market, [])) + list(always.get("_default", []))
-            market_filtered = list(filtered.get(market, []))
-            cols = (
-                feature_filter.get("Common", [])
-                + league_filter.get("Common", [])
-                + market_always
-                + market_filtered
+        self.base_profile()
+        cols = (
+            feature_filter.get("Common", [])
+            + league_filter.get("Common", [])
+            + list(self.playerProfile.add_prefix("Player ").columns)
+            + list(self.teamProfile.add_prefix("Team ").columns)
+            + list(self.defenseProfile.add_prefix("Defense ").columns)
+        )
+        if "Player team" in cols:
+            cols.remove("Player team")
+        for pos in self.positions:
+            cols.remove(f"Defense {pos}")
+        if self.league == "MLB":
+            cols.extend(
+                ["PF R", "PF OBP", "PF H", "PF 1B", "PF 2B", "PF 3B", "PF HR", "PF BB", "PF K"]
             )
-            cols = list(dict.fromkeys(cols))  # de-dup, preserve order
 
-            # The variant generator (``add_suffix(" short"/" growth", 1)``
-            # in ``base_profile``) only fires on gamelog ``stat_types``.
-            # Any ``Player {col}`` that lands in playerProfile via another
-            # path — demographics (age/depth/position), volume projections
-            # (``proj * mean``), comp aggregates (``comps mean``,
-            # ``comps mean (EB)``, ``comps p25/p75``), or season-to-date
-            # ``_asof`` snapshots — has no ``... short``/``... growth``
-            # sibling. Listing those patterns here keeps the loop below
-            # from inserting phantom variant names that would later
-            # KeyError on matrix slice (strict-indexed in get_volume_stats).
-            profile_cols = [
-                col
-                for col in (market_always + market_filtered)
-                if "Player " in col
-                and not any(
-                    [
-                        string in col
-                        for string in [
-                            " age",
-                            " depth",
-                            " proj ",
-                            " position",
-                            " comps",
-                            "_asof",
-                        ]
-                    ]
-                )
-            ]
-
-            count = 1
-            for i, c in enumerate(cols.copy()):
-                if c in profile_cols:
-                    cols.insert(i + count, c + " growth")
-                    cols.insert(i + count, c + " short")
-                    count = count + 2
-
-        else:
-            self.base_profile()
-            cols = (
-                feature_filter.get("Common", [])
-                + league_filter.get("Common", [])
-                + list(self.playerProfile.add_prefix("Player ").columns)
-                + list(self.teamProfile.add_prefix("Team ").columns)
-                + list(self.defenseProfile.add_prefix("Defense ").columns)
-            )
-            if "Player team" in cols:
-                cols.remove("Player team")
-            for pos in self.positions:
-                cols.remove(f"Defense {pos}")
-            if self.league == "MLB":
-                cols.extend(
-                    ["PF R", "PF OBP", "PF H", "PF 1B", "PF 2B", "PF 3B", "PF HR", "PF BB", "PF K"]
-                )
-
-            cols = sorted(list(set(cols)))
-
-        return cols
+        return sorted(set(cols))
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Hook: restrict per-gameday training rows to positions eligible for ``market``.

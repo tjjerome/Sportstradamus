@@ -30,7 +30,6 @@ from sportstradamus.stats.base import (
     _VOLUME_SCALE_RATIO_CAP,
     _VOLUME_SCALE_RATIO_FLOOR,
     Stats,
-    archive,
     clean_data,
 )
 
@@ -657,12 +656,37 @@ class StatsNFL(Stats):
         nfl_data.loc[nfl_data["team"] == "OAK", "team"] = "LV"
 
         if not nfl_data.empty:
-            nfl_data.loc[:, "moneyline"] = nfl_data.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1
-            )
-            nfl_data.loc[:, "totals"] = nfl_data.apply(
-                lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1
-            )
+            # Only enrich rows that will survive the post-concat
+            # drop_duplicates below. Without this filter the bulk path
+            # still wins, but most of the work is thrown away when the
+            # cached gamelog already covers the (season, week, player) tuple.
+            cached_keys: set[tuple] = set()
+            if {"season", "week", "player id"}.issubset(self.gamelog.columns):
+                cached_keys = set(
+                    zip(
+                        self.gamelog["season"],
+                        self.gamelog["week"],
+                        self.gamelog["player id"],
+                        strict=False,
+                    )
+                )
+            if cached_keys:
+                new_mask = np.fromiter(
+                    (
+                        key not in cached_keys
+                        for key in zip(
+                            nfl_data["season"],
+                            nfl_data["week"],
+                            nfl_data["player id"],
+                            strict=False,
+                        )
+                    ),
+                    dtype=bool,
+                    count=len(nfl_data),
+                )
+            else:
+                new_mask = None
+            self._enrich_team_markets(nfl_data, mask=new_mask)
 
         self.gamelog = (
             pd.concat([self.gamelog, nfl_data], ignore_index=True)
@@ -797,12 +821,7 @@ class StatsNFL(Stats):
             self.gamelog["player display name"] = self.gamelog["player display name"].apply(
                 remove_accents
             )
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(self.gamelog)
 
         self._coerce_numeric_gamelog()
 
@@ -1741,7 +1760,7 @@ class StatsNFL(Stats):
 
         comps = {}
         for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position == position]
+            positionProfile = playerProfile.loc[playerProfile.position == position].copy()
             positionProfile[filterStat[position]] = (
                 positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             )
@@ -1793,7 +1812,7 @@ class StatsNFL(Stats):
 
         comps = {}
         for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position == position]
+            positionProfile = playerProfile.loc[playerProfile.position == position].copy()
             positionProfile[filterStat[position]] = (
                 positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             )

@@ -52,16 +52,6 @@ _RNG_SEED: int = 69
     help="Select league to train on",
 )
 @click.option(
-    "--rebuild-filter/--no-rebuild-filter",
-    default=False,
-    help="Train with full feature set (ignore Filtered), then rerun SHAP and rewrite filter",
-)
-@click.option(
-    "--reset-markets",
-    default="",
-    help="Comma-separated league:market pairs (or just market for active league) to clear from Filtered before training",
-)
-@click.option(
     "--rebuild-correlations/--no-rebuild-correlations",
     default=False,
     help="Rebuild only the per-league correlation matrices and exit; skip the per-market training loop",
@@ -142,8 +132,6 @@ _RNG_SEED: int = 69
 def meditate(
     force,
     league,
-    rebuild_filter,
-    reset_markets,
     rebuild_correlations,
     log_level,
     deterministic,
@@ -167,7 +155,6 @@ def meditate(
         extra={
             "force": force,
             "league": league,
-            "rebuild_filter": rebuild_filter,
             "rebuild_correlations": rebuild_correlations,
             "deterministic": deterministic,
             "target_strategy": target_strategy,
@@ -179,7 +166,7 @@ def meditate(
     )
     click.echo(
         f"meditate starting: league={league} force={force} "
-        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations} "
+        f"rebuild_correlations={rebuild_correlations} "
         f"deterministic={deterministic}"
     )
     if not deterministic:
@@ -197,33 +184,6 @@ def meditate(
     # ``dist`` field that ``load_ship_config`` collapses out, so the bypass
     # can substitute a SkewNormal-vs-count-branch-appropriate strategy.
     stat_meta_full = load_stat_meta(STAT_META_PATH) if bypass_withholding else {}
-
-    if reset_markets.strip():
-        ff_path = pkg_resources.files(data) / "config" / "feature_filter.json"
-        with open(ff_path) as fh:
-            ff = json.load(fh)
-        for tok in [t.strip() for t in reset_markets.split(",") if t.strip()]:
-            if ":" in tok:
-                lg, mk = tok.split(":", 1)
-            else:
-                lg, mk = league, tok
-            mk = mk.strip()
-            ff.setdefault(lg, {}).setdefault("Filtered", {})
-            if mk in ff[lg]["Filtered"]:
-                del ff[lg]["Filtered"][mk]
-                log.info("Reset filter", extra={"league": lg, "market": mk})
-        # In deterministic mode the in-memory clear still propagates (so this
-        # run sees the reset), but skip persisting to feature_filter.json —
-        # deterministic runs use crippled hyperparameters and must never
-        # mutate production config.
-        if not deterministic:
-            with open(ff_path, "w") as fh:
-                json.dump(ff, fh, indent=4)
-        # Reload module-level feature_filter so this run sees the change
-        from sportstradamus import helpers as _hp
-
-        _hp.feature_filter.clear()
-        _hp.feature_filter.update(ff)
 
     nba = StatsNBA()
     nfl = StatsNFL()
@@ -334,7 +294,6 @@ def meditate(
                 market,
                 stat_data,
                 force,
-                rebuild_filter,
                 archive,
                 league_start_date,
                 deterministic=deterministic,

@@ -1,42 +1,32 @@
-"""SHAP-based feature importance computation and feature filter management."""
+"""Post-training SHAP importance diagnostics.
+
+After the 2026-05-27 no-filter rewire, this module no longer drives feature
+selection — ``get_stat_columns`` returns the full unfiltered candidate set
+unconditionally. The remaining job is drift monitoring: compute |SHAP| per
+feature on the held-out test set after each model trains and stash the result
+in ``data/training/feature_importances.csv`` so the dashboard can show
+importance trends over time.
+"""
 
 import importlib.resources as pkg_resources
 
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import shap
 
 from sportstradamus import data
-from sportstradamus import feature_selection as fs
-from sportstradamus.helpers import feature_filter
-
-# Temporal train/test split for the scouting regression pass; mirrors the same
-# 70/30 policy used in pipeline.py:_step_build_splits.
-_SCOUTING_TRAIN_FRACTION: float = 0.7
-
-# Distribution-specific columns to drop before SHAP analysis
-_DIST_DROP_COLS = {
-    "Gamma": ["Alpha"],
-    "ZAGamma": ["Alpha", "Gate"],
-    "NegBin": ["R", "NB_P"],
-    "ZINB": ["R", "NB_P", "Gate"],
-    "Mixture2G": ["STD"],
-}
 
 
-def _compute_shap_and_corr(model, test_df, distribution):
+def _compute_shap_and_corr(model, test_df):
     """SHAP |val| + Pearson corr for one market test set. Returns (shap_dict_pct, corr_dict)."""
-    X = test_df.drop(columns=["Result", "EV", "P"], errors="ignore")
+    # Allowlist from the trained booster — ignores diagnostic columns that
+    # _step_persist_artifacts appends to test_df after fit.
+    features = list(model.booster.feature_name())
+    X = test_df[features].copy()
     C = X.corrwith(test_df["Result"])
 
-    drop_cols = _DIST_DROP_COLS.get(distribution, [])
-    X.drop(columns=drop_cols, inplace=True, errors="ignore")
-    C.drop(drop_cols, inplace=True, errors="ignore")
-
-    features = X.columns
     for c in ("Home", "Player position"):
-        if c in features:
+        if c in X.columns:
             X[c] = X[c].astype("category")
 
     explainer = shap.TreeExplainer(model.booster)
@@ -66,11 +56,11 @@ def _refresh_all_aggregates(shap_df):
     return shap_df
 
 
-def compute_market_importance(league: str, market: str, model, test_df, distribution: str) -> None:
+def compute_market_importance(league: str, market: str, model, test_df) -> None:
     """Update one market column in feature_importances.csv + feature_correlations.csv.
     test_df must contain Result + features + (any dist params).
     """
-    shap_dict, corr_dict = _compute_shap_and_corr(model, test_df, distribution)
+    shap_dict, corr_dict = _compute_shap_and_corr(model, test_df)
 
     col_name = f"{league}_{market.replace(' ', '-')}"
     shap_path = pkg_resources.files(data) / "training" / "feature_importances.csv"
@@ -94,7 +84,7 @@ def compute_market_importance(league: str, market: str, model, test_df, distribu
 
 
 def see_features() -> None:
-    """Batch: rebuild full feature_importances.csv + feature_correlations.csv from all saved models."""
+    """Batch-rebuild feature_importances.csv + feature_correlations.csv from all saved models."""
     import pickle
 
     from tqdm import tqdm
@@ -109,9 +99,7 @@ def see_features() -> None:
             filedict = pickle.load(infile)
         test_path = pkg_resources.files(data) / ("test_sets/" + model_str.replace(".mdl", ".csv"))
         test_df = pd.read_csv(test_path, index_col=0)
-        shap_dict, corr_dict = _compute_shap_and_corr(
-            filedict["model"], test_df, filedict["distribution"]
-        )
+        shap_dict, corr_dict = _compute_shap_and_corr(filedict["model"], test_df)
         feature_importances.append(shap_dict)
         feature_correlations.append(corr_dict)
 
@@ -128,128 +116,3 @@ def see_features() -> None:
     )
 
 
-def _load_shap_corr_dfs():
-    """Read SHAP + corr CSVs, drop ALL aggregate cols, return (shap_df, corr_df).
-
-    Both frames have ``fillna(0)`` applied: the CSVs are wide-format with one
-    column per ``{league}_{market}`` cell, so any feature whose row is absent
-    from another league's market shows up as NaN. Downstream composite scoring
-    treats those NaN entries as zero correlation/importance — leaving the NaN
-    in place poisons ``normalize_scores`` (which uses ``ndarray.min/max`` that
-    propagate NaN) and silently destabilizes the KEEP_CAP sort.
-    """
-    sp = pkg_resources.files(data) / "training" / "feature_importances.csv"
-    cp = pkg_resources.files(data) / "training" / "feature_correlations.csv"
-    shap_df = pd.read_csv(sp, index_col=0) if sp.is_file() else pd.DataFrame()
-    corr_df = pd.read_csv(cp, index_col=0) if cp.is_file() else pd.DataFrame()
-    if not shap_df.empty:
-        drop = [c for c in shap_df.columns if c == "ALL" or c.endswith("_ALL")]
-        shap_df = shap_df.drop(columns=drop, errors="ignore").fillna(0)
-    if not corr_df.empty:
-        corr_df = corr_df.fillna(0)
-    return shap_df, corr_df
-
-
-def _save_feature_filter() -> None:
-    """Write the current feature_filter dict to feature_filter.json."""
-    import json
-
-    with open(pkg_resources.files(data) / "config" / "feature_filter.json", "w") as outfile:
-        json.dump(feature_filter, outfile, indent=4)
-
-
-def _scouting_shap_and_filter(league, market, M, stat_data):
-    """Train fixed-HP regression LightGBM on unfiltered features, write SHAP+corr columns
-    via compute_market_importance, rewrite Filtered bucket via filter_market.
-    Used only under --rebuild-filter, before the final Optuna training pass.
-    """
-    cols = stat_data.get_stat_columns(market, unfiltered=True)
-    cols = [c for c in cols if c in M.columns]
-    if not cols or "Result" not in M.columns:
-        return None
-
-    X = M[cols].copy()
-    for c in ("Home", "Player position"):
-        if c in X.columns:
-            X[c] = X[c].astype("category")
-
-    y = pd.to_numeric(M["Result"], errors="coerce").fillna(0).to_numpy()
-
-    M_sorted = M.sort_values("Date")
-    n_train = int(len(M_sorted) * _SCOUTING_TRAIN_FRACTION)
-    if n_train < 50:
-        return None
-    train_idx = M_sorted.index[:n_train]
-    test_idx = M_sorted.index[n_train:]
-    X_train, X_test = X.loc[train_idx], X.loc[test_idx]
-    pos_map = {ix: i for i, ix in enumerate(M.index)}
-    y_train = y[[pos_map[i] for i in train_idx]]
-    y_test = y[[pos_map[i] for i in test_idx]]
-
-    dtrain = lgb.Dataset(
-        X_train,
-        label=y_train,
-        free_raw_data=False,
-        categorical_feature=[c for c in ("Home", "Player position") if c in X_train.columns],
-    )
-    params = dict(
-        objective="regression",
-        learning_rate=0.05,
-        num_leaves=63,
-        min_child_samples=50,
-        feature_fraction=0.8,
-        bagging_fraction=0.8,
-        bagging_freq=1,
-        verbose=-1,
-        num_threads=8,
-    )
-    booster = lgb.train(params, dtrain, num_boost_round=200)
-
-    class _Shim:
-        pass
-
-    shim = _Shim()
-    shim.booster = booster
-
-    test_df = X_test.copy()
-    test_df["Result"] = y_test
-    compute_market_importance(league, market, shim, test_df, distribution="regression")
-    return filter_market(league, market)
-
-
-def filter_market(league: str, market: str) -> dict:
-    """Per-market filter rebuild. Updates feature_filter[league]['Filtered'][market]
-    in memory + on disk. Returns diagnostic dict.
-    """
-    shap_df, corr_df = _load_shap_corr_dfs()
-    new_filtered, diag = fs.filter_market_features(league, market, feature_filter, shap_df, corr_df)
-
-    # `feature_filter` is the same dict object as helpers.feature_filter (imported
-    # by reference). Mutating it here is what `get_stat_columns` will see on the
-    # next call — no clear/reload needed.
-    feature_filter.setdefault(league, {})
-    feature_filter[league].setdefault("Common", [])
-    feature_filter[league].setdefault("Always", {"_default": []})
-    feature_filter[league].setdefault("Filtered", {})
-    feature_filter[league]["Filtered"][market] = new_filtered
-    _save_feature_filter()
-    return diag
-
-
-def filter_features() -> None:
-    """Batch: rebuild Filtered bucket for every (league, market) seen in SHAP CSV.
-    Reuses per-market path so logic stays single-source.
-    """
-    shap_df, _ = _load_shap_corr_dfs()
-    if shap_df.empty:
-        return
-    seen = set()
-    for col in shap_df.columns:
-        if "_" not in col:
-            continue
-        league, raw_market = col.split("_", 1)
-        market = raw_market.replace("-", " ")
-        if (league, market) in seen:
-            continue
-        seen.add((league, market))
-        filter_market(league, market)

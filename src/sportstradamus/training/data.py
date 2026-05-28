@@ -126,7 +126,7 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
             & (M["Result"] <= M["Result"].quantile(_RESULT_OUTLIER_HIGH))
         )
         | (M["Archived"] == 1)
-    ]
+    ].copy()
 
     # --- 3. Clip lines to a realistic range ---
     # Use archived range when coverage is good; otherwise fall back to
