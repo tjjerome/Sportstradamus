@@ -1,122 +1,122 @@
 {
     "MLB": {
         "1st inning hits allowed": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "1st inning runs allowed": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "batter strikeouts": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "doubles": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "hits": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "hits allowed": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "hits+runs+rbi": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "hitter fantasy points underdog": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "hitter fantasy score": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "home runs": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "pitcher fantasy points underdog": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "pitcher fantasy score": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "pitcher strikeouts": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "pitches thrown": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "pitching outs": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "plateAppearances": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "rbi": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "runs": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "runs allowed": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "singles": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "stolen bases": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "total bases": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "walks": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "walks allowed": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         }
@@ -240,7 +240,7 @@
             "strategy": "none"
         },
         "completion percentage": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
@@ -260,12 +260,12 @@
             "strategy": "ratio_meanyr"
         },
         "first downs": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "fumbles lost": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
@@ -275,17 +275,17 @@
             "strategy": "none"
         },
         "longest completion": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "longest reception": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "longest rush": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
@@ -362,82 +362,82 @@
     },
     "NHL": {
         "assists": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "blocked": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "faceOffWins": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "fantasy points prizepicks": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "goalie fantasy points underdog": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "goals": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "goalsAgainst": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "hits": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "points": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "powerPlayPoints": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "saves": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "shots": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "shotsAgainst": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "skater fantasy points underdog": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "sogBS": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         },
         "timeOnIce": {
-            "dist": "Gamma",
+            "dist": "SkewNormal",
             "shipped": "withheld",
             "strategy": "none"
         }

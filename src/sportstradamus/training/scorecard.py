@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Offline regression-toward-the-mean diagnostic for trained LightGBMLSS models.
+"""Per-cell ship-gate scorecard for trained LightGBMLSS models.
 
-Reads the ``data/test_sets/{LEAGUE}_{market}.csv`` artifacts that ``meditate``
-already dumps (no network, no model reload) and quantifies prediction
-compression: the structural GBDT bias where high-mean players are
-under-predicted and low-mean players over-predicted.
+Read by :func:`compute_gates` from the test-set CSV ``meditate`` dumps
+(``data/test_sets/{LEAGUE}_{market}.csv``) and merged into the wide
+``model_stats.parquet`` row by ``training.report.report()``. The five offline
+gates (see ``docs/ship_gate.md``) plus the compression diagnostics live here so
+the meditate path and the standalone A/B-test harness share one implementation.
 
-Primary signal is the per-player-mean decile table — rows binned by ``MeanYr``
-(player season-to-date mean), reporting MAE and signed bias per decile. A
-monotone negative bias rising across the top deciles is the compression
-signature. The compression ratio ``std(pred) / std(actual)`` summarizes it in
-one number (1.0 = no compression; Wheeler 2012 measured ~7.7x on raw NBA PPG).
-
-Two modes:
-  * single  — score one or more test sets: a per-cell five-gate scorecard (with an
-              "oracle" bound) to data/tier0_scorecard.csv, plus the compression run log.
-  * diff    — compare a candidate test set against a baseline, reporting the gate
-              metrics for both (the supersede ship verdict lands in a later phase).
+Two entry points:
+  * :func:`compute_gates` — pure-Python function returning the per-cell
+    gate-column dict for inline use by ``training.report``. No file IO.
+  * Click CLI — exercise the same numerics against arbitrary test sets in
+    three modes: ``single`` (audit one or more cells; optional scorecard CSV
+    output goes to a sandbox path, never ``data/training/``), ``diff``
+    (baseline vs candidate, prints the supersede S1/S2/S3 verdict),
+    ``--live-window`` (score the last N days of settled history). The CLI
+    never writes ``model_stats.parquet`` — that file is owned by
+    :func:`training.report.report`.
 
 Usage
 -----
-  poetry run python3 -m sportstradamus.scripts.compression_eval --league NBA
-  poetry run python3 -m sportstradamus.scripts.compression_eval \
+  poetry run python3 -m sportstradamus.training.scorecard --league NBA
+  poetry run python3 -m sportstradamus.training.scorecard \
       --league NBA --market PTS --strategy ratio_baseline --scatter
-  poetry run python3 -m sportstradamus.scripts.compression_eval \
+  poetry run python3 -m sportstradamus.training.scorecard \
       --baseline data/test_sets/NBA_PTS.csv --candidate /tmp/NBA_PTS_centered.csv
 """
 
@@ -60,14 +60,13 @@ from sportstradamus.training.ship_config import load_ship_config, resolve_cell_s
 #     Gate 1 Brier-vs-book paired bootstrap, Gates 2/3 star/bench bias-vs-spread
 #     match (denominator = segment σ, NOT σ/sqrt(N) — SE collapses on large-N
 #     low-variance bench segments), Gate 4 IQR spread, Gate 5 equal-mass ECE.
-#     This module is MEASUREMENT-ONLY for these five: the per-cell metrics (plus
-#     an "oracle" bound) go to tier0_scorecard.csv with no pass/fail. Thresholds
-#     (k, the Gate-1 CI rule, the IQR floor, the ECE ceiling) are chosen after
-#     reading the numbers, then the overall verdict is wired back in. Cells with
-#     no book Odds leave Gate 1 blank; the ship convention is that a blank Gate 1
-#     auto-passes — no book to beat, model wins by default. Gate 5 (model-only
-#     calibration) does NOT use Odds, so it still computes for those cells; Gate 5
-#     blank means "couldn't compute" (no P or no Line), not auto-pass.
+#     The per-cell metrics (plus an "oracle" bound) land on the wide
+#     ``model_stats.parquet`` row via :func:`compute_gates`; ``apply_thresholds``
+#     wires the strict starter pass/fail. Cells with no book Odds leave Gate 1
+#     blank; the ship convention is that a blank Gate 1 auto-passes — no book
+#     to beat, model wins by default. Gate 5 (model-only calibration) does NOT
+#     use Odds, so it still computes for those cells; Gate 5 blank means
+#     "couldn't compute" (no P or no Line), not auto-pass.
 #   * research -> devel, supersede: pass all five + a paired Brier CI (current-new,
 #     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
 #     backdated Kelly sim (supersede_verdict, diff mode).
@@ -147,12 +146,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 RUN_LOG_PATH = _REPO_ROOT / "research" / "compression_eval" / "compression_eval_log.csv"
 SCATTER_DIR = Path("/tmp")
 
-# Per-cell gate scorecard SNAPSHOT (not the append-only run log). write_gate_scorecard
-# overwrites this on every full audit with one row per evaluated cell: the five gate
-# metrics for the model alongside an "oracle" column set (model = the true score
-# exactly) that bounds each gate. Measurement-only — no pass/fail until thresholds
-# are set. Readable as plain CSV without re-running the audit.
-TIER0_SCORECARD_PATH = pkg_resources.files(data) / "training" / "tier0_scorecard.csv"
+# Sandbox default for the CLI's --scorecard-out flag. ``training.report.report()`` is
+# the only writer for the production ``model_stats.parquet``; the CLI's full-audit mode
+# still writes a CSV snapshot for ad-hoc inspection, but it lands in /tmp by default so
+# A/B-test runs never clobber the per-cell view ``meditate`` produces.
+_SCORECARD_SANDBOX_DEFAULT = Path("/tmp/scorecard.csv")
 
 # --live-window mode constants (Stage 0 deliverable 0.3).
 # Look-back window for MeanYr computation from the per-league gamelog. Matches
@@ -981,6 +979,62 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     return out
 
 
+# Identity columns gate_row attaches that the inline caller already owns on
+# the row it's merging into — strip them off in compute_gates so the merge
+# can't fight the parent row over (league, market).
+_GATE_ROW_IDENTITY_KEYS = ("league", "market", "strategy")
+
+
+def compute_gates(
+    test_set_df: pd.DataFrame,
+    *,
+    league: str,
+    market: str,
+    strategy: str = "meditate",
+    pred_col: str = DEFAULT_PRED_COL,
+) -> dict[str, object]:
+    """Per-cell ship-gate column dict for inline use by ``training.report``.
+
+    Wraps :func:`gate_row` + :func:`apply_thresholds`, strips the identity
+    fields the parent row already owns, and renames ``n_rows`` to
+    ``n_validation`` so the merge into the wide stats row uses the column
+    name the parquet schema documents.
+
+    Args:
+        test_set_df: A frame produced by :func:`load_test_set`.
+        league: League code (``"NBA"``, ``"NFL"``, ...).
+        market: Market name in either slug (``"rushing-tds"``) or
+            human-readable (``"rushing tds"``) form. Spaces are converted
+            to hyphens before the per-cell training-strategy lookup.
+        strategy: Run label written into the row's ``strategy`` field
+            before it's stripped. Defaults to ``"meditate"`` so the inline
+            caller doesn't have to think about a label that's never read.
+        pred_col: Predicted-mean column to evaluate (``"EV"`` by default).
+
+    Returns:
+        Dict carrying every gate measurement, oracle bound, per-gate
+        ``g{1..5}_pass`` flag, and the overall ``ship`` verdict. Excludes
+        ``league``, ``market``, ``strategy``; renames ``n_rows`` →
+        ``n_validation``.
+    """
+    market_stem = market.replace(" ", "-")
+    decode_strategy = _resolve_decode_strategy(league, market_stem)
+    row = apply_thresholds(
+        gate_row(
+            test_set_df,
+            pred_col,
+            league=league,
+            market=market_stem,
+            strategy=strategy,
+            decode_strategy=decode_strategy,
+        )
+    )
+    gate_only = {k: v for k, v in row.items() if k not in _GATE_ROW_IDENTITY_KEYS}
+    if "n_rows" in gate_only:
+        gate_only["n_validation"] = gate_only.pop("n_rows")
+    return gate_only
+
+
 def write_gate_scorecard(rows: list[dict[str, object]], out_path: Path) -> pd.DataFrame:
     """Write the per-cell five-gate scorecard snapshot to CSV, one row per cell.
 
@@ -1548,7 +1602,12 @@ def _resolve_live_cells(
     "--scorecard-out",
     type=click.Path(path_type=Path),
     default=None,
-    help="Gate scorecard CSV path (default data/tier0_scorecard.csv; only a full audit auto-writes).",
+    help=(
+        "Gate scorecard CSV path. Defaults to /tmp/scorecard.csv on a full audit "
+        "(no --league/--market filter); a filtered run only writes when this flag "
+        "is given explicitly. The production model_stats.parquet is owned by "
+        "training.report.report() and is never touched by this CLI."
+    ),
 )
 @click.option(
     "--live-window",
@@ -1673,13 +1732,15 @@ def main(
             append_run_log(card, log_path)
 
     # Gate scorecard snapshot. Only a FULL audit (no league/market filter) auto-writes
-    # the canonical scorecard, so a filtered run can't clobber it down to a subset; a
-    # filtered run still writes when --scorecard-out is given explicitly.
+    # the sandbox scorecard, so a filtered run can't clobber it down to a subset; a
+    # filtered run still writes when --scorecard-out is given explicitly. The
+    # production model_stats.parquet is owned by training.report.report() and is
+    # never written from this CLI path.
     if write_scorecard and rows:
         if scorecard_out is not None:
             sc_path: Path | None = scorecard_out
         elif league is None and market is None:
-            sc_path = Path(str(TIER0_SCORECARD_PATH))
+            sc_path = _SCORECARD_SANDBOX_DEFAULT
         else:
             sc_path = None
         if sc_path is not None:

@@ -94,11 +94,12 @@ Sportstradamus/
 | `calibration.py` | `fit_book_weights`, `fit_model_weight`, `select_distribution` |
 | `shap.py` | Post-train drift-monitoring SHAP only: `compute_market_importance` writes per-cell |SHAP| + corr columns to `feature_importances.csv` / `feature_correlations.csv` after each model trains. `see_features` rebuilds the CSVs from all pickles in batch. SHAP no longer drives feature selection (2026-05-27 no-filter rewire) |
 | `correlate.py` | `correlate(league, stat_data)` — builds `{LEAGUE}_corr.csv` from player stat history |
-| `report.py` | `report()` — reads model pickles, writes `training_report.txt` |
+| `report.py` | `report()` — walks model pickles, builds the wide one-row-per-cell training stats, and writes `data/training/model_stats.parquet` + `model_stats.csv` mirror. `get_market_calibration` exposes `{kelly_shrinkage, brier_skill_score, model_weight}` for Kelly to read. Inline calls `training.scorecard.compute_gates` per cell |
+| `scorecard.py` | `compute_gates(test_set_df, *, league, market)` — five offline ship gates (G1 paired Brier CI, G2/G3 star/bench z, G4 IQR ratio, G5 Roelofs-debiased ECE) called inline by `report()` and exposed via a standalone click CLI (`poetry run python -m sportstradamus.training.scorecard ...`) for A/B-test runs. The CLI never writes `model_stats.parquet` |
 | `data.py` | `count_training_rows`, `trim_matrix`, `_histogram_weights` |
 | `hyperparams.py` | `warm_start_hyper_opt`, `_BoundedResponseFn` |
 | `markets.py` | `ALL_MARKETS` — per-league market name lists |
-| `config.py` | `load/save_distribution_config`, `load/save_zi_config` |
+| `config.py` | `load/save_distribution_config`, `load_shipped_config`, `load/save_zi_config` |
 | `__init__.py` | Re-exports the public API |
 
 ### `prediction/` — The `prophecize` pipeline
@@ -206,8 +207,8 @@ a gate before `optimize_comp_weights.py --save`.
 | Ship a cell that cleared Gate 1 | `src/sportstradamus/data/config/stat_meta.json` (`shipped: "withheld"` → `"devel"`) |
 | Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/config/prop_books.json` |
 | Add a player name alias | `src/sportstradamus/data/config/name_map.json` |
-| Understand a training report metric | [CLAUDE.md](CLAUDE.md) §Training Report Diagnostics — covers the raw-metric schema (`brier_score`, `log_loss`, `roc_auc`, `expected_calibration_error`, `brier_skill_score`, `kelly_shrinkage`, etc.) and the pinned `row_kind="book_baseline"` row |
-| Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → returns `{kelly_shrinkage, brier_skill_score, model_weight}` for a `(league, market)` from `data/model_stats.parquet` |
+| Understand a training stats metric | [CLAUDE.md](CLAUDE.md) §Training stats — covers the wide one-row-per-cell schema (identity, scoring rules, ECE, discrimination, EV/line, Kelly, shape, ship gates, hyperparameters) and the CSV mirror |
+| Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → returns `{kelly_shrinkage, brier_skill_score, model_weight}` for a `(league, market)` from `data/training/model_stats.parquet` |
 | Tune the Kelly resolution chain | `strategies/kelly.py` constants `LIVE_BLEND_FLOOR=25`, `LIVE_BLEND_FULL=100`, `DEFAULT_KELLY_FRACTION=0.25`, `MAX_FRACTION_OF_BANKROLL=0.005` |
 | Change the confidence cutoff for picks | `prediction/scoring.py` → `MIN_CONFIDENCE` |
 | Change the Optuna hyperparameter search space | `training/pipeline.py` → `train_market` objective |
@@ -247,7 +248,7 @@ commit runs `ruff check --fix` and `ruff format`. CI runs the same checks plus
    ```
 4. For changes that touch the training pipeline, run `meditate` on a small league
    (`--league WNBA` if in-season) to confirm models still train without errors and
-   the `training_report.txt` values look plausible.
+   the `data/training/model_stats.csv` values look plausible.
 5. For changes that touch `prophecize`, run it against the live data and spot-check
    the exported sheet.
 
@@ -341,7 +342,8 @@ A "market" is a betting category for a single stat in a single league (e.g. "ass
    columns for a single offer as `get_training_matrix` produces for training.
 
 6. Run `poetry run meditate --league {LEAGUE}` — the new market will train on the first
-   pass. Review its block in `training_report.txt`.
+   pass. Review its row in `data/training/model_stats.csv` (CSV mirror of the parquet
+   the dashboard reads).
 
 ---
 
@@ -425,7 +427,7 @@ code.**
 
 | Keep (production runtime / operator tools) | Leave off `devel` (dev-only research) |
 |---|---|
-| `baselines.py`, pipeline dispatch, `model_prob` decode | `compression_eval` (offline A/B harness) |
+| `baselines.py`, pipeline dispatch, `model_prob` decode, `training/scorecard.py` (inline-called by `report()`) | `training/scorecard.py` standalone-CLI A/B mode (single/diff/live-window flags) — keep the module, leave the research CLI exercises off |
 | `ship_config.py` + `helpers/io.py` model-pickle helpers + `meditate` wiring | `zinb-routing-diagnostics` + the **`statsmodels`** dependency it pulls in |
 | `nightly` live-metrics, `check-graduation`, `backfill-live-metrics` | `icc-diagnostics` |
 | Production data / feature fixes | the diagnostics' test suites; any `/tmp` harness |
