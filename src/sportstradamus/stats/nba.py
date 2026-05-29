@@ -7,7 +7,6 @@ import pickle
 import warnings
 from datetime import date, datetime, timedelta
 from io import StringIO
-from time import sleep
 
 import line_profiler
 import nba_api.stats.endpoints as nba
@@ -32,7 +31,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import write_gamelog
+from sportstradamus.helpers.io import write_gamelog, read_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
     _VOLUME_SCALE_RATIO_CAP,
@@ -42,18 +41,13 @@ from sportstradamus.stats.base import (
     clean_data,
     scraper,
 )
+from sportstradamus.stats import nba_client
+from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.nba_client import NBAStatsError
 
 
 class StatsNBA(Stats):
-    """A class for handling and analyzing NBA statistics.
-    Inherits from the Stats parent class.
-
-    Additional Attributes:
-        None
-
-    Additional Methods:
-        None
-    """
+    """NBA player statistics: game log loading, feature engineering, and prediction."""
 
     def __init__(self):
         """Initialize the StatsNBA class."""
@@ -382,6 +376,13 @@ class StatsNBA(Stats):
         self.tiebreaker_stat = "USG_PCT short"
         self._volume_model_cache = None
 
+    def load(self) -> None:
+        """Load data from files."""
+        nba_data = read_gamelog("nba")
+        self.players = nba_data["players"]
+        self.gamelog = nba_data["gamelog"]
+        self.teamlog = nba_data["teamlog"]
+
     def build_comp_profile(self, playerList=None):
         """Build merged player profile DataFrame for comp computation.
 
@@ -553,7 +554,7 @@ class StatsNBA(Stats):
 
         self.comps = comps
 
-    def update(self):
+    def update(self) -> None:
         """Update data from the web API."""
         # Fix corrupted POS values (integer 0 or None) from prior fillna(0) bug
         # Step 1: Clean self.players — try to resolve from other seasons/teams
@@ -612,125 +613,70 @@ class StatsNBA(Stats):
             },
             inplace=True,
         )
-        i = 0
-        while i < 10:
-            try:
-                with tqdm(
-                    total=8, desc="NBA league endpoints", unit="endpoint", leave=False
-                ) as pbar:
-                    pbar.set_postfix_str("PlayerBioStats")
-                    playerBios = nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats(
-                        season=self.season
-                    ).get_normalized_dict()["LeagueDashPlayerBioStats"]
-                    pbar.update(1)
 
-                    pbar.set_postfix_str("ShotLocations")
-                    shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(
-                        **{
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "distance_range": "By Zone",
-                            "per_mode_detailed": "PerGame",
-                        }
-                    ).get_dict()["resultSets"]
-                    pbar.update(1)
+        def _synergy(play_type: str) -> dict:
+            return nba_client.fetch(
+                nba.synergyplaytypes.SynergyPlayTypes,
+                league_id="00",
+                season=self.season,
+                season_type_all_star="Regular Season",
+                per_mode_simple="PerGame",
+                player_or_team_abbreviation="P",
+                type_grouping_nullable="offensive",
+                play_type_nullable=play_type,
+            ).get_dict()["resultSets"][0]
 
-                    pbar.set_postfix_str("Synergy:Postup")
-                    postup = nba.synergyplaytypes.SynergyPlayTypes(
-                        **{
-                            "league_id": "00",
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "per_mode_simple": "PerGame",
-                            "player_or_team_abbreviation": "P",
-                            "type_grouping_nullable": "offensive",
-                            "play_type_nullable": "Postup",
-                        }
-                    ).get_dict()["resultSets"][0]
-                    pbar.update(1)
+        try:
+            with tqdm(total=8, desc="NBA league endpoints", unit="endpoint", leave=False) as pbar:
+                pbar.set_postfix_str("PlayerBioStats")
+                playerBios = nba_client.fetch(
+                    nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats,
+                    season=self.season,
+                ).get_normalized_dict()["LeagueDashPlayerBioStats"]
+                pbar.update(1)
 
-                    pbar.set_postfix_str("Synergy:Handoff")
-                    handoff = nba.synergyplaytypes.SynergyPlayTypes(
-                        **{
-                            "league_id": "00",
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "per_mode_simple": "PerGame",
-                            "player_or_team_abbreviation": "P",
-                            "type_grouping_nullable": "offensive",
-                            "play_type_nullable": "Handoff",
-                        }
-                    ).get_dict()["resultSets"][0]
-                    pbar.update(1)
+                pbar.set_postfix_str("ShotLocations")
+                shotData = nba_client.fetch(
+                    nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations,
+                    season=self.season,
+                    season_type_all_star="Regular Season",
+                    distance_range="By Zone",
+                    per_mode_detailed="PerGame",
+                ).get_dict()["resultSets"]
+                pbar.update(1)
 
-                    pbar.set_postfix_str("Synergy:Isolation")
-                    isolation = nba.synergyplaytypes.SynergyPlayTypes(
-                        **{
-                            "league_id": "00",
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "per_mode_simple": "PerGame",
-                            "player_or_team_abbreviation": "P",
-                            "type_grouping_nullable": "offensive",
-                            "play_type_nullable": "Isolation",
-                        }
-                    ).get_dict()["resultSets"][0]
-                    pbar.update(1)
+                pbar.set_postfix_str("Synergy:Postup")
+                postup = _synergy("Postup")
+                pbar.update(1)
 
-                    pbar.set_postfix_str("Synergy:PRBallHandler")
-                    picknroll = nba.synergyplaytypes.SynergyPlayTypes(
-                        **{
-                            "league_id": "00",
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "per_mode_simple": "PerGame",
-                            "player_or_team_abbreviation": "P",
-                            "type_grouping_nullable": "offensive",
-                            "play_type_nullable": "PRBallHandler",
-                        }
-                    ).get_dict()["resultSets"][0]
-                    pbar.update(1)
+                pbar.set_postfix_str("Synergy:Handoff")
+                handoff = _synergy("Handoff")
+                pbar.update(1)
 
-                    pbar.set_postfix_str("Synergy:Spotup")
-                    spotup = nba.synergyplaytypes.SynergyPlayTypes(
-                        **{
-                            "league_id": "00",
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "per_mode_simple": "PerGame",
-                            "player_or_team_abbreviation": "P",
-                            "type_grouping_nullable": "offensive",
-                            "play_type_nullable": "Spotup",
-                        }
-                    ).get_dict()["resultSets"][0]
-                    pbar.update(1)
+                pbar.set_postfix_str("Synergy:Isolation")
+                isolation = _synergy("Isolation")
+                pbar.update(1)
 
-                    pbar.set_postfix_str("Synergy:OffRebound")
-                    putback = nba.synergyplaytypes.SynergyPlayTypes(
-                        **{
-                            "league_id": "00",
-                            "season": self.season,
-                            "season_type_all_star": "Regular Season",
-                            "per_mode_simple": "PerGame",
-                            "player_or_team_abbreviation": "P",
-                            "type_grouping_nullable": "offensive",
-                            "play_type_nullable": "OffRebound",
-                        }
-                    ).get_dict()["resultSets"][0]
-                    pbar.update(1)
-                break
-            except Exception as e:
-                logger.warning("NBA league endpoint fetch failed (attempt %d/10): %s", i + 1, e)
-                playerBios = []
-                shotData = {"rowSet": [], "headers": [{}, {"columnNames": []}]}
-                postup = {"rowSet": [], "headers": []}
-                handoff = {"rowSet": [], "headers": []}
-                isolation = {"rowSet": [], "headers": []}
-                picknroll = {"rowSet": [], "headers": []}
-                spotup = {"rowSet": [], "headers": []}
-                putback = {"rowSet": [], "headers": []}
-                sleep(0.1)
-                i = i + 1
+                pbar.set_postfix_str("Synergy:PRBallHandler")
+                picknroll = _synergy("PRBallHandler")
+                pbar.update(1)
+
+                pbar.set_postfix_str("Synergy:Spotup")
+                spotup = _synergy("Spotup")
+                pbar.update(1)
+
+                pbar.set_postfix_str("Synergy:OffRebound")
+                putback = _synergy("OffRebound")
+                pbar.update(1)
+        except NBAStatsError:
+            playerBios = []
+            shotData = {"rowSet": [], "headers": [{}, {"columnNames": []}]}
+            postup = {"rowSet": [], "headers": []}
+            handoff = {"rowSet": [], "headers": []}
+            isolation = {"rowSet": [], "headers": []}
+            picknroll = {"rowSet": [], "headers": []}
+            spotup = {"rowSet": [], "headers": []}
+            putback = {"rowSet": [], "headers": []}
 
         playerBios = pd.DataFrame(playerBios)
         shotData = pd.DataFrame(shotData["rowSet"], columns=shotData["headers"][1]["columnNames"])
@@ -936,7 +882,7 @@ class StatsNBA(Stats):
                         "Home": True,
                     }
 
-        except:
+        except Exception:
             pass
 
         params = {
@@ -952,150 +898,102 @@ class StatsNBA(Stats):
         teamlog = []
         sco_teamlog = []
         adv_teamlog = []
-        i = 0
         include_playin = (today.month == 4) or (today - latest_date).days > 150
         include_playoffs = (4 <= today.month <= 6) or (today - latest_date).days > 150
         total_gamelog_calls = 6 + (6 if include_playin else 0) + (6 if include_playoffs else 0)
 
-        while i < 10:
-            try:
-                with tqdm(
-                    total=total_gamelog_calls,
-                    desc="NBA player/team gamelogs",
-                    unit="endpoint",
-                    leave=False,
-                ) as pbar:
-                    pbar.set_postfix_str("PlayerGameLogs:Base")
-                    nba_gamelog = nba.playergamelogs.PlayerGameLogs(**params).get_normalized_dict()[
-                        "PlayerGameLogs"
-                    ]
+        def _player_logs(measure: str | None = None) -> list:
+            extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
+            return nba_client.fetch(
+                nba.playergamelogs.PlayerGameLogs, **(params | extra)
+            ).get_normalized_dict()["PlayerGameLogs"]
+
+        def _team_logs(measure: str | None = None) -> list:
+            extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
+            return nba_client.fetch(
+                nba.teamgamelogs.TeamGameLogs, **(params | extra)
+            ).get_normalized_dict()["TeamGameLogs"]
+
+        try:
+            with tqdm(
+                total=total_gamelog_calls,
+                desc="NBA player/team gamelogs",
+                unit="endpoint",
+                leave=False,
+            ) as pbar:
+                pbar.set_postfix_str("PlayerGameLogs:Base")
+                nba_gamelog = _player_logs()
+                pbar.update(1)
+
+                pbar.set_postfix_str("PlayerGameLogs:Advanced")
+                adv_gamelog = _player_logs("Advanced")
+                pbar.update(1)
+
+                pbar.set_postfix_str("PlayerGameLogs:Usage")
+                usg_gamelog = _player_logs("Usage")
+                pbar.update(1)
+
+                pbar.set_postfix_str("TeamGameLogs:Base")
+                teamlog = _team_logs()
+                pbar.update(1)
+
+                pbar.set_postfix_str("TeamGameLogs:Scoring")
+                sco_teamlog = _team_logs("Scoring")
+                pbar.update(1)
+
+                pbar.set_postfix_str("TeamGameLogs:Advanced")
+                adv_teamlog = _team_logs("Advanced")
+                pbar.update(1)
+
+                # Fetch playoffs game logs
+                if include_playin:
+                    params.update({"season_type_nullable": "PlayIn"})
+                    pbar.set_postfix_str("PlayIn:PlayerGameLogs:Base")
+                    nba_gamelog.extend(_player_logs())
                     pbar.update(1)
-
-                    pbar.set_postfix_str("PlayerGameLogs:Advanced")
-                    adv_gamelog = nba.playergamelogs.PlayerGameLogs(
-                        **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                    ).get_normalized_dict()["PlayerGameLogs"]
+                    pbar.set_postfix_str("PlayIn:PlayerGameLogs:Advanced")
+                    adv_gamelog.extend(_player_logs("Advanced"))
                     pbar.update(1)
-
-                    pbar.set_postfix_str("PlayerGameLogs:Usage")
-                    usg_gamelog = nba.playergamelogs.PlayerGameLogs(
-                        **(params | {"measure_type_player_game_logs_nullable": "Usage"})
-                    ).get_normalized_dict()["PlayerGameLogs"]
+                    pbar.set_postfix_str("PlayIn:PlayerGameLogs:Usage")
+                    usg_gamelog.extend(_player_logs("Usage"))
                     pbar.update(1)
-
-                    pbar.set_postfix_str("TeamGameLogs:Base")
-                    teamlog = nba.teamgamelogs.TeamGameLogs(**(params)).get_normalized_dict()[
-                        "TeamGameLogs"
-                    ]
+                    pbar.set_postfix_str("PlayIn:TeamGameLogs:Base")
+                    teamlog.extend(_team_logs())
                     pbar.update(1)
-
-                    pbar.set_postfix_str("TeamGameLogs:Scoring")
-                    sco_teamlog = nba.teamgamelogs.TeamGameLogs(
-                        **(params | {"measure_type_player_game_logs_nullable": "Scoring"})
-                    ).get_normalized_dict()["TeamGameLogs"]
+                    pbar.set_postfix_str("PlayIn:TeamGameLogs:Scoring")
+                    sco_teamlog.extend(_team_logs("Scoring"))
                     pbar.update(1)
-
-                    pbar.set_postfix_str("TeamGameLogs:Advanced")
-                    adv_teamlog = nba.teamgamelogs.TeamGameLogs(
-                        **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                    ).get_normalized_dict()["TeamGameLogs"]
+                    pbar.set_postfix_str("PlayIn:TeamGameLogs:Advanced")
+                    adv_teamlog.extend(_team_logs("Advanced"))
                     pbar.update(1)
-
-                    # Fetch playoffs game logs
-                    if include_playin:
-                        params.update({"season_type_nullable": "PlayIn"})
-                        pbar.set_postfix_str("PlayIn:PlayerGameLogs:Base")
-                        nba_gamelog.extend(
-                            nba.playergamelogs.PlayerGameLogs(**params).get_normalized_dict()[
-                                "PlayerGameLogs"
-                            ]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("PlayIn:PlayerGameLogs:Advanced")
-                        adv_gamelog.extend(
-                            nba.playergamelogs.PlayerGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                            ).get_normalized_dict()["PlayerGameLogs"]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("PlayIn:PlayerGameLogs:Usage")
-                        usg_gamelog.extend(
-                            nba.playergamelogs.PlayerGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Usage"})
-                            ).get_normalized_dict()["PlayerGameLogs"]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("PlayIn:TeamGameLogs:Base")
-                        teamlog.extend(
-                            nba.teamgamelogs.TeamGameLogs(**(params)).get_normalized_dict()[
-                                "TeamGameLogs"
-                            ]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("PlayIn:TeamGameLogs:Scoring")
-                        sco_teamlog.extend(
-                            nba.teamgamelogs.TeamGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Scoring"})
-                            ).get_normalized_dict()["TeamGameLogs"]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("PlayIn:TeamGameLogs:Advanced")
-                        adv_teamlog.extend(
-                            nba.teamgamelogs.TeamGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                            ).get_normalized_dict()["TeamGameLogs"]
-                        )
-                        pbar.update(1)
-                    if include_playoffs:
-                        params.update({"season_type_nullable": "Playoffs"})
-                        pbar.set_postfix_str("Playoffs:PlayerGameLogs:Base")
-                        nba_gamelog.extend(
-                            nba.playergamelogs.PlayerGameLogs(**params).get_normalized_dict()[
-                                "PlayerGameLogs"
-                            ]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("Playoffs:PlayerGameLogs:Advanced")
-                        adv_gamelog.extend(
-                            nba.playergamelogs.PlayerGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                            ).get_normalized_dict()["PlayerGameLogs"]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("Playoffs:PlayerGameLogs:Usage")
-                        usg_gamelog.extend(
-                            nba.playergamelogs.PlayerGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Usage"})
-                            ).get_normalized_dict()["PlayerGameLogs"]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("Playoffs:TeamGameLogs:Base")
-                        teamlog.extend(
-                            nba.teamgamelogs.TeamGameLogs(**(params)).get_normalized_dict()[
-                                "TeamGameLogs"
-                            ]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("Playoffs:TeamGameLogs:Scoring")
-                        sco_teamlog.extend(
-                            nba.teamgamelogs.TeamGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Scoring"})
-                            ).get_normalized_dict()["TeamGameLogs"]
-                        )
-                        pbar.update(1)
-                        pbar.set_postfix_str("Playoffs:TeamGameLogs:Advanced")
-                        adv_teamlog.extend(
-                            nba.teamgamelogs.TeamGameLogs(
-                                **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                            ).get_normalized_dict()["TeamGameLogs"]
-                        )
-                        pbar.update(1)
-
-                break
-            except Exception as e:
-                logger.warning("NBA gamelog fetch failed (attempt %d/10): %s", i + 1, e)
-                sleep(0.2)
-                i += 1
+                if include_playoffs:
+                    params.update({"season_type_nullable": "Playoffs"})
+                    pbar.set_postfix_str("Playoffs:PlayerGameLogs:Base")
+                    nba_gamelog.extend(_player_logs())
+                    pbar.update(1)
+                    pbar.set_postfix_str("Playoffs:PlayerGameLogs:Advanced")
+                    adv_gamelog.extend(_player_logs("Advanced"))
+                    pbar.update(1)
+                    pbar.set_postfix_str("Playoffs:PlayerGameLogs:Usage")
+                    usg_gamelog.extend(_player_logs("Usage"))
+                    pbar.update(1)
+                    pbar.set_postfix_str("Playoffs:TeamGameLogs:Base")
+                    teamlog.extend(_team_logs())
+                    pbar.update(1)
+                    pbar.set_postfix_str("Playoffs:TeamGameLogs:Scoring")
+                    sco_teamlog.extend(_team_logs("Scoring"))
+                    pbar.update(1)
+                    pbar.set_postfix_str("Playoffs:TeamGameLogs:Advanced")
+                    adv_teamlog.extend(_team_logs("Advanced"))
+                    pbar.update(1)
+        except NBAStatsError:
+            # All-or-nothing: a partial pull would mix populated and empty logs.
+            nba_gamelog = []
+            adv_gamelog = []
+            usg_gamelog = []
+            teamlog = []
+            sco_teamlog = []
+            adv_teamlog = []
 
         adv_teamlog_idx = {(g["TEAM_ID"], g["GAME_ID"]): g for g in adv_teamlog}
         sco_teamlog_idx = {(g["TEAM_ID"], g["GAME_ID"]): g for g in sco_teamlog}
@@ -1202,11 +1100,13 @@ class StatsNBA(Stats):
                 if position is None:
                     try:
                         position = (
-                            nba.commonplayerinfo.CommonPlayerInfo(player_id=player_id)
+                            nba_client.fetch(
+                                nba.commonplayerinfo.CommonPlayerInfo, player_id=player_id
+                            )
                             .get_normalized_dict()["CommonPlayerInfo"][0]
                             .get("POSITION")
                         )
-                    except:
+                    except NBAStatsError:
                         position = "Forward-Guard"
                     position = position_map.get(position, "W")
 
