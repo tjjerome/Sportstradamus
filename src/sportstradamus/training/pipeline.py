@@ -101,6 +101,11 @@ _SHAPE_CEILING_MULTIPLIER: float = 2.0
 # Fixed RNG seed for --deterministic runs (debug/eval only).
 DETERMINISTIC_SEED = 1234
 
+# RNG seed for the val/test random split inside ``_step_build_splits``.
+# Arbitrary but fixed so the split boundary is stable across reruns on the
+# same dataset.
+_VAL_SPLIT_RANDOM_STATE: int = 25
+
 # Deterministic-mode model pickles live OUTSIDE the installed package tree so
 # the research harness can iterate on them without polluting the production
 # model dir (`src/sportstradamus/data/models/`). Resolved off __file__ so the
@@ -595,6 +600,46 @@ def _step_persist_matrix_and_comps(
     return M
 
 
+# Must survive pruning even when constant: `set_model_start_values`
+# (helpers/distributions.py) reads these unconditionally. Canonical
+# failure: NBA MIN has ZeroYr ≡ 0 (gamelog excludes DNPs → minutes
+# never zero). LightGBM cost of carrying a constant feature is negligible.
+_SEEDING_REQUIRED_COLUMNS: tuple[str, ...] = ("MeanYr", "STDYr", "ZeroYr")
+
+
+def _prune_uninformative_features(
+    X_train: pd.DataFrame, categorical_cols: list[str]
+) -> list[str]:
+    """Return the subset of ``X_train.columns`` LightGBM can split on.
+
+    A column is dropped when ``X_train`` shows it is entirely NaN or has
+    fewer than two distinct non-NaN values (zero variance). Such columns
+    can never improve the loss — LightGBM has nothing to split on — so
+    dropping them is mathematically lossless. The win is wall-time:
+    per-trial Optuna cost scales linearly with feature count, and the
+    2026-05-27 no-filter rewire ballooned the candidate set to ~440
+    features per NFL cell, of which a non-trivial slice is sparse on a
+    given cell.
+
+    Categorical columns and ``_SEEDING_REQUIRED_COLUMNS`` are always kept.
+    LightGBM treats categoricals as a special split type, and the seeding
+    columns are consumed unconditionally by ``set_model_start_values``
+    regardless of whether they have splittable variance.
+    """
+    keep: list[str] = []
+    for col in X_train.columns:
+        if col in categorical_cols or col in _SEEDING_REQUIRED_COLUMNS:
+            keep.append(col)
+            continue
+        s = X_train[col]
+        if s.isna().all():
+            continue
+        if s.nunique(dropna=True) < 2:
+            continue
+        keep.append(col)
+    return keep
+
+
 def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     """Build feature matrix, temporal 70/30 split, then 50/50 test/validation.
 
@@ -638,8 +683,22 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     X_test = X.loc[test_idx]
     y_test = y.loc[test_idx]
 
+    # Drop columns LightGBM cannot meaningfully split on. The mask is
+    # computed on ``X_train`` only so test rows never influence which
+    # features survive. The post-prune column list is persisted as
+    # ``expected_columns`` in the model pickle (see ``_build_filedict``);
+    # the inference path slices each offer's feature frame to that list
+    # before ``model.predict`` (see ``match_offers`` in
+    # ``prediction/scoring.py``), so pruning at train time propagates
+    # cleanly to serving without any inference-side change.
+    kept_cols = _prune_uninformative_features(X_train, categories)
+    if len(kept_cols) < len(X.columns):
+        X = X[kept_cols]
+        X_train = X_train[kept_cols]
+        X_test = X_test[kept_cols]
+
     X_test, X_validation, y_test, y_validation = train_test_split(
-        X_test, y_test, test_size=0.5, random_state=25
+        X_test, y_test, test_size=0.5, random_state=_VAL_SPLIT_RANDOM_STATE
     )
 
     B_train = M.loc[X_train.index, ["Line", "Odds", "EV"]]
@@ -1249,10 +1308,10 @@ def _step_persist_artifacts(
     X_test["P"] = y_proba_filt[:, 1]
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
-    # compression-eval harness can score artifacts without overwriting
-    # production. Training-data parquet and the whole-suite report() stay
-    # suppressed (input is unchanged under input-freeze; report() is not
-    # per-market and would clobber the production training_report.txt).
+    # scorecard harness can score artifacts without overwriting production.
+    # Training-data parquet and the whole-suite report() stay suppressed
+    # (input is unchanged under input-freeze; report() is not per-market and
+    # would clobber the production data/training/model_stats.{parquet,csv}).
     # Test-set CSVs remain inside the package data tree; only the model
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
@@ -1894,7 +1953,9 @@ def _step_select_distribution(
         ).sum()
         cv = max(cv, _SKEWNORMAL_CV_FLOOR)
         shape_ceiling = None
-        marginal_shape = None
+        # NaN not None: count-branch marginal-shape doesn't apply here, and
+        # float(None) raises TypeError in _wide_row's _diag() helper.
+        marginal_shape = float("nan")
 
         if hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD:
             nonzero_mask = y_train_labels > 0

@@ -46,6 +46,21 @@ def load_distribution_config() -> dict:
     return {lg: {m: cell["dist"] for m, cell in mkts.items()} for lg, mkts in meta.items()}
 
 
+def load_shipped_config() -> dict:
+    """Read ``{league: {market: shipped}}`` derived from ``stat_meta.json``.
+
+    ``shipped`` is one of ``"withheld"`` / ``"devel"`` / ``"main"`` and drives
+    the release surface for each cell. The training-stats parquet carries it
+    so dashboards and downstream tooling can filter by shipping state without
+    re-reading ``stat_meta.json``.
+    """
+    meta = _load(_STAT_META_PATH)
+    return {
+        lg: {m: cell.get("shipped", "withheld") for m, cell in mkts.items()}
+        for lg, mkts in meta.items()
+    }
+
+
 def save_distribution_config(config: dict) -> None:
     """Persist a full ``{league: {market: dist}}`` map into ``stat_meta.json``.
 

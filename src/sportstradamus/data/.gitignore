@@ -3,7 +3,6 @@ feature_importances.xlsx
 config/stat_calibration.json
 config/book_weights.json
 config/goalies.json
-training/training_report.txt
 leagues/*/comps.json
 leagues/*/corr_same_team.parquet
 leagues/*/corr_opposing.parquet

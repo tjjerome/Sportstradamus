@@ -9,19 +9,43 @@ importance trends over time.
 """
 
 import importlib.resources as pkg_resources
+import pickle
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import shap
+from tqdm import tqdm
 
 from sportstradamus import data
 
 
+def _collapse_multi_output_shap(subvals: np.ndarray | list) -> np.ndarray:
+    """Reduce raw SHAP TreeExplainer output to a 2-D ``(samples, features)`` |SHAP| array.
+
+    SHAP returns one of three shapes depending on version + booster output dim:
+
+    * 2-D ``(samples, features)`` for single-output boosters — abs and pass through.
+    * ``list`` of ``(samples, features)`` per output, older SHAP — sum |·| across outputs.
+    * 3-D ``(samples, features, outputs)`` for multi-output, newer SHAP — sum |·| across outputs.
+
+    All three reductions are exercised by ``tests/golden/test_shap_reduction.py``;
+    if SHAP changes its return shape again the test fails before the live pipeline does.
+    """
+    if isinstance(subvals, list):
+        return np.sum([np.abs(sv) for sv in subvals], axis=0)
+    arr = np.asarray(subvals)
+    if arr.ndim == 3:
+        return np.abs(arr).sum(axis=-1)
+    return np.abs(arr)
+
+
 def _compute_shap_and_corr(model, test_df):
     """SHAP |val| + Pearson corr for one market test set. Returns (shap_dict_pct, corr_dict)."""
-    # Allowlist from the trained booster — ignores diagnostic columns that
-    # _step_persist_artifacts appends to test_df after fit.
-    features = list(model.booster.feature_name())
+    # LightGBM normalizes " " to "_" in feature names; invert via test_df.columns so stats
+    # with underscores in their original name (e.g. "fantasy_points_underdog") still resolve.
+    rename_map = {c.replace(" ", "_"): c for c in test_df.columns}
+    features = [rename_map[f] for f in model.booster.feature_name()]
     X = test_df[features].copy()
     C = X.corrwith(test_df["Result"])
 
@@ -30,11 +54,9 @@ def _compute_shap_and_corr(model, test_df):
             X[c] = X[c].astype("category")
 
     explainer = shap.TreeExplainer(model.booster)
-    subvals = explainer.shap_values(X)
-    if isinstance(subvals, list):
-        subvals = np.sum([np.abs(sv) for sv in subvals], axis=0)
+    subvals = _collapse_multi_output_shap(explainer.shap_values(X))
 
-    vals = np.mean(np.abs(subvals), axis=0)
+    vals = np.mean(subvals, axis=0)
     total = np.sum(vals)
     if total > 0:
         vals = vals / total * 100
@@ -56,9 +78,18 @@ def _refresh_all_aggregates(shap_df):
     return shap_df
 
 
-def compute_market_importance(league: str, market: str, model, test_df) -> None:
+def compute_market_importance(
+    league: str, market: str, model: Any, test_df: pd.DataFrame
+) -> None:
     """Update one market column in feature_importances.csv + feature_correlations.csv.
-    test_df must contain Result + features + (any dist params).
+
+    Args:
+        league: League identifier string (e.g. "NBA", "NFL").
+        market: Market name (e.g. "points", "attempts").
+        model: Trained LightGBMLSS model with a `.booster` attribute.
+        test_df: Held-out test set. Must contain "Result" plus all feature
+            columns the booster was trained on; extra distribution-parameter
+            columns are ignored.
     """
     shap_dict, corr_dict = _compute_shap_and_corr(model, test_df)
 
@@ -85,10 +116,6 @@ def compute_market_importance(league: str, market: str, model, test_df) -> None:
 
 def see_features() -> None:
     """Batch-rebuild feature_importances.csv + feature_correlations.csv from all saved models."""
-    import pickle
-
-    from tqdm import tqdm
-
     model_list = sorted(
         f.name for f in (pkg_resources.files(data) / "models").iterdir() if ".mdl" in f.name
     )
