@@ -5,7 +5,6 @@ import json
 import warnings
 from datetime import datetime, timedelta
 from io import StringIO
-from time import sleep
 
 import line_profiler
 import nba_api.stats.endpoints as nba
@@ -33,8 +32,10 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 from sportstradamus.stats.nba import StatsNBA
+from sportstradamus.stats.nba_client import NBAStatsError
 
 
 class StatsWNBA(StatsNBA):
@@ -69,56 +70,49 @@ class StatsWNBA(StatsNBA):
 
         pos_map = {"G-F": "G", "F-G": "F", "F-C": "C"}
 
-        i = 0
-        while i < 10:
-            try:
-                player_df = nba.playerindex.PlayerIndex(
-                    season=self.season_start.year, league_id="10", historical_nullable=1
-                ).get_normalized_dict()["PlayerIndex"]
-                player_df = pd.DataFrame(player_df).rename(
-                    columns={"POSITION": "POS", "Position": "POS", "PERSON_ID": "PLAYER_ID"}
-                )
-                player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(
-                    lambda x: team_abbr_map.get(x, x)
-                )
-                player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
-                break
-            except:
-                player_df = pd.DataFrame(
-                    columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "POS"]
-                )
+        try:
+            player_df = nba_client.fetch(
+                nba.playerindex.PlayerIndex,
+                season=self.season_start.year,
+                league_id="10",
+                historical_nullable=1,
+            ).get_normalized_dict()["PlayerIndex"]
+            player_df = pd.DataFrame(player_df).rename(
+                columns={"POSITION": "POS", "Position": "POS", "PERSON_ID": "PLAYER_ID"}
+            )
+            player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(
+                lambda x: team_abbr_map.get(x, x)
+            )
+            player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
+        except NBAStatsError:
+            player_df = pd.DataFrame(
+                columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "POS"]
+            )
 
-            sleep(0.1)
-            i = i + 1
+        try:
+            playerBios = nba_client.fetch(
+                nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats,
+                season=self.season_start.year,
+                league_id="10",
+            ).get_normalized_dict()["LeagueDashPlayerBioStats"]
 
-        i = 0
-        while i < 10:
-            try:
-                playerBios = nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats(
-                    season=self.season_start.year, league_id="10"
-                ).get_normalized_dict()["LeagueDashPlayerBioStats"]
-
-                shotData = nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations(
-                    **{
-                        "season": self.season_start.year,
-                        "league_id_nullable": "10",
-                        "season_type_all_star": "Regular Season",
-                        "distance_range": "By Zone",
-                        "per_mode_detailed": "Per40",
-                    }
-                ).get_dict()["resultSets"]
-                break
-            except:
-                playerBios = {
-                    "PLAYER_NAME": [],
-                    "PLAYER_ID": [],
-                    "PLAYER_HEIGHT_INCHES": [],
-                    "PLAYER_WEIGHT": [],
-                    "TEAM_ABBREVIATION": [],
-                }
-                shotData = {"rowSet": []}
-                sleep(0.1)
-                i = i + 1
+            shotData = nba_client.fetch(
+                nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations,
+                season=self.season_start.year,
+                league_id_nullable="10",
+                season_type_all_star="Regular Season",
+                distance_range="By Zone",
+                per_mode_detailed="Per40",
+            ).get_dict()["resultSets"]
+        except NBAStatsError:
+            playerBios = {
+                "PLAYER_NAME": [],
+                "PLAYER_ID": [],
+                "PLAYER_HEIGHT_INCHES": [],
+                "PLAYER_WEIGHT": [],
+                "TEAM_ABBREVIATION": [],
+            }
+            shotData = {"rowSet": []}
 
         playerBios = pd.DataFrame(playerBios)
         if not playerBios.empty:
@@ -143,7 +137,6 @@ class StatsWNBA(StatsNBA):
                 on=["PLAYER_NAME", "TEAM_ABBREVIATION"],
                 suffixes=(None, "_y"),
             )
-            # list(player_df.loc[player_df.isna().any(axis=1)].index.unique()) TODO handle these names
             player_df.PLAYER_WEIGHT = player_df.PLAYER_WEIGHT.astype(float)
             player_df.POS = player_df.POS.str[0]
             player_df.index = player_df.PLAYER_NAME
@@ -231,9 +224,9 @@ class StatsWNBA(StatsNBA):
             "date_to_nullable": today.strftime("%m/%d/%Y"),
         }
 
-        # Pre-init so a fully-failed retry loop falls through to the empty-list
-        # guard at line 296 instead of raising UnboundLocalError. Mirrors the
-        # NBA pattern in stats/nba.py around the identical retry loop.
+        # Pre-init so the except-NBAStatsError branch and the empty-list guard
+        # below have defined names even if the first fetch raises. Mirrors the
+        # NBA pattern in stats/nba.py around the identical gamelog fetch.
         nba_gamelog: list = []
         adv_gamelog: list = []
         usg_gamelog: list = []
@@ -241,67 +234,43 @@ class StatsWNBA(StatsNBA):
         sco_teamlog: list = []
         adv_teamlog: list = []
 
-        i = 0
+        def _player_logs(measure: str | None = None) -> list:
+            extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
+            return nba_client.fetch(
+                nba.playergamelogs.PlayerGameLogs, **(params | extra)
+            ).get_normalized_dict()["PlayerGameLogs"]
 
-        while i < 10:
-            try:
-                nba_gamelog = nba.playergamelogs.PlayerGameLogs(**params).get_normalized_dict()[
-                    "PlayerGameLogs"
-                ]
-                adv_gamelog = nba.playergamelogs.PlayerGameLogs(
-                    **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                ).get_normalized_dict()["PlayerGameLogs"]
-                usg_gamelog = nba.playergamelogs.PlayerGameLogs(
-                    **(params | {"measure_type_player_game_logs_nullable": "Usage"})
-                ).get_normalized_dict()["PlayerGameLogs"]
-                teamlog = nba.teamgamelogs.TeamGameLogs(**(params)).get_normalized_dict()[
-                    "TeamGameLogs"
-                ]
-                sco_teamlog = nba.teamgamelogs.TeamGameLogs(
-                    **(params | {"measure_type_player_game_logs_nullable": "Scoring"})
-                ).get_normalized_dict()["TeamGameLogs"]
-                adv_teamlog = nba.teamgamelogs.TeamGameLogs(
-                    **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                ).get_normalized_dict()["TeamGameLogs"]
+        def _team_logs(measure: str | None = None) -> list:
+            extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
+            return nba_client.fetch(
+                nba.teamgamelogs.TeamGameLogs, **(params | extra)
+            ).get_normalized_dict()["TeamGameLogs"]
 
-                # Fetch playoffs game logs
-                if (today.month >= 9) or (today - latest_date).days > 150:
-                    params.update({"season_type_nullable": "Playoffs"})
-                    nba_gamelog.extend(
-                        nba.playergamelogs.PlayerGameLogs(**params).get_normalized_dict()[
-                            "PlayerGameLogs"
-                        ]
-                    )
-                    adv_gamelog.extend(
-                        nba.playergamelogs.PlayerGameLogs(
-                            **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                        ).get_normalized_dict()["PlayerGameLogs"]
-                    )
-                    usg_gamelog.extend(
-                        nba.playergamelogs.PlayerGameLogs(
-                            **(params | {"measure_type_player_game_logs_nullable": "Usage"})
-                        ).get_normalized_dict()["PlayerGameLogs"]
-                    )
-                    teamlog.extend(
-                        nba.teamgamelogs.TeamGameLogs(**(params)).get_normalized_dict()[
-                            "TeamGameLogs"
-                        ]
-                    )
-                    sco_teamlog.extend(
-                        nba.teamgamelogs.TeamGameLogs(
-                            **(params | {"measure_type_player_game_logs_nullable": "Scoring"})
-                        ).get_normalized_dict()["TeamGameLogs"]
-                    )
-                    adv_teamlog.extend(
-                        nba.teamgamelogs.TeamGameLogs(
-                            **(params | {"measure_type_player_game_logs_nullable": "Advanced"})
-                        ).get_normalized_dict()["TeamGameLogs"]
-                    )
+        try:
+            nba_gamelog = _player_logs()
+            adv_gamelog = _player_logs("Advanced")
+            usg_gamelog = _player_logs("Usage")
+            teamlog = _team_logs()
+            sco_teamlog = _team_logs("Scoring")
+            adv_teamlog = _team_logs("Advanced")
 
-                break
-            except:
-                sleep(0.1)
-                i += 1
+            # Fetch playoffs game logs
+            if (today.month >= 9) or (today - latest_date).days > 150:
+                params.update({"season_type_nullable": "Playoffs"})
+                nba_gamelog.extend(_player_logs())
+                adv_gamelog.extend(_player_logs("Advanced"))
+                usg_gamelog.extend(_player_logs("Usage"))
+                teamlog.extend(_team_logs())
+                sco_teamlog.extend(_team_logs("Scoring"))
+                adv_teamlog.extend(_team_logs("Advanced"))
+        except NBAStatsError:
+            # All-or-nothing: a partial pull would mix populated and empty logs.
+            nba_gamelog = []
+            adv_gamelog = []
+            usg_gamelog = []
+            teamlog = []
+            sco_teamlog = []
+            adv_teamlog = []
 
         if nba_gamelog and adv_gamelog and usg_gamelog:
             nba_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
