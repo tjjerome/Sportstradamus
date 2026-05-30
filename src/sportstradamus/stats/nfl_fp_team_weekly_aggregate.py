@@ -493,8 +493,7 @@ def _aggregate_pattern_a(
 
     mapping = abbr_map.to_dict()
     out.index = [mapping.get(idx) for idx in out.index]
-    out = out.loc[out.index.notna()] if isinstance(out.index, pd.Index) else out
-    return out
+    return out.loc[out.index.notna()] if isinstance(out.index, pd.Index) else out
 
 
 def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataFrame:
@@ -648,8 +647,7 @@ def _line_matchups_team_side(
     side.index = [mapping.get(idx) for idx in side[TEAM_GROUP_COL]]
     side = side.loc[side.index.notna()] if isinstance(side.index, pd.Index) else side
     side = side.drop(columns=[TEAM_GROUP_COL])
-    side = side.add_prefix("lm_")
-    return side
+    return side.add_prefix("lm_")
 
 
 def _line_matchups_opp_side(
@@ -668,8 +666,7 @@ def _line_matchups_opp_side(
     side.index = side[_OPPONENT_ABBR_COL].values
     side = side.loc[side.index.notna()] if isinstance(side.index, pd.Index) else side
     side = side.drop(columns=[_OPPONENT_ABBR_COL])
-    side = side.add_prefix("lm_def_")
-    return side
+    return side.add_prefix("lm_def_")
 
 
 # Module-level cache: teamTeamId -> teamAbbreviation, keyed by season.

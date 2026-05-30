@@ -21,7 +21,6 @@ from sportstradamus.helpers import (
     remove_accents,
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
-from sportstradamus.stats.base import clean_data, scraper
 from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import archive, clean_data, scraper
 from sportstradamus.stats.nba import StatsNBA

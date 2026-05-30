@@ -31,8 +31,9 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import write_gamelog, read_gamelog
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import (
     _VOLUME_SCALE_RATIO_CAP,
     _VOLUME_SCALE_RATIO_FLOOR,
@@ -41,8 +42,6 @@ from sportstradamus.stats.base import (
     clean_data,
     scraper,
 )
-from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 from sportstradamus.stats.nba_client import NBAStatsError
 
 
@@ -1300,7 +1299,7 @@ class StatsNBA(Stats):
 
         # Slice to the trained schema embedded in the pickle.
         cols = self._volume_model_cache["expected_columns"]
-        if any([col not in playerStats.columns for col in cols]):
+        if any(col not in playerStats.columns for col in cols):
             logger.warning(f"Gamelog missing - {date}")
             return []
         playerStats = playerStats[cols]
@@ -1460,6 +1459,7 @@ class StatsNBA(Stats):
             self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
 
         self.playerProfile.fillna(0, inplace=True)
+        return None
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[
@@ -1481,8 +1481,7 @@ class StatsNBA(Stats):
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
-                else:
-                    ev += v
+                ev += v
 
         elif market in ["DREB", "OREB"]:
             ev = (

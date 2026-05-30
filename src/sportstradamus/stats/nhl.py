@@ -985,8 +985,7 @@ class StatsNHL(Stats):
                     ev = 0
                     break
 
-                else:
-                    ev += v
+                ev += v
 
         elif market == "goalsAgainst":
             ev = archive.get_total("NHL", date, opponent)
