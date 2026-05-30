@@ -305,8 +305,6 @@ def select_distribution(player_stats) -> tuple[str, float]:
     Returns (dist_name, p_zero) where dist_name is one of NegBin/ZINB/Gamma/ZAGamma
     and p_zero is the estimated excess zero-inflation rate.
     """
-    import warnings
-
     warnings.filterwarnings("ignore", "overflow", RuntimeWarning)
 
     sample = player_stats.first()

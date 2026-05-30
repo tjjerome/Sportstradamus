@@ -109,7 +109,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     """
     warnings.simplefilter("ignore", UserWarning)
 
-    # --- 1. Fix DaysIntoSeason wrapping ---
     while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
         M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = (
             M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
@@ -119,7 +118,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
             - M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"].min()
         )
 
-    # --- 2. Remove result outliers (archived rows always kept) ---
     M = M.loc[
         (
             (M["Result"] >= M["Result"].quantile(_RESULT_OUTLIER_LOW))
@@ -128,7 +126,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         | (M["Archived"] == 1)
     ].copy()
 
-    # --- 3. Clip lines to a realistic range ---
     # Use archived range when coverage is good; otherwise fall back to
     # full-data percentiles so sparse-archive markets keep their natural
     # line distribution.
@@ -145,7 +142,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         line_ceil = M["Line"].quantile(_LINE_CLIP_HIGH)
     M["Line"] = M["Line"].clip(line_floor, line_ceil)
 
-    # --- 4. Balance line distribution ---
     overall_target = M.loc[archived_mask, "Line"].median() if n_archived >= 5 else M["Line"].mean()
 
     def _balance_lines(M, pos_mask):
@@ -185,7 +181,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     else:
         M = _balance_lines(M, pd.Series(True, index=M.index))
 
-    # --- 5. Balance over/under proportions ---
     if n_archived < 10:
         return M.sort_values("Date")
 
@@ -217,7 +212,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         cut = np.random.choice(chopping_block, n, replace=False, p=p)
         M.drop(cut, inplace=True)
 
-    # --- 6. Re-insert pushes at the correct proportion ---
     n = int(push_rate * len(M)) - pushes["Archived"].sum()
     chopping_block = pushes.loc[pushes["Archived"] == 0].index
     n = np.clip(n, None, len(chopping_block))
