@@ -1028,305 +1028,293 @@ class StatsNFL(Stats):
                 "WL": win,
             }
 
-        else:
-            if self.ids.get(playerName) is None:
-                return {
-                    "completion_percentage_over_expected": 0,
-                    "completion_percentage": 0,
-                    "passer_rating": 0,
-                    "passer_adot": 0,
-                    "passer_adot_differential": 0,
-                    "time_to_throw": 0,
-                    "aggressiveness": 0,
-                    "pass_yards_per_attempt": 0,
-                    "receiver_drops": 0,
-                    "midfield_target_rate": 0,
-                    "rushing_yards_over_expected": 0,
-                    "rushing_success_rate": 0,
-                    "breakaway_yards": 0,
-                    "broken_tackles": 0,
-                    "drop_rate": 0,
-                    "yac_over_expected": 0,
-                    "separation_created": 0,
-                    "targets_per_route_run": 0,
-                    "first_read_targets_per_route_run": 0,
-                    "route_participation": 0,
-                    "yards_per_route_run": 0,
-                    "yards_per_carry": 0,
-                    "midfield_tprr": 0,
-                    "average_depth_of_target": 0,
-                    "receiver_cp_over_expected": 0,
-                    "first_read_target_share": 0,
-                    "redzone_target_share": 0,
-                    "redzone_carry_share": 0,
-                    "carry_share": 0,
-                    "longest_completion": 0,
-                    "longest_rush": 0,
-                    "longest_reception": 0,
-                    "sacks_taken": 0,
-                    "passing_first_downs": 0,
-                    "first_downs": 0,
-                }
-
-            cpoe = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "completion_percentage_above_expectation",
-            ].mean()
-            cp = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "completion_percentage",
-            ].mean()
-            qbr = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "passer_rating",
-            ].mean()
-            pass_adot = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_intended_air_yards",
-            ].mean()
-            pass_adot_diff = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_air_yards_differential",
-            ].mean()
-            time_to_throw = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_time_to_throw",
-            ].mean()
-            aggressiveness = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "aggressiveness",
-            ].mean()
-            ryoe = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "rush_yards_over_expected",
-            ].mean()
-            rush_sr = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "rush_pct_over_expected",
-            ].mean()
-            yacoe = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_yac_above_expectation",
-            ].mean()
-            sep = (
-                self.ngs.loc[
-                    (self.ngs["player_display_name"] == playerName)
-                    & (self.ngs["week"] == pbp.week.max()),
-                    "avg_separation",
-                ].mean()
-                - self.ngs.loc[
-                    (self.ngs["player_display_name"] == playerName)
-                    & (self.ngs["week"] == pbp.week.max()),
-                    "avg_cushion",
-                ].mean()
-            )
-            broken_tackles = (
-                self.pfr.loc[
-                    (self.pfr["pfr_player_name"] == playerName)
-                    & (self.pfr["week"] == pbp.week.max()),
-                    ["rushing_broken_tackles", "receiving_broken_tackles"],
-                ]
-                .sum(axis=1)
-                .mean()
-            )
-            breakaway_yards = self.pfr.loc[
-                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
-                "rushing_yards_after_contact_avg",
-            ].mean()
-            drop_pct = self.pfr.loc[
-                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
-                "receiving_drop_pct",
-            ].mean()
-            pass_drop_pct = self.pfr.loc[
-                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
-                "passing_drop_pct",
-            ].mean()
-            pass_ypa = (
-                pbp_off.loc[pbp_off["passer_player_id"] == self.ids.get(playerName), "yards_gained"]
-                .fillna(0)
-                .infer_objects(copy=False)
-                .mean()
-            )
-            ypc = (
-                pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName), "yards_gained"]
-                .fillna(0)
-                .infer_objects(copy=False)
-                .mean()
-            )
-            routes_run = int(
-                pbp_off["pass"].sum()
-                * self.gamelog.loc[
-                    (self.gamelog.season == year)
-                    & (self.gamelog.week == week)
-                    & (self.gamelog["player display name"] == playerName),
-                    "snap pct",
-                ].mean()
-            )
-            targets = len(pbp_off.loc[pbp_off["receiver_player_id"] == self.ids.get(playerName)])
-            fr_targets = len(
-                pbp_off.loc[
-                    (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                    & (pbp_off["read_thrown"] == "1")
-                ]
-            )
-            pass_attempts = len(pbp_off.loc[pbp_off["pass"]])
-            fr_pass_attempts = len(pbp_off.loc[(pbp_off["pass"]) & (pbp_off["read_thrown"] == "1")])
-            mid_target_rate = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["passer_player_id"] == self.ids.get(playerName))
-                            & (pbp_off["pass_location"] == "middle")
-                        ]
-                    )
-                    / pass_attempts
-                )
-                if pass_attempts > 0
-                else np.nan
-            )
-            mid_targets = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                            & (pbp_off["pass_location"] == "middle")
-                        ]
-                    )
-                    / routes_run
-                )
-                if routes_run > 0
-                else np.nan
-            )
-            tprr = (targets / routes_run) if routes_run > 0 else np.nan
-            frtprr = (fr_targets / routes_run) if routes_run > 0 else np.nan
-            frt_pct = (fr_targets / fr_pass_attempts) if fr_pass_attempts > 0 else np.nan
-            route_participation = (routes_run / pass_attempts) if pass_attempts > 0 else np.nan
-            yprr = (
-                (
-                    pbp_off.loc[
-                        pbp_off["receiver_player_id"] == self.ids.get(playerName), "yards_gained"
-                    ].sum()
-                    / routes_run
-                )
-                if routes_run > 0
-                else np.nan
-            )
-            adot = pbp_off.loc[
-                pbp_off["receiver_player_id"] == self.ids.get(playerName), "air_yards"
-            ].mean()
-            rec_cpoe = pbp_off.loc[
-                pbp_off["receiver_player_id"] == self.ids.get(playerName), "cpoe"
-            ].mean()
-            rz_passes = len(pbp_off.loc[pbp_off["pass_attempt"] & pbp_off["redzone"]])
-            rz_target_pct = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                            & pbp_off["redzone"]
-                        ]
-                    )
-                    / rz_passes
-                )
-                if rz_passes > 0
-                else np.nan
-            )
-            rz_rushes = len(pbp_off.loc[pbp_off["rush"] & pbp_off["redzone"]])
-            rz_attempt_pct = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["rusher_player_id"] == self.ids.get(playerName))
-                            & pbp_off["redzone"]
-                        ]
-                    )
-                    / rz_rushes
-                )
-                if rz_rushes > 0
-                else np.nan
-            )
-            rushes = len(pbp_off.loc[pbp_off["rush"]])
-            attempt_pct = (
-                (len(pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName)]) / rushes)
-                if rushes > 0
-                else np.nan
-            )
-
-            sacks_taken = pbp_off.loc[
-                pbp_off["passer_player_id"] == self.ids.get(playerName), "sack"
-            ].sum()
-            longest_completion = pbp_off.loc[
-                pbp_off["passer_player_id"] == self.ids.get(playerName), "passing_yards"
-            ].max()
-            longest_rush = pbp_off.loc[
-                pbp_off["rusher_player_id"] == self.ids.get(playerName), "rushing_yards"
-            ].max()
-            longest_reception = pbp_off.loc[
-                pbp_off["receiver_player_id"] == self.ids.get(playerName), "receiving_yards"
-            ].max()
-            passing_first_downs = len(
-                pbp_off.loc[
-                    (pbp_off["passer_player_id"] == self.ids.get(playerName))
-                    & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
-                ]
-            )
-            first_downs = len(
-                pbp_off.loc[
-                    (
-                        (pbp_off["rusher_player_id"] == self.ids.get(playerName))
-                        | (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                    )
-                    & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
-                ]
-            )
-
+        if self.ids.get(playerName) is None:
             return {
-                "completion_percentage_over_expected": cpoe,
-                "completion_percentage": cp,
-                "passer_rating": qbr,
-                "passer_adot": pass_adot,
-                "passer_adot_differential": pass_adot_diff,
-                "time_to_throw": time_to_throw,
-                "aggressiveness": aggressiveness,
-                "pass_yards_per_attempt": pass_ypa,
-                "receiver_drops": pass_drop_pct,
-                "midfield_target_rate": mid_target_rate,
-                "rushing_yards_over_expected": ryoe,
-                "rushing_success_rate": rush_sr,
-                "breakaway_yards": breakaway_yards,
-                "broken_tackles": broken_tackles,
-                "drop_rate": drop_pct,
-                "yac_over_expected": yacoe,
-                "separation_created": sep,
-                "targets_per_route_run": tprr,
-                "first_read_targets_per_route_run": frtprr,
-                "route_participation": route_participation,
-                "yards_per_route_run": yprr,
-                "midfield_tprr": mid_targets,
-                "average_depth_of_target": adot,
-                "receiver_cp_over_expected": rec_cpoe,
-                "first_read_target_share": frt_pct,
-                "redzone_target_share": rz_target_pct,
-                "redzone_carry_share": rz_attempt_pct,
-                "carry_share": attempt_pct,
-                "yards_per_carry": ypc,
-                "longest_completion": longest_completion,
-                "longest_rush": longest_rush,
-                "longest_reception": longest_reception,
-                "sacks_taken": sacks_taken,
-                "passing_first_downs": passing_first_downs,
-                "first_downs": first_downs,
+                "completion_percentage_over_expected": 0,
+                "completion_percentage": 0,
+                "passer_rating": 0,
+                "passer_adot": 0,
+                "passer_adot_differential": 0,
+                "time_to_throw": 0,
+                "aggressiveness": 0,
+                "pass_yards_per_attempt": 0,
+                "receiver_drops": 0,
+                "midfield_target_rate": 0,
+                "rushing_yards_over_expected": 0,
+                "rushing_success_rate": 0,
+                "breakaway_yards": 0,
+                "broken_tackles": 0,
+                "drop_rate": 0,
+                "yac_over_expected": 0,
+                "separation_created": 0,
+                "targets_per_route_run": 0,
+                "first_read_targets_per_route_run": 0,
+                "route_participation": 0,
+                "yards_per_route_run": 0,
+                "yards_per_carry": 0,
+                "midfield_tprr": 0,
+                "average_depth_of_target": 0,
+                "receiver_cp_over_expected": 0,
+                "first_read_target_share": 0,
+                "redzone_target_share": 0,
+                "redzone_carry_share": 0,
+                "carry_share": 0,
+                "longest_completion": 0,
+                "longest_rush": 0,
+                "longest_reception": 0,
+                "sacks_taken": 0,
+                "passing_first_downs": 0,
+                "first_downs": 0,
             }
+
+        cpoe = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "completion_percentage_above_expectation",
+        ].mean()
+        cp = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "completion_percentage",
+        ].mean()
+        qbr = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "passer_rating",
+        ].mean()
+        pass_adot = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_intended_air_yards",
+        ].mean()
+        pass_adot_diff = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_air_yards_differential",
+        ].mean()
+        time_to_throw = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_time_to_throw",
+        ].mean()
+        aggressiveness = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "aggressiveness",
+        ].mean()
+        ryoe = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "rush_yards_over_expected",
+        ].mean()
+        rush_sr = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "rush_pct_over_expected",
+        ].mean()
+        yacoe = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_yac_above_expectation",
+        ].mean()
+        sep = (
+            self.ngs.loc[
+                (self.ngs["player_display_name"] == playerName)
+                & (self.ngs["week"] == pbp.week.max()),
+                "avg_separation",
+            ].mean()
+            - self.ngs.loc[
+                (self.ngs["player_display_name"] == playerName)
+                & (self.ngs["week"] == pbp.week.max()),
+                "avg_cushion",
+            ].mean()
+        )
+        broken_tackles = (
+            self.pfr.loc[
+                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+                ["rushing_broken_tackles", "receiving_broken_tackles"],
+            ]
+            .sum(axis=1)
+            .mean()
+        )
+        breakaway_yards = self.pfr.loc[
+            (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+            "rushing_yards_after_contact_avg",
+        ].mean()
+        drop_pct = self.pfr.loc[
+            (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+            "receiving_drop_pct",
+        ].mean()
+        pass_drop_pct = self.pfr.loc[
+            (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+            "passing_drop_pct",
+        ].mean()
+        pass_ypa = (
+            pbp_off.loc[pbp_off["passer_player_id"] == self.ids.get(playerName), "yards_gained"]
+            .fillna(0)
+            .infer_objects(copy=False)
+            .mean()
+        )
+        ypc = (
+            pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName), "yards_gained"]
+            .fillna(0)
+            .infer_objects(copy=False)
+            .mean()
+        )
+        routes_run = int(
+            pbp_off["pass"].sum()
+            * self.gamelog.loc[
+                (self.gamelog.season == year)
+                & (self.gamelog.week == week)
+                & (self.gamelog["player display name"] == playerName),
+                "snap pct",
+            ].mean()
+        )
+        targets = len(pbp_off.loc[pbp_off["receiver_player_id"] == self.ids.get(playerName)])
+        fr_targets = len(
+            pbp_off.loc[
+                (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                & (pbp_off["read_thrown"] == "1")
+            ]
+        )
+        pass_attempts = len(pbp_off.loc[pbp_off["pass"]])
+        fr_pass_attempts = len(pbp_off.loc[(pbp_off["pass"]) & (pbp_off["read_thrown"] == "1")])
+        mid_target_rate = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["passer_player_id"] == self.ids.get(playerName))
+                        & (pbp_off["pass_location"] == "middle")
+                    ]
+                )
+                / pass_attempts
+            )
+            if pass_attempts > 0
+            else np.nan
+        )
+        mid_targets = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                        & (pbp_off["pass_location"] == "middle")
+                    ]
+                )
+                / routes_run
+            )
+            if routes_run > 0
+            else np.nan
+        )
+        tprr = (targets / routes_run) if routes_run > 0 else np.nan
+        frtprr = (fr_targets / routes_run) if routes_run > 0 else np.nan
+        frt_pct = (fr_targets / fr_pass_attempts) if fr_pass_attempts > 0 else np.nan
+        route_participation = (routes_run / pass_attempts) if pass_attempts > 0 else np.nan
+        yprr = (
+            (
+                pbp_off.loc[
+                    pbp_off["receiver_player_id"] == self.ids.get(playerName), "yards_gained"
+                ].sum()
+                / routes_run
+            )
+            if routes_run > 0
+            else np.nan
+        )
+        adot = pbp_off.loc[
+            pbp_off["receiver_player_id"] == self.ids.get(playerName), "air_yards"
+        ].mean()
+        rec_cpoe = pbp_off.loc[
+            pbp_off["receiver_player_id"] == self.ids.get(playerName), "cpoe"
+        ].mean()
+        rz_passes = len(pbp_off.loc[pbp_off["pass_attempt"] & pbp_off["redzone"]])
+        rz_target_pct = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                        & pbp_off["redzone"]
+                    ]
+                )
+                / rz_passes
+            )
+            if rz_passes > 0
+            else np.nan
+        )
+        rz_rushes = len(pbp_off.loc[pbp_off["rush"] & pbp_off["redzone"]])
+        rz_attempt_pct = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["rusher_player_id"] == self.ids.get(playerName))
+                        & pbp_off["redzone"]
+                    ]
+                )
+                / rz_rushes
+            )
+            if rz_rushes > 0
+            else np.nan
+        )
+        rushes = len(pbp_off.loc[pbp_off["rush"]])
+        attempt_pct = (
+            (len(pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName)]) / rushes)
+            if rushes > 0
+            else np.nan
+        )
+
+        sacks_taken = pbp_off.loc[
+            pbp_off["passer_player_id"] == self.ids.get(playerName), "sack"
+        ].sum()
+        longest_completion = pbp_off.loc[
+            pbp_off["passer_player_id"] == self.ids.get(playerName), "passing_yards"
+        ].max()
+        longest_rush = pbp_off.loc[
+            pbp_off["rusher_player_id"] == self.ids.get(playerName), "rushing_yards"
+        ].max()
+        longest_reception = pbp_off.loc[
+            pbp_off["receiver_player_id"] == self.ids.get(playerName), "receiving_yards"
+        ].max()
+        passing_first_downs = len(
+            pbp_off.loc[
+                (pbp_off["passer_player_id"] == self.ids.get(playerName))
+                & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
+            ]
+        )
+        first_downs = len(
+            pbp_off.loc[
+                (
+                    (pbp_off["rusher_player_id"] == self.ids.get(playerName))
+                    | (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                )
+                & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
+            ]
+        )
+
+        return {
+            "completion_percentage_over_expected": cpoe,
+            "completion_percentage": cp,
+            "passer_rating": qbr,
+            "passer_adot": pass_adot,
+            "passer_adot_differential": pass_adot_diff,
+            "time_to_throw": time_to_throw,
+            "aggressiveness": aggressiveness,
+            "pass_yards_per_attempt": pass_ypa,
+            "receiver_drops": pass_drop_pct,
+            "midfield_target_rate": mid_target_rate,
+            "rushing_yards_over_expected": ryoe,
+            "rushing_success_rate": rush_sr,
+            "breakaway_yards": breakaway_yards,
+            "broken_tackles": broken_tackles,
+            "drop_rate": drop_pct,
+            "yac_over_expected": yacoe,
+            "separation_created": sep,
+            "targets_per_route_run": tprr,
+            "first_read_targets_per_route_run": frtprr,
+            "route_participation": route_participation,
+            "yards_per_route_run": yprr,
+            "midfield_tprr": mid_targets,
+            "average_depth_of_target": adot,
+            "receiver_cp_over_expected": rec_cpoe,
+            "first_read_target_share": frt_pct,
+            "redzone_target_share": rz_target_pct,
+            "redzone_carry_share": rz_attempt_pct,
+            "carry_share": attempt_pct,
+            "yards_per_carry": ypc,
+            "longest_completion": longest_completion,
+            "longest_rush": longest_rush,
+            "longest_reception": longest_reception,
+            "sacks_taken": sacks_taken,
+            "passing_first_downs": passing_first_downs,
+            "first_downs": first_downs,
+        }
 
     def build_comp_profile(self, target_game_date: date | None = None) -> pd.DataFrame:
         """Build the NFL player comp profile from per-game FP snapshots + PBP aggregates.
@@ -1385,8 +1373,7 @@ class StatsNFL(Stats):
         if playerProfile.empty:
             return playerProfile
 
-        playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
-        return playerProfile
+        return playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
 
     def _resolve_comp_cache_key(self, target_game_date: date | None) -> tuple[int, int | None]:
         """Translate the public ``target_game_date`` arg into a cache key + lookback spec.
