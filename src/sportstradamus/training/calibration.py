@@ -8,6 +8,30 @@ from scipy.stats import fit, gamma, nbinom, norm, poisson, skewnorm
 
 from sportstradamus.helpers import fused_loc, stat_cv
 
+# Blend-weight bounds for the model-vs-book optimization. 0.05 keeps a minimum
+# bookmaker signal even when the model is dominant; 0.9 keeps a minimum model
+# signal even when the bookmaker is dominant. Both ends prevent degenerate
+# all-one-source blends that give log-likelihood no room to improve.
+_MODEL_WEIGHT_MIN: float = 0.05
+_MODEL_WEIGHT_MAX: float = 0.9
+
+# Resolution threshold for choosing NegBin over Gamma: the per-player ratio
+# step/nonzero_mean measures how "count-like" (integer-stepped, low-mean) the
+# distribution is.  Above 0.2 the stat fits a count model better than a
+# continuous one (empirically validated on NBA/NFL/NHL markets).
+_NEGBIN_RESOLUTION_THRESHOLD: float = 0.2
+
+# Zero-inflation threshold for upgrading NegBin → ZINB.  Excess zeros above
+# 10% of total observations are more than Poisson mixing can absorb in NegBin;
+# the ZI component prevents the shape parameter from bloating to compensate.
+_ZINB_ZERO_INFLATION_THRESHOLD: float = 0.1
+
+# Zero-inflation threshold for upgrading Gamma → ZAGamma (zero-augmented).
+# Gamma is continuous and can't model a genuine spike at 0; above 5% excess
+# zeros the ZAGamma component is needed to avoid calibration drift at the
+# over/under threshold near the bookmaker line.
+_ZAGAMMA_ZERO_INFLATION_THRESHOLD: float = 0.05
+
 
 def fit_book_weights(league: str, market: str, stat_data, archive, book_weights: dict) -> dict:
     """Fit optimal weights for multiple sportsbooks using historical accuracy."""
@@ -30,7 +54,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
                 stat_data.log_strings["date"],
                 stat_data.log_strings["win"],
             ]
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates(
             [stat_data.log_strings["date"], stat_data.log_strings["team"]]
@@ -48,7 +72,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
                 stat_data.log_strings["date"],
                 stat_data.log_strings["score"],
             ]
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates(
             [stat_data.log_strings["date"], stat_data.log_strings["team"]]
@@ -63,7 +87,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
         log = stat_data.gamelog.loc[
             stat_data.gamelog["starting pitcher"],
             ["opponent", stat_data.log_strings["date"], "1st inning runs allowed"],
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates([stat_data.log_strings["date"], "opponent"]).set_index(
             [stat_data.log_strings["date"], "opponent"]
@@ -75,7 +99,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
     else:
         log = stat_data.gamelog[
             [stat_data.log_strings["player"], stat_data.log_strings["date"], market]
-        ]
+        ].copy()
         log[stat_data.log_strings["date"]] = log[stat_data.log_strings["date"]].str[:10]
         df["Result"] = log.drop_duplicates(
             [stat_data.log_strings["date"], stat_data.log_strings["player"]]
@@ -213,7 +237,9 @@ def fit_model_weight(
                 return -np.mean(loglik)
             return -np.mean(base_logpdf)
 
-        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)], tol=1e-8, method="TNC")
+        res = minimize(
+            objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
+        )
         return res.x[0]
 
     elif dist == "NegBin":
@@ -241,7 +267,9 @@ def fit_model_weight(
                 return -np.mean(loglik)
             return -np.mean(base_logpmf)
 
-        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)], tol=1e-8, method="TNC")
+        res = minimize(
+            objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
+        )
         return res.x[0]
     else:
         model_alpha_arr = np.asarray(model_alpha, dtype=float)
@@ -267,11 +295,13 @@ def fit_model_weight(
                 return -np.mean(loglik)
             return -np.mean(base_logpdf)
 
-        res = minimize(objective, 0.5, bounds=[(0.05, 0.9)], tol=1e-8, method="TNC")
+        res = minimize(
+            objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
+        )
         return res.x[0]
 
 
-def select_distribution(player_stats):
+def select_distribution(player_stats) -> tuple[str, float]:
     """Recommend a distribution family by inspecting per-player data properties.
 
     Returns (dist_name, p_zero) where dist_name is one of NegBin/ZINB/Gamma/ZAGamma
@@ -304,8 +334,11 @@ def select_distribution(player_stats):
 
         resolutions = player_stats.apply(_player_resolution).dropna()
         resolution = resolutions.median()
-        dist = "NegBin" if resolution > 0.2 else "Gamma"
-        print(f"  Resolution: {resolution:.4f} ({'NegBin' if resolution > 0.2 else 'Gamma'})")
+        dist = "NegBin" if resolution > _NEGBIN_RESOLUTION_THRESHOLD else "Gamma"
+        print(
+            f"  Resolution: {resolution:.4f}"
+            f" ({'NegBin' if resolution > _NEGBIN_RESOLUTION_THRESHOLD else 'Gamma'})"
+        )
 
     observed_zeros = player_stats.agg(lambda x: x.eq(0).mean())
 
@@ -322,7 +355,7 @@ def select_distribution(player_stats):
         nb_fit = player_stats.apply(_nb_mom)
         base_zero_prob = nb_fit.apply(lambda row: nbinom.pmf(0, row[0], row[1]))
         p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
-        if p_zero > 0.1:
+        if p_zero > _ZINB_ZERO_INFLATION_THRESHOLD:
             dist = "ZINB"
     else:
         gam_fit = player_stats.apply(
@@ -330,7 +363,7 @@ def select_distribution(player_stats):
         )
         base_zero_prob = gam_fit.apply(lambda row: gamma.cdf(0.99, row[0], scale=row[2]))
         p_zero = float(((observed_zeros - base_zero_prob) / (1 - base_zero_prob)).clip(0, 1).mean())
-        if p_zero > 0.05:
+        if p_zero > _ZAGAMMA_ZERO_INFLATION_THRESHOLD:
             dist = "ZAGamma"
 
     print(f"  Data type: {f'integer (step={int(step)})' if is_integer else 'continuous'}")

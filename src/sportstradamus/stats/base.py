@@ -37,7 +37,32 @@ from sportstradamus.helpers import (
     stat_dist,
 )
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
+from sportstradamus.helpers.io import read_gamelog
 from sportstradamus.spiderLogger import logger
+
+# Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
+# ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
+# produced by 2-comp players whose means nearly coincide. See profile_market.
+_COMP_Z_CLIP: float = 10.0
+
+# Empirical-Bayes prior count for the ``comps mean (EB)`` shrinkage. The
+# shrinkage weight is ``K / (K + n_eff)`` where ``n_eff`` is the sum of
+# distance-weighted comp memberships (Efron & Morris 1975 JASA). At the
+# NFL-weekly granularity Albert (2008) and the comp-research brief
+# recommend K in the 8-12 band; 10 is the middle of that band.
+_COMP_EB_PRIOR_K: float = 10.0
+
+# Quantile bands for the ``comps p25`` / ``comps p75`` signals. Use the
+# distance-weighted comp distribution rather than the raw comp set: a
+# closer comp gets more vote, matching how ``comps mean`` is built.
+_COMP_QUANTILE_LO: float = 0.25
+_COMP_QUANTILE_HI: float = 0.75
+
+# Clip bounds for per-player projection scale ratios in get_volume_stats.
+# Floor prevents shrinking a player below 10% of their mean; cap prevents
+# inflating beyond 10×. Shared across NBA, WNBA, NHL, and NFL volume models.
+_VOLUME_SCALE_RATIO_FLOOR: float = 0.1
+_VOLUME_SCALE_RATIO_CAP: float = 10.0
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access so processes that merely import this module — most importantly
@@ -46,7 +71,8 @@ from sportstradamus.spiderLogger import logger
 archive = LazyArchive()
 scraper = Scrape()
 
-# flag to clean up gamelogs
+# When True, forces a full reload of all cached CSVs on the next load() /
+# update() call. Flipped manually by operators to clear corrupt gamelog state.
 clean_data = False
 pd.set_option("future.no_silent_downcasting", True)
 
@@ -108,9 +134,21 @@ class Stats:
         self.usage_stat = ""
         self.tiebreaker_stat = ""
         self.comps = {}
+        # Per-week comp cache (training matrix path). ``_ensure_comps(date)``
+        # routes the active ``self.comps`` to the entry keyed by the
+        # ``(season, week-of-Wednesday)`` bucket that contains ``date``, and
+        # rebuilds on cache miss. ``date=None`` (inference / cron) keeps the
+        # legacy lazy-once snapshot.
+        self._comps_by_week: dict = {}
+        self._current_comps_key = None
+        # Per-comp-pool cache of the static (player, comp, position, dist,
+        # weight) pairs DataFrame. Keyed by ``_current_comps_key`` so it
+        # invalidates in lockstep with ``self.comps``. Lets ``base_profile``
+        # and ``get_stats`` skip the Python tuple-loop rebuild per gameday.
+        self._comp_pairs_cache: dict = {}
 
     def parse_game(self, game):
-        """Parses a game and updates the gamelog.
+        """Parse a single game API response and update ``self.gamelog``.
 
         Args:
             game (dict): A dictionary representing a game.
@@ -118,29 +156,78 @@ class Stats:
         Returns:
             None
         """
-        # Implementation details...
 
     def load(self):
-        """Loads game logs from a file.
+        """Read cached gamelog / teamlog / players artifacts for this league.
 
-        Args:
-            file_path (str): The path to the file containing game logs.
-
-        Returns:
-            None
+        The on-disk shape is uniform across leagues (one parquet/JSON bundle
+        per league, see :mod:`sportstradamus.helpers.io`). Subclasses with
+        league-specific post-processing (NFL roster validation, MLB
+        affinity CSVs) override and either replace this body entirely or
+        call ``super().load()`` first. The league key is derived from
+        ``self.league`` so a single base implementation serves NBA, WNBA,
+        and NHL — see :ref:`STYLE_GUIDE §2.6 <three-occurrences>`.
         """
-        # Implementation details...
+        league_data = read_gamelog(self.league.lower())
+        self.gamelog = league_data["gamelog"]
+        self.teamlog = league_data["teamlog"]
+        self.players = league_data["players"]
 
     def update(self):
-        """Updates the gamelog with new game data.
-
-        Args:
-            None
+        """Fetch new game data from the league API and append to ``self.gamelog``.
 
         Returns:
             None
         """
-        # Implementation details...
+
+    def _enrich_team_markets(
+        self,
+        df: pd.DataFrame,
+        *,
+        date_col: str = "gameday",
+        team_col: str = "team",
+        mask: "np.ndarray | None" = None,
+    ) -> None:
+        """In-place: populate ``moneyline`` / ``totals`` columns from the archive.
+
+        Two bulk DuckDB queries (one per market) replace the per-row
+        ``archive.get_moneyline`` / ``archive.get_total`` ``DataFrame.apply``
+        loops that previously dominated ``update()`` wall time — point
+        lookups across a full-history gamelog ran into the millions of
+        serial queries and took minutes. The bulk path is two queries plus
+        an in-Python dict lookup per row.
+
+        Args:
+            df: Frame to enrich. Must have a date column and a team column;
+                values are written back via ``df.loc[mask, col]``.
+            date_col: Name of the date column (``gameday`` for NFL/MLB
+                shaped frames, ``gameDate`` for MLB game logs,
+                ``GAME_DATE`` for NBA-shaped frames).
+            team_col: Name of the team column.
+            mask: Optional boolean mask scoping enrichment to a subset.
+                ``None`` enriches the whole frame.
+
+        Fallback values match the per-row helpers: ``0.5`` for moneyline,
+        :attr:`Archive.default_totals` per league for totals.
+        """
+        if df.empty:
+            return
+        if mask is None:
+            mask = np.ones(len(df), dtype=bool)
+        if not mask.any():
+            return
+        subset = df.loc[mask]
+        unique_dates = subset[date_col].unique()
+        ml_map = archive.get_team_market_map(
+            self.league, "Moneyline", dates=unique_dates
+        )
+        tot_map = archive.get_team_market_map(
+            self.league, "Totals", dates=unique_dates
+        )
+        default_total = archive.default_totals.get(self.league, 1)
+        keys = list(zip(subset[date_col].astype(str).str[:10], subset[team_col], strict=False))
+        df.loc[mask, "moneyline"] = [ml_map.get(k, 0.5) for k in keys]
+        df.loc[mask, "totals"] = [tot_map.get(k, default_total) for k in keys]
 
     @staticmethod
     def _build_comps(knn, profile_df, min_comps=5, max_comps=20):
@@ -182,14 +269,162 @@ class Stats:
     def update_player_comps(self, year=None):
         return
 
-    def _compute_comps(self):
-        """Build comps from loaded data. Override in subclass."""
+    def _compute_comps(self, target_game_date: "date | None" = None) -> None:
+        """Build comps from loaded data. Override in subclass.
+
+        Args:
+            target_game_date: Optional date the comps should reflect "as of".
+                Subclasses with point-in-time profile assembly (currently NFL)
+                use it to bound the comp pool to games strictly before this
+                date. Subclasses that don't accept it must still tolerate the
+                keyword argument so the training-matrix caller can pass it
+                uniformly; for those leagues the comps remain today()-bound
+                and the legacy lookahead leakage is not yet addressed.
+        """
         pass
 
-    def _ensure_comps(self):
-        """Build comps lazily on first access."""
-        if not self.comps:
-            self._compute_comps()
+    def _comp_target_key(self, date: "date | None") -> "int | None":
+        """Cache key for the comp pool active at ``date``.
+
+        Default heuristic: the week index of the most-recent Wednesday on or
+        before ``date``. Wednesday is the operator-confirmed retrain boundary;
+        within a Wed→Wed window all gamedays share the same comp pool,
+        matching live retrain cadence. Subclasses with schedule semantics
+        (NFL) may override to return a (season, schedule-week) tuple.
+
+        Returns ``None`` when ``date`` is ``None`` -- the inference path keys
+        on the lazy-once snapshot instead.
+        """
+        if date is None:
+            return None
+        wed_offset = (date.weekday() - 2) % 7  # Monday=0..Sunday=6; Wednesday=2
+        most_recent_wed = date - timedelta(days=wed_offset)
+        return most_recent_wed.toordinal() // 7
+
+    def _ensure_comps(self, date: "date | None" = None) -> None:
+        """Materialize ``self.comps`` for the comp pool active at ``date``.
+
+        Two modes:
+
+        * ``date is None`` (inference, cron, dashboards): lazy-once. Build
+          comps if ``self.comps`` is empty, otherwise reuse the cached
+          snapshot for the lifetime of the ``Stats`` instance.
+        * ``date`` provided (training matrix path): route ``self.comps`` to
+          the per-week cache entry containing ``date``. Cache key comes from
+          :meth:`_comp_target_key`. First visit to a (season, week) bucket
+          calls :meth:`_compute_comps` with the date so per-league code can
+          bound the comp pool point-in-time; subsequent visits to the same
+          bucket are O(1) swaps. This eliminates the look-ahead leakage where
+          a 2023 training row's comps "know" the 2025 player population.
+        """
+        # TODO(comp-leakage-mlb): StatsNFL, StatsNBA, StatsWNBA, and StatsNHL
+        # all honor ``target_game_date`` and gate their comp pool on the
+        # appropriate season-cut. StatsMLB still relies on the today() affinity
+        # match-score CSVs (``affinity_pitchersBySHV_matchScores.csv`` /
+        # ``affinity_hittersByHittingProfile_matchScores.csv``) loaded in
+        # ``StatsMLB.load`` and has no ``_compute_comps`` override; the
+        # training matrix path therefore reuses that fixed snapshot across
+        # every gameday. A true fix needs historical baseballsavant exports
+        # (the published CSV is current-state only) so this leakage stays
+        # open until that data source is wired in.
+        if date is None:
+            if not self.comps:
+                self._compute_comps()
+            return
+
+        target_key = self._comp_target_key(date)
+        if self._current_comps_key == target_key and self.comps:
+            return
+
+        cached = self._comps_by_week.get(target_key)
+        if cached is not None:
+            self.comps = cached
+            self._current_comps_key = target_key
+            return
+
+        self._compute_comps(target_game_date=date)
+        self._comps_by_week[target_key] = self.comps
+        self._current_comps_key = target_key
+
+    def _comp_pairs(self) -> pd.DataFrame:
+        """Return the static (player, comp, position, dist, weight) pairs DataFrame.
+
+        Cached per ``_current_comps_key`` so the Python tuple-loop that flattens
+        ``self.comps`` only runs once per comp-pool swap (i.e. once per training
+        week), not once per gameday. ``base_profile`` and ``get_stats`` consume
+        this to derive the per-day comp features via vectorized ops.
+
+        MLB-style comp structures (``{"pitchers": {pid: [id1, id2, ...]}}`` --
+        lists rather than ``{"comps": ..., "distances": ...}`` dicts) yield an
+        empty frame here; the MLB code path in ``get_stats`` operates directly
+        on ``self.comps`` and does not call into this helper.
+        """
+        key = self._current_comps_key
+        cached = self._comp_pairs_cache.get(key)
+        if cached is not None:
+            return cached
+
+        records = []
+        for position, pos_comps in self.comps.items():
+            if not isinstance(pos_comps, dict):
+                continue
+            for player, comp_data in pos_comps.items():
+                if not isinstance(comp_data, dict):
+                    continue
+                comps_list = comp_data.get("comps")
+                dist_list = comp_data.get("distances")
+                if not comps_list or dist_list is None:
+                    continue
+                for comp, dist in zip(comps_list, dist_list, strict=False):
+                    if comp == player:
+                        continue
+                    d = float(dist)
+                    records.append((player, comp, position, d, 1.0 / (1.0 + d)))
+
+        if not records:
+            pairs = pd.DataFrame(columns=["player", "comp", "position", "dist", "weight"])
+        else:
+            pairs = pd.DataFrame.from_records(
+                records, columns=["player", "comp", "position", "dist", "weight"]
+            )
+        self._comp_pairs_cache[key] = pairs
+        return pairs
+
+    @staticmethod
+    def _vectorized_weighted_quantiles(
+        df_sorted: pd.DataFrame, qs: list[float]
+    ) -> dict[float, pd.Series]:
+        """Per-player distance-weighted quantile of ``comp_mean``.
+
+        Replaces the per-group ``DataFrame.groupby.apply(_weighted_q)`` recipe
+        with a single sort + cumsum + np.interp pass. ``df_sorted`` must hold
+        ``['player', 'comp_mean', 'weight']`` already ordered by
+        ``('player', 'comp_mean')``. Returns ``{q: Series(indexed by player)}``.
+        """
+        if df_sorted.empty:
+            return {q: pd.Series(dtype=float) for q in qs}
+
+        grouper = df_sorted.groupby("player", sort=False)
+        group_sizes = grouper.size()
+        players_idx = group_sizes.index
+        sizes = group_sizes.to_numpy()
+        starts = np.concatenate([[0], np.cumsum(sizes)[:-1]])
+        ends = starts + sizes
+
+        cum_w = grouper["weight"].cumsum().to_numpy()
+        total_w = grouper["weight"].transform("sum").to_numpy()
+        cum_norm = np.divide(cum_w, total_w, out=np.zeros_like(cum_w), where=total_w > 0)
+        vals = df_sorted["comp_mean"].to_numpy()
+
+        results: dict[float, pd.Series] = {}
+        for q in qs:
+            out = np.full(len(players_idx), np.nan, dtype=np.float64)
+            for i, (s, e) in enumerate(zip(starts, ends, strict=False)):
+                if total_w[s] <= 0:
+                    continue
+                out[i] = np.interp(q, cum_norm[s:e], vals[s:e])
+            results[q] = pd.Series(out, index=players_idx)
+        return results
 
     def save_comps(self):
         """Write current comps to the league's JSON file for inspection."""
@@ -198,6 +433,32 @@ class Stats:
         filepath = pkg_resources.files(data) / "leagues" / self.league.lower() / "comps.json"
         with open(filepath, "w") as f:
             json.dump(self.comps, f, indent=4)
+
+    def _join_fp_team_features(self, date) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        """League hook: return ``(team_features, defense_features)`` for ``date``.
+
+        Default no-op returns ``(None, None)``. Override on a league subclass
+        to plug an external team-grain data source into ``teamProfile`` /
+        ``defenseProfile``. The frames must be indexed by the same key the
+        gamelog uses for the team / opponent columns (abbreviation for NFL).
+        ``base_profile`` join-left-merges them after the existing teamlog
+        aggregation so absent teams degrade to NaN-then-zero downstream.
+        """
+        return None, None
+
+    def _join_fp_player_features(self, date) -> pd.DataFrame | None:
+        """League hook: return season-to-date per-player FP feature frame for ``date``.
+
+        Default no-op returns ``None``. Override on a league subclass to plug an
+        external player-grain data source into ``playerstats``. The frame must
+        be indexed by the same key ``base_profile``'s ``playerstats`` uses
+        (``log_strings['player']`` value, post-``remove_accents``). Column
+        names should be RAW ``{name}_asof`` (no ``Player`` prefix) — the
+        ``add_prefix("Player ")`` step downstream in ``get_stats`` /
+        ``get_feature_columns`` prepends the namespace once, producing the
+        ``Player {name}_asof`` keys the feature filter expects.
+        """
+        return None
 
     @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
@@ -269,12 +530,17 @@ class Stats:
 
         _filled_gl = self.short_gamelog.fillna(0).infer_objects(copy=False)
         _player_col = self.log_strings["player"]
-        playerstats = _filled_gl.groupby(_player_col)[stat_types].mean(numeric_only=True)
+        # Intersect stat_types with available gamelog columns so partial fixtures
+        # (e.g. tests/integration's cached parquets that don't reload the full
+        # gamelog) don't KeyError. Production runs have all expected columns
+        # after Stats.update(); this is purely defensive for fixture mode.
+        _avail_stats = [s for s in stat_types if s in _filled_gl.columns]
+        playerstats = _filled_gl.groupby(_player_col)[_avail_stats].mean(numeric_only=True)
 
         # Vectorized tail(5).mean() — avoids per-group .apply()
         _last5 = _filled_gl.groupby(_player_col).tail(5)
         playershortstats = (
-            _last5.groupby(_last5[_player_col])[stat_types]
+            _last5.groupby(_last5[_player_col])[_avail_stats]
             .mean()
             .fillna(0)
             .infer_objects(copy=False)
@@ -305,17 +571,41 @@ class Stats:
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
 
+        # League hook: external player-grain feature source (e.g. NFL
+        # season-to-date FP aggregates from `load_through_one_year`). Override
+        # ``_join_fp_player_features`` to return a frame indexed by the same
+        # player-name key as ``playerstats``, with columns already prefixed
+        # ``Player {name}_asof`` — joined left so missing players degrade to
+        # NaN-then-zero downstream.
+        fp_player_features = self._join_fp_player_features(date)
+        if fp_player_features is not None and not fp_player_features.empty:
+            playerstats = playerstats.join(fp_player_features, how="left")
+
         # Vectorized tail(10).mean() for team stats
         _team_col = self.log_strings["team"]
         _team_last10 = self.short_teamlog.groupby(_team_col).tail(10)
         teamstats = _team_last10.groupby(_team_last10[_team_col])[team_stat_types].mean()
 
+        # League hook: per-league augmentation of teamstats / defenseProfile with
+        # external-data-source features (e.g. NFL FP team-grain weekly snapshots).
+        # Default no-op returns ``None``; NFL overrides return abbreviation-indexed
+        # ``(team_features, defense_features)`` frames merged in below.
+        fp_team_features, fp_defense_features = self._join_fp_team_features(date)
+        if fp_team_features is not None and not fp_team_features.empty:
+            teamstats = teamstats.join(fp_team_features, how="left")
+
         self.defenseProfile = (
             self.defenseProfile.join(teamstats, how="right").fillna(0).infer_objects(copy=False)
         )
         self.defenseProfile.index.name = self.log_strings["opponent"]
+        if fp_defense_features is not None and not fp_defense_features.empty:
+            self.defenseProfile = (
+                self.defenseProfile.join(fp_defense_features, how="left")
+                .fillna(0)
+                .infer_objects(copy=False)
+            )
 
-        self.teamProfile = teamstats[team_stat_types]
+        self.teamProfile = teamstats
 
         self.playerProfile = (
             self.playerProfile.join(playerstats, how="right").fillna(0).infer_objects(copy=False)
@@ -379,7 +669,6 @@ class Stats:
                 "moneyline gain",
                 "totals gain",
                 "position",
-                "comps",
                 "comp n",
                 "comp distance",
             ]
@@ -484,44 +773,75 @@ class Stats:
             _denom_dt = (_n_def * _SX2_dt - _SX_dt**2).replace(0, np.nan)
             self.defenseProfile["totals gain"] = (_n_def * _SXY_dt - _SX_dt * _SY_def) / _denom_dt
 
-        # Player comps mean: distance-weighted average of comps' market means
-        # Player comps z: how the player performs vs their comp peer group
-        self._ensure_comps()
-        if self.comps:
-            _comp_records_p = []
-            for pos_comps in self.comps.values():
-                for player, comp_data in pos_comps.items():
-                    if player not in _all_mean.index:
-                        continue
-                    for comp, dist in zip(comp_data["comps"], comp_data["distances"], strict=False):
-                        if comp != player and comp in _all_mean.index:
-                            _comp_records_p.append((player, comp, 1.0 / (1.0 + dist)))
-            if _comp_records_p:
-                _cp_df_p = pd.DataFrame(_comp_records_p, columns=["player", "comp", "weight"])
-                _cp_df_p["comp_mean"] = _cp_df_p["comp"].map(_all_mean)
-                _cp_df_p = _cp_df_p.dropna(subset=["comp_mean"])
+        # Player comps mean: distance-weighted average of comps' market means.
+        # Player comps mean (EB): Efron-Morris shrinkage of comps mean toward
+        #   the position baseline. Reduces tail noise on low-sample players.
+        # Player comps p25 / p75: distance-weighted quantiles of comp means.
+        #   Lets the GBDT discriminate "tight cluster, confident estimate" vs
+        #   "wide cluster, uncertain estimate" without emitting a redundant std.
+        # The static ``comps z`` (player vs comp-pool level ranking) was
+        # removed -- it carries no matchup signal and is redundant with
+        # ``comps mean`` next to ``MeanYr`` for the GBDT. The matchup-conditional
+        # ``Player comps z`` is computed per-prediction in ``get_stats``.
+        # Pass ``date`` so the training-matrix iteration rebuilds the comp
+        # pool whenever the advancing date crosses into a new Wednesday-keyed
+        # week (see :meth:`_ensure_comps`). The inference / cron path passes
+        # today() and hits the lazy-once snapshot path.
+        self._ensure_comps(date=date)
+        _pairs = self._comp_pairs()
+        if not _pairs.empty:
+            # Per-day dynamic step: bind market-specific ``_all_mean`` to the
+            # cached static pairs. The Python tuple-loop that flattens
+            # ``self.comps`` lives in ``_comp_pairs`` and only runs on
+            # comp-pool swap (per training week), not per gameday.
+            _cp_df_p = _pairs.loc[
+                _pairs["player"].isin(_all_mean.index), ["player", "comp", "weight"]
+            ].copy()
+            _cp_df_p["comp_mean"] = _cp_df_p["comp"].map(_all_mean)
+            _cp_df_p = _cp_df_p.dropna(subset=["comp_mean"])
+            if not _cp_df_p.empty:
                 _wsum_p = (
                     (_cp_df_p["comp_mean"] * _cp_df_p["weight"]).groupby(_cp_df_p["player"]).sum()
                 )
                 _wcnt_p = _cp_df_p["weight"].groupby(_cp_df_p["player"]).sum()
                 _comp_wmean = (_wsum_p / _wcnt_p).reindex(self.playerProfile.index)
                 self.playerProfile["comps mean"] = _comp_wmean
-                _cp_df_p["wtd_sq"] = (
-                    _cp_df_p["weight"]
-                    * (_cp_df_p["comp_mean"] - _cp_df_p["player"].map(_comp_wmean.fillna(0))) ** 2
+
+                # Empirical-Bayes shrinkage of the comp mean toward the
+                # position baseline. ``_comp_wmean`` is the distance-
+                # weighted estimator; ``n_eff`` (weight mass) substitutes
+                # for sample size in the K/(K+n) shrinkage factor. The
+                # baseline is the population mean of comp means rather
+                # than the global market mean -- that's the right anchor
+                # because the comp pool already filters on the position's
+                # usage band.
+                _baseline = float(_cp_df_p["comp_mean"].mean())
+                _shrinkage = _wcnt_p / (_wcnt_p + _COMP_EB_PRIOR_K)
+                _comp_eb = (_shrinkage * _comp_wmean + (1.0 - _shrinkage) * _baseline).reindex(
+                    self.playerProfile.index
                 )
-                _comp_wstd = (
-                    np.sqrt(
-                        (_cp_df_p["wtd_sq"].groupby(_cp_df_p["player"]).sum() / _wcnt_p).astype(
-                            float
-                        )
-                    )
-                    .replace(0, np.nan)
-                    .reindex(self.playerProfile.index)
+                self.playerProfile["comps mean (EB)"] = _comp_eb
+
+                # Distance-weighted comp p25 / p75: numpy's standard weighted-
+                # quantile recipe (np.interp(q, cum_w_norm, sorted_vals))
+                # vectorized across all players in a single sort + cumsum pass
+                # via :meth:`_vectorized_weighted_quantiles`. Replaces the
+                # per-group ``DataFrame.groupby.apply`` recipe that dominated
+                # the per-gameday cost on training matrix generation.
+                _sorted = (
+                    _cp_df_p[["player", "comp_mean", "weight"]]
+                    .sort_values(["player", "comp_mean"])
+                    .reset_index(drop=True)
                 )
-                self.playerProfile["comps z"] = (
-                    _all_mean.reindex(self.playerProfile.index) - _comp_wmean
-                ) / _comp_wstd
+                _qs = self._vectorized_weighted_quantiles(
+                    _sorted, [_COMP_QUANTILE_LO, _COMP_QUANTILE_HI]
+                )
+                self.playerProfile["comps p25"] = _qs[_COMP_QUANTILE_LO].reindex(
+                    self.playerProfile.index
+                )
+                self.playerProfile["comps p75"] = _qs[_COMP_QUANTILE_HI].reindex(
+                    self.playerProfile.index
+                )
 
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
@@ -609,7 +929,7 @@ class Stats:
 
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
-        self._ensure_comps()
+        self._ensure_comps(date=date)
         stats = pd.DataFrame(
             columns=[
                 "Avg1",
@@ -798,11 +1118,16 @@ class Stats:
             defstats["position"] = np.diag(defstats.iloc[:, stats["Player position"] + 5])
             defstats.drop(columns=self.positions, inplace=True)
 
-        defstats["comps"] = defstats["comps"].astype(np.float64)
-
         defstats.index = stats.index
 
-        # Pre-compute per-player zscore of market column for comps lookups
+        # The matchup-conditional residual signal now writes to
+        # ``stats["Player comps z"]`` (was the misnamed ``defstats["comps"]``
+        # under the ``Defense `` prefix). The count + uniqueness signals stay
+        # on the defstats side under their legacy names (``Defense comp n``,
+        # ``Defense comp distance``) so cached training matrices and the
+        # SHAP-rebuild filter survive without a regeneration pass.
+        #
+        # Pre-compute per-player zscore of market column for comps lookups.
         _opp_col = self.log_strings["opponent"]
         _player_col = self.log_strings["player"]
         _gl_z = self.short_gamelog[[_player_col, _opp_col, market]].copy()
@@ -810,6 +1135,7 @@ class Stats:
         _gl_groups = _gl_z.groupby(_player_col)[market]
         _std = _gl_groups.transform("std").replace(0, np.nan)
         _gl_z["_mkt_zscore"] = ((_gl_z[market] - _gl_groups.transform("mean")) / _std).fillna(0)
+        stats["Player comps z"] = 0.0
 
         if self.league == "MLB":
             _is_pitch_market = any(s in market for s in ["allowed", "pitch"])
@@ -868,45 +1194,65 @@ class Stats:
                 scores.index = scores.index.droplevel(0)
                 compGames[market] = scores
                 opp_comp_games = compGames.loc[compGames[_opp_col] == opponents[player], market]
-                defstats.loc[player, "comps"] = opp_comp_games.mean()
+                stats.loc[player, "Player comps z"] = opp_comp_games.mean()
                 defstats.loc[player, "comp n"] = opp_comp_games.count()
         else:
-            # Vectorized comps lookup for non-MLB leagues with distance weighting
-            _comp_records = []
-            for player, row in stats.iterrows():
-                pos_idx = int(row.get("Player position", 1)) - 1
-                if pos_idx < 0 or pos_idx >= len(self.positions):
-                    continue
-                comp_data = self.comps.get(self.positions[pos_idx], {}).get(
-                    player, {"comps": [player], "distances": [0.0]}
-                )
-                opp = opponents.get(player, "")
-                for comp, dist in zip(comp_data["comps"], comp_data["distances"], strict=False):
-                    if comp == player:
-                        continue
-                    _comp_records.append((player, comp, opp, 1.0 / (1.0 + dist), dist))
-
-            if _comp_records:
-                _cp_df = pd.DataFrame(
-                    _comp_records, columns=["target", "comp", "opp", "weight", "dist"]
-                )
-                # Defense comp distance: mean distance to player's comps (uniqueness signal)
-                defstats["comp distance"] = (
-                    _cp_df.groupby("target")["dist"].mean().reindex(defstats.index)
-                )
-                _merged = _cp_df.merge(
-                    _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
-                    left_on=["comp", "opp"],
-                    right_on=[_player_col, _opp_col],
-                    how="inner",
-                )
-                _merged["weighted_z"] = _merged["_mkt_zscore"] * _merged["weight"]
-                _comp_wsum = _merged.groupby("target")["weighted_z"].sum()
-                _comp_wcount = _merged.groupby("target")["weight"].sum()
-                _comp_means = _comp_wsum / _comp_wcount
-                defstats["comps"] = _comp_means.reindex(defstats.index)
-                # Defense comp n: number of comp-opponent game observations in this estimate
-                defstats["comp n"] = _merged.groupby("target").size().reindex(defstats.index)
+            # Non-MLB matchup-conditional comp lookup. The static
+            # ``(player, comp, position, dist, weight)`` table is built once
+            # per comp-pool swap by :meth:`_comp_pairs`; here we only attach
+            # the per-call opponent and merge against the per-day ``_gl_z``.
+            _pairs = self._comp_pairs()
+            if not _pairs.empty:
+                _pos_idx = stats["Player position"].astype(int) - 1
+                _valid = (_pos_idx >= 0) & (_pos_idx < len(self.positions))
+                if _valid.any():
+                    _expected_pos = pd.Series(
+                        np.asarray(self.positions)[_pos_idx[_valid].to_numpy()],
+                        index=stats.index[_valid],
+                        name="expected_pos",
+                    )
+                    # Keep only pairs whose position matches the stats-side
+                    # position assignment. Preserves the original lookup
+                    # semantics (``self.comps[stats_position].get(player, ...)``)
+                    # for players whose ``Player position`` disagrees with the
+                    # comp-pool assignment.
+                    _cp_df = _pairs.merge(
+                        _expected_pos.rename_axis("target_player").reset_index(),
+                        left_on="player",
+                        right_on="target_player",
+                        how="inner",
+                    )
+                    _cp_df = _cp_df[_cp_df["position"] == _cp_df["expected_pos"]]
+                    if not _cp_df.empty:
+                        _cp_df["opp"] = _cp_df["player"].map(opponents)
+                        # Mean distance to comps (player-side uniqueness signal --
+                        # not matchup-dependent). Carried on defstats only because
+                        # cached training matrices know it under the ``Defense `` prefix.
+                        defstats["comp distance"] = (
+                            _cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
+                        )
+                        # Inner-join comp games vs the opponent. The result is the
+                        # matchup-conditional residual signal: each comp's outcome
+                        # vs this opponent z-scored against the comp's own per-player
+                        # baseline, distance-weighted across the comp set.
+                        _merged = _cp_df.merge(
+                            _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
+                            left_on=["comp", "opp"],
+                            right_on=[_player_col, _opp_col],
+                            how="inner",
+                            suffixes=("", "_gl"),
+                        )
+                        _merged["weighted_z"] = _merged["_mkt_zscore"] * _merged["weight"]
+                        _comp_wsum = _merged.groupby("player")["weighted_z"].sum()
+                        _comp_wcount = _merged.groupby("player")["weight"].sum()
+                        _comp_means = _comp_wsum / _comp_wcount
+                        stats["Player comps z"] = _comp_means.reindex(stats.index).fillna(0.0)
+                        # Count of (comp, opponent) game observations backing each
+                        # ``Player comps z`` estimate. Stays on defstats for cached-
+                        # matrix compatibility.
+                        defstats["comp n"] = (
+                            _merged.groupby("player").size().reindex(defstats.index)
+                        )
 
         stats = stats.join(defstats.add_prefix("Defense "))
 
@@ -928,59 +1274,36 @@ class Stats:
     def get_volume_stats(self, offers, date=datetime.today().date()):
         return
 
-    def get_stat_columns(self, market, unfiltered=False):
+    def get_stat_columns(self, market):
+        """Return the candidate feature columns for ``market``.
+
+        Returns the full unfiltered candidate set: Common + league Common +
+        all playerProfile, teamProfile, and defenseProfile columns. The
+        Filtered SHAP-ranked bucket was removed in the 2026-05-27 no-filter
+        rewire (researcher Option C; Akhiat & Touchanti 2024 arXiv:2411.05937 —
+        tree ensembles statistically tie FS-filtered vs no-FS across 960
+        XGBoost experiments). ``feature_filter.json`` still ships the Common /
+        Always buckets; the Filtered bucket is gone from disk.
+        """
         league_filter = feature_filter.get(self.league, {})
-        # Two-tier schema: Filtered (SHAP-ranked, refreshable) + Always (locked)
-        # Back-compat: if no "Filtered" key, treat the league block itself as the flat market list
-        filtered = league_filter.get("Filtered", league_filter)
-        always = league_filter.get("Always", {})
-
-        if market in filtered and not unfiltered:
-            market_always = list(always.get(market, [])) + list(always.get("_default", []))
-            market_filtered = list(filtered.get(market, []))
-            cols = (
-                feature_filter.get("Common", [])
-                + league_filter.get("Common", [])
-                + market_always
-                + market_filtered
+        self.base_profile()
+        cols = (
+            feature_filter.get("Common", [])
+            + league_filter.get("Common", [])
+            + list(self.playerProfile.add_prefix("Player ").columns)
+            + list(self.teamProfile.add_prefix("Team ").columns)
+            + list(self.defenseProfile.add_prefix("Defense ").columns)
+        )
+        if "Player team" in cols:
+            cols.remove("Player team")
+        for pos in self.positions:
+            cols.remove(f"Defense {pos}")
+        if self.league == "MLB":
+            cols.extend(
+                ["PF R", "PF OBP", "PF H", "PF 1B", "PF 2B", "PF 3B", "PF HR", "PF BB", "PF K"]
             )
-            cols = list(dict.fromkeys(cols))  # de-dup, preserve order
 
-            profile_cols = [
-                col
-                for col in (market_always + market_filtered)
-                if "Player " in col
-                and not any([string in col for string in [" age", " depth", " proj ", " position"]])
-            ]
-
-            count = 1
-            for i, c in enumerate(cols.copy()):
-                if c in profile_cols:
-                    cols.insert(i + count, c + " growth")
-                    cols.insert(i + count, c + " short")
-                    count = count + 2
-
-        else:
-            self.base_profile()
-            cols = (
-                feature_filter.get("Common", [])
-                + league_filter.get("Common", [])
-                + list(self.playerProfile.add_prefix("Player ").columns)
-                + list(self.teamProfile.add_prefix("Team ").columns)
-                + list(self.defenseProfile.add_prefix("Defense ").columns)
-            )
-            if "Player team" in cols:
-                cols.remove("Player team")
-            for pos in self.positions:
-                cols.remove(f"Defense {pos}")
-            if self.league == "MLB":
-                cols.extend(
-                    ["PF R", "PF OBP", "PF H", "PF 1B", "PF 2B", "PF 3B", "PF HR", "PF BB", "PF K"]
-                )
-
-            cols = sorted(list(set(cols)))
-
-        return cols
+        return sorted(set(cols))
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Hook: restrict per-gameday training rows to positions eligible for ``market``.

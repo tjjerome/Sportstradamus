@@ -19,6 +19,12 @@ from sportstradamus.dashboard_data import (
     load_resolve_meta,
     render_banner,
 )
+from sportstradamus.strategies.profit_sim import (
+    N_MONTE_CARLO_DEFAULT,
+    RANKING_MAP,
+    simulate_strategy,
+    summarize_runs,
+)
 
 st.title("Profit Simulation")
 render_banner("stats", "Monte Carlo strategy backtesting")
@@ -83,133 +89,6 @@ selected_platforms = st.sidebar.multiselect(
 )
 df = df.loc[df["Platform"].isin(selected_platforms)]
 
-N_MONTE_CARLO = 100
-
-# Ranking column mapping
-RANKING_MAP = {
-    "Kelly": "K",
-    "Probability": "Model P",  # raw predicted probability
-    "EV": "Model",  # Model P * Boost
-}
-
-
-def compute_payout(row):
-    """Compute payout multiplier for a winning bet."""
-    platform = row.get("Platform", "")
-    boost = row.get("Boost", 1)
-    if platform == "Underdog":
-        return (100 / 110) * boost
-    elif platform == "Sleeper":
-        return boost
-    else:
-        return (100 / 110) * boost
-
-
-def simulate_strategy(
-    df,
-    min_model_p,
-    min_books_p,
-    max_bets_day,
-    sizing_pct,
-    use_kelly,
-    ranking,
-    initial_bankroll,
-    n_mc=N_MONTE_CARLO,
-):
-    """Run Monte Carlo profit simulation on exploded offer data.
-
-    Returns DataFrame with columns: date, run, bankroll, daily_pnl
-    """
-    rank_col = RANKING_MAP.get(ranking, "K")
-
-    # Filter by thresholds
-    eligible = df.loc[(df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)].copy()
-
-    if eligible.empty:
-        return pd.DataFrame()
-
-    # Best offer per player-market-date: pick the offer with the highest
-    # ranking value (e.g., best Kelly, highest Model P * Boost, or highest Model P)
-    eligible = eligible.sort_values(rank_col, ascending=False).drop_duplicates(
-        subset=["Player", "Market", "_date"], keep="first"
-    )
-
-    eligible["_player_base"] = eligible["Player"].str.split(r" \+ | vs\. ").str[0]
-
-    # Pre-compute payouts
-    eligible["Payout"] = eligible.apply(compute_payout, axis=1)
-
-    eligible = eligible.sort_values("_date")
-    dates = sorted(eligible["_date"].unique())
-    all_runs = []
-    rng = np.random.default_rng(42)
-
-    for run_i in range(n_mc):
-        bankroll = initial_bankroll
-        run_data = []
-
-        for date in dates:
-            day_bets = eligible.loc[eligible["_date"] == date].copy()
-            if day_bets.empty:
-                run_data.append({"date": date, "run": run_i, "bankroll": bankroll, "daily_pnl": 0})
-                continue
-
-            # Select bets via weighted sampling, ensuring each player
-            # is only picked once (avoid correlated markets on same player)
-            if len(day_bets) > max_bets_day:
-                weights = day_bets[rank_col].clip(lower=0.01).values
-                weights = weights / weights.sum()
-                chosen = []
-                used_players = set()
-                pool_idx = list(range(len(day_bets)))
-                pool_weights = weights.copy()
-                while len(chosen) < max_bets_day and pool_idx:
-                    pool_weights_norm = pool_weights / pool_weights.sum()
-                    pick = rng.choice(len(pool_idx), p=pool_weights_norm)
-                    actual_idx = pool_idx[pick]
-                    player_base = day_bets.iloc[actual_idx]["_player_base"]
-                    if player_base not in used_players:
-                        chosen.append(actual_idx)
-                        used_players.add(player_base)
-                    pool_idx.pop(pick)
-                    pool_weights = np.delete(pool_weights, pick)
-                    if pool_weights.sum() == 0:
-                        break
-                day_bets = day_bets.iloc[chosen]
-            else:
-                # Even when taking all, deduplicate by base player (keep best)
-                day_bets = day_bets.sort_values(rank_col, ascending=False).drop_duplicates(
-                    subset=["_player_base"], keep="first"
-                )
-
-            daily_pnl = 0
-            for _, bet in day_bets.iterrows():
-                if use_kelly:
-                    payout_mult = bet["Payout"]
-                    if payout_mult <= 1:
-                        continue
-                    kelly_f = (bet[prob_col] * payout_mult - 1) / (payout_mult - 1)
-                    kelly_f = max(0, min(kelly_f, 0.05))  # cap at 5%
-                    bet_size = bankroll * kelly_f
-                else:
-                    bet_size = bankroll * sizing_pct / 100
-
-                if bet["Hit"]:
-                    daily_pnl += bet_size * bet["Payout"]
-                else:
-                    daily_pnl -= bet_size
-
-            bankroll += daily_pnl
-            bankroll = max(bankroll, 0)
-            run_data.append(
-                {"date": date, "run": run_i, "bankroll": bankroll, "daily_pnl": daily_pnl}
-            )
-
-        all_runs.extend(run_data)
-
-    return pd.DataFrame(all_runs)
-
-
 # --- Preset Strategies ---
 PRESETS = {
     "Conservative": {
@@ -270,13 +149,15 @@ with st.spinner("Running Monte Carlo simulations..."):
     for name, params in PRESETS.items():
         result = simulate_strategy(
             df,
-            params["min_model_p"],
-            params["min_books_p"],
-            params["max_bets_day"],
-            params["sizing_pct"],
-            params["use_kelly"],
-            params["ranking"],
-            initial_bankroll,
+            prob_col=prob_col,
+            ranking=params["ranking"],
+            min_model_p=params["min_model_p"],
+            min_books_p=params["min_books_p"],
+            max_bets_day=params["max_bets_day"],
+            sizing_pct=params["sizing_pct"],
+            use_kelly=params["use_kelly"],
+            initial_bankroll=initial_bankroll,
+            n_mc=N_MONTE_CARLO_DEFAULT,
         )
         if not result.empty:
             all_results[name] = result
@@ -284,13 +165,15 @@ with st.spinner("Running Monte Carlo simulations..."):
     # Custom
     custom_result = simulate_strategy(
         df,
-        custom_min_p,
-        custom_min_books,
-        custom_max_bets,
-        custom_sizing,
-        custom_kelly,
-        custom_ranking,
-        initial_bankroll,
+        prob_col=prob_col,
+        ranking=custom_ranking,
+        min_model_p=custom_min_p,
+        min_books_p=custom_min_books,
+        max_bets_day=custom_max_bets,
+        sizing_pct=custom_sizing,
+        use_kelly=custom_kelly,
+        initial_bankroll=initial_bankroll,
+        n_mc=N_MONTE_CARLO_DEFAULT,
     )
     if not custom_result.empty:
         all_results["Custom"] = custom_result
@@ -399,11 +282,11 @@ for name, result in all_results.items():
     summary_rows.append(
         {
             "Strategy": name,
-            "Final Bankroll": f"${mean_final:,.0f}",
-            "ROI": f"{roi:+.1%}",
-            "Max Drawdown": f"{mean_dd:.1%}",
-            "Sharpe Ratio": f"{sharpe:.3f}",
-            "Win% (daily)": f"{win_rate:.1%}",
+            "Final Bankroll": f"${summary['mean_final']:,.0f}",
+            "ROI": f"{summary['roi']:+.1%}",
+            "Max Drawdown": f"{summary['max_drawdown']:.1%}",
+            "Sharpe Ratio": f"{summary['sharpe']:.3f}",
+            "Win% (daily)": f"{summary['win_rate']:.1%}",
         }
     )
 

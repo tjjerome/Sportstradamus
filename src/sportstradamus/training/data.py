@@ -6,6 +6,27 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+# Quantile cutoff for counting non-archived rows: players below the 25th
+# percentile of usage on each game day are excluded (marginal players rarely
+# accrue a sportsbook line, so their rows add noise without adding signal).
+_USAGE_QUANTILE_CUTOFF: float = 0.25
+
+# Quantile bounds for outlier removal on raw results.  Bottom and top 5%
+# are trimmed to eliminate data-entry errors and near-impossible outcomes.
+_RESULT_OUTLIER_LOW: float = 0.05
+_RESULT_OUTLIER_HIGH: float = 0.95
+
+# Same bounds applied to the line distribution when archived data is sparse.
+_LINE_CLIP_LOW: float = 0.05
+_LINE_CLIP_HIGH: float = 0.95
+
+# Minimum archived rows AND minimum fraction of archived rows required before
+# the line-clip bounds are derived from the archived distribution (a smaller
+# or sparser archive falls back to the full-data percentiles so we don't over-
+# restrict thin markets).
+_MIN_ARCHIVED_FOR_CLIP: int = 50
+_MIN_ARCHIVED_FRACTION_FOR_CLIP: float = 0.10
+
 
 def count_training_rows(stat_data, market, start_date, archive) -> int:
     """Estimate the number of training rows get_training_matrix would produce for
@@ -31,7 +52,7 @@ def count_training_rows(stat_data, market, start_date, archive) -> int:
     if gamelog.empty:
         return 0
 
-    usage_cutoff = gamelog[stat_data.usage_stat].quantile(0.25)
+    usage_cutoff = gamelog[stat_data.usage_stat].quantile(_USAGE_QUANTILE_CUTOFF)
     archived_by_date = archive.archived_players_by_date(stat_data.league, market)
 
     total = 0
@@ -100,9 +121,12 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
 
     # --- 2. Remove result outliers (archived rows always kept) ---
     M = M.loc[
-        ((M["Result"] >= M["Result"].quantile(0.05)) & (M["Result"] <= M["Result"].quantile(0.95)))
+        (
+            (M["Result"] >= M["Result"].quantile(_RESULT_OUTLIER_LOW))
+            & (M["Result"] <= M["Result"].quantile(_RESULT_OUTLIER_HIGH))
+        )
         | (M["Archived"] == 1)
-    ]
+    ].copy()
 
     # --- 3. Clip lines to a realistic range ---
     # Use archived range when coverage is good; otherwise fall back to
@@ -110,12 +134,15 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     # line distribution.
     archived_mask = M["Archived"] == 1
     n_archived = archived_mask.sum()
-    if n_archived >= 50 and n_archived / len(M) > 0.10:
+    if (
+        n_archived >= _MIN_ARCHIVED_FOR_CLIP
+        and n_archived / len(M) > _MIN_ARCHIVED_FRACTION_FOR_CLIP
+    ):
         line_floor = M.loc[archived_mask, "Line"].min()
         line_ceil = M.loc[archived_mask, "Line"].max()
     else:
-        line_floor = M["Line"].quantile(0.05)
-        line_ceil = M["Line"].quantile(0.95)
+        line_floor = M["Line"].quantile(_LINE_CLIP_LOW)
+        line_ceil = M["Line"].quantile(_LINE_CLIP_HIGH)
     M["Line"] = M["Line"].clip(line_floor, line_ceil)
 
     # --- 4. Balance line distribution ---
