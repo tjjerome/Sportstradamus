@@ -84,6 +84,21 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$(jq -r '.tool_input.file_path // empty')\"; case \"$f\" in *.py) poetry run ruff check --fix \"$f\"; poetry run ruff format \"$f\" ;; esac"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/complexity-gate.py\""
+          }
+        ]
+      }
     ]
   },
   "outputStyle": "Caveman",

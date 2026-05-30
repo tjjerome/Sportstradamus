@@ -82,6 +82,7 @@ flask-table = "^0.5.0"
 ruff = "^0.15.0"
 mypy = "^1.10.0"
 pre-commit = "^3.7.0"
+pylint = "^3.2"          # duplicate-code detector only; see [tool.pylint.*]
 
 
 [[tool.poetry.source]]
@@ -115,11 +116,32 @@ extend-exclude = ["src/deprecated"]
 # D: pydocstyle, SIM: simplify, RUF: ruff-native, N: naming,
 # PTH: pathlib, PLR/PLW: pylint refactor/warning, PERF: performance,
 # TID: tidy-imports.
+# C4/RET/PIE/ERA/FBT/T20 mechanize STYLE_GUIDE rules that were docs-only.
+# C90 (mccabe) is deliberately omitted: the .claude/hooks/complexity-gate.py
+# AST gate covers complexity diff-scoped, without flagging all legacy code.
 select = [
     "E", "W", "F", "I", "UP", "B", "D", "SIM", "RUF",
     "N", "PTH", "PLR", "PLW", "PERF", "TID",
+    "C4",   # flake8-comprehensions — §10 idioms (mostly autofixable)
+    "RET",  # flake8-return — §10 guard clauses; RET504 = "name steps, not echoes"
+    "PIE",  # flake8-pie — misc redundancy (mostly autofixable)
+    "ERA",  # eradicate — §12 no commented-out code (dormant; see ignore ratchet)
+    "FBT",  # flake8-boolean-trap — §10 no flag arguments (dormant; see ignore)
+    "T20",  # flake8-print — §9 no stray prints (dormant; see ignore)
 ]
 ignore = [
+    # PRIORITY LIFT — these contradict CLAUDE.md hard rules and head the
+    # ratchet queue: E722 (bare except -> STYLE_GUIDE §11) and PLR2004
+    # (magic values -> §9 / no-magic-numbers). Both still appear in the phase
+    # blocks below; clear those modules first, then drop them from here.
+
+    # ----- Anti-slop ratchet: declared in `select`, dormant until a one-time
+    # burn-down. Baseline with `ruff check --add-noqa src/sportstradamus/`,
+    # then drop each code as its modules are cleaned.
+    "ERA001",                       # §12 commented-out code
+    "FBT001", "FBT002", "FBT003",   # §10 boolean flag arguments
+    "T201", "T203",                 # §9 stray print / pprint
+
     # Module and package docstrings — ratcheting up as each file gains one.
     "D100", "D104",
     # Argument and statement-count limits — advisory during the refactor.
@@ -170,8 +192,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Scripts are terser by nature; tests do not need docstrings.
-"src/sportstradamus/scripts/*" = ["D", "PLR"]
+# Scripts are terser by nature; tests do not need docstrings. Scripts may
+# legitimately print, so keep T20 off them even after the ratchet lifts it.
+"src/sportstradamus/scripts/*" = ["D", "PLR", "T201", "T203"]
 "tests/*" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
@@ -194,6 +217,26 @@ warn_unused_ignores = true
 # Strict on what is annotated; permissive on what is not.
 disallow_untyped_defs = false
 check_untyped_defs = true
+
+# -----------------------------------------------------------------------------
+# Duplication detector. Ruff has no clone detection; pylint's similarity
+# checker fills that gap (GitClear's data makes duplication the dominant
+# AI-debt signal). Advisory like mypy — NOT part of the blocking `ruff check`
+# gate. Run on demand / in CI with everything except the clone checker off:
+#
+#     poetry run pylint --disable=all --enable=duplicate-code src/sportstradamus/
+#
+# Review the report and hoist genuine clones into the base class or a shared
+# helper (STYLE_GUIDE §2.9; rule of three §2.6). Accept intentional per-league
+# parallelism in stats/ rather than over-abstracting it — raise
+# min-similarity-lines if that directory is too noisy.
+# -----------------------------------------------------------------------------
+[tool.pylint.similarities]
+min-similarity-lines = 6
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

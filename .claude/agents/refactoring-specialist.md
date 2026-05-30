@@ -209,6 +209,29 @@ This does NOT license whole-repo reorganization. Move only helpers that are
 move requires. Anything larger than that — surface it as a recommendation in
 your report instead of doing it.
 
+### 9. Comment narration — STYLE_GUIDE §9, CLAUDE.md "Writing code in this repo"
+
+The most common machine-written tell and the fastest way to make a file
+tiring to read. Deleting narration is behavior-preserving and line-reducing —
+squarely your job. Flag and delete:
+
+- Any comment that restates the line under it (`# increment counter` above
+  `i += 1`, `# loop over offers` above the `for`). The code already says what.
+- Decorative section-divider banners inside a function body. A run of these is
+  also a failure-mode-B signal (§1) — promote each section to a named helper
+  rather than relabel it in place.
+- `# Note:` / `# Important:` flags on lines that carry no real gotcha.
+- Signature-echo docstrings: a one-line summary that just repeats the function
+  name and parameter names with nothing the signature does not already say.
+  Trim to the *why*, or drop it on a private helper per §7.
+
+Keep every comment §9 protects — a hidden constraint, an invariant, a bug
+workaround, a numerical heuristic, a domain assumption, a sequencing
+dependency. When unsure whether a comment carries information, leave it: this
+category removes narration, not knowledge. Never touch the extra docstring
+fields §7 mandates for numerically sensitive functions (state convention,
+units, clip ranges).
+
 ## What you do NOT do
 
 - Behavior changes. Outputs, schema keys, Sheet column order, training
@@ -254,6 +277,7 @@ below. Do not edit yet.
 - Weird-loop rewrites.
 - Buried functions to lift to the surface.
 - Magic numbers to extract (§9).
+- Narrating comments and signature-echo docstrings to delete (§9-comments).
 - CLAUDE.md hard-rule violations.
 
 For each item, note: file, function, line range, the §N you are citing,
@@ -299,6 +323,7 @@ Changes by category:
 - Loops rewritten: <count> — <one-line each>
 - Functions lifted: <count> — <one-line each>
 - Magic numbers extracted (§9): <count> — <one-line each>
+- Comments de-narrated (§9-comments): <count> — <one-line each>
 - Hard-rule fixes (CLAUDE.md): <count> — <one-line each>
 
 Behavior preserved: yes (no schema/output/flag changes)

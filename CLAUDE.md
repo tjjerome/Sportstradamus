@@ -2,6 +2,66 @@
 
 Guidance for Claude Code (claude.ai/code) when working in this repository.
 
+## Writing code in this repo — applies every session
+
+This is a solo-maintained project. Every abstraction, fallback, and helper is
+something **one person** has to understand and fix later, often months from now.
+The default is *less code*, not more. Match the codebase you find; do not impose
+textbook patterns over it. The rules in this section are binding on their own —
+they do not depend on you having opened another file first.
+
+**Avoid over-engineering.** Only make changes that are directly requested or
+clearly necessary for the task. Keep solutions simple and focused.
+
+* **Scope.** Don't add features, refactor, or make "improvements" beyond what was
+  asked. A bug fix does not need the surrounding code cleaned up. If you notice
+  unrelated work worth doing, say so — don't just do it.
+* **Defensive coding.** Don't add error handling, fallbacks, or validation for
+  scenarios that can't happen. Trust internal code and framework guarantees. Catch
+  only the specific exceptions you can actually handle and let everything else fail
+  loud — a clean traceback beats a swallowed error. No bare `except:`. Python is
+  EAFP: prefer `try`/act over pre-checking conditions that are almost always true,
+  and don't sprinkle `hasattr`/`getattr`-with-default to paper over our own code.
+* **Edge cases.** Handle what the task names and what demonstrably occurs in this
+  project's data. Ask before writing code for speculative inputs.
+
+**Don't narrate code with comments.** Over-commenting is the most common tell of
+machine-written code and the fastest way to make a file tiring to read.
+
+* Comments explain **why**, never **what**. Delete any comment that just restates
+  the line under it (`# increment counter`, `# loop over the rows`).
+* No section-divider banners and no `# Note:` / `# Important:` spam. Flag a real
+  gotcha when one exists; otherwise stay quiet.
+* Docstrings go on public functions, classes, and modules only, and only when they
+  add something the signature doesn't. Don't add docstrings, comments, or type
+  annotations to code you didn't otherwise change. (See STYLE_GUIDE.md for the
+  ratchet — D1xx is being lifted file by file, not back-filled in bulk.)
+
+**Prefer a few deep functions over many thin ones.** A coherent 40-line function
+beats six 7-line fragments you have to read together to follow one thought.
+
+* A function must earn its name with real logic. No wrappers that only rename and
+  forward a call. Keep a single logical operation within ~3 layers of our own calls.
+* No new class where a function does the job. No factory / strategy / config-object /
+  dependency-injection scaffolding unless **three** real implementations already
+  need it (rule of three). Build for today's task, not a hypothetical future one.
+
+**Reuse before you write.** Duplicated logic is the largest measured source of
+drift in AI-assisted codebases.
+
+* Before writing a utility, grep `helpers/` and the relevant package for one that
+  already exists, and use it. `sportstradamus.helpers` is the shared home (see the
+  package table below).
+* Don't reimplement the standard library or our existing stack. Reach for
+  `itertools`, `collections`, `pathlib`, and vectorized pandas/numpy/polars before
+  hand-rolling a loop.
+* Find the same logic in two places? Consolidate it — don't copy it a third time.
+
+**Type hints in moderation.** Annotate public signatures and module boundaries;
+skip the obvious locals. Avoid `Any` — model real structures with `dataclass`,
+`TypedDict`, or `Protocol`. Don't build elaborate generics where a concrete type
+reads fine.
+
 ## Mandatory reading — do this first
 
 Before touching any code, read these two documents once:
