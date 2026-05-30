@@ -205,12 +205,18 @@ class Archive:
                 backoff = min(backoff * 2, _LOCK_BACKOFF_MAX)
 
     def __new__(cls):
+        """Return the process-wide singleton, creating it on first call."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
+        """Open (or reuse) the DuckDB connection and reset write buffers.
+
+        Idempotent: the singleton is initialized once per process, so repeat
+        constructions short-circuit on the ``_initialized`` guard.
+        """
         if self._initialized:
             return
         self._initialized = True
