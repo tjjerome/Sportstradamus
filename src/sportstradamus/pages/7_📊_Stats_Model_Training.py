@@ -1,10 +1,9 @@
-"""Per-market training diagnostics from the latest `meditate` run.
+"""Per-cell training diagnostics from the latest `meditate` run.
 
-Phase 3 §4.d: tabs are split by metric family (Scoring rules, Discrimination,
-Rates, Kelly & blending, Dispersion, EV & lines, Hyperparameters). Each tab
-renders a one-row "Book-only baseline" table above the per-market model rows
-so readers see what taking the book's odds gets you before reading model
-performance. Every metric column carries a one-line help string indicating
+Renders the wide one-row-per-`(league, market)` schema written by
+``training.report.report()`` with the lifecycle state joined in at read
+time via ``training.graduation.lifecycle_table()``. Tabs split the slate
+by metric family; each column carries a one-line help string indicating
 whether higher or lower is better (or that the field is informational).
 """
 
@@ -18,23 +17,25 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard_data import format_ts, load_model_stats, render_banner
-from sportstradamus.helpers.io import MODEL_STATS_PATH
+from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
+from sportstradamus.training.graduation import lifecycle_table
 
-# The "calibrated" row carries the post-correction performance the model
-# actually deploys at; the other rows (raw, corrected) are diagnostic.
-DEFAULT_METRIC_ROW = "calibrated"
-
-# Direction annotations rendered as Streamlit `column_config` help strings.
-# Single source of truth — column groupings below pull their help text from here.
+# Single source of truth for the per-column direction help strings rendered
+# through Streamlit's ``column_config``. Columns absent from this map don't
+# get an annotation.
 HIGHER = "↑ higher is better"
 LOWER = "↓ lower is better"
 INFO = "informational"
 DIRECTIONS: dict[str, str] = {
     # Scoring rules
-    "brier_score": LOWER,
-    "log_loss": LOWER,
+    "brier_book": LOWER,
+    "brier_model": LOWER,
+    "brier_skill_score": HIGHER,
+    "log_loss_book": LOWER,
+    "log_loss_model": LOWER,
     "nll": LOWER,
-    "expected_calibration_error": LOWER,
+    "ece_equal_mass": LOWER,
+    "ece_debiased": LOWER,
     # Discrimination
     "roc_auc": HIGHER,
     "accuracy": HIGHER,
@@ -47,22 +48,35 @@ DIRECTIONS: dict[str, str] = {
     "frac_ev_gt_line": INFO,
     "over_pct_ev_gt": HIGHER,
     "over_pct_ev_lt": LOWER,
-    # Kelly & blending
-    "brier_skill_score": HIGHER,
-    "kelly_shrinkage": HIGHER,
-    "model_weight": INFO,
-    # Dispersion
-    "shape_ratio": INFO,
-    "dispersion_cal": INFO,
-    "model_shape": INFO,
-    "empirical_shape": INFO,
     # EV & lines
     "model_ev": INFO,
     "mean_line": INFO,
     "result_mean": INFO,
     "mean_ev_diff": HIGHER,
     "median_ev_diff": HIGHER,
-    "cf_over_pct": INFO,
+    # Kelly & blending
+    "kelly_shrinkage": HIGHER,
+    "model_weight": INFO,
+    # Dispersion
+    "model_shape": INFO,
+    "empirical_shape": INFO,
+    "shape_ratio": INFO,
+    "marginal_shape": INFO,
+    "dispersion_cal": INFO,
+    # Ship gates
+    "g1_brier_diff_mean": LOWER,
+    "g1_brier_diff_ci_lo": LOWER,
+    "g1_brier_diff_ci_hi": LOWER,
+    "g2_star_z": LOWER,
+    "g3_bench_z": LOWER,
+    "g4_iqr_ratio": INFO,
+    "g5_ece_debiased": LOWER,
+    "g1_pass": INFO,
+    "g2_pass": INFO,
+    "g3_pass": INFO,
+    "g4_pass": INFO,
+    "g5_pass": INFO,
+    "ship": INFO,
     # Hyperparameters
     "hp_rounds": INFO,
     "hp_leaves": INFO,
@@ -73,12 +87,30 @@ DIRECTIONS: dict[str, str] = {
     "cv": INFO,
     "std": INFO,
     "historical_zero_rate": INFO,
+    # Lifecycle / identity
+    "lifecycle_state": INFO,
+    "n_validation": INFO,
 }
 
-ID_COLS = ["league", "market", "distribution"]
+ID_COLS = ["league", "market", "distribution", "shipped", "lifecycle_state"]
 
 TAB_COLUMNS: dict[str, list[str]] = {
-    "Scoring rules": ["brier_score", "log_loss", "nll", "expected_calibration_error"],
+    "Overview": [
+        "n_validation",
+        "brier_skill_score",
+        "kelly_shrinkage",
+        "ship",
+    ],
+    "Scoring rules": [
+        "brier_book",
+        "brier_model",
+        "brier_skill_score",
+        "log_loss_book",
+        "log_loss_model",
+        "nll",
+        "ece_equal_mass",
+        "ece_debiased",
+    ],
     "Discrimination": [
         "roc_auc",
         "accuracy",
@@ -93,15 +125,35 @@ TAB_COLUMNS: dict[str, list[str]] = {
         "over_pct_ev_gt",
         "over_pct_ev_lt",
     ],
-    "Kelly & blending": ["brier_skill_score", "kelly_shrinkage", "model_weight"],
-    "Dispersion": ["shape_ratio", "dispersion_cal", "model_shape", "empirical_shape"],
     "EV & lines": [
         "model_ev",
         "mean_line",
         "result_mean",
         "mean_ev_diff",
         "median_ev_diff",
-        "cf_over_pct",
+    ],
+    "Kelly & blending": ["kelly_shrinkage", "model_weight", "brier_skill_score"],
+    "Dispersion": [
+        "model_shape",
+        "empirical_shape",
+        "shape_ratio",
+        "marginal_shape",
+        "dispersion_cal",
+    ],
+    "Ship gates": [
+        "g1_brier_diff_mean",
+        "g1_brier_diff_ci_lo",
+        "g1_brier_diff_ci_hi",
+        "g2_star_z",
+        "g3_bench_z",
+        "g4_iqr_ratio",
+        "g5_ece_debiased",
+        "g1_pass",
+        "g2_pass",
+        "g3_pass",
+        "g4_pass",
+        "g5_pass",
+        "ship",
     ],
     "Hyperparameters": [
         "hp_rounds",
@@ -117,32 +169,42 @@ TAB_COLUMNS: dict[str, list[str]] = {
 }
 
 TAB_CAPTIONS: dict[str, str] = {
+    "Overview": (
+        "One row per (league, market). Columns are annotated ↑/↓/informational."
+    ),
     "Scoring rules": (
-        "Proper scoring rules on the validation set. The pinned baseline shows what"
-        " predicting the book's implied probability scores; model rows beneath should beat it."
-        " Columns are annotated ↑/↓/informational."
+        "Proper scoring rules on the validation set. The model's `*_model` column"
+        " should beat the `*_book` baseline; the derived `brier_skill_score` is the"
+        " single-number gate the kelly chain reads. Columns are annotated ↑/↓/informational."
     ),
     "Discrimination": (
-        "How well the model separates winners from losers. Baseline = book-as-model."
+        "How well the model separates winners from losers."
         " Columns are annotated ↑/↓/informational."
     ),
     "Rates": (
-        "Rates and conditional Over% slices. Baseline = book-as-model where applicable;"
-        " EV-conditional fields are model-only and read NaN on the baseline."
+        "Rates and conditional Over% slices. Compare `predicted_over_rate` to"
+        " `empirical_over_rate` for bias; `over_pct_ev_gt` / `over_pct_ev_lt` show"
+        " whether EV-positive picks actually win at higher rates."
         " Columns are annotated ↑/↓/informational."
-    ),
-    "Kelly & blending": (
-        "Skill score relative to the book and the derived Kelly shrinkage."
-        " Baseline pins to skill=0, shrinkage=0 (no edge over the book)."
-        " Columns are annotated ↑/↓/informational."
-    ),
-    "Dispersion": (
-        "Shape calibration diagnostics. shape_ratio≈1.0 means model dispersion matches"
-        " the empirical outcome dispersion. Columns are informational."
     ),
     "EV & lines": (
         "Expected-value diagnostics vs. the bookmaker line. Mean/median EV diffs are"
         " the model's edge over the line. Columns are annotated ↑/↓/informational."
+    ),
+    "Kelly & blending": (
+        "Skill score relative to the book and the derived Kelly shrinkage."
+        " `kelly_shrinkage = clip(brier_skill_score, 0, 1)`."
+        " Columns are annotated ↑/↓/informational."
+    ),
+    "Dispersion": (
+        "Shape calibration diagnostics. `shape_ratio≈1.0` means model dispersion"
+        " matches the empirical outcome dispersion. Columns are informational."
+    ),
+    "Ship gates": (
+        "Five offline ship gates (training.scorecard.compute_gates). G1 = paired"
+        " Brier CI vs book (ci_hi < 0 ⇒ model wins). G2/G3 = top-decile/bottom-quartile"
+        " bias-over-spread z. G4 = predicted vs realized IQR ratio (≈1.0 ideal)."
+        " G5 = Roelofs-debiased equal-mass ECE. `ship` is the AND of all five gates."
     ),
     "Hyperparameters": (
         "Optuna-tuned LightGBMLSS hyperparameters and per-market scale references."
@@ -152,43 +214,19 @@ TAB_CAPTIONS: dict[str, str] = {
 
 
 def _column_config(cols: list[str]) -> dict[str, st.column_config.Column]:
-    """Build Streamlit column_config with direction help for each metric column."""
-    cfg: dict[str, st.column_config.Column] = {}
-    for c in cols:
-        if c in DIRECTIONS:
-            cfg[c] = st.column_config.Column(help=DIRECTIONS[c])
-    return cfg
+    """Streamlit column_config with direction help for each annotated column."""
+    return {c: st.column_config.Column(help=DIRECTIONS[c]) for c in cols if c in DIRECTIONS}
 
 
-def _render_tab(
-    tab_name: str,
-    metric_cols: list[str],
-    model_view: pd.DataFrame,
-    book_view: pd.DataFrame,
-) -> None:
-    """Render the pinned book-baseline table above the per-market model table."""
+def _render_tab(tab_name: str, metric_cols: list[str], view: pd.DataFrame) -> None:
     st.caption(TAB_CAPTIONS[tab_name])
-    cols = ID_COLS + metric_cols
-    available = [c for c in cols if c in model_view.columns]
-
-    book_available = [c for c in cols if c in book_view.columns]
-    if not book_view.empty and book_available:
-        st.markdown("**Book-only baseline (what taking the book's odds gets you):**")
-        st.dataframe(
-            book_view[book_available].sort_values(["league", "market"]),
-            use_container_width=True,
-            hide_index=True,
-            column_config=_column_config(book_available),
-        )
-    else:
-        st.info("No book baseline rows for the current filters.")
-
+    cols = [c for c in ID_COLS + metric_cols if c in view.columns]
     st.dataframe(
-        model_view[available].sort_values(["league", "market"]),
+        view[cols].sort_values(["league", "market"]),
         use_container_width=True,
         height=560,
         hide_index=True,
-        column_config=_column_config(available),
+        column_config=_column_config(cols),
     )
 
 
@@ -209,9 +247,19 @@ if stats.empty:
     st.info("No model stats found. Run `poetry run meditate` to generate `model_stats.parquet`.")
     st.stop()
 
-# Backfill row_kind for parquets written before §4.c (treat all rows as model).
-if "row_kind" not in stats.columns:
-    stats = stats.assign(row_kind="model")
+# Lifecycle state joins offline Gate-1 (this parquet) with live Gate-2
+# (live_metrics_per_market.parquet, written daily by `reflect`). Computed
+# at read time so the lifecycle classification reflects today's live data
+# rather than whatever it was at the last meditate run.
+lifecycle = lifecycle_table(MODEL_STATS_PATH, LIVE_METRICS_PATH)
+if not lifecycle.empty:
+    stats = stats.merge(
+        lifecycle[["league", "market", "lifecycle_state"]],
+        on=["league", "market"],
+        how="left",
+    )
+else:
+    stats["lifecycle_state"] = pd.NA
 
 with st.sidebar:
     st.header("Filters")
@@ -219,30 +267,27 @@ with st.sidebar:
     sel_leagues = st.multiselect("Leagues", leagues, default=leagues)
     distributions = sorted(stats["distribution"].dropna().unique())
     sel_dists = st.multiselect("Distributions", distributions, default=distributions)
-
-    model_rows_df = stats.loc[stats["row_kind"] == "model"]
-    metric_rows = sorted(model_rows_df["metric_row"].dropna().unique())
-    if not metric_rows:
-        st.warning("No model rows in `model_stats.parquet`.")
-        st.stop()
-    sel_metric_row = st.selectbox(
-        "Metric row",
-        metric_rows,
-        index=metric_rows.index(DEFAULT_METRIC_ROW) if DEFAULT_METRIC_ROW in metric_rows else 0,
+    shipped_states = sorted(stats["shipped"].dropna().unique()) if "shipped" in stats.columns else []
+    sel_shipped = (
+        st.multiselect("Shipped", shipped_states, default=shipped_states) if shipped_states else []
+    )
+    lifecycle_states = sorted(stats["lifecycle_state"].dropna().unique())
+    sel_lifecycle = (
+        st.multiselect("Lifecycle", lifecycle_states, default=lifecycle_states)
+        if lifecycle_states
+        else []
     )
 
 scope = stats["league"].isin(sel_leagues) & stats["distribution"].isin(sel_dists)
-model_view = stats.loc[
-    scope & (stats["row_kind"] == "model") & (stats["metric_row"] == sel_metric_row)
-]
-book_view = stats.loc[scope & (stats["row_kind"] == "book_baseline")]
+if sel_shipped:
+    scope &= stats["shipped"].isin(sel_shipped)
+if sel_lifecycle:
+    scope &= stats["lifecycle_state"].isin(sel_lifecycle)
+view = stats.loc[scope]
 
-st.caption(
-    f"Showing **{len(model_view):,}** model rows at `{sel_metric_row}` and "
-    f"**{len(book_view):,}** book-baseline rows."
-)
+st.caption(f"Showing **{len(view):,}** cells.")
 
 tabs = st.tabs(list(TAB_COLUMNS.keys()))
 for tab, name in zip(tabs, TAB_COLUMNS.keys(), strict=True):
     with tab:
-        _render_tab(name, TAB_COLUMNS[name], model_view, book_view)
+        _render_tab(name, TAB_COLUMNS[name], view)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import importlib.resources as pkg_resources
 import json
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +19,6 @@ import pytest
 from click.testing import CliRunner
 
 from sportstradamus import data
-from sportstradamus.training import correlate as correlate_module
 from sportstradamus.training.cli import meditate
 from sportstradamus.training.correlate import (
     MIN_OVERLAP_FOR_FULL_WEIGHT,
@@ -147,7 +146,36 @@ def _models_snapshot() -> dict[str, float]:
     return {f.name: f.stat().st_mtime for f in Path(str(models_dir)).iterdir() if f.is_file()}
 
 
-def test_metadata_written_with_required_keys(tmp_path) -> None:
+@pytest.fixture
+def _preserve_nba_correlate_outputs():
+    """Snapshot + restore the per-league correlate outputs around each test.
+
+    These tests call ``correlate("NBA", stub, ...)``, which writes to the
+    real package data directory at ``data/leagues/nba/``. Without this
+    fixture the empty-gamelog stub would leave a ``cache_key`` of
+    ``row_count=0`` / ``max_date=null`` behind, making the next real
+    ``meditate`` run see a cache mismatch against its populated gamelog
+    and rebuild from scratch — the test pollution the user hit on
+    2026-05-29.
+    """
+    league_dir = Path(str(pkg_resources.files(data) / "leagues" / "nba"))
+    targets = ["corr_metadata.json", "corr_same_team.parquet", "corr_opposing.parquet"]
+    saved: dict[str, bytes | None] = {}
+    for name in targets:
+        path = league_dir / name
+        saved[name] = path.read_bytes() if path.is_file() else None
+    try:
+        yield
+    finally:
+        for name, blob in saved.items():
+            path = league_dir / name
+            if blob is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(blob)
+
+
+def test_metadata_written_with_required_keys(_preserve_nba_correlate_outputs) -> None:
     """correlate() emits the metadata side-car with the documented keys."""
     stub = _StubStats()
     metadata_path = pkg_resources.files(data) / "leagues" / "nba" / "corr_metadata.json"
@@ -173,6 +201,51 @@ def test_metadata_written_with_required_keys(tmp_path) -> None:
     assert not missing, f"metadata missing keys: {missing}"
     assert metadata["league"] == "NBA"
     assert isinstance(metadata["per_team_observations"], dict)
+
+
+def test_correlate_skips_when_cache_valid(_preserve_nba_correlate_outputs) -> None:
+    """A second non-force call with unchanged inputs leaves the prior outputs untouched."""
+    stub = _StubStats()
+    metadata_path = Path(str(pkg_resources.files(data) / "leagues" / "nba" / "corr_metadata.json"))
+    same_path = Path(str(pkg_resources.files(data) / "leagues" / "nba" / "corr_same_team.parquet"))
+
+    correlate("NBA", stub, force=True)
+    first_meta = json.loads(metadata_path.read_text())
+    first_same_mtime = same_path.stat().st_mtime if same_path.is_file() else None
+
+    # Second call with the same stub (same empty gamelog) and force=False must
+    # take the skip path — the metadata timestamp and parquet mtime stay put.
+    correlate("NBA", stub, force=False)
+    second_meta = json.loads(metadata_path.read_text())
+    second_same_mtime = same_path.stat().st_mtime if same_path.is_file() else None
+
+    assert first_meta["generated_at"] == second_meta["generated_at"], (
+        "skip path must not rewrite corr_metadata.json"
+    )
+    assert first_meta.get("cache_key") == second_meta.get("cache_key"), (
+        "cache_key should round-trip unchanged"
+    )
+    assert first_same_mtime == second_same_mtime, "skip path must not rewrite the parquet"
+
+
+def test_correlate_force_bypasses_skip(_preserve_nba_correlate_outputs, capsys) -> None:
+    """``force=True`` always rebuilds, even when the cache_key matches."""
+    stub = _StubStats()
+
+    correlate("NBA", stub, force=True)
+    capsys.readouterr()  # discard the priming-run banner
+
+    # Inputs are identical and the metadata is freshly valid — but force=True
+    # must still take the full rebuild path. The skip banner would print
+    # "Correlating NBA... cache valid, skipped"; the rebuild banner prints
+    # only "Correlating NBA...".
+    correlate("NBA", stub, force=True)
+    out = capsys.readouterr().out
+
+    assert "Correlating NBA..." in out
+    assert "cache valid, skipped" not in out, (
+        f"force=True took the skip path: {out!r}"
+    )
 
 
 def test_rebuild_correlations_does_not_touch_models(monkeypatch) -> None:
@@ -204,6 +277,3 @@ def test_rebuild_correlations_does_not_touch_models(monkeypatch) -> None:
     assert _models_snapshot() == before, "model files were modified during --rebuild-correlations"
 
 
-# Make sure the module reference stays imported (ruff F401 guard).
-_ = correlate_module
-_ = timedelta

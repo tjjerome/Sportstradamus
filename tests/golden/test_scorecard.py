@@ -1,4 +1,4 @@
-"""Unit tests for the offline compression-eval / ship-gate harness.
+"""Unit tests for ``training.scorecard`` — the offline ship-gate harness.
 
 Exercises the numeric path (decile binning, compression ratio, scorecard, the five
 offline ship gates, and their deterministic-1/0 oracle) on synthetic test-set frames
@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.scripts.compression_eval import (
+from sportstradamus.training.scorecard import (
     _GATE1_CI_HI_MAX,
     _GATE2_STAR_Z_MAX,
     _GATE3_BENCH_Z_MAX,
@@ -788,7 +788,7 @@ def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):
         gate_row(_compressed_frame(seed=1), "EV", league="NFL", market="yards", strategy="t"),
         gate_row(_compressed_frame(seed=2), "EV", league="NBA", market="PTS", strategy="t"),
     ]
-    out = tmp_path / "tier0_scorecard.csv"
+    out = tmp_path / "scorecard.csv"
     df = write_gate_scorecard(rows, out)
     assert out.exists()
     assert list(df["league"]) == ["NBA", "NFL"]  # sorted by (league, market)
@@ -1159,7 +1159,7 @@ from datetime import datetime, timedelta
 
 from click.testing import CliRunner
 
-from sportstradamus.scripts.compression_eval import (
+from sportstradamus.training.scorecard import (
     _history_to_eval_frame,
     _make_meanyr_lookup_from_gamelog,
     main,
@@ -1332,7 +1332,7 @@ def test_make_meanyr_lookup_returns_mean_of_prior_year():
 def test_live_window_cli_unknown_league_filter_errors(monkeypatch):
     runner = CliRunner()
     history = pd.DataFrame()
-    monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history", lambda: history)
+    monkeypatch.setattr("sportstradamus.training.scorecard.read_history", lambda: history)
     result = runner.invoke(main, ["--live-window", "30"])
     assert result.exit_code != 0
     assert "empty" in result.output.lower()
@@ -1341,9 +1341,9 @@ def test_live_window_cli_unknown_league_filter_errors(monkeypatch):
 def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
     """Full --live-window run with mocked Stats loading — no real gamelog needed."""
     history = _build_live_history_fixture(n=80, market="PTS")
-    monkeypatch.setattr("sportstradamus.scripts.compression_eval.read_history", lambda: history)
+    monkeypatch.setattr("sportstradamus.training.scorecard.read_history", lambda: history)
     monkeypatch.setattr(
-        "sportstradamus.scripts.compression_eval._load_league_stats_lookup",
+        "sportstradamus.training.scorecard._load_league_stats_lookup",
         lambda league: lambda player, market, date: 20.0,
     )
     runner = CliRunner()
@@ -1357,7 +1357,7 @@ def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
 
 def test_live_window_cli_rejects_conflicting_flags(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        "sportstradamus.scripts.compression_eval.read_history",
+        "sportstradamus.training.scorecard.read_history",
         lambda: _build_live_history_fixture(n=10),
     )
     runner = CliRunner()

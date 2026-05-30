@@ -27,6 +27,7 @@ import datetime
 import os
 import time
 import warnings
+from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path
 
@@ -293,21 +294,33 @@ class Archive:
         entity: str,
         *,
         at: datetime.datetime | None = None,
+        case_insensitive_entity: bool = False,
     ) -> list[tuple[str, float]]:
         """Return ``[(book, ev), ...]`` — latest observation per book at-or-before ``at``.
 
         ``at=None`` means "latest available", i.e. as-of-now.
+
+        ``case_insensitive_entity`` compares ``entity`` via ``UPPER()`` on
+        both sides. Set by the team-market readers (:meth:`get_moneyline`,
+        :meth:`get_total`, :meth:`get_team_market`) so callers passing
+        uppercase abbreviations like ``"BUF"`` still match legacy
+        title-case archive rows like ``"Buf"`` written under the klepto
+        backend. Player-prop callers leave this off — player names are
+        already canonicalized via :func:`remove_accents` and proper-case
+        names like ``"DeAndre Hopkins"`` would be corrupted by a
+        case-folding match.
         """
         d = _safe_date(date)
         if d is None:
             return []
         params: list = [league, market, d, entity]
+        entity_clause = "UPPER(entity)=UPPER(?)" if case_insensitive_entity else "entity=?"
         sql = (
             "SELECT book, ev FROM ("
             "  SELECT book, ev, observed_at, "
             "         ROW_NUMBER() OVER (PARTITION BY book ORDER BY observed_at DESC) AS rn "
             "  FROM odds "
-            "  WHERE league=? AND market=? AND game_date=? AND entity=?"
+            f"  WHERE league=? AND market=? AND game_date=? AND {entity_clause}"
         )
         if at is not None:
             sql += " AND observed_at <= ?"
@@ -327,8 +340,13 @@ class Archive:
         return self._weighted_book_ev(league, market, rows)
 
     def get_team_market(self, league, market, date, team, *, at: datetime.datetime | None = None):
-        """Weighted-average team-market EV (non-player, non-moneyline)."""
-        rows = self._book_rows(league, market, date, team, at=at)
+        """Weighted-average team-market EV (non-player, non-moneyline).
+
+        Matches ``team`` case-insensitively: gamelogs carry uppercase
+        abbreviations (``"BUF"``) while the legacy klepto-migrated rows
+        store title case (``"Buf"``). See ``_book_rows``.
+        """
+        rows = self._book_rows(league, market, date, team, at=at, case_insensitive_entity=True)
         if not rows:
             return np.nan
         return self._weighted_book_ev(league, market, rows)
@@ -337,8 +355,11 @@ class Archive:
         """Weighted-average moneyline EV across books for ``team`` on ``date``.
 
         Falls back to ``0.5`` when no book has quoted the game.
+        Case-insensitive team match — see :meth:`get_team_market`.
         """
-        rows = self._book_rows(league, "Moneyline", date, team, at=at)
+        rows = self._book_rows(
+            league, "Moneyline", date, team, at=at, case_insensitive_entity=True
+        )
         if not rows:
             return 0.5
         return self._weighted_book_ev(league, "Moneyline", rows)
@@ -348,11 +369,84 @@ class Archive:
 
         Falls back to the per-league default total when no book has quoted
         the game so callers always receive a numeric value.
+        Case-insensitive team match — see :meth:`get_team_market`.
         """
-        rows = self._book_rows(league, "Totals", date, team, at=at)
+        rows = self._book_rows(
+            league, "Totals", date, team, at=at, case_insensitive_entity=True
+        )
         if not rows:
             return self.default_totals.get(league, 1)
         return self._weighted_book_ev(league, "Totals", rows)
+
+    def get_team_market_map(
+        self,
+        league: str,
+        market: str,
+        *,
+        dates: Iterable[str | datetime.date] | None = None,
+        at: datetime.datetime | None = None,
+    ) -> dict[tuple[str, str], float]:
+        """Bulk weighted-average EV map for one ``(league, market)`` across many entities.
+
+        Returns ``{("YYYY-MM-DD", entity): ev}`` for every ``(date, entity)``
+        the archive holds for the league/market. ``dates`` restricts the
+        scan to the slice the caller cares about (typical: the unique
+        ``game_date`` values present in a freshly fetched gamelog). When
+        ``dates`` is omitted, every date is scanned.
+
+        Missing keys mean "no book quoted that slot"; callers should pass
+        a fallback to :py:meth:`dict.get` (e.g. ``0.5`` for moneyline,
+        :attr:`default_totals` for totals) to preserve the per-row
+        semantics of :meth:`get_moneyline` / :meth:`get_total` when
+        replacing row-by-row ``DataFrame.apply`` loops.
+
+        Team names in the returned dict are uppercased so callers using
+        the canonical uppercase abbreviation from :data:`abbreviations`
+        (e.g. ``"BUF"``) match both legacy title-case archive rows
+        (``"Buf"``, written under the klepto backend) and the current
+        uppercase write path. See ``_book_rows`` for the read-side
+        rationale.
+
+        Args:
+            league: League code (e.g., 'NBA', 'NFL').
+            market: Market name (e.g., 'Moneyline', 'Totals').
+            dates: Restrict scan to these game dates. ``None`` scans all dates.
+            at: Observation cutoff; ``None`` means "latest available" per book.
+
+        Returns:
+            Dict mapping ``("YYYY-MM-DD", UPPER(entity))`` to weighted-average EV.
+            Keys absent from the dict mean no book quoted that slot.
+        """
+        params: list = [league, market]
+        sql = (
+            "SELECT game_date, entity, book, ev FROM ("
+            "  SELECT game_date, entity, book, ev, observed_at, "
+            "         ROW_NUMBER() OVER ("
+            "             PARTITION BY game_date, entity, book "
+            "             ORDER BY observed_at DESC"
+            "         ) AS rn "
+            "  FROM odds "
+            "  WHERE league=? AND market=?"
+        )
+        if dates is not None:
+            normalized = sorted({_safe_date(d) for d in dates} - {None})
+            if not normalized:
+                return {}
+            placeholders = ",".join(["?"] * len(normalized))
+            sql += f" AND game_date IN ({placeholders})"
+            params.extend(normalized)
+        if at is not None:
+            sql += " AND observed_at <= ?"
+            params.append(at)
+        sql += ") WHERE rn = 1"
+
+        grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
+        for game_date, entity, book, ev in self._connection.execute(sql, params).fetchall():
+            key = (game_date.isoformat(), entity.upper())
+            grouped.setdefault(key, []).append((book, ev))
+        return {
+            key: self._weighted_book_ev(league, market, rows) for key, rows in grouped.items()
+        }
 
     def get_line(self, league, market, date, player, *, at: datetime.datetime | None = None):
         """Consensus line for ``player`` on ``date``: median, floored to ½.

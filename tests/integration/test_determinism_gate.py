@@ -115,7 +115,12 @@ def _assert_hurdle_params_bit_reproducible(parquet_name: str, stats, market: str
     M = M.sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
 
     cols = stats.get_stat_columns(market)
-    X = M[cols].copy()
+    # ``reindex`` over ``M[cols]`` matches production's resilience to stale
+    # cached parquets (see ``_step_build_splits`` in ``training/pipeline.py``).
+    # When a feature_filter addition lands before the cached training parquet
+    # is regenerated, the missing columns fill with NaN; LightGBM handles
+    # NaN deterministically so bit-reproducibility is preserved.
+    X = M.reindex(columns=cols).copy()
     for c in ("Home", "Player position"):
         if c in X.columns:
             X[c] = X[c].astype("category")
