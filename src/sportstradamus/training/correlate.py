@@ -54,6 +54,11 @@ MIN_OVERLAP_FOR_FULL_WEIGHT: int = 30
 # dropped from the output — keeps the on-disk matrix sparse.
 CORR_MAGNITUDE_FLOOR: float = 0.05
 
+# Structural invariants (not cache-key tunables): a scored game has exactly two
+# teams, and a correlation needs at least two markets over at least two rows.
+_TEAMS_PER_GAME: int = 2
+_MIN_CORR_DIMENSIONS: int = 2
+
 _TRACKED_STATS: dict[str, dict] = {
     "NFL": {
         "QB": [
@@ -540,7 +545,7 @@ def _build_team_game_records(
     for gameId in tqdm(games):
         game_df = residualized.loc[residualized[log_str["game"]] == gameId]
         gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
-        if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != 2:
+        if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != _TEAMS_PER_GAME:
             continue
         [home_team, away_team] = tuple(
             game_df.sort_values(log_str["home"], ascending=False)[log_str["team"]].unique()
@@ -810,7 +815,7 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
         # Drop columns that are entirely NaN (residuals never defined for any
         # game) — they cannot contribute to a correlation estimate.
         team_matrix = team_matrix.loc[:, team_matrix.notna().any(axis=0)]
-        if team_matrix.shape[1] < 2 or len(team_matrix) < 2:
+        if team_matrix.shape[1] < _MIN_CORR_DIMENSIONS or len(team_matrix) < _MIN_CORR_DIMENSIONS:
             continue
         team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
 
