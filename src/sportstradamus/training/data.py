@@ -225,6 +225,4 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         cut = np.random.choice(chopping_block, n, replace=False)
         pushes.drop(cut, inplace=True)
 
-    M = pd.concat([M, pushes]).sort_values("Date")
-
-    return M
+    return pd.concat([M, pushes]).sort_values("Date")

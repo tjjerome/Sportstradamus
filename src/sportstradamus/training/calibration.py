@@ -165,8 +165,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
         )
 
         return {k: res.x[i] for i, k in enumerate(test_df.columns)}
-    else:
-        return {}
+    return {}
 
 
 def fit_model_weight(
@@ -242,7 +241,7 @@ def fit_model_weight(
         )
         return res.x[0]
 
-    elif dist == "NegBin":
+    if dist == "NegBin":
         model_r_arr = np.asarray(model_r, dtype=float)
         result_int = result.astype(int)
 
@@ -271,34 +270,33 @@ def fit_model_weight(
             objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
         )
         return res.x[0]
-    else:
-        model_alpha_arr = np.asarray(model_alpha, dtype=float)
+    model_alpha_arr = np.asarray(model_alpha, dtype=float)
 
-        def objective(w):
-            alpha_bl, beta_bl, g_blend = fused_loc(
-                w,
-                model_ev,
-                odds_ev,
-                cv,
-                "Gamma",
-                alpha=model_alpha_arr,
-                gate_model=gate_model,
-                gate_book=gate_book,
-            )
-            base_logpdf = np.clip(gamma.logpdf(result, alpha_bl, scale=1 / beta_bl), -20, 0)
-            if has_gate:
-                loglik = np.where(
-                    result == 0,
-                    np.log(np.clip(g_blend, 1e-12, None)),
-                    np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf,
-                )
-                return -np.mean(loglik)
-            return -np.mean(base_logpdf)
-
-        res = minimize(
-            objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
+    def objective(w):
+        alpha_bl, beta_bl, g_blend = fused_loc(
+            w,
+            model_ev,
+            odds_ev,
+            cv,
+            "Gamma",
+            alpha=model_alpha_arr,
+            gate_model=gate_model,
+            gate_book=gate_book,
         )
-        return res.x[0]
+        base_logpdf = np.clip(gamma.logpdf(result, alpha_bl, scale=1 / beta_bl), -20, 0)
+        if has_gate:
+            loglik = np.where(
+                result == 0,
+                np.log(np.clip(g_blend, 1e-12, None)),
+                np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf,
+            )
+            return -np.mean(loglik)
+        return -np.mean(base_logpdf)
+
+    res = minimize(
+        objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
+    )
+    return res.x[0]
 
 
 def select_distribution(player_stats) -> tuple[str, float]:

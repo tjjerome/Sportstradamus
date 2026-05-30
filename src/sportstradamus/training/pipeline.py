@@ -607,9 +607,7 @@ def _step_persist_matrix_and_comps(
 _SEEDING_REQUIRED_COLUMNS: tuple[str, ...] = ("MeanYr", "STDYr", "ZeroYr")
 
 
-def _prune_uninformative_features(
-    X_train: pd.DataFrame, categorical_cols: list[str]
-) -> list[str]:
+def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[str]) -> list[str]:
     """Return the subset of ``X_train.columns`` LightGBM can split on.
 
     A column is dropped when ``X_train`` shows it is entirely NaN or has
@@ -1442,7 +1440,7 @@ def _step_calibrate_dispersion(
             "SkewNormal",
             sigma=decoded["sn_sigma_val"],
             skew_alpha=decoded["sn_alpha_val"],
-            **(dict(gate_book=hist_gate) if hist_gate > _HIST_GATE_THRESHOLD else {}),
+            **({"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}),
         )
         out["val_weighted_mean_val"] = val_weighted_mean_val
         return out
@@ -1734,7 +1732,7 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > _HIST_GATE_THRESHOLD else {}
+        _zi_kwargs = {"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}
         model_weight = fit_model_weight(
             ev_validation,
             book_ev_val,
@@ -1781,7 +1779,7 @@ def _step_fuse_predictions(
 
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
-        _zi_kwargs = dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
+        _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
     model_weight = fit_model_weight(
         ev_validation,
         book_ev_val,
@@ -1796,10 +1794,10 @@ def _step_fuse_predictions(
 
     if dist in ("NegBin", "ZINB"):
         _zi_test = (
-            dict(gate_model=decoded["gate_test"], gate_book=hist_gate) if dist == "ZINB" else {}
+            {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
         )
         _zi_val = (
-            dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
+            {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
             if dist == "ZINB"
             else {}
         )
@@ -1836,10 +1834,10 @@ def _step_fuse_predictions(
 
     # Gamma / ZAGamma
     _zi_test = (
-        dict(gate_model=decoded["gate_test"], gate_book=hist_gate) if dist == "ZAGamma" else {}
+        {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZAGamma" else {}
     )
     _zi_val = (
-        dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
+        {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
         if dist == "ZAGamma"
         else {}
     )

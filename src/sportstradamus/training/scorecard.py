@@ -261,8 +261,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     # are filtered locally inside _brier_skill_score so older CSVs that lack
     # those columns still pass the harness.
     required_view = out[list(required)].replace([np.inf, -np.inf], np.nan)
-    out = out[required_view.notna().all(axis=1)]
-    return out
+    return out[required_view.notna().all(axis=1)]
 
 
 def decile_table(df: pd.DataFrame, pred_col: str, n_deciles: int = N_DECILES) -> pd.DataFrame:
