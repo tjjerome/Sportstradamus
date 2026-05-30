@@ -7,6 +7,7 @@ stats loaders, and the prop-export writer all run names through.
 """
 
 import datetime
+import functools
 import re
 import unicodedata
 
@@ -16,12 +17,17 @@ import statsapi as mlb
 
 from sportstradamus.helpers.config import name_map
 
+# Trailing rows used to fit the recent-form slope in ``get_trends``; below
+# MIN_TREND_ROWS the fit is too noisy to trust, so the slope is reported as 0.
+TREND_WINDOW = 5
+MIN_TREND_ROWS = 3
+
 
 def remove_accents(input_str):
     """Normalize a player name to the project's canonical spelling.
 
     Strips accents, parenthesized substrings, and positional suffixes
-    ("Jr", "Sr", "II"–"IV"), then runs the result through ``name_map`` to
+    ("Jr", "Sr", "II"-"IV"), then runs the result through ``name_map`` to
     resolve known alternate spellings. Handles the two combo-prop syntaxes
     ("A + B" and "A vs B") by normalizing each side independently.
 
@@ -39,6 +45,8 @@ def remove_accents(input_str):
     for substr in [" Jr", " Sr", " II", " III", " IV"]:
         if out_str.endswith(substr):
             out_str = out_str.replace(substr, "")
+    # Curly apostrophe -> ASCII so name_map keys match; the literal is data
+    # (flagged by RUF001 once that code is un-ratcheted — intentional).
     out_str = out_str.replace("’", "'")
     out_str = re.sub(r"[\(\[].*?[\)\]]", "", out_str).strip().title()
     if "+" in out_str:
@@ -80,10 +88,11 @@ def merge_dict(a, b, path=None):
 
 def get_trends(x):
     """Return per-column slope of the trailing 5 rows of ``x`` as a Series."""
-    if len(x) < 3:
+    if len(x) < MIN_TREND_ROWS:
         trend = np.zeros(len(x.columns))
     else:
-        trend = np.polyfit(np.arange(0, len(x.tail(5))), x.tail(5), 1)[0]
+        recent = x.tail(TREND_WINDOW)
+        trend = np.polyfit(np.arange(0, len(recent)), recent, 1)[0]
     return pd.Series(trend, index=x.columns)
 
 
@@ -102,13 +111,10 @@ def hmean(items):
 
     if total != 0:
         return count / total
-    else:
-        return 0
+    return 0
 
 
-_mlb_pitchers_cache = None
-
-
+@functools.cache
 def get_mlb_pitchers():
     """Return a ``{team_abbr: pitcher_name}`` dict for the next week of MLB.
 
@@ -116,10 +122,6 @@ def get_mlb_pitchers():
     The LA/ANA/ARI/WAS aliases exist because different sportsbooks spell
     those franchises differently from the league feed.
     """
-    global _mlb_pitchers_cache
-    if _mlb_pitchers_cache is not None:
-        return _mlb_pitchers_cache
-
     mlb_games = mlb.schedule(
         start_date=datetime.date.today(),
         end_date=(datetime.date.today() + datetime.timedelta(days=7)),
@@ -128,26 +130,25 @@ def get_mlb_pitchers():
     pitchers = {}
     for game in mlb_games:
         if game["status"] in ["Pre-Game", "Scheduled"]:
-            awayTeam = [
+            away_team = [
                 team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["away_id"]
             ]
-            homeTeam = [
+            home_team = [
                 team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["home_id"]
             ]
-            if len(awayTeam) == 1 and len(homeTeam) == 1:
-                awayTeam = awayTeam[0]
-                homeTeam = homeTeam[0]
+            if len(away_team) == 1 and len(home_team) == 1:
+                away_team = away_team[0]
+                home_team = home_team[0]
             else:
                 continue
             if game["game_num"] == 1:
-                if "away_probable_pitcher" in game and awayTeam not in pitchers:
-                    pitchers[awayTeam] = remove_accents(game["away_probable_pitcher"])
-                if "home_probable_pitcher" in game and homeTeam not in pitchers:
-                    pitchers[homeTeam] = remove_accents(game["home_probable_pitcher"])
+                if "away_probable_pitcher" in game and away_team not in pitchers:
+                    pitchers[away_team] = remove_accents(game["away_probable_pitcher"])
+                if "home_probable_pitcher" in game and home_team not in pitchers:
+                    pitchers[home_team] = remove_accents(game["home_probable_pitcher"])
 
     pitchers["LA"] = pitchers.get("LAD", "")
     pitchers["ANA"] = pitchers.get("LAA", "")
     pitchers["ARI"] = pitchers.get("AZ", "")
     pitchers["WAS"] = pitchers.get("WSH", "")
-    _mlb_pitchers_cache = pitchers
     return pitchers
