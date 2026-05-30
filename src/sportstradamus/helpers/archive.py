@@ -363,9 +363,7 @@ class Archive:
         Falls back to ``0.5`` when no book has quoted the game.
         Case-insensitive team match — see :meth:`get_team_market`.
         """
-        rows = self._book_rows(
-            league, "Moneyline", date, team, at=at, case_insensitive_entity=True
-        )
+        rows = self._book_rows(league, "Moneyline", date, team, at=at, case_insensitive_entity=True)
         if not rows:
             return 0.5
         return self._weighted_book_ev(league, "Moneyline", rows)
@@ -377,9 +375,7 @@ class Archive:
         the game so callers always receive a numeric value.
         Case-insensitive team match — see :meth:`get_team_market`.
         """
-        rows = self._book_rows(
-            league, "Totals", date, team, at=at, case_insensitive_entity=True
-        )
+        rows = self._book_rows(league, "Totals", date, team, at=at, case_insensitive_entity=True)
         if not rows:
             return self.default_totals.get(league, 1)
         return self._weighted_book_ev(league, "Totals", rows)
@@ -450,9 +446,7 @@ class Archive:
         for game_date, entity, book, ev in self._connection.execute(sql, params).fetchall():
             key = (game_date.isoformat(), entity.upper())
             grouped.setdefault(key, []).append((book, ev))
-        return {
-            key: self._weighted_book_ev(league, market, rows) for key, rows in grouped.items()
-        }
+        return {key: self._weighted_book_ev(league, market, rows) for key, rows in grouped.items()}
 
     def get_line(self, league, market, date, player, *, at: datetime.datetime | None = None):
         """Consensus line for ``player`` on ``date``: median, floored to ½.
