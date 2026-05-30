@@ -228,7 +228,8 @@ commit runs `ruff check --fix` and `ruff format`. CI runs the same checks plus
 
 ### Workflow
 
-1. Work on a feature branch off `main`.
+1. Work on a feature branch off `devel` (production tracks `devel`; `main`
+   lags — see CLAUDE.md §Production deployment).
 2. Run `poetry run ruff check src/ --fix && poetry run ruff format src/` before
    committing. The pre-commit hook does this, but running it manually first avoids
    a hook-rejected commit.
@@ -258,22 +259,17 @@ change the `torch` dependency without verifying the new wheel exists in that sou
 
 ## Style Rules Summary
 
-The full rules are in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md). Quick reference:
+Code conventions live in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md) — read it
+once, cite sections by number (`§N`). It is the single source of truth; this
+document deliberately does not restate the rules, so the two can't drift apart.
 
-- **Formatter:** `ruff format`. Line length 100. Double quotes.
-- **Linter:** `ruff check`. Enforces PEP 8, import order, pydocstyle (Google convention),
-  bugbear, and more.
-- **Docstrings:** Every public function and class. Google format (Args / Returns / Raises).
-  Module-level docstring on every file under `src/sportstradamus/`.
-- **Type hints:** Required on all public function signatures.
-- **Naming:** `snake_case` for modules/functions/variables, `PascalCase` for classes,
-  `UPPER_SNAKE_CASE` for module-level constants.
-- **Comments:** Explain *why*, not *what*. No commented-out code — delete it and let
-  `git log` keep the history. If code will return, move it to `src/deprecated/` instead.
-- **Function length:** Target ≤ 60 logical lines. Hard cap ~120. Extract helpers when
-  nesting exceeds 4 levels.
-- **No speculative abstraction.** Three similar lines of code are better than a premature
-  abstraction. Extract only after the third concrete reuse.
+The posture in one line: **less code, written for a human to maintain** — no
+wrappers that only forward a call, no fallbacks for cases that can't happen, no
+comments that narrate the code. The §18 smells table is the fastest checklist.
+
+Mechanical enforcement (`ruff format` + `ruff check --fix`, line length 100,
+Google docstrings, the three quality gates) is configured in `pyproject.toml`
+and runs automatically — see STYLE_GUIDE §19.
 
 ---
 

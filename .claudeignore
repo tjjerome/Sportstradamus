@@ -1,0 +1,99 @@
+# .claudeignore — keep Claude Code's context on code + docs, not bulk data or secrets.
+#
+# .gitignore-style syntax, but this is about CONTEXT RELEVANCE, not version control,
+# so it diverges from .gitignore on purpose. When unsure whether something explains
+# the code, it is KEPT.
+#
+# Kept on purpose (NOT listed below): every *.py wherever it lives (src/,
+# src/deprecated/, tests/, scripts/, .claude/hooks/, docs/source/conf.py), the prose
+# docs (CLAUDE.md, CONTRIBUTING.md, README.md, IMPLEMENTATION_SUMMARY.md, docs/*.md +
+# docs/source/*.rst), pyproject.toml, .github/ CI workflows, the one exploratory
+# notebook (notebooks/), and the committed config + small per-league reference JSON
+# under src/sportstradamus/data/ (config/*.json, leagues/*/corr_metadata.json) — these
+# document schema and must stay readable. The *.csv/*.png rules below also drop the
+# parlay-calibration data dumps + plots in docs/; the markdown that cites them stays.
+
+# Secrets: API keys, OAuth tokens, scraper creds (any creds/ at any depth)
+creds/
+
+# Odds archive: DuckDB + klepto/HDF5 store, ~2.5 GB of stored odds, no source here
+archive/
+
+# Trained model pickles (LightGBMLSS .mdl, legacy pickles) + comp feature arrays
+*.mdl
+*.pkl
+*.pickle
+*.npz
+src/sportstradamus/data/models/
+src/sportstradamus/data/old_models/
+
+# Bulk + cached data tables: parquet, their CSV mirrors, sqlite/zip/klepto caches
+*.parquet
+*.csv
+*.db
+*.zip
+*.dat
+*.jsonl
+*.hdf5
+*.h5
+*.duckdb
+
+# Per-cell data dirs: game logs, training matrices, holdout sets, vendor snapshots
+src/sportstradamus/data/player_data/
+src/sportstradamus/data/team_data/
+src/sportstradamus/data/training/
+src/sportstradamus/data/training_data/
+src/sportstradamus/data/test_sets/
+src/sportstradamus/data/fantasypoints/
+src/sportstradamus/data/runtime/
+
+# Heavy per-league data JSON (player rosters >1 MB, comp index); reference JSON kept
+src/sportstradamus/data/leagues/**/players.json
+src/sportstradamus/data/leagues/**/comps.json
+
+# Top-level data/ is diagnostics + archives only (icc, zinb_routing, pff, test_sets)
+/data/
+
+# Research scaffolding: experiment dumps, eval logs, model snapshots, source papers
+research/
+resources/
+
+# Runtime logs (JSONL job logs at any depth)
+logs/
+
+# Generated reports, spreadsheets, plots, papers — binary, not code
+*.xlsx
+*.pdf
+*.png
+
+# Profiler output
+.lprof/
+*.lprof
+*.prof
+
+# Resolved dependency lock (pyproject.toml is the readable source of truth)
+poetry.lock
+
+# Python build / cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# WSL Zone.Identifier metadata cruft
+*Zone.Identifier*
