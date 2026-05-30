@@ -78,8 +78,8 @@ class Scrape:
     def _new_headers(self):
         """Rotate to a new header, weighted against the recently-burned one."""
         self._ensure_headers()
-        for i in range(len(self._headers)):
-            if self._headers[i] == self._header:
+        for i, candidate in enumerate(self._headers):
+            if candidate == self._header:
                 self._weights[i] = 0
             else:
                 self._weights[i] += 1
