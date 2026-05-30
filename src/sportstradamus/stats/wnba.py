@@ -2,18 +2,12 @@
 
 import importlib.resources as pkg_resources
 import json
-import warnings
 from datetime import date, datetime, timedelta
-from io import StringIO
 
-import line_profiler
 import nba_api.stats.endpoints as nba
 import numpy as np
 import pandas as pd
-import requests
-from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
-from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
@@ -25,20 +19,18 @@ from sportstradamus.helpers import (
     get_mlb_pitchers,
     get_odds,
     remove_accents,
-    set_model_start_values,
-    stat_cv,
-    stat_dist,
 )
-from sportstradamus.helpers.io import write_gamelog
-from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, clean_data, scraper
+from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.stats.base import clean_data, scraper
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import archive, clean_data, scraper
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
 
 class StatsWNBA(StatsNBA):
+    """WNBA player statistics, routed to stats.wnba.com via nba_client."""
+
     def __init__(self):
         super().__init__()
         self.league = "WNBA"
@@ -51,7 +43,15 @@ class StatsWNBA(StatsNBA):
 
         self.season = self.season_start.year
 
-    def update(self):
+    def load(self) -> None:
+        """Load data from files."""
+        wnba_data = read_gamelog("wnba")
+        self.players = wnba_data["players"]
+        self.gamelog = wnba_data["gamelog"]
+        self.teamlog = wnba_data["teamlog"]
+
+    def update(self) -> None:
+        """Fetch new WNBA game logs from stats.wnba.com and merge into stored data."""
         team_abbr_map = {
             "CONN": "CON",
             "NY": "NYL",
@@ -66,6 +66,7 @@ class StatsWNBA(StatsNBA):
         try:
             player_df = nba_client.fetch(
                 nba.playerindex.PlayerIndex,
+                host=nba_client.WNBA_HOST,
                 season=self.season_start.year,
                 league_id="10",
                 historical_nullable=1,
@@ -85,12 +86,14 @@ class StatsWNBA(StatsNBA):
         try:
             playerBios = nba_client.fetch(
                 nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats,
+                host=nba_client.WNBA_HOST,
                 season=self.season_start.year,
                 league_id="10",
             ).get_normalized_dict()["LeagueDashPlayerBioStats"]
 
             shotData = nba_client.fetch(
                 nba.leaguedashplayershotlocations.LeagueDashPlayerShotLocations,
+                host=nba_client.WNBA_HOST,
                 season=self.season_start.year,
                 league_id_nullable="10",
                 season_type_all_star="Regular Season",
@@ -230,13 +233,13 @@ class StatsWNBA(StatsNBA):
         def _player_logs(measure: str | None = None) -> list:
             extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
             return nba_client.fetch(
-                nba.playergamelogs.PlayerGameLogs, **(params | extra)
+                nba.playergamelogs.PlayerGameLogs, host=nba_client.WNBA_HOST, **(params | extra)
             ).get_normalized_dict()["PlayerGameLogs"]
 
         def _team_logs(measure: str | None = None) -> list:
             extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
             return nba_client.fetch(
-                nba.teamgamelogs.TeamGameLogs, **(params | extra)
+                nba.teamgamelogs.TeamGameLogs, host=nba_client.WNBA_HOST, **(params | extra)
             ).get_normalized_dict()["TeamGameLogs"]
 
         try:
@@ -407,7 +410,62 @@ class StatsWNBA(StatsNBA):
         # Save the updated player data
         write_gamelog("wnba", self.gamelog, self.teamlog, self.players)
 
-    def update_player_comps(self, year=None):
+    def build_comp_profile(self, playerList=None):
+        """Build merged player profile DataFrame for comp computation.
+
+        Args:
+            playerList: Optional dict of {team: {player_name: stats_dict}}.
+                If None, uses all seasons from self.players.
+
+        Returns:
+            (playerProfile, playerDict) where playerProfile is indexed by
+            PLAYER_NAME, and playerDict maps player_name to stats_dict.
+        """
+        if self.playerProfile.empty:
+            self.profile_market("MIN")
+
+        if playerList is None:
+            playerList = {}
+            for season_key in self.players:
+                playerList.update(self.players[season_key])
+
+        players = []
+        for team in playerList:
+            players.extend(
+                [
+                    v | {"PLAYER_NAME": k, "TEAM_ABBREVIATION": team}
+                    for k, v in playerList[team].items()
+                ]
+            )
+
+        playerProfile = self.playerProfile.merge(
+            pd.DataFrame(players).drop_duplicates(subset="PLAYER_NAME"),
+            on="PLAYER_NAME",
+            how="outer",
+            suffixes=("_x", None),
+        ).set_index("PLAYER_NAME")
+
+        # Coalesce _x columns (gamelog values shadowed by roster values during merge)
+        _x_cols = [c for c in playerProfile.columns if c.endswith("_x")]
+        for col in _x_cols:
+            base = col[:-2]
+            if base in playerProfile.columns:
+                playerProfile[base] = playerProfile[base].fillna(playerProfile[col])
+        playerProfile.drop(columns=_x_cols, inplace=True, errors="ignore")
+        playerProfile.fillna(0, inplace=True)
+
+        playerDict = {}
+        for team in playerList.values():
+            playerDict.update(team)
+
+        return playerProfile, playerDict
+
+    def update_player_comps(self, year: int | None = None) -> None:
+        """Rebuild player-comparable profiles and write comps.json.
+
+        Args:
+            year: Season year to build comps for. Defaults to current season.
+        """
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
