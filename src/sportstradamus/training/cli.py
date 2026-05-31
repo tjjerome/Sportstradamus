@@ -227,7 +227,7 @@ def meditate(
             if stat_data is None:
                 continue
             stat_data.update_player_comps()
-            correlate(lg, stat_data, force)
+            correlate(lg, stat_data, force=force)
         return
 
     archive = Archive()
@@ -260,7 +260,7 @@ def meditate(
             json.dump(book_weights, outfile, indent=4)
 
         stat_data.update_player_comps()
-        correlate(lg, stat_data, force)
+        correlate(lg, stat_data, force=force)
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
@@ -293,9 +293,9 @@ def meditate(
                 lg,
                 market,
                 stat_data,
-                force,
                 archive,
                 league_start_date,
+                force=force,
                 deterministic=deterministic,
                 target_strategy=cell_strategy,
                 zinb_mode=zinb_mode,

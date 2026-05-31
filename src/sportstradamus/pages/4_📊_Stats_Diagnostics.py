@@ -150,7 +150,7 @@ if not market_df.empty:
         ab = abs(b)
         if ab < 0.03:
             return "green"
-        elif ab < 0.07:
+        if ab < 0.07:
             return "orange"
         return "red"
 
@@ -260,7 +260,7 @@ fig_rel.add_trace(
         x=[0.5, 1.0],
         y=[0.5, 1.0],
         mode="lines",
-        line=dict(dash="dash", color="gray"),
+        line={"dash": "dash", "color": "gray"},
         name="Perfect calibration",
         showlegend=True,
     )
@@ -272,7 +272,7 @@ fig_rel.add_trace(
         y=cal_stats["Actual"],
         mode="lines+markers",
         name="Model",
-        marker=dict(size=cal_stats["Count"].clip(upper=500) / 20 + 5),
+        marker={"size": cal_stats["Count"].clip(upper=500) / 20 + 5},
         text=[f"n={c}" for c in cal_stats["Count"]],
         hovertemplate="Predicted: %{x:.3f}<br>Actual: %{y:.3f}<br>%{text}",
     )
@@ -288,8 +288,8 @@ fig_rel.add_trace(
     )
 )
 fig_rel.update_layout(
-    yaxis=dict(title="Actual Hit Rate", range=[0.4, 1.0]),
-    yaxis2=dict(title="Count", overlaying="y", side="right"),
+    yaxis={"title": "Actual Hit Rate", "range": [0.4, 1.0]},
+    yaxis2={"title": "Count", "overlaying": "y", "side": "right"},
     xaxis_title="Predicted Probability",
     height=450,
 )

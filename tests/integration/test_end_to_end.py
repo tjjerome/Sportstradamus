@@ -151,8 +151,8 @@ def test_pipeline_smoke(
     # ----- Phase 3: prophecize (CLI invoked; parquet snapshot + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
 
-    monkeypatch.setattr(prediction_cli, "get_ud", lambda: {})
-    monkeypatch.setattr(prediction_cli, "get_sleeper", lambda: {})
+    monkeypatch.setattr(prediction_cli, "get_ud", dict)
+    monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
 
     captured: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 

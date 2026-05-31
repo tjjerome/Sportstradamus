@@ -108,6 +108,7 @@ def _pooled_underdog_curve() -> dict[int, list[float]]:
 def _payout_curve_for(
     platform: str,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
+    *,
     legacy: bool,
 ) -> tuple[list[float], dict[int, list[float]]]:
     """Build the (per-size search list, per-(size,misses) payout table) for a platform.

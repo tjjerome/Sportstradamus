@@ -7,6 +7,7 @@ live in ``src/deprecated/books_deprecated.py``.
 """
 
 from datetime import datetime, timedelta
+from http import HTTPStatus
 from operator import itemgetter
 
 from tqdm import tqdm
@@ -267,18 +268,18 @@ def get_sleeper():
     offers = {}
     res = requests.get(SLEEPER_AVAILABLE_URL)
 
-    if res.status_code != 200:
+    if res.status_code != HTTPStatus.OK:
         return offers
 
     res = res.json()
-    leagues = set([x["sport"] for x in res])
+    leagues = {x["sport"] for x in res}
 
     alt = requests.get(SLEEPER_ALT_URL)
-    if alt.status_code == 200:
+    if alt.status_code == HTTPStatus.OK:
         res.extend(alt.json())
 
     game_res = requests.get(SLEEPER_GAMES_URL)
-    if game_res.status_code != 200:
+    if game_res.status_code != HTTPStatus.OK:
         return offers
 
     games = {}
@@ -297,7 +298,7 @@ def get_sleeper():
 
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
         players = requests.get(SLEEPER_PLAYERS_URL.format(league=league))
-        if players.status_code != 200:
+        if players.status_code != HTTPStatus.OK:
             continue
 
         players = players.json()
@@ -317,7 +318,7 @@ def get_sleeper():
             game_date = games.get(league, {}).get(prop["game_id"], {}).get("date")
 
             all_outcomes = sorted(prop["options"], key=itemgetter("outcome", "outcome_value"))
-            lines = set([x["outcome_value"] for x in all_outcomes])
+            lines = {x["outcome_value"] for x in all_outcomes}
             for line in lines:
                 outcomes = [x for x in all_outcomes if x["outcome_value"] == line]
                 if len(outcomes) < 2:

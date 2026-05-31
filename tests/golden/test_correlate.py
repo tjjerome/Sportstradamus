@@ -228,23 +228,32 @@ def test_correlate_skips_when_cache_valid(_preserve_nba_correlate_outputs) -> No
     assert first_same_mtime == second_same_mtime, "skip path must not rewrite the parquet"
 
 
-def test_correlate_force_bypasses_skip(_preserve_nba_correlate_outputs, capsys) -> None:
+def test_correlate_force_bypasses_skip(_preserve_nba_correlate_outputs, caplog) -> None:
     """``force=True`` always rebuilds, even when the cache_key matches."""
+    import logging
+
     stub = _StubStats()
 
     correlate("NBA", stub, force=True)
-    capsys.readouterr()  # discard the priming-run banner
 
+    # correlate's logger sets propagate=False (helpers.get_logger), so attach
+    # caplog's handler directly to it by its real name to capture INFO records.
+    target = logging.getLogger("sportstradamus.cli.sportstradamus.training.correlate")
+    target.addHandler(caplog.handler)
+    caplog.clear()
     # Inputs are identical and the metadata is freshly valid — but force=True
-    # must still take the full rebuild path. The skip banner would print
-    # "Correlating NBA... cache valid, skipped"; the rebuild banner prints
+    # must still take the full rebuild path. The skip path logs
+    # "Correlating NBA... cache valid, skipped"; the rebuild path logs
     # only "Correlating NBA...".
-    correlate("NBA", stub, force=True)
-    out = capsys.readouterr().out
+    try:
+        correlate("NBA", stub, force=True)
+    finally:
+        target.removeHandler(caplog.handler)
+    messages = [record.getMessage() for record in caplog.records]
 
-    assert "Correlating NBA..." in out
-    assert "cache valid, skipped" not in out, (
-        f"force=True took the skip path: {out!r}"
+    assert any(msg == "Correlating NBA..." for msg in messages)
+    assert not any("cache valid, skipped" in msg for msg in messages), (
+        f"force=True took the skip path: {messages!r}"
     )
 
 
@@ -254,7 +263,7 @@ def test_rebuild_correlations_does_not_touch_models(monkeypatch) -> None:
 
     calls: list[tuple[str, bool]] = []
 
-    def fake_correlate(league: str, stat_data, force: bool = False) -> None:
+    def fake_correlate(league: str, stat_data, *, force: bool = False) -> None:
         calls.append((league, force))
 
     monkeypatch.setattr("sportstradamus.training.cli.StatsNBA", _StubStats)
@@ -275,5 +284,3 @@ def test_rebuild_correlations_does_not_touch_models(monkeypatch) -> None:
     assert result.exit_code == 0, f"meditate exited {result.exit_code}: {result.output}"
     assert calls == [("NBA", False)], f"expected single NBA correlate call, got {calls}"
     assert _models_snapshot() == before, "model files were modified during --rebuild-correlations"
-
-
