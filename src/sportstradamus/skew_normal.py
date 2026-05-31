@@ -22,9 +22,9 @@ from lightgbmlss.distributions.distribution_utils import DistributionClass
 from lightgbmlss.utils import exp_fn, identity_fn, softplus_fn
 from torch.distributions import constraints
 
-# ---------------------------------------------------------------------------
-# PyTorch Distribution: SkewNormal
-# ---------------------------------------------------------------------------
+# Below this z-value, log Φ(z) switches to the erfc tail form (avoids log-underflow
+# in the left tail); above it the direct log(½(1+erf)) form is numerically stable.
+_LOG_NDTR_ERFC_CROSSOVER = -5.0
 
 
 class SkewNormalTorch(D.Distribution):
@@ -69,32 +69,27 @@ class SkewNormalTorch(D.Distribution):
         batch_shape = self.loc.shape
         super().__init__(batch_shape=batch_shape, validate_args=validate_args)
 
-    # ---- helpers ----------------------------------------------------------
     _standard_normal = D.Normal(0.0, 1.0)
 
     @staticmethod
     def _log_ndtr(x: torch.Tensor) -> torch.Tensor:
         """Numerically stable log Φ(x) using erfc for the left tail."""
-        # For large positive x, log(Phi(x)) ≈ 0.
-        # For large negative x, use the erfc formulation to avoid log(0).
         return torch.where(
-            x > -5.0,
+            x > _LOG_NDTR_ERFC_CROSSOVER,
             torch.log(torch.clamp(0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))), min=1e-30)),
             # log(erfc(-x/sqrt(2))/2)  – numerically stable for x << 0
             torch.log(torch.clamp(torch.erfc(-x / math.sqrt(2.0)), min=1e-30)) - math.log(2.0),
         )
 
-    # ---- core methods -----------------------------------------------------
     def log_prob(self, value):
         z = (value - self.loc) / self.scale
         # log(2) + log φ(z) + log Φ(α·z) - log(ω)
-        log_pdf = (
+        return (
             math.log(2.0)
             + self._standard_normal.log_prob(z)
             + self._log_ndtr(self.alpha * z)
             - torch.log(self.scale)
         )
-        return log_pdf
 
     def rsample(self, sample_shape=torch.Size()):
         """Reparameterised sample via the stochastic representation:
@@ -115,8 +110,7 @@ class SkewNormalTorch(D.Distribution):
         # |Z₀| via soft-abs (retains gradient flow)
         abs_z0 = torch.abs(z0)
 
-        x = self.loc + self.scale * (delta * abs_z0 + torch.sqrt(1.0 - delta**2) * z1)
-        return x
+        return self.loc + self.scale * (delta * abs_z0 + torch.sqrt(1.0 - delta**2) * z1)
 
     @property
     def mean(self):
@@ -127,11 +121,6 @@ class SkewNormalTorch(D.Distribution):
     def variance(self):
         delta = self.alpha / torch.sqrt(1.0 + self.alpha**2)
         return self.scale**2 * (1.0 - 2.0 * delta**2 / math.pi)
-
-
-# ---------------------------------------------------------------------------
-# LightGBMLSS Distribution wrapper: SkewNormal
-# ---------------------------------------------------------------------------
 
 
 class SkewNormal(DistributionClass):
@@ -171,7 +160,6 @@ class SkewNormal(DistributionClass):
         loss_fn: str = "nll",
         initialize: bool = False,
     ):
-        # Input Checks
         if stabilization not in ["None", "MAD", "L2"]:
             raise ValueError(
                 "Invalid stabilization method. Please choose from 'None', 'MAD' or 'L2'."
@@ -181,14 +169,12 @@ class SkewNormal(DistributionClass):
         if not isinstance(initialize, bool):
             raise ValueError("Invalid initialize. Please choose from True or False.")
 
-        # Specify Response Functions
         response_functions = {"exp": exp_fn, "softplus": softplus_fn}
         if response_fn in response_functions:
             response_fn = response_functions[response_fn]
         else:
             raise ValueError("Invalid response function. Please choose from 'exp' or 'softplus'.")
 
-        # Set the parameters specific to the distribution
         distribution = SkewNormalTorch
         param_dict = {
             "loc": identity_fn,  # unconstrained
@@ -197,7 +183,6 @@ class SkewNormal(DistributionClass):
         }
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        # Specify Distribution Class
         super().__init__(
             distribution=distribution,
             univariate=True,
