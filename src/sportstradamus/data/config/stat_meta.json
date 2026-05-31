@@ -236,8 +236,8 @@
         },
         "carries": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
         },
         "completion percentage": {
             "dist": "SkewNormal",
@@ -336,18 +336,18 @@
         },
         "rushing yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
         },
         "sacks taken": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
         },
         "targets": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
         },
         "tds": {
             "dist": "ZINB",
@@ -445,8 +445,8 @@
     "WNBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
         },
         "BLK": {
             "dist": "ZINB",
@@ -500,8 +500,8 @@
         },
         "PRA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "strategy": "ratio_meanyr"
         },
         "PTS": {
             "dist": "SkewNormal",

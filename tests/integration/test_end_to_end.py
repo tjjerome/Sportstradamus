@@ -121,6 +121,12 @@ def test_pipeline_smoke(
     monkeypatch.setattr(markets_module, "ALL_MARKETS", {"WNBA": ["PTS"]})
     monkeypatch.setattr(training_cli, "ALL_MARKETS", {"WNBA": ["PTS"]})
 
+    # Gate-driven meditate skips cells withheld in stat_meta; an empty
+    # ship-config makes every cell active (mirrors --deterministic) so this
+    # smoke check is robust to which cells happen to be withheld on the
+    # committed branch.
+    monkeypatch.setattr(training_cli, "load_ship_config", lambda *a, **kw: {})
+
     if not _REAL_APIS:
         _stub_stats_loaders(monkeypatch)
 
