@@ -793,74 +793,18 @@ class StatsNHL(Stats):
             )
 
     def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
-        flat_offers = {}
-        if isinstance(offers, dict):
-            for players in offers.values():
-                flat_offers.update(players)
-        else:
-            flat_offers = offers
-
         market = "shotsAgainst" if pitcher else "timeOnIce"
-
-        if isinstance(offers, dict):
-            flat_offers.update(offers.get(market, {}))
-        self.profile_market(market, date)
-        self.get_depth(flat_offers, date)
-        playerStats = self.get_stats(market, flat_offers, date)
-
-        filename = "_".join([self.league, market]).replace(" ", "-")
-        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        if self._volume_model_cache is None:
-            self._volume_model_cache = {}
-        if filename not in self._volume_model_cache:
-            if os.path.isfile(filepath):
-                with open(filepath, "rb") as infile:
-                    self._volume_model_cache[filename] = pickle.load(infile)
-            else:
-                logger.warning(f"{filename} missing")
-                return
-
-        if filename in self._volume_model_cache:
-            filedict = self._volume_model_cache[filename]
-            playerStats = playerStats[filedict["expected_columns"]]
-            model = filedict["model"]
-            dist = filedict["distribution"]
-
-            categories = ["Home", "Player position"]
-            if "Player position" not in playerStats.columns:
-                categories.remove("Player position")
-            for c in categories:
-                playerStats[c] = playerStats[c].astype("category")
-
-            set_model_start_values(model, dist, playerStats)
-
-            prob_params = pd.DataFrame()
-            preds = model.predict(playerStats, pred_type="parameters")
-            preds.index = playerStats.index
-            prob_params = pd.concat([prob_params, preds])
-
-            prob_params.sort_index(inplace=True)
-            playerStats.sort_index(inplace=True)
-
-        else:
-            logger.warning(f"{filename} missing")
+        if not self.load_volume_model_params(
+            offers,
+            market,
+            date,
+            {
+                "loc": f"proj {market} loc",
+                "scale": f"proj {market} scale",
+                "alpha": f"proj {market} alpha",
+            },
+        ):
             return
-
-        # Drop gate column for ZI distributions — not needed for budget normalization
-        prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
-
-        rename_map = {
-            "loc": f"proj {market} loc",
-            "scale": f"proj {market} scale",
-            "alpha": f"proj {market} alpha",
-        }
-
-        self.playerProfile = self.playerProfile.join(
-            prob_params.rename(columns=rename_map), lsuffix="_obs"
-        )
-        self.playerProfile.drop(
-            columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
-        )
 
         if not pitcher:
             # Budget parameters derived from historical NHL gamelogs:
