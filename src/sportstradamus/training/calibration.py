@@ -32,6 +32,11 @@ _ZINB_ZERO_INFLATION_THRESHOLD: float = 0.1
 # over/under threshold near the bookmaker line.
 _ZAGAMMA_ZERO_INFLATION_THRESHOLD: float = 0.05
 
+# Minimum graded (book line vs realized result) samples before per-book weights
+# are fit. With fewer, the fit overfits a handful of games, so the caller keeps
+# the prior weights instead.
+_MIN_SAMPLES_FOR_BOOK_FIT: int = 9
+
 
 def fit_book_weights(league: str, market: str, stat_data, archive, book_weights: dict) -> dict:
     """Fit optimal weights for multiple sportsbooks using historical accuracy."""
@@ -147,7 +152,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
     x = test_df.loc[~test_df.isna().all(axis=1)].to_numpy()
     x[x < 0] = np.nan
     y = result.loc[~test_df.isna().all(axis=1)].to_numpy()
-    if len(x) > 9:
+    if len(x) > _MIN_SAMPLES_FOR_BOOK_FIT:
         prev_weights = book_weights.get(league, {}).get(market, {})
         guess = {}
         for book in test_df.columns:

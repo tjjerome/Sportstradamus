@@ -66,6 +66,9 @@ _PROBA_CLIP = 1e-6
 # accuracy / over% statistics.  Mirrors the live scoring path in
 # prediction/scoring.py. Value from CLAUDE.md "Performance Table".
 _MODE_CONFIDENCE_THRESHOLD: float = 0.54
+# Minimum rows in an EV-conditioned, confidence-masked subset before its over-
+# rate is reported; thinner slices give a noisy mean, so the diagnostic is NaN.
+_MIN_DIAGNOSTIC_ROWS: int = 10
 # Temporal train/test split fraction: earliest 70% of the matrix goes to
 # training, latest 30% is held out for evaluation.  Temporal ordering (not
 # random split) prevents look-ahead leakage of player form.
@@ -1082,12 +1085,12 @@ def _step_compute_diagnostics(
     conf_mask = np.max(y_proba_no_filt, axis=1) > _MODE_CONFIDENCE_THRESHOLD
     diag_over_pct_ev_gt = (
         float(y_class[ev_gt_mask & conf_mask].mean())
-        if (ev_gt_mask & conf_mask).sum() > 10
+        if (ev_gt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
         else float("nan")
     )
     diag_over_pct_ev_lt = (
         float(y_class[ev_lt_mask & conf_mask].mean())
-        if (ev_lt_mask & conf_mask).sum() > 10
+        if (ev_lt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
         else float("nan")
     )
 
@@ -1116,7 +1119,9 @@ def _step_compute_diagnostics(
         cf_pred = (cf_over > 0.5).astype(int)
         cf_mask = np.maximum(cf_under, cf_over) > _MODE_CONFIDENCE_THRESHOLD
         diag_cf_over_pct = (
-            float(cf_pred[cf_mask].mean() / cf_mask.mean()) if cf_mask.sum() > 10 else float("nan")
+            float(cf_pred[cf_mask].mean() / cf_mask.mean())
+            if cf_mask.sum() > _MIN_DIAGNOSTIC_ROWS
+            else float("nan")
         )
     else:
         diag_cf_over_pct = float("nan")
