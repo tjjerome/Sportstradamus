@@ -19,6 +19,10 @@ from tqdm import tqdm
 
 from sportstradamus import data
 
+# Raw SHAP output is 3-D (samples, features, outputs) for multi-output boosters;
+# anything lower is already per-feature and needs no output-axis reduction.
+_MULTI_OUTPUT_SHAP_NDIM: int = 3
+
 
 def _collapse_multi_output_shap(subvals: np.ndarray | list) -> np.ndarray:
     """Reduce raw SHAP TreeExplainer output to a 2-D ``(samples, features)`` |SHAP| array.
@@ -35,7 +39,7 @@ def _collapse_multi_output_shap(subvals: np.ndarray | list) -> np.ndarray:
     if isinstance(subvals, list):
         return np.sum([np.abs(sv) for sv in subvals], axis=0)
     arr = np.asarray(subvals)
-    if arr.ndim == 3:
+    if arr.ndim == _MULTI_OUTPUT_SHAP_NDIM:
         return np.abs(arr).sum(axis=-1)
     return np.abs(arr)
 
@@ -78,9 +82,7 @@ def _refresh_all_aggregates(shap_df):
     return shap_df
 
 
-def compute_market_importance(
-    league: str, market: str, model: Any, test_df: pd.DataFrame
-) -> None:
+def compute_market_importance(league: str, market: str, model: Any, test_df: pd.DataFrame) -> None:
     """Update one market column in feature_importances.csv + feature_correlations.csv.
 
     Args:
@@ -141,5 +143,3 @@ def see_features() -> None:
     pd.DataFrame(feature_correlations, index=[m[:-4] for m in model_list]).T.to_csv(
         pkg_resources.files(data) / "training" / "feature_correlations.csv"
     )
-
-

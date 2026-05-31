@@ -203,8 +203,7 @@ def load_one_year(year: int) -> pd.DataFrame:
 
     per_year = per_year.rename(columns={"POS": "position", "G": "player_game_count"})
     per_year = derive_comp_metrics(per_year)
-    per_year = _join_nfl_players(per_year)
-    return per_year
+    return _join_nfl_players(per_year)
 
 
 def derive_comp_metrics(profile: pd.DataFrame) -> pd.DataFrame:
@@ -543,8 +542,7 @@ def _load_pbp_named_by_player(year: int) -> pd.DataFrame | None:
     pbp.index = pbp.index.map(name_lookup)
     pbp.index.name = None
     pbp = pbp.loc[pbp.index.notna()]
-    pbp = pbp[~pbp.index.duplicated(keep="last")]
-    return pbp
+    return pbp[~pbp.index.duplicated(keep="last")]
 
 
 def _prefix_columns(df: pd.DataFrame, prefix: str) -> pd.DataFrame:

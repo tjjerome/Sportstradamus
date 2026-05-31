@@ -27,6 +27,18 @@ _LINE_CLIP_HIGH: float = 0.95
 _MIN_ARCHIVED_FOR_CLIP: int = 50
 _MIN_ARCHIVED_FRACTION_FOR_CLIP: float = 0.10
 
+# Above this many days, DaysIntoSeason has wrapped past a season boundary and is
+# rebased back into range.
+_SEASON_DAY_WRAP_CEILING: int = 300
+
+# Minimum archived rows required before an archived-derived line target is trusted
+# over the full-data fallback: overall median, over/under balancing, per-position
+# median, and the archived over-rate target respectively.
+_MIN_ARCHIVED_FOR_MEDIAN_LINE: int = 5
+_MIN_ARCHIVED_FOR_BALANCE: int = 10
+_MIN_POS_ARCHIVED_FOR_MEDIAN: int = 20
+_MIN_ARCHIVED_FOR_OVER_TARGET: int = 20
+
 
 def count_training_rows(stat_data, market, start_date, archive) -> int:
     """Estimate the number of training rows get_training_matrix would produce for
@@ -109,17 +121,15 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     """
     warnings.simplefilter("ignore", UserWarning)
 
-    # --- 1. Fix DaysIntoSeason wrapping ---
-    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > 300):
+    while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING):
         M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = (
             M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
         )
-        M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"] = (
-            M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"]
-            - M.loc[M["DaysIntoSeason"] > 300, "DaysIntoSeason"].min()
+        M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"] = (
+            M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"]
+            - M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"].min()
         )
 
-    # --- 2. Remove result outliers (archived rows always kept) ---
     M = M.loc[
         (
             (M["Result"] >= M["Result"].quantile(_RESULT_OUTLIER_LOW))
@@ -128,7 +138,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         | (M["Archived"] == 1)
     ].copy()
 
-    # --- 3. Clip lines to a realistic range ---
     # Use archived range when coverage is good; otherwise fall back to
     # full-data percentiles so sparse-archive markets keep their natural
     # line distribution.
@@ -145,8 +154,11 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         line_ceil = M["Line"].quantile(_LINE_CLIP_HIGH)
     M["Line"] = M["Line"].clip(line_floor, line_ceil)
 
-    # --- 4. Balance line distribution ---
-    overall_target = M.loc[archived_mask, "Line"].median() if n_archived >= 5 else M["Line"].mean()
+    overall_target = (
+        M.loc[archived_mask, "Line"].median()
+        if n_archived >= _MIN_ARCHIVED_FOR_MEDIAN_LINE
+        else M["Line"].mean()
+    )
 
     def _balance_lines(M, pos_mask):
         budget = max(len(M) - min_rows, 0)
@@ -155,7 +167,11 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
 
         pos_archived = archived_mask & pos_mask
         n_pos_archived = pos_archived.sum()
-        target = M.loc[pos_archived, "Line"].median() if n_pos_archived >= 20 else overall_target
+        target = (
+            M.loc[pos_archived, "Line"].median()
+            if n_pos_archived >= _MIN_POS_ARCHIVED_FOR_MEDIAN
+            else overall_target
+        )
 
         non_arch = ~archived_mask & pos_mask
         less = M.loc[non_arch & (M["Line"] < target), "Line"]
@@ -185,8 +201,7 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     else:
         M = _balance_lines(M, pd.Series(True, index=M.index))
 
-    # --- 5. Balance over/under proportions ---
-    if n_archived < 10:
+    if n_archived < _MIN_ARCHIVED_FOR_BALANCE:
         return M.sort_values("Date")
 
     pushes = M.loc[M["Result"] == M["Line"]]
@@ -194,7 +209,7 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     M = M.loc[M["Result"] != M["Line"]]
 
     archived_no_push = M["Archived"] == 1
-    if archived_no_push.sum() >= 20:
+    if archived_no_push.sum() >= _MIN_ARCHIVED_FOR_OVER_TARGET:
         target = (M.loc[archived_no_push, "Result"] > M.loc[archived_no_push, "Line"]).mean()
     else:
         target = (M["Result"] > M["Line"]).mean()
@@ -217,7 +232,6 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         cut = np.random.choice(chopping_block, n, replace=False, p=p)
         M.drop(cut, inplace=True)
 
-    # --- 6. Re-insert pushes at the correct proportion ---
     n = int(push_rate * len(M)) - pushes["Archived"].sum()
     chopping_block = pushes.loc[pushes["Archived"] == 0].index
     n = np.clip(n, None, len(chopping_block))
@@ -225,6 +239,4 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         cut = np.random.choice(chopping_block, n, replace=False)
         pushes.drop(cut, inplace=True)
 
-    M = pd.concat([M, pushes]).sort_values("Date")
-
-    return M
+    return pd.concat([M, pushes]).sort_values("Date")

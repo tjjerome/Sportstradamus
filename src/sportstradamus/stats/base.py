@@ -64,6 +64,20 @@ _COMP_QUANTILE_HI: float = 0.75
 _VOLUME_SCALE_RATIO_FLOOR: float = 0.1
 _VOLUME_SCALE_RATIO_CAP: float = 10.0
 
+# Players with fewer than this many games get a zero trend — the vectorized
+# reimplementation of helpers.text.get_trends, which returns zeros below the
+# same floor (the trailing-window slope is too noisy on <3 points).
+_MIN_GAMES_FOR_TRENDS: int = 3
+
+# Participation floor for defense/usage profiling: keep only players whose
+# market hit-rate (per-game value clipped to [0, 1], averaged) clears this.
+# Below it the player barely sees the market and only adds profile noise.
+_MIN_PARTICIPATION_RATE: float = 0.1
+
+# Month (1-12) on/after which a league's season is labeled by the starting
+# calendar year. Aug+ rolls the season year forward for fall/winter leagues.
+_SEASON_ROLLOVER_MONTH: int = 8
+
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access so processes that merely import this module — most importantly
 # the long-lived Streamlit dashboard — do not hold the archive lock for
@@ -218,12 +232,8 @@ class Stats:
             return
         subset = df.loc[mask]
         unique_dates = subset[date_col].unique()
-        ml_map = archive.get_team_market_map(
-            self.league, "Moneyline", dates=unique_dates
-        )
-        tot_map = archive.get_team_market_map(
-            self.league, "Totals", dates=unique_dates
-        )
+        ml_map = archive.get_team_market_map(self.league, "Moneyline", dates=unique_dates)
+        tot_map = archive.get_team_market_map(self.league, "Totals", dates=unique_dates)
         default_total = archive.default_totals.get(self.league, 1)
         keys = list(zip(subset[date_col].astype(str).str[:10], subset[team_col], strict=False))
         df.loc[mask, "moneyline"] = [ml_map.get(k, 0.5) for k in keys]
@@ -281,7 +291,6 @@ class Stats:
                 uniformly; for those leagues the comps remain today()-bound
                 and the legacy lookahead leakage is not yet addressed.
         """
-        pass
 
     def _comp_target_key(self, date: "date | None") -> "int | None":
         """Cache key for the comp pool active at ``date``.
@@ -563,9 +572,8 @@ class Stats:
         playertrends = (_sum_iy.multiply(_n_t, axis=0) - _sum_y.multiply(_sum_r, axis=0)).div(
             _denom_t, axis=0
         )
-        # Original get_trends returns zeros for players with < 3 total games
         _total_games = _filled_gl.groupby(_player_col).size()
-        playertrends.loc[_total_games < 3] = 0.0
+        playertrends.loc[_total_games < _MIN_GAMES_FOR_TRENDS] = 0.0
         playertrends = playertrends.fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
 
         playerstats = playerstats.join(playershortstats)
@@ -628,7 +636,9 @@ class Stats:
         _pc = self.log_strings["player"]
         _grp_pre = self.short_gamelog.groupby(_pc)[market]
         _agg = _grp_pre.agg(count="count", clipped_mean=lambda x: x.clip(0, 1).mean())
-        _valid_players = _agg[(_agg["clipped_mean"] > 0.1) & (_agg["count"] > 1)].index
+        _valid_players = _agg[
+            (_agg["clipped_mean"] > _MIN_PARTICIPATION_RATE) & (_agg["count"] > 1)
+        ].index
         _filtered = self.short_gamelog[self.short_gamelog[_pc].isin(_valid_players)]
         playerGroups = _filtered.groupby(_pc)
 
@@ -858,7 +868,9 @@ class Stats:
 
         players = set(players)
         season = (
-            date.year if ((date.month >= 8) or (self.league in ["WNBA", "MLB"])) else date.year - 1
+            date.year
+            if ((date.month >= _SEASON_ROLLOVER_MONTH) or (self.league in ["WNBA", "MLB"]))
+            else date.year - 1
         )
         if self.league == "NBA":
             season = "-".join([str(season), str(season - 1999)])
@@ -1081,7 +1093,7 @@ class Stats:
                 archive.get_total(self.league, dates[x], teams[x]) for x in stats.index
             ]
 
-        if self.league == "MLB" and not any([string in market for string in ["allowed", "pitch"]]):
+        if self.league == "MLB" and not any(string in market for string in ["allowed", "pitch"]):
             h2hgames = self.short_gamelog.loc[
                 self.short_gamelog["opponent pitcher"]
                 == self.short_gamelog[self.log_strings["player"]].map(pitchers)
@@ -1368,13 +1380,13 @@ class Stats:
                 self.get_volume_stats(
                     offers,
                     gameDate,
-                    pitcher=any([string in market for string in ["allowed", "pitch"]]),
+                    pitcher=any(string in market for string in ["allowed", "pitch"]),
                 )
             elif self.league == "NHL":
                 self.get_volume_stats(
                     offers,
                     gameDate,
-                    pitcher=any([string in market for string in ["Against", "saves", "goalie"]]),
+                    pitcher=any(string in market for string in ["Against", "saves", "goalie"]),
                 )
             else:
                 self.get_volume_stats(offers, gameDate)
@@ -1441,9 +1453,9 @@ class Stats:
                         stats.loc[stats["Archived"] | (usage > usage_cutoff)].to_dict("records")
                     )
 
-        M = pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
-
-        return M
+        return (
+            pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+        )
 
     def trim_gamelog(self):
         """Trims the gamelog to the most recent 21500 rows of data plus one year."""
