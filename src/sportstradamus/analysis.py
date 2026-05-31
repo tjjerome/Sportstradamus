@@ -15,6 +15,12 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from tqdm import tqdm
 
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, get_odds
+from sportstradamus.history_schema import (
+    CLOSING_FIELD_INDICES,
+    LEGACY_OFFER_ARITY,
+    OFFER_FIELDS,
+    PREDICTION_LEVEL_COLS,
+)
 
 LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
@@ -145,20 +151,8 @@ def _migrate_flat_history(history):
     pre-CLV rows; ``reflect`` populates them from the archive on resolution.
     """
     pred_key = ["Player", "League", "Date", "Market"]
-    offer_cols = ["Line", "Boost", "Platform", "Bet", "Model P", "Books P"]
-    pred_cols = [
-        "Team",
-        "Model EV",
-        "Books EV",
-        "Dist",
-        "CV",
-        "Model Param",
-        "Gate",
-        "Temperature",
-        "Disp Cal",
-        "Step",
-        "Actual",
-    ]
+    offer_cols = OFFER_FIELDS[:LEGACY_OFFER_ARITY]
+    pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
 
     # Ensure columns exist
     for col in offer_cols + pred_cols + ["Actual"]:
@@ -211,12 +205,6 @@ def _migrate_flat_history(history):
         for col in pred_cols:
             row[col] = latest.get(col, np.nan)
 
-        # Try to recover Actual from old Result column
-        if pd.isna(row.get("Actual")) and "Result" in grp.columns:
-            latest.get("Result")
-            # Can't recover numeric Actual from Over/Under, but mark as resolved
-            # so resolve_history will skip it if Actual is still NaN
-
         rows.append(row)
 
     return pd.DataFrame(rows)
@@ -258,7 +246,7 @@ def _merge_offers(old_offers, new_offers):
 
 def _pad_legacy(offer):
     """Return ``offer`` padded to the canonical 9-field shape with NaN."""
-    if isinstance(offer, tuple | list) and len(offer) == 6:
+    if isinstance(offer, tuple | list) and len(offer) == LEGACY_OFFER_ARITY:
         return (*tuple(offer), np.nan, np.nan, np.nan)
     return tuple(offer)
 
@@ -266,7 +254,7 @@ def _pad_legacy(offer):
 def _preserve_closing(old_offer, new_offer):
     """Carry old closing-trio values forward when ``new_offer`` lacks them."""
     merged = list(new_offer)
-    for idx in (6, 7, 8):  # CloseBooksP, MarketCLV, ModelCLV
+    for idx in CLOSING_FIELD_INDICES:
         if idx < len(merged) and pd.isna(merged[idx]) and idx < len(old_offer):
             merged[idx] = old_offer[idx]
     return tuple(merged)
@@ -457,7 +445,6 @@ def compute_individual_metrics(history):
     history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
     history = history.loc[history["_date"].notna()].copy()
 
-    # --- Summary table with timeframe splits ---
     rows = []
     filtered = history.loc[history["Model"] > _MODEL_PROB_PICK_FLOOR]
 
@@ -495,7 +482,6 @@ def compute_individual_metrics(history):
             ["Period", "Split", "Accuracy", "Balance", "LogLoss", "Brier", "ROI", "Samples"]
         ]
 
-    # --- Daily granular data for time series charting ---
     one_year = filtered.loc[filtered["_date"] >= today - timedelta(days=365)].copy()
     one_year["Hit"] = (one_year["Bet"] == one_year["Result"]).astype(int)
     one_year["Profit Unit"] = one_year["Hit"] * (100 / 110) - (1 - one_year["Hit"])
@@ -514,7 +500,6 @@ def compute_individual_metrics(history):
     daily["Date"] = daily["Date"].astype(str)
     daily = daily.sort_values(["Date", "League", "Market"])
 
-    # --- Calibration ---
     cal_data = one_year.copy()
     bins = np.linspace(0.5, 1.0, 11)
     cal_data["bin"] = pd.cut(cal_data[prob_col], bins=bins)
@@ -530,7 +515,6 @@ def compute_individual_metrics(history):
     calibration["Bin"] = calibration["bin"].astype(str)
     calibration = calibration[["Bin", "Predicted", "Actual", "Count"]]
 
-    # --- ROI by threshold ---
     roi_rows = []
     for threshold in [0.55, 0.58, 0.60, 0.65, 0.70]:
         for tf_label, tf_days in TIMEFRAMES:
@@ -592,7 +576,6 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
     parlays["Hit"] = (parlays["Misses"] == 0).astype(int)
 
-    # --- Underdog profit ---
     profit_rows = []
     ud_parlays = parlays.loc[parlays["Platform"] == "Underdog"].copy()
     if len(ud_parlays) > 0:
@@ -637,7 +620,6 @@ def compute_parlay_metrics(parlays, stats, stat_map):
 
     profit_df = pd.DataFrame(profit_rows)
 
-    # --- Daily parlay data for time series ---
     daily_rows = []
     for platform in parlays["Platform"].unique():
         plat_df = parlays.loc[parlays["Platform"] == platform]
@@ -674,7 +656,6 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     else:
         daily_parlays = pd.DataFrame()
 
-    # --- Hit rate by parlay size with miss distributions (both platforms) ---
     size_rows = []
     for platform in parlays["Platform"].unique():
         plat_parlays = parlays.loc[parlays["Platform"] == platform]
@@ -709,7 +690,6 @@ def compute_parlay_metrics(parlays, stats, stat_map):
                 size_rows.append(row)
     size_stats = pd.DataFrame(size_rows)
 
-    # --- Correlation calibration ---
     if "P" in parlays.columns and len(parlays) > 0:
         cal_df = parlays.copy()
         bins = np.linspace(0, 1, 11)
@@ -728,7 +708,6 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     else:
         corr_cal = pd.DataFrame()
 
-    # Clean up temp column
     parlays.drop(columns=["_date", "Hit"], inplace=True, errors="ignore")
 
     return profit_df, daily_parlays, size_stats, corr_cal

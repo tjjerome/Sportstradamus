@@ -26,6 +26,7 @@ import pandas as pd
 
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.logging import get_logger
+from sportstradamus.history_schema import LEGACY_OFFER_ARITY, OFFER_ARITY
 
 # Per-(League, Market, Platform) CLV summary segments require this many legs
 # to be reported. Smaller segments are statistical noise.
@@ -109,9 +110,9 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
 
         new_offers = []
         for offer in offers:
-            if isinstance(offer, tuple | list) and len(offer) == 6:
+            if isinstance(offer, tuple | list) and len(offer) == LEGACY_OFFER_ARITY:
                 offer = (*tuple(offer), np.nan, np.nan, np.nan)
-            elif not (isinstance(offer, tuple | list) and len(offer) == 9):
+            elif not (isinstance(offer, tuple | list) and len(offer) == OFFER_ARITY):
                 new_offers.append(offer)
                 continue
             line, boost, platform, bet, model_p, books_p, prev_close, _, _ = offer
@@ -171,9 +172,9 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
             movement = movement_cache[cache_key]
 
         for offer in offers:
-            if not (isinstance(offer, tuple | list) and len(offer) >= 9):
+            if not (isinstance(offer, tuple | list) and len(offer) >= OFFER_ARITY):
                 continue
-            _, _, platform, bet, model_p, _, close_p, market_clv, _model_clv = offer[:9]
+            _, _, platform, bet, model_p, _, close_p, market_clv, _model_clv = offer[:OFFER_ARITY]
             if pd.isna(close_p) or pd.isna(market_clv):
                 continue
             aligned = _movement_alignment(movement, model_p, bet)

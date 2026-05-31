@@ -31,6 +31,7 @@ from sportstradamus.helpers.io import (
     write_history,
     write_parlay_hist,
 )
+from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.persist import write_current_offers
 from sportstradamus.prediction.scoring import process_offers
 from sportstradamus.spiderLogger import logger
@@ -187,7 +188,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         contest_variant=contest_variant,
     )
 
-    # --- Append to rolling parlay history ---
     if not parlay_df.empty:
         old_parlays = read_parlay_hist()
         if not old_parlays.empty:
@@ -207,40 +207,9 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         if "Offers" not in history.columns:
             history = _migrate_flat_history(history)
     else:
-        history = pd.DataFrame(
-            columns=[
-                "Player",
-                "League",
-                "Team",
-                "Date",
-                "Market",
-                "Model EV",
-                "Books EV",
-                "Dist",
-                "CV",
-                "Model Param",
-                "Gate",
-                "Temperature",
-                "Disp Cal",
-                "Step",
-                "Offers",
-                "Actual",
-            ]
-        )
+        history = pd.DataFrame(columns=HISTORY_COLS)
 
     pred_key = ["Player", "League", "Date", "Market"]
-    pred_level_cols = [
-        "Team",
-        "Model EV",
-        "Books EV",
-        "Dist",
-        "CV",
-        "Model Param",
-        "Gate",
-        "Temperature",
-        "Disp Cal",
-        "Step",
-    ]
 
     if all_offers:
         all_df = pd.concat(all_offers)
@@ -282,7 +251,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
                 "Market": market,
                 "Offers": offers,
             }
-            for col in pred_level_cols:
+            for col in PREDICTION_LEVEL_COLS:
                 row[col] = latest.get(col, np.nan)
             new_preds.append(row)
 
@@ -298,7 +267,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
                 if not isinstance(old_offers, list):
                     old_offers = []
                 history.at[idx, "Offers"] = _merge_offers(old_offers, new_df.at[idx, "Offers"])
-                for col in pred_level_cols:
+                for col in PREDICTION_LEVEL_COLS:
                     val = new_df.at[idx, col]
                     if pd.notna(val):
                         history.at[idx, col] = val
