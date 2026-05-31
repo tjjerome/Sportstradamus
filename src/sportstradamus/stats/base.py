@@ -104,6 +104,109 @@ def _profile_rows_for_teams(profile: pd.DataFrame, team_keys: pd.Index | list[st
     return profile.reindex(team_keys)
 
 
+def scale_team_volume_to_budget(
+    player_profile: pd.DataFrame,
+    market: str,
+    *,
+    budget_mean: float,
+    typical_rotation: int,
+    avg_unmodeled_min: float,
+    per_player_floor: float,
+    per_player_cap: float,
+) -> None:
+    """Rescale per-player SkewNormal volume projections to a team minutes budget.
+
+    For each team, distributes the (budget - modeled-total) deficit across the
+    team's modeled players precision-weighted by variance, clips each player to
+    ``per_player_cap``, and rescales loc/scale together to preserve every
+    player's coefficient of variation. Mutates ``player_profile`` in place.
+    Shared by the NBA and NHL volume models, which differ only in the per-league
+    ``budget_mean`` derivation and the rotation/floor/cap parameters.
+
+    Two real-world constraints complicate a simple minutes cap:
+
+    1. Overtime: games sometimes go beyond regulation. With probability p_ot per
+       period, each OT adds ot_per_period player-minutes. Modelling this as a
+       geometric process gives:
+           budget_mean = reg_minutes + ot_per_period * p_ot / (1 - p_ot)
+
+    2. Unmodeled players: incomplete roster coverage (rookies, fringe benchwarmers)
+       means some minutes go to players we have no projection for. We reserve:
+           unmodeled_reserve = max(0, typical_rotation - N) * avg_unmodeled_min
+
+    The precision-weighted adjustment is the minimum-information-loss solution to:
+        minimise  sum_i (d_i / sigma_i)^2
+        subject to  sum_i (mu_i + d_i) = target
+        -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
+    Players we are most uncertain about absorb the correction; confidently
+    projected players are left largely untouched.
+
+    Args:
+        player_profile: DataFrame with columns ``"team"``, ``"proj {market} loc"``,
+            ``"proj {market} scale"``, and optionally ``"proj {market} alpha"``.
+            Rows with ``team == 0`` are skipped (unassigned players).
+            Writes back ``"proj {market} loc"``, ``"proj {market} scale"``,
+            ``"proj {market} mean"``, and ``"proj {market} std"`` in place.
+        market: Stat name used to construct the column key (e.g. ``"MIN"``).
+        budget_mean: Expected total team volume (minutes or TOI) per game,
+            including overtime expectation.  Units match ``per_player_cap``.
+        typical_rotation: Median number of modeled players per team per game;
+            used to size the unmodeled reserve.
+        avg_unmodeled_min: Mean volume for players outside the modeled tier;
+            units match ``budget_mean``.
+        per_player_floor: Minimum per-player volume used to set the lower target
+            (``N * per_player_floor``).  Units match ``budget_mean``.
+        per_player_cap: Hard ceiling clipped onto each player's new mean before
+            ratio rescaling.
+    """
+    teams = player_profile.loc[player_profile["team"] != 0].groupby("team")
+    for _team, team_df in teams:
+        loc = team_df[f"proj {market} loc"].copy()
+        scale = team_df[f"proj {market} scale"].copy()
+        sn_alpha = (
+            team_df[f"proj {market} alpha"].copy()
+            if f"proj {market} alpha" in team_df.columns
+            else pd.Series(0, index=loc.index)
+        )
+        N = len(team_df)
+
+        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
+        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
+        true_vars = scale**2
+
+        total = true_means.sum()
+        if total <= 0:
+            continue
+
+        unmodeled_count = max(0, typical_rotation - N)
+        unmodeled_reserve = unmodeled_count * avg_unmodeled_min
+
+        upper_target = budget_mean - unmodeled_reserve
+        lower_target = N * per_player_floor
+        target = max(upper_target, lower_target)
+
+        deficit = target - total
+        total_var = true_vars.sum()
+        if total_var > 0:
+            adjustments = true_vars / total_var * deficit
+        else:
+            adjustments = true_means / total * deficit
+
+        new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
+
+        ratio = new_means / true_means.replace(0, np.nan)
+        ratio = ratio.fillna(1.0).clip(
+            lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
+        )
+        new_scale = scale * ratio
+        new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
+
+        player_profile.loc[loc.index, f"proj {market} loc"] = new_loc
+        player_profile.loc[scale.index, f"proj {market} scale"] = new_scale
+        player_profile.loc[loc.index, f"proj {market} mean"] = new_means
+        player_profile.loc[scale.index, f"proj {market} std"] = new_scale
+
+
 class Stats:
     """A parent class for handling and analyzing sports statistics.
 

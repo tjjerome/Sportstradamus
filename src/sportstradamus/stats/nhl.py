@@ -34,11 +34,10 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
-    _VOLUME_SCALE_RATIO_CAP,
-    _VOLUME_SCALE_RATIO_FLOOR,
     Stats,
     archive,
     clean_data,
+    scale_team_volume_to_budget,
     scraper,
 )
 
@@ -823,7 +822,6 @@ class StatsNHL(Stats):
 
         if filename in self._volume_model_cache:
             filedict = self._volume_model_cache[filename]
-            # Slice to the trained schema embedded in the pickle.
             playerStats = playerStats[filedict["expected_columns"]]
             model = filedict["model"]
             dist = filedict["distribution"]
@@ -851,7 +849,6 @@ class StatsNHL(Stats):
         # Drop gate column for ZI distributions — not needed for budget normalization
         prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
 
-        # SkewNormal: rename loc/scale/alpha to proj {market} loc/scale/alpha
         rename_map = {
             "loc": f"proj {market} loc",
             "scale": f"proj {market} scale",
@@ -866,17 +863,13 @@ class StatsNHL(Stats):
         )
 
         if not pitcher:
-            # ------------------------------------------------------------------
-            # Budget parameters — derived by analyzing historical NHL gamelogs.
-            #
-            # Methodology:
+            # Budget parameters derived from historical NHL gamelogs:
             #   typical_rotation : median skaters (non-G) logging >3 min per team-game
             #   ot_rate          : fraction of team-games where total skater TOI > 300
             #   ot_extra         : mean extra team TOI above 300 when OT occurs (9.6 min)
             #   avg_unmodeled_min: mean TOI for ranked 8-18 skaters (rank > 7 tier)
-            #   per_player_floor : 5th-percentile TOI for top-7 tier skaters
-            #   per_player_cap   : 99th-percentile TOI for top-7 tier skaters
-            # ------------------------------------------------------------------
+            #   per_player_floor : 5th-pct TOI for top-7 tier skaters
+            #   per_player_cap   : 99th-pct TOI for top-7 tier skaters
             reg_minutes = 300  # 5 skaters × 60 min regulation
             ot_rate = 0.189  # measured: 18.9% of team-games go to OT
             ot_extra = 9.6  # measured: mean extra team TOI when OT occurs
@@ -888,56 +881,15 @@ class StatsNHL(Stats):
             # Expected total team TOI including OT
             budget_mean = reg_minutes + ot_rate * ot_extra
 
-            teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
-            for _team, team_df in teams:
-                # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
-                loc = team_df[f"proj {market} loc"].copy()
-                scale = team_df[f"proj {market} scale"].copy()
-                sn_alpha = (
-                    team_df[f"proj {market} alpha"].copy()
-                    if f"proj {market} alpha" in team_df.columns
-                    else pd.Series(0, index=loc.index)
-                )
-                N = len(team_df)
-
-                delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-                true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-                true_vars = scale**2
-
-                total = true_means.sum()
-                if total <= 0:
-                    continue
-
-                # Reserve TOI for the many unmodeled skaters (rank 8-18)
-                unmodeled_count = max(0, typical_rotation - N)
-                unmodeled_reserve = unmodeled_count * avg_unmodeled_min
-
-                upper_target = budget_mean - unmodeled_reserve
-                lower_target = N * per_player_floor
-                target = max(upper_target, lower_target)
-
-                # Precision-weighted deficit distribution
-                deficit = target - total
-                total_var = true_vars.sum()
-                if total_var > 0:
-                    adjustments = true_vars / total_var * deficit
-                else:
-                    adjustments = true_means / total * deficit
-
-                new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
-
-                # Scale both loc and scale to preserve coefficient of variation
-                ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(
-                    lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
-                )
-                new_scale = scale * ratio
-                new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-                self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
-                self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
-                self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
-                self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
+            scale_team_volume_to_budget(
+                self.playerProfile,
+                market,
+                budget_mean=budget_mean,
+                typical_rotation=typical_rotation,
+                avg_unmodeled_min=avg_unmodeled_min,
+                per_player_floor=per_player_floor,
+                per_player_cap=per_player_cap,
+            )
 
         # Drop SkewNormal parameters (keep only mean/std for downstream use)
         self.playerProfile.drop(
