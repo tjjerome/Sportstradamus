@@ -11,7 +11,6 @@ from sklearn.neighbors import BallTree
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Scrape,
     abbreviations,
     combo_props,
     feature_filter,
@@ -22,7 +21,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import archive, clean_data, scraper
+from sportstradamus.stats.base import archive, clean_data, fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
@@ -170,7 +169,6 @@ class StatsWNBA(StatsNBA):
             else:
                 self.players[self.season_start.year] = player_dict
 
-        self.upcoming_games = {}
         today = datetime.today().date()
 
         # Drop records with incomplete advanced stats so they can be re-fetched
@@ -182,35 +180,7 @@ class StatsWNBA(StatsNBA):
             latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
             latest_date = max(latest_date, self.season_start)
 
-        try:
-            ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID=10&Season={self.season_start.year}&RegionID=1&Date={today.strftime('%m/%d/%Y')}&EST=Y"
-
-            ug_res = scraper.get(ug_url)["resultSets"][1]["CompleteGameList"]
-
-            next_day = today + timedelta(days=1)
-            ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID=10&Season={self.season_start.year}&RegionID=1&Date={next_day.strftime('%m/%d/%Y')}&EST=Y"
-
-            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
-
-            next_day = next_day + timedelta(days=1)
-            ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID=10&Season={self.season_start.year}&RegionID=1&Date={next_day.strftime('%m/%d/%Y')}&EST=Y"
-
-            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
-
-            for game in ug_res:
-                if game["vtAbbreviation"] not in self.upcoming_games:
-                    self.upcoming_games[game["vtAbbreviation"]] = {
-                        "Opponent": game["htAbbreviation"],
-                        "Home": False,
-                    }
-                if game["htAbbreviation"] not in self.upcoming_games:
-                    self.upcoming_games[game["htAbbreviation"]] = {
-                        "Opponent": game["vtAbbreviation"],
-                        "Home": True,
-                    }
-
-        except:
-            pass
+        self.upcoming_games = fetch_upcoming_games("10", self.season_start.year, today)
 
         params = {
             "season_nullable": self.season_start.year,

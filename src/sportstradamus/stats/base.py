@@ -5,7 +5,7 @@ import json
 import os.path
 import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 from time import sleep
 
@@ -77,6 +77,11 @@ _MIN_PARTICIPATION_RATE: float = 0.1
 # Month (1-12) on/after which a league's season is labeled by the starting
 # calendar year. Aug+ rolls the season year forward for fall/winter leagues.
 _SEASON_ROLLOVER_MONTH: int = 8
+
+# Days ahead (including today) that fetch_upcoming_games scrapes. Three days
+# covers today + tomorrow + day-after so late-night runs don't miss next-day
+# tip-offs.
+_SCHEDULE_LOOKAHEAD_DAYS: int = 3
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access so processes that merely import this module — most importantly
@@ -205,6 +210,50 @@ def scale_team_volume_to_budget(
         player_profile.loc[scale.index, f"proj {market} scale"] = new_scale
         player_profile.loc[loc.index, f"proj {market} mean"] = new_means
         player_profile.loc[scale.index, f"proj {market} std"] = new_scale
+
+
+def fetch_upcoming_games(league_id: str, season: str | int, today: date) -> dict[str, dict]:
+    """Map each team to its next matchup from the stats.nba.com schedule.
+
+    Scrapes the ``internationalbroadcasterschedule`` endpoint for ``today`` and
+    the next two days. Shared by the NBA and WNBA ``update`` paths, which differ
+    only in ``league_id`` ("00" vs "10") and the ``season`` value interpolated
+    into the URL. Returns ``{team_abbr: {"Opponent": str, "Home": bool}}`` keyed
+    by the first date a team is seen.
+
+    ``Scrape.get`` swallows network errors and returns ``{}`` on exhausted
+    retries, so an unavailable endpoint surfaces here as a ``KeyError`` while
+    indexing the empty response; that and the sibling ``IndexError`` /
+    ``TypeError`` from a malformed payload yield an empty mapping. This is the
+    historical bare-except behavior, narrowed to the exceptions the block can
+    actually raise (§ E722).
+    """
+    upcoming_games: dict[str, dict] = {}
+    try:
+        ug_res = []
+        for offset in range(_SCHEDULE_LOOKAHEAD_DAYS):
+            day = today + timedelta(days=offset)
+            ug_url = (
+                "https://stats.nba.com/stats/internationalbroadcasterschedule"
+                f"?LeagueID={league_id}&Season={season}&RegionID=1"
+                f"&Date={day.strftime('%m/%d/%Y')}&EST=Y"
+            )
+            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
+
+        for game in ug_res:
+            if game["vtAbbreviation"] not in upcoming_games:
+                upcoming_games[game["vtAbbreviation"]] = {
+                    "Opponent": game["htAbbreviation"],
+                    "Home": False,
+                }
+            if game["htAbbreviation"] not in upcoming_games:
+                upcoming_games[game["htAbbreviation"]] = {
+                    "Opponent": game["vtAbbreviation"],
+                    "Home": True,
+                }
+    except (KeyError, IndexError, TypeError):
+        pass
+    return upcoming_games
 
 
 class Stats:
@@ -1385,6 +1434,86 @@ class Stats:
             stats["Player depth"] = stats["Player position"]
 
         return stats.fillna(0).infer_objects(copy=False)
+
+    def load_volume_model_params(
+        self, offers, market, date, rename_map, position_filter=None
+    ) -> bool:
+        """Join a volume model's predicted distribution parameters into playerProfile.
+
+        Shared head of ``StatsMLB`` / ``StatsNHL`` / ``StatsNFL`` ``get_volume_stats``:
+        flattens ``offers``, profiles the market, loads the cached
+        ``models/{league}_{market}.mdl`` pickle, predicts the per-player
+        distribution parameters, and joins them into ``self.playerProfile`` under
+        ``rename_map`` (the per-league difference besides ``market``). Returns
+        ``True`` on success, ``False`` when the pickle is absent so callers with
+        post-join work (NHL/NFL budget scaling) can abort.
+
+        Args:
+            offers: Sportsbook offers dict or list passed through from the caller.
+            market: The volume stat market name (e.g. ``"carries"``).
+            date: Game date used for profiling and stats lookup.
+            rename_map: Column rename applied to the raw model output before the
+                join, e.g. ``{"loc": "proj carries loc", ...}``.
+            position_filter: When not ``None``, restrict predicted rows to players
+                whose ``"Player position"`` value is in this collection before the
+                join. NFL passes a per-market list of depth-chart position numbers
+                (``1`` = QB, ``2`` = WR, ``3`` = RB, ``4`` = TE). MLB and NHL
+                pass ``None`` and skip the filter.
+        """
+        flat_offers = {}
+        if isinstance(offers, dict):
+            for players in offers.values():
+                flat_offers.update(players)
+            flat_offers.update(offers.get(market, {}))
+        else:
+            flat_offers = offers
+
+        self.profile_market(market, date)
+        self.get_depth(flat_offers, date)
+        playerStats = self.get_stats(market, flat_offers, date)
+
+        filename = "_".join([self.league, market]).replace(" ", "-")
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if self._volume_model_cache is None:
+            self._volume_model_cache = {}
+        if filename not in self._volume_model_cache:
+            if os.path.isfile(filepath):
+                with open(filepath, "rb") as infile:
+                    self._volume_model_cache[filename] = pickle.load(infile)
+            else:
+                logger.warning(f"{filename} missing")
+                return False
+
+        filedict = self._volume_model_cache[filename]
+        playerStats = playerStats[filedict["expected_columns"]]
+        model = filedict["model"]
+        dist = filedict["distribution"]
+
+        categories = ["Home", "Player position"]
+        if "Player position" not in playerStats.columns:
+            categories.remove("Player position")
+        for c in categories:
+            playerStats[c] = playerStats[c].astype("category")
+
+        set_model_start_values(model, dist, playerStats)
+
+        prob_params = model.predict(playerStats, pred_type="parameters")
+        prob_params.index = playerStats.index
+
+        prob_params.sort_index(inplace=True)
+        playerStats.sort_index(inplace=True)
+        if position_filter is not None:
+            prob_params = prob_params.loc[playerStats["Player position"].isin(position_filter)]
+
+        # gate is a ZI-model artifact; callers consume only the distribution parameters.
+        prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
+        self.playerProfile = self.playerProfile.join(
+            prob_params.rename(columns=rename_map), lsuffix="_obs"
+        )
+        self.playerProfile.drop(
+            columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
+        )
+        return True
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
         return

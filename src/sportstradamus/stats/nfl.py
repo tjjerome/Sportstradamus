@@ -137,6 +137,15 @@ _COMP_POOL_MIN_PLAYERS: int = 7  # skip position if fewer candidates survive fil
 _COMP_KNN_MIN: int = 5
 _COMP_KNN_MAX: int = 15
 
+# Per-market position-number filters for load_volume_model_params.
+# Numbers correspond to self.positions = ["QB","WR","RB","TE"] (index+1):
+#   QB=1, WR=2, RB=3, TE=4. Must mirror NFL_MARKET_POSITIONS (name→number).
+_VOLUME_MARKET_POSITION_FILTER: dict[str, list[int]] = {
+    "attempts": [1],        # QB only
+    "carries": [1, 3],      # QB + RB (QBs scramble)
+    "targets": [2, 3, 4],   # WR + RB + TE
+}
+
 
 class StatsNFL(Stats):
     """A class for handling and analyzing NFL statistics.
@@ -1831,90 +1840,19 @@ class StatsNFL(Stats):
         return 0  # combo-market EV pending reimplementation
 
     def get_volume_stats(self, offers: dict, date: date = datetime.today().date()) -> None:
-        flat_offers = {}
-        if isinstance(offers, dict):
-            for players in offers.values():
-                flat_offers.update(players)
-        else:
-            flat_offers = offers
-
-        position_map = {"attempts": [1], "carries": [1, 3], "targets": [2, 3, 4]}
-
         for market in self.volume_stats:
-            if isinstance(offers, dict):
-                flat_offers.update(offers.get(market, {}))
-            self.profile_market(market, date)
-            self.get_depth(flat_offers, date)
-            playerStats = self.get_stats(market, flat_offers, date)
-
-            filename = "_".join([self.league, market]).replace(" ", "-")
-            filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-            if self._volume_model_cache is None:
-                self._volume_model_cache = {}
-            if filename not in self._volume_model_cache:
-                if os.path.isfile(filepath):
-                    with open(filepath, "rb") as infile:
-                        self._volume_model_cache[filename] = pickle.load(infile)
-                else:
-                    logger.warning(f"{filename} missing")
-                    return
-
-            if filename in self._volume_model_cache:
-                filedict = self._volume_model_cache[filename]
-                # Slice to the trained schema embedded in the pickle. This is the
-                # source of truth — never re-derive from feature_filter.json here,
-                # which can drift between when the volume model was trained and now.
-                playerStats = playerStats[filedict["expected_columns"]]
-                model = filedict["model"]
-                dist = filedict["distribution"]
-
-                categories = ["Home", "Player position"]
-                if "Player position" not in playerStats.columns:
-                    categories.remove("Player position")
-                for c in categories:
-                    playerStats[c] = playerStats[c].astype("category")
-
-                set_model_start_values(model, dist, playerStats)
-
-                prob_params = pd.DataFrame()
-                preds = model.predict(playerStats, pred_type="parameters")
-                preds.index = playerStats.index
-                prob_params = pd.concat([prob_params, preds])
-
-                prob_params.sort_index(inplace=True)
-                playerStats.sort_index(inplace=True)
-                prob_params = prob_params.loc[
-                    playerStats["Player position"].isin(position_map[market])
-                ]
-
-            else:
-                logger.warning(f"{filename} missing")
+            if not self.load_volume_model_params(
+                offers,
+                market,
+                date,
+                {
+                    "loc": f"proj {market} loc",
+                    "scale": f"proj {market} scale",
+                    "alpha": f"proj {market} alpha",
+                },
+                position_filter=_VOLUME_MARKET_POSITION_FILTER[market],
+            ):
                 return
-
-            # ---------------------------------------------------------------
-            # Store distribution parameters in playerProfile.
-            #
-            # attempts  → SkewNormal: loc, scale, alpha
-            # carries / targets → NegBin/ZINB: probs (p), total_count (n)
-            #   NegBin mean     μ = n(1−p)/p
-            #   NegBin variance σ² = n(1−p)/p² = μ/p
-            # ---------------------------------------------------------------
-            # Drop gate column for ZI distributions — not needed for budget normalization
-            prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
-            # All NFL volume stats (attempts, carries, targets) now use SkewNormal
-            rename_map = {
-                "loc": f"proj {market} loc",
-                "scale": f"proj {market} scale",
-                "alpha": f"proj {market} alpha",
-            }
-
-            self.playerProfile = self.playerProfile.join(
-                prob_params.rename(columns=rename_map), lsuffix="_obs"
-            )
-            self.playerProfile.drop(
-                columns=[col for col in self.playerProfile.columns if "_obs" in col],
-                inplace=True,
-            )
 
             # ---------------------------------------------------------------
             # Volume normalization — precision-weighted, always-adjust.

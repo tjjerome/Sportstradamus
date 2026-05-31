@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Scrape,
     abbreviations,
     combo_props,
     feature_filter,
@@ -38,8 +37,8 @@ from sportstradamus.stats.base import (
     Stats,
     archive,
     clean_data,
+    fetch_upcoming_games,
     scale_team_volume_to_budget,
-    scraper,
 )
 from sportstradamus.stats.nba_client import NBAStatsError
 
@@ -851,37 +850,7 @@ class StatsNBA(Stats):
             "Guard-Center": "W",
         }
 
-        self.upcoming_games = {}
-
-        try:
-            ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID=00&Season={self.season[:4]}&RegionID=1&Date={today.strftime('%m/%d/%Y')}&EST=Y"
-
-            ug_res = scraper.get(ug_url)["resultSets"][1]["CompleteGameList"]
-
-            next_day = today + timedelta(days=1)
-            ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID=00&Season={self.season[:4]}&RegionID=1&Date={next_day.strftime('%m/%d/%Y')}&EST=Y"
-
-            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
-
-            next_day = next_day + timedelta(days=1)
-            ug_url = f"https://stats.nba.com/stats/internationalbroadcasterschedule?LeagueID=00&Season={self.season[:4]}&RegionID=1&Date={next_day.strftime('%m/%d/%Y')}&EST=Y"
-
-            ug_res.extend(scraper.get(ug_url)["resultSets"][1]["CompleteGameList"])
-
-            for game in ug_res:
-                if game["vtAbbreviation"] not in self.upcoming_games:
-                    self.upcoming_games[game["vtAbbreviation"]] = {
-                        "Opponent": game["htAbbreviation"],
-                        "Home": False,
-                    }
-                if game["htAbbreviation"] not in self.upcoming_games:
-                    self.upcoming_games[game["htAbbreviation"]] = {
-                        "Opponent": game["vtAbbreviation"],
-                        "Home": True,
-                    }
-
-        except Exception:
-            pass
+        self.upcoming_games = fetch_upcoming_games("00", self.season[:4], today)
 
         params = {
             "season_nullable": self.season,
