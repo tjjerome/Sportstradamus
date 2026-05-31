@@ -82,7 +82,7 @@ BOTTOM_QUARTILE_FRAC: float = 0.25
 
 # Gate 1 / supersede-S2 paired bootstrap: resample count, RNG seed (fixed so the CI
 # is reproducible — the repo has a determinism gate), and the 95% two-sided
-# percentile bounds. Seed matches zinb_routing_diagnostics._DEFAULT_SEED.
+# percentile bounds.
 _GATE1_N_BOOT: int = 2000
 _GATE1_SEED: int = 1729
 _CI_LOW_PCT: float = 2.5
@@ -457,8 +457,8 @@ def _bootstrap_mean_ci(
 
     Resamples ``values`` with replacement ``n_boot`` times (seeded ``rng`` for a
     reproducible CI) and returns the point mean plus the 95% two-sided percentile
-    bounds. Sibling of ``zinb_routing_diagnostics._bootstrap_ci``, specialized to the
-    mean of an already-computed per-event statistic (Gate 1 here, supersede S2 later).
+    bounds, specialized to the mean of an already-computed per-event statistic
+    (Gate 1 here, supersede S2 later).
     Returns ``(nan, nan, nan)`` when ``values`` is empty after dropping non-finites.
     """
     values = np.asarray(values, dtype=float)
