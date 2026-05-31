@@ -66,7 +66,7 @@ def test_wide_row_handles_none_in_every_diag_key():
         "model_shape",
         "empirical_shape",
     )
-    model = _model_with_diag({key: None for key in diag_keys})
+    model = _model_with_diag(dict.fromkeys(diag_keys))
 
     row = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
 

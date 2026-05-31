@@ -123,7 +123,7 @@ if has_indep and has_corr_p:
             x=[0, scatter_df[["Indep P", "P"]].max().max()],
             y=[0, scatter_df[["Indep P", "P"]].max().max()],
             mode="lines",
-            line=dict(dash="dash", color="gray"),
+            line={"dash": "dash", "color": "gray"},
             name="No adjustment line",
         )
     )
@@ -259,7 +259,7 @@ if "P" in resolved.columns and resolved["P"].notna().any():
             x=[0, cal_stats["Predicted"].max()],
             y=[0, cal_stats["Predicted"].max()],
             mode="lines",
-            line=dict(dash="dash", color="gray"),
+            line={"dash": "dash", "color": "gray"},
             name="Perfect",
         )
     )
