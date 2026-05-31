@@ -30,6 +30,10 @@ PAYOUT_TABLE = {
     ],
 }
 
+# Underdog applies a boost of 2x or more only to a clean entry (zero misses); a
+# boosted entry that drops a leg pays the un-boosted table value instead.
+_UNDERDOG_PERFECT_BOOST_MULT = 2
+
 TIMEFRAMES = [
     ("7d", 7),
     ("30d", 30),
@@ -37,6 +41,12 @@ TIMEFRAMES = [
     ("6m", 183),
     ("1y", 365),
 ]
+
+# Pick-quality floors for the dashboard summary splits: keep only legs the model
+# rates above _MODEL_PROB_PICK_FLOOR, and (for the "Book Filtered" split) that the
+# book also priced above _BOOK_PROB_PICK_FLOOR.
+_MODEL_PROB_PICK_FLOOR = 0.58
+_BOOK_PROB_PICK_FLOOR = 0.52
 
 
 def check_bet(bet, stats, stat_map):
@@ -206,7 +216,6 @@ def _migrate_flat_history(history):
             latest.get("Result")
             # Can't recover numeric Actual from Over/Under, but mark as resolved
             # so resolve_history will skip it if Actual is still NaN
-            pass
 
         rows.append(row)
 
@@ -422,7 +431,7 @@ def _compute_stats_row(subset, prob_col):
     sub_hit = (subset["Bet"] == subset["Result"]).astype(int)
     wins = sub_hit.sum()
     profit = wins * (100 / 110) - (len(subset) - wins)
-    row = {
+    return {
         "Accuracy": round(accuracy_score(subset["Bet"], subset["Result"]), 4),
         "Balance": round((subset["Bet"] == "Over").mean() - (subset["Result"] == "Over").mean(), 4),
         "LogLoss": round(log_loss(sub_hit, subset[prob_col].clip(0.01, 0.99), labels=[0, 1]), 4),
@@ -430,7 +439,6 @@ def _compute_stats_row(subset, prob_col):
         "ROI": round(profit / len(subset), 4),
         "Samples": len(subset),
     }
-    return row
 
 
 def compute_individual_metrics(history):
@@ -451,7 +459,7 @@ def compute_individual_metrics(history):
 
     # --- Summary table with timeframe splits ---
     rows = []
-    filtered = history.loc[history["Model"] > 0.58]
+    filtered = history.loc[history["Model"] > _MODEL_PROB_PICK_FLOOR]
 
     for tf_label, tf_days in TIMEFRAMES:
         cutoff = today - timedelta(days=tf_days)
@@ -463,7 +471,7 @@ def compute_individual_metrics(history):
             rows.append({"Period": tf_label, "Split": "All"} | r)
 
         # Book filtered
-        r = _compute_stats_row(tf_data.loc[tf_data["Books"] > 0.52], prob_col)
+        r = _compute_stats_row(tf_data.loc[tf_data["Books"] > _BOOK_PROB_PICK_FLOOR], prob_col)
         if r:
             rows.append({"Period": tf_label, "Split": "All, Book Filtered"} | r)
 
@@ -531,7 +539,9 @@ def compute_individual_metrics(history):
                 ("All", history.loc[history["_date"] >= cutoff]),
                 (
                     "Book Filtered",
-                    history.loc[(history["_date"] >= cutoff) & (history["Books"] > 0.52)],
+                    history.loc[
+                        (history["_date"] >= cutoff) & (history["Books"] > _BOOK_PROB_PICK_FLOOR)
+                    ],
                 ),
             ]:
                 t_sub = subset.loc[subset["Model"] > threshold]
@@ -590,7 +600,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
             lambda x: (
                 np.clip(
                     PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
-                    * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
+                    * (x.Boost if x.Boost < _UNDERDOG_PERFECT_BOOST_MULT or x.Misses == 0 else 1),
                     None,
                     100,
                 )
@@ -753,8 +763,7 @@ def reconstruct_prob(row, line=None):
     r = param if dist in ("NegBin", "ZINB") else None
     alpha = param if dist in ("Gamma", "ZAGamma") else None
 
-    raw_under = get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, step=step)
-    return raw_under
+    return get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, step=step)
 
 
 def reconstruct_quantile(row, q):
@@ -785,14 +794,13 @@ def reconstruct_quantile(row, q):
             q_adj = (q - gate) / (1 - gate)
             return nbinom.ppf(q_adj, r, p)
         return nbinom.ppf(q, r, p)
-    else:
-        alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
-        if gate is not None and dist == "ZAGamma":
-            if q <= gate:
-                return 0.0
-            q_adj = (q - gate) / (1 - gate)
-            return gamma_dist.ppf(q_adj, alpha, scale=ev / alpha)
-        return gamma_dist.ppf(q, alpha, scale=ev / alpha)
+    alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
+    if gate is not None and dist == "ZAGamma":
+        if q <= gate:
+            return 0.0
+        q_adj = (q - gate) / (1 - gate)
+        return gamma_dist.ppf(q_adj, alpha, scale=ev / alpha)
+    return gamma_dist.ppf(q, alpha, scale=ev / alpha)
 
 
 def compute_crps_row(row):
@@ -838,47 +846,42 @@ def compute_crps_row(row):
 
         # CRPS = sum_k (F(k) - 1(k >= y))^2 for discrete distributions
         indicator = (k >= y).astype(float)
-        crps = np.sum((cdf - indicator) ** 2)
+        return np.sum((cdf - indicator) ** 2)
+
+    alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
+    beta = alpha / ev  # rate parameter
+
+    if gate is not None and dist == "ZAGamma":
+        # ZA-Gamma CRPS: gate * |y| + (1-gate) * CRPS_gamma
+        # plus cross term for the mixture
+        # Simplified: numerical integration
+        from scipy.integrate import quad
+
+        def _cdf(x):
+            if x < 0:
+                return 0.0
+            base = gamma_dist.cdf(x, alpha, scale=1 / beta)
+            return gate + (1 - gate) * base
+
+        def integrand(x):
+            return (_cdf(x) - (1 if x >= y else 0)) ** 2
+
+        crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
         return crps
 
-    else:
-        alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
-        beta = alpha / ev  # rate parameter
+    # Closed-form Gamma CRPS (Gneiting & Raftery 2007, eq. 21):
+    # CRPS(Gamma(alpha, beta), y) = y*(2*F(y) - 1) - alpha/beta*(2*F_a1(y) - 1)
+    #   - 1/(beta * B(0.5, alpha))
+    # where F is Gamma(alpha, beta) CDF, F_a1 is Gamma(alpha+1, beta) CDF,
+    # and B is the Beta function
+    from scipy.special import beta as beta_fn
 
-        if gate is not None and dist == "ZAGamma":
-            # ZA-Gamma CRPS: gate * |y| + (1-gate) * CRPS_gamma
-            # plus cross term for the mixture
-            # Simplified: numerical integration
-            from scipy.integrate import quad
-
-            def _cdf(x):
-                if x < 0:
-                    return 0.0
-                base = gamma_dist.cdf(x, alpha, scale=1 / beta)
-                return gate + (1 - gate) * base
-
-            def integrand(x):
-                return (_cdf(x) - (1 if x >= y else 0)) ** 2
-
-            crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
-            return crps
-
-        # Closed-form Gamma CRPS (Gneiting & Raftery 2007, eq. 21):
-        # CRPS(Gamma(alpha, beta), y) = y*(2*F(y) - 1) - alpha/beta*(2*F_a1(y) - 1)
-        #   - 1/(beta * B(0.5, alpha))
-        # where F is Gamma(alpha, beta) CDF, F_a1 is Gamma(alpha+1, beta) CDF,
-        # and B is the Beta function
-        from scipy.special import beta as beta_fn
-
-        scale = 1 / beta
-        cdf_y = gamma_dist.cdf(y, alpha, scale=scale)
-        cdf_y_a1 = gamma_dist.cdf(y, alpha + 1, scale=scale)
-        crps = (
-            y * (2 * cdf_y - 1)
-            - (alpha / beta) * (2 * cdf_y_a1 - 1)
-            - 1 / (beta * beta_fn(0.5, alpha))
-        )
-        return crps
+    scale = 1 / beta
+    cdf_y = gamma_dist.cdf(y, alpha, scale=scale)
+    cdf_y_a1 = gamma_dist.cdf(y, alpha + 1, scale=scale)
+    return (
+        y * (2 * cdf_y - 1) - (alpha / beta) * (2 * cdf_y_a1 - 1) - 1 / (beta * beta_fn(0.5, alpha))
+    )
 
 
 def compute_brier_skill_score(subset, base_rate=0.5):
@@ -999,9 +1002,9 @@ def compute_coverage(subset, levels=(0.5, 0.8, 0.9)):
     """
     valid = subset.dropna(subset=["Dist", "Actual"])
     if len(valid) == 0:
-        return {level: np.nan for level in levels}
+        return dict.fromkeys(levels, np.nan)
 
-    results = {level: 0 for level in levels}
+    results = dict.fromkeys(levels, 0)
     count = 0
 
     for _, row in valid.iterrows():
@@ -1016,6 +1019,6 @@ def compute_coverage(subset, levels=(0.5, 0.8, 0.9)):
                 results[level] += 1
 
     if count == 0:
-        return {level: np.nan for level in levels}
+        return dict.fromkeys(levels, np.nan)
 
     return {level: results[level] / count for level in levels}
