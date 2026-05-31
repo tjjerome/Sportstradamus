@@ -38,6 +38,10 @@ CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
 CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
 MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
+# Plain-text mirror of model_stats.parquet for filesystem browsing in VSCode.
+# Atomically regenerated from the parquet on every training write; never read
+# by code (parquet is the authoritative source on disagreement).
+MODEL_STATS_CSV_PATH = _TRAINING_DIR / "model_stats.csv"
 LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
@@ -122,10 +126,7 @@ def prune_model_pickle(league: str, market: str) -> bool:
 def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None) -> None:
     path = Path(str(path))
     tmp = path.with_suffix(path.suffix + ".tmp")
-    if compression is None:
-        df.to_parquet(tmp, engine="pyarrow", index=False)
-    else:
-        df.to_parquet(tmp, engine="pyarrow", index=False, compression=compression)
+    df.to_parquet(tmp, engine="pyarrow", index=False, compression=compression)
     tmp.replace(path)
 
 
@@ -134,6 +135,14 @@ def _atomic_write_json(obj, path) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w") as f:
         json.dump(obj, f, indent=2, default=str)
+    tmp.replace(path)
+
+
+def _atomic_write_csv(df: pd.DataFrame, path) -> None:
+    """Write a DataFrame to CSV via a tempfile + replace, so partial reads never see torn data."""
+    path = Path(str(path))
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    df.to_csv(tmp, index=False)
     tmp.replace(path)
 
 

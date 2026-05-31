@@ -2,7 +2,7 @@
 
 import importlib.resources as pkg_resources
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import nba_api.stats.endpoints as nba
 import numpy as np
@@ -11,6 +11,13 @@ from sklearn.neighbors import BallTree
 
 from sportstradamus import data
 from sportstradamus.helpers import (
+    Scrape,
+    abbreviations,
+    combo_props,
+    feature_filter,
+    get_ev,
+    get_mlb_pitchers,
+    get_odds,
     remove_accents,
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
@@ -335,17 +342,10 @@ class StatsWNBA(StatsNBA):
             stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
 
             if not stat_df.empty:
-                stat_df.loc[:, "moneyline"] = stat_df.apply(
-                    lambda x: archive.get_moneyline(
-                        self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]
-                    ),
-                    axis=1,
-                )
-                stat_df.loc[:, "totals"] = stat_df.apply(
-                    lambda x: archive.get_total(
-                        self.league, x[self.log_strings["date"]], x["TEAM_ABBREVIATION"]
-                    ),
-                    axis=1,
+                self._enrich_team_markets(
+                    stat_df,
+                    date_col=self.log_strings["date"],
+                    team_col="TEAM_ABBREVIATION",
                 )
                 self.gamelog = (
                     pd.concat([stat_df[self.gamelog.columns], self.gamelog])
@@ -398,17 +398,10 @@ class StatsWNBA(StatsNBA):
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
+            self._enrich_team_markets(
+                self.gamelog,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
             )
             self.gamelog["GAME_DATE"] = self.gamelog["GAME_DATE"].astype(str)
             self.teamlog["GAME_DATE"] = self.teamlog["GAME_DATE"].astype(str)
@@ -510,38 +503,12 @@ class StatsWNBA(StatsNBA):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
-            stats = json.load(f)
+    def _current_season_key(self, target_game_date: date) -> int:
+        """WNBA override: integer-year season keys.
 
-        all_features = set()
-        for pos_weights in stats["WNBA"].values():
-            all_features.update(pos_weights.keys())
-        all_features = list(all_features)
-
-        playerProfile, playerDict = self.build_comp_profile()
-        playerProfile = playerProfile[
-            [f for f in all_features if f in playerProfile.columns]
-        ].replace([np.nan, np.inf, -np.inf], 0)
-
-        comps = {}
-        for position in self.positions:
-            pos_weights = stats["WNBA"][position]
-            pos_features = list(pos_weights.keys())
-            pos_players = [
-                p
-                for p, v in playerDict.items()
-                if v["POS"] == position and p in playerProfile.index
-            ]
-            if len(pos_players) < 7:
-                continue
-            positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
-            knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
-
-        self.comps = comps
+        WNBA seasons run May–Oct of a single calendar year, so the season
+        containing ``target_game_date`` is just its calendar year. ``int``
+        return type lets the inherited :meth:`StatsNBA._player_seasons_through`
+        compare against the int keys in ``self.players``.
+        """
+        return target_game_date.year

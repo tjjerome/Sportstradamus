@@ -164,6 +164,10 @@ cython_debug/
 *.mdl
 docs/build
 *.csv*
+# Track the Tier-0 status snapshot so the per-cell "current metric vs goal vs pass"
+# is visible in the branch without re-running the audit (regenerated each full
+# compression_eval run). Research-branch only; denylisted from devel/main.
+!src/sportstradamus/data/tier0_scorecard.csv
 *.
 .lprof
 *refactor.py
@@ -187,6 +191,7 @@ src/sportstradamus/data/config/goalies.json
 src/sportstradamus/data/leagues/*/players.json
 src/sportstradamus/data/leagues/*/players.parquet
 src/sportstradamus/data/leagues/*/comps.json
+src/sportstradamus/data/leagues/*/comps_metric.npz
 src/sportstradamus/data/runtime/
 src/sportstradamus/data/fantasypoints/
 src/profile_output.lprof

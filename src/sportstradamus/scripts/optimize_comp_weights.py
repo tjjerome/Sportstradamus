@@ -1,15 +1,26 @@
 """
-Optimize playerCompStats.json weights based on predictive power.
+Optimize player-comp construction.
 
-Jointly optimizes the full weight vector for each league/position using
-scipy.optimize.differential_evolution. The objective function:
-  1. Apply weight vector to z-scored player profiles
-  2. Build BallTree comps using the weighted profiles
-  3. Measure mean Spearman correlation of the comp signal vs actual outcomes
-     across multiple target markets
+Runs ``scipy.optimize.differential_evolution`` over the per-position diagonal
+weight vector. The objective is:
 
-Also runs per-feature diagnostics and reports the composite predictive score
+1. Apply weight vector to z-scored player profiles
+2. Build BallTree comps using the weighted profiles
+3. Measure mean Spearman correlation of the comp signal vs actual outcomes
+   across the configured target markets
+
+Writes optimized weights back to
+``src/sportstradamus/data/config/playerCompStats.json`` when ``--save`` is
+passed. Also prints per-feature diagnostics and a composite predictive score
 for both current and optimized weights.
+
+A previous variant ran a low-rank Mahalanobis metric fit (originally
+``NeighborhoodComponentsAnalysis``, later re-objectived to a DE-on-Mahalanobis
+fit using this same Spearman score). The Mahalanobis form lost on every NFL
+position on a held-out 2025 val fold (low-rank compression of 25 features
+into 4 components dropped too much signal), so the backend was retired. See
+``git log -- src/sportstradamus/scripts/optimize_comp_weights.py`` for the
+retirement commit.
 """
 
 import argparse
@@ -27,6 +38,19 @@ from sportstradamus import data
 from sportstradamus.stats import Stats, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 warnings.filterwarnings("ignore")
+
+# Minimum (prediction, actual) pairs required before the Spearman correlation
+# is computed in measure_comp_quality. Below this count the rank correlation
+# is unreliable. Goldberger et al. 2004 and the comp-research brief both
+# recommend 30–50 game pairs as the floor; 50 is the conservative choice.
+_MIN_SPEARMAN_OBSERVATIONS: int = 50
+
+# Raw search-space bounds for the DE weight optimisation. Weights below 0.1
+# become numerically indistinguishable from zero after sqrt(); 8.0 is a
+# practical ceiling that keeps the BallTree distances in a sensible range
+# while still allowing one feature to dominate at 4× the average weight.
+_DE_WEIGHT_LO: float = 0.1
+_DE_WEIGHT_HI: float = 8.0
 
 
 def build_weighted_comps(z_profile, weights, min_comps=5, max_comps=15):
@@ -116,7 +140,7 @@ def measure_comp_quality(
                     predictions.append(weighted_z / total_weight)
                     actuals.append(actual_z)
 
-        if len(predictions) >= 50:
+        if len(predictions) >= _MIN_SPEARMAN_OBSERVATIONS:
             corr, pval = spearmanr(predictions, actuals)
             if not np.isnan(corr):
                 n_obs = len(predictions)
@@ -267,18 +291,18 @@ def optimize_position_weights(
     current_score = -objective(np.array(current_weights))
     print(f"    Current weights score: {current_score:.5f}")
 
-    # Bounds: each weight in [0.1, 8.0]
-    bounds = [(0.1, 8.0)] * n_features
+    # Bounds: each weight in [_DE_WEIGHT_LO, _DE_WEIGHT_HI]
+    bounds = [(_DE_WEIGHT_LO, _DE_WEIGHT_HI)] * n_features
 
     # Seed the initial population with the current weights + random perturbations
     rng = np.random.default_rng(42)
     pop_count = popsize * n_features
-    init_pop = rng.uniform(0.1, 8.0, size=(pop_count, n_features))
+    init_pop = rng.uniform(_DE_WEIGHT_LO, _DE_WEIGHT_HI, size=(pop_count, n_features))
     init_pop[0] = np.array(current_weights)  # include current as first member
     # Add several perturbations of current
     for i in range(1, min(5, pop_count)):
         noise = rng.normal(0, 0.5, n_features)
-        init_pop[i] = np.clip(np.array(current_weights) + noise, 0.1, 8.0)
+        init_pop[i] = np.clip(np.array(current_weights) + noise, _DE_WEIGHT_LO, _DE_WEIGHT_HI)
 
     pbar = tqdm(
         total=maxiter,
@@ -476,21 +500,16 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
     When ``validation_cutoff`` is set, the gamelog is split on the ``season``
     column: rows with ``season <= validation_cutoff`` form the train fold and
     rows with ``season > validation_cutoff`` form the val fold. Each position's
-    value in the returned dict then becomes ``(z_profile, train_lookups,
-    val_lookups)`` instead of the default ``(z_profile, lookups)``. The
-    z-scored profile itself is always built from the full filtered profile —
-    the split only affects market-level z-score lookups.
-
-    Args:
-        stats_obj: loaded ``StatsNFL`` instance.
-        features_by_pos: ``{position: [feature_name, ...]}`` from current weights.
-        target_markets_by_pos: ``{position: [market_name, ...]}``.
-        validation_cutoff: latest season (inclusive) treated as training data.
-            ``None`` preserves the original single-lookup behavior.
+    value in the returned dict then carries the train- and val-fold lookups in
+    place of the single legacy lookup. The z-scored profile itself is always
+    built from the full filtered profile -- the split only affects
+    market-level z-score lookups.
 
     Returns:
-        ``{position: (z_profile, lookups)}`` when ``validation_cutoff is None``,
-        else ``{position: (z_profile, train_lookups, val_lookups)}``.
+        ``{position: payload}`` where ``payload`` is a dict with keys
+        ``z_profile`` and either ``lookups`` (legacy) when
+        ``validation_cutoff is None``, else ``train_lookups`` and
+        ``val_lookups``.
     """
     stats_obj.load()
 
@@ -545,7 +564,10 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
                 "position",
                 min_games=5,
             )
-            position_data[position] = (z_profile, lookups)
+            position_data[position] = {
+                "z_profile": z_profile,
+                "lookups": lookups,
+            }
             continue
 
         train_lookups = precompute_market_lookups(
@@ -568,7 +590,11 @@ def prepare_nfl(stats_obj, features_by_pos, target_markets_by_pos, validation_cu
             min_games=5,
             season_filter=val_filter,
         )
-        position_data[position] = (z_profile, train_lookups, val_lookups)
+        position_data[position] = {
+            "z_profile": z_profile,
+            "train_lookups": train_lookups,
+            "val_lookups": val_lookups,
+        }
 
     return position_data
 
@@ -834,12 +860,14 @@ def main():
                 nfl_weights[position] = current_weights["NFL"][position]
                 continue
 
+            payload = pos_data[position]
+            z_profile = payload["z_profile"]
             if args.validation_cutoff is None:
-                z_profile, lookups = pos_data[position]
-                train_lookups = lookups
+                train_lookups = payload["lookups"]
                 val_lookups = None
             else:
-                z_profile, train_lookups, val_lookups = pos_data[position]
+                train_lookups = payload["train_lookups"]
+                val_lookups = payload["val_lookups"]
 
             opp_z, games, positions = train_lookups
             if not opp_z:

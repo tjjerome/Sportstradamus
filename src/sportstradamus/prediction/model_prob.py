@@ -47,6 +47,16 @@ _NONZERO_DENOM_GATE = 0.05
 # SkewNormal prediction frame for downstream gate-aware blending.
 _GATE_PUBLISH_THRESHOLD = 0.02
 
+# Minimum bookmaker line for a "yards" market to be scored. Combo legs ("vs.")
+# are exempt; single-player yards lines at or below this are too low to model
+# reliably and are dropped.
+_MIN_YARDS_LINE = 8
+
+# Maximum Underdog boost multiplier kept when de-duplicating a player's offers.
+# Above this the promo is an outlier (e.g. a discounted special) that distorts
+# the per-player distance ranking, so it is filtered out.
+_MAX_UNDERDOG_BOOST = 3.65
+
 
 def _decode_skewnormal(
     prob_params: pd.DataFrame,
@@ -142,6 +152,8 @@ def model_prob(
     Returns:
         list[dict]: Scored offer records, or ``[]`` on failure.
     """
+    # style: allow-length  pre-existing distribution-decode orchestrator
+    # (§2.8/§18.9): flag, don't split. Already over the limit before this edit.
 
     def odds_from_boost(o):
         p = [
@@ -167,7 +179,9 @@ def model_prob(
     offer_df = pd.DataFrame(offers)
     offer_df.index = offer_df.Player
     if "yards" in market:
-        offer_df = offer_df.loc[(offer_df.Player.str.contains("vs.")) | (offer_df.Line > 8)]
+        offer_df = offer_df.loc[
+            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
+        ]
     if os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
@@ -331,7 +345,7 @@ def model_prob(
 
         # Blend model and book distributions via fused_loc
         if dist == "SkewNormal":
-            _zi_kw = dict(gate_book=hist_gate) if hist_gate > _GATE_PUBLISH_THRESHOLD else {}
+            _zi_kw = {"gate_book": hist_gate} if hist_gate > _GATE_PUBLISH_THRESHOLD else {}
             blended_base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
@@ -356,7 +370,7 @@ def model_prob(
 
         elif dist in ("NegBin", "ZINB"):
             _zi_kw = (
-                dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate)
+                {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
                 if dist == "ZINB" and "Model Gate" in offer_df.columns
                 else {}
             )
@@ -378,7 +392,7 @@ def model_prob(
             offer_df["Model R"] = r_blend
         else:
             _zi_kw = (
-                dict(gate_model=offer_df["Model Gate"].to_numpy(), gate_book=hist_gate)
+                {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
                 if dist == "ZAGamma" and "Model Gate" in offer_df.columns
                 else {}
             )
@@ -520,7 +534,7 @@ def model_prob(
             1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
         )
         offer_df = (
-            offer_df.loc[offer_df["Boost"] <= 3.65]
+            offer_df.loc[offer_df["Boost"] <= _MAX_UNDERDOG_BOOST]
             .sort_values("Distance", ascending=True)
             .groupby("Player")
             .head(3)
@@ -610,6 +624,5 @@ def model_prob(
             ]
         ].to_dict("records")
 
-    else:
-        logger.warning(f"{filename} missing")
-        return []
+    logger.warning(f"{filename} missing")
+    return []

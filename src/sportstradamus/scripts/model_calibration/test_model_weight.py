@@ -101,40 +101,36 @@ def fit_dispersion_on_raw_model(data):
         d["r"] = r_raw * c_opt
         return c_opt, d
 
-    else:  # Gamma / ZAGamma
-        alpha_raw = data["alpha"]
+    # Gamma / ZAGamma
+    alpha_raw = data["alpha"]
 
-        def loss(c):
-            alpha_cal = alpha_raw * c
-            scale_cal = model_ev / alpha_cal  # mean-preserving
-            if gate is not None:
-                x_max = max(result.max() * 2, np.mean(model_ev) * 4)
-                x_grid = np.linspace(0, x_max, 500)
-                dx = x_grid[1] - x_grid[0]
-                cdf_grid = gamma_dist.cdf(
-                    x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :]
-                )
-                cdf_grid = gate[None, :] + (1 - gate[None, :]) * cdf_grid
-                indicator = (result[None, :] <= x_grid[:, None]).astype(float)
-                crps = np.mean(np.sum((cdf_grid - indicator) ** 2, axis=0) * dx)
-            else:
-                F_y = gamma_dist.cdf(result, alpha_cal, scale=scale_cal)
-                F_y_a1 = gamma_dist.cdf(result, alpha_cal + 1, scale=scale_cal)
-                mu = model_ev
-                crps = np.mean(
-                    result * (2 * F_y - 1)
-                    - mu * (2 * F_y_a1 - 1)
-                    - scale_cal / beta_fn(0.5, alpha_cal)
-                )
-            reg = 0.01 * np.log(c) ** 2
-            return crps + reg
+    def loss(c):
+        alpha_cal = alpha_raw * c
+        scale_cal = model_ev / alpha_cal  # mean-preserving
+        if gate is not None:
+            x_max = max(result.max() * 2, np.mean(model_ev) * 4)
+            x_grid = np.linspace(0, x_max, 500)
+            dx = x_grid[1] - x_grid[0]
+            cdf_grid = gamma_dist.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
+            cdf_grid = gate[None, :] + (1 - gate[None, :]) * cdf_grid
+            indicator = (result[None, :] <= x_grid[:, None]).astype(float)
+            crps = np.mean(np.sum((cdf_grid - indicator) ** 2, axis=0) * dx)
+        else:
+            F_y = gamma_dist.cdf(result, alpha_cal, scale=scale_cal)
+            F_y_a1 = gamma_dist.cdf(result, alpha_cal + 1, scale=scale_cal)
+            mu = model_ev
+            crps = np.mean(
+                result * (2 * F_y - 1) - mu * (2 * F_y_a1 - 1) - scale_cal / beta_fn(0.5, alpha_cal)
+            )
+        reg = 0.01 * np.log(c) ** 2
+        return crps + reg
 
-        res = minimize_scalar(loss, bounds=(0.1, 10.0), method="bounded")
-        c_opt = res.x
+    res = minimize_scalar(loss, bounds=(0.1, 10.0), method="bounded")
+    c_opt = res.x
 
-        d = dict(data)
-        d["alpha"] = alpha_raw * c_opt
-        return c_opt, d
+    d = dict(data)
+    d["alpha"] = alpha_raw * c_opt
+    return c_opt, d
 
 
 def eval_accuracy(w, data, use_dispersion_cal=False):
@@ -143,7 +139,7 @@ def eval_accuracy(w, data, use_dispersion_cal=False):
     base_dist = "NegBin" if dist in ("NegBin", "ZINB") else "Gamma"
     zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and data["hist_gate"] > 0:
-        zi_kwargs = dict(gate_model=data["gate"], gate_book=data["hist_gate"])
+        zi_kwargs = {"gate_model": data["gate"], "gate_book": data["hist_gate"]}
 
     if base_dist == "NegBin":
         r_blend, p_blend, gate_blend = fused_loc(
@@ -180,7 +176,7 @@ def objective_nll(w, data, clamp=-20):
     zi_kwargs = {}
     has_gate = dist in ("ZINB", "ZAGamma") and data["hist_gate"] > 0
     if has_gate:
-        zi_kwargs = dict(gate_model=data["gate"], gate_book=data["hist_gate"])
+        zi_kwargs = {"gate_model": data["gate"], "gate_book": data["hist_gate"]}
 
     if base_dist == "NegBin":
         r_blend, p_blend, g_blend = fused_loc(
@@ -196,27 +192,24 @@ def objective_nll(w, data, clamp=-20):
             )
             return -np.mean(loglik)
         return -np.mean(base_logpmf)
-    else:
-        alpha_bl, beta_bl, g_blend = fused_loc(
-            w,
-            data["model_ev"],
-            data["book_ev"],
-            data["cv"],
-            "Gamma",
-            alpha=data["alpha"],
-            **zi_kwargs,
+    alpha_bl, beta_bl, g_blend = fused_loc(
+        w,
+        data["model_ev"],
+        data["book_ev"],
+        data["cv"],
+        "Gamma",
+        alpha=data["alpha"],
+        **zi_kwargs,
+    )
+    base_logpdf = np.clip(gamma_dist.logpdf(data["result"], alpha_bl, scale=1 / beta_bl), clamp, 0)
+    if has_gate:
+        loglik = np.where(
+            data["result"] == 0,
+            np.log(np.clip(g_blend, 1e-12, None)),
+            np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf,
         )
-        base_logpdf = np.clip(
-            gamma_dist.logpdf(data["result"], alpha_bl, scale=1 / beta_bl), clamp, 0
-        )
-        if has_gate:
-            loglik = np.where(
-                data["result"] == 0,
-                np.log(np.clip(g_blend, 1e-12, None)),
-                np.log(np.clip(1 - g_blend, 1e-12, None)) + base_logpdf,
-            )
-            return -np.mean(loglik)
-        return -np.mean(base_logpdf)
+        return -np.mean(loglik)
+    return -np.mean(base_logpdf)
 
 
 def objective_nll_unclamped(w, data):
@@ -231,7 +224,7 @@ def objective_crps(w, data):
     zi_kwargs = {}
     has_gate = dist in ("ZINB", "ZAGamma") and data["hist_gate"] > 0
     if has_gate:
-        zi_kwargs = dict(gate_model=data["gate"], gate_book=data["hist_gate"])
+        zi_kwargs = {"gate_model": data["gate"], "gate_book": data["hist_gate"]}
 
     if base_dist == "NegBin":
         r_blend, p_blend, g_blend = fused_loc(
@@ -246,35 +239,33 @@ def objective_crps(w, data):
             cdf = g_blend[None, :] + (1 - g_blend[None, :]) * cdf
         indicator = (result_int[None, :] <= k_vals[:, None]).astype(float)
         return np.mean(np.sum((cdf - indicator) ** 2, axis=0))
-    else:
-        alpha_bl, beta_bl, g_blend = fused_loc(
-            w,
-            data["model_ev"],
-            data["book_ev"],
-            data["cv"],
-            "Gamma",
-            alpha=data["alpha"],
-            **zi_kwargs,
-        )
-        scale_bl = 1 / beta_bl
-        mu_bl = alpha_bl * scale_bl
-        if has_gate and g_blend is not None:
-            x_max = max(data["result"].max() * 2, np.mean(mu_bl) * 4)
-            x_grid = np.linspace(0, x_max, 500)
-            dx = x_grid[1] - x_grid[0]
-            cdf_grid = gamma_dist.cdf(x_grid[:, None], alpha_bl[None, :], scale=scale_bl[None, :])
-            cdf_grid = g_blend[None, :] + (1 - g_blend[None, :]) * cdf_grid
-            indicator = (data["result"][None, :] <= x_grid[:, None]).astype(float)
-            return np.mean(np.sum((cdf_grid - indicator) ** 2, axis=0) * dx)
-        else:
-            F_y = gamma_dist.cdf(data["result"], alpha_bl, scale=scale_bl)
-            F_y_a1 = gamma_dist.cdf(data["result"], alpha_bl + 1, scale=scale_bl)
-            crps_vals = (
-                data["result"] * (2 * F_y - 1)
-                - mu_bl * (2 * F_y_a1 - 1)
-                - scale_bl / beta_fn(0.5, alpha_bl)
-            )
-            return np.mean(crps_vals)
+    alpha_bl, beta_bl, g_blend = fused_loc(
+        w,
+        data["model_ev"],
+        data["book_ev"],
+        data["cv"],
+        "Gamma",
+        alpha=data["alpha"],
+        **zi_kwargs,
+    )
+    scale_bl = 1 / beta_bl
+    mu_bl = alpha_bl * scale_bl
+    if has_gate and g_blend is not None:
+        x_max = max(data["result"].max() * 2, np.mean(mu_bl) * 4)
+        x_grid = np.linspace(0, x_max, 500)
+        dx = x_grid[1] - x_grid[0]
+        cdf_grid = gamma_dist.cdf(x_grid[:, None], alpha_bl[None, :], scale=scale_bl[None, :])
+        cdf_grid = g_blend[None, :] + (1 - g_blend[None, :]) * cdf_grid
+        indicator = (data["result"][None, :] <= x_grid[:, None]).astype(float)
+        return np.mean(np.sum((cdf_grid - indicator) ** 2, axis=0) * dx)
+    F_y = gamma_dist.cdf(data["result"], alpha_bl, scale=scale_bl)
+    F_y_a1 = gamma_dist.cdf(data["result"], alpha_bl + 1, scale=scale_bl)
+    crps_vals = (
+        data["result"] * (2 * F_y - 1)
+        - mu_bl * (2 * F_y_a1 - 1)
+        - scale_bl / beta_fn(0.5, alpha_bl)
+    )
+    return np.mean(crps_vals)
 
 
 def objective_brier(w, data):
@@ -284,7 +275,7 @@ def objective_brier(w, data):
     zi_kwargs = {}
     has_gate = dist in ("ZINB", "ZAGamma") and data["hist_gate"] > 0
     if has_gate:
-        zi_kwargs = dict(gate_model=data["gate"], gate_book=data["hist_gate"])
+        zi_kwargs = {"gate_model": data["gate"], "gate_book": data["hist_gate"]}
 
     if base_dist == "NegBin":
         r_blend, p_blend, gate_blend = fused_loc(
@@ -352,7 +343,7 @@ def eval_accuracy_2w(w_mean, w_shape, data):
     base_dist = "NegBin" if dist in ("NegBin", "ZINB") else "Gamma"
     has_gate = dist in ("ZINB", "ZAGamma") and data["hist_gate"] > 0
     if has_gate:
-        dict(gate_model=data["gate"], gate_book=data["hist_gate"])
+        {"gate_model": data["gate"], "gate_book": data["hist_gate"]}
 
     if base_dist == "NegBin":
         # Blend mean with w_mean, shape with w_shape
@@ -469,31 +460,30 @@ def objective_nll_2w(params, data, clamp=-20):
             )
             return -np.mean(loglik)
         return -np.mean(base_logpmf)
-    else:
-        model_alpha = np.asarray(data["alpha"], dtype=float)
-        book_alpha = 1 / data["cv"] ** 2
-        inv_var_m = model_alpha / np.asarray(data["model_ev"], dtype=float) ** 2
-        inv_var_b = book_alpha / np.asarray(data["book_ev"], dtype=float) ** 2
-        total_inv_var = w_mean * inv_var_m + (1 - w_mean) * inv_var_b
-        blended_mean = (
-            w_mean * data["model_ev"] * inv_var_m + (1 - w_mean) * data["book_ev"] * inv_var_b
-        ) / total_inv_var
-        blended_alpha = w_shape * model_alpha + (1 - w_shape) * book_alpha
-        blended_beta = blended_alpha / blended_mean
-        base_logpdf = np.clip(
-            gamma_dist.logpdf(data["result"], blended_alpha, scale=1 / blended_beta), clamp, 0
+    model_alpha = np.asarray(data["alpha"], dtype=float)
+    book_alpha = 1 / data["cv"] ** 2
+    inv_var_m = model_alpha / np.asarray(data["model_ev"], dtype=float) ** 2
+    inv_var_b = book_alpha / np.asarray(data["book_ev"], dtype=float) ** 2
+    total_inv_var = w_mean * inv_var_m + (1 - w_mean) * inv_var_b
+    blended_mean = (
+        w_mean * data["model_ev"] * inv_var_m + (1 - w_mean) * data["book_ev"] * inv_var_b
+    ) / total_inv_var
+    blended_alpha = w_shape * model_alpha + (1 - w_shape) * book_alpha
+    blended_beta = blended_alpha / blended_mean
+    base_logpdf = np.clip(
+        gamma_dist.logpdf(data["result"], blended_alpha, scale=1 / blended_beta), clamp, 0
+    )
+    if has_gate:
+        gate_blend = (
+            w_mean * np.asarray(data["gate"], dtype=float) + (1 - w_mean) * data["hist_gate"]
         )
-        if has_gate:
-            gate_blend = (
-                w_mean * np.asarray(data["gate"], dtype=float) + (1 - w_mean) * data["hist_gate"]
-            )
-            loglik = np.where(
-                data["result"] == 0,
-                np.log(np.clip(gate_blend, 1e-12, None)),
-                np.log(np.clip(1 - gate_blend, 1e-12, None)) + base_logpdf,
-            )
-            return -np.mean(loglik)
-        return -np.mean(base_logpdf)
+        loglik = np.where(
+            data["result"] == 0,
+            np.log(np.clip(gate_blend, 1e-12, None)),
+            np.log(np.clip(1 - gate_blend, 1e-12, None)) + base_logpdf,
+        )
+        return -np.mean(loglik)
+    return -np.mean(base_logpdf)
 
 
 def main():

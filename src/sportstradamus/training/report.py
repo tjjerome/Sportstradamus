@@ -1,71 +1,79 @@
-"""Training report generation: reads saved model pickles and writes training_report.txt.
+"""Training report generation: reads saved model pickles and writes model_stats.{parquet,csv}.
 
-Per Phase 3 §4.c/§4.e/§4.f/§4.g, ``model_stats.parquet`` carries the migrated
-raw-metric set plus a pinned ``row_kind="book_baseline"`` row so downstream
-consumers (Kelly, dashboard) compare against "what taking the book's odds gets
-you" rather than against a scaled Brier.
+One row per ``(league, market)`` cell. The parquet is the authoritative
+artifact (read by the page-7 dashboard, the kelly calibration getter, the
+graduation gate, and the ship-config promoter); the CSV mirror at
+:data:`MODEL_STATS_CSV_PATH` is rewritten alongside the parquet on every
+run so the same numbers are browseable from VSCode without a parquet
+viewer extension.
+
+Columns owned by ``meditate`` cover the validation-set metrics produced by
+``training.pipeline._compute_metrics`` (model + book baseline + brier skill
+score), the per-cell diagnostics (model_weight, EV vs line, shape
+calibration), and the trained hyperparameters. Columns owned by
+``training.scorecard.compute_gates`` (``ece_*``, ``g1_*`` … ``g5_*``,
+``ship``) populate as a side effect of ``training.scorecard`` running over
+the test-set CSV for the same cell; before that runs they hold NaN / pd.NA.
 """
 
 import importlib.resources as pkg_resources
 import json
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from sportstradamus import data
 from sportstradamus.helpers import get_logger
-from sportstradamus.helpers.io import MODEL_STATS_PATH, _atomic_write_parquet
+from sportstradamus.helpers.io import (
+    MODEL_STATS_CSV_PATH,
+    MODEL_STATS_PATH,
+    _atomic_write_csv,
+    _atomic_write_parquet,
+    market_file_slug,
+)
 from sportstradamus.training.config import (
     load_distribution_config,
+    load_shipped_config,
     load_zi_config,
     save_cv_std_config,
     save_distribution_config,
     save_zi_config,
 )
+from sportstradamus.training.scorecard import (
+    DEFAULT_PRED_COL,
+    compute_gates,
+    load_test_set,
+)
 
 logger = get_logger(__name__)
 
-# Stats matrix row labels — depend on number of rows present in model["stats"].
-_STATS_ROW_LABELS_3 = ("raw", "corrected", "calibrated")
-_STATS_ROW_LABELS_2 = ("no_filter", "filter")
-# Per-row classification stats source key (model["stats"]) → snake_case parquet column.
-# Renames per Phase 3 §4.b — a clean break: old names disappear on next meditate.
-_STATS_COL_MAP = {
-    "Accuracy": "accuracy",
-    "Over Prec": "precision_over",
-    "Under Prec": "precision_under",
-    "Over%": "predicted_over_rate",
-    "Sharpness": "prediction_std",
-    "NLL": "nll",
-}
-# Validation-set raw metrics computed in pipeline.py:_compute_metrics, mirrored
-# verbatim into both the model's calibrated row and the book_baseline row.
-_RAW_METRIC_KEYS = (
-    "brier_score",
-    "log_loss",
-    "roc_auc",
-    "expected_calibration_error",
-    "accuracy",
-    "precision_over",
-    "precision_under",
-    "predicted_over_rate",
-    "empirical_over_rate",
-    "prediction_std",
-    "nll",
-)
+# Tri-state ship-gate columns. Cast at the parquet boundary to the pandas
+# nullable BooleanDtype so a missing scorecard run round-trips as pd.NA
+# instead of decaying into False.
+_GATE_PASS_COLS = ("g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "ship")
+
+# ``training.scorecard.compute_gates`` reads per-cell test-set CSVs from this
+# directory. ``meditate`` dumps them inside :class:`training.pipeline.train_market`
+# at the end of every cell-training run.
+_TEST_SETS_DIR = pkg_resources.files(data) / "test_sets"
+
+# Minimum denominator for the empirical_shape division in _wide_row; guards
+# against divide-by-zero when empirical_shape is near zero on sparse markets.
+_SHAPE_DENOM_FLOOR: float = 0.01
 
 
 def report() -> None:
-    """Generate training report summarizing all model performance metrics."""
-    model_list = [
+    """Build per-cell training stats from saved model pickles and persist parquet + CSV."""
+    model_list = sorted(
         f.name for f in (pkg_resources.files(data) / "models/").iterdir() if ".mdl" in f.name
-    ]
-    model_list.sort()
+    )
     # cv/std/zi live in stat_calibration.json (gitignored, runtime-recomputed);
-    # dist lives in stat_meta.json (committed). Both are read via the helpers
-    # in training.config so the on-disk layout can evolve in one place.
+    # dist + shipped live in stat_meta.json (committed). Read both via the
+    # training.config helpers so the on-disk layout can evolve in one place.
     stat_dist = load_distribution_config()
+    stat_shipped = load_shipped_config()
     stat_zi_local = load_zi_config()
     _cal_path = pkg_resources.files(data) / "config" / "stat_calibration.json"
     if _cal_path.is_file():
@@ -78,284 +86,203 @@ def report() -> None:
     }
     stat_std = {lg: {m: cell.get("std") for m, cell in mkts.items()} for lg, mkts in _cal.items()}
 
-    with open(pkg_resources.files(data) / "training" / "training_report.txt", "w") as f:
-        league_models = {}
-        for model_str in model_list:
-            with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
-                model = pickle.load(infile)
+    league_models: dict[str, dict[str, dict]] = {}
+    for model_str in model_list:
+        with open(pkg_resources.files(data) / f"models/{model_str}", "rb") as infile:
+            model = pickle.load(infile)
 
-            name = model_str.split("_")
-            cv = model["cv"]
-            std = model.get("std", 0)
-            league = name[0]
-            market = name[1].replace("-", " ").replace(".mdl", "")
-            dist = model["distribution"]
-            h_gate = model.get("hist_gate", 0)
+        name = model_str.split("_")
+        cv = model["cv"]
+        std = model.get("std", 0)
+        league = name[0]
+        market = name[1].replace("-", " ").replace(".mdl", "")
+        dist = model["distribution"]
+        h_gate = model.get("hist_gate", 0)
 
-            league_models.setdefault(league, {})[market] = model
-
-            stat_cv.setdefault(league, {})
-            stat_cv[league][market] = float(cv)
-
-            stat_std.setdefault(league, {})
-            stat_std[league][market] = float(std)
-
-            stat_dist.setdefault(league, {})
-            stat_dist[league][market] = dist
-
-            stat_zi_local.setdefault(league, {})
-            stat_zi_local[league][market] = h_gate
-
-            f.write(f" {league} {market} ".center(62, "="))
-            f.write("\n")
-            f.write(f" Distribution: {dist} | Historical Zero Rate: {h_gate:.4f}\n")
-
-            metrics_block = model.get("metrics") or {}
-            book = metrics_block.get("book_baseline")
-            mm = metrics_block.get("model")
-            if mm is not None:
-                if book is not None:
-                    f.write(
-                        f" BOOK BASELINE  brier={book['brier_score']:.3f}"
-                        f" logloss={book['log_loss']:.3f}"
-                        f" auc={book['roc_auc']:.3f}"
-                        f" ece={book['expected_calibration_error']:.3f}\n"
-                    )
-                else:
-                    f.write(" BOOK BASELINE  unavailable\n")
-                f.write(
-                    f" MODEL          brier={mm['brier_score']:.3f}"
-                    f" logloss={mm['log_loss']:.3f}"
-                    f" auc={mm['roc_auc']:.3f}"
-                    f" ece={mm['expected_calibration_error']:.3f}\n"
-                )
-                bss = metrics_block.get("brier_skill_score", float("nan"))
-                ks = metrics_block.get("kelly_shrinkage", float("nan"))
-                bss_str = f"{bss:+.3f}" if np.isfinite(bss) else "nan"
-                ks_str = f"{ks:.3f}" if np.isfinite(ks) else "nan"
-                f.write(f" SKILL          brier_skill_score={bss_str}  kelly_shrinkage={ks_str}\n")
-
-            n_rows = len(next(iter(model["stats"].values())))
-            if n_rows == 3:
-                idx = ["Raw Model", "Corrected", "Calibrated"]
-            else:
-                idx = ["No Filter", "Filter"]
-            f.write(pd.DataFrame(model["stats"], index=idx).to_string())
-            f.write("\n")
-
-            if "diagnostics" in model:
-                d = model["diagnostics"]
-                sl = d["shape_label"]
-                emp_shape = d.get("empirical_shape", 0.0)
-                mod_shape = d.get("model_shape", 0.0)
-                shape_ratio = (
-                    mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float("nan")
-                )
-                f.write(f" DIAG model_weight={d.get('model_weight', float('nan')):.3f}\n")
-                f.write(
-                    f" DIAG start_{sl}={d.get('start_shape', 0.0):.3f}"
-                    f" model_{sl}={mod_shape:.3f}"
-                    f" empirical_{sl}={emp_shape:.3f}"
-                    f" shape_ratio={shape_ratio:.1f}x\n"
-                )
-                f.write(
-                    f" DIAG start_mean={d.get('start_mean', 0.0):.2f}"
-                    f" model_ev={d.get('model_ev', 0.0):.2f}"
-                    f" mean_line={d.get('mean_line', 0.0):.2f}"
-                    f" result_mean={d.get('result_mean', 0.0):.2f}\n"
-                )
-                f.write(
-                    f" DIAG mean_ev_diff={d.get('ev_minus_line', 0.0):+.3f}"
-                    f" median_ev_diff={d.get('median_ev_diff', 0.0):+.3f}"
-                    f" frac_ev>line={d.get('frac_ev_gt_line', 0.0):.1%}\n"
-                )
-                f.write(
-                    f" DIAG Over%|ev>line={d.get('over_pct_ev_gt', float('nan')):.3f}"
-                    f" Over%|ev<line={d.get('over_pct_ev_lt', float('nan')):.3f}"
-                    f" CF_Over%(emp_shape)={d.get('cf_over_pct', float('nan')):.3f}\n"
-                )
-                f.write(
-                    f" DIAG shape_ceiling={d.get('shape_ceiling', 'N/A')}"
-                    f" marginal_shape={d.get('marginal_shape', 'N/A')}"
-                    f" dispersion_cal={d.get('dispersion_cal', 0.0):.3f}\n"
-                )
-                f.write(
-                    f" DIAG ev_meanyr_corr={d.get('ev_meanyr_corr', float('nan')):.3f}"
-                    f" result_meanyr_corr={d.get('result_meanyr_corr', float('nan')):.3f}\n"
-                )
-
-            if "params" in model:
-                p = model["params"]
-                f.write(
-                    f" HP rounds={p.get('opt_rounds', '?')}"
-                    f" leaves={p.get('num_leaves', '?')}"
-                    f" lr={p.get('learning_rate', 0):.4f}"
-                    f" min_child={p.get('min_child_samples', '?')}"
-                    f" L1={p.get('lambda_l1', 0):.2e}"
-                    f" L2={p.get('lambda_l2', 0):.2e}\n"
-                )
-
-            f.write("\n")
-
-        # === PER-LEAGUE SUMMARY TABLES ===
-        for league, markets in sorted(league_models.items()):
-            f.write("\n" + "=" * 80 + "\n")
-            f.write(f" {league} SUMMARY TABLE\n")
-            f.write("=" * 80 + "\n")
-            f.write(
-                f"{'Market':<16} {'Dist':<8} {'Over%':>6} {'ShpR':>5}"
-                f" {'FracEV>':>7} {'MedDiff':>8}"
-                f" {'O%|EV>':>7} {'O%|EV<':>7} {'CF_O%':>6}\n"
-            )
-            f.write("-" * 80 + "\n")
-            for mkt, mdl in sorted(markets.items()):
-                if "diagnostics" not in mdl:
-                    continue
-                d = mdl["diagnostics"]
-                stats = mdl["stats"]
-                dist_name = mdl.get("distribution", "?")[:6]
-                over_pct_val = stats["Over%"][1]
-                emp_s = d.get("empirical_shape", 0.0)
-                mod_s = d.get("model_shape", 0.0)
-                sr = mod_s / max(emp_s, 0.01) if not np.isnan(emp_s) else float("nan")
-                fev = d.get("frac_ev_gt_line", 0)
-                med = d.get("median_ev_diff", 0)
-                oeg = d.get("over_pct_ev_gt", float("nan"))
-                oel = d.get("over_pct_ev_lt", float("nan"))
-                cfo = d.get("cf_over_pct", float("nan"))
-                sr_str = f"{sr:>4.1f}x" if not np.isnan(sr) else "  nan"
-                f.write(
-                    f"{mkt:<16} {dist_name:<8} {over_pct_val:>6.3f} {sr_str}"
-                    f" {fev:>7.1%} {med:>+8.3f}"
-                    f" {oeg:>7.3f} {oel:>7.3f} {cfo:>6.3f}\n"
-                )
-            f.write("\n")
+        league_models.setdefault(league, {})[market] = model
+        stat_cv.setdefault(league, {})[market] = float(cv)
+        stat_std.setdefault(league, {})[market] = float(std)
+        stat_dist.setdefault(league, {})[market] = dist
+        stat_zi_local.setdefault(league, {})[market] = h_gate
 
     save_cv_std_config(stat_cv, stat_std)
     save_distribution_config(stat_dist)
     save_zi_config(stat_zi_local)
 
-    write_model_stats(league_models, stat_cv, stat_std)
+    write_model_stats(league_models, stat_cv, stat_std, stat_shipped)
 
 
-def _diag_row(model: dict, league: str, market: str, stat_cv: dict, stat_std: dict) -> dict:
-    """Diagnostic + hyperparameter columns repeated on every parquet row for the market."""
-    diag = model.get("diagnostics", {}) or {}
-    params = model.get("params", {}) or {}
-    emp_shape = diag.get("empirical_shape", float("nan"))
-    mod_shape = diag.get("model_shape", float("nan"))
-    shape_ratio = mod_shape / max(emp_shape, 0.01) if not np.isnan(emp_shape) else float("nan")
+def _wide_row(
+    model: dict,
+    league: str,
+    market: str,
+    shipped: str,
+    stat_cv: dict,
+    stat_std: dict,
+) -> dict:
+    """Flatten one trained model's pickle into a single training-stats row."""
+    metrics_block = model.get("metrics") or {}
+    model_m = metrics_block.get("model") or {}
+    book_m = metrics_block.get("book_baseline") or {}
+    diag = model.get("diagnostics") or {}
+    params = model.get("params") or {}
+    has_book = bool(book_m)
+
+    def _safe_float(value) -> float:
+        # dict.get(k, default) returns the stored None when key is present-but-None,
+        # bypassing the default — so float(None) raises TypeError. Collapse to NaN.
+        return float(value) if value is not None else float("nan")
+
+    emp_shape = _safe_float(diag.get("empirical_shape"))
+    mod_shape = _safe_float(diag.get("model_shape"))
+    shape_ratio = (
+        mod_shape / max(emp_shape, _SHAPE_DENOM_FLOOR) if not np.isnan(emp_shape) else float("nan")
+    )
+
+    def _book(key: str) -> float:
+        return _safe_float(book_m.get(key)) if has_book else float("nan")
+
+    def _model_val(key: str) -> float:
+        return _safe_float(model_m.get(key))
+
+    def _diag(key: str) -> float:
+        return _safe_float(diag.get(key))
+
+    def _param(key: str) -> float:
+        return _safe_float(params.get(key))
+
     return {
-        "model_weight": diag.get("model_weight", float("nan")),
-        "start_shape": diag.get("start_shape", float("nan")),
-        "model_shape": mod_shape,
-        "empirical_shape": emp_shape,
-        "shape_ratio": shape_ratio,
-        "model_ev": diag.get("model_ev", float("nan")),
-        "mean_line": diag.get("mean_line", float("nan")),
-        "result_mean": diag.get("result_mean", float("nan")),
-        "mean_ev_diff": diag.get("ev_minus_line", float("nan")),
-        "median_ev_diff": diag.get("median_ev_diff", float("nan")),
-        "frac_ev_gt_line": diag.get("frac_ev_gt_line", float("nan")),
-        "over_pct_ev_gt": diag.get("over_pct_ev_gt", float("nan")),
-        "over_pct_ev_lt": diag.get("over_pct_ev_lt", float("nan")),
-        "cf_over_pct": diag.get("cf_over_pct", float("nan")),
-        "dispersion_cal": diag.get("dispersion_cal", float("nan")),
-        "marginal_shape": diag.get("marginal_shape", float("nan")),
-        "shape_ceiling": diag.get("shape_ceiling", float("nan")),
-        "hp_rounds": params.get("opt_rounds", float("nan")),
-        "hp_leaves": params.get("num_leaves", float("nan")),
-        "hp_lr": params.get("learning_rate", float("nan")),
-        "hp_min_child": params.get("min_child_samples", float("nan")),
-        "hp_l1": params.get("lambda_l1", float("nan")),
-        "hp_l2": params.get("lambda_l2", float("nan")),
+        # Identity
+        "league": league,
+        "market": market,
+        "distribution": model.get("distribution"),
+        "shipped": shipped,
+        # Sample
+        "n_validation": float("nan"),  # populated by training.scorecard.compute_gates
+        "historical_zero_rate": _safe_float(model.get("hist_gate")),
+        # Scoring rules
+        "brier_book": _book("brier_score"),
+        "brier_model": _model_val("brier_score"),
+        "brier_skill_score": _safe_float(metrics_block.get("brier_skill_score")),
+        "log_loss_book": _book("log_loss"),
+        "log_loss_model": _model_val("log_loss"),
+        "nll": _model_val("nll"),
+        # Calibration ECE — populated by training.scorecard.compute_gates.
+        "ece_equal_mass": float("nan"),
+        "ece_null_bias": float("nan"),
+        "ece_debiased": float("nan"),
+        # Discrimination
+        "roc_auc": _model_val("roc_auc"),
+        "accuracy": _model_val("accuracy"),
+        "precision_over": _model_val("precision_over"),
+        "precision_under": _model_val("precision_under"),
+        "prediction_std": _model_val("prediction_std"),
+        # Over rates
+        "predicted_over_rate": _model_val("predicted_over_rate"),
+        "empirical_over_rate": _model_val("empirical_over_rate"),
+        "over_pct_ev_gt": _diag("over_pct_ev_gt"),
+        "over_pct_ev_lt": _diag("over_pct_ev_lt"),
+        # EV / line
+        "model_ev": _diag("model_ev"),
+        "mean_line": _diag("mean_line"),
+        "result_mean": _diag("result_mean"),
+        "mean_ev_diff": _diag("ev_minus_line"),
+        "median_ev_diff": _diag("median_ev_diff"),
+        "frac_ev_gt_line": _diag("frac_ev_gt_line"),
+        # Kelly & blending
+        "kelly_shrinkage": _safe_float(metrics_block.get("kelly_shrinkage")),
+        "model_weight": _diag("model_weight"),
+        # Shape
+        "model_shape": float(mod_shape),
+        "empirical_shape": float(emp_shape),
+        "shape_ratio": float(shape_ratio),
+        "marginal_shape": _diag("marginal_shape"),
+        "dispersion_cal": _diag("dispersion_cal"),
+        # Ship gates — populated by training.scorecard.compute_gates.
+        "g1_brier_diff_mean": float("nan"),
+        "g1_ci_lo": float("nan"),
+        "g1_ci_hi": float("nan"),
+        "g1_brier_diff_mean_oracle": float("nan"),
+        "g1_ci_lo_oracle": float("nan"),
+        "g1_ci_hi_oracle": float("nan"),
+        "g2_star_z": float("nan"),
+        "g2_star_z_oracle": float("nan"),
+        "g3_bench_z": float("nan"),
+        "g3_bench_z_oracle": float("nan"),
+        "g4_iqr_ratio": float("nan"),
+        "g4_iqr_ratio_oracle": float("nan"),
+        "g5_ece_debiased": float("nan"),
+        "g1_pass": pd.NA,
+        "g2_pass": pd.NA,
+        "g3_pass": pd.NA,
+        "g4_pass": pd.NA,
+        "g5_pass": pd.NA,
+        "ship": pd.NA,
+        # Hyperparameters
+        "hp_rounds": _param("opt_rounds"),
+        "hp_leaves": _param("num_leaves"),
+        "hp_lr": _param("learning_rate"),
+        "hp_min_child": _param("min_child_samples"),
+        "hp_l1": _param("lambda_l1"),
+        "hp_l2": _param("lambda_l2"),
+        # Per-cell calibration
         "cv": float(stat_cv.get(league, {}).get(market, float("nan"))),
         "std": float(stat_std.get(league, {}).get(market, float("nan"))),
-        "historical_zero_rate": model.get("hist_gate", float("nan")),
     }
 
 
-def write_model_stats(league_models: dict, stat_cv: dict, stat_std: dict) -> None:
-    """Persist a structured per-market metrics table for the dashboard.
+def _layer_gates_from_test_set(row: dict, league: str, market: str) -> None:
+    """Overwrite the placeholder ship-gate columns on ``row`` if the test-set CSV is present.
 
-    Per Phase 3 §4.c: each (league, market) emits one ``row_kind="book_baseline"``
-    row carrying the metrics produced if the model *were* the bookmaker, plus
-    one ``row_kind="model"`` row per ``metric_row`` (raw / corrected / calibrated).
-    The new raw metrics from ``model["metrics"]["model"]`` (Brier, log-loss,
-    ROC-AUC, ECE, etc.) are attached to the calibrated model row only — they
-    describe the calibrated output. ``brier_skill_score`` and ``kelly_shrinkage``
-    are mirrored on the calibrated row so the Kelly getter can read one row.
+    Skips silently when the CSV is missing (the cell trained but its test_set
+    wasn't dumped), empty (degenerate frame would crash ``pd.qcut``), or
+    malformed (missing required columns). The row is mutated in place.
     """
+    test_set_path = Path(str(_TEST_SETS_DIR / f"{market_file_slug(league, market)}.csv"))
+    if not test_set_path.is_file():
+        return
+    try:
+        df = load_test_set(test_set_path, DEFAULT_PRED_COL)
+    except (ValueError, KeyError) as e:
+        logger.warning("scorecard skip %s/%s: %s", league, market, e)
+        return
+    if df.empty:
+        return
+    row.update(compute_gates(df, league=league, market=market))
+
+
+def write_model_stats(
+    league_models: dict,
+    stat_cv: dict,
+    stat_std: dict,
+    stat_shipped: dict | None = None,
+) -> None:
+    """Persist one wide row per ``(league, market)`` cell to parquet + CSV mirror.
+
+    Args:
+        league_models: ``{league: {market: model_dict}}`` keyed by trained cell.
+        stat_cv: ``{league: {market: cv}}`` from stat_calibration.
+        stat_std: ``{league: {market: std}}`` from stat_calibration.
+        stat_shipped: ``{league: {market: shipped}}`` from stat_meta. Defaults
+            to an empty dict so callers (tests) that don't care about the
+            shipping column don't have to supply one; cells absent from the
+            map fall back to ``"withheld"``.
+    """
+    shipped_map = stat_shipped or {}
     rows = []
     for league, markets in league_models.items():
         for market, model in markets.items():
-            stats_block = model.get("stats", {})
-            n_rows = len(next(iter(stats_block.values()))) if stats_block else 0
-            labels = (
-                _STATS_ROW_LABELS_3
-                if n_rows == 3
-                else _STATS_ROW_LABELS_2
-                if n_rows == 2
-                else tuple(f"row_{i}" for i in range(n_rows))
-            )
-            metrics_block = model.get("metrics") or {}
-            model_metrics = metrics_block.get("model") or {}
-            book_metrics = metrics_block.get("book_baseline")
-            bss = metrics_block.get("brier_skill_score", float("nan"))
-            ks = metrics_block.get("kelly_shrinkage", float("nan"))
-            diag_cols = _diag_row(model, league, market, stat_cv, stat_std)
-
-            # --- Book baseline row (one per market) ---
-            book_row = {
-                "league": league,
-                "market": market,
-                "distribution": model.get("distribution"),
-                "row_kind": "book_baseline",
-                "metric_row": None,
-            }
-            book_row.update({k: float("nan") for k in _RAW_METRIC_KEYS})
-            if book_metrics is not None:
-                for k in _RAW_METRIC_KEYS:
-                    if k in book_metrics:
-                        book_row[k] = float(book_metrics[k])
-            book_row["brier_skill_score"] = 0.0 if book_metrics is not None else float("nan")
-            book_row["kelly_shrinkage"] = 0.0 if book_metrics is not None else float("nan")
-            book_row.update(diag_cols)
-            rows.append(book_row)
-
-            # --- Model rows (one per metric_row) ---
-            for i, label in enumerate(labels):
-                row = {
-                    "league": league,
-                    "market": market,
-                    "distribution": model.get("distribution"),
-                    "row_kind": "model",
-                    "metric_row": label,
-                }
-                # Per-row classification stats from model["stats"] (renamed).
-                for src, dst in _STATS_COL_MAP.items():
-                    vals = stats_block.get(src)
-                    row[dst] = (
-                        float(vals[i]) if vals is not None and i < len(vals) else float("nan")
-                    )
-                # Validation-set raw metrics + skill/shrinkage live on the
-                # calibrated row (where the calibrated probs were scored).
-                is_calibrated = label == "calibrated"
-                for k in _RAW_METRIC_KEYS:
-                    if is_calibrated and k in model_metrics:
-                        # Don't clobber the per-row stats already filled above
-                        # (accuracy/precision_over/etc.); prefer the validation-set
-                        # value from compute_metrics for the calibrated row.
-                        row[k] = float(model_metrics[k])
-                    else:
-                        row.setdefault(k, float("nan"))
-                row["brier_skill_score"] = float(bss) if is_calibrated else float("nan")
-                row["kelly_shrinkage"] = float(ks) if is_calibrated else float("nan")
-                row.update(diag_cols)
-                rows.append(row)
+            shipped = shipped_map.get(league, {}).get(market, "withheld")
+            row = _wide_row(model, league, market, shipped, stat_cv, stat_std)
+            _layer_gates_from_test_set(row, league, market)
+            rows.append(row)
 
     df = pd.DataFrame(rows)
+    for col in _GATE_PASS_COLS:
+        if col in df.columns:
+            df[col] = df[col].astype("boolean")
     _atomic_write_parquet(df, MODEL_STATS_PATH)
+    _atomic_write_csv(df, MODEL_STATS_CSV_PATH)
 
 
 def get_market_calibration(league: str, market: str) -> dict[str, float]:
@@ -375,12 +302,7 @@ def get_market_calibration(league: str, market: str) -> dict[str, float]:
     df = pd.read_parquet(MODEL_STATS_PATH)
     if df.empty:
         return nan_result
-    mask = (df["league"] == league) & (df["market"] == market) & (df["row_kind"] == "model")
-    if "metric_row" in df.columns:
-        cal = mask & (df["metric_row"] == "calibrated")
-        sub = df[cal] if cal.any() else df[mask]
-    else:
-        sub = df[mask]
+    sub = df[(df["league"] == league) & (df["market"] == market)]
     if sub.empty:
         return nan_result
     row = sub.iloc[0]

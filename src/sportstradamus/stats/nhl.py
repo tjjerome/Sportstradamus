@@ -5,7 +5,7 @@ import json
 import os.path
 import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 from time import sleep
 
@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -32,9 +31,15 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_gamelog, write_gamelog
+from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import (
+    Stats,
+    archive,
+    clean_data,
+    scale_team_volume_to_budget,
+    scraper,
+)
 
 
 class StatsNHL(Stats):
@@ -119,20 +124,6 @@ class StatsNHL(Stats):
         self.tiebreaker_stat = "Fenwick short"
         self._volume_model_cache = None
 
-    def load(self):
-        """Loads NHL skater and goalie data from files.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        nhl_data = read_gamelog("nhl")
-        self.players = nhl_data["players"]
-        self.gamelog = nhl_data["gamelog"]
-        self.teamlog = nhl_data["teamlog"]
-
     def build_comp_profile(self, playerDict=None):
         """Build NHL player comp profile from loaded player data.
 
@@ -192,12 +183,52 @@ class StatsNHL(Stats):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
+    def _current_season_key(self, target_game_date: date) -> int:
+        """Return the ``self.players`` key for the season containing ``target_game_date``.
+
+        NHL seasons run Oct–Jun and ``self.players`` is keyed by the season
+        *start* year (int). Oct–Dec dates belong to that year's season;
+        Jan–Sep dates belong to the prior year's season.
+        """
+        if target_game_date.month >= 10:
+            return target_game_date.year
+        return target_game_date.year - 1
+
+    def _player_seasons_through(self, target_game_date: date) -> dict:
+        """Merge ``self.players`` seasons ``<=`` ``target_game_date``'s season.
+
+        Returns a flat ``{player_id: stats_dict}`` mapping ready for
+        :meth:`build_comp_profile`. Iterates oldest → newest so the current
+        season's roster wins on dict-update conflicts (matches the
+        :meth:`update_player_comps` ``prior.update(current)`` order).
+        """
+        cutoff = self._current_season_key(target_game_date)
+        merged: dict = {}
+        for season_key in sorted(self.players.keys()):
+            if season_key > cutoff:
+                continue
+            merged.update(self.players[season_key])
+        return merged
+
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
+        """Build comps from loaded data at runtime (no JSON I/O).
+
+        When ``target_game_date`` is provided, the player pool is bounded to
+        ``self.players`` seasons that started on or before the target date's
+        season-start year, so a 2022 training row's comps no longer pool
+        with 2024+ rookies. ``self.playerProfile`` is already date-bounded
+        by :meth:`base_profile` upstream (it filters ``short_gamelog`` to
+        the 300-day window ending at ``date``), so the gate here is on the
+        per-season roster set that feeds :meth:`build_comp_profile`.
+        Today() default preserves inference / cron behavior.
+        """
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
-        playerProfile, all_players, id_to_name = self.build_comp_profile()
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerDict = self._player_seasons_through(target_game_date)
+        playerProfile, all_players, id_to_name = self.build_comp_profile(playerDict=playerDict)
         if playerProfile.empty:
             return
 
@@ -501,9 +532,9 @@ class StatsNHL(Stats):
         # Parse the game stats
         nhl_gamelog = []
         nhl_teamlog = []
-        for gameId, date in tqdm(ids, desc="Getting NHL Stats"):
-            if datetime.strptime(date, "%Y-%m-%d").date() < today:
-                gamelog, teamlog = self.parse_game(gameId, date)
+        for gameId, game_date_str in tqdm(ids, desc="Getting NHL Stats"):
+            if datetime.strptime(game_date_str, "%Y-%m-%d").date() < today:
+                gamelog, teamlog = self.parse_game(gameId, game_date_str)
                 if type(gamelog) is list:
                     nhl_gamelog.extend(gamelog)
                 if type(teamlog) is list:
@@ -519,12 +550,7 @@ class StatsNHL(Stats):
                 nhl_df = nhl_df[
                     ~nhl_df.apply(lambda x: (x["gameId"], x["playerName"]) in existing, axis=1)
                 ]
-            nhl_df.loc[:, "moneyline"] = nhl_df.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-            )
-            nhl_df.loc[:, "totals"] = nhl_df.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(nhl_df, date_col="gameDate", team_col="team")
         nhl_teamlog_df = pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False)
         if not nhl_teamlog_df.empty:
             nhl_teamlog_df.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
@@ -682,9 +708,6 @@ class StatsNHL(Stats):
         else:
             skater_df = pd.DataFrame()
 
-        # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
-        # shot_df = pd.read_csv(StringIO(res.text))
-
         res = requests.get(
             f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv"
         )
@@ -757,12 +780,7 @@ class StatsNHL(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         # Write to file
         write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
@@ -804,7 +822,6 @@ class StatsNHL(Stats):
 
         if filename in self._volume_model_cache:
             filedict = self._volume_model_cache[filename]
-            # Slice to the trained schema embedded in the pickle.
             playerStats = playerStats[filedict["expected_columns"]]
             model = filedict["model"]
             dist = filedict["distribution"]
@@ -832,7 +849,6 @@ class StatsNHL(Stats):
         # Drop gate column for ZI distributions — not needed for budget normalization
         prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
 
-        # SkewNormal: rename loc/scale/alpha to proj {market} loc/scale/alpha
         rename_map = {
             "loc": f"proj {market} loc",
             "scale": f"proj {market} scale",
@@ -847,17 +863,13 @@ class StatsNHL(Stats):
         )
 
         if not pitcher:
-            # ------------------------------------------------------------------
-            # Budget parameters — derived by analyzing historical NHL gamelogs.
-            #
-            # Methodology:
+            # Budget parameters derived from historical NHL gamelogs:
             #   typical_rotation : median skaters (non-G) logging >3 min per team-game
             #   ot_rate          : fraction of team-games where total skater TOI > 300
             #   ot_extra         : mean extra team TOI above 300 when OT occurs (9.6 min)
             #   avg_unmodeled_min: mean TOI for ranked 8-18 skaters (rank > 7 tier)
-            #   per_player_floor : 5th-percentile TOI for top-7 tier skaters
-            #   per_player_cap   : 99th-percentile TOI for top-7 tier skaters
-            # ------------------------------------------------------------------
+            #   per_player_floor : 5th-pct TOI for top-7 tier skaters
+            #   per_player_cap   : 99th-pct TOI for top-7 tier skaters
             reg_minutes = 300  # 5 skaters × 60 min regulation
             ot_rate = 0.189  # measured: 18.9% of team-games go to OT
             ot_extra = 9.6  # measured: mean extra team TOI when OT occurs
@@ -869,54 +881,15 @@ class StatsNHL(Stats):
             # Expected total team TOI including OT
             budget_mean = reg_minutes + ot_rate * ot_extra
 
-            teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
-            for _team, team_df in teams:
-                # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
-                loc = team_df[f"proj {market} loc"].copy()
-                scale = team_df[f"proj {market} scale"].copy()
-                sn_alpha = (
-                    team_df[f"proj {market} alpha"].copy()
-                    if f"proj {market} alpha" in team_df.columns
-                    else pd.Series(0, index=loc.index)
-                )
-                N = len(team_df)
-
-                delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-                true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-                true_vars = scale**2
-
-                total = true_means.sum()
-                if total <= 0:
-                    continue
-
-                # Reserve TOI for the many unmodeled skaters (rank 8-18)
-                unmodeled_count = max(0, typical_rotation - N)
-                unmodeled_reserve = unmodeled_count * avg_unmodeled_min
-
-                upper_target = budget_mean - unmodeled_reserve
-                lower_target = N * per_player_floor
-                target = max(upper_target, lower_target)
-
-                # Precision-weighted deficit distribution
-                deficit = target - total
-                total_var = true_vars.sum()
-                if total_var > 0:
-                    adjustments = true_vars / total_var * deficit
-                else:
-                    adjustments = true_means / total * deficit
-
-                new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
-
-                # Scale both loc and scale to preserve coefficient of variation
-                ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
-                new_scale = scale * ratio
-                new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-                self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
-                self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
-                self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
-                self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
+            scale_team_volume_to_budget(
+                self.playerProfile,
+                market,
+                budget_mean=budget_mean,
+                typical_rotation=typical_rotation,
+                avg_unmodeled_min=avg_unmodeled_min,
+                per_player_floor=per_player_floor,
+                per_player_cap=per_player_cap,
+            )
 
         # Drop SkewNormal parameters (keep only mean/std for downstream use)
         self.playerProfile.drop(
@@ -964,8 +937,7 @@ class StatsNHL(Stats):
                     ev = 0
                     break
 
-                else:
-                    ev += v
+                ev += v
 
         elif market == "goalsAgainst":
             ev = archive.get_total("NHL", date, opponent)

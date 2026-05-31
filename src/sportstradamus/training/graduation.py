@@ -105,7 +105,6 @@ def read_gate1(path: Path, league: str | None = None) -> pd.DataFrame:
     if not path.exists():
         raise click.UsageError(f"model_stats parquet not found: {path}")
     df = pd.read_parquet(path, engine="pyarrow")
-    df = df[(df["row_kind"] == "model") & (df["metric_row"] == "calibrated")]
     if league:
         df = df[df["league"] == league]
     keep = [

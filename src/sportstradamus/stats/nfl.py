@@ -4,7 +4,7 @@ import importlib.resources as pkg_resources
 import json
 import os.path
 import pickle
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import nfl_data_py as nfl
 import nflreadpy as nflr
@@ -20,8 +20,46 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import nfl_fp_loader
-from sportstradamus.stats.base import Stats, archive, clean_data
+from sportstradamus.stats import (
+    nfl_fp_loader,
+    nfl_fp_team_weekly,
+    nfl_fp_team_weekly_aggregate,
+    nfl_fp_weekly_aggregate,
+)
+from sportstradamus.stats.base import (
+    _VOLUME_SCALE_RATIO_CAP,
+    _VOLUME_SCALE_RATIO_FLOOR,
+    Stats,
+    clean_data,
+)
+
+# Phase-1.5 lookback rule:
+#   - Post-week-4 (target_week >= 5) of the target's season: comp pool is
+#     restricted to current-season weeks 1..target_week-1 (no prior season).
+#     ~4 in-season games are more predictive of the next game than last
+#     year's full-season number for the same player.
+#   - Pre-week-5 (target_week 1..4): not enough current-season sample to
+#     stand alone, so the prior season's BACK HALF (weeks 11..18 -- last
+#     8 weeks of the regular season) is blended with any current-season
+#     games already played. The back-half-only choice trims early-season
+#     noise from the prior year on the assumption that late-season form
+#     is more representative of the player's current talent level.
+# These thresholds encode the operator-confirmed rule; the named constants
+# document the policy rather than burying it as a magic literal inside
+# build_comp_profile / _lookback_windows.
+COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK = 5
+COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK = 11
+
+# Default NFL regular-season length in weeks; the season-CSV path used 17
+# (pre-2021) / 18 (2021+). Phase-1.5 always reads the per-game weekly
+# snapshots, so 18 is the right ceiling for the comp lookback window.
+NFL_REGULAR_SEASON_WEEKS = 18
+
+# Number of prior NFL seasons retained in the legacy (None-date) fallback
+# path. Only used when ``build_comp_profile`` is called without a
+# ``target_game_date`` -- the post-Phase-1.5 production path uses the
+# back-half rule above instead.
+COMP_PRIOR_SEASON_DEPTH = 3
 
 # Positions that actually accrue each market stat. Rows for other positions are
 # all-zero (or wrong-population) noise that depresses MeanYr and inflates the zero
@@ -85,6 +123,19 @@ _TARGET_CAP: int = 20  # absolute single-player target ceiling per game
 # (~6 seasons). Keeping more than 6 seasons of NFL data inflates storage and
 # includes pre-analytics-era play-by-play that is noisier than modern data.
 _GAMELOG_RETENTION_DAYS: int = 2191  # 6 * 365 + 1 leap day
+
+# KNN comp-pool filtering thresholds. The percentile gate removes very
+# low-usage players who would pollute the nearest-neighbor set with
+# small-sample noise. The min-players guard avoids fitting a BallTree
+# with too few points to produce meaningful comps.
+_COMP_POOL_MIN_USAGE_PERCENTILE: float = 0.25  # bottom quartile filtered out
+_COMP_POOL_MIN_PLAYERS: int = 7  # skip position if fewer candidates survive filter
+
+# BallTree KNN comp count bounds. min_comps prevents degenerate 1-comp
+# matches; max_comps caps the neighborhood to avoid averaging over
+# players who are barely similar.
+_COMP_KNN_MIN: int = 5
+_COMP_KNN_MAX: int = 15
 
 
 class StatsNFL(Stats):
@@ -387,7 +438,16 @@ class StatsNFL(Stats):
         )
 
     def load(self):
-        """Load data from files."""
+        """Read the NFL gamelog bundle and apply NFL-specific cleanup.
+
+        Differs from the base :meth:`Stats.load` in two ways:
+
+        * The ``players`` payload is only assigned when non-empty, so a
+          stale or corrupt read does not blow away a previously populated
+          roster snapshot.
+        * The gamelog object-dtype numeric columns are coerced to real
+          numeric dtypes before downstream feature engineering.
+        """
         nfl_data = read_gamelog("nfl")
         self.gamelog = nfl_data["gamelog"]
         self.teamlog = nfl_data["teamlog"]
@@ -596,12 +656,37 @@ class StatsNFL(Stats):
         nfl_data.loc[nfl_data["team"] == "OAK", "team"] = "LV"
 
         if not nfl_data.empty:
-            nfl_data.loc[:, "moneyline"] = nfl_data.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1
-            )
-            nfl_data.loc[:, "totals"] = nfl_data.apply(
-                lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1
-            )
+            # Only enrich rows that will survive the post-concat
+            # drop_duplicates below. Without this filter the bulk path
+            # still wins, but most of the work is thrown away when the
+            # cached gamelog already covers the (season, week, player) tuple.
+            cached_keys: set[tuple] = set()
+            if {"season", "week", "player id"}.issubset(self.gamelog.columns):
+                cached_keys = set(
+                    zip(
+                        self.gamelog["season"],
+                        self.gamelog["week"],
+                        self.gamelog["player id"],
+                        strict=False,
+                    )
+                )
+            if cached_keys:
+                new_mask = np.fromiter(
+                    (
+                        key not in cached_keys
+                        for key in zip(
+                            nfl_data["season"],
+                            nfl_data["week"],
+                            nfl_data["player id"],
+                            strict=False,
+                        )
+                    ),
+                    dtype=bool,
+                    count=len(nfl_data),
+                )
+            else:
+                new_mask = None
+            self._enrich_team_markets(nfl_data, mask=new_mask)
 
         self.gamelog = (
             pd.concat([self.gamelog, nfl_data], ignore_index=True)
@@ -736,12 +821,7 @@ class StatsNFL(Stats):
             self.gamelog["player display name"] = self.gamelog["player display name"].apply(
                 remove_accents
             )
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameday"], x["team"]), axis=1
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(self.league, x["gameday"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(self.gamelog)
 
         self._coerce_numeric_gamelog()
 
@@ -948,338 +1028,605 @@ class StatsNFL(Stats):
                 "WL": win,
             }
 
-        else:
-            if self.ids.get(playerName) is None:
-                return {
-                    "completion_percentage_over_expected": 0,
-                    "completion_percentage": 0,
-                    "passer_rating": 0,
-                    "passer_adot": 0,
-                    "passer_adot_differential": 0,
-                    "time_to_throw": 0,
-                    "aggressiveness": 0,
-                    "pass_yards_per_attempt": 0,
-                    "receiver_drops": 0,
-                    "midfield_target_rate": 0,
-                    "rushing_yards_over_expected": 0,
-                    "rushing_success_rate": 0,
-                    "breakaway_yards": 0,
-                    "broken_tackles": 0,
-                    "drop_rate": 0,
-                    "yac_over_expected": 0,
-                    "separation_created": 0,
-                    "targets_per_route_run": 0,
-                    "first_read_targets_per_route_run": 0,
-                    "route_participation": 0,
-                    "yards_per_route_run": 0,
-                    "yards_per_carry": 0,
-                    "midfield_tprr": 0,
-                    "average_depth_of_target": 0,
-                    "receiver_cp_over_expected": 0,
-                    "first_read_target_share": 0,
-                    "redzone_target_share": 0,
-                    "redzone_carry_share": 0,
-                    "carry_share": 0,
-                    "longest_completion": 0,
-                    "longest_rush": 0,
-                    "longest_reception": 0,
-                    "sacks_taken": 0,
-                    "passing_first_downs": 0,
-                    "first_downs": 0,
-                }
-
-            cpoe = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "completion_percentage_above_expectation",
-            ].mean()
-            cp = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "completion_percentage",
-            ].mean()
-            qbr = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "passer_rating",
-            ].mean()
-            pass_adot = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_intended_air_yards",
-            ].mean()
-            pass_adot_diff = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_air_yards_differential",
-            ].mean()
-            time_to_throw = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_time_to_throw",
-            ].mean()
-            aggressiveness = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "aggressiveness",
-            ].mean()
-            ryoe = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "rush_yards_over_expected",
-            ].mean()
-            rush_sr = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "rush_pct_over_expected",
-            ].mean()
-            yacoe = self.ngs.loc[
-                (self.ngs["player_display_name"] == playerName)
-                & (self.ngs["week"] == pbp.week.max()),
-                "avg_yac_above_expectation",
-            ].mean()
-            sep = (
-                self.ngs.loc[
-                    (self.ngs["player_display_name"] == playerName)
-                    & (self.ngs["week"] == pbp.week.max()),
-                    "avg_separation",
-                ].mean()
-                - self.ngs.loc[
-                    (self.ngs["player_display_name"] == playerName)
-                    & (self.ngs["week"] == pbp.week.max()),
-                    "avg_cushion",
-                ].mean()
-            )
-            broken_tackles = (
-                self.pfr.loc[
-                    (self.pfr["pfr_player_name"] == playerName)
-                    & (self.pfr["week"] == pbp.week.max()),
-                    ["rushing_broken_tackles", "receiving_broken_tackles"],
-                ]
-                .sum(axis=1)
-                .mean()
-            )
-            breakaway_yards = self.pfr.loc[
-                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
-                "rushing_yards_after_contact_avg",
-            ].mean()
-            drop_pct = self.pfr.loc[
-                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
-                "receiving_drop_pct",
-            ].mean()
-            pass_drop_pct = self.pfr.loc[
-                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
-                "passing_drop_pct",
-            ].mean()
-            pass_ypa = (
-                pbp_off.loc[pbp_off["passer_player_id"] == self.ids.get(playerName), "yards_gained"]
-                .fillna(0)
-                .infer_objects(copy=False)
-                .mean()
-            )
-            ypc = (
-                pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName), "yards_gained"]
-                .fillna(0)
-                .infer_objects(copy=False)
-                .mean()
-            )
-            routes_run = int(
-                pbp_off["pass"].sum()
-                * self.gamelog.loc[
-                    (self.gamelog.season == year)
-                    & (self.gamelog.week == week)
-                    & (self.gamelog["player display name"] == playerName),
-                    "snap pct",
-                ].mean()
-            )
-            targets = len(pbp_off.loc[pbp_off["receiver_player_id"] == self.ids.get(playerName)])
-            fr_targets = len(
-                pbp_off.loc[
-                    (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                    & (pbp_off["read_thrown"] == "1")
-                ]
-            )
-            pass_attempts = len(pbp_off.loc[pbp_off["pass"]])
-            fr_pass_attempts = len(pbp_off.loc[(pbp_off["pass"]) & (pbp_off["read_thrown"] == "1")])
-            mid_target_rate = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["passer_player_id"] == self.ids.get(playerName))
-                            & (pbp_off["pass_location"] == "middle")
-                        ]
-                    )
-                    / pass_attempts
-                )
-                if pass_attempts > 0
-                else np.nan
-            )
-            mid_targets = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                            & (pbp_off["pass_location"] == "middle")
-                        ]
-                    )
-                    / routes_run
-                )
-                if routes_run > 0
-                else np.nan
-            )
-            tprr = (targets / routes_run) if routes_run > 0 else np.nan
-            frtprr = (fr_targets / routes_run) if routes_run > 0 else np.nan
-            frt_pct = (fr_targets / fr_pass_attempts) if fr_pass_attempts > 0 else np.nan
-            route_participation = (routes_run / pass_attempts) if pass_attempts > 0 else np.nan
-            yprr = (
-                (
-                    pbp_off.loc[
-                        pbp_off["receiver_player_id"] == self.ids.get(playerName), "yards_gained"
-                    ].sum()
-                    / routes_run
-                )
-                if routes_run > 0
-                else np.nan
-            )
-            adot = pbp_off.loc[
-                pbp_off["receiver_player_id"] == self.ids.get(playerName), "air_yards"
-            ].mean()
-            rec_cpoe = pbp_off.loc[
-                pbp_off["receiver_player_id"] == self.ids.get(playerName), "cpoe"
-            ].mean()
-            rz_passes = len(pbp_off.loc[pbp_off["pass_attempt"] & pbp_off["redzone"]])
-            rz_target_pct = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                            & pbp_off["redzone"]
-                        ]
-                    )
-                    / rz_passes
-                )
-                if rz_passes > 0
-                else np.nan
-            )
-            rz_rushes = len(pbp_off.loc[pbp_off["rush"] & pbp_off["redzone"]])
-            rz_attempt_pct = (
-                (
-                    len(
-                        pbp_off.loc[
-                            (pbp_off["rusher_player_id"] == self.ids.get(playerName))
-                            & pbp_off["redzone"]
-                        ]
-                    )
-                    / rz_rushes
-                )
-                if rz_rushes > 0
-                else np.nan
-            )
-            rushes = len(pbp_off.loc[pbp_off["rush"]])
-            attempt_pct = (
-                (len(pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName)]) / rushes)
-                if rushes > 0
-                else np.nan
-            )
-
-            sacks_taken = pbp_off.loc[
-                pbp_off["passer_player_id"] == self.ids.get(playerName), "sack"
-            ].sum()
-            longest_completion = pbp_off.loc[
-                pbp_off["passer_player_id"] == self.ids.get(playerName), "passing_yards"
-            ].max()
-            longest_rush = pbp_off.loc[
-                pbp_off["rusher_player_id"] == self.ids.get(playerName), "rushing_yards"
-            ].max()
-            longest_reception = pbp_off.loc[
-                pbp_off["receiver_player_id"] == self.ids.get(playerName), "receiving_yards"
-            ].max()
-            passing_first_downs = len(
-                pbp_off.loc[
-                    (pbp_off["passer_player_id"] == self.ids.get(playerName))
-                    & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
-                ]
-            )
-            first_downs = len(
-                pbp_off.loc[
-                    (
-                        (pbp_off["rusher_player_id"] == self.ids.get(playerName))
-                        | (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                    )
-                    & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
-                ]
-            )
-
+        if self.ids.get(playerName) is None:
             return {
-                "completion_percentage_over_expected": cpoe,
-                "completion_percentage": cp,
-                "passer_rating": qbr,
-                "passer_adot": pass_adot,
-                "passer_adot_differential": pass_adot_diff,
-                "time_to_throw": time_to_throw,
-                "aggressiveness": aggressiveness,
-                "pass_yards_per_attempt": pass_ypa,
-                "receiver_drops": pass_drop_pct,
-                "midfield_target_rate": mid_target_rate,
-                "rushing_yards_over_expected": ryoe,
-                "rushing_success_rate": rush_sr,
-                "breakaway_yards": breakaway_yards,
-                "broken_tackles": broken_tackles,
-                "drop_rate": drop_pct,
-                "yac_over_expected": yacoe,
-                "separation_created": sep,
-                "targets_per_route_run": tprr,
-                "first_read_targets_per_route_run": frtprr,
-                "route_participation": route_participation,
-                "yards_per_route_run": yprr,
-                "midfield_tprr": mid_targets,
-                "average_depth_of_target": adot,
-                "receiver_cp_over_expected": rec_cpoe,
-                "first_read_target_share": frt_pct,
-                "redzone_target_share": rz_target_pct,
-                "redzone_carry_share": rz_attempt_pct,
-                "carry_share": attempt_pct,
-                "yards_per_carry": ypc,
-                "longest_completion": longest_completion,
-                "longest_rush": longest_rush,
-                "longest_reception": longest_reception,
-                "sacks_taken": sacks_taken,
-                "passing_first_downs": passing_first_downs,
-                "first_downs": first_downs,
+                "completion_percentage_over_expected": 0,
+                "completion_percentage": 0,
+                "passer_rating": 0,
+                "passer_adot": 0,
+                "passer_adot_differential": 0,
+                "time_to_throw": 0,
+                "aggressiveness": 0,
+                "pass_yards_per_attempt": 0,
+                "receiver_drops": 0,
+                "midfield_target_rate": 0,
+                "rushing_yards_over_expected": 0,
+                "rushing_success_rate": 0,
+                "breakaway_yards": 0,
+                "broken_tackles": 0,
+                "drop_rate": 0,
+                "yac_over_expected": 0,
+                "separation_created": 0,
+                "targets_per_route_run": 0,
+                "first_read_targets_per_route_run": 0,
+                "route_participation": 0,
+                "yards_per_route_run": 0,
+                "yards_per_carry": 0,
+                "midfield_tprr": 0,
+                "average_depth_of_target": 0,
+                "receiver_cp_over_expected": 0,
+                "first_read_target_share": 0,
+                "redzone_target_share": 0,
+                "redzone_carry_share": 0,
+                "carry_share": 0,
+                "longest_completion": 0,
+                "longest_rush": 0,
+                "longest_reception": 0,
+                "sacks_taken": 0,
+                "passing_first_downs": 0,
+                "first_downs": 0,
             }
 
-    def build_comp_profile(self):
-        """Build the NFL player comp profile from FantasyPoints + PBP aggregates.
+        cpoe = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "completion_percentage_above_expectation",
+        ].mean()
+        cp = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "completion_percentage",
+        ].mean()
+        qbr = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "passer_rating",
+        ].mean()
+        pass_adot = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_intended_air_yards",
+        ].mean()
+        pass_adot_diff = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_air_yards_differential",
+        ].mean()
+        time_to_throw = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_time_to_throw",
+        ].mean()
+        aggressiveness = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "aggressiveness",
+        ].mean()
+        ryoe = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "rush_yards_over_expected",
+        ].mean()
+        rush_sr = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "rush_pct_over_expected",
+        ].mean()
+        yacoe = self.ngs.loc[
+            (self.ngs["player_display_name"] == playerName) & (self.ngs["week"] == pbp.week.max()),
+            "avg_yac_above_expectation",
+        ].mean()
+        sep = (
+            self.ngs.loc[
+                (self.ngs["player_display_name"] == playerName)
+                & (self.ngs["week"] == pbp.week.max()),
+                "avg_separation",
+            ].mean()
+            - self.ngs.loc[
+                (self.ngs["player_display_name"] == playerName)
+                & (self.ngs["week"] == pbp.week.max()),
+                "avg_cushion",
+            ].mean()
+        )
+        broken_tackles = (
+            self.pfr.loc[
+                (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+                ["rushing_broken_tackles", "receiving_broken_tackles"],
+            ]
+            .sum(axis=1)
+            .mean()
+        )
+        breakaway_yards = self.pfr.loc[
+            (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+            "rushing_yards_after_contact_avg",
+        ].mean()
+        drop_pct = self.pfr.loc[
+            (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+            "receiving_drop_pct",
+        ].mean()
+        pass_drop_pct = self.pfr.loc[
+            (self.pfr["pfr_player_name"] == playerName) & (self.pfr["week"] == pbp.week.max()),
+            "passing_drop_pct",
+        ].mean()
+        pass_ypa = (
+            pbp_off.loc[pbp_off["passer_player_id"] == self.ids.get(playerName), "yards_gained"]
+            .fillna(0)
+            .infer_objects(copy=False)
+            .mean()
+        )
+        ypc = (
+            pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName), "yards_gained"]
+            .fillna(0)
+            .infer_objects(copy=False)
+            .mean()
+        )
+        routes_run = int(
+            pbp_off["pass"].sum()
+            * self.gamelog.loc[
+                (self.gamelog.season == year)
+                & (self.gamelog.week == week)
+                & (self.gamelog["player display name"] == playerName),
+                "snap pct",
+            ].mean()
+        )
+        targets = len(pbp_off.loc[pbp_off["receiver_player_id"] == self.ids.get(playerName)])
+        fr_targets = len(
+            pbp_off.loc[
+                (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                & (pbp_off["read_thrown"] == "1")
+            ]
+        )
+        pass_attempts = len(pbp_off.loc[pbp_off["pass"]])
+        fr_pass_attempts = len(pbp_off.loc[(pbp_off["pass"]) & (pbp_off["read_thrown"] == "1")])
+        mid_target_rate = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["passer_player_id"] == self.ids.get(playerName))
+                        & (pbp_off["pass_location"] == "middle")
+                    ]
+                )
+                / pass_attempts
+            )
+            if pass_attempts > 0
+            else np.nan
+        )
+        mid_targets = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                        & (pbp_off["pass_location"] == "middle")
+                    ]
+                )
+                / routes_run
+            )
+            if routes_run > 0
+            else np.nan
+        )
+        tprr = (targets / routes_run) if routes_run > 0 else np.nan
+        frtprr = (fr_targets / routes_run) if routes_run > 0 else np.nan
+        frt_pct = (fr_targets / fr_pass_attempts) if fr_pass_attempts > 0 else np.nan
+        route_participation = (routes_run / pass_attempts) if pass_attempts > 0 else np.nan
+        yprr = (
+            (
+                pbp_off.loc[
+                    pbp_off["receiver_player_id"] == self.ids.get(playerName), "yards_gained"
+                ].sum()
+                / routes_run
+            )
+            if routes_run > 0
+            else np.nan
+        )
+        adot = pbp_off.loc[
+            pbp_off["receiver_player_id"] == self.ids.get(playerName), "air_yards"
+        ].mean()
+        rec_cpoe = pbp_off.loc[
+            pbp_off["receiver_player_id"] == self.ids.get(playerName), "cpoe"
+        ].mean()
+        rz_passes = len(pbp_off.loc[pbp_off["pass_attempt"] & pbp_off["redzone"]])
+        rz_target_pct = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                        & pbp_off["redzone"]
+                    ]
+                )
+                / rz_passes
+            )
+            if rz_passes > 0
+            else np.nan
+        )
+        rz_rushes = len(pbp_off.loc[pbp_off["rush"] & pbp_off["redzone"]])
+        rz_attempt_pct = (
+            (
+                len(
+                    pbp_off.loc[
+                        (pbp_off["rusher_player_id"] == self.ids.get(playerName))
+                        & pbp_off["redzone"]
+                    ]
+                )
+                / rz_rushes
+            )
+            if rz_rushes > 0
+            else np.nan
+        )
+        rushes = len(pbp_off.loc[pbp_off["rush"]])
+        attempt_pct = (
+            (len(pbp_off.loc[pbp_off["rusher_player_id"] == self.ids.get(playerName)]) / rushes)
+            if rushes > 0
+            else np.nan
+        )
 
-        Phase 1A+1D of the PFF -> FantasyPoints migration. Per-year FP CSVs
-        + PBP/NGS aggregates arrive from
-        :func:`sportstradamus.stats.nfl_fp_loader.load_one_year` already
-        derived and joined with age/height/bmi (Phase 1G surfaces the same
-        derived columns to the Y/Y stability diagnostic). Per-year frames
-        are concatenated with a ``season`` tag, the Phase 1G rolling
-        transform smooths the moderate-stability features over the lookback
-        window, then the most-recent row per player is selected for the
-        downstream KNN join.
+        sacks_taken = pbp_off.loc[
+            pbp_off["passer_player_id"] == self.ids.get(playerName), "sack"
+        ].sum()
+        longest_completion = pbp_off.loc[
+            pbp_off["passer_player_id"] == self.ids.get(playerName), "passing_yards"
+        ].max()
+        longest_rush = pbp_off.loc[
+            pbp_off["rusher_player_id"] == self.ids.get(playerName), "rushing_yards"
+        ].max()
+        longest_reception = pbp_off.loc[
+            pbp_off["receiver_player_id"] == self.ids.get(playerName), "receiving_yards"
+        ].max()
+        passing_first_downs = len(
+            pbp_off.loc[
+                (pbp_off["passer_player_id"] == self.ids.get(playerName))
+                & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
+            ]
+        )
+        first_downs = len(
+            pbp_off.loc[
+                (
+                    (pbp_off["rusher_player_id"] == self.ids.get(playerName))
+                    | (pbp_off["receiver_player_id"] == self.ids.get(playerName))
+                )
+                & (pbp_off["yards_gained"] > pbp_off["ydstogo"])
+            ]
+        )
+
+        return {
+            "completion_percentage_over_expected": cpoe,
+            "completion_percentage": cp,
+            "passer_rating": qbr,
+            "passer_adot": pass_adot,
+            "passer_adot_differential": pass_adot_diff,
+            "time_to_throw": time_to_throw,
+            "aggressiveness": aggressiveness,
+            "pass_yards_per_attempt": pass_ypa,
+            "receiver_drops": pass_drop_pct,
+            "midfield_target_rate": mid_target_rate,
+            "rushing_yards_over_expected": ryoe,
+            "rushing_success_rate": rush_sr,
+            "breakaway_yards": breakaway_yards,
+            "broken_tackles": broken_tackles,
+            "drop_rate": drop_pct,
+            "yac_over_expected": yacoe,
+            "separation_created": sep,
+            "targets_per_route_run": tprr,
+            "first_read_targets_per_route_run": frtprr,
+            "route_participation": route_participation,
+            "yards_per_route_run": yprr,
+            "midfield_tprr": mid_targets,
+            "average_depth_of_target": adot,
+            "receiver_cp_over_expected": rec_cpoe,
+            "first_read_target_share": frt_pct,
+            "redzone_target_share": rz_target_pct,
+            "redzone_carry_share": rz_attempt_pct,
+            "carry_share": attempt_pct,
+            "yards_per_carry": ypc,
+            "longest_completion": longest_completion,
+            "longest_rush": longest_rush,
+            "longest_reception": longest_reception,
+            "sacks_taken": sacks_taken,
+            "passing_first_downs": passing_first_downs,
+            "first_downs": first_downs,
+        }
+
+    def build_comp_profile(self, target_game_date: date | None = None) -> pd.DataFrame:
+        """Build the NFL player comp profile from per-game FP snapshots + PBP aggregates.
+
+        Phase-1.5 of the PFF -> FantasyPoints migration. Inputs come from
+        the per-game weekly parquets via
+        :func:`sportstradamus.stats.nfl_fp_weekly_aggregate.load_through_one_year`,
+        which season-to-dates per-game rows using the Pattern A / B / C
+        helpers in :mod:`sportstradamus.stats.nfl_fp_aggregation`. PBP/NGS
+        aggregates are joined the same way the legacy season-CSV path
+        did. The Phase-1G rolling transform smooths moderate-stability
+        features across the lookback window, then the most-recent row per
+        player is selected for the downstream KNN join.
+
+        The lookback window enforces the operator's Phase-1.5 v2 rule:
+        after week 4 of ``target_game_date``'s season the comp pool is
+        current-season-only (no prior seasons blended in). Pre-week-5
+        the prior season's BACK HALF (weeks
+        ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..18``) is pooled with
+        any current-season games already played so the KNN has enough
+        sample. When ``target_game_date`` is None the function falls
+        back to a full-season aggregate across the prior three seasons +
+        the current season's complete window -- preserving the legacy
+        contract for callers that haven't been migrated to per-game-date
+        comp profiles yet.
+
+        Results are cached per ``(season, week)`` cell on ``self`` so
+        repeated calls within a training loop don't re-aggregate the same
+        snapshots.
+
+        Args:
+            target_game_date: Date of the game the comp profile is being
+                built for. When provided, the lookback window cuts off
+                at ``target_week - 1`` of the corresponding season (post-
+                week-4: current season only; pre-week-5: prior-season
+                back half + current partial). When ``None``, full-season
+                aggregates land for the prior three seasons + current
+                season (legacy path).
 
         Returns:
             DataFrame indexed by accent-stripped player name with
             ``position``, ``player_game_count``, the comp-filter aliases
             (``dropbacks`` / ``attempts`` / ``routes``), every FP-prefixed
             metric, every ``pbp_*`` aggregate, and (when available)
-            ``age`` / ``height`` / ``bmi``. Empty DataFrame if no FP files
-            are found in the lookback window.
+            ``age`` / ``height`` / ``bmi``. Empty DataFrame if no FP
+            snapshots are found in the lookback window.
         """
         if self.playerProfile.empty:
             self.profile_market("snap pct")
 
-        year = self.season_start.year
+        cache_key = self._resolve_comp_cache_key(target_game_date)
+        cache = self._comp_profile_cache()
+        if cache_key not in cache:
+            cache[cache_key] = self._compute_comp_profile(cache_key)
+        playerProfile = cache[cache_key]
+        if playerProfile.empty:
+            return playerProfile
+
+        return playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
+
+    def _resolve_comp_cache_key(self, target_game_date: date | None) -> tuple[int, int | None]:
+        """Translate the public ``target_game_date`` arg into a cache key + lookback spec.
+
+        Returns a ``(target_season, target_week)`` tuple. ``target_week``
+        carries a sentinel ``None`` for the "no date given" mode --
+        triggers the full-season fallback inside
+        :meth:`_compute_comp_profile`. ``target_season`` defaults to
+        ``self.season_start.year`` so callers without a date still see
+        the right season for the current cron run.
+        """
+        if target_game_date is None:
+            return self.season_start.year, None
+        target_season, target_week = self._lookup_season_week(target_game_date)
+        return target_season, target_week
+
+    def _comp_target_key(self, date: "date | None") -> "tuple[int, int | None]":
+        """NFL override: cache the per-week comp pool on ``(season, week)``.
+
+        The base implementation buckets on the most-recent Wednesday's week
+        index. NFL has authoritative schedule weeks that already align with
+        the Wed→Wed window (games Thu/Sun/Mon; Tue/Wed = retrain idle), so
+        reusing :meth:`_resolve_comp_cache_key` keeps the comp cache aligned
+        with both :meth:`build_comp_profile`'s ``_comp_profile_cache`` and
+        the operator's confirmed retrain cadence.
+        """
+        return self._resolve_comp_cache_key(date)
+
+    def _lookup_season_week(self, target_game_date: datetime | date) -> tuple[int, int]:
+        """Resolve a calendar date to ``(season, week)`` via nfl_data_py's schedule.
+
+        Builds + caches a date → (season, week) index across the
+        seasons that overlap the requested date. For dates in the
+        regular-season window the schedule lookup is exact; for
+        bye-week / off-season dates the function returns the next
+        scheduled game's week so the comp pool covers everything the
+        target player could plausibly have played in already.
+        """
+        if isinstance(target_game_date, datetime):
+            target_game_date = target_game_date.date()
+
+        sched_index = self._schedule_index()
+        if sched_index.empty:
+            return self.season_start.year, NFL_REGULAR_SEASON_WEEKS
+
+        match = sched_index.loc[sched_index["gameday"] >= target_game_date].head(1)
+        if match.empty:
+            # All schedule rows are in the past -> use the season's last week.
+            last = sched_index.iloc[-1]
+            return int(last["season"]), int(last["week"])
+        row = match.iloc[0]
+        return int(row["season"]), int(row["week"])
+
+    def _schedule_index(self) -> pd.DataFrame:
+        """Cached ``(gameday, season, week)`` index spanning the comp lookback."""
+        if getattr(self, "_sched_index", None) is None:
+            years = list(
+                range(
+                    self.season_start.year - COMP_PRIOR_SEASON_DEPTH,
+                    self.season_start.year + 2,
+                )
+            )
+            try:
+                sched = nfl.import_schedules(years)
+            except Exception as exc:
+                logger.warning("import_schedules(%s) failed: %s", years, exc)
+                self._sched_index = pd.DataFrame(columns=["gameday", "season", "week"])
+                return self._sched_index
+            sched = sched.dropna(subset=["gameday", "season", "week"]).copy()
+            sched["gameday"] = pd.to_datetime(sched["gameday"]).dt.date
+            self._sched_index = (
+                sched[["gameday", "season", "week"]]
+                .drop_duplicates()
+                .sort_values("gameday", kind="stable")
+                .reset_index(drop=True)
+            )
+        return self._sched_index
+
+    def _comp_profile_cache(self) -> dict[tuple[int, int | None], pd.DataFrame]:
+        """Lazily-initialised per-(season, week) comp profile cache."""
+        if getattr(self, "_comp_cache", None) is None:
+            self._comp_cache: dict[tuple[int, int | None], pd.DataFrame] = {}
+        return self._comp_cache
+
+    def _join_fp_team_features(
+        self, date: datetime | date
+    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        """Phase-2 NFL hook: aggregate FP team-grain snapshots into team / defense feature frames.
+
+        Resolves ``date`` to ``(season, target_week)`` via
+        ``_lookup_season_week``, applies the Phase-1.5 lookback rule via
+        ``_lookback_windows`` (post-week-4 = current-season only;
+        pre-week-5 = prior season weeks 11..18 BLENDED with current
+        partial), and hands the windows + the target snapshot to the
+        bridge. The bridge handles Pattern A (rate stats pooled across
+        windows) and Pattern B (``line_matchups`` single-snapshot at
+        target week).
+
+        Returns ``(None, None)`` when the team-data fetcher hasn't
+        backfilled any snapshots for the target season AND the prior
+        season -- the existing nfl_data_py-derived teamlog aggregates
+        carry the run alone, so production stays live on mixed-fill data.
+        """
+        season, target_week = self._lookup_season_week(date)
+        pattern_a_windows = self._lookback_windows(season, target_week)
+        has_data = any(
+            nfl_fp_team_weekly.available_snapshots(window_season)
+            for window_season, _, _ in pattern_a_windows
+        ) or bool(nfl_fp_team_weekly.available_snapshots(season))
+        if not has_data:
+            return None, None
+        team_features, defense_features = (
+            nfl_fp_team_weekly_aggregate.load_team_and_defense_features(
+                pattern_a_windows=pattern_a_windows,
+                pattern_b_snapshot=(season, target_week),
+            )
+        )
+        return team_features, defense_features
+
+    def _join_fp_player_features(self, date: datetime | date) -> pd.DataFrame | None:
+        """NFL hook: project FP per-player season-to-date aggregates to ``{col}_asof``.
+
+        Resolves ``date`` to ``(season, target_week)`` via
+        ``_lookup_season_week``, then loads the player-grain season-to-date
+        profile through ``load_through_one_year(season, target_week=week-1)``
+        — the "as of last week" snapshot, leakage-clean for the target row's
+        date. Each non-meta column is renamed to raw ``{col}_asof`` (no
+        ``Player`` prefix) so the downstream ``add_prefix("Player ")`` step
+        prepends the namespace once, producing ``Player {col}_asof`` keys
+        that do not collide with the legacy gamelog ``Player {col}`` columns.
+
+        Pre-week-5 falls back to the prior season's late weeks. Returns
+        ``None`` when no FP weekly snapshot exists for the resolved window —
+        the model falls back to gamelog-derived features alone.
+        """
+        season, target_week = self._lookup_season_week(date)
+        if getattr(self, "_fp_asof_cache", None) is None:
+            self._fp_asof_cache: dict[tuple[int, int], pd.DataFrame | None] = {}
+        key = (season, target_week)
+        if key in self._fp_asof_cache:
+            return self._fp_asof_cache[key]
+        frame = self._compute_fp_asof_features(season, target_week)
+        self._fp_asof_cache[key] = frame
+        return frame
+
+    def _compute_fp_asof_features(self, season: int, week: int) -> pd.DataFrame | None:
+        """Load FP season-to-date profile for ``(season, week-1)`` and rename to raw ``{col}_asof``.
+
+        Pre-week-5 routes to the prior season's late weeks via
+        ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..NFL_REGULAR_SEASON_WEEKS``;
+        this mirrors the comp-profile blend semantics so the early-season
+        asof view sees real signal instead of an empty frame.
+        """
+        lookback_week = max(week - 1, 0)
+        if lookback_week >= 1:
+            frame = nfl_fp_weekly_aggregate.load_through_one_year(season, target_week=lookback_week)
+        else:
+            # Early-season: fall back to prior season's late weeks.
+            frame = nfl_fp_weekly_aggregate.load_through_one_year(
+                season - 1, target_week=NFL_REGULAR_SEASON_WEEKS
+            )
+        if frame is None or frame.empty or "Name" not in frame.columns:
+            return None
+        frame = frame.copy()
+        # Drop rows with missing player names (rare aggregation artifacts).
+        frame = frame.loc[frame["Name"].notna()]
+        if frame.empty:
+            return None
+        # Join key matches the gamelog ``player display name`` after the
+        # ``remove_accents`` pass that ``base_profile`` applies to
+        # short_gamelog. Both sides must strip accents for the merge to land.
+        frame.index = frame["Name"].astype(str).apply(remove_accents)
+        frame.index.name = self.log_strings["player"]
+        meta = {"Name", "Team", "position"}
+        feat_cols = [c for c in frame.columns if c not in meta]
+        if not feat_cols:
+            return None
+        out = frame[feat_cols].copy()
+        # Drop duplicate-index rows (player traded mid-season -> two Team rows).
+        # Keep the row with the most non-NaN cells so we don't lose signal to
+        # the smaller-sample team's snapshot.
+        if out.index.has_duplicates:
+            non_na_rank = out.notna().sum(axis=1)
+            out = out.assign(_rank=non_na_rank).sort_values("_rank", ascending=False)
+            out = out[~out.index.duplicated(keep="first")].drop(columns="_rank")
+        # Emit raw ``{col}_asof`` (no Player prefix). Downstream
+        # ``add_prefix("Player ")`` in get_stats / get_feature_columns
+        # prepends the namespace once, producing ``Player {col}_asof``.
+        # Prefixing here would double-prefix to ``Player Player {col}_asof``.
+        out.columns = [f"{c}_asof" for c in out.columns]
+        return out
+
+    def _compute_comp_profile(self, cache_key: tuple[int, int | None]) -> pd.DataFrame:
+        """Aggregate the per-game snapshots into a comp-profile frame for one cell.
+
+        Applies the Phase-1.5 lookback rule:
+
+        * ``target_week is None`` -> legacy fallback. Load full-season
+          aggregates for the prior 3 seasons + current season,
+          season-by-season, then rolling-transform + latest-row dedupe.
+          Per-season independent aggregation matches the pre-Phase-1.5
+          contract for callers (e.g. ``optimize_comp_weights``) that
+          haven't been migrated to per-game-date comp profiles yet.
+        * ``target_week < 5`` -> pre-cutoff. Prior season's back half
+          (weeks ``COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK..18``) BLENDED
+          with the current season's partial weeks through
+          ``target_week - 1``. "Blended" here means a player's per-game
+          rows from BOTH seasons land in one aggregate row -- the
+          aggregator pools raw per-game data across windows before the
+          per-player groupby, so a player with 8 prior-back-half games
+          + 2 current-season games gets one 10-game aggregate (not
+          most-recent-season-wins).
+        * ``target_week >= 5`` -> post-cutoff. Current season only,
+          weeks ``1..target_week - 1``. Prior seasons drop out because
+          ~4 in-season games are more predictive of the next game than
+          last year's full-season number for the same player (the comp
+          pool also restricts to current-season players who have a
+          meaningful in-season sample).
+        """
+        target_season, target_week = cache_key
+        windows = self._lookback_windows(target_season, target_week)
+        if target_week is None:
+            return self._compute_comp_profile_legacy(windows)
+
+        playerProfile = nfl_fp_weekly_aggregate.load_multi_window_one_year(windows)
+        if playerProfile.empty:
+            return playerProfile
+        playerProfile = playerProfile.copy()
+        playerProfile["season"] = target_season
+
+        if "Name" in playerProfile.columns:
+            playerProfile = playerProfile.assign(player=playerProfile["Name"])
+        return playerProfile
+
+    @staticmethod
+    def _compute_comp_profile_legacy(
+        windows: list[tuple[int, int, int]],
+    ) -> pd.DataFrame:
+        """Per-season aggregation + rolling-transform path used by the None-date fallback.
+
+        Preserves the pre-Phase-1.5 contract: aggregate each season
+        independently, stack, run ``apply_rolling_transforms`` for
+        cross-season smoothing, then keep the most-recent row per
+        player. Callers that pass a ``target_game_date`` route through
+        the pooled aggregator instead.
+        """
         per_year_frames: list[pd.DataFrame] = []
-        for y in range(year - 3, year + 1):
-            per_year = nfl_fp_loader.load_one_year(y)
+        for season, start_week, end_week in windows:
+            per_year = nfl_fp_weekly_aggregate.load_window_one_year(season, start_week, end_week)
             if per_year.empty:
                 continue
             per_year = per_year.copy()
-            per_year["season"] = y
+            per_year["season"] = season
             per_year_frames.append(per_year)
 
         if not per_year_frames:
@@ -1287,26 +1634,100 @@ class StatsNFL(Stats):
 
         stacked = pd.concat(per_year_frames)
         stacked = nfl_fp_loader.apply_rolling_transforms(stacked)
-
-        # Take the most-recent row per player so the KNN sees the
-        # rolling-smoothed current-season value (and the latest snapshot of
-        # every other column).
         stacked = stacked.sort_values("season", kind="stable")
         playerProfile = stacked.loc[~stacked.index.duplicated(keep="last")]
 
-        # The downstream short-window join expects the index to be the
-        # accent-stripped player name. ``load_one_year`` already builds it
-        # that way but the concat/sort chain can lose the name attribute --
-        # rebuild it from ``Name`` defensively and mirror it into ``player``
-        # so legacy callers that look for the old PFF column name still work.
         if "Name" in playerProfile.columns:
+            # The concat-then-sort can leave a NaN ``Name`` cell for any
+            # row whose player only appeared in one of the lookback's
+            # seasons; remove_accents chokes on NaN. Drop those before
+            # re-indexing rather than letting the dispatch fail.
+            playerProfile = playerProfile.dropna(subset=["Name"])
+            if playerProfile.empty:
+                return playerProfile
             playerProfile = playerProfile.assign(player=playerProfile["Name"])
             playerProfile.index = playerProfile["Name"].apply(remove_accents)
-
-        playerProfile = playerProfile.join(self.playerProfile[self.playerProfile.columns[9:]])
         return playerProfile
 
-    def update_player_comps(self, year=None):
+    @staticmethod
+    def _lookback_windows(
+        target_season: int, target_week: int | None
+    ) -> list[tuple[int, int, int]]:
+        """Return the ``[(season, start_week, end_week), ...]`` list for the comp lookback.
+
+        Encodes the Phase-1.5 rule. Documented case-by-case so future
+        edits to the cutoff land here in one place rather than scattered
+        across the aggregation path.
+
+        **Postseason-clean contract** (pinned by
+        ``tests/golden/test_nfl_lookback_windows.py``):
+
+        * Regular-season targets (``target_week`` in 1..18) MUST NOT pull
+          any window past ``NFL_REGULAR_SEASON_WEEKS = 18``. The
+          prior-season window caps at 18 explicitly; the current-season
+          window caps at ``target_week - 1 <= 17``. Postseason rows are a
+          measurably different distribution at team grain (2022 W11-18
+          vs W19-22 measured PROE +8.4pp, ``def_two_high_pct`` +7.7pp,
+          dropbacks/game +9.2%); blending them into a reg-season prior
+          biases the feature in the wrong direction. Full diagnostic +
+          cross-sport precedent: Phase 2.1 section of the team-features
+          plan doc.
+        * Postseason targets (``target_week`` in 19..22) pass through the
+          post-cutoff branch and pull ``(target_season, 1, target_week - 1)``,
+          which DOES include this season's earlier postseason rows. That
+          is the symmetric rule's INCLUDE branch -- a postseason target
+          should see postseason priors. The branch is unreachable today
+          (no postseason props are priced), but the test pins it so a
+          future tightening does not kill it before the operator decides
+          to price one.
+
+        Pattern B (``line_matchups``) is NOT routed through this method;
+        the single-snapshot lookup at ``(target_season, target_week)``
+        applies whether the target is reg-season or postseason.
+        """
+        if target_week is None:
+            # Legacy fallback -- full-season aggregates for prior 3 + current.
+            # Cap at NFL_REGULAR_SEASON_WEEKS so optimize_comp_weights' default
+            # path inherits the postseason-clean contract above.
+            return [
+                (s, 1, NFL_REGULAR_SEASON_WEEKS)
+                for s in range(
+                    target_season - COMP_PRIOR_SEASON_DEPTH,
+                    target_season + 1,
+                )
+            ]
+        if target_week >= COMP_LOOKBACK_CURRENT_SEASON_ONLY_WEEK:
+            # Post-cutoff -- current season only. For target_week in 5..18 the
+            # ``target_week - 1`` end is <= 17 (reg-season only); for
+            # target_week in 19..22 (postseason target) the end >= 18 and
+            # postseason rows are intentionally included per the symmetric rule.
+            return [(target_season, 1, target_week - 1)]
+        # Pre-week-5 -- prior season's back half (clipped at 18 -- the cap is
+        # load-bearing, not cosmetic) + current partial (if any).
+        windows = [
+            (
+                target_season - 1,
+                COMP_LOOKBACK_PRIOR_SEASON_FROM_WEEK,
+                NFL_REGULAR_SEASON_WEEKS,
+            )
+        ]
+        if target_week > 1:
+            windows.append((target_season, 1, target_week - 1))
+        return windows
+
+    def update_player_comps(self, year: int | None = None) -> None:
+        """Rebuild comp clusters for each NFL position and write to ``comps.json``.
+
+        Applies the Phase-1.5 lookback rule via ``build_comp_profile``: after
+        week 4 of the current season, the comp pool is restricted to
+        current-season weeks 1..W-1; pre-week-5, the prior season's back half
+        (weeks 11..18) is blended with any current-season games. Writes the
+        result to ``data/leagues/nfl/comps.json`` for reuse by the prediction
+        pipeline.
+
+        Args:
+            year: Override the season year. Defaults to ``self.season_start.year``.
+        """
         if year is None:
             year = self.season_start.year
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
@@ -1314,73 +1735,102 @@ class StatsNFL(Stats):
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
 
-        playerProfile = self.build_comp_profile()
+        # Pass today's date so the Phase-1.5 lookback rule applies: after
+        # week 4 of the current season the comp pool is restricted to
+        # current-season weeks 1..W-1 (`_lookback_windows`), which is the
+        # operator-confirmed cron behaviour. Pre-week-5 (or off-season),
+        # the prior season's back half (weeks 11..18) is blended with
+        # any current-season games already played.
+        playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
         if playerProfile.empty:
             return
 
         comps = {}
         for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position == position]
+            positionProfile = playerProfile.loc[playerProfile.position == position].copy()
             positionProfile[filterStat[position]] = (
                 positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             )
             positionProfile = positionProfile.loc[
                 positionProfile[filterStat[position]]
-                >= positionProfile[filterStat[position]].quantile(0.25)
+                >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
             ]
-            positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace(
-                [np.nan, np.inf, -np.inf], 0
-            )
+            positionProfile = positionProfile.reindex(
+                columns=list(stats["NFL"][position].keys())
+            ).replace([np.nan, np.inf, -np.inf], 0)
             positionProfile = positionProfile.apply(
                 lambda x: (x - x.mean()) / x.std(), axis=0
             ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
+            positionProfile = positionProfile.mul(
+                np.sqrt(np.abs(np.asarray(list(stats["NFL"][position].values()))))
+            )
             knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
+            comps[position] = self._build_comps(
+                knn, positionProfile, min_comps=_COMP_KNN_MIN, max_comps=_COMP_KNN_MAX
+            )
 
         filepath = pkg_resources.files(data) / "leagues" / "nfl" / "comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
+        """Build comps from loaded data at runtime (no JSON I/O).
+
+        Args:
+            target_game_date: Date the comps should reflect "as of". The
+                training-matrix path passes the per-gameday date so the comp
+                pool is bounded to games strictly before it (eliminates the
+                look-ahead leakage where a 2023 row's comps would otherwise
+                see the 2025 player population). When ``None`` (inference /
+                cron path), today's date is used and the Phase-1.5 lookback
+                rule routes through ``_lookback_windows`` to restrict comps
+                to current-season-only candidates after week 4.
+        """
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
         filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
 
-        playerProfile = self.build_comp_profile()
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerProfile = self.build_comp_profile(target_game_date=target_game_date)
         if playerProfile.empty:
             return
 
         comps = {}
         for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position == position]
+            positionProfile = playerProfile.loc[playerProfile.position == position].copy()
             positionProfile[filterStat[position]] = (
                 positionProfile[filterStat[position]] / positionProfile["player_game_count"]
             )
             positionProfile = positionProfile.loc[
                 positionProfile[filterStat[position]]
-                >= positionProfile[filterStat[position]].quantile(0.25)
+                >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
             ]
-            positionProfile = positionProfile[list(stats["NFL"][position].keys())].replace(
-                [np.nan, np.inf, -np.inf], 0
-            )
-            if len(positionProfile) < 7:
+            positionProfile = positionProfile.reindex(
+                columns=list(stats["NFL"][position].keys())
+            ).replace([np.nan, np.inf, -np.inf], 0)
+            if len(positionProfile) < _COMP_POOL_MIN_PLAYERS:
                 continue
             positionProfile = positionProfile.apply(
                 lambda x: (x - x.mean()) / x.std(), axis=0
             ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(stats["NFL"][position].values())))
+            positionProfile = positionProfile.mul(
+                np.sqrt(np.abs(np.asarray(list(stats["NFL"][position].values()))))
+            )
             knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=15)
+            comps[position] = self._build_comps(
+                knn, positionProfile, min_comps=_COMP_KNN_MIN, max_comps=_COMP_KNN_MAX
+            )
 
         self.comps = comps
 
-    def check_combo_markets(self, market, player, date=datetime.today().date()):
+    def check_combo_markets(
+        self, market: str, player: str, date: date = datetime.today().date()
+    ) -> int:
         return 0  # combo-market EV pending reimplementation
 
-    def get_volume_stats(self, offers, date=datetime.today().date()):
+    def get_volume_stats(self, offers: dict, date: date = datetime.today().date()) -> None:
         flat_offers = {}
         if isinstance(offers, dict):
             for players in offers.values():
@@ -1559,7 +2009,9 @@ class StatsNFL(Stats):
 
                 # SkewNormal: scale both loc and scale to preserve CV
                 ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
+                ratio = ratio.fillna(1.0).clip(
+                    lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
+                )
                 new_scale = scale * ratio
                 new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
 

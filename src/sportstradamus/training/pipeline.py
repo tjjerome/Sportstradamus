@@ -51,7 +51,7 @@ from sportstradamus.training.config import (
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, warm_start_hyper_opt
 from sportstradamus.training.report import report
-from sportstradamus.training.shap import _scouting_shap_and_filter
+from sportstradamus.training.shap import compute_market_importance
 
 logger = get_logger(__name__)
 
@@ -61,10 +61,53 @@ _ECE_BINS = 10
 _BRIER_SKILL_DENOM_FLOOR = 1e-9
 # Probability clip used so log_loss / Brier never see exact 0 or 1.
 _PROBA_CLIP = 1e-6
+# Confidence cutoff for the mode-stats and diagnostic masks: only rows where
+# the model's top-class probability exceeds this are counted in precision /
+# accuracy / over% statistics.  Mirrors the live scoring path in
+# prediction/scoring.py. Value from CLAUDE.md "Performance Table".
+_MODE_CONFIDENCE_THRESHOLD: float = 0.54
+# Minimum rows in an EV-conditioned, confidence-masked subset before its over-
+# rate is reported; thinner slices give a noisy mean, so the diagnostic is NaN.
+_MIN_DIAGNOSTIC_ROWS: int = 10
+# Temporal train/test split fraction: earliest 70% of the matrix goes to
+# training, latest 30% is held out for evaluation.  Temporal ordering (not
+# random split) prevents look-ahead leakage of player form.
+_TRAIN_FRACTION: float = 0.7
+# Minimum historical zero rate (hist_gate) to activate the zero-inflation gate
+# component during SkewNormal training and blending.  Below 2% the gate adds
+# more noise than signal — the model treats the stat as effectively continuous.
+_HIST_GATE_THRESHOLD: float = 0.02
+# Mean threshold separating SkewNormal (continuous, high-mean) from count
+# distributions (NegBin/ZINB).  Stats with global_mean < 2 are integer-like
+# enough that a count family fits better than SkewNormal.
+_SKEWNORMAL_MEAN_THRESHOLD: float = 2.0
+# hist_gate level above which the SkewNormal path filters to nonzero rows only.
+# Below this, zeros are rare enough to model directly without an offset pass.
+_SKEWNORMAL_HIST_GATE_THRESHOLD: float = 0.05
+# Minimum coefficient of variation for the SkewNormal branch.  Prevents
+# degenerate near-zero CV when all players have nearly identical outcomes.
+_SKEWNORMAL_CV_FLOOR: float = 0.05
+# Shape parameter cap for the NegBin / ZINB count branch.  Very large R values
+# collapse NegBin toward Poisson and destabilize optimization.
+_COUNT_BRANCH_R_CAP: int = 50
+# Quantile of per-player NegBin R estimates used as the marginal shape prior.
+# 95th-percentile trims outlier players without discarding the heavy tail.
+_MARGINAL_SHAPE_QUANTILE: float = 0.95
+# Floor on the marginal shape prior — avoids a degenerate shape_ceiling of ~0
+# when the market has near-zero variance across all players.
+_MARGINAL_SHAPE_FLOOR: float = 0.5
+# Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
+# headroom to exceed the prior while preventing runaway over-dispersion.
+_SHAPE_CEILING_MULTIPLIER: float = 2.0
 
 
 # Fixed RNG seed for --deterministic runs (debug/eval only).
 DETERMINISTIC_SEED = 1234
+
+# RNG seed for the val/test random split inside ``_step_build_splits``.
+# Arbitrary but fixed so the split boundary is stable across reruns on the
+# same dataset.
+_VAL_SPLIT_RANDOM_STATE: int = 25
 
 # Deterministic-mode model pickles live OUTSIDE the installed package tree so
 # the research harness can iterate on them without polluting the production
@@ -444,7 +487,7 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
         cv = stat_cv[league].get(market, 1)
         step = None
 
-    print(f"Training {league} - {market}")
+    logger.info("Training %s - %s", league, market)
     cv = stat_cv[league].get(market, 1)
     return {
         "filedict": filedict,
@@ -463,6 +506,7 @@ def _step_load_matrix(
     stat_data,
     league: str,
     market: str,
+    *,
     deterministic: bool,
     force: bool,
     need_model: bool,
@@ -502,7 +546,7 @@ def _step_load_matrix(
 
     M = pd.concat([M, new_M], ignore_index=True)
     if M.empty:
-        print(f"  No usable training data for {league} {market}, skipping")
+        logger.warning("  No usable training data for %s %s, skipping", league, market)
         return None
     M.Date = pd.to_datetime(M.Date, format="mixed")
     if "Player" in M.columns:
@@ -550,7 +594,7 @@ def _step_synthesize_odds(
 
 
 def _step_persist_matrix_and_comps(
-    M: pd.DataFrame, filepath, deterministic: bool, stat_data
+    M: pd.DataFrame, filepath, stat_data, *, deterministic: bool
 ) -> pd.DataFrame:
     """Trim the matrix, write parquet, save comps. Deterministic mode skips I/O."""
     M = trim_matrix(M, 15000)
@@ -560,18 +604,42 @@ def _step_persist_matrix_and_comps(
     return M
 
 
-def _step_scout_features(
-    rebuild_filter: bool, league: str, market: str, M: pd.DataFrame, stat_data
-) -> None:
-    """Run the SHAP scouting pass if ``rebuild_filter`` is set."""
-    if not rebuild_filter:
-        return
-    print("  Scouting pass for filter rebuild...")
-    diag = _scouting_shap_and_filter(league, market, M, stat_data)
-    if diag is not None:
-        print(
-            f"  Filter: kept={diag['n_kept']} dropped={diag['n_dropped']} added={diag['n_added']}"
-        )
+# Must survive pruning even when constant: `set_model_start_values`
+# (helpers/distributions.py) reads these unconditionally. Canonical
+# failure: NBA MIN has ZeroYr ≡ 0 (gamelog excludes DNPs → minutes
+# never zero). LightGBM cost of carrying a constant feature is negligible.
+_SEEDING_REQUIRED_COLUMNS: tuple[str, ...] = ("MeanYr", "STDYr", "ZeroYr")
+
+
+def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[str]) -> list[str]:
+    """Return the subset of ``X_train.columns`` LightGBM can split on.
+
+    A column is dropped when ``X_train`` shows it is entirely NaN or has
+    fewer than two distinct non-NaN values (zero variance). Such columns
+    can never improve the loss — LightGBM has nothing to split on — so
+    dropping them is mathematically lossless. The win is wall-time:
+    per-trial Optuna cost scales linearly with feature count, and the
+    2026-05-27 no-filter rewire ballooned the candidate set to ~440
+    features per NFL cell, of which a non-trivial slice is sparse on a
+    given cell.
+
+    Categorical columns and ``_SEEDING_REQUIRED_COLUMNS`` are always kept.
+    LightGBM treats categoricals as a special split type, and the seeding
+    columns are consumed unconditionally by ``set_model_start_values``
+    regardless of whether they have splittable variance.
+    """
+    keep: list[str] = []
+    for col in X_train.columns:
+        if col in categorical_cols or col in _SEEDING_REQUIRED_COLUMNS:
+            keep.append(col)
+            continue
+        s = X_train[col]
+        if s.isna().all():
+            continue
+        if s.nunique(dropna=True) < 2:
+            continue
+        keep.append(col)
+    return keep
 
 
 def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
@@ -588,7 +656,16 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
         ``B_validation``, ``y_train_labels``.
     """
     y = M[["Result"]]
-    X = M[stat_data.get_stat_columns(market)]
+    # ``reindex`` over ``M[cols]`` so a stale cached parquet that hasn't been
+    # regenerated since the last ``feature_filter.json`` schema addition fills
+    # the new columns with NaN instead of raising KeyError. LightGBM treats
+    # NaN as a missing-value category deterministically, so the deterministic
+    # gate (``test_deterministic_mode_hurdle_is_bit_reproducible_*``) remains
+    # bit-reproducible when running against an older cache. Production
+    # non-``--deterministic`` runs rebuild new_M with the current schema and
+    # concat-fill old cached rows the same way, so behavior is identical on
+    # the happy path.
+    X = M.reindex(columns=stat_data.get_stat_columns(market))
 
     categories = ["Home", "Player position"]
     if "Player position" not in X.columns:
@@ -596,10 +673,10 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     for c in categories:
         X[c] = X[c].astype("category")
 
-    # Temporal split: earliest 70% to train, latest 30% to test
+    # Temporal split: earliest _TRAIN_FRACTION to train, remainder to test
     M_sorted = M.sort_values("Date")
     n = len(M_sorted)
-    n_train = int(n * 0.7)
+    n_train = int(n * _TRAIN_FRACTION)
     train_idx = M_sorted.index[:n_train]
     test_idx = M_sorted.index[n_train:]
 
@@ -608,8 +685,22 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     X_test = X.loc[test_idx]
     y_test = y.loc[test_idx]
 
+    # Drop columns LightGBM cannot meaningfully split on. The mask is
+    # computed on ``X_train`` only so test rows never influence which
+    # features survive. The post-prune column list is persisted as
+    # ``expected_columns`` in the model pickle (see ``_build_filedict``);
+    # the inference path slices each offer's feature frame to that list
+    # before ``model.predict`` (see ``match_offers`` in
+    # ``prediction/scoring.py``), so pruning at train time propagates
+    # cleanly to serving without any inference-side change.
+    kept_cols = _prune_uninformative_features(X_train, categories)
+    if len(kept_cols) < len(X.columns):
+        X = X[kept_cols]
+        X_train = X_train[kept_cols]
+        X_test = X_test[kept_cols]
+
     X_test, X_validation, y_test, y_validation = train_test_split(
-        X_test, y_test, test_size=0.5, random_state=25
+        X_test, y_test, test_size=0.5, random_state=_VAL_SPLIT_RANDOM_STATE
     )
 
     B_train = M.loc[X_train.index, ["Line", "Odds", "EV"]]
@@ -638,6 +729,7 @@ def _step_build_lss_model(
     dist_obj,
     X_train,
     shape_ceiling,
+    *,
     normalize: bool,
     offset_mode: bool,
     use_hurdle: bool,
@@ -675,10 +767,11 @@ def _step_select_hyperparams(
     X_train,
     dist: str,
     model,
-    use_hurdle: bool,
-    deterministic: bool,
     opt_params_in: dict | None,
     dtrain,
+    *,
+    use_hurdle: bool,
+    deterministic: bool,
 ) -> tuple[dict, list[int]]:
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
@@ -755,13 +848,13 @@ def _step_select_hyperparams(
 
 
 def _step_fit_model(
-    use_hurdle: bool,
     dist: str,
     dist_obj,
     X_train,
     y_train_labels,
     opt_params: dict,
     *,
+    use_hurdle: bool,
     normalize: bool,
     offset_mode: bool,
     shape_ceiling,
@@ -787,7 +880,7 @@ def _step_fit_model(
 
 
 def _step_predict_splits(
-    model, dist: str, splits: dict, normalize: bool, offset_mode: bool
+    model, dist: str, splits: dict, *, normalize: bool, offset_mode: bool
 ) -> dict:
     """Predict raw distribution params on train/validation/test splits.
 
@@ -888,7 +981,7 @@ def _step_compute_mode_stats(
     """Compute the legacy prec/acc/sharp/ll/over_pct/under_prec arrays (length-3).
 
     Index 0 = raw, 1 = no_filt (post-blend, pre-temp), 2 = filt (post-temp).
-    Confidence mask is ``max(proba) > 0.54``.
+    Confidence mask is ``max(proba) > _MODE_CONFIDENCE_THRESHOLD``.
     """
     prec = np.zeros(3)
     acc = np.zeros(3)
@@ -898,7 +991,7 @@ def _step_compute_mode_stats(
     under_prec = np.zeros(3)
     for i, y_proba in enumerate([y_proba_raw, y_proba_no_filt, y_proba_filt]):
         y_pred = (y_proba > 0.5).astype(int)[:, 1]
-        mask = np.max(y_proba, axis=1) > 0.54
+        mask = np.max(y_proba, axis=1) > _MODE_CONFIDENCE_THRESHOLD
         prec[i] = precision_score(y_class[mask], y_pred[mask])
         acc[i] = accuracy_score(y_class[mask], y_pred[mask])
         sharp[i] = np.std(y_proba[:, 1])
@@ -961,14 +1054,17 @@ def _step_compute_diagnostics(
         diag_shape_label = "alpha"
     elif dist in ("NegBin", "ZINB"):
         diag_start_shape = float(
-            np.clip(test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6), 1, 50)
+            np.clip(
+                test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6),
+                1,
+                _COUNT_BRANCH_R_CAP,
+            )
         )
         diag_model_shape = float(prob_params["total_count"].mean())
-        R_CAP = 50
         per_player_emp_r = player_stats.mean() ** 2 / np.maximum(
             player_stats.var() - player_stats.mean(), 0.01
         )
-        per_player_emp_r = np.minimum(per_player_emp_r, R_CAP)
+        per_player_emp_r = np.minimum(per_player_emp_r, _COUNT_BRANCH_R_CAP)
         diag_empirical_shape = float(np.median(per_player_emp_r))
         diag_shape_label = "r"
 
@@ -989,15 +1085,15 @@ def _step_compute_diagnostics(
 
     ev_gt_mask = ev_minus_line_arr > 0
     ev_lt_mask = ev_minus_line_arr <= 0
-    conf_mask = np.max(y_proba_no_filt, axis=1) > 0.54
+    conf_mask = np.max(y_proba_no_filt, axis=1) > _MODE_CONFIDENCE_THRESHOLD
     diag_over_pct_ev_gt = (
         float(y_class[ev_gt_mask & conf_mask].mean())
-        if (ev_gt_mask & conf_mask).sum() > 10
+        if (ev_gt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
         else float("nan")
     )
     diag_over_pct_ev_lt = (
         float(y_class[ev_lt_mask & conf_mask].mean())
-        if (ev_lt_mask & conf_mask).sum() > 10
+        if (ev_lt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
         else float("nan")
     )
 
@@ -1024,9 +1120,11 @@ def _step_compute_diagnostics(
             )
         cf_over = 1 - cf_under
         cf_pred = (cf_over > 0.5).astype(int)
-        cf_mask = np.maximum(cf_under, cf_over) > 0.54
+        cf_mask = np.maximum(cf_under, cf_over) > _MODE_CONFIDENCE_THRESHOLD
         diag_cf_over_pct = (
-            float(cf_pred[cf_mask].mean() / cf_mask.mean()) if cf_mask.sum() > 10 else float("nan")
+            float(cf_pred[cf_mask].mean() / cf_mask.mean())
+            if cf_mask.sum() > _MIN_DIAGNOSTIC_ROWS
+            else float("nan")
         )
     else:
         diag_cf_over_pct = float("nan")
@@ -1197,7 +1295,7 @@ def _step_persist_artifacts(
         X_test["SN_Loc"] = prob_params["loc"]
         X_test["SN_Scale"] = prob_params["scale"]
         X_test["SN_Alpha"] = prob_params["alpha"]
-        if hist_gate > 0.02:
+        if hist_gate > _HIST_GATE_THRESHOLD:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
         base_ev = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
@@ -1216,10 +1314,10 @@ def _step_persist_artifacts(
     X_test["P"] = y_proba_filt[:, 1]
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
-    # compression-eval harness can score artifacts without overwriting
-    # production. Training-data parquet and the whole-suite report() stay
-    # suppressed (input is unchanged under input-freeze; report() is not
-    # per-market and would clobber the production training_report.txt).
+    # scorecard harness can score artifacts without overwriting production.
+    # Training-data parquet and the whole-suite report() stay suppressed
+    # (input is unchanged under input-freeze; report() is not per-market and
+    # would clobber the production data/training/model_stats.{parquet,csv}).
     # Test-set CSVs remain inside the package data tree; only the model
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
@@ -1350,7 +1448,7 @@ def _step_calibrate_dispersion(
             "SkewNormal",
             sigma=decoded["sn_sigma_val"],
             skew_alpha=decoded["sn_alpha_val"],
-            **(dict(gate_book=hist_gate) if hist_gate > 0.02 else {}),
+            **({"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}),
         )
         out["val_weighted_mean_val"] = val_weighted_mean_val
         return out
@@ -1501,7 +1599,7 @@ def _step_decode_predictions(
     SkewNormal: applies the strategy's decode_loc/decode_scale then adds the
     skew-normal mean adjustment ``delta * sqrt(2/pi)``. NegBin/ZINB: EV = r·p/(1−p).
     Gamma/ZAGamma: EV = α/β. Synthesizes a constant ``gate_*`` vector for
-    SkewNormal when ``hist_gate > 0.02`` (no per-row gate from the model).
+    SkewNormal when ``hist_gate > _HIST_GATE_THRESHOLD`` (no per-row gate from the model).
 
     Returns:
         Dict with: ``ev``, ``ev_validation``, ``gate_test``, ``gate_validation``,
@@ -1552,7 +1650,7 @@ def _step_decode_predictions(
         out["sn_alpha_test"] = alpha_sn
         out["sn_alpha_val"] = alpha_sn_val
 
-        if hist_gate > 0.02:
+        if hist_gate > _HIST_GATE_THRESHOLD:
             out["gate_test"] = np.full_like(ev, hist_gate)
             out["gate_validation"] = np.full_like(ev_validation, hist_gate)
 
@@ -1642,7 +1740,7 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        _zi_kwargs = dict(gate_book=hist_gate) if hist_gate > 0.02 else {}
+        _zi_kwargs = {"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}
         model_weight = fit_model_weight(
             ev_validation,
             book_ev_val,
@@ -1689,7 +1787,7 @@ def _step_fuse_predictions(
 
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
-        _zi_kwargs = dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
+        _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
     model_weight = fit_model_weight(
         ev_validation,
         book_ev_val,
@@ -1704,10 +1802,10 @@ def _step_fuse_predictions(
 
     if dist in ("NegBin", "ZINB"):
         _zi_test = (
-            dict(gate_model=decoded["gate_test"], gate_book=hist_gate) if dist == "ZINB" else {}
+            {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
         )
         _zi_val = (
-            dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
+            {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
             if dist == "ZINB"
             else {}
         )
@@ -1744,10 +1842,10 @@ def _step_fuse_predictions(
 
     # Gamma / ZAGamma
     _zi_test = (
-        dict(gate_model=decoded["gate_test"], gate_book=hist_gate) if dist == "ZAGamma" else {}
+        {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZAGamma" else {}
     )
     _zi_val = (
-        dict(gate_model=decoded["gate_validation"], gate_book=hist_gate)
+        {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
         if dist == "ZAGamma"
         else {}
     )
@@ -1790,13 +1888,15 @@ def _step_select_distribution(
     league: str,
     target_strategy: str,
     zinb_mode: str,
+    *,
     deterministic: bool,
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Branch logic: ``global_mean >= 2.0`` → SkewNormal, otherwise NegBin (escalated
-    to ZINB when ``hist_gate > 0.02``). For SkewNormal, drops zero rows when
-    ``hist_gate > 0.05`` and applies the strategy's forward transform.
+    Branch logic: ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, otherwise
+    NegBin (escalated to ZINB when ``hist_gate > _HIST_GATE_THRESHOLD``). For SkewNormal,
+    drops zero rows when ``hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD`` and applies the
+    strategy's forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
@@ -1848,7 +1948,7 @@ def _step_select_distribution(
     strategy = baselines.get_strategy(target_strategy)
     dist_obj = None
 
-    if global_mean >= 2.0:
+    if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
         dist = "SkewNormal"
         dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
 
@@ -1858,11 +1958,13 @@ def _step_select_distribution(
             * player_stats.count()
             / player_stats.count().sum()
         ).sum()
-        cv = max(cv, 0.05)
+        cv = max(cv, _SKEWNORMAL_CV_FLOOR)
         shape_ceiling = None
-        marginal_shape = None
+        # NaN not None: count-branch marginal-shape doesn't apply here, and
+        # float(None) raises TypeError in _wide_row's _diag() helper.
+        marginal_shape = float("nan")
 
-        if hist_gate > 0.05:
+        if hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD:
             nonzero_mask = y_train_labels > 0
             X_train = X_train[nonzero_mask]
             y_train_labels = y_train_labels[nonzero_mask]
@@ -1875,7 +1977,7 @@ def _step_select_distribution(
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
     else:
         dist = "NegBin"
-        if hist_gate > 0.02:
+        if hist_gate > _HIST_GATE_THRESHOLD:
             dist = "ZINB"
         if dist == "NegBin":
             dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
@@ -1884,15 +1986,16 @@ def _step_select_distribution(
             dist_obj = ZINB(stabilization="None", loss_fn="nll")
         # else: hurdle path — dist_obj is not constructed; HurdleZINB is built at fit time.
 
-        R_CAP = 50
         per_player_r = player_stats.mean() ** 2 / np.maximum(
             player_stats.var() - player_stats.mean(), 0.01
         )
-        per_player_r = np.minimum(per_player_r, R_CAP)
+        per_player_r = np.minimum(per_player_r, _COUNT_BRANCH_R_CAP)
 
-        marginal_shape = max(float(np.quantile(per_player_r, 0.95)), 0.5)
-        K_SHAPE = 2.0
-        shape_ceiling = marginal_shape * K_SHAPE
+        marginal_shape = max(
+            float(np.quantile(per_player_r, _MARGINAL_SHAPE_QUANTILE)),
+            _MARGINAL_SHAPE_FLOOR,
+        )
+        shape_ceiling = marginal_shape * _SHAPE_CEILING_MULTIPLIER
 
         cv = (1 / per_player_r * player_stats.count() / player_stats.count().sum()).sum()
         cv = max(cv, 1 / shape_ceiling)
@@ -1932,10 +2035,10 @@ def train_market(
     league: str,
     market: str,
     stat_data,
-    force: bool,
-    rebuild_filter: bool,
     archive,
     league_start_date,
+    *,
+    force: bool,
     deterministic: bool = False,
     target_strategy: str = "ratio_meanyr",
     zinb_mode: str = "joint",
@@ -1957,8 +2060,6 @@ def train_market(
         market: Market name (e.g. ``"FGA"``, ``"PTS"``).
         stat_data: League-specific ``Stats`` instance.
         force: Retrain even when no new training rows arrived.
-        rebuild_filter: Run the SHAP scouting pass and rebuild the feature
-            filter; invalidates any warm-start hyperparameters.
         archive: ``Archive`` instance (passed through for book weights).
         league_start_date: Earliest cutoff for training rows.
         deterministic: Pin RNGs and replace Optuna with fixed hyperparams for
@@ -1978,6 +2079,8 @@ def train_market(
             when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
             byte-identical to pre-P2.B production behavior.
     """
+    # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
+    # don't split. Already over the limit before the FBT keyword-only conversion.
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
@@ -1993,21 +2096,22 @@ def train_market(
         stat_data,
         league,
         market,
-        deterministic,
-        force,
-        init["need_model"],
+        deterministic=deterministic,
+        force=force,
+        need_model=init["need_model"],
     )
     if loaded is None:
         return
     M, training_data_path = loaded
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
-    M = _step_persist_matrix_and_comps(M, training_data_path, deterministic, stat_data)
-    _step_scout_features(rebuild_filter, league, market, M, stat_data)
+    M = _step_persist_matrix_and_comps(
+        M, training_data_path, stat_data, deterministic=deterministic
+    )
 
     splits = _step_build_splits(M, stat_data, market)
     dist_info = _step_select_distribution(
-        splits, stat_data, market, league, target_strategy, zinb_mode, deterministic
+        splits, stat_data, market, league, target_strategy, zinb_mode, deterministic=deterministic
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2020,29 +2124,28 @@ def train_market(
         dist_info["dist_obj"],
         splits["X_train"],
         shape_ceiling,
-        dist_info["normalize"],
-        dist_info["offset_mode"],
-        use_hurdle,
+        normalize=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        use_hurdle=use_hurdle,
     )
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
-    # Under --rebuild-filter, warm-starting from old pickle hyperparams is invalid.
-    opt_params_in = None if rebuild_filter else filedict.get("params")
+    opt_params_in = filedict.get("params")
     opt_params, _ = _step_select_hyperparams(
         splits["X_train"],
         dist,
         model,
-        use_hurdle,
-        deterministic,
         opt_params_in,
         dtrain,
+        use_hurdle=use_hurdle,
+        deterministic=deterministic,
     )
     model = _step_fit_model(
-        use_hurdle,
         dist,
         dist_info["dist_obj"],
         splits["X_train"],
         splits["y_train_labels"],
         opt_params,
+        use_hurdle=use_hurdle,
         normalize=dist_info["normalize"],
         offset_mode=dist_info["offset_mode"],
         shape_ceiling=shape_ceiling,
@@ -2050,7 +2153,7 @@ def train_market(
     )
 
     preds = _step_predict_splits(
-        model, dist, splits, dist_info["normalize"], dist_info["offset_mode"]
+        model, dist, splits, normalize=dist_info["normalize"], offset_mode=dist_info["offset_mode"]
     )
     prob_params = preds["prob_params"]
 
@@ -2150,6 +2253,18 @@ def train_market(
         target_strategy=target_strategy,
         zinb_mode=zinb_mode,
     )
+
+    # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the
+    # training/feature_importances.csv + feature_correlations.csv. After the
+    # 2026-05-27 no-filter rewire these CSVs are no longer used for selection;
+    # they survive purely so the dashboard can show importance drift over time.
+    # Skip in deterministic mode (artifacts must not leak from eval runs) and
+    # skip hurdle (HurdleZINB has two separate boosters; SHAP would need a
+    # custom path — defer to a follow-up if hurdle drift becomes interesting).
+    if not deterministic and not use_hurdle:
+        test_df = splits["X_test"].copy()
+        test_df["Result"] = splits["y_test"]["Result"].to_numpy()
+        compute_market_importance(league, market, model, test_df)
 
     if not deterministic:
         report()
