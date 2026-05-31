@@ -28,22 +28,29 @@ import numpy as np
 from scipy.optimize import brentq, minimize
 from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
 
+# Weight on the lower-bound tail violation in ``fit_distro``'s objective: the
+# clamp cares far more about a left-tail breach (mass below ``lower_bound``)
+# than a right-tail one, so its penalty is scaled up relative to the upper tail.
+LOWER_TAIL_PENALTY = 100
+
+# Above this raw value softplus(x) ≈ x to machine precision; ``_softplus_inv``
+# returns x directly past it to dodge expm1 overflow.
+SOFTPLUS_LINEAR_THRESHOLD = 20
+
 
 def odds_to_prob(odds):
     """Convert American odds to an implied probability."""
     if odds > 0:
         return 100 / (odds + 100)
-    else:
-        odds = -odds
-        return odds / (odds + 100)
+    odds = -odds
+    return odds / (odds + 100)
 
 
 def prob_to_odds(p):
     """Convert a probability to American odds (integer-rounded)."""
     if p < 0.5:
         return int(np.round((1 - p) / p * 100))
-    else:
-        return int(np.round((p / (1 - p)) * -100))
+    return int(np.round((p / (1 - p)) * -100))
 
 
 def no_vig_odds(over, under=None):
@@ -124,7 +131,7 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
             hi *= 2
         return float(brentq(_nb_residual, lo, hi, xtol=1e-8))
 
-    elif dist == "SkewNormal":
+    if dist == "SkewNormal":
         line = float(line)
         a = float(skew_alpha) if skew_alpha is not None else 0.0
 
@@ -147,17 +154,16 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
             return float(line)
         return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
 
-    else:
-        # Gamma / ZAGamma (default for all continuous distributions)
-        line = float(line)
-        alpha = 1.0 / (cv**2)
+    # Gamma / ZAGamma (default for all continuous distributions)
+    line = float(line)
+    alpha = 1.0 / (cv**2)
 
-        def _gamma_residual(mean):
-            return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
+    def _gamma_residual(mean):
+        return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
 
-        while _gamma_residual(hi) > 0:
-            hi *= 2
-        return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
+    while _gamma_residual(hi) > 0:
+        hi *= 2
+    return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
 
 
 def get_odds(
@@ -193,7 +199,7 @@ def get_odds(
     if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
         return poisson.cdf(line, ev) - poisson.pmf(line, ev) / 2
 
-    elif dist in ("NegBin", "ZINB"):
+    if dist in ("NegBin", "ZINB"):
         if r is None:
             r = 1 / cv
         p = r / (r + ev)
@@ -205,7 +211,7 @@ def get_odds(
             base_pmf = (1 - gate) * base_pmf
         return base_cdf - base_pmf / 2
 
-    elif dist == "SkewNormal":
+    if dist == "SkewNormal":
         sigma_val = sigma if sigma is not None else ev * cv
         a = skew_alpha if skew_alpha is not None else 0.0
         delta = a / np.sqrt(1 + a**2)
@@ -218,19 +224,18 @@ def get_odds(
         push = cdf_high - cdf_low
         return cdf_high - push / 2
 
-    else:
-        if alpha is None:
-            alpha = 1 / cv**2
+    if alpha is None:
+        alpha = 1 / cv**2
 
-        # Gamma / ZAGamma CDF
-        cdf_high = gamma.cdf(high, alpha, scale=ev / alpha)
-        cdf_low = gamma.cdf(low, alpha, scale=ev / alpha)
-        if gate is not None and dist == "ZAGamma":
-            # ZA-CDF: gate + (1 - gate) * base_CDF
-            cdf_high = gate + (1 - gate) * cdf_high
-            cdf_low = gate + (1 - gate) * cdf_low
-        push = cdf_high - cdf_low
-        return cdf_high - push / 2
+    # Gamma / ZAGamma CDF
+    cdf_high = gamma.cdf(high, alpha, scale=ev / alpha)
+    cdf_low = gamma.cdf(low, alpha, scale=ev / alpha)
+    if gate is not None and dist == "ZAGamma":
+        # ZA-CDF: gate + (1 - gate) * base_CDF
+        cdf_high = gate + (1 - gate) * cdf_high
+        cdf_low = gate + (1 - gate) * cdf_low
+    push = cdf_high - cdf_low
+    return cdf_high - push / 2
 
 
 def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=None, skew_alpha=None):
@@ -296,16 +301,15 @@ def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=0.1, upper_tol=0.0
         v = w if w >= 1 else 1 / w
         if s > 0:
             return (
-                100 * max((norm.cdf(lower_bound, w * m, v * s) - lower_tol), 0)
+                LOWER_TAIL_PENALTY * max((norm.cdf(lower_bound, w * m, v * s) - lower_tol), 0)
                 + max((norm.sf(upper_bound, w * m, v * s) - upper_tol), 0)
                 + np.power(1 - v, 2)
             )
-        else:
-            return (
-                100 * max((poisson.cdf(lower_bound, w * m) - lower_tol), 0)
-                + max((poisson.sf(upper_bound, w * m) - upper_tol), 0)
-                + np.power(1 - v, 2)
-            )
+        return (
+            LOWER_TAIL_PENALTY * max((poisson.cdf(lower_bound, w * m) - lower_tol), 0)
+            + max((poisson.sf(upper_bound, w * m) - upper_tol), 0)
+            + np.power(1 - v, 2)
+        )
 
     res = minimize(objective, [1], args=(mean, std), bounds=[(0.5, 2)], tol=1e-3, method="TNC")
     return res.x[0]
@@ -380,7 +384,7 @@ def fused_loc(
         p = r_blend / (r_blend + mu)
         return r_blend, p, gate_blend
 
-    elif dist == "SkewNormal":
+    if dist == "SkewNormal":
         ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
         ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
         model_sigma = np.clip(np.asarray(sigma, dtype=float), 1e-6, None)
@@ -408,18 +412,18 @@ def fused_loc(
 
         return blended_ev, blended_sigma, blended_skew, gate_blend
 
-    else:  # Gamma — precision-weighted blend.
-        ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
-        ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
-        model_alpha = np.clip(np.asarray(alpha, dtype=float), 1e-9, None)
-        book_alpha = 1 / cv**2
-        inv_var_m = model_alpha / ev_a**2
-        inv_var_b = book_alpha / ev_b**2
-        total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
-        blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
-        blended_alpha = blended_mean**2 * total_inv_var
-        blended_beta = blended_mean * total_inv_var
-        return blended_alpha, blended_beta, gate_blend
+    # Gamma — precision-weighted blend.
+    ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
+    ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
+    model_alpha = np.clip(np.asarray(alpha, dtype=float), 1e-9, None)
+    book_alpha = 1 / cv**2
+    inv_var_m = model_alpha / ev_a**2
+    inv_var_b = book_alpha / ev_b**2
+    total_inv_var = w * inv_var_m + (1 - w) * inv_var_b
+    blended_mean = (w * ev_a * inv_var_m + (1 - w) * ev_b * inv_var_b) / total_inv_var
+    blended_alpha = blended_mean**2 * total_inv_var
+    blended_beta = blended_mean * total_inv_var
+    return blended_alpha, blended_beta, gate_blend
 
 
 def set_model_start_values(
@@ -447,7 +451,7 @@ def set_model_start_values(
         normalized: If ``True``, targets are already normalized to
             ``Result/MeanYr ≈ 1.0`` and start values are set for that space.
         offset_mode: SkewNormal-only. If ``True``, targets are an additive
-            centered residual (``y − baseline``), so ``loc`` is seeded at
+            centered residual (``y - baseline``), so ``loc`` is seeded at
             zero per row and ``scale`` at per-player STDYr (residual
             dispersion ≈ per-player std). Mutually exclusive with
             ``normalized``; ignored for non-SkewNormal distributions.
@@ -456,7 +460,11 @@ def set_model_start_values(
 
     def _softplus_inv(x):
         x = np.asarray(x, dtype=float)
-        return np.where(x > 20, x, np.log(np.expm1(np.clip(x, 1e-4, 20))))
+        return np.where(
+            x > SOFTPLUS_LINEAR_THRESHOLD,
+            x,
+            np.log(np.expm1(np.clip(x, 1e-4, SOFTPLUS_LINEAR_THRESHOLD))),
+        )
 
     sv = X_data[["MeanYr", "STDYr", "ZeroYr"]].to_numpy()
     n = len(sv)
@@ -470,7 +478,7 @@ def set_model_start_values(
 
     if dist == "SkewNormal":
         if offset_mode:
-            # Additive centered residual target (y − baseline): residual mean
+            # Additive centered residual target (y - baseline): residual mean
             # ≈ 0 per row; scale starts at per-player STDYr. Explicit per-row
             # broadcast — must be (n,) not scalar (a degenerate scalar 0 was
             # a confirmed seeding regression in the overconfidence

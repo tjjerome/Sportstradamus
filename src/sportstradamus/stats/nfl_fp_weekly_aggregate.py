@@ -965,8 +965,7 @@ def load_multi_window_one_year(
     if pbp is not None and not by_player_id.empty:
         by_player_id = by_player_id.combine_first(pbp)
 
-    by_player_id = _join_nfl_players(by_player_id)
-    return by_player_id
+    return _join_nfl_players(by_player_id)
 
 
 def _broadcast_team_coverage(
@@ -1519,8 +1518,7 @@ def _project_to_name_index(by_player_id: pd.DataFrame) -> pd.DataFrame:
     # Drop intermediate name columns; ``Name`` survives for downstream
     # ``build_comp_profile`` re-indexing.
     by_player_id = by_player_id.drop(columns=["First", "Last"])
-    by_player_id = by_player_id.loc[~by_player_id.index.duplicated(keep="last")]
-    return by_player_id
+    return by_player_id.loc[~by_player_id.index.duplicated(keep="last")]
 
 
 def _derive_aggregate_metrics(profile: pd.DataFrame) -> pd.DataFrame:

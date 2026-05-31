@@ -145,9 +145,8 @@ class StatsMLB(Stats):
             awayInning1Hits = linescore["innings"][0]["away"]["hits"]
             homeInning1Hits = linescore["innings"][0]["home"]["hits"]
 
-            away_bullpen = {
-                k: 0
-                for k in [
+            away_bullpen = dict.fromkeys(
+                [
                     "pitches thrown",
                     "pitcher strikeouts",
                     "pitching outs",
@@ -156,8 +155,9 @@ class StatsMLB(Stats):
                     "hits allowed",
                     "home runs allowed",
                     "runs allowed",
-                ]
-            }
+                ],
+                0,
+            )
             for v in boxscore["teams"]["away"]["players"].values():
                 if v["person"]["id"] == awayPitcherId or v.get("battingOrder"):
                     n = {
@@ -376,9 +376,8 @@ class StatsMLB(Stats):
                     away_bullpen["home runs allowed"] += v["stats"]["pitching"].get("homeRuns", 0)
                     away_bullpen["runs allowed"] += v["stats"]["pitching"].get("runs", 0)
 
-            home_bullpen = {
-                k: 0
-                for k in [
+            home_bullpen = dict.fromkeys(
+                [
                     "pitches thrown",
                     "pitcher strikeouts",
                     "pitching outs",
@@ -387,8 +386,9 @@ class StatsMLB(Stats):
                     "hits allowed",
                     "home runs allowed",
                     "runs allowed",
-                ]
-            }
+                ],
+                0,
+            )
             for v in boxscore["teams"]["home"]["players"].values():
                 if v["person"]["id"] == homePitcherId or v.get("battingOrder"):
                     n = {
@@ -951,7 +951,7 @@ class StatsMLB(Stats):
         self.pitcherProfile = pd.DataFrame(columns=["z", "home", "moneyline gain", "totals gain"])
 
         # Filter non-starting pitchers or non-starting batters depending on the market
-        if any([string in market for string in ["allowed", "pitch"]]):
+        if any(string in market for string in ["allowed", "pitch"]):
             gamelog = self.short_gamelog[self.short_gamelog["starting pitcher"]].copy()
         else:
             gamelog = self.short_gamelog[self.short_gamelog["starting batter"]].copy()
@@ -1087,7 +1087,7 @@ class StatsMLB(Stats):
                 )[0]
             )
 
-        if not any([string in market for string in ["allowed", "pitch"]]):
+        if not any(string in market for string in ["allowed", "pitch"]):
             self.pitcherProfile = self.pitcherProfile.join(
                 self.playerProfile[self.stat_types["pitching"]]
             )
@@ -1188,8 +1188,7 @@ class StatsMLB(Stats):
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
-                else:
-                    ev += v
+                ev += v
 
         elif "fantasy" in market:
             book_odds = False

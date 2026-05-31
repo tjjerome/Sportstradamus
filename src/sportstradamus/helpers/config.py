@@ -28,13 +28,12 @@ legacy ``.get(..., default)`` call sites already tolerate.
 
 import importlib.resources as pkg_resources
 import json
-import os
 
 from sportstradamus import creds, data
 
 # --- API keys ---------------------------------------------------------------
 
-with open(pkg_resources.files(creds) / "keys.json") as infile:
+with (pkg_resources.files(creds) / "keys.json").open() as infile:
     _keys = json.load(infile)
     odds_api = _keys["odds_api"]
 
@@ -42,13 +41,13 @@ with open(pkg_resources.files(creds) / "keys.json") as infile:
 
 _config_dir = pkg_resources.files(data) / "config"
 
-with open(_config_dir / "abbreviations.json") as infile:
+with (_config_dir / "abbreviations.json").open() as infile:
     abbreviations = json.load(infile)
 
-with open(_config_dir / "combo_props.json") as infile:
+with (_config_dir / "combo_props.json").open() as infile:
     combo_props = json.load(infile)
 
-with open(_config_dir / "stat_meta.json") as infile:
+with (_config_dir / "stat_meta.json").open() as infile:
     _stat_meta_committed: dict[str, dict[str, dict]] = json.load(infile)
 
 # stat_calibration.json is gitignored — a fresh clone may not have it. In
@@ -56,8 +55,8 @@ with open(_config_dir / "stat_meta.json") as infile:
 # values on its first run, matching the legacy stat_cv/stat_std behavior
 # (those files were already gitignored).
 _cal_path = _config_dir / "stat_calibration.json"
-if os.path.isfile(_cal_path):
-    with open(_cal_path) as infile:
+if _cal_path.is_file():
+    with _cal_path.open() as infile:
         _stat_cal: dict[str, dict[str, dict]] = json.load(infile)
 else:
     _stat_cal = {}
@@ -97,22 +96,22 @@ stat_zi: dict[str, dict[str, float]] = {
     for league, markets in stat_meta.items()
 }
 
-with open(_config_dir / "stat_map.json") as infile:
+with (_config_dir / "stat_map.json").open() as infile:
     stat_map = json.load(infile)
 
-with open(_config_dir / "book_weights.json") as infile:
+with (_config_dir / "book_weights.json").open() as infile:
     book_weights = json.load(infile)
 
-with open(_config_dir / "prop_books.json") as infile:
+with (_config_dir / "prop_books.json").open() as infile:
     books = json.load(infile)
 
-with open(_config_dir / "goalies.json") as infile:
+with (_config_dir / "goalies.json").open() as infile:
     nhl_goalies = json.load(infile)
 
-with open(_config_dir / "feature_filter.json") as infile:
+with (_config_dir / "feature_filter.json").open() as infile:
     feature_filter = json.load(infile)
 
-with open(_config_dir / "banned_combos.json") as infile:
+with (_config_dir / "banned_combos.json").open() as infile:
     banned = json.load(infile)
 
 # Banned combos ship with player-name keys joined by " & "; rewrite as
@@ -126,14 +125,14 @@ for platform in banned:
             frozenset(k.split(" & ")): v for k, v in banned[platform][league]["opponent"].items()
         }
 
-with open(_config_dir / "name_map.json") as infile:
+with (_config_dir / "name_map.json").open() as infile:
     name_map = json.load(infile)
 
 # Underdog contest-variant payouts feed parlay scoring + display reconciliation
 # in :mod:`sportstradamus.prediction.correlation`. Keys are bet sizes encoded
 # as strings; rewrite to int keys so callers can index by ``bet_size``
 # directly.
-with open(_config_dir / "underdog_payouts.json") as infile:
+with (_config_dir / "underdog_payouts.json").open() as infile:
     _raw_underdog = json.load(infile)
 
 underdog_payouts: dict[str, dict[int, float | list[float]]] = {}
