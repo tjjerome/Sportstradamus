@@ -1357,11 +1357,27 @@ def _supersede_headline(v: dict[str, object]) -> str:
 
 
 def append_run_log(card: Scorecard, log_path: Path) -> None:
-    """Append a scorecard row to the cross-session run log CSV."""
+    """Append a scorecard row to the cross-session run log CSV.
+
+    The :class:`Scorecard` schema only grows (new fields are appended last), so a
+    log first written under an older, shorter header keeps that stale header while
+    later rows carry the extra trailing columns — a ragged file ``pd.read_csv``
+    rejects. When the on-disk header no longer matches the current columns,
+    re-header the whole file (back-filling new columns as NaN for historical rows)
+    before appending; otherwise take the plain append fast path.
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     row = pd.DataFrame([asdict(card)])
-    header = not log_path.exists()
-    row.to_csv(log_path, mode="a", header=header, index=False)
+    if not log_path.exists():
+        row.to_csv(log_path, index=False)
+        return
+    with log_path.open() as fh:
+        on_disk_header = fh.readline().rstrip("\r\n")
+    if on_disk_header == ",".join(row.columns):
+        row.to_csv(log_path, mode="a", header=False, index=False)
+        return
+    migrated = pd.read_csv(log_path).reindex(columns=row.columns)
+    pd.concat([migrated, row], ignore_index=True).to_csv(log_path, index=False)
 
 
 def write_scatter(df: pd.DataFrame, pred_col: str, out_path: Path, title: str) -> None:
