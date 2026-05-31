@@ -52,10 +52,16 @@ def reset_archive_singleton():
     _reset(Archive._instance)
 
 
-# Files in ``src/sportstradamus/data/`` that ``meditate`` rewrites mid-run.
+# Files under ``src/sportstradamus/data/`` that the pipeline rewrites mid-run.
 # We snapshot their bytes at test setup and restore on teardown so the
-# integration suite leaves no on-disk side effects.
-_DATA_FILES_TO_PROTECT = ("book_weights.json", "upcoming_events.json")
+# integration suite leaves no on-disk side effects. ``config/stat_meta.json``
+# is COMMITTED -- meditate's gate/ship logic rewrites its ``shipped`` fields
+# from fixture gate results, which must never be left staged against production.
+_DATA_FILES_TO_PROTECT = (
+    "book_weights.json",
+    "upcoming_events.json",
+    "config/stat_meta.json",
+)
 
 
 def _data_dir_real_path() -> Path:
@@ -73,16 +79,18 @@ def _data_dir_real_path() -> Path:
     raise RuntimeError(msg)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def preserve_data_files():
     """Snapshot/restore mutable JSON config files in the ``data`` package.
 
-    ``meditate`` rewrites ``book_weights.json``; ``confer --fixture-dir``
-    rewrites ``upcoming_events.json``. The smoke test's stubs prevent
-    those writes from carrying real production data, but the underlying
-    file truncation still mutates the on-disk bytes — this fixture
-    captures them up front and writes them back on teardown so the
-    integration suite leaves no on-disk side effects.
+    ``meditate`` rewrites ``book_weights.json`` and, via the gate/ship logic,
+    the ``shipped`` fields of the committed ``config/stat_meta.json``;
+    ``confer --fixture-dir`` rewrites ``upcoming_events.json``. The smoke
+    test's stubs prevent those writes from carrying real production data, but
+    the underlying file truncation still mutates the on-disk bytes — this
+    fixture captures them up front and writes them back on teardown so the
+    integration suite leaves no on-disk side effects. Autouse so every
+    integration test is covered, not just the ones that opt in.
     """
     data_root = _data_dir_real_path()
     snapshots = {

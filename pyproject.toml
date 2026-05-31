@@ -43,8 +43,10 @@ scrapeops-python-requests = "^0.4.7"
 streamlit = ">=1.38"
 plotly = ">=5.18"
 streamlit-aggrid = "^1.2.1.post2"
+# Research-only (model-research branch): powers scripts/zinb_routing_diagnostics.py,
+# which was stripped from devel along with statsmodels. Re-added here so the
+# diagnostic and its golden test still resolve on this branch; devel has neither.
 statsmodels = "^0.14.6"
-powershap = "^0.1.0.1"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.prediction.cli:main"
