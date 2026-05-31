@@ -487,7 +487,7 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
         cv = stat_cv[league].get(market, 1)
         step = None
 
-    print(f"Training {league} - {market}")
+    logger.info("Training %s - %s", league, market)
     cv = stat_cv[league].get(market, 1)
     return {
         "filedict": filedict,
@@ -545,7 +545,7 @@ def _step_load_matrix(
 
     M = pd.concat([M, new_M], ignore_index=True)
     if M.empty:
-        print(f"  No usable training data for {league} {market}, skipping")
+        logger.warning("  No usable training data for %s %s, skipping", league, market)
         return None
     M.Date = pd.to_datetime(M.Date, format="mixed")
     if "Player" in M.columns:

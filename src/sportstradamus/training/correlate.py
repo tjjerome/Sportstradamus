@@ -31,6 +31,9 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.helpers import get_logger
+
+logger = get_logger(__name__)
 
 # Lookback window for game inclusion. ~1 calendar year covers a full regular
 # season + post-season for the major leagues.
@@ -745,7 +748,7 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
     When the prior run's outputs are present and the inputs are unchanged
     (gamelog freshness, tracked stat schema, and module constants all
     match the prior ``cache_key`` in ``corr_metadata.json``), the function
-    prints a "cache valid" line and returns without recomputing. Pass
+    logs a "cache valid" line and returns without recomputing. Pass
     ``force=True`` (CLI: ``--rebuild-correlations`` or ``--force``) to
     bypass the skip.
 
@@ -771,12 +774,12 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
             per-game record cache from scratch instead of reusing the prior
             run's parquet.
     """
-    print(f"Correlating {league}...")
+    logger.info("Correlating %s...", league)
     log = stat_data
 
     cache_key = _build_cache_key(league, log)
     if not force and _corr_outputs_present(league) and _cache_key_matches(league, cache_key):
-        print(f"Correlating {league}... cache valid, skipped")
+        logger.info("Correlating %s... cache valid, skipped", league)
         return
 
     training_data_dir = pkg_resources.files(data) / "training_data"
