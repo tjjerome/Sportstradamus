@@ -22,18 +22,28 @@ goes to production once it proves it — Tier-0 gate offline → 14-day
 Gate-2 soak live → graduate. A cell promoted but still in 14-day soak
 counts toward the 75% numerator (ship-incrementally).
 
-## Current state (scorecard snapshot 2026-05-23, post-Step-0.5 audit)
+## Current state (model_stats.parquet, May-30 retrain + Step 0.7 g4 fix, 2026-05-31)
 
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
-| NBA | 18 | 21 | 86% | 16 | **+2** |
-| NFL | 11 | 20 | 55% | 15 | **−4** |
+| NBA | 18 | 21 | 86% | 16 | **+2 ✓** |
+| NFL | 12 | 20 | 60% | 15 | **−3** |
 | WNBA | 12 | 18 | 67% | 14 | **−2** |
 
-Source: [`data/training/tier0_scorecard.csv`](../src/sportstradamus/data/training/tier0_scorecard.csv),
-strategy `ship75-step0-g4audit-2026-05-23`. `ship = g1_pass AND g2_pass AND
-g3_pass AND g4_pass AND g5_pass`
-([compression_eval.py:653](../src/sportstradamus/scripts/compression_eval.py)).
+Total 42/59 = 71%. Source: `data/training/model_stats.parquet` (owned by
+`training.report.report()`); `ship = g1_pass AND … AND g5_pass` via
+[`training/scorecard.py`](../src/sportstradamus/training/scorecard.py)
+`compute_gates`. The offline harness moved from the old
+`scripts/compression_eval.py` to `training/scorecard.py`.
+
+> **Reconciliation note (2026-05-31).** The 2026-05-23 snapshot this section
+> used to show (NFL 11, WNBA 12 → 41/59) was scored off *re-scored old test
+> CSVs* and was optimistic. The May-30 fresh retrain (commit `50e5dce`)
+> regressed WNBA 12→10 and NFL 11→8 (36/59 = 61%) — the doc's "ready" cells
+> didn't survive a real retrain. Step 0.7 (g4 decode fix, below) then flipped
+> +4 NFL / +2 WNBA back to 42/59 = 71% with **no retrain**. The per-cell
+> lifecycle tables further down still reflect the stale 2026-05-23 view and
+> need a full refresh on the next audit pass.
 
 **Step 0 verdict: G4 was measuring a measurement artifact.** The old
 gate `_iqr(point_pred) / _iqr(actual)` compared point-prediction spread
@@ -424,6 +434,53 @@ Risk: count-branch ECE can be worse where the SkewNormal tail was
 capturing real over-dispersion; existing BSS guardrail rejects the swap
 per cell. Counts as one lever attempt on the per-cell budget for the
 *initial* run only (per the reentry rule above).
+
+### Step 0.7 — G4 decode-strategy fix on withheld SkewNormal cells (DONE 2026-05-31)
+
+Step-0-class gate artifact, found while reconciling the May-30 retrain.
+`training/scorecard.py:_resolve_decode_strategy` resolved the per-cell decode
+strategy through `resolve_cell_strategy` → `load_ship_config`, which collapses
+every **withheld** cell's strategy to the `WITHHELD` sentinel. The g4
+analytical-IQR decode for a withheld SkewNormal cell therefore skipped the
+`× MeanYr` step the cell trained under (`ratio_meanyr`), leaving `SN_Scale` in
+normalized ratio-units → predicted IQR 10–250× too small → false g4 failure
+(e.g. NFL `carries` g4-ratio 0.072 with Brier-skill **+0.227** — a
+contradiction that gave it away). The docstring claimed a `ratio_meanyr`
+fallback for un-shipped cells; the code never reached it (`mapped` was never
+`None`). Training substitutes the `--target-strategy` default for the `none`
+slug; the offline g4 scorer did not — that asymmetry was the whole bug.
+
+**Fix:** `_resolve_decode_strategy` now reads the strategy straight from
+`stat_meta.json` (new lru-cached `_cached_stat_meta`) and substitutes
+`_DECODE_FALLBACK_STRATEGY` (`ratio_meanyr`) for the `none` slug. A withheld
+cell's real per-cell slug (e.g. a `centered_additive_*`) is preserved rather
+than collapsed. `compute_gates` (the function `report()` uses to write
+`model_stats.parquet`) calls the same resolver, so the parquet self-heals on
+the next `meditate`; the May-30 models were re-scored offline (no retrain) to
+realize the fix immediately.
+
+**Recovery (6 cells ship, 0 break, no retrain):**
+
+- NFL flips (4): `carries` (0.072→0.951), `rushing yards` (0.020→0.832),
+  `sacks taken` (0.384→0.738), `targets` (0.257→0.968) — all g4-only fails.
+- WNBA flips (2): `AST` (0.249→0.720), `PRA` (0.049→0.831).
+- 6 more cells drop their g4 failure but still kill on another gate
+  (NBA `FGA`, NBA `fantasy points prizepicks` — both g2; NFL `attempts` /
+  `completions` / `passing first downs` / `qb yards` — g1, and qb-yards g3).
+
+Promoted in `stat_meta.json` (withheld→devel, `strategy: none`→`ratio_meanyr`
+to satisfy the SkewNormal invariant). Tie-out check confirmed g1/g2/g3/g5
+verdicts unchanged on all 59 cells — the fix moves only g4. **Counts: NBA
+18/21, NFL 12/20, WNBA 12/18 → 42/59 = 71%.**
+
+**Implication for Step 0.6.** The "low-mean count SkewNormal under-disperses"
+premise is **disproven** for `carries` / `targets` / `attempts` — their
+predictive dispersion was fine; the gate misread it. Step 0.6 family-swap
+candidates shrink to cells still failing a dispersion gate after 0.7. After
+0.7 the residual NFL wall is **g1 (Brier paired-CI) on small-n cells**
+(`attempts`/`completions`/`passing first downs`/`receiving yards`, n≈313–378)
+— audit g1 for a small-n CI-width artifact (Step 4.1) before retraining, given
+g4 and g5 both turned out to be artifacts.
 
 ### Step 1 — Post-hoc mean-bias correction (1–2 weeks)
 

@@ -49,7 +49,7 @@ from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.io import read_history
 from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.ship_config import load_ship_config, resolve_cell_strategy
+from sportstradamus.training.ship_config import STAT_META_PATH, STRATEGY_NONE, load_stat_meta
 
 # ---------------------------------------------------------------------------
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -790,26 +790,34 @@ def _round_gate_value(v: float | None) -> float | None:
 
 
 @functools.lru_cache(maxsize=1)
-def _cached_ship_config() -> dict:
-    """Memoize the parsed stat_meta ship policy so a full-audit loop hits disk once."""
-    return load_ship_config()
+def _cached_stat_meta() -> dict:
+    """Memoize raw stat_meta so a full-audit loop hits disk once."""
+    return load_stat_meta(Path(str(STAT_META_PATH)))
 
 
 def _resolve_decode_strategy(league: str, market_stem: str) -> str:
     """Look up the per-cell training strategy for a SkewNormal decode mirror.
 
     ``market_stem`` is the file-slug form (e.g. ``fantasy-points-prizepicks``)
-    that lives in the test_set CSV name; ``stat_meta.json`` keys are the
-    raw market names with spaces, so we reverse the hyphenation done by
-    :func:`helpers.io.market_file_slug` (line 81). Falls back to
-    ``ratio_meanyr`` when the cell isn't shipped (un-shipped cells
-    were trained under the ``--target-strategy`` default, which is
-    ``ratio_meanyr``).
+    that lives in the test_set CSV name; ``stat_meta.json`` keys are the raw
+    market names with spaces, so we reverse the hyphenation done by
+    :func:`helpers.io.market_file_slug`.
+
+    Reads the strategy straight from ``stat_meta.json`` rather than the
+    ship-config projection: :func:`load_ship_config` collapses every withheld
+    cell to the ``WITHHELD`` sentinel, which hides the ``ratio_meanyr``
+    transform the cell actually trained under and leaves the g4 IQR decode in
+    normalized ratio-units. A ``none`` strategy means the cell took the
+    ``--target-strategy`` default — ``ratio_meanyr``.
     """
     market_with_spaces = market_stem.replace("-", " ")
-    return resolve_cell_strategy(
-        league, market_with_spaces, _DECODE_FALLBACK_STRATEGY, _cached_ship_config()
+    strategy = (
+        _cached_stat_meta()
+        .get(league, {})
+        .get(market_with_spaces, {})
+        .get("strategy", STRATEGY_NONE)
     )
+    return _DECODE_FALLBACK_STRATEGY if strategy == STRATEGY_NONE else strategy
 
 
 def gate_row(
