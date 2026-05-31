@@ -149,7 +149,7 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "strategy": "none"
         },
         "FGA": {
@@ -271,7 +271,7 @@
         },
         "interceptions": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "strategy": "none"
         },
         "longest completion": {
@@ -301,7 +301,7 @@
         },
         "passing yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "ratio_meanyr"
         },
         "qb tds": {
@@ -321,7 +321,7 @@
         },
         "receiving yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "ratio_meanyr"
         },
         "receptions": {
@@ -331,7 +331,7 @@
         },
         "rushing tds": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "none"
         },
         "rushing yards": {
@@ -505,7 +505,7 @@
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "ratio_meanyr"
         },
         "RA": {
@@ -520,7 +520,7 @@
         },
         "STL": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "strategy": "none"
         },
         "TOV": {
