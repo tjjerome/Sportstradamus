@@ -246,7 +246,7 @@ def find_correlation(
     # single-multiplier-per-size list used inside the beam-search ranking;
     # ``full_payouts`` is the per-(size, miss-count) lookup driving push-aware
     # EV and the display Boost column.
-    search_payouts, full_payouts = _payout_curve_for(platform, contest_variant, legacy)
+    search_payouts, full_payouts = _payout_curve_for(platform, contest_variant, legacy=legacy)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
