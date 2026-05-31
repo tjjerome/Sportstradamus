@@ -214,7 +214,7 @@ for name, result in all_results.items():
             fillcolor=color.replace(")", ",0.1)").replace("rgb", "rgba")
             if "rgb" in color
             else color + "1A",
-            line=dict(width=0),
+            line={"width": 0},
             name=f"{name} (10th-90th %ile)",
             showlegend=False,
             hoverinfo="skip",
@@ -228,7 +228,7 @@ for name, result in all_results.items():
             y=agg["mean_bankroll"],
             mode="lines",
             name=name,
-            line=dict(color=color, width=2),
+            line={"color": color, "width": 2},
         )
     )
 

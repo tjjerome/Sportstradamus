@@ -97,8 +97,9 @@ def _make_model(*, with_book: bool = True, brier: float = 0.197) -> dict:
 def patched_paths(tmp_path):
     parquet = tmp_path / "model_stats.parquet"
     csv = tmp_path / "model_stats.csv"
-    with mock.patch.object(report_module, "MODEL_STATS_PATH", parquet), mock.patch.object(
-        report_module, "MODEL_STATS_CSV_PATH", csv
+    with (
+        mock.patch.object(report_module, "MODEL_STATS_PATH", parquet),
+        mock.patch.object(report_module, "MODEL_STATS_CSV_PATH", csv),
     ):
         yield parquet, csv
 
