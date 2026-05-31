@@ -18,9 +18,12 @@ from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import train_market
 from sportstradamus.training.ship_config import (
+    SKEW_NORMAL_DIST,
+    STAT_META_PATH,
     STRATEGY_NONE,
     WITHHELD,
     load_ship_config,
+    load_stat_meta,
     resolve_cell_strategy,
 )
 
@@ -47,16 +50,6 @@ _RNG_SEED: int = 69
     type=click.Choice(["All", "NFL", "NBA", "MLB", "NHL", "WNBA"]),
     default="All",
     help="Select league to train on",
-)
-@click.option(
-    "--rebuild-filter/--no-rebuild-filter",
-    default=False,
-    help="Train with full feature set (ignore Filtered), then rerun SHAP and rewrite filter",
-)
-@click.option(
-    "--reset-markets",
-    default="",
-    help="Comma-separated league:market pairs (or just market for active league) to clear from Filtered before training",
 )
 @click.option(
     "--rebuild-correlations/--no-rebuild-correlations",
@@ -124,11 +117,21 @@ _RNG_SEED: int = 69
         "shipped=main. See data/config/stat_meta.json."
     ),
 )
+@click.option(
+    "--bypass-withholding/--no-bypass-withholding",
+    default=False,
+    help=(
+        "One-shot escape from the ship gate: train EVERY market in the "
+        "registry regardless of shipped status. Withheld SkewNormal cells "
+        "fall back to --target-strategy; non-SkewNormal cells fall back to "
+        "STRATEGY_NONE (count-branch ignores the slug). Lets internal "
+        "projection markets (NFL attempts/carries/targets) train so their "
+        "pickles feed proj_* features into downstream training matrices."
+    ),
+)
 def meditate(
     force,
     league,
-    rebuild_filter,
-    reset_markets,
     rebuild_correlations,
     log_level,
     deterministic,
@@ -136,6 +139,7 @@ def meditate(
     zinb_mode,
     market,
     branch,
+    bypass_withholding,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # --deterministic implies --force: the input-freeze (new_M = empty)
@@ -151,18 +155,18 @@ def meditate(
         extra={
             "force": force,
             "league": league,
-            "rebuild_filter": rebuild_filter,
             "rebuild_correlations": rebuild_correlations,
             "deterministic": deterministic,
             "target_strategy": target_strategy,
             "zinb_mode": zinb_mode,
             "market": market,
             "branch": branch,
+            "bypass_withholding": bypass_withholding,
         },
     )
     click.echo(
         f"meditate starting: league={league} force={force} "
-        f"rebuild_filter={rebuild_filter} rebuild_correlations={rebuild_correlations} "
+        f"rebuild_correlations={rebuild_correlations} "
         f"deterministic={deterministic}"
     )
     if not deterministic:
@@ -176,33 +180,10 @@ def meditate(
     # production pickles. See docs/gbdt_mean_regression_plan.md "Ship
     # mechanism — per-cell strategy".
     ship_config = {} if deterministic else load_ship_config(branch=branch)
-
-    if reset_markets.strip():
-        ff_path = pkg_resources.files(data) / "config" / "feature_filter.json"
-        with open(ff_path) as fh:
-            ff = json.load(fh)
-        for tok in [t.strip() for t in reset_markets.split(",") if t.strip()]:
-            if ":" in tok:
-                lg, mk = tok.split(":", 1)
-            else:
-                lg, mk = league, tok
-            mk = mk.strip()
-            ff.setdefault(lg, {}).setdefault("Filtered", {})
-            if mk in ff[lg]["Filtered"]:
-                del ff[lg]["Filtered"][mk]
-                log.info("Reset filter", extra={"league": lg, "market": mk})
-        # In deterministic mode the in-memory clear still propagates (so this
-        # run sees the reset), but skip persisting to feature_filter.json —
-        # deterministic runs use crippled hyperparameters and must never
-        # mutate production config.
-        if not deterministic:
-            with open(ff_path, "w") as fh:
-                json.dump(ff, fh, indent=4)
-        # Reload module-level feature_filter so this run sees the change
-        from sportstradamus import helpers as _hp
-
-        _hp.feature_filter.clear()
-        _hp.feature_filter.update(ff)
+    # Raw stat_meta is consulted only by --bypass-withholding to recover the
+    # ``dist`` field that ``load_ship_config`` collapses out, so the bypass
+    # can substitute a SkewNormal-vs-count-branch-appropriate strategy.
+    stat_meta_full = load_stat_meta(STAT_META_PATH) if bypass_withholding else {}
 
     nba = StatsNBA()
     nfl = StatsNFL()
@@ -246,7 +227,7 @@ def meditate(
             if stat_data is None:
                 continue
             stat_data.update_player_comps()
-            correlate(lg, stat_data, force)
+            correlate(lg, stat_data, force=force)
         return
 
     archive = Archive()
@@ -279,15 +260,29 @@ def meditate(
             json.dump(book_weights, outfile, indent=4)
 
         stat_data.update_player_comps()
-        correlate(lg, stat_data, force)
+        correlate(lg, stat_data, force=force)
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
             cell_strategy = resolve_cell_strategy(lg, market, target_strategy, ship_config)
             if cell_strategy == WITHHELD:
-                prune_model_pickle(lg, market)
-                click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
-                continue
+                if bypass_withholding:
+                    cell_dist = stat_meta_full.get(lg, {}).get(market, {}).get("dist")
+                    # SkewNormal needs a real strategy slug; count-branch
+                    # families (ZINB/NegBin/Gamma/ZAGamma) ignore the slug,
+                    # so STRATEGY_NONE is fine and the next clause will
+                    # substitute the run-wide default for the pipeline call.
+                    cell_strategy = (
+                        target_strategy if cell_dist == SKEW_NORMAL_DIST else STRATEGY_NONE
+                    )
+                    click.echo(
+                        f"[{lg}] {market}: BYPASS withhold "
+                        f"(dist={cell_dist!r}, strategy={cell_strategy!r})"
+                    )
+                else:
+                    prune_model_pickle(lg, market)
+                    click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
+                    continue
             # STRATEGY_NONE marks count-branch cells that don't opt into a
             # SkewNormal strategy slug. The pipeline's count branch ignores
             # the slug anyway, so substitute the CLI default — the run-wide
@@ -298,10 +293,9 @@ def meditate(
                 lg,
                 market,
                 stat_data,
-                force,
-                rebuild_filter,
                 archive,
                 league_start_date,
+                force=force,
                 deterministic=deterministic,
                 target_strategy=cell_strategy,
                 zinb_mode=zinb_mode,

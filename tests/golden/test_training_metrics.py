@@ -1,7 +1,10 @@
 """Golden tests for training/report.py write_model_stats + get_market_calibration.
 
-Covers Phase 3 §4.c/§4.f/§4.g: the migrated raw-metric schema, the pinned
-``row_kind="book_baseline"`` row, and the thin getter Kelly consumes.
+The parquet is the wide one-row-per-cell schema: each ``(league, market)`` pair
+emits a single row carrying the model's validation-set metrics, the book
+baseline counterparts, the per-cell diagnostics and hyperparameters, and pd.NA
+placeholders for the ship-gate columns ``training.scorecard.compute_gates``
+populates in a second pass.
 """
 
 from __future__ import annotations
@@ -14,7 +17,6 @@ import pandas as pd
 import pytest
 
 from sportstradamus.training.report import (
-    _RAW_METRIC_KEYS,
     get_market_calibration,
     write_model_stats,
 )
@@ -92,66 +94,97 @@ def _make_model(*, with_book: bool = True, brier: float = 0.197) -> dict:
 
 
 @pytest.fixture
-def patched_path(tmp_path):
-    target = tmp_path / "model_stats.parquet"
-    with mock.patch.object(report_module, "MODEL_STATS_PATH", target):
-        yield target
+def patched_paths(tmp_path):
+    parquet = tmp_path / "model_stats.parquet"
+    csv = tmp_path / "model_stats.csv"
+    with (
+        mock.patch.object(report_module, "MODEL_STATS_PATH", parquet),
+        mock.patch.object(report_module, "MODEL_STATS_CSV_PATH", csv),
+    ):
+        yield parquet, csv
 
 
-def test_write_emits_book_baseline_and_model_rows(patched_path):
+def test_writes_one_row_per_cell(patched_paths):
+    parquet, csv = patched_paths
     league_models = {"NFL": {"player_pass_yds": _make_model()}}
     write_model_stats(
-        league_models, {"NFL": {"player_pass_yds": 0.5}}, {"NFL": {"player_pass_yds": 1.0}}
+        league_models,
+        {"NFL": {"player_pass_yds": 0.5}},
+        {"NFL": {"player_pass_yds": 1.0}},
+        {"NFL": {"player_pass_yds": "devel"}},
     )
 
-    df = pd.read_parquet(patched_path)
-    assert set(df["row_kind"]) == {"book_baseline", "model"}
-    book = df[df["row_kind"] == "book_baseline"]
-    assert len(book) == 1
-    assert book.iloc[0]["brier_score"] == pytest.approx(0.218)
-    # Skill score on the baseline row is pinned at 0 — the book matches itself.
-    assert book.iloc[0]["brier_skill_score"] == 0.0
-    assert book.iloc[0]["kelly_shrinkage"] == 0.0
+    df = pd.read_parquet(parquet)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["league"] == "NFL"
+    assert row["market"] == "player_pass_yds"
+    assert row["distribution"] == "Gamma"
+    assert row["shipped"] == "devel"
+    assert row["brier_book"] == pytest.approx(0.218)
+    assert row["brier_model"] == pytest.approx(0.197)
+    assert row["brier_skill_score"] == pytest.approx(1 - 0.197 / 0.218)
+    assert row["kelly_shrinkage"] == pytest.approx(1 - 0.197 / 0.218)
+    assert row["log_loss_model"] == pytest.approx(0.65)
+    assert row["log_loss_book"] == pytest.approx(0.65)
+    assert row["nll"] == pytest.approx(0.65)
+    assert row["roc_auc"] == pytest.approx(0.62)
+    assert row["accuracy"] == pytest.approx(0.58)
+    assert row["model_weight"] == pytest.approx(0.30)
+    assert row["model_shape"] == pytest.approx(1.1)
+    assert row["shape_ratio"] == pytest.approx(1.1)
+    assert row["mean_ev_diff"] == pytest.approx(0.05)
+    assert row["cv"] == pytest.approx(0.5)
+    assert row["std"] == pytest.approx(1.0)
+    assert row["historical_zero_rate"] == pytest.approx(0.01)
+    assert row["hp_rounds"] == pytest.approx(100)
+    assert row["hp_leaves"] == pytest.approx(31)
+    # Ship-gate columns are populated by training.scorecard.compute_gates;
+    # at write time they're NaN / pd.NA.
+    assert math.isnan(row["ece_equal_mass"])
+    assert math.isnan(row["g1_brier_diff_mean"])
+    assert math.isnan(row["g5_ece_debiased"])
+    assert pd.isna(row["g1_pass"])
+    assert pd.isna(row["ship"])
 
-    model_rows = df[df["row_kind"] == "model"]
-    assert set(model_rows["metric_row"]) == {"raw", "corrected", "calibrated"}
-    cal = model_rows[model_rows["metric_row"] == "calibrated"].iloc[0]
-    # Calibrated row carries the validation raw metrics and the skill score.
-    assert cal["brier_score"] == pytest.approx(0.197)
-    assert cal["brier_skill_score"] == pytest.approx(1 - 0.197 / 0.218)
-    assert cal["kelly_shrinkage"] == pytest.approx(1 - 0.197 / 0.218)
-    # Raw/corrected rows do not carry the validation raw metrics.
-    raw = model_rows[model_rows["metric_row"] == "raw"].iloc[0]
-    assert math.isnan(raw["brier_score"])
-    assert math.isnan(raw["brier_skill_score"])
+    # CSV mirror is rewritten alongside the parquet.
+    assert csv.is_file()
+    csv_df = pd.read_csv(csv)
+    assert len(csv_df) == 1
+    assert csv_df.iloc[0]["brier_skill_score"] == pytest.approx(1 - 0.197 / 0.218)
 
 
-def test_useless_model_skill_score_zero(patched_path):
-    # Same Brier as book → BSS = 0, kelly_shrinkage = 0.
+def test_useless_model_skill_score_zero(patched_paths):
     league_models = {"NFL": {"m": _make_model(brier=0.218)}}
     write_model_stats(league_models, {}, {})
-    df = pd.read_parquet(patched_path)
-    cal = df[(df["row_kind"] == "model") & (df["metric_row"] == "calibrated")].iloc[0]
-    assert cal["brier_skill_score"] == pytest.approx(0.0, abs=1e-9)
-    assert cal["kelly_shrinkage"] == pytest.approx(0.0, abs=1e-9)
+    df = pd.read_parquet(patched_paths[0])
+    row = df.iloc[0]
+    assert row["brier_skill_score"] == pytest.approx(0.0, abs=1e-9)
+    assert row["kelly_shrinkage"] == pytest.approx(0.0, abs=1e-9)
 
 
-def test_missing_book_baseline_skill_is_nan(patched_path):
+def test_missing_book_baseline_nans(patched_paths):
     league_models = {"NFL": {"m": _make_model(with_book=False)}}
     write_model_stats(league_models, {}, {})
-    df = pd.read_parquet(patched_path)
-    book = df[df["row_kind"] == "book_baseline"].iloc[0]
-    # No book metrics → all raw metric columns NaN.
-    for k in _RAW_METRIC_KEYS:
-        assert math.isnan(book[k])
-    assert math.isnan(book["brier_skill_score"])
-    assert math.isnan(book["kelly_shrinkage"])
-    cal = df[(df["row_kind"] == "model") & (df["metric_row"] == "calibrated")].iloc[0]
-    assert math.isnan(cal["brier_skill_score"])
-    assert math.isnan(cal["kelly_shrinkage"])
+    df = pd.read_parquet(patched_paths[0])
+    row = df.iloc[0]
+    assert math.isnan(row["brier_book"])
+    assert math.isnan(row["log_loss_book"])
+    assert math.isnan(row["brier_skill_score"])
+    assert math.isnan(row["kelly_shrinkage"])
+    # Model-side metrics still populate.
+    assert row["brier_model"] == pytest.approx(0.197)
 
 
-def test_get_market_calibration_returns_calibrated_row(patched_path):
+def test_default_shipped_is_withheld(patched_paths):
+    """Cells absent from the stat_shipped map default to ``"withheld"``."""
+    league_models = {"NFL": {"m": _make_model()}}
+    write_model_stats(league_models, {}, {})  # no stat_shipped argument
+    df = pd.read_parquet(patched_paths[0])
+    assert df.iloc[0]["shipped"] == "withheld"
+
+
+def test_get_market_calibration_returns_cell_row(patched_paths):
     league_models = {"NFL": {"player_pass_yds": _make_model()}}
     write_model_stats(league_models, {}, {})
     out = get_market_calibration("NFL", "player_pass_yds")
@@ -160,7 +193,7 @@ def test_get_market_calibration_returns_calibrated_row(patched_path):
     assert out["model_weight"] == pytest.approx(0.30)
 
 
-def test_get_market_calibration_missing_returns_nans(patched_path):
+def test_get_market_calibration_missing_returns_nans(patched_paths):
     league_models = {"NFL": {"player_pass_yds": _make_model()}}
     write_model_stats(league_models, {}, {})
     out = get_market_calibration("NBA", "missing_market")

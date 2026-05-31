@@ -9,6 +9,7 @@ weights machinery picks the next-freshest header on retry.
 import importlib.resources as pkg_resources
 import json
 import random
+from http import HTTPStatus
 from time import sleep
 
 import numpy as np
@@ -31,7 +32,7 @@ class Scrape:
 
     def __init__(self):
         """Load API keys. Headers are fetched on first use."""
-        with open(pkg_resources.files(creds) / "keys.json") as f:
+        with (pkg_resources.files(creds) / "keys.json").open() as f:
             _keys = json.load(f)
         self.apikey = _keys["scrapingfish"]
         self._scrapeops_key = _keys["scrapeops"]
@@ -50,11 +51,13 @@ class Scrape:
 
     @property
     def headers(self):
+        """The ScrapeOps header pool, fetched on first access."""
         self._ensure_headers()
         return self._headers
 
     @property
     def header(self):
+        """The currently active browser header."""
         self._ensure_headers()
         return self._header
 
@@ -64,6 +67,7 @@ class Scrape:
 
     @property
     def weights(self):
+        """Per-header rotation weights; a burned header decays toward zero."""
         self._ensure_headers()
         return self._weights
 
@@ -74,8 +78,8 @@ class Scrape:
     def _new_headers(self):
         """Rotate to a new header, weighted against the recently-burned one."""
         self._ensure_headers()
-        for i in range(len(self._headers)):
-            if self._headers[i] == self._header:
+        for i, candidate in enumerate(self._headers):
+            if candidate == self._header:
                 self._weights[i] = 0
             else:
                 self._weights[i] += 1
@@ -107,12 +111,11 @@ class Scrape:
                     sleep(random.uniform(1, 3))
                 try:
                     response = requests.get(url, headers=headers, params=params)
-                    if response.status_code == 200:
+                    if response.status_code == HTTPStatus.OK:
                         return response.json()
-                    else:
-                        logger.debug("Attempt " + str(i) + ", Error " + str(response.status_code))
+                    logger.debug(f"Attempt {i}, Error {response.status_code}")
                 except Exception:
-                    logger.exception("Attempt " + str(i) + ",")
+                    logger.exception(f"Attempt {i},")
 
             logger.warning("Max Attempts Reached")
             return {}

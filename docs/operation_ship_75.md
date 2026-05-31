@@ -256,9 +256,9 @@ FG3M g4-fail, PRA g1-fail, TOV g5-fail) — Step 1 attacks these.
 | receiving-tds | ZINB | ready (Step 0.4 degenerate-pass) | `ratio_meanyr` | — (g4 0/0→1.0) | Step 0.3 promote | 0 |
 | rushing-tds | ZINB | ready (Step 0.4 degenerate-pass) | `ratio_meanyr` | — (g4 0/0→1.0) | Step 0.3 promote | 0 |
 | tds | ZINB | ready (Step 0.4 degenerate-pass) | `ratio_meanyr` | — (g4 0/0→1.0) | Step 0.3 promote | 0 |
-| attempts | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 now 0.73 | Step 4 small-n widen | 0 |
-| carries | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.89 | Step 4 small-n widen | 0 |
-| completions | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.76 | Step 4 small-n widen | 0 |
+| attempts | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 now 0.73 | Step 0.6 ZINB/NegBin swap → Step 4.1 small-n widen | 0 |
+| carries | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.89 | Step 0.6 ZINB/NegBin swap → Step 4.1 small-n widen | 0 |
+| completions | SkewNormal | g1-fail | `ratio_meanyr` | g1 (CI_HI>0); g4 0.76 | Step 0.6 ZINB/NegBin swap → Step 4.1 small-n widen | 0 |
 | interceptions | ZINB | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.09); g4 now 1.00 | Step 1 affine + Step 4 | 0 |
 | passing-first-downs | SkewNormal | ready (Step 0.5 flip) | `centered_additive_eb_meanyr_k10` | — (g5 0.095→0.025 debiased) | Step 0.5 promote | 0 |
 | passing-yards | SkewNormal | ready (Step 0.5 flip) | `ratio_meanyr` | — (g5 0.093→0.030 debiased) | Step 0.5 promote | 0 |
@@ -266,7 +266,7 @@ FG3M g4-fail, PRA g1-fail, TOV g5-fail) — Step 1 attacks these.
 | qb-yards | SkewNormal | g2+g5-fail | `ratio_meanyr` | g2 (z=0.68), g5 (0.174); g4 1.18 | Step 1 isotonic | 0 |
 | rushing-yards | SkewNormal | g1+g5-fail | `ratio_meanyr` | g1, g5 (0.092); g4 18.7 (over-spread) | Step 4 + dispersion ceiling | 0 |
 | sacks-taken | ZINB | multi-fail | `ratio_meanyr` | g1, g2 (z=0.55), g5 (0.084); g4 now 1.00 | Step 4 (likely defer-90) | 0 |
-| targets | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52); g4 0.89 | Step 1 isotonic | 0 |
+| targets | SkewNormal | g2-fail | `ratio_meanyr` | g2 (z=0.52); g4 0.89 | Step 0.6 ZINB swap (operator-flagged canonical) → Step 1 isotonic if residual | 0 |
 
 > Update this table after every `compression_eval` re-run. The
 > `lever_attempts` column is the safety on the per-cell pivot policy.
@@ -358,12 +358,83 @@ Decide per cell:
 **Step 0 stop criterion:** if recovery ≥ 12 cells, Step 1 becomes the
 NFL-specific track. If < 5, Step 1/2 carry the full load.
 
+### Step 0.6 — Distribution-family audit on low-mean count SkewNormal cells (precondition to Step 1)
+
+Operator-flagged high-priority precondition (2026-05-28). Several
+SkewNormal cells failing on the NFL board are low-mean integer counts
+where the continuous family likely over-smooths the discrete tail.
+Post-hoc correction (Step 1) on the wrong family bandages the wrong
+thing — fix the family first, then Step 1 cleans residuals against a
+fair baseline. Existing inference / Kelly / SHAP plumbing already
+supports ZINB and NegBin via the dist routing at
+[`prediction/model_prob.py`](../src/sportstradamus/prediction/model_prob.py),
+so the per-cell cost is a one-line `stat_meta.json` change + retrain.
+
+Candidates from the current scorecard:
+
+- NFL `targets` (g2-fail; receivers often < 5 targets/game) — operator-flagged canonical case.
+- NFL `attempts`, `carries`, `completions` (all g1-fail; low-mean integer counts; small-n widen in Step 4.1 is the alternative lever).
+- NFL `receptions` (shipped under SkewNormal `centered_additive_mean10`) — re-test as ZINB via the `supersede_verdict()` gate; same Tier-1 contract as a strategy swap.
+- Audit any low-mean SkewNormal cell on NBA / WNBA boards opportunistically (lower priority — league 75 % targets already cleared on NBA / within 2 cells on WNBA).
+
+Per-cell mechanism:
+
+- Inspect training-target distribution: zero rate, mean, IQR, integer purity. The new live-metrics parquet from
+  [`backfill_live_metrics.py`](../src/sportstradamus/scripts/backfill_live_metrics.py)
+  has these; or quick pandas inspection of the cell's
+  `test_sets/<LEAGUE>_<market>.csv`.
+- Family-choice heuristic:
+  - Zero rate ≥ ~10 % AND integer-valued → `"ZINB"`.
+  - Discrete count, zero rate < 10 %, mean < 15 → `"NegBin"`.
+  - Otherwise → keep `"SkewNormal"`.
+- Edit `stat_meta.json`: flip `dist`, flip `strategy` to `"none"` (count-branch invariant enforced by
+  [`ship_config.load_ship_config`](../src/sportstradamus/training/ship_config.py)).
+- `meditate --force` the cell; run `compression_eval`.
+- Cells passing Tier-0 under the new family → `status=ready`.
+- Cells flipping to ZINB and still under-fitting on the joint path qualify for Step 4.3's `zinb_mode: "hurdle"` toggle as the immediate follow-on.
+
+**Step 0.6 stop criterion:** cells passing Tier-0 under the new family →
+soak (counts toward 75 %). Cells failing under both `"SkewNormal"` and
+`"ZINB"`/`"NegBin"` carry the better-fitting family into Step 1 as a
+working hypothesis — not a permanent commitment.
+
+**Reentry rule (important — borderline cells are not "decided").** Step
+0.6 is not one-shot. Any downstream lever that changes the training
+input or output transform reopens the family question for cells whose
+0.6 verdict was thin:
+
+- Step 1's bias-corrected predictions shift the residual distribution
+  that ECE / Brier are measured against → re-evaluate family on cells
+  Step 1 touches.
+- Step 2's `MeanYr_expanding_shifted` / EB-shrunk feature changes
+  per-player conditional variance → re-evaluate on cells where Step 2
+  lands a non-trivial SHAP weight.
+- Step 4.2's `strategy` slug swap on SkewNormal cells changes the target
+  transform → re-evaluate the SkewNormal-vs-count comparison on the new
+  transform.
+
+Borderline = `|BSS_chosen − BSS_rejected| < 0.02` on the previous
+validation, OR Tier-0 gates passing on the chosen family with ≤ 2 cells'
+margin. Flipping back is one `stat_meta.json` edit + `meditate --force`
++ `compression_eval`; the `supersede_verdict()` contract still applies
+for any flip on a baselined cell. Re-entries do NOT count as additional
+lever attempts on the per-cell budget — same lever, fresh input.
+
+Risk: count-branch ECE can be worse where the SkewNormal tail was
+capturing real over-dispersion; existing BSS guardrail rejects the swap
+per cell. Counts as one lever attempt on the per-cell budget for the
+*initial* run only (per the reentry rule above).
+
 ### Step 1 — Post-hoc mean-bias correction (1–2 weeks)
 
-Targets residual G2 (star) / G3 (bench) bias cells after Step 0.
-Per 2026-05-22 research verdict (see
-[references doc](operation_ship_references.md) §8): post-hoc
-correction is the only lever that moves both bias bands by construction.
+Targets residual G2 (star) / G3 (bench) bias cells after Steps 0 + 0.6.
+Per Step 0.6's reentry rule the family choice from 0.6 is a working
+hypothesis, not a commitment — if Step 1's correction lands and a cell
+still kills (or the corrected residual distribution looks materially
+different from the pre-correction one), re-run 0.6 on the corrected
+predictions. Per 2026-05-22 research verdict (see
+[references doc](operation_ship_references.md) §8): post-hoc correction
+is the only lever that moves both bias bands by construction.
 
 **1.1 — Affine ROE** first: fit `y = a + b·ŷ` on validation;
 `ŷ_corrected = a + b·ŷ`. Works at any sample size.
@@ -485,6 +556,67 @@ compatible.
 **4.4 — Lever cap.** After 4 attempts, cell moves to `deferred-90`
 with a one-line documented reason.
 
+**4.5 — Monotone-prior locking via per-cell config (proposal).**
+Today
+[`training/pipeline.py:780-782`](../src/sportstradamus/training/pipeline.py)
+commits to one prior: `MeanYr +1` for Gamma/ZAGamma/SkewNormal cells. The
+vector is a fixed Optuna param (line 790, `["none", [monotone]]`), so the
+trace prints a ~440-element mostly-zero list per trial — visual noise, not
+search cost — but more importantly the booster is left free to fit
+mechanically implausible splits (higher `Player snap_pct` → lower
+projected attempts, etc.) and Optuna wastes trials on hyperparam combos
+that overfit to those. A handful of config-driven priors prunes that
+space without burning Optuna trials, and is a natural per-cell lever for
+cells failing on insufficient generalization (NFL `attempts` / `carries`
+/ `completions` g1-fail on small-sample noise; `qb-yards` g2-fail star
+compression are the obvious test beds — locking
+`snap_pct` / `route_participation` / `Team plays_per_game` to `+1` forces
+the volume signal in).
+
+Proposed mechanism:
+
+- New `data/config/monotone_priors.json`, layered `{default → league.default
+  → league.<market>}` with later layers overriding earlier:
+  ```json
+  {
+    "default": {"MeanYr": 1, "Mean10": 1, "Player snap_pct": 1, "Team plays_per_game": 1},
+    "NFL": {
+      "default": {"Player route_participation": 1, "Player carry_share": 1, "Player target_share": 1},
+      "rushing-tds": {"Player redzone_carry_share": 1},
+      "passing-tds": {"Player redzone_target_share": 1}
+    }
+  }
+  ```
+- New helper `_build_monotone_vector(league, market, col_list, dist)`
+  replaces the inline block at pipeline.py:780-782. Config keys not in
+  `col_list` are silently skipped (feature-list drift defence).
+- Restrict to `dist in ("Gamma", "ZAGamma", "SkewNormal")` initially.
+  Extending to NegBin/ZINB requires verifying that the booster's link
+  composition (log on `total_count`, logit on `probs`/`gate`) still
+  yields a mean-monotone effect; document for a future audit.
+- Future-compatible with the existing per-cell `strategy` field: a cell
+  could carry an optional `monotone_overrides` field on `stat_meta.json`
+  for the rare cell where the league/market defaults don't fit.
+
+Per-cell rollout + validation:
+
+- Phase 0: commit the global defaults. `MeanYr +1` is the only non-no-op
+  match for already-shipped non-NFL cells, so this preserves existing
+  behaviour (other defaults are no-ops where feature absent).
+- Phase 1: add NFL defaults. Retrain affected cells. Per-cell BSS
+  guardrail mirroring Step 1.4 — reject the prior if Brier skill score
+  drops > 0.01 on validation.
+- Phase 2: TD markets pick up redzone-share priors.
+- New golden test: `tests/golden/test_monotone_priors.py` — schema
+  validation + `_build_monotone_vector` resolves correctly for
+  representative cells (NBA PTS, NFL attempts, NFL rushing-tds).
+
+Risk: wrong-sign prior actively hurts the model — *worse* than no
+constraint because the booster can't learn around it. Mitigation:
+commit only priors with mechanical meaning (volume shares,
+plays_per_game); BSS guardrail catches misses per cell; lever counter
+increments on this attempt if the cell already exhausted three.
+
 ### Step 5 — Family-build re-entry (deferred)
 
 CMPμ / marginalized-hurdle / MZINB family build is **deferred** per
@@ -573,7 +705,8 @@ session before push (CLAUDE.md hard rule).
 | Week | Step | Goal |
 |---|---|---|
 | 1 | 0.1–0.4 | G4 audit + recompute scorecard. Promote G4-only-fails. Target: NBA 14–18, WNBA 13–16, NFL 6–10. |
-| 2–3 | 1 | Post-hoc bias correction. Target: NBA 16, WNBA 14, NFL 11–13. |
+| 2 | 0.6 | Family-swap audit on low-mean count SkewNormal cells (NFL `targets`, `attempts`, `carries`, `completions`, `receptions` supersession). Target: NFL +2–4 toward 15/20. |
+| 3–4 | 1 | Post-hoc bias correction on residual bias cells (with family-choice locked in by 0.6). Target: NBA 16, WNBA 14, NFL 11–13. |
 | 4 | 2 | Expanding-mean player feature. |
 | 5 | 3 | Opponent-defense + blowout. NFL focus. |
 | 6+ | 4 | Per-cell pivots / gate widening. Lever cap 4. |

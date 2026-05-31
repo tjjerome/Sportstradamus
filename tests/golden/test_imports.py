@@ -15,7 +15,6 @@ CORE_MODULES = [
     "sportstradamus.helpers",
     "sportstradamus.spiderLogger",
     "sportstradamus.skew_normal",
-    "sportstradamus.feature_selection",
     "sportstradamus.stats",
     "sportstradamus.books",
     "sportstradamus.moneylines",

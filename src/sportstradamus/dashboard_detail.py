@@ -138,11 +138,17 @@ def _parse_corr(s: str, max_n: int = 3) -> list[tuple[str, float]]:
     return out
 
 
+# Correlation-strength badge thresholds: a leg whose multiplier on the base edge
+# clears these earns the Strong / Moderate badge in the offer-detail view.
+_CORR_STRONG_MULT = 1.25
+_CORR_MODERATE_MULT = 1.1
+
+
 def _strength_badge(mult: float) -> str:
     """Return emoji badge for correlation strength."""
-    if mult >= 1.25:
+    if mult >= _CORR_STRONG_MULT:
         return "🔴 Strong"
-    if mult >= 1.1:
+    if mult >= _CORR_MODERATE_MULT:
         return "🟡 Moderate"
     return "⚪ Mild"
 

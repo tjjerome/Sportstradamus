@@ -5,7 +5,7 @@ import json
 import os.path
 import pickle
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 
 import line_profiler
@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -35,7 +34,13 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import (
+    Stats,
+    archive,
+    clean_data,
+    scale_team_volume_to_budget,
+    scraper,
+)
 from sportstradamus.stats.nba_client import NBAStatsError
 
 
@@ -467,24 +472,68 @@ class StatsNBA(Stats):
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
+    def _current_season_key(self, target_game_date: date) -> str:
+        """Return the ``self.players`` key for the season containing ``target_game_date``.
+
+        NBA seasons span Oct–Jun and ``self.players`` is keyed by the
+        ``"YYYY-YY"`` notation. Dates in Oct–Dec belong to the season that
+        started that calendar year; Jan–Sep dates belong to the season that
+        started the prior year.
+        """
+        year = target_game_date.year
+        if target_game_date.month >= 10:
+            return f"{year}-{(year + 1) % 100:02d}"
+        return f"{year - 1}-{year % 100:02d}"
+
+    def _player_seasons_through(self, target_game_date: date) -> dict:
+        """Merge ``self.players`` seasons whose key is ``<=`` ``target_game_date``'s season.
+
+        Returns a ``{team: {player_name: stats_dict}}`` mapping ready for
+        :meth:`build_comp_profile`. Iterates oldest → newest so the current
+        season's roster wins on dict-update conflicts (matches the
+        :meth:`update_player_comps` ``prior.update(current)`` order).
+        """
+        cutoff = self._current_season_key(target_game_date)
+        merged: dict = {}
+        for season_key in sorted(self.players.keys()):
+            if season_key > cutoff:
+                continue
+            for team, roster in self.players[season_key].items():
+                merged.setdefault(team, {}).update(roster)
+        return merged
+
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
+        """Build comps from loaded data at runtime (no JSON I/O).
+
+        When ``target_game_date`` is provided, the player pool is bounded to
+        seasons whose key (NBA "YYYY-YY") is ``<=`` the target date's season,
+        so a 2022 training row's comps no longer pool with 2024+ rookies.
+        ``self.playerProfile`` is already date-bounded by
+        :meth:`base_profile` upstream (it filters ``short_gamelog`` to the
+        300-day window ending at ``date``), so this fix only needs to gate
+        the per-season roster set that feeds :meth:`build_comp_profile`.
+        Today() default preserves inference / cron behavior.
+        """
         with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
+        league_weights = stats[self.league]
         all_features = set()
-        for pos_weights in stats["NBA"].values():
+        for pos_weights in league_weights.values():
             all_features.update(pos_weights.keys())
         all_features = list(all_features)
 
-        playerProfile, playerDict = self.build_comp_profile()
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerList = self._player_seasons_through(target_game_date)
+        playerProfile, playerDict = self.build_comp_profile(playerList=playerList)
         playerProfile = playerProfile[
             [f for f in all_features if f in playerProfile.columns]
         ].replace([np.nan, np.inf, -np.inf], 0)
 
         comps = {}
         for position in self.positions:
-            pos_weights = stats["NBA"][position]
+            pos_weights = league_weights[position]
             pos_features = list(pos_weights.keys())
             pos_players = [
                 p
@@ -1113,17 +1162,10 @@ class StatsNBA(Stats):
 
         if not nba_df.empty:
             # Retrieve moneyline and totals data
-            nba_df.loc[:, "moneyline"] = nba_df.apply(
-                lambda x: archive.get_moneyline(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
-            )
-            nba_df.loc[:, "totals"] = nba_df.apply(
-                lambda x: archive.get_total(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
+            self._enrich_team_markets(
+                nba_df,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
             )
 
             self.gamelog = (
@@ -1207,17 +1249,10 @@ class StatsNBA(Stats):
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
             self.gamelog["PLAYER_NAME"] = self.gamelog["PLAYER_NAME"].apply(remove_accents)
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(
-                    self.league, x[self.log_strings["date"]][:10], x["TEAM_ABBREVIATION"]
-                ),
-                axis=1,
+            self._enrich_team_markets(
+                self.gamelog,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
             )
             self.gamelog.loc[:, self.log_strings["position"]] = self.gamelog.apply(
                 lambda x: (
@@ -1261,9 +1296,8 @@ class StatsNBA(Stats):
                 logger.warning(f"{filename} missing")
                 return []
 
-        # Slice to the trained schema embedded in the pickle.
         cols = self._volume_model_cache["expected_columns"]
-        if any([col not in playerStats.columns for col in cols]):
+        if any(col not in playerStats.columns for col in cols):
             logger.warning(f"Gamelog missing - {date}")
             return []
         playerStats = playerStats[cols]
@@ -1290,7 +1324,6 @@ class StatsNBA(Stats):
         # Drop gate column for ZI distributions — not needed for budget normalization
         prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
 
-        # SkewNormal: rename loc/scale/alpha to proj {market} loc/scale/alpha
         rename_map = {
             "loc": f"proj {market} loc",
             "scale": f"proj {market} scale",
@@ -1304,53 +1337,13 @@ class StatsNBA(Stats):
             columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
         )
 
-        # ------------------------------------------------------------------
-        # Minutes-budget normalization
-        #
-        # Two real-world constraints complicate a simple 300-minute cap:
-        #
-        #   1. Overtime: Games sometimes go beyond regulation. With probability
-        #      p_ot per period, each OT adds ot_per_period player-minutes.
-        #      Modelling this as a geometric process gives an expected total of:
-        #          budget_mean = reg_minutes + ot_per_period * p_ot / (1 - p_ot)
-        #
-        #   2. Unmodeled players: When our roster coverage is incomplete (e.g.
-        #      rookies or fringe benchwarmers lacking enough data), those players
-        #      still consume real minutes. We reserve a portion of the budget for
-        #      them so we don't over-inflate the projections of modeled players.
-        #          unmodeled_reserve = max(0, typical_rotation - N) * avg_unmodeled_min
-        #
-        # Given these facts, the target range for modeled players' total is:
-        #   lower_target = N * per_player_floor   (sanity floor — each player logged)
-        #   upper_target = budget_mean - unmodeled_reserve
-        #
-        # When the projected total falls outside [lower_target, upper_target] we
-        # apply a precision-weighted adjustment. Rather than scaling everyone by
-        # the same factor, we distribute the correction in proportion to each
-        # player's variance. This is the minimum-information-loss solution to the
-        # constrained optimisation:
-        #
-        #   minimise  sum_i (d_i / sigma_i)^2
-        #   subject to  sum_i (mu_i + d_i) = target
-        #
-        #   -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
-        #
-        # Players we are most uncertain about absorb the correction; confidently
-        # projected players are left largely untouched.
-        # ------------------------------------------------------------------
-
-        # ------------------------------------------------------------------
-        # Budget parameters — derived by analyzing historical gamelogs.
-        #
-        # Methodology (run offline against self.gamelog, hardcoded for speed):
+        # Budget parameters derived from historical gamelogs (methodology in
+        # scale_team_volume_to_budget docstring):
         #   typical_rotation : median players logging >3 min per team per game
-        #   ot_rate          : fraction of games where any player exceeded
-        #                      regulation max minutes (0.55% NBA, 3.9% WNBA)
-        #   avg_unmodeled_min: mean minutes for players ranked beyond the top-7
-        #                      modeled tier (ranks 8-10 NBA, 8-9 WNBA)
-        #   per_player_floor : 5th-percentile minutes for top-7 tier players
+        #   ot_rate          : fraction of games going to OT (6% NBA, 3.9% WNBA)
+        #   avg_unmodeled_min: mean min for players ranked beyond the modeled tier
+        #   per_player_floor : 5th-pct min for top-7 tier players
         #   per_player_cap   : regulation max + one 5-min OT period (hard rule)
-        # ------------------------------------------------------------------
         if self.league == "NBA":
             reg_minutes = 240  # 5 players × 48 min regulation
             ot_per_period = 25  # 5 players × 5 min per OT period
@@ -1372,55 +1365,18 @@ class StatsNBA(Stats):
         ot_expected = ot_per_period * ot_rate / (1.0 - ot_rate)
         budget_mean = reg_minutes + ot_expected
 
-        teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
-        for _team, team_df in teams:
-            # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi) where delta = alpha/sqrt(1+alpha^2)
-            loc = team_df[f"proj {market} loc"].copy()
-            scale = team_df[f"proj {market} scale"].copy()
-            sn_alpha = (
-                team_df[f"proj {market} alpha"].copy()
-                if f"proj {market} alpha" in team_df.columns
-                else pd.Series(0, index=loc.index)
-            )
-            N = len(team_df)
-
-            delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-            true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-            true_vars = scale**2
-
-            total = true_means.sum()
-            if total <= 0:
-                continue
-
-            # Minutes reserved for fringe bench players not captured in our model.
-            unmodeled_count = max(0, typical_rotation - N)
-            unmodeled_reserve = unmodeled_count * avg_unmodeled_min
-
-            upper_target = budget_mean - unmodeled_reserve
-            lower_target = N * per_player_floor
-            target = max(upper_target, lower_target)
-
-            # Precision-weighted deficit distribution
-            deficit = target - total
-            total_var = true_vars.sum()
-            if total_var > 0:
-                adjustments = true_vars / total_var * deficit
-            else:
-                adjustments = true_means / total * deficit
-            new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
-
-            # Scale both loc and scale to preserve coefficient of variation
-            ratio = new_means / true_means.replace(0, np.nan)
-            ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
-            new_scale = scale * ratio
-            new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-            self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
-            self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
-            self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
-            self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
+        scale_team_volume_to_budget(
+            self.playerProfile,
+            market,
+            budget_mean=budget_mean,
+            typical_rotation=typical_rotation,
+            avg_unmodeled_min=avg_unmodeled_min,
+            per_player_floor=per_player_floor,
+            per_player_cap=per_player_cap,
+        )
 
         self.playerProfile.fillna(0, inplace=True)
+        return None
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[
@@ -1442,8 +1398,7 @@ class StatsNBA(Stats):
                 if np.isnan(v) or v == 0:
                     ev = 0
                     break
-                else:
-                    ev += v
+                ev += v
 
         elif market in ["DREB", "OREB"]:
             ev = (

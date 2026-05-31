@@ -146,7 +146,7 @@ if not volume_pivot.empty:
         volume_pivot.values,
         x=[str(d) for d in volume_pivot.columns],
         y=volume_pivot.index.tolist(),
-        labels=dict(x="Date", y="League", color="Predictions"),
+        labels={"x": "Date", "y": "League", "color": "Predictions"},
         aspect="auto",
         color_continuous_scale="Blues",
     )

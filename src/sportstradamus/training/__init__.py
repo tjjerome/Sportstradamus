@@ -1,7 +1,8 @@
 """Training package: LightGBMLSS model training pipeline.
 
-Public API re-exports for back-compat with any code that imported from
-``sportstradamus.train`` directly.
+Re-exports the public API so callers can do
+``from sportstradamus.training import train_market`` without knowing the
+internal module layout.
 """
 
 from sportstradamus.training.calibration import (
@@ -14,16 +15,12 @@ from sportstradamus.training.correlate import correlate
 from sportstradamus.training.report import report
 from sportstradamus.training.shap import (
     compute_market_importance,
-    filter_features,
-    filter_market,
     see_features,
 )
 
 __all__ = [
     "compute_market_importance",
     "correlate",
-    "filter_features",
-    "filter_market",
     "fit_book_weights",
     "fit_model_weight",
     "meditate",

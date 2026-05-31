@@ -64,6 +64,7 @@ def test_classify_lifecycle_precision_over_gate(precision_over, expected):
 
 
 def _seed_model_stats(path):
+    """Seed the wide one-row-per-cell ``model_stats.parquet`` schema."""
     rows = []
     for league, market, bss in [
         ("NBA", "PTS", 0.12),
@@ -75,26 +76,10 @@ def _seed_model_stats(path):
                 "league": league,
                 "market": market,
                 "distribution": "SkewNormal",
-                "row_kind": "model",
-                "metric_row": "calibrated",
                 "brier_skill_score": bss,
                 "predicted_over_rate": 0.52,
                 "empirical_over_rate": 0.50,
                 "kelly_shrinkage": 0.1,
-            }
-        )
-        # A book_baseline row the reader must filter out.
-        rows.append(
-            {
-                "league": league,
-                "market": market,
-                "distribution": "SkewNormal",
-                "row_kind": "book_baseline",
-                "metric_row": None,
-                "brier_skill_score": 0.0,
-                "predicted_over_rate": 0.50,
-                "empirical_over_rate": 0.50,
-                "kelly_shrinkage": 0.0,
             }
         )
     pd.DataFrame(rows).to_parquet(path, engine="pyarrow", index=False)
@@ -121,13 +106,14 @@ def _seed_live_metrics(path):
     pd.DataFrame(rows).to_parquet(path, engine="pyarrow", index=False)
 
 
-def test_read_gate1_filters_and_renames(tmp_path):
+def test_read_gate1_renames_brier_skill_score(tmp_path):
+    """read_gate1 renames ``brier_skill_score`` to ``gate1_bss`` over the wide rows."""
     p = tmp_path / "model_stats.parquet"
     _seed_model_stats(p)
     df = read_gate1(p)
     assert "gate1_bss" in df.columns
     assert "brier_skill_score" not in df.columns
-    assert len(df) == 3  # one model+calibrated row per cell; book_baseline filtered out
+    assert len(df) == 3
     assert set(zip(df["league"], df["market"], strict=False)) == {
         ("NBA", "PTS"),
         ("NBA", "FG3M"),

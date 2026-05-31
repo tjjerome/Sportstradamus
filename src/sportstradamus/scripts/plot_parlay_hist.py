@@ -81,50 +81,49 @@ def reflect():
         ]
         if game.empty:
             return np.nan, np.nan
-        else:
-            legs = 0
-            misses = 0
-            for leg in bet:
-                if isinstance(leg, str) and "%" in leg:
-                    legs += 1
-                    if " Under " in leg:
-                        split_leg = leg.split(" Under ")
-                        over = False
+        legs = 0
+        misses = 0
+        for leg in bet:
+            if isinstance(leg, str) and "%" in leg:
+                legs += 1
+                if " Under " in leg:
+                    split_leg = leg.split(" Under ")
+                    over = False
+                else:
+                    split_leg = leg.split(" Over ")
+                    over = True
+                player = split_leg[0]
+                rest = split_leg[1].split(" - ")[0]
+                line = rest.split(" ")[0]
+                market = rest[(len(line) + 1) :].replace("H2H ", "")
+                line = float(line)
+                market = new_map.get(market, market)
+
+                if " + " in player:
+                    players = player.split(" + ")
+                    result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
+                    result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
+                    if result1.empty or result2.empty:
+                        result = result1
                     else:
-                        split_leg = leg.split(" Over ")
-                        over = True
-                    player = split_leg[0]
-                    rest = split_leg[1].split(" - ")[0]
-                    line = rest.split(" ")[0]
-                    market = rest[(len(line) + 1) :].replace("H2H ", "")
-                    line = float(line)
-                    market = new_map.get(market, market)
-
-                    if " + " in player:
-                        players = player.split(" + ")
-                        result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
-                        result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
-                        if result1.empty or result2.empty:
-                            result = result1
-                        else:
-                            result = pd.Series(result1.iat[0] + result2.iat[0])
-                    elif " vs. " in player:
-                        players = player.split(" vs. ")
-                        result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
-                        result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
-                        if result1.empty or result2.empty:
-                            result = result1
-                        else:
-                            result = pd.Series(result1.iat[0] + result2.iat[0])
+                        result = pd.Series(result1.iat[0] + result2.iat[0])
+                elif " vs. " in player:
+                    players = player.split(" vs. ")
+                    result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
+                    result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
+                    if result1.empty or result2.empty:
+                        result = result1
                     else:
-                        result = game.loc[game[nameStr[bet.League]] == player, market]
+                        result = pd.Series(result1.iat[0] + result2.iat[0])
+                else:
+                    result = game.loc[game[nameStr[bet.League]] == player, market]
 
-                    if result.empty or result.iat[0] == line:
-                        legs -= 1
-                    elif (result.iat[0] < line and over) or (result.iat[0] > line and not over):
-                        misses += 1
+                if result.empty or result.iat[0] == line:
+                    legs -= 1
+                elif (result.iat[0] < line and over) or (result.iat[0] > line and not over):
+                    misses += 1
 
-            return legs, misses
+        return legs, misses
 
     parlays.loc[parlays.Legs.isna(), ["Legs", "Misses"]] = (
         parlays.loc[parlays.Legs.isna()].progress_apply(check_bet, axis=1).to_list()

@@ -60,6 +60,10 @@ STRATEGY_NONE = "none"
 # Reserved shipped value: cell is not shipped on any branch.
 WITHHELD = "withheld"
 
+# Distribution family name for the custom PyTorch SkewNormal; used in ship-gate
+# logic to detect which cells need a real strategy slug vs. STRATEGY_NONE.
+SKEW_NORMAL_DIST: str = "SkewNormal"
+
 # Allowed shipped values per training branch — a cell is "active" on branch
 # ``b`` iff ``cell["shipped"] in _ALLOWED_FOR_BRANCH[b]``.
 _ALLOWED_FOR_BRANCH: dict[str, frozenset[str]] = {
@@ -76,7 +80,7 @@ STAT_META_PATH = pkg_resources.files(data) / "config" / "stat_meta.json"
 ShipConfig = dict[str, dict[str, str]]
 
 
-def _load_stat_meta(path: Path) -> dict[str, dict[str, dict]]:
+def load_stat_meta(path: Path) -> dict[str, dict[str, dict]]:
     if not path.exists():
         return {}
     with open(path) as infile:
@@ -98,12 +102,12 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
             f"stat_meta.json: cell {league}/{market} has unknown strategy "
             f"value {strategy!r}; valid: {sorted(set(STRATEGY_SLUGS) | {STRATEGY_NONE})}"
         )
-    if dist == "SkewNormal" and strategy == STRATEGY_NONE and shipped != WITHHELD:
+    if dist == SKEW_NORMAL_DIST and strategy == STRATEGY_NONE and shipped != WITHHELD:
         raise ValueError(
             f"stat_meta.json: SkewNormal cell {league}/{market} cannot ship "
             f"with strategy=none (SkewNormal requires a real strategy slug)"
         )
-    if dist != "SkewNormal" and strategy != STRATEGY_NONE:
+    if dist != SKEW_NORMAL_DIST and strategy != STRATEGY_NONE:
         raise ValueError(
             f"stat_meta.json: non-SkewNormal cell {league}/{market} (dist={dist!r}) "
             f"cannot carry strategy={strategy!r}; the slug only applies to the "
@@ -137,7 +141,7 @@ def load_ship_config(branch: str = "devel", path: Path | None = None) -> ShipCon
     if branch not in _ALLOWED_FOR_BRANCH:
         raise ValueError(f"Unknown branch {branch!r}; valid: {sorted(_ALLOWED_FOR_BRANCH)}")
     path = Path(str(STAT_META_PATH)) if path is None else Path(path)
-    meta = _load_stat_meta(path)
+    meta = load_stat_meta(path)
     allowed = _ALLOWED_FOR_BRANCH[branch]
     config: ShipConfig = {}
     for league, markets in meta.items():
