@@ -263,7 +263,7 @@ def test_rebuild_correlations_does_not_touch_models(monkeypatch) -> None:
 
     calls: list[tuple[str, bool]] = []
 
-    def fake_correlate(league: str, stat_data, force: bool = False) -> None:
+    def fake_correlate(league: str, stat_data, *, force: bool = False) -> None:
         calls.append((league, force))
 
     monkeypatch.setattr("sportstradamus.training.cli.StatsNBA", _StubStats)

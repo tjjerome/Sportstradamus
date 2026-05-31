@@ -506,6 +506,7 @@ def _step_load_matrix(
     stat_data,
     league: str,
     market: str,
+    *,
     deterministic: bool,
     force: bool,
     need_model: bool,
@@ -593,7 +594,7 @@ def _step_synthesize_odds(
 
 
 def _step_persist_matrix_and_comps(
-    M: pd.DataFrame, filepath, deterministic: bool, stat_data
+    M: pd.DataFrame, filepath, stat_data, *, deterministic: bool
 ) -> pd.DataFrame:
     """Trim the matrix, write parquet, save comps. Deterministic mode skips I/O."""
     M = trim_matrix(M, 15000)
@@ -728,6 +729,7 @@ def _step_build_lss_model(
     dist_obj,
     X_train,
     shape_ceiling,
+    *,
     normalize: bool,
     offset_mode: bool,
     use_hurdle: bool,
@@ -765,10 +767,11 @@ def _step_select_hyperparams(
     X_train,
     dist: str,
     model,
-    use_hurdle: bool,
-    deterministic: bool,
     opt_params_in: dict | None,
     dtrain,
+    *,
+    use_hurdle: bool,
+    deterministic: bool,
 ) -> tuple[dict, list[int]]:
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
@@ -845,13 +848,13 @@ def _step_select_hyperparams(
 
 
 def _step_fit_model(
-    use_hurdle: bool,
     dist: str,
     dist_obj,
     X_train,
     y_train_labels,
     opt_params: dict,
     *,
+    use_hurdle: bool,
     normalize: bool,
     offset_mode: bool,
     shape_ceiling,
@@ -877,7 +880,7 @@ def _step_fit_model(
 
 
 def _step_predict_splits(
-    model, dist: str, splits: dict, normalize: bool, offset_mode: bool
+    model, dist: str, splits: dict, *, normalize: bool, offset_mode: bool
 ) -> dict:
     """Predict raw distribution params on train/validation/test splits.
 
@@ -1885,6 +1888,7 @@ def _step_select_distribution(
     league: str,
     target_strategy: str,
     zinb_mode: str,
+    *,
     deterministic: bool,
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
@@ -2031,9 +2035,10 @@ def train_market(
     league: str,
     market: str,
     stat_data,
-    force: bool,
     archive,
     league_start_date,
+    *,
+    force: bool,
     deterministic: bool = False,
     target_strategy: str = "ratio_meanyr",
     zinb_mode: str = "joint",
@@ -2074,6 +2079,8 @@ def train_market(
             when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
             byte-identical to pre-P2.B production behavior.
     """
+    # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
+    # don't split. Already over the limit before the FBT keyword-only conversion.
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
@@ -2089,20 +2096,22 @@ def train_market(
         stat_data,
         league,
         market,
-        deterministic,
-        force,
-        init["need_model"],
+        deterministic=deterministic,
+        force=force,
+        need_model=init["need_model"],
     )
     if loaded is None:
         return
     M, training_data_path = loaded
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
-    M = _step_persist_matrix_and_comps(M, training_data_path, deterministic, stat_data)
+    M = _step_persist_matrix_and_comps(
+        M, training_data_path, stat_data, deterministic=deterministic
+    )
 
     splits = _step_build_splits(M, stat_data, market)
     dist_info = _step_select_distribution(
-        splits, stat_data, market, league, target_strategy, zinb_mode, deterministic
+        splits, stat_data, market, league, target_strategy, zinb_mode, deterministic=deterministic
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2115,9 +2124,9 @@ def train_market(
         dist_info["dist_obj"],
         splits["X_train"],
         shape_ceiling,
-        dist_info["normalize"],
-        dist_info["offset_mode"],
-        use_hurdle,
+        normalize=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        use_hurdle=use_hurdle,
     )
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     opt_params_in = filedict.get("params")
@@ -2125,18 +2134,18 @@ def train_market(
         splits["X_train"],
         dist,
         model,
-        use_hurdle,
-        deterministic,
         opt_params_in,
         dtrain,
+        use_hurdle=use_hurdle,
+        deterministic=deterministic,
     )
     model = _step_fit_model(
-        use_hurdle,
         dist,
         dist_info["dist_obj"],
         splits["X_train"],
         splits["y_train_labels"],
         opt_params,
+        use_hurdle=use_hurdle,
         normalize=dist_info["normalize"],
         offset_mode=dist_info["offset_mode"],
         shape_ceiling=shape_ceiling,
@@ -2144,7 +2153,7 @@ def train_market(
     )
 
     preds = _step_predict_splits(
-        model, dist, splits, dist_info["normalize"], dist_info["offset_mode"]
+        model, dist, splits, normalize=dist_info["normalize"], offset_mode=dist_info["offset_mode"]
     )
     prob_params = preds["prob_params"]
 

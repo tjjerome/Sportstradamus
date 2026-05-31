@@ -742,7 +742,7 @@ def _stratify_team_pairs(team_corr: pd.Series) -> tuple[pd.Series, pd.Series]:
     return same, cross
 
 
-def correlate(league: str, stat_data, force: bool = False) -> None:
+def correlate(league: str, stat_data, *, force: bool = False) -> None:
     """Build stratified per-league correlation matrices and metadata sidecar.
 
     When the prior run's outputs are present and the inputs are unchanged
