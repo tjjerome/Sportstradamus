@@ -6,7 +6,9 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import fit, gamma, nbinom, norm, poisson, skewnorm
 
-from sportstradamus.helpers import fused_loc, stat_cv
+from sportstradamus.helpers import fused_loc, get_logger, stat_cv
+
+logger = get_logger(__name__)
 
 # Blend-weight bounds for the model-vs-book optimization. 0.05 keeps a minimum
 # bookmaker signal even when the model is dominant; 0.9 keeps a minimum model
@@ -43,7 +45,7 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
     warnings.simplefilter("ignore", UserWarning)
     from sportstradamus.training.config import load_distribution_config
 
-    print(f"Fitting Book Weights - {league}, {market}")
+    logger.info("Fitting Book Weights - %s, %s", league, market)
     df = archive.to_pandas(league, market)
     df = df[[col for col in df.columns if col != "pinnacle"]]
     if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
@@ -336,10 +338,7 @@ def select_distribution(player_stats) -> tuple[str, float]:
         resolutions = player_stats.apply(_player_resolution).dropna()
         resolution = resolutions.median()
         dist = "NegBin" if resolution > _NEGBIN_RESOLUTION_THRESHOLD else "Gamma"
-        print(
-            f"  Resolution: {resolution:.4f}"
-            f" ({'NegBin' if resolution > _NEGBIN_RESOLUTION_THRESHOLD else 'Gamma'})"
-        )
+        logger.info("  Resolution: %.4f (%s)", resolution, dist)
 
     observed_zeros = player_stats.agg(lambda x: x.eq(0).mean())
 
@@ -367,8 +366,9 @@ def select_distribution(player_stats) -> tuple[str, float]:
         if p_zero > _ZAGAMMA_ZERO_INFLATION_THRESHOLD:
             dist = "ZAGamma"
 
-    print(f"  Data type: {f'integer (step={int(step)})' if is_integer else 'continuous'}")
-    print(f"  Zero inflation - {p_zero:.4f}")
-    print(f"  Selected: {dist}")
+    data_type = f"integer (step={int(step)})" if is_integer else "continuous"
+    logger.info("  Data type: %s", data_type)
+    logger.info("  Zero inflation - %.4f", p_zero)
+    logger.info("  Selected: %s", dist)
 
     return dist, p_zero

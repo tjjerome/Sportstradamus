@@ -3,6 +3,10 @@
 import numpy as np
 import torch
 
+from sportstradamus.helpers import get_logger
+
+logger = get_logger(__name__)
+
 
 class _BoundedResponseFn:
     """Picklable callable that clamps a response function's output."""
@@ -92,17 +96,17 @@ def warm_start_hyper_opt(
 
     study.optimize(objective, n_trials=n_trials, timeout=60 * max_minutes, show_progress_bar=True)
 
-    print("\nWarm-Start Hyper-Parameter Optimization finished.")
-    print("  Number of finished trials: ", len(study.trials))
-    print("  Best trial:")
+    logger.info("Warm-Start Hyper-Parameter Optimization finished.")
+    logger.info("  Number of finished trials: %d", len(study.trials))
+    logger.info("  Best trial:")
     opt_param = study.best_trial
     opt_param.params["opt_rounds"] = int(
         study.trials_dataframe()["user_attrs_opt_round"][study.trials_dataframe()["value"].idxmin()]
     )
 
-    print(f"    Value: {opt_param.value}")
-    print("    Params: ")
+    logger.info("    Value: %s", opt_param.value)
+    logger.info("    Params:")
     for key, value in opt_param.params.items():
-        print(f"    {key}: {value}")
+        logger.info("    %s: %s", key, value)
 
     return opt_param.params
