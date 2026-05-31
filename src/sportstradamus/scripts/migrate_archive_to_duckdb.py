@@ -77,7 +77,7 @@ def _iter_league(archive_root: Path, league: str, cutoff: datetime.date):
     """
     league_dir = archive_root / league
     if not league_dir.is_dir():
-        return
+        return None
     a = hdfdir_archive(str(league_dir), {}, protocol=-1)
     a.load()
 

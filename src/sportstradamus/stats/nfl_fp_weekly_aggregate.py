@@ -38,7 +38,7 @@ a ``target_game_date`` was passed.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -1075,6 +1075,23 @@ def _dispatch(df: pd.DataFrame, recipe: _Recipe) -> pd.Series | None:
     return None
 
 
+def _iter_bucket_payloads(df: pd.DataFrame) -> Iterator[tuple[object, dict[str, object]]]:
+    """Yield ``(player_id, payload)`` for each row whose JSON ``bucket`` parses to a dict.
+
+    Shared preamble for the separation/coverage aggregators — each reads the
+    same per-game ``bucket`` JSON column but extracts different inner keys.
+    """
+    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
+        if not isinstance(bucket_str, str) or not bucket_str:
+            continue
+        try:
+            payload = json.loads(bucket_str)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            yield player_id, payload
+
+
 def _aggregate_separation_by_routes(
     windows: Sequence[tuple[int, int, int]],
 ) -> pd.DataFrame:
@@ -1102,15 +1119,7 @@ def _aggregate_separation_by_routes(
         return pd.DataFrame()
 
     long_rows: list[dict[str, object]] = []
-    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
-        if not isinstance(bucket_str, str) or not bucket_str:
-            continue
-        try:
-            payload = json.loads(bucket_str)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    for player_id, payload in _iter_bucket_payloads(df):
         for route_key, route_payload in payload.items():
             if not isinstance(route_payload, dict):
                 continue
@@ -1241,15 +1250,7 @@ def _aggregate_separation_by_coverage(
         return pd.DataFrame()
 
     long_rows: list[dict[str, object]] = []
-    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
-        if not isinstance(bucket_str, str) or not bucket_str:
-            continue
-        try:
-            payload = json.loads(bucket_str)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    for player_id, payload in _iter_bucket_payloads(df):
         for bucket_name, key in _SEP_BY_COVERAGE_SCHEMES.items():
             inner = payload.get(key)
             if not isinstance(inner, dict):
@@ -1311,15 +1312,7 @@ def _aggregate_separation_by_alignment_bucket(
         return pd.DataFrame()
 
     long_rows: list[dict[str, object]] = []
-    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
-        if not isinstance(bucket_str, str) or not bucket_str:
-            continue
-        try:
-            payload = json.loads(bucket_str)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    for player_id, payload in _iter_bucket_payloads(df):
         for align_name, key in _SEP_BY_ALIGNMENT_BUCKETS.items():
             inner = payload.get(key)
             if not isinstance(inner, dict):
@@ -1398,15 +1391,7 @@ def _aggregate_man_vs_zone_bucket(
         return pd.DataFrame()
 
     long_rows: list[dict[str, object]] = []
-    for player_id, bucket_str in zip(df[PLAYER_GROUP_COL], df["bucket"], strict=True):
-        if not isinstance(bucket_str, str) or not bucket_str:
-            continue
-        try:
-            payload = json.loads(bucket_str)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    for player_id, payload in _iter_bucket_payloads(df):
         for shell_name, key in _MZ_BUCKETS.items():
             inner = payload.get(key)
             if not isinstance(inner, dict):

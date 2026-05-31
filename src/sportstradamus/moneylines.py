@@ -26,6 +26,7 @@ American-sports start hours only — is::
 import importlib.resources as pkg_resources
 import json
 from datetime import datetime, timedelta
+from http import HTTPStatus
 from itertools import groupby
 from operator import itemgetter
 from pathlib import Path
@@ -74,6 +75,10 @@ ODDS_API_HISTORICAL_EVENT_ODDS_URL = (
 )
 ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/"
 
+# Warn when the Odds API account drops below this many remaining requests so the
+# season-long token budget doesn't silently run dry mid-slate.
+_LOW_API_CREDITS_THRESHOLD = 50
+
 
 def _get_with_retry(url, params=None):
     """GET ``url`` with one 429-retry. Returns the ``requests.Response``.
@@ -83,7 +88,7 @@ def _get_with_retry(url, params=None):
     so callers can decide whether to ``continue`` or bail.
     """
     res = requests.get(url, params=params)
-    if res.status_code == 429:
+    if res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         sleep(1)
         res = requests.get(url, params=params)
     return res
@@ -179,10 +184,10 @@ def get_moneylines(
             logger.warning("All sports only supported if date is today")
             return archive
         res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey["odds_api"]})
-        if res.status_code != 200:
+        if res.status_code != HTTPStatus.OK:
             return archive
 
-        low_on_credits = int(res.headers.get("X-Requests-Remaining")) < 50
+        low_on_credits = int(res.headers.get("X-Requests-Remaining")) < _LOW_API_CREDITS_THRESHOLD
         res = res.json()
 
         sports = [
@@ -216,7 +221,7 @@ def get_moneylines(
 
     for sport, league in sports:
         res = _get_with_retry(url_template.format(sport=sport), params=params)
-        if res.status_code != 200:
+        if res.status_code != HTTPStatus.OK:
             continue
 
         res = res.json()["data"] if historical else res.json()
@@ -309,7 +314,7 @@ def get_props(
             logger.warning("All sports only supported if date is today")
             return archive
         res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey})
-        if res.status_code != 200:
+        if res.status_code != HTTPStatus.OK:
             return archive
 
         res = res.json()
@@ -343,7 +348,7 @@ def get_props(
         if league == "MLB":
             params["markets"] = params["markets"] + ",totals_1st_1_innings,spreads_1st_1_innings"
         events = _get_with_retry(event_url_template.format(sport=sport), params=params)
-        if events.status_code != 200:
+        if events.status_code != HTTPStatus.OK:
             continue
 
         events = events.json()["data"] if historical else events.json()
@@ -359,9 +364,9 @@ def get_props(
             res = _get_with_retry(
                 odds_url_template.format(sport=sport, eventId=event["id"]), params=event_params
             )
-            if res.status_code == 404:
+            if res.status_code == HTTPStatus.NOT_FOUND:
                 return archive
-            elif res.status_code != 200:
+            if res.status_code != HTTPStatus.OK:
                 continue
 
             game = res.json()["data"] if historical else res.json()
@@ -405,7 +410,7 @@ def _archive_event_props(archive, game, league, props, gameDate):
                 totals.setdefault(spread_name, {})
                 totals[spread_name][book["key"]] = get_ev(outcomes[1]["point"], sub_odds[1])
                 continue
-            elif "spread" in market["key"]:
+            if "spread" in market["key"]:
                 spread_name = " ".join(market["key"].split("_")[1:])
                 outcomes = sorted(market["outcomes"], key=itemgetter("point"))
                 sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
@@ -610,7 +615,7 @@ def _close_lines_pass(apikey, props):
             ODDS_API_EVENT_ODDS_URL.format(sport=sport_key, eventId=event_id),
             params=event_params,
         )
-        if res.status_code != 200:
+        if res.status_code != HTTPStatus.OK:
             logger.warning(f"close-lines: {league} {event_id} returned status {res.status_code}")
             continue
         game = res.json()

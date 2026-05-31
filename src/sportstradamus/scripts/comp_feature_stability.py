@@ -155,9 +155,7 @@ def load_stacked_seasons(min_games: int) -> pd.DataFrame:
     stacked = apply_rolling_transforms(stacked)
 
     # Min-games filter mirrors the half-season cutoff used in stickiness lit.
-    stacked = stacked.loc[stacked[GAMES_COLUMN] >= min_games].copy()
-
-    return stacked
+    return stacked.loc[stacked[GAMES_COLUMN] >= min_games].copy()
 
 
 def collect_pairs(stacked: pd.DataFrame, feature: str, position: str | None = None) -> pd.DataFrame:

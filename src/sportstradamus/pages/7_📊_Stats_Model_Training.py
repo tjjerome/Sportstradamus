@@ -169,17 +169,14 @@ TAB_COLUMNS: dict[str, list[str]] = {
 }
 
 TAB_CAPTIONS: dict[str, str] = {
-    "Overview": (
-        "One row per (league, market). Columns are annotated ↑/↓/informational."
-    ),
+    "Overview": ("One row per (league, market). Columns are annotated ↑/↓/informational."),
     "Scoring rules": (
         "Proper scoring rules on the validation set. The model's `*_model` column"
         " should beat the `*_book` baseline; the derived `brier_skill_score` is the"
         " single-number gate the kelly chain reads. Columns are annotated ↑/↓/informational."
     ),
     "Discrimination": (
-        "How well the model separates winners from losers."
-        " Columns are annotated ↑/↓/informational."
+        "How well the model separates winners from losers. Columns are annotated ↑/↓/informational."
     ),
     "Rates": (
         "Rates and conditional Over% slices. Compare `predicted_over_rate` to"
@@ -267,7 +264,9 @@ with st.sidebar:
     sel_leagues = st.multiselect("Leagues", leagues, default=leagues)
     distributions = sorted(stats["distribution"].dropna().unique())
     sel_dists = st.multiselect("Distributions", distributions, default=distributions)
-    shipped_states = sorted(stats["shipped"].dropna().unique()) if "shipped" in stats.columns else []
+    shipped_states = (
+        sorted(stats["shipped"].dropna().unique()) if "shipped" in stats.columns else []
+    )
     sel_shipped = (
         st.multiselect("Shipped", shipped_states, default=shipped_states) if shipped_states else []
     )

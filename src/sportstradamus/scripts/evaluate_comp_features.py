@@ -89,7 +89,7 @@ def discover_numeric_features(profile, min_coverage=0.5, min_unique=3):
     """Find all numeric features with adequate coverage."""
     features = []
     for col in profile.columns:
-        if col.endswith("growth") or col.endswith("short"):
+        if col.endswith(("growth", "short")):
             continue
         try:
             vals = pd.to_numeric(profile[col], errors="coerce")
@@ -640,7 +640,7 @@ def main():
 
         elif args.save and (added or removed):
             # Save with equal weights normalized
-            equal_w = {f: 1.0 for f in best_features}
+            equal_w = dict.fromkeys(best_features, 1.0)
             current_weights[args.league][position] = normalize_weights(equal_w)
 
     if args.save:
