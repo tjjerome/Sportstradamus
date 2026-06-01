@@ -22,28 +22,33 @@ goes to production once it proves it — Tier-0 gate offline → 14-day
 Gate-2 soak live → graduate. A cell promoted but still in 14-day soak
 counts toward the 75% numerator (ship-incrementally).
 
-## Current state (model_stats.parquet, May-30 retrain + Step 0.7 g4 fix, 2026-05-31)
+## Current state (May-30 retrain + Step 0.7 g4 fix + Step 0.8 EV-gate/g1 fix, 2026-05-31)
 
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
 | NBA | 18 | 21 | 86% | 16 | **+2 ✓** |
-| NFL | 12 | 20 | 60% | 15 | **−3** |
-| WNBA | 12 | 18 | 67% | 14 | **−2** |
+| NFL | 14 | 20 | 70% | 15 | **−1** |
+| WNBA | 13 | 18 | 72% | 14 | **−1** |
 
-Total 42/59 = 71%. Source: `data/training/model_stats.parquet` (owned by
+Total 45/59 = 76%. Source: `data/training/model_stats.parquet` (owned by
 `training.report.report()`); `ship = g1_pass AND … AND g5_pass` via
 [`training/scorecard.py`](../src/sportstradamus/training/scorecard.py)
 `compute_gates`. The offline harness moved from the old
 `scripts/compression_eval.py` to `training/scorecard.py`.
+
+Step 0.8 (below) flips +3 with no retrain: NFL `rushing tds` (g2) +
+`receiving yards` (g1) and WNBA `FG3M` (g3). NBA already clears 75%; NFL and
+WNBA each sit one cell short of their per-league target.
 
 > **Reconciliation note (2026-05-31).** The 2026-05-23 snapshot this section
 > used to show (NFL 11, WNBA 12 → 41/59) was scored off *re-scored old test
 > CSVs* and was optimistic. The May-30 fresh retrain (commit `50e5dce`)
 > regressed WNBA 12→10 and NFL 11→8 (36/59 = 61%) — the doc's "ready" cells
 > didn't survive a real retrain. Step 0.7 (g4 decode fix, below) then flipped
-> +4 NFL / +2 WNBA back to 42/59 = 71% with **no retrain**. The per-cell
-> lifecycle tables further down still reflect the stale 2026-05-23 view and
-> need a full refresh on the next audit pass.
+> +4 NFL / +2 WNBA back to 42/59 = 71% with **no retrain**, and Step 0.8
+> (EV-gate + g1-rounding fixes, below) flipped a further +3 to 45/59 = 76% —
+> also no retrain. The per-cell lifecycle tables further down still reflect the
+> stale 2026-05-23 view and need a full refresh on the next audit pass.
 
 **Step 0 verdict: G4 was measuring a measurement artifact.** The old
 gate `_iqr(point_pred) / _iqr(actual)` compared point-prediction spread
@@ -481,6 +486,59 @@ candidates shrink to cells still failing a dispersion gate after 0.7. After
 (`attempts`/`completions`/`passing first downs`/`receiving yards`, n≈313–378)
 — audit g1 for a small-n CI-width artifact (Step 4.1) before retraining, given
 g4 and g5 both turned out to be artifacts.
+
+### Step 0.8 — Bias-gate EV representation + g1-rounding fixes (DONE 2026-05-31)
+
+Two more gate-representation artifacts in the same family as Step 0.7's g4
+decode bug — the gate read a quantity that did not mean what it assumed. Both
+are scorer-side; no model change, no retrain.
+
+**g2/g3 EV-gate (the dominant fix).** ZINB/ZAGamma cells store the
+**base-distribution mean** μ in the test-set `EV` column
+([pipeline.py](../src/sportstradamus/training/pipeline.py) `_step_persist_artifacts`,
+`EV = total_count·probs/(1−probs)`, with `Gate` = π a *separate* column). This is
+the deliberate betting convention: `get_ev` factors the zero-inflation gate π out
+of EV and `get_odds` reapplies it only when pricing over/under probabilities — so
+g1 (Brier) and g5 (ECE), which run through the probability path, were always
+correct. But the **bias gates g2/g3 compared the base μ directly against the
+zero-INCLUSIVE empirical segment mean**, never reapplying π — overstating the
+prediction by `1/(1−π)`, worst where the gate is large (bench players; star
+goal-line backs). The model was fine; the gate misread it.
+
+Fix: `scorecard.py:_zero_inflated_mean(df, pred)` returns `pred·(1−π)` for
+ZINB/ZAGamma (dist inferred from the `Gate` column + NB/Gamma params) and is used
+for the g2/g3 segment means only — g4 keeps the raw base μ. SkewNormal is
+**excluded**: its `EV` is already a full mean, and gating it would re-break shipped
+cells (e.g. WNBA `AST` g2 0.20→0.57). The same convention is mirrored in
+`pipeline.py:_zero_inflated_outcome_mean` so the informational EV/line
+**diagnostics** (`model_ev`, `mean_ev_diff`, `median_ev_diff`, `frac_ev_gt_line`,
+`over_pct_ev_gt/lt`, `ev_meanyr_corr`) report E[Y] = (1−π)·μ rather than the
+overstated base μ. Diagnostics do not feed the ship gates, so this is a
+read-accuracy fix, not a gate flip.
+
+**g1 negative-zero rounding.** Gate values store rounded to 4 dp, and Python's
+`round()` preserves the sign bit, so a genuinely-negative paired-Brier CI upper
+bound in (−5e-5, 0) lands on `-0.0` — where the strict `g1_ci_hi < 0` test reads
+`-0.0 < 0.0` as False and **false-fails** a cell that beat the book. NFL
+`receiving yards` (true `g1_ci_hi` ≈ −0.0000429) was the boundary cell.
+`scorecard.py:_below_zero_ci_bound` now counts a negative-signed zero as below the
+bound (via `np.signbit`); the change is monotonic (only adds g1 passes), so no
+shipped cell can regress.
+
+**Recovery (3 cells ship, 0 break, no retrain), verified on the full 59-cell
+offline sweep:**
+
+- NFL `rushing tds` (ZINB) — g2 star_z 0.638→0.292 (EV-gate).
+- WNBA `FG3M` (ZINB) — g3 bench_z 0.645→0.015 (EV-gate); WNBA `BLK` g3 also drops
+  (0.555→0.028) but still kills on g4.
+- NFL `receiving yards` (SkewNormal) — g1 `-0.0` now passes (rounding fix).
+
+Promoted in `stat_meta.json` (withheld→devel). **Counts: NBA 18/21, NFL 14/20,
+WNBA 13/18 → 45/59 = 76%.** The r-misfit hypothesis for ZINB TDs is **refuted** —
+extracted per-row params show r≈50 (near-Poisson, well-fit); the dispersion was
+never the problem. NFL `attempts`/`completions`/`passing-first-downs` stay withheld:
+their g1 wall is a real efficient-market wall (synthetic flat-0.5 book odds; oracle
+Brier ceiling 0.0012 vs the ~0.012 g1 needs), not an artifact — accept-killed.
 
 ### Step 1 — Post-hoc mean-bias correction (1–2 weeks)
 
