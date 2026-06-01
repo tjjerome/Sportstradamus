@@ -1009,6 +1009,22 @@ def _step_compute_mode_stats(
     }
 
 
+def _zero_inflated_outcome_mean(
+    base_mean: np.ndarray, dist: str, gate: np.ndarray | None
+) -> np.ndarray:
+    """E[Y] = (1-π)·μ for zero-inflated count cells; the base mean otherwise.
+
+    ZINB/ZAGamma store the base-distribution mean — the betting convention factors
+    the gate out and reapplies it in ``get_odds``. The EV/bias diagnostics compare
+    against zero-INCLUSIVE outcomes (Result, Line), so they must reapply it. SkewNormal
+    EV is already a full mean and NegBin/Gamma carry no gate — both pass through. Mirrors
+    ``training.scorecard._zero_inflated_mean``.
+    """
+    if dist in ("ZINB", "ZAGamma") and gate is not None:
+        return base_mean * (1.0 - gate)
+    return base_mean
+
+
 def _step_compute_diagnostics(
     splits: dict,
     prob_params: pd.DataFrame,
@@ -1069,17 +1085,22 @@ def _step_compute_diagnostics(
         diag_shape_label = "r"
 
     diag_start_mean = float(test_mean_yr)
-    diag_model_ev = float(weighted_mean.mean())
+    # E[Y] = (1-π)·μ — the EV/bias diagnostics below compare against zero-INCLUSIVE
+    # outcomes (Result, Line), so zero-inflated count cells reapply the gate that
+    # weighted_mean (base-μ betting convention) factors out. The get_odds/cf path
+    # further down keeps using weighted_mean and reapplies the gate itself.
+    ev_full = _zero_inflated_outcome_mean(weighted_mean, dist, gate_blend_test)
+    diag_model_ev = float(ev_full.mean())
     diag_mean_line = float(B_test["Line"].mean())
-    diag_ev_minus_line = float((weighted_mean - B_test["Line"].to_numpy()).mean())
+    diag_ev_minus_line = float((ev_full - B_test["Line"].to_numpy()).mean())
     diag_result_mean = float(y_test["Result"].mean())
 
     _meanyr_arr = X_test["MeanYr"].to_numpy()
     _result_arr = y_test["Result"].to_numpy()
-    diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, weighted_mean - _meanyr_arr)[0, 1])
+    diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, ev_full - _meanyr_arr)[0, 1])
     diag_result_meanyr_corr = float(np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1])
 
-    ev_minus_line_arr = weighted_mean - B_test["Line"].to_numpy()
+    ev_minus_line_arr = ev_full - B_test["Line"].to_numpy()
     diag_median_ev_diff = float(np.median(ev_minus_line_arr))
     diag_frac_ev_gt_line = float((ev_minus_line_arr > 0).mean())
 
