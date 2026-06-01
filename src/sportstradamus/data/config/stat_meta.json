@@ -321,7 +321,7 @@
         },
         "receiving yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "strategy": "ratio_meanyr"
         },
         "receptions": {
@@ -331,7 +331,7 @@
         },
         "rushing tds": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "strategy": "none"
         },
         "rushing yards": {
@@ -465,7 +465,7 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "strategy": "none"
         },
         "FGA": {
