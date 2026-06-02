@@ -3,535 +3,640 @@
         "1st inning hits allowed": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "1st inning runs allowed": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "batter strikeouts": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "doubles": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "hits": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "hits allowed": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "hits+runs+rbi": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "hitter fantasy points underdog": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "hitter fantasy score": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "home runs": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "pitcher fantasy points underdog": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "pitcher fantasy score": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "pitcher strikeouts": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "pitches thrown": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "pitching outs": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "plateAppearances": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "rbi": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "runs": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "runs allowed": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "singles": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "stolen bases": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "total bases": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "walks": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "walks allowed": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         }
     },
     "NBA": {
         "AST": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "BLK": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "BLST": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "DREB": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "FG3A": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "FG3M": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "FGA": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "FGM": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "FTM": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "MIN": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "OREB": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "PA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "PF": {
             "dist": "ZINB",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "PR": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "PRA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "PTS": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "RA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "REB": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "STL": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "TOV": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         }
     },
     "NFL": {
         "attempts": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "carries": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "completion percentage": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "completions": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "first downs": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "fumbles lost": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "interceptions": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "longest completion": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "longest reception": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "longest rush": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "passing first downs": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "passing tds": {
             "dist": "ZINB",
-            "shipped": "devel",
-            "strategy": "none"
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "passing yards": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "qb tds": {
             "dist": "ZINB",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "qb yards": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "receiving tds": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "receiving yards": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "receptions": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "centered_additive_mean10"
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none"
         },
         "rushing tds": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "rushing yards": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "sacks taken": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "targets": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "tds": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "yards": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         }
     },
     "NHL": {
         "assists": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "blocked": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "faceOffWins": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "goalie fantasy points underdog": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "goals": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "goalsAgainst": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "hits": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "points": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "powerPlayPoints": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "saves": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "shots": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "shotsAgainst": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "skater fantasy points underdog": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "sogBS": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "timeOnIce": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         }
     },
     "WNBA": {
         "AST": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "BLK": {
             "dist": "ZINB",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "BLST": {
             "dist": "ZINB",
-            "shipped": "withheld",
-            "strategy": "none"
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_isotonic"
         },
         "DREB": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "centered_additive_mean10"
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none"
         },
         "FG3M": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "FGA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "FTM": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "MIN": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "OREB": {
             "dist": "ZINB",
             "shipped": "devel",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "PA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "PR": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "PRA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "strategy": "ratio_meanyr"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "prob_recal_isotonic"
         },
         "RA": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "REB": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         },
         "STL": {
             "dist": "ZINB",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "TOV": {
             "dist": "ZINB",
             "shipped": "withheld",
-            "strategy": "none"
+            "target_normalization": "none",
+            "posthoc": "none"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
             "shipped": "devel",
-            "strategy": "ratio_meanyr"
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
         }
     }
 }

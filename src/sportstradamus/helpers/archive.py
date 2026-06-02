@@ -759,18 +759,29 @@ class Archive:
         entity: str,
         book: str,
         ev: float,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
-        """Buffer a per-book EV observation; flushed by :meth:`write`."""
+        """Buffer a per-book EV observation; flushed by :meth:`write`.
+
+        ``observed_at`` defaults to now; the historical backfill passes the
+        snapshot's as-of time so point-in-time training reads pick it up.
+        """
         self._pending_odds.append(
-            (league, market, date, entity, book, float(ev), datetime.datetime.utcnow())
+            (league, market, date, entity, book, float(ev), observed_at or datetime.datetime.utcnow())
         )
 
     def _stage_line(
-        self, league: str, market: str, date: datetime.date, entity: str, line: float
+        self,
+        league: str,
+        market: str,
+        date: datetime.date,
+        entity: str,
+        line: float,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
         """Buffer a line observation; flushed by :meth:`write`."""
         self._pending_lines.append(
-            (league, market, date, entity, float(line), datetime.datetime.utcnow())
+            (league, market, date, entity, float(line), observed_at or datetime.datetime.utcnow())
         )
 
     def add_dfs(self, offers, platform, key):
@@ -833,12 +844,14 @@ class Archive:
         player: str,
         book_evs: dict[str, float],
         lines: list[float] | None = None,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
         """Append per-book EVs and any new lines for one player entry.
 
         Append-only under the time-series schema: every call adds new
         ``observed_at`` rows; the latest-per-book reader returns the
-        freshest observations.
+        freshest observations. ``observed_at`` defaults to now; the
+        historical backfill passes the snapshot's as-of time.
         """
         d = _safe_date(date)
         if d is None:
@@ -847,11 +860,11 @@ class Archive:
         for book, ev in book_evs.items():
             if ev is None:
                 continue
-            self._stage_book_ev(league, market, d, player, book, ev)
+            self._stage_book_ev(league, market, d, player, book, ev, observed_at)
         for line in lines or []:
             if line is None:
                 continue
-            self._stage_line(league, market, d, player, line)
+            self._stage_line(league, market, d, player, line, observed_at)
 
     def set_team_books(
         self,

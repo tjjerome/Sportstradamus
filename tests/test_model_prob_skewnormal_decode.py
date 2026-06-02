@@ -2,7 +2,7 @@
 
 Pins the train/predict mirror for the SkewNormal branch added in P1 Task 5:
 
-* Legacy pickles (no ``offset_meta`` / ``target_strategy`` keys) must decode
+* Legacy pickles (no ``offset_meta`` / ``target_normalization`` keys) must decode
   through the ``ratio_meanyr`` strategy and produce ``Model EV ==
   loc * MeanYr_clipped + scale * MeanYr_clipped * delta * sqrt(2/pi)``,
   bit-identical to the pre-Task-5 hand-rolled formula.
@@ -64,7 +64,7 @@ def _expected_ratio_ev(prob_params: pd.DataFrame, X: pd.DataFrame, denom_col: st
 
 
 def test_legacy_pickle_decodes_through_ratio_path_bit_identical():
-    """No offset_meta + no target_strategy ⇒ same numbers as pre-Task-5 code."""
+    """No offset_meta + no target_normalization ⇒ same numbers as pre-Task-5 code."""
     X = _synth_player_stats()
     prob_params = _synth_prob_params()
     expected_ev, expected_sigma, expected_skew = _expected_ratio_ev(
@@ -76,7 +76,7 @@ def test_legacy_pickle_decodes_through_ratio_path_bit_identical():
         X,
         hist_gate=0.0,
         offset_meta=None,
-        target_strategy="ratio_meanyr",
+        target_normalization="ratio_meanyr",
     )
 
     # Bitwise equality vs. legacy formula.
@@ -100,7 +100,7 @@ def test_ratio_path_uses_meanyr_nonzero_when_hist_gate_exceeds_threshold():
         X,
         hist_gate=hist_gate,
         offset_meta=None,
-        target_strategy="ratio_meanyr",
+        target_normalization="ratio_meanyr",
     )
 
     np.testing.assert_array_equal(out["Model EV"].to_numpy(), expected_ev)
@@ -137,7 +137,7 @@ def test_centered_additive_decodes_through_eb_offset_path():
         X,
         hist_gate=0.0,
         offset_meta=offset_meta,
-        target_strategy="centered_additive_eb_meanyr_k10",
+        target_normalization="centered_additive_eb_meanyr_k10",
     )
 
     np.testing.assert_allclose(out["Model EV"].to_numpy(), expected_ev, atol=1e-12)
@@ -169,7 +169,7 @@ def test_centered_additive_model_skew_is_finite():
         X,
         hist_gate=0.0,
         offset_meta=offset_meta,
-        target_strategy="centered_additive_eb_meanyr_k10",
+        target_normalization="centered_additive_eb_meanyr_k10",
     )
 
     assert np.all(np.isfinite(out["Model Skew"].to_numpy())), (
@@ -191,7 +191,7 @@ def test_ratio_path_model_skew_is_finite():
         X,
         hist_gate=0.0,
         offset_meta=None,
-        target_strategy="ratio_meanyr",
+        target_normalization="ratio_meanyr",
     )
 
     assert np.all(np.isfinite(out["Model Skew"].to_numpy()))
@@ -223,7 +223,7 @@ def test_meanyr_floor_applied_in_ratio_path():
         X,
         hist_gate=0.0,
         offset_meta=None,
-        target_strategy="ratio_meanyr",
+        target_normalization="ratio_meanyr",
     )
 
     # loc=1 -> Model EV == MeanYr_clipped. First three should hit the 0.5 floor.

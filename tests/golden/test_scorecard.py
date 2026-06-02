@@ -413,13 +413,21 @@ def test_resolve_decode_strategy_substitutes_default_for_none(monkeypatch):
 
     fake_meta = {
         "NFL": {
-            "carries": {"dist": "SkewNormal", "shipped": "withheld", "strategy": "none"},
+            "carries": {
+                "dist": "SkewNormal",
+                "shipped": "withheld",
+                "target_normalization": "none",
+            },
             "receptions": {
                 "dist": "SkewNormal",
                 "shipped": "withheld",
-                "strategy": "centered_additive_mean10",
+                "target_normalization": "centered_additive_mean10",
             },
-            "passing yards": {"dist": "SkewNormal", "shipped": "devel", "strategy": "ratio_meanyr"},
+            "passing yards": {
+                "dist": "SkewNormal",
+                "shipped": "devel",
+                "target_normalization": "ratio_meanyr",
+            },
         }
     }
     monkeypatch.setattr(sc, "_cached_stat_meta", lambda: fake_meta)

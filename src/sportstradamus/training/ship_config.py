@@ -1,23 +1,25 @@
-"""Per-cell ship config — which strategy each ``(league, market)`` trains with.
+"""Per-cell training **strategy** each ``(league, market)`` ships with.
 
-``data/config/stat_meta.json`` (committed) holds the canonical per-cell
-record:
+A cell's *strategy* is the combination of its target-normalization choice, its
+post-hoc calibration choice, and any future per-cell training knob.
+``data/config/stat_meta.json`` (committed) holds the canonical per-cell record:
 
     {
         "NBA": {
-            "PTS": {"dist": "SkewNormal", "shipped": "devel", "strategy": "ratio_meanyr"},
-            "FG3M": {"dist": "ZINB", "shipped": "devel", "strategy": "none"},
-            "FGA": {"dist": "SkewNormal", "shipped": "withheld", "strategy": "none"},
+            "PTS": {"dist": "SkewNormal", "shipped": "devel",
+                    "target_normalization": "ratio_meanyr", "posthoc": "none"},
+            "FG3M": {"dist": "ZINB", "shipped": "devel",
+                     "target_normalization": "none", "posthoc": "none"},
             ...
         },
         ...
     }
 
-Three fields per cell drive shipping + training:
+Fields per cell drive shipping + training:
 
 * ``dist`` — distribution family the cell trains with (``SkewNormal`` /
   ``ZINB`` / ``NegBin`` / ``Gamma`` / ``ZAGamma``). Determines which
-  pipeline branch consumes the strategy slug.
+  pipeline branch consumes the target-normalization slug.
 * ``shipped`` — release surface:
 
   - ``"withheld"`` — never shipped; ``meditate`` skips training and prunes
@@ -28,14 +30,16 @@ Three fields per cell drive shipping + training:
   - ``"main"`` — passed Gate 1 AND Gate 2; ships on both ``devel`` and
     ``main``.
 
-* ``strategy`` — training-pipeline strategy:
+* ``target_normalization`` — how the GBDT target is reshaped:
 
-  - A ``STRATEGY_SLUGS`` value (e.g. ``"ratio_meanyr"``,
-    ``"centered_additive_eb_meanyr_k10"``) — used in the SkewNormal
-    training branch to pick a target transform.
-  - :data:`STRATEGY_NONE` (``"none"``) — no extra processing. Every
-    count-branch cell uses this today; future strategies may add
-    post-processing / calibration / etc. that count cells can opt into.
+  - A :data:`TARGET_NORMALIZATION_SLUGS` value (e.g. ``"ratio_meanyr"``,
+    ``"centered_additive_eb_meanyr_k10"``) — SkewNormal branch only.
+  - :data:`TARGET_NORM_NONE` (``"none"``) — no target transform; every
+    count-branch cell uses this.
+
+* ``posthoc`` — post-hoc calibration applied after the distribution is formed,
+  one of :data:`sportstradamus.training.posthoc.POSTHOC_SLUGS`. Orthogonal to
+  ``target_normalization`` — any family may carry any ``posthoc``.
 
 Shipping a cell that has cleared Gate 1 is a one-field edit to
 ``stat_meta.json``: set ``shipped`` from ``"withheld"`` to ``"devel"`` (or
@@ -51,17 +55,18 @@ import json
 from pathlib import Path
 
 from sportstradamus import data
-from sportstradamus.training.baselines import STRATEGY_SLUGS
+from sportstradamus.training.baselines import TARGET_NORMALIZATION_SLUGS
+from sportstradamus.training.posthoc import POSTHOC_SLUGS
 
-# Reserved strategy value: the cell does not opt into any pipeline strategy.
-# Distinct from a real slug so future strategies don't have to overload it.
-STRATEGY_NONE = "none"
+# Reserved target-normalization value: the cell applies no target transform.
+# Distinct from a real slug so future normalizations don't have to overload it.
+TARGET_NORM_NONE = "none"
 
 # Reserved shipped value: cell is not shipped on any branch.
 WITHHELD = "withheld"
 
 # Distribution family name for the custom PyTorch SkewNormal; used in ship-gate
-# logic to detect which cells need a real strategy slug vs. STRATEGY_NONE.
+# logic to detect which cells need a real strategy slug vs. TARGET_NORM_NONE.
 SKEW_NORMAL_DIST: str = "SkewNormal"
 
 # Allowed shipped values per training branch — a cell is "active" on branch
@@ -76,7 +81,7 @@ _SHIPPED_VALUES: frozenset[str] = frozenset({WITHHELD, "devel", "main"})
 
 STAT_META_PATH = pkg_resources.files(data) / "config" / "stat_meta.json"
 
-# Nested {league: {market: strategy_or_withheld}} as returned by load_ship_config.
+# Nested {league: {market: target_normalization_or_withheld}} as returned by load_ship_config.
 ShipConfig = dict[str, dict[str, str]]
 
 
@@ -90,28 +95,35 @@ def load_stat_meta(path: Path) -> dict[str, dict[str, dict]]:
 def _validate_cell(league: str, market: str, cell: dict) -> None:
     """Raise ValueError if a stat_meta entry is internally inconsistent."""
     shipped = cell.get("shipped")
-    strategy = cell.get("strategy")
+    target_norm = cell.get("target_normalization")
+    posthoc = cell.get("posthoc", TARGET_NORM_NONE)
     dist = cell.get("dist")
     if shipped not in _SHIPPED_VALUES:
         raise ValueError(
             f"stat_meta.json: cell {league}/{market} has unknown shipped "
             f"value {shipped!r}; valid: {sorted(_SHIPPED_VALUES)}"
         )
-    if strategy != STRATEGY_NONE and strategy not in STRATEGY_SLUGS:
+    if target_norm != TARGET_NORM_NONE and target_norm not in TARGET_NORMALIZATION_SLUGS:
         raise ValueError(
-            f"stat_meta.json: cell {league}/{market} has unknown strategy "
-            f"value {strategy!r}; valid: {sorted(set(STRATEGY_SLUGS) | {STRATEGY_NONE})}"
+            f"stat_meta.json: cell {league}/{market} has unknown target_normalization "
+            f"value {target_norm!r}; valid: "
+            f"{sorted(set(TARGET_NORMALIZATION_SLUGS) | {TARGET_NORM_NONE})}"
         )
-    if dist == SKEW_NORMAL_DIST and strategy == STRATEGY_NONE and shipped != WITHHELD:
+    if posthoc not in POSTHOC_SLUGS:
+        raise ValueError(
+            f"stat_meta.json: cell {league}/{market} has unknown posthoc "
+            f"value {posthoc!r}; valid: {sorted(POSTHOC_SLUGS)}"
+        )
+    if dist == SKEW_NORMAL_DIST and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(
             f"stat_meta.json: SkewNormal cell {league}/{market} cannot ship "
-            f"with strategy=none (SkewNormal requires a real strategy slug)"
+            f"with target_normalization=none (SkewNormal requires a real slug)"
         )
-    if dist != SKEW_NORMAL_DIST and strategy != STRATEGY_NONE:
+    if dist != SKEW_NORMAL_DIST and target_norm != TARGET_NORM_NONE:
         raise ValueError(
             f"stat_meta.json: non-SkewNormal cell {league}/{market} (dist={dist!r}) "
-            f"cannot carry strategy={strategy!r}; the slug only applies to the "
-            f"SkewNormal branch. Use {STRATEGY_NONE!r}."
+            f"cannot carry target_normalization={target_norm!r}; the slug only applies "
+            f"to the SkewNormal branch. Use {TARGET_NORM_NONE!r}."
         )
 
 
@@ -128,10 +140,10 @@ def load_ship_config(branch: str = "devel", path: Path | None = None) -> ShipCon
             :data:`STAT_META_PATH`. Missing file yields an empty map.
 
     Returns:
-        Nested ``{league: {market: strategy_or_withheld}}`` where the
-        value is the cell's strategy slug (if active on ``branch``) or
+        Nested ``{league: {market: target_normalization_or_withheld}}`` where the
+        value is the cell's target-normalization slug (if active on ``branch``) or
         :data:`WITHHELD` (if not active). ``meditate`` consumes this via
-        :func:`resolve_cell_strategy`.
+        :func:`resolve_cell_target_normalization`.
 
     Raises:
         ValueError: If ``branch`` is not recognized, or any cell in
@@ -150,14 +162,14 @@ def load_ship_config(branch: str = "devel", path: Path | None = None) -> ShipCon
             _validate_cell(league, market, cell)
             shipped = cell["shipped"]
             if shipped in allowed:
-                cfg_markets[market] = cell["strategy"]
+                cfg_markets[market] = cell["target_normalization"]
             else:
                 cfg_markets[market] = WITHHELD
         config[league] = cfg_markets
     return config
 
 
-def resolve_cell_strategy(
+def resolve_cell_target_normalization(
     league: str,
     market: str,
     flag_strategy: str,
@@ -169,7 +181,7 @@ def resolve_cell_strategy(
     ``--target-strategy`` flag value fills the gap, so an empty map
     reproduces today's behavior exactly.
 
-    A returned value of :data:`STRATEGY_NONE` means "this cell does not
+    A returned value of :data:`TARGET_NORM_NONE` means "this cell does not
     opt into any pipeline strategy." :mod:`training.cli` substitutes the
     CLI's ``--target-strategy`` value at the call site, so the underlying
     training pipeline always receives a real slug (count-branch training
@@ -178,12 +190,12 @@ def resolve_cell_strategy(
     Args:
         league: League code (e.g. ``"NBA"``).
         market: Market stem.
-        flag_strategy: The run-wide ``--target-strategy`` value (fallback
+        flag_strategy: The run-wide ``--target-normalization`` value (fallback
             for cells absent from the map).
         config: A loaded :func:`load_ship_config` map.
 
     Returns:
-        A strategy slug, :data:`STRATEGY_NONE`, or :data:`WITHHELD` (the
+        A strategy slug, :data:`TARGET_NORM_NONE`, or :data:`WITHHELD` (the
         caller prunes the pickle and skips training in the last case).
     """
     mapped = config.get(league, {}).get(market)

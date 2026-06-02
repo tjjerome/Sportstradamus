@@ -47,6 +47,7 @@ from sportstradamus.helpers import (
     no_vig_odds,
     remove_accents,
     stat_cv,
+    stat_dist,
 )
 from sportstradamus.helpers.io import read_upcoming_events, write_upcoming_events
 from sportstradamus.spiderLogger import logger
@@ -80,17 +81,29 @@ ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/
 _LOW_API_CREDITS_THRESHOLD = 50
 
 
+class OddsAPIAuthError(RuntimeError):
+    """Raised on an Odds API ``401`` — out of usage credits or a bad key.
+
+    Both are unrecoverable for the current run, so we fail loud rather than
+    silently writing an empty archive. The historical backfill catches this
+    to checkpoint progress and exit cleanly for a later resume.
+    """
+
+
 def _get_with_retry(url, params=None):
     """GET ``url`` with one 429-retry. Returns the ``requests.Response``.
 
     The Odds API hands back 429s under bursty load; a single 1-second
-    retry clears them in practice. Other non-200 statuses propagate back
+    retry clears them in practice. A ``401`` (out of credits / bad key)
+    raises :class:`OddsAPIAuthError`; other non-200 statuses propagate back
     so callers can decide whether to ``continue`` or bail.
     """
     res = requests.get(url, params=params)
     if res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         sleep(1)
         res = requests.get(url, params=params)
+    if res.status_code == HTTPStatus.UNAUTHORIZED:
+        raise OddsAPIAuthError(f"Odds API 401 at {url}: {res.text[:200]}")
     return res
 
 
@@ -370,7 +383,8 @@ def get_props(
                 continue
 
             game = res.json()["data"] if historical else res.json()
-            _archive_event_props(archive, game, league, props, gameDate_str)
+            observed_at = _historical_observed_at(historical, gameDate)
+            _archive_event_props(archive, game, league, props, gameDate_str, observed_at)
 
             if not historical:
                 ledger[(sport, event["id"])] = {
@@ -387,7 +401,19 @@ def get_props(
     return archive
 
 
-def _archive_event_props(archive, game, league, props, gameDate):
+def _historical_observed_at(historical, gameDate):
+    """Snapshot stamp for backfilled rows, or ``None`` for live runs.
+
+    Live writes default to ``utcnow()``. Backfilled rows stamp game-day
+    01:00 so they beat the migrated midnight (``00:00``) rows on recency
+    while staying before any ``kickoff - 8h`` point-in-time training read.
+    """
+    if not historical:
+        return None
+    return datetime(gameDate.year, gameDate.month, gameDate.day, 1, 0, 0)
+
+
+def _archive_event_props(archive, game, league, props, gameDate, observed_at=None):
     """Parse one Odds API event response and write its odds into ``archive``.
 
     Splits markets into player props (per-player EV and consensus lines),
@@ -461,14 +487,21 @@ def _archive_event_props(archive, game, league, props, gameDate):
                 line = lines[0].get("point", 0.5)
                 odds[market_name][player]["Lines"].append(line)
                 price = no_vig_odds(*[x["price"] for x in lines])
-                ev = get_ev(line, price[1], stat_cv[league].get(market_name, 1))
+                ev = get_ev(
+                    line,
+                    price[1],
+                    stat_cv[league].get(market_name, 1),
+                    dist=stat_dist.get(league, {}).get(market_name, "SkewNormal"),
+                )
 
                 odds[market_name][player]["EV"][book["key"]] = ev
 
     for market in odds:
         for player, entry in odds[market].items():
             line = np.median(entry["Lines"])
-            archive.merge_player_books(league, market, gameDate, player, entry["EV"], [line])
+            archive.merge_player_books(
+                league, market, gameDate, player, entry["EV"], [line], observed_at=observed_at
+            )
 
     for market in totals:
         home_team = abbreviations[league][remove_accents(game["home_team"])]

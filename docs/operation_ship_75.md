@@ -536,9 +536,39 @@ offline sweep:**
 Promoted in `stat_meta.json` (withheld→devel). **Counts: NBA 18/21, NFL 14/20,
 WNBA 13/18 → 45/59 = 76%.** The r-misfit hypothesis for ZINB TDs is **refuted** —
 extracted per-row params show r≈50 (near-Poisson, well-fit); the dispersion was
-never the problem. NFL `attempts`/`completions`/`passing-first-downs` stay withheld:
-their g1 wall is a real efficient-market wall (synthetic flat-0.5 book odds; oracle
-Brier ceiling 0.0012 vs the ~0.012 g1 needs), not an artifact — accept-killed.
+never the problem. NFL `attempts` stays withheld and is **accept-killed** — a
+standing decision, not re-derived here. NFL `completions` and `passing first downs`
+also stay withheld but remain **live** g1 candidates: their g1 fail has not been
+shown to be a real wall (it may be a small-n CI-width artifact, the same class
+Steps 0/0.5/0.7/0.8 kept finding), so they are NOT killed. The previously cited
+oracle Brier-ceiling estimate (0.0012 vs ~0.012) was proven faulty last season and
+is **not** used as evidence anywhere.
+
+**Backfill resolution (2026-06-01) — the passing-family g1 was graded against a
+fabricated book.** The archived per-book `ev` for the passing family was a legacy
+klepto-era seed (every book = the consensus median line → `p_book ≡ 0.5`, a coin
+flip), not a real price — confirmed from the archive and a live-parser replay (the
+live confer path is clean). Fix: re-fetched real two-sided historical prices via the
+Odds API (`scripts/backfill_historical_odds.py`, 253 NFL game-dates), injected them
+into the cached training matrices without a feature rebuild
+(`scripts/inject_backfilled_odds.py`), and retrained the five cells against the
+honest book. The result splits the family:
+
+- **Continuous (`passing yards`, `attempts`, `completions`) — the wall is REAL.**
+  With real two-sided prices `brier_book` stays ≈0.25: a sharp continuous market
+  sets the line at the median, so `p_book ≈ 0.5` by construction. The model ties at
+  best (`passing yards` g1 −0.0009) and loses on attempts/completions — a genuine
+  efficient-market wall, now proven with real data rather than asserted from the
+  degenerate seed. They need a better model, not better book data.
+- **`passing tds` was a FALSE PASS — demoted devel→withheld.** Its book was the
+  corrupt low-count flavor (`brier_book` 0.466, worse than a coin flip); the honest
+  book (0.268) collapses the model's apparent edge from −0.31 to −0.017 and the g1 CI
+  crosses 0 → fails. It shipped on devel only because the broken book was trivial to
+  beat.
+- **`interceptions` survives but is now marginal** — g1 CI upper −0.163 → −0.007.
+
+**Counts: NFL 14/20 → 13/20** (passing tds demoted). The backfill added no ship; it
+removed a false one and confirmed the continuous-family wall is real.
 
 ### Step 1 — Post-hoc mean-bias correction (1–2 weeks)
 

@@ -23,9 +23,9 @@ import pytest
 
 from sportstradamus.training.baselines import (
     EB_SHRINKAGE_K,
-    STRATEGY_SLUGS,
+    TARGET_NORMALIZATION_SLUGS,
     compute_eb_prior,
-    get_strategy,
+    get_target_normalization,
 )
 
 
@@ -79,7 +79,7 @@ def test_ratio_meanyr_forward_matches_legacy_pipeline_behavior():
     legacy_meanyr = X["MeanYr"].clip(lower=0.5).to_numpy()
     legacy_target = np.clip(y / legacy_meanyr, 0.01, None)
 
-    out = get_strategy("ratio_meanyr").forward(y, X, global_mean=10.0)
+    out = get_target_normalization("ratio_meanyr").forward(y, X, global_mean=10.0)
 
     np.testing.assert_array_equal(out, legacy_target)
 
@@ -88,7 +88,7 @@ def test_ratio_meanyr_decode_round_trips_on_noise_free_input():
     """ratio decode: loc·MeanYr at decode recovers y on a noise-free fit."""
     X = _synth_x()
     y = np.array([12.0, 8.0, 30.0, 5.5, 18.0, 22.0, 4.0, 11.0])
-    strat = get_strategy("ratio_meanyr")
+    strat = get_target_normalization("ratio_meanyr")
 
     y_t = strat.forward(y, X, global_mean=10.0)
     # Noise-free "model": predict loc = y_t exactly, scale = 0, alpha = 0.
@@ -109,7 +109,7 @@ def test_centered_eb_forward_subtracts_eb_prior():
     )
     expected = y - expected_eb
 
-    out = get_strategy("centered_additive_eb_meanyr_k10").forward(y, X, global_mean=10.0)
+    out = get_target_normalization("centered_additive_eb_meanyr_k10").forward(y, X, global_mean=10.0)
     np.testing.assert_allclose(out, expected, atol=1e-12)
 
 
@@ -117,7 +117,7 @@ def test_centered_eb_decode_adds_back_same_eb_prior():
     """Train/predict mirror: decode must reuse the same EB formula as forward."""
     X = _synth_x()
     y = np.array([12.0, 8.0, 30.0, 5.5, 18.0, 22.0, 4.0, 11.0])
-    strat = get_strategy("centered_additive_eb_meanyr_k10")
+    strat = get_target_normalization("centered_additive_eb_meanyr_k10")
 
     y_t = strat.forward(y, X, global_mean=10.0)
     # Noise-free "model" predicts the residual exactly: decode must recover y.
@@ -130,7 +130,7 @@ def test_centered_eb_scale_is_absolute_not_scaled():
     """Centered scale stays in absolute residual units; no ``× MeanYr``."""
     X = _synth_x()
     scale = np.full(len(X), 3.0)
-    out = get_strategy("centered_additive_eb_meanyr_k10").decode_scale(scale, X)
+    out = get_target_normalization("centered_additive_eb_meanyr_k10").decode_scale(scale, X)
     np.testing.assert_array_equal(out, scale)
 
 
@@ -139,13 +139,13 @@ def test_ratio_scale_is_multiplied_by_meanyr():
     X = _synth_x()
     scale = np.full(len(X), 0.3)
     expected = scale * X["MeanYr"].clip(lower=0.5).to_numpy()
-    out = get_strategy("ratio_meanyr").decode_scale(scale, X)
+    out = get_target_normalization("ratio_meanyr").decode_scale(scale, X)
     np.testing.assert_allclose(out, expected, atol=1e-12)
 
 
 def test_offset_meta_centered_eb_has_required_keys():
     """Pickle-persisted meta must let model_prob.py recompute EB identically."""
-    meta = get_strategy("centered_additive_eb_meanyr_k10").offset_meta(
+    meta = get_target_normalization("centered_additive_eb_meanyr_k10").offset_meta(
         global_mean=8.69, denom_col="MeanYr"
     )
     assert meta is not None
@@ -158,13 +158,13 @@ def test_offset_meta_centered_eb_has_required_keys():
 
 def test_offset_meta_ratio_is_none():
     """Ratio strategy needs no baseline mirror — denom column + MeanYr suffice."""
-    assert get_strategy("ratio_meanyr").offset_meta(global_mean=8.69) is None
+    assert get_target_normalization("ratio_meanyr").offset_meta(global_mean=8.69) is None
 
 
 def test_start_mode_flag_per_strategy():
     """Plumbs into ``set_model_start_values``; mismatch breaks SkewNormal seeding."""
-    assert get_strategy("ratio_meanyr").start_mode_flag == "normalized"
-    assert get_strategy("centered_additive_eb_meanyr_k10").start_mode_flag == "offset"
+    assert get_target_normalization("ratio_meanyr").start_mode_flag == "normalized"
+    assert get_target_normalization("centered_additive_eb_meanyr_k10").start_mode_flag == "offset"
 
 
 def test_full_round_trip_with_skewnormal_mean_formula():
@@ -175,8 +175,8 @@ def test_full_round_trip_with_skewnormal_mean_formula():
     scale = np.zeros(len(y))
     delta = alpha / np.sqrt(1 + alpha**2)
 
-    for slug in STRATEGY_SLUGS:
-        strat = get_strategy(slug)
+    for slug in TARGET_NORMALIZATION_SLUGS:
+        strat = get_target_normalization(slug)
         y_t = strat.forward(y, X, global_mean=10.0)
         ev = strat.decode_loc(y_t, X, global_mean=10.0) + strat.decode_scale(
             scale, X
@@ -189,7 +189,7 @@ def test_centered_mean10_forward_subtracts_mean10():
     X["Mean10"] = np.array([10.0, 8.0, 6.0, 4.0, 12.0, 14.0, 5.0, 9.0])
     y = np.array([12.0, 8.0, 30.0, 5.5, 18.0, 22.0, 4.0, 11.0])
     expected = y - X["Mean10"].clip(lower=0.5).to_numpy()
-    out = get_strategy("centered_additive_mean10").forward(y, X, global_mean=10.0)
+    out = get_target_normalization("centered_additive_mean10").forward(y, X, global_mean=10.0)
     np.testing.assert_allclose(out, expected, atol=1e-12)
 
 
@@ -198,7 +198,7 @@ def test_centered_mean10_decode_round_trip():
     X = _synth_x()
     X["Mean10"] = np.array([10.0, 8.0, 6.0, 4.0, 12.0, 14.0, 5.0, 9.0])
     y = np.array([12.0, 8.0, 30.0, 5.5, 18.0, 22.0, 4.0, 11.0])
-    strat = get_strategy("centered_additive_mean10")
+    strat = get_target_normalization("centered_additive_mean10")
     y_t = strat.forward(y, X, global_mean=10.0)
     decoded = strat.decode_loc(y_t, X, global_mean=10.0)
     np.testing.assert_allclose(decoded, y, atol=1e-9)
@@ -209,7 +209,7 @@ def test_centered_mean10_falls_back_to_denom_when_mean10_missing():
     X = _synth_x(n=3)
     X["Mean10"] = np.array([np.nan, 9.0, np.nan])
     y = np.array([15.0, 11.0, 7.0])
-    out = get_strategy("centered_additive_mean10").forward(y, X, global_mean=10.0)
+    out = get_target_normalization("centered_additive_mean10").forward(y, X, global_mean=10.0)
     # Row 0 and 2 fall back to MeanYr; row 1 uses Mean10 directly.
     fallback = X["MeanYr"].clip(lower=0.5).to_numpy()
     expected = y.copy()
@@ -220,7 +220,7 @@ def test_centered_mean10_falls_back_to_denom_when_mean10_missing():
 
 
 def test_centered_mean10_offset_meta_records_mean10_baseline():
-    meta = get_strategy("centered_additive_mean10").offset_meta(
+    meta = get_target_normalization("centered_additive_mean10").offset_meta(
         global_mean=8.69, denom_col="MeanYr"
     )
     assert meta is not None
@@ -233,20 +233,20 @@ def test_centered_mean10_scale_is_absolute():
     X = _synth_x()
     X["Mean10"] = np.full(len(X), 9.0)
     scale = np.full(len(X), 2.5)
-    out = get_strategy("centered_additive_mean10").decode_scale(scale, X)
+    out = get_target_normalization("centered_additive_mean10").decode_scale(scale, X)
     np.testing.assert_array_equal(out, scale)
 
 
 def test_get_strategy_unknown_slug_raises():
     with pytest.raises(ValueError, match="Unknown target strategy"):
-        get_strategy("not_a_real_strategy")
+        get_target_normalization("not_a_real_strategy")
 
 
 def test_strategy_slugs_publishes_registered_options():
-    """CLI Click choice list will read STRATEGY_SLUGS — must include all."""
-    assert "ratio_meanyr" in STRATEGY_SLUGS
-    assert "centered_additive_eb_meanyr_k10" in STRATEGY_SLUGS
-    assert "centered_additive_mean10" in STRATEGY_SLUGS
+    """CLI Click choice list will read TARGET_NORMALIZATION_SLUGS — must include all."""
+    assert "ratio_meanyr" in TARGET_NORMALIZATION_SLUGS
+    assert "centered_additive_eb_meanyr_k10" in TARGET_NORMALIZATION_SLUGS
+    assert "centered_additive_mean10" in TARGET_NORMALIZATION_SLUGS
 
 
 # ---------------------------------------------------------------------------
@@ -342,8 +342,8 @@ def test_set_start_values_offset_mode_ignored_for_non_skewnormal():
     np.testing.assert_array_equal(m_offset.start_values, m_default.start_values)
 
 
-def test_meditate_accepts_target_strategy_flag():
-    """CLI surface: --target-strategy must accept registered slugs."""
+def test_meditate_accepts_target_normalization_flag():
+    """CLI surface: --target-normalization must accept registered slugs."""
     from click.testing import CliRunner
 
     from sportstradamus.training.cli import meditate
@@ -351,18 +351,18 @@ def test_meditate_accepts_target_strategy_flag():
     runner = CliRunner()
     result = runner.invoke(meditate, ["--help"])
     assert result.exit_code == 0
-    assert "--target-strategy" in result.output
+    assert "--target-normalization" in result.output
     assert "ratio_meanyr" in result.output
     assert "centered_additive_eb_meanyr_k10" in result.output
 
 
-def test_meditate_rejects_unknown_target_strategy():
-    """Click validates against STRATEGY_SLUGS; unknown slug -> non-zero exit."""
+def test_meditate_rejects_unknown_target_normalization():
+    """Click validates against TARGET_NORMALIZATION_SLUGS; unknown slug -> non-zero exit."""
     from click.testing import CliRunner
 
     from sportstradamus.training.cli import meditate
 
     runner = CliRunner()
-    result = runner.invoke(meditate, ["--target-strategy", "not_a_real_strategy"])
+    result = runner.invoke(meditate, ["--target-normalization", "not_a_real_strategy"])
     assert result.exit_code != 0
     assert "not_a_real_strategy" in result.output or "Invalid" in result.output
