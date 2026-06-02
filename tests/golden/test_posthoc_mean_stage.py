@@ -28,3 +28,17 @@ def test_mean_stage_is_noop_when_slug_is_none():
     assert np.allclose(posthoc.apply_posthoc("none", None, mu), mu)
     assert "roe_mean" in posthoc.MEAN_STAGE
     assert "roe_mean" not in posthoc.PROB_STAGE
+
+
+def test_apply_mean_posthoc_helper_matches_posthoc_module():
+    from sportstradamus.prediction.model_prob import _apply_mean_posthoc
+    from sportstradamus.training import posthoc
+    mu = np.array([0.5, 1.5, 2.5, 3.5])
+    blob = {"kind": "affine", "a": 0.2, "b": 1.3}
+    got = _apply_mean_posthoc(mu, "roe_mean", blob)
+    want = posthoc.apply_posthoc("roe_mean", blob, mu)
+    assert np.allclose(got, want)
+    # prob-stage slug must be a no-op on the mean path
+    assert np.allclose(_apply_mean_posthoc(mu, "prob_recal_platt", blob), mu)
+    # legacy pickle: no blob => identity
+    assert np.allclose(_apply_mean_posthoc(mu, "none", None), mu)

@@ -31,7 +31,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
-from sportstradamus.training.posthoc import PROB_STAGE, apply_posthoc
+from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -134,6 +134,20 @@ def _apply_prob_posthoc(
     if posthoc_slug in PROB_STAGE:
         return apply_posthoc(posthoc_slug, posthoc_blob, cal_over)
     return cal_over
+
+
+def _apply_mean_posthoc(
+    model_mu: np.ndarray, posthoc_slug: str, posthoc_blob: dict | None
+) -> np.ndarray:
+    """Apply a fitted mean-stage corrector to the decoded model mean.
+
+    No-op unless the cell's slug is a :data:`MEAN_STAGE` corrector. Mirrors the
+    training-side correction in ``pipeline.train_market`` so the live blend sees
+    the same corrected mean.
+    """
+    if posthoc_slug in MEAN_STAGE:
+        return apply_posthoc(posthoc_slug, posthoc_blob, model_mu)
+    return model_mu
 
 
 def model_prob(
@@ -361,6 +375,13 @@ def model_prob(
                 offer_df["Model R"] = np.minimum(offer_df["Model R"], shape_ceiling)
             elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
                 offer_df["Model Alpha"] = np.minimum(offer_df["Model Alpha"], shape_ceiling)
+
+        # Mean-stage post-hoc correction of the model EV before blending, mirroring
+        # pipeline.train_market so live predictions match the offline test CSV
+        # event-for-event.
+        offer_df["Model EV"] = _apply_mean_posthoc(
+            offer_df["Model EV"].to_numpy(), posthoc_slug, posthoc_blob
+        )
 
         # Blend model and book distributions via fused_loc
         if dist == "SkewNormal":
