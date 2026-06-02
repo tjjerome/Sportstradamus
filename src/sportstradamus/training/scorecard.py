@@ -49,7 +49,7 @@ from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.io import read_history
 from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.ship_config import STAT_META_PATH, STRATEGY_NONE, load_stat_meta
+from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
 # ---------------------------------------------------------------------------
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -549,8 +549,8 @@ _RATIO_LIKE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr"})
 def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, np.ndarray]:
     """Decode raw SkewNormal ``loc`` / ``scale`` to EV-space per strategy.
 
-    Mirrors ``training.baselines.TargetStrategy.decode_loc`` / ``decode_scale``
-    for the strategies wired in ``_STRATEGIES`` there. ``ratio_meanyr``
+    Mirrors ``training.baselines.TargetNormalization.decode_loc`` / ``decode_scale``
+    for the strategies wired in ``_TARGET_NORMALIZATIONS`` there. ``ratio_meanyr``
     multiplies both by ``MeanYr.clip(_SN_DENOM_FLOOR)``; the
     ``centered_additive_*`` strategies leave ``scale`` alone (location decode
     is irrelevant for IQR, which is location-free for SkewNormal).
@@ -807,17 +807,17 @@ def _resolve_decode_strategy(league: str, market_stem: str) -> str:
     ship-config projection: :func:`load_ship_config` collapses every withheld
     cell to the ``WITHHELD`` sentinel, which hides the ``ratio_meanyr``
     transform the cell actually trained under and leaves the g4 IQR decode in
-    normalized ratio-units. A ``none`` strategy means the cell took the
-    ``--target-strategy`` default — ``ratio_meanyr``.
+    normalized ratio-units. A ``none`` value means the cell took the
+    ``--target-normalization`` default — ``ratio_meanyr``.
     """
     market_with_spaces = market_stem.replace("-", " ")
-    strategy = (
+    target_norm = (
         _cached_stat_meta()
         .get(league, {})
         .get(market_with_spaces, {})
-        .get("strategy", STRATEGY_NONE)
+        .get("target_normalization", TARGET_NORM_NONE)
     )
-    return _DECODE_FALLBACK_STRATEGY if strategy == STRATEGY_NONE else strategy
+    return _DECODE_FALLBACK_STRATEGY if target_norm == TARGET_NORM_NONE else target_norm
 
 
 def _zero_inflated_mean(df: pd.DataFrame, pred: np.ndarray) -> np.ndarray:

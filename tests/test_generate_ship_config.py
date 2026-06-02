@@ -15,7 +15,7 @@ from sportstradamus.scripts.generate_ship_config import (
     promote_for_main,
 )
 from sportstradamus.training.ship_config import (
-    STRATEGY_NONE,
+    TARGET_NORM_NONE,
     WITHHELD,
     load_ship_config,
 )
@@ -29,8 +29,8 @@ def _invoke(args):
     return CliRunner().invoke(main, args)
 
 
-def _meta_cell(dist: str, shipped: str, strategy: str) -> dict:
-    return {"dist": dist, "shipped": shipped, "strategy": strategy}
+def _meta_cell(dist: str, shipped: str, target_normalization: str) -> dict:
+    return {"dist": dist, "shipped": shipped, "target_normalization": target_normalization}
 
 
 def test_promote_for_main_promotes_graduated_devel_cells():
@@ -61,7 +61,7 @@ def test_promote_for_main_demotes_failed_main_cells():
 def test_promote_for_main_leaves_withheld_alone():
     meta = {
         "NBA": {
-            "PTS": _meta_cell("SkewNormal", "withheld", STRATEGY_NONE),
+            "PTS": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
         }
     }
     # Even if a "withheld" cell appears in graduated (stale state), do not
@@ -80,7 +80,7 @@ def test_load_ship_config_devel_includes_devel_and_main(tmp_path):
             "NBA": {
                 "PTS": _meta_cell("SkewNormal", "main", "ratio_meanyr"),
                 "REB": _meta_cell("SkewNormal", "devel", "ratio_meanyr"),
-                "AST": _meta_cell("SkewNormal", "withheld", STRATEGY_NONE),
+                "AST": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
             }
         },
     )
@@ -120,7 +120,7 @@ def test_load_ship_config_rejects_skew_with_strategy_none(tmp_path):
     meta_path = tmp_path / "stat_meta.json"
     _write(
         meta_path,
-        {"NBA": {"PTS": _meta_cell("SkewNormal", "devel", STRATEGY_NONE)}},
+        {"NBA": {"PTS": _meta_cell("SkewNormal", "devel", TARGET_NORM_NONE)}},
     )
     with pytest.raises(ValueError):
         load_ship_config(branch="devel", path=meta_path)
@@ -143,7 +143,7 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
         {
             "NBA": {
                 "PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr"),
-                "REB": _meta_cell("SkewNormal", "withheld", STRATEGY_NONE),
+                "REB": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
             }
         },
     )
@@ -283,7 +283,7 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
         {
             "NBA": {
                 "PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr"),
-                "REB": _meta_cell("SkewNormal", "withheld", STRATEGY_NONE),
+                "REB": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE),
             }
         },
     )

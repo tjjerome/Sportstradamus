@@ -1,8 +1,8 @@
-"""P1 Task 3: target_strategy plumbing through the SkewNormal pipeline.
+"""P1 Task 3: target_normalization plumbing through the SkewNormal pipeline.
 
 Validates three load-bearing claims of the P1 plan:
 
-* Default ``target_strategy="ratio_meanyr"`` is bitwise-identical to a
+* Default ``target_normalization="ratio_meanyr"`` is bitwise-identical to a
   no-strategy-arg call. The legacy code path is byte-frozen.
 * Switching to ``centered_additive_eb_meanyr_k10`` actually changes the
   training behavior (predicted distribution params diverge).
@@ -86,7 +86,7 @@ def _fit(y_labels, X_train, X_test):
 
 
 def _fit_with_strategy(slug, X_train, y_raw, X_test):
-    strat = baselines.get_strategy(slug)
+    strat = baselines.get_target_normalization(slug)
     global_mean = float(np.mean(y_raw))
     y_t = strat.forward(y_raw, X_train, global_mean, "MeanYr")
     dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
