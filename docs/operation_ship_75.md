@@ -27,10 +27,10 @@ counts toward the 75% numerator (ship-incrementally).
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
 | NBA | 18 | 21 | 86% | 16 | **+2 ✓** |
-| NFL | 9 | 20 | 45% | 15 | **−6** |
+| NFL | 11 | 20 | 55% | 15 | **−4** |
 | WNBA | 14 | 18 | 78% | 14 | **✓** |
 
-Total 41/59 = 69%. Source: `data/training/model_stats.parquet` (owned by
+Total 43/59 = 73%. Source: `data/training/model_stats.parquet` (owned by
 `training.report.report()`); `ship = g1_pass AND … AND g5_pass` via
 [`training/scorecard.py`](../src/sportstradamus/training/scorecard.py)
 `compute_gates`. The offline harness moved from the old
@@ -45,6 +45,22 @@ WNBA now clears its 75% target and NBA stays clear; NFL drops to 9/20 (the broke
 book had propped up those four). The 5 are **re-ship candidates** once training is
 strengthened, not kills (`g1_oracle` stays −0.25…−0.56 — real headroom). NBA
 `BLK/STL/FG3M` and NFL `tds` survive on the real book and stay `devel`.
+
+**Step 1 + Step 0.10 (2026-06-02, branch `ship75-nfl-calibration-integrity`).** The
+mean-stage post-hoc corrector (`roe_mean`, **Step 1** below) retrained against the
+repaired book re-promoted **NFL `passing tds` and `interceptions` `withheld→devel`** —
+both clear g1 *and* the player-clustered g1 recheck on the honest book by a real
+margin (`passing tds` `g1_ci_hi` +0.0110→−0.0178, BSS +0.06→+0.10; `interceptions`
++0.0178→−0.0056, BSS +0.064). NFL → **11/20 (55%)**, total **43/59 = 73%**. These are
+the two cells where the model holds a genuine edge over the book (count/ZINB cells vs
+wide or miscalibrated INT books). The other six g1-only-fail SkewNormal cells
+(`passing-yards`, `receiving-yards`, `carries`, `rushing-yards`, `attempts`,
+`completions`) did **not** flip under `roe_mean` and were reverted to `posthoc: none`.
+They are **open, not closed** — `roe_mean`/`isotonic_mean`/prob-recal are exhausted on
+them (they are well-calibrated with `roc_auc ≈ 0.50`, i.e. an edge problem, not a
+calibration one), so the live tracks are a **stronger model** (which g1 ships
+automatically once whole-set Brier-skill turns positive — no gate change needed) or a
+**closing-line-value gate** once the test-CSV schema upgrade lands (Step 0.10).
 
 > **Reconciliation note (2026-05-31).** The 2026-05-23 snapshot this section
 > used to show (NFL 11, WNBA 12 → 41/59) was scored off *re-scored old test
@@ -624,7 +640,59 @@ on the full count/yardage retrain it fails g1 and is withheld.
 passes; none are killed. Deferred per the repair plan: MLB/NHL and deep history
 (2022–24) — see [`docs/archive_repair_plan.md`](archive_repair_plan.md).
 
-### Step 1 — Post-hoc mean-bias correction (1–2 weeks)
+### Step 0.10 — g1 selection-gate audit (DONE 2026-06-02; verdict KEEP)
+
+Triggered by Step 1's result that six NFL SkewNormal cells fail **only** g1 (they pass
+g2–g5) with `roc_auc ≈ 0.50`. Proposal audited: replace or augment g1's whole-set paired
+Brier CI with a **selection-based EV gate** — "precision on value picks > the −110 vig
+break-even (0.5238), with confidence." Full brief: `/tmp/researcher_g1_selection_gate.md`
+([Gneiting & Raftery 2007]; [Murphy 1973]; [Harvey, Liu & Zhu 2016]).
+
+**Verdict: KEEP g1 as-is; do NOT add a selection-precision ship gate.**
+
+- **g1 is the right EV primitive.** Brier is strictly proper; against a sharp book the
+  de-vigged `Odds` is the market's best probability estimate, so "beat it on a proper
+  score, with confidence" is the necessary precondition for any durable edge.
+- **The selection gate is a garden-of-forking-paths trap**: conditioning the evaluation
+  on the model's own EV signal is circular (in-sample), 6 cells × 2 sides × a `tau` grid
+  is 16–73 simultaneous tests (multiplicity), and `tau` is an optional-stopping knob.
+- **Quantified on the real test CSVs, 0 of the six survive a multiplicity-aware test.**
+  The best `tau`-searched config (`carries` OVER, tau 0.05, precision 0.578) has raw
+  p=0.031 → **Bonferroni p_adj = 1.00**, and decays to 0.544 (n=169) out of sample. The
+  model is **informative but not bettable**: pooled, its own picks go 52.70% (p<1e-4 vs a
+  coin flip — real skill) but do **not** beat the vig (p=0.32 vs 0.5238). That gap is the
+  bookmaker's hold.
+
+**The six are open, not failed.** The verdict is about the *current models on the current
+data*, not a claim these markets are unbeatable. Two principled tracks remain — **neither
+is a gate loosening**:
+
+1. **A stronger model** — if a future model lifts a cell's whole-set Brier-skill above 0
+   with confidence, g1 ships it automatically. g1 is not the blocker; model edge is.
+2. **A closing-line-value gate** — beating the *closing* de-vigged price (clustered CI) is
+   the one principled selection-style criterion worth building, constructible only after
+   the test-CSV `game_date`/`player_id` schema upgrade (tie to the block-bootstrap backlog
+   item in `/tmp/researcher_g1_power_leverfit.md`). Run honestly it currently agrees with g1.
+
+A read-only diagnostic (never a `ship` term) could be added later: a validation-tuned,
+FDR-corrected held-out value-pick Wilson lower bound vs 0.5238 in `model_stats.parquet`,
+mirroring `g1_clustered_ci_hi`. **Do not gate on a model-conditioned statistic** — that is
+the trap this audit rejected.
+
+### Step 1 — Post-hoc mean-bias correction (1.1 ROE DONE 2026-06-02; 1.2/1.3 available)
+
+**1.1 affine-ROE shipped as the `roe_mean` post-hoc slug** — a `MEAN_STAGE` corrector in
+[`training/posthoc.py`](../src/sportstradamus/training/posthoc.py), selected per cell via
+the `posthoc` field on `stat_meta.json` (the seam landed as `posthoc`/`MEAN_STAGE`, not the
+`bias_correction` field this section originally sketched). Fit on the validation split,
+applied to the disjoint test split (leak-free), clipped ≥0, leaves dispersion untouched.
+Outcome on NFL: flipped **`passing tds` + `interceptions`** to ship (the two cells with a
+real edge over the book); the six g1-only-fail SkewNormal cells did not flip (Step 0.10 —
+a discrimination floor, not a calibration gap) and were reverted to `posthoc: none`. 1.2
+isotonic / 1.3 multicalibration remain available but are not expected to move the six
+(`roc_auc ≈ 0.50` is an edge problem). Original plan text retained below.
+
+Targets residual G2 (star) / G3 (bench) bias cells after Steps 0 + 0.6.
 
 Targets residual G2 (star) / G3 (bench) bias cells after Steps 0 + 0.6.
 Per Step 0.6's reentry rule the family choice from 0.6 is a working
@@ -898,6 +966,7 @@ session before push (CLAUDE.md hard rule).
 | > 4 lever attempts per cell | high | Defer to Ship 90 — don't grind. |
 | NFL ~17 games/season noise on new feature | med | Smoke phase first; full-verification per cross-league policy. |
 | `feature_filter.json` SHAP rebuild discards new feature | low | SHAP override pin; document. |
+| Subset-profitability search ships a multiplicity artifact | med | Standing rule (Step 0.10): any search over bet-definition knobs (`tau`, side, market) must be Bonferroni/BHY-corrected over the full search space *before* it informs a ship decision; never gate on a model-conditioned statistic. Cautionary example: `carries`-OVER-`tau`-0.05, raw p 0.031 → adjusted 1.00. |
 
 ## Execution sequencing
 
