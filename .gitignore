@@ -204,3 +204,6 @@ src/sportstradamus/data/training_data/.gitignore:Zone.Identifier
 *.parquet
 research/
 notebooks/
+
+# Git worktrees for isolated feature workspaces (subagent-driven development)
+.worktrees/
