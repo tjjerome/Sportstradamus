@@ -754,6 +754,7 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g1_brier_diff_mean_oracle",
         "g1_brier_diff_ci_lo_oracle",
         "g1_brier_diff_ci_hi_oracle",
+        "g1_clustered_ci_hi",
         "g1_brier_skill_score",
         "g2_star_pred_mean",
         "g2_star_true_mean",

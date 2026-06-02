@@ -329,28 +329,41 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
     return p_model, y
 
 
-def _brier_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Return ``(p_model, p_book, y)`` for the priced Brier gates, or None if absent.
+def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
+    """Rows usable for the priced Brier gates: finite P, Odds, Line, and outcome.
+
+    The single source of truth for which test rows enter Gate 1, so ancillary
+    columns (e.g. Player for the clustered bootstrap) align to the same rows.
+    """
+    if "Odds" not in df.columns:
+        return None
+    if not {"P", "Odds", "Line"}.issubset(df.columns):
+        return None
+    sub = df[["P", "Odds", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
+    return sub if len(sub) else None
+
+
+def _brier_inputs(
+    df: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, pd.Index] | None:
+    """Return ``(p_model, p_book, y, index)`` for the priced Brier gates, or None.
 
     Layers the book's ``Odds`` (book under-probability ⇒ book over = ``1 - Odds``) on
     top of :func:`_calibration_inputs`. The row set is re-filtered to drop rows with
     non-finite ``Odds`` (so the Brier and ECE row sets can differ when some events
     have a posted line but no book quote). Returns ``None`` when ``Odds`` is missing
     entirely or every priced row is non-finite. Shared by
-    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`).
+    :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`); ``index`` is the
+    surviving-row index so callers can align ancillary columns (Player) to the same
+    rows without re-deriving the filter.
     """
-    if "Odds" not in df.columns:
-        return None
-    needed = {"P", "Odds", "Line"}
-    if not needed.issubset(df.columns):
-        return None
-    sub = df[["P", "Odds", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
-    if len(sub) == 0:
+    sub = _priced_rows(df)
+    if sub is None:
         return None
     y = (sub[ACTUAL_COL] >= sub["Line"]).astype(float).to_numpy()
     p_model = np.clip(sub["P"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
     p_book = np.clip(1.0 - sub["Odds"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
-    return p_model, p_book, y
+    return p_model, p_book, y, sub.index
 
 
 def _brier_skill_score(df: pd.DataFrame) -> float | None:
@@ -362,7 +375,7 @@ def _brier_skill_score(df: pd.DataFrame) -> float | None:
     inputs = _brier_inputs(df)
     if inputs is None:
         return None
-    p_model, p_book, y = inputs
+    p_model, p_book, y, _ = inputs
     brier_model = float(np.mean((p_model - y) ** 2))
     brier_book = float(np.mean((p_book - y) ** 2))
     if brier_book <= 0:
@@ -471,6 +484,48 @@ def _bootstrap_mean_ci(
         draws[i] = values[rng.integers(0, n, n)].mean()
     lo, hi = np.percentile(draws, [_CI_LOW_PCT, _CI_HIGH_PCT])
     return float(values.mean()), float(lo), float(hi)
+
+
+def _bootstrap_mean_ci_clustered(
+    values: np.ndarray,
+    cluster_ids: np.ndarray,
+    rng: np.random.Generator,
+    n_boot: int = _GATE1_N_BOOT,
+) -> tuple[float, float, float]:
+    """Cluster (player) block bootstrap of the mean of ``values``.
+
+    Resamples whole clusters with replacement, so within-cluster correlation is
+    preserved and the CI is not anti-conservative on repeated-player panels.
+    ``n_boot`` defaults to :data:`_GATE1_N_BOOT`. Returns ``(mean, ci_lo, ci_hi)``;
+    ``(nan, nan, nan)`` if empty.
+    """
+    values = np.asarray(values, dtype=float)
+    cluster_ids = np.asarray(cluster_ids)
+    finite = np.isfinite(values)
+    values, cluster_ids = values[finite], cluster_ids[finite]
+    if len(values) == 0:
+        return float("nan"), float("nan"), float("nan")
+    uniq = np.unique(cluster_ids)
+    groups = [values[cluster_ids == c] for c in uniq]
+    n_clusters = len(uniq)
+    draws = np.empty(n_boot, dtype=float)
+    for i in range(n_boot):
+        pick = rng.integers(0, n_clusters, n_clusters)
+        draws[i] = np.concatenate([groups[j] for j in pick]).mean()
+    lo, hi = np.percentile(draws, [_CI_LOW_PCT, _CI_HIGH_PCT])
+    return float(values.mean()), float(lo), float(hi)
+
+
+def _gate1_brier_ci_clustered(
+    p_model: np.ndarray,
+    p_book: np.ndarray,
+    y: np.ndarray,
+    cluster_ids: np.ndarray,
+    rng: np.random.Generator,
+) -> tuple[float, float, float]:
+    """Gate 1 paired Brier CI under a player-clustered bootstrap."""
+    d = (p_model - y) ** 2 - (p_book - y) ** 2
+    return _bootstrap_mean_ci_clustered(d, cluster_ids, rng)
 
 
 def _iqr(values: np.ndarray) -> float:
@@ -891,8 +946,9 @@ def gate_row(
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
+        g1_clustered_hi = None
     else:
-        p_model_b, p_book, y_b = brier_in
+        p_model_b, p_book, y_b, priced_index = brier_in
         g1_mean, g1_lo, g1_hi = _gate1_brier_ci(
             p_model_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
         )
@@ -900,6 +956,13 @@ def gate_row(
             y_b, p_book, y_b, np.random.default_rng(_GATE1_SEED)
         )
         bss = _brier_skill_score(df)
+        g1_clustered_hi = None
+        if "Player" in df.columns:
+            g1_clustered_hi = _gate1_brier_ci_clustered(
+                p_model_b, p_book, y_b,
+                df.loc[priced_index, "Player"].to_numpy(),
+                np.random.default_rng(_GATE1_SEED),
+            )[2]
 
     # Gate 5 — model-only calibration. Needs P + Line (NOT Odds) — Gate 5 checks the
     # model's probabilities against outcomes; the book doesn't enter. Blank only if
@@ -942,6 +1005,7 @@ def gate_row(
         "g1_brier_diff_mean_oracle": r(g1_mean_o),
         "g1_brier_diff_ci_lo_oracle": r(g1_lo_o),
         "g1_brier_diff_ci_hi_oracle": r(g1_hi_o),
+        "g1_clustered_ci_hi": r(g1_clustered_hi),
         "g1_brier_skill_score": r(bss),
         "g2_star_pred_mean": r(g2_pred),
         "g2_star_true_mean": r(g2_true),
