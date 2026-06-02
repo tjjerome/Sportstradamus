@@ -12,7 +12,7 @@ from sportstradamus import data
 from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
 from sportstradamus.helpers.io import prune_model_pickle
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
-from sportstradamus.training import baselines
+from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
@@ -292,6 +292,9 @@ def meditate(
             if cell_target_norm == TARGET_NORM_NONE:
                 cell_target_norm = target_normalization
             cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
+            cell_blending = stat_meta_full.get(lg, {}).get(market, {}).get(
+                "blending", calibration.DEFAULT_BLENDING
+            )
             train_market(
                 lg,
                 market,
@@ -302,5 +305,6 @@ def meditate(
                 deterministic=deterministic,
                 target_normalization=cell_target_norm,
                 posthoc_slug=cell_posthoc,
+                blending=cell_blending,
                 zinb_mode=zinb_mode,
             )

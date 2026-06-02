@@ -41,8 +41,8 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.training import baselines, posthoc
-from sportstradamus.training.calibration import fit_book_weights, fit_model_weight
+from sportstradamus.training import baselines, calibration, posthoc
+from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.config import (
     load_distribution_config,
     save_cv_std_config,
@@ -1721,6 +1721,7 @@ def _step_fuse_predictions(
     dist: str,
     cv: float,
     hist_gate: float,
+    blending: str = calibration.DEFAULT_BLENDING,
 ) -> dict:
     """Fit model_weight, then fuse model+book predictions on test and validation.
 
@@ -1771,7 +1772,8 @@ def _step_fuse_predictions(
 
     if dist == "SkewNormal":
         _zi_kwargs = {"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}
-        model_weight = fit_model_weight(
+        model_weight = calibration.fit_blend_weight(
+            blending,
             ev_validation,
             book_ev_val,
             y_val_result,
@@ -1818,7 +1820,8 @@ def _step_fuse_predictions(
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-    model_weight = fit_model_weight(
+    model_weight = calibration.fit_blend_weight(
+        blending,
         ev_validation,
         book_ev_val,
         y_val_result,
@@ -2072,6 +2075,7 @@ def train_market(
     deterministic: bool = False,
     target_normalization: str = "ratio_meanyr",
     posthoc_slug: str = "none",
+    blending: str = calibration.DEFAULT_BLENDING,
     zinb_mode: str = "joint",
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
@@ -2221,7 +2225,7 @@ def train_market(
             posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
         )
 
-    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate)
+    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
     calibrated = _step_calibrate_dispersion(
         decoded,
         fused,

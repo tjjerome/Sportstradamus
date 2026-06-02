@@ -306,6 +306,24 @@ def fit_model_weight(
     return res.x[0]
 
 
+# Per-cell blend strategy: how the model and book distributions are combined.
+# Each entry owns its weight-fitting objective and its weight bounds, so a future
+# strategy can change the objective (e.g. Brier-at-line) and/or the bounds (e.g.
+# drop the 0.05 floor) without touching the others. Default `nll` reproduces the
+# historical behavior exactly.
+DEFAULT_BLENDING: str = "nll"
+BLENDING_SLUGS: frozenset[str] = frozenset({"nll"})
+
+
+def fit_blend_weight(blending: str, *args, **kwargs) -> float:
+    """Dispatch to the blend strategy's weight fitter. ``nll`` is the legacy
+    full-distribution-likelihood objective in :func:`fit_model_weight`.
+    """
+    if blending not in BLENDING_SLUGS:
+        raise ValueError(f"Unknown blending slug {blending!r}; valid: {sorted(BLENDING_SLUGS)}")
+    return fit_model_weight(*args, **kwargs)
+
+
 def select_distribution(player_stats) -> tuple[str, float]:
     """Recommend a distribution family by inspecting per-player data properties.
 

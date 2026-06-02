@@ -56,6 +56,7 @@ from pathlib import Path
 
 from sportstradamus import data
 from sportstradamus.training.baselines import TARGET_NORMALIZATION_SLUGS
+from sportstradamus.training.calibration import BLENDING_SLUGS, DEFAULT_BLENDING
 from sportstradamus.training.posthoc import POSTHOC_SLUGS
 
 # Reserved target-normalization value: the cell applies no target transform.
@@ -103,16 +104,22 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
             f"stat_meta.json: cell {league}/{market} has unknown shipped "
             f"value {shipped!r}; valid: {sorted(_SHIPPED_VALUES)}"
         )
-    if target_norm != TARGET_NORM_NONE and target_norm not in TARGET_NORMALIZATION_SLUGS:
+    _valid_target_norms = set(TARGET_NORMALIZATION_SLUGS) | {TARGET_NORM_NONE}
+    if target_norm not in _valid_target_norms:
         raise ValueError(
             f"stat_meta.json: cell {league}/{market} has unknown target_normalization "
-            f"value {target_norm!r}; valid: "
-            f"{sorted(set(TARGET_NORMALIZATION_SLUGS) | {TARGET_NORM_NONE})}"
+            f"value {target_norm!r}; valid: {sorted(_valid_target_norms)}"
         )
     if posthoc not in POSTHOC_SLUGS:
         raise ValueError(
             f"stat_meta.json: cell {league}/{market} has unknown posthoc "
             f"value {posthoc!r}; valid: {sorted(POSTHOC_SLUGS)}"
+        )
+    blending = cell.get("blending", DEFAULT_BLENDING)
+    if blending not in BLENDING_SLUGS:
+        raise ValueError(
+            f"stat_meta.json: cell {league}/{market} has unknown blending "
+            f"value {blending!r}; valid: {sorted(BLENDING_SLUGS)}"
         )
     if dist == SKEW_NORMAL_DIST and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(
