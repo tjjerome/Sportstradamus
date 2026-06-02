@@ -306,9 +306,9 @@
         },
         "interceptions": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "roe_mean"
         },
         "passing first downs": {
             "dist": "SkewNormal",
@@ -318,9 +318,9 @@
         },
         "passing tds": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "roe_mean"
         },
         "passing yards": {
             "dist": "SkewNormal",
