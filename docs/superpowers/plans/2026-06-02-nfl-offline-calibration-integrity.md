@@ -656,7 +656,7 @@ git commit -m "feat(scorecard): add player-clustered Gate-1 bootstrap recheck"
 
 ## Task 6: Convolution-derived book helpers
 
-New module computing an honest combined-market book over/under probability from the component markets: `qb-yards = passing-yards + rushing-yards` (Normal sum, correlation from `NFL_corr.csv`); `qb-tds = passing-tds + rushing-tds` (count PMF convolution). Pure functions, no I/O — sourcing happens in Task 7.
+New module computing an honest combined-market book over/under probability from the component markets: `qb-yards = passing-yards + rushing-yards` (Normal sum, correlation from `NFL_corr.parquet`); `qb-tds = passing-tds + rushing-tds` (count PMF convolution). Pure functions, no I/O — archive sourcing happens in the Task 8 injection script.
 
 **Files:**
 - Create: `src/sportstradamus/helpers/combined_markets.py`
@@ -760,13 +760,15 @@ git commit -m "feat(helpers): convolution-derived book for combined QB markets"
 
 ---
 
-## Task 7: Inject the derived book into `qb-yards` / `qb-tds` gating
+## Task 7: `derived_book_under_prob_row` adapter (injection script deferred to Task 8)
 
-Source the component book parameters per `(player, game_date)` and replace the fabricated `0.5` book (`Odds`) for `qb-yards`/`qb-tds` test rows with the convolution-derived under-probability (book over = `1 − Odds`, per `scorecard._brier_inputs`). Skip offers missing a component book — never fabricate. `passing-first-downs` is left unchanged (no clean decomposition).
+**Re-scoped 2026-06-02 during execution.** The original Task 7 also built an offline `inject_combined_book.py` script. Verifying the data sources showed the script cannot be built or validated as specified yet: (a) the correlation matrix ships as `NFL_corr.parquet` / per-league `corr_same_team.parquet`, not `NFL_corr.csv`; (b) the component test sets (`NFL_passing-yards.csv`, etc.) and the qb target CSVs carry no `Player`/`Date` join key — those columns only appear after a retrain (Task 4's persist), so the `(player, game_date)` join is impossible until the qb cells are retrained; (c) the CSVs store only `Line`/`Odds` plus the model's own params, not the book's `mu`/`sd`/`pmf`, so the script must source component prices from the archive and impose an implied-component-book model — a modeling choice best made against real data. Per the user decision, Task 7 ships ONLY the pure, fully-testable adapter; the archive-sourcing injection script is built and validated in Task 8 (after the qb retrains), where its coverage and implied-book model can be checked against the freshly-persisted `Player`/`Date`.
+
+This task adds one row-level adapter mapping a per-offer dict (component `pass`/`rush` book params) to the archive's `Odds` convention (book under-probability; book over = `1 − Odds`), returning `None` when a component book is missing so the future caller skips rather than fabricates.
 
 **Files:**
-- Create: an offline script `src/sportstradamus/scripts/inject_combined_book.py` (operator tool, mirrors the existing `inject_backfilled_odds.py` shape)
-- Test: `tests/golden/test_combined_markets.py` (append a coverage/skip test)
+- Modify: `src/sportstradamus/helpers/combined_markets.py` (add `derived_book_under_prob_row`)
+- Test: `tests/golden/test_combined_markets.py` (append adapter tests)
 
 - [ ] **Step 1: Write the failing test (coverage + convention)**
 
@@ -820,33 +822,17 @@ def derived_book_under_prob_row(row: dict, market: str, rho: float) -> float | N
     return float(1.0 - over)
 ```
 
-- [ ] **Step 4: Write the injection script**
-
-Create `src/sportstradamus/scripts/inject_combined_book.py` (a `click` CLI, mirroring `inject_backfilled_odds.py`): for `qb-yards`/`qb-tds`, load the cell's training matrix / test set, join the component book params from the archive (`get_line`/`get_ev` and the persisted component distribution params) per `(Player, Date)`, read the pass/rush `rho` from `NFL_corr.csv`, call `derived_book_under_prob_row` per offer, write the result into the `Odds` column where both components are present (count + skip-coverage reported), and leave other rows untouched. It writes to the cached matrix the same way `inject_backfilled_odds.py` does (no feature rebuild). Add a `--dry-run` that only reports coverage.
-
-```python
-# skeleton — full arg wiring mirrors scripts/inject_backfilled_odds.py
-import click
-@click.command()
-@click.option("--market", type=click.Choice(["qb-yards", "qb-tds"]), required=True)
-@click.option("--dry-run", is_flag=True)
-def main(market: str, dry_run: bool) -> None:
-    ...  # load matrix, join components, compute derived under-prob, report coverage, write unless dry-run
-```
-
-- [ ] **Step 5: Run the helper tests + a dry-run coverage check**
+- [ ] **Step 4: Run the adapter tests + commit**
 
 Run: `poetry run pytest tests/golden/test_combined_markets.py -v`
-Expected: PASS.
-Run: `poetry run python -m sportstradamus.scripts.inject_combined_book --market qb-yards --dry-run`
-Expected: prints coverage (fraction of `qb-yards` offers with both component books); no file written.
-
-- [ ] **Step 6: Commit**
+Expected: PASS (Task-6 convolution tests + the new adapter tests, including a `qb-tds` count-dispatch case).
 
 ```bash
-git add src/sportstradamus/helpers/combined_markets.py src/sportstradamus/scripts/inject_combined_book.py tests/golden/test_combined_markets.py
-git commit -m "feat(scripts): inject convolution-derived book for qb-yards/qb-tds"
+git add src/sportstradamus/helpers/combined_markets.py tests/golden/test_combined_markets.py
+git commit -m "feat(helpers): add derived_book_under_prob_row adapter for combined QB markets"
 ```
+
+**Deferred to Task 8 (the injection script).** Building `inject_combined_book.py` requires the qb test sets to carry `Player`/`Date` (only present after the Task-4 retrain) and an implied-component-book model sourced from the archive (the CSVs store no book `mu`/`sd`/`pmf`). Both are best decided against real data, so the script is written and validated in Task 8 Step 6, after `qb-tds` is retrained.
 
 ---
 
@@ -899,7 +885,7 @@ Expected: all clean.
 
 - [ ] **Step 6: Repeat Steps 1–5 for `qb-tds`, `interceptions`, `carries`**
 
-- For `qb-tds`: first run `inject_combined_book --market qb-tds` (Task 7) so it is scored against the honest book, then `posthoc: roe_mean`, retrain, re-score. Expect it may stay withheld (honest book is sharp).
+- For `qb-tds`: it needs the honest convolution book before scoring, and that requires building the deferred injection script. Order: (a) retrain `qb-tds` FIRST so its test set carries `Player`/`Date`; (b) write `src/sportstradamus/scripts/inject_combined_book.py` (a `click` CLI mirroring `inject_backfilled_odds.py`) — source the `passing-tds` + `rushing-tds` component prices from the archive per `(Player, Date)`, impose an implied-component-book count model, build each component PMF, call `derived_book_under_prob_row` per offer, write the derived under-prob into the test set's `Odds` column where both components are present, skip rows missing a component, and report coverage under `--dry-run`; (c) run `--dry-run`, validate coverage against the real retrained test set, then apply; (d) set `posthoc: roe_mean`, re-score. Expect it may stay withheld (the honest book is sharp). `qb-yards` (Normal-sum) follows the same pattern only if time permits; `passing-first-downs` has no clean decomposition and stays on its current book.
 - For `interceptions`: low prior (μ ~uncorrelated with INTs); apply `roe_mean`, re-score, promote only if both g1 gates clear, else leave withheld.
 - For `carries`: apply `roe_mean`, re-score, promote only if both gates clear.
 
