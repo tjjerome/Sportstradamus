@@ -241,7 +241,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         raise ValueError(f"{path.name} missing required columns: {sorted(missing)}")
     # Opportunistically keep brier-skill inputs when present; older CSVs without
     # them stay loadable and just skip the third gate downstream.
-    optional = {"P", "Odds", "Line"} & set(df.columns)
+    optional = {"P", "Odds", "Line", "Player", "Date"} & set(df.columns)
     # Per-row distribution params (Operation Ship 75 Step 0.2 G4 audit).
     # ``training/pipeline.py::_step_persist_artifacts`` dumps these at lines
     # 1191-1212; older CSVs predating that dump simply leave them out and the

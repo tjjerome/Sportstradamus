@@ -708,6 +708,8 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     B_validation = M.loc[X_validation.index, ["Line", "Odds", "EV"]]
 
     y_train_labels = np.ravel(y_train.to_numpy())
+    players_test = M.loc[X_test.index, "Player"].values if "Player" in M.columns else None
+    dates_test = M.loc[X_test.index, "Date"].values
     return {
         "X": X,
         "y": y,
@@ -721,6 +723,8 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
         "B_test": B_test,
         "B_validation": B_validation,
         "y_train_labels": y_train_labels,
+        "players_test": players_test,
+        "dates_test": dates_test,
     }
 
 
@@ -1284,6 +1288,15 @@ def _build_filedict(
     }
 
 
+def _persist_player_metadata(X_test: pd.DataFrame, splits: dict) -> None:
+    # Player key + game date enable the offline scorecard's player-clustered Gate-1
+    # bootstrap; the i.i.d. bootstrap over-credits repeated-player panels without them.
+    # Guard is real — some leagues (e.g. team-level markets) omit "Player" entirely.
+    if splits.get("players_test") is not None:
+        X_test["Player"] = splits["players_test"]
+    X_test["Date"] = splits["dates_test"]
+
+
 def _step_persist_artifacts(
     *,
     filedict: dict,
@@ -1342,6 +1355,7 @@ def _step_persist_artifacts(
         X_test["Alpha"] = prob_params["concentration"]
 
     X_test["P"] = y_proba_filt[:, 1]
+    _persist_player_metadata(X_test, splits)
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
     # scorecard harness can score artifacts without overwriting production.
