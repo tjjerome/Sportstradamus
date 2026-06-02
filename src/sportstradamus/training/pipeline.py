@@ -1298,6 +1298,7 @@ def _step_persist_artifacts(
     deterministic: bool,
     target_normalization: str,
     zinb_mode: str,
+    mean_corrected: bool = False,
 ) -> None:
     """Write the test-set CSV and the model pickle.
 
@@ -1324,7 +1325,11 @@ def _step_persist_artifacts(
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
         base_ev = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
-        X_test["EV"] = base_ev
+        # A mean-stage corrector already adjusted decoded["ev"]; persist that so the
+        # bias gates (EV column) see the same corrected mean the blend used. The
+        # native R / NB_P below stay uncorrected — Gate 4 reads them and measures
+        # dispersion, which roe_mean intentionally leaves alone.
+        X_test["EV"] = decoded["ev"] if mean_corrected else base_ev
         if dist == "ZINB":
             X_test["Gate"] = prob_params["gate"]
         X_test["R"] = prob_params["total_count"]
@@ -2198,6 +2203,24 @@ def train_market(
         dist_info["denom_col"],
         hist_gate,
     )
+
+    # Mean-stage post-hoc (orthogonal to target_normalization and to the
+    # prob-stage corrector below): fit on the validation decoded mean, then
+    # correct both test and validation means BEFORE fusion so the correction
+    # flows through the blend into P (Gate 1/5) and into the persisted EV
+    # (Gate 2/3). roe_mean undoes leaf-averaging compression; it deliberately
+    # does not touch dispersion (Gate 4).
+    mean_posthoc_blob = None
+    if posthoc_slug in posthoc.MEAN_STAGE:
+        val_result = splits["y_validation"]["Result"].to_numpy(dtype=float)
+        mean_posthoc_blob = posthoc.fit_posthoc(
+            posthoc_slug, decoded["ev_validation"], val_result
+        )
+        decoded["ev"] = posthoc.apply_posthoc(posthoc_slug, mean_posthoc_blob, decoded["ev"])
+        decoded["ev_validation"] = posthoc.apply_posthoc(
+            posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
+        )
+
     fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate)
     calibrated = _step_calibrate_dispersion(
         decoded,
@@ -2222,7 +2245,7 @@ def train_market(
     # both the validation probs (so skill reflects it) and the persisted test
     # probs (so the offline ship gates see the corrected cell). No-op when the
     # cell's posthoc slug is "none" or not a probability-stage corrector.
-    posthoc_blob = None
+    posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
     if posthoc_slug in posthoc.PROB_STAGE:
         posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
         val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
@@ -2296,6 +2319,7 @@ def train_market(
         deterministic=deterministic,
         target_normalization=target_normalization,
         zinb_mode=zinb_mode,
+        mean_corrected=mean_posthoc_blob is not None,
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the
