@@ -34,6 +34,7 @@ from sportstradamus import data
 from sportstradamus.helpers import Archive, get_odds, stat_cv, stat_dist
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.io import market_file_slug
+from sportstradamus.scripts.delete_corrupt_seed import BLOWN_ABS_CEILING, BLOWN_LINE_FACTOR
 
 # 8 PM UTC commence-time stand-in from stats/base.py get_training_matrix. The
 # archive read happens at this minus the training lookback; backfilled rows
@@ -41,17 +42,54 @@ from sportstradamus.helpers.io import market_file_slug
 # the latest observation = the backfill.
 _COMMENCE_STANDIN = datetime.timedelta(hours=20)
 
+# Sentinel Odds value written for synthesized rows so pipeline._step_synthesize_odds
+# catches them via its `Odds == 0` mask arm — works even when Odds_synthetic is absent.
+_SYNTH_ODDS_SENTINEL: float = 0.0
+
 
 def _target_at(game_date: datetime.date) -> datetime.datetime:
     return datetime.datetime.combine(game_date, datetime.time()) + _COMMENCE_STANDIN - TRAINING_LOOKBACK
+
+
+def _is_blown(ev: float, line: float) -> bool:
+    """A cached EV the swept archive can no longer price — pre-``get_ev``-fix residue."""
+    return ev > BLOWN_ABS_CEILING or (line > 0 and ev > BLOWN_LINE_FACTOR * line)
+
+
+def _resolve_row(archive, league, market, dist, cv, row, has_synth):
+    """Re-derived ``(line, ev, odds, synthetic)`` book columns for one cached row.
+
+    A row the archive prices with a sane EV is recomputed from it (the backfill
+    supersedes the seed); a row with no archived price keeps its clean cached
+    book columns. A resolved EV that is blown (an archive value the magnitude
+    sweep missed — inverted-moderate, or a point-in-time line below the latest
+    one) or already NaN (a prior synthesis, or un-re-quotable pre-fix residue)
+    is synthesized: ``Odds`` set to ``_SYNTH_ODDS_SENTINEL``, ``EV`` left NaN
+    for ``pipeline._step_synthesize_odds`` to fill canonically. No matrix row
+    may carry a blown or NaN ``EV``; a NaN ``EV`` crashes the LightGBMLSS fit.
+    """
+    game_date = pd.to_datetime(row["Date"]).date()
+    at = _target_at(game_date)
+    date = game_date.strftime("%Y-%m-%d")
+    ev = archive.get_ev(league, market, date, row["Player"], at=at)
+    line = archive.get_line(league, market, date, row["Player"], at=at)
+    priced = not np.isnan(ev) and line > 0
+    if not priced:
+        line, ev = row["Line"], row["EV"]
+    if np.isnan(ev) or _is_blown(ev, line):
+        return line, np.nan, _SYNTH_ODDS_SENTINEL, True
+    if priced:
+        return line, ev, 1 - get_odds(line, ev, dist, cv=cv), False
+    cached_synth = row["Odds_synthetic"] if has_synth else False
+    return line, ev, row["Odds"], cached_synth
 
 
 def _refresh_one(archive, league: str, market: str, M: pd.DataFrame):
     """Re-derive ``Line``/``Odds``/``EV`` from the archive for every cached row.
 
     Mirrors the ``Odds = 1 - get_odds(line, ev)`` derivation in ``stats/base.py``
-    ``get_training_matrix`` so the injected columns equal a full rebuild's. Rows
-    with no archived price keep their cached book columns. Returns
+    ``get_training_matrix`` so the injected columns equal a full rebuild's (see
+    ``_resolve_row`` for the per-row policy). Returns
     ``(n_changed, frac_half_before, frac_half_after)`` where the coin-flip
     fraction (``Odds == 0.5``) is the degeneracy fingerprint the backfill clears.
     """
@@ -60,21 +98,11 @@ def _refresh_one(archive, league: str, market: str, M: pd.DataFrame):
     has_synth = "Odds_synthetic" in M.columns
     lines, evs, odds, synth = [], [], [], []
     for _, row in tqdm(M.iterrows(), total=len(M), desc=f"{league} {market}", leave=False):
-        game_date = pd.to_datetime(row["Date"]).date()
-        at = _target_at(game_date)
-        date = game_date.strftime("%Y-%m-%d")
-        ev = archive.get_ev(league, market, date, row["Player"], at=at)
-        line = archive.get_line(league, market, date, row["Player"], at=at)
-        if np.isnan(ev) or line <= 0:
-            lines.append(row["Line"])
-            evs.append(row["EV"])
-            odds.append(row["Odds"])
-            synth.append(row["Odds_synthetic"] if has_synth else False)
-            continue
+        line, ev, od, sy = _resolve_row(archive, league, market, dist, cv, row, has_synth)
         lines.append(line)
         evs.append(ev)
-        odds.append(1 - get_odds(line, ev, dist, cv=cv))
-        synth.append(False)
+        odds.append(od)
+        synth.append(sy)
 
     new_odds = np.asarray(odds, dtype=float)
     old_odds = M["Odds"].to_numpy(dtype=float)
@@ -85,8 +113,7 @@ def _refresh_one(archive, league: str, market: str, M: pd.DataFrame):
     M["Line"] = lines
     M["EV"] = evs
     M["Odds"] = new_odds
-    if has_synth:
-        M["Odds_synthetic"] = synth
+    M["Odds_synthetic"] = synth
     return n_changed, frac_before, frac_after
 
 

@@ -119,6 +119,10 @@ def _safe_date(d: str | datetime.date | None) -> datetime.date | None:
         return None
 
 
+def _dfs_under_boost(over, boost_under):
+    return boost_under if boost_under and boost_under > 0 else over
+
+
 def clean_archive(cutoff_date: datetime.date | None = None) -> None:
     """Drop stale dates and combo/matchup pseudo-entities from the archive.
 
@@ -830,7 +834,9 @@ class Archive:
             line = float(o["Line"])
 
             over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
-            odds = no_vig_odds(over, o.get("Boost_Under"))
+            # A missing/zero under side fabricated a ~6.5%-vig under in no_vig_odds
+            # that inverts to a blown count-cell ev; DFS picks are symmetric instead.
+            odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
             ev = get_ev(line, odds[1], cv, dist=dist, gate=gate or None)
 
             self._stage_book_ev(league, market, d, player, platform, ev)

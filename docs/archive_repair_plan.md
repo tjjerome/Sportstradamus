@@ -1,8 +1,15 @@
 # Archive EV Repair Plan
 
-Status: proposed (2026-06-01). Repairs the **local** `archive/archive.duckdb` that feeds
+Status: executing (2026-06-02). Repairs the **local** `archive/archive.duckdb` that feeds
 local training and rebuilds. The production/server archive is a separate, deferred concern
 (see Phase 0).
+
+> **2026-06-02 update — the real root cause was in `get_ev`, not just the parser
+> default.** The parser-`dist` fix below stopped one source, but two numerical bugs in
+> `helpers/distributions.py:get_ev` were still minting blown evs into *live* and *re-fetched*
+> rows (not only the migration seed). Both are now fixed; see
+> [§ `get_ev` numerical root cause](#get_ev-numerical-root-cause-2026-06-02). The execution
+> log at the bottom records what actually ran.
 
 ## Problem
 
@@ -47,6 +54,33 @@ Per-month NBA BLK, matrix vs current archive:
 
 The clean window's book *discriminates* (Odds bin → empirical over: 0.22 → 0.39 → 0.37 → 0.56);
 the blown tail does not (top bin says >70% over, 42% hit).
+
+## `get_ev` numerical root cause (2026-06-02)
+
+The parser-`dist` fix was necessary but not sufficient. Two ill-conditioned bands in
+`helpers/distributions.py:get_ev` were still producing blown evs from *correct* inputs, so
+the corruption kept landing in live and re-fetched rows — not just the migration seed:
+
+1. **ZINB/ZAGamma gate underflow → runaway mean.** For zero-inflated cells `get_ev` strips the
+   gate: `base_CDF = (under − gate) / (1 − gate)`. When the de-vigged under-prob is at or below
+   the zero-inflation `gate` (routine for high-zero count cells — NBA `BLK` gate ≈ 0.63, so a
+   fair −130/+110 book de-vigs to under ≈ 0.46 < gate), `base_CDF ≤ 0` clips to `1e-6` and the
+   NegBin inversion solves for a mean in the thousands (BLK → 5 917). **Only `add_dfs` passes a
+   `gate`** (archive.py), so this is the DFS write path; the live props parser passes
+   `gate=None` and stays bounded. Two add_dfs sub-triggers fed it: a missing/zero `Boost_Under`
+   (Underdog Rivals/Sleeper) made `no_vig_odds` fabricate a ~6.5%-vig under ≈ 0.06, and even a
+   symmetric DFS pick (under = 0.5) fell below the gate. **Fix:** `base_CDF ≤ 0 → return line`;
+   and `add_dfs` now prices a missing under side symmetrically (`_dfs_under_boost`).
+2. **SkewNormal mean→∞ asymptote → millions, then a `brentq` crash.** The scale grows with the
+   mean, so `cdf(line, mean)` asymptotes to `Φ(−1/cv)` as `mean → ∞`, not to 0. A book under-prob
+   a hair above that floor inverts to an astronomically large mean (rushing yards → 1.9–3.2M) and,
+   at the exact boundary, hands `brentq` a same-sign bracket that raises `ValueError` — this
+   crashed the NFL backfill at date 150/199. **Fix:** the new `_skewnormal_ev` helper returns the
+   line when the implied mean would exceed `SN_MAX_MEAN_FACTOR × line` (cutoff `Φ((1−F)/(F·cv))`).
+
+Pinned by `tests/golden/test_get_ev_robustness.py`. Because these minted blown evs into live and
+re-fetch layers, the cleanup needed a **magnitude predicate across all `observed_at` layers**, not
+just the midnight seed — `delete_corrupt_seed.py --blown-all-layers`.
 
 ## Constraint: the only reliable source of truth is the original two-sided prices
 
@@ -134,6 +168,69 @@ Unaffordable to re-fetch; not used by training (trimmed) or live.
 
 ## Out of scope / superseded
 
-`scripts/repair_matrix_ev.py` (in-place recover+reproject from the archive) is the wrong
-approach — it reads the most-corrupt layer and made training worse in testing. Delete it; the
-right tools are `backfill_historical_odds.py` + `inject_backfilled_odds.py`.
+`scripts/repair_matrix_ev.py` (in-place recover+reproject from the archive) was the wrong
+approach — it reads the most-corrupt layer and made training worse in testing. **Deleted
+2026-06-02**; the right tools are `backfill_historical_odds.py` + `inject_backfilled_odds.py`.
+
+## Execution log
+
+- **2026-06-02 — `get_ev` fix + cleanup + re-fetch.**
+  - Fixed both `get_ev` bands + the `add_dfs` symmetric-under path; deleted the obsolete
+    `repair_matrix_ev.py`. Gates green (golden / integration / ruff); refactoring-specialist clean.
+  - Extended `delete_corrupt_seed.py` with `--blown-all-layers` (magnitude predicate, any
+    `observed_at` layer). Backed up the DB, then deleted blown + degenerate rows for NBA
+    `BLK/STL/FG3M`, WNBA `FG3M`, NFL `rushing yards/receiving yards/carries/tds`. **Blown count
+    → 0 across all layers** for every target cell afterward.
+  - Re-fetched (Odds API historical, one pre-game snapshot per game-day): WNBA `FG3M` (hour 14),
+    NBA `BLK/STL/FG3M` (hour 23 — evening is the only snapshot that carries BLK/STL lines). New
+    rows verified clean (NBA p50: BLK 0.55, STL 1.8, FG3M 2.2; zero `>5×line`). Cost ≈ 31 cr per
+    market-date.
+  - **Deferred (budget):** the NFL yardage/`tds` tail (50 dates, `2025-10-05`→end, ~16k cr) — the
+    backfill had already landed 149/199 dates before the SkewNormal crash; balance after NBA+WNBA
+    won't cover it. Resume `backfill_historical_odds … --league NFL --markets "tds,receiving
+    yards,rushing yards,carries" --start 2023-09-01 --end 2026-02-28 --snapshot-hour 14` on refill.
+  - **Caveat:** seed deletion ran *before* the re-fetch finished, so a handful of fully-blown
+    NFL dates lost their only odds rows and now fall outside `_game_dates` (odds-driven). They
+    resolve to synthetic 0.5 until a future `lines`-driven re-fetch; negligible (≈3 dates).
+  - **NFL tail completed** (budget freed up): the full NFL `tds/carries/rushing yards/
+    receiving yards/interceptions` history was re-fetched after NBA/WNBA, clearing the
+    SkewNormal-asymptote crash at date 150 once the `get_ev` fix landed. A second
+    `--blown-all-layers` pass on every re-fetched cell drove blown → 0.
+
+- **2026-06-02 — inject + retrain (Phase 3).**
+  - `inject_backfilled_odds.py` refreshed the 9 cached matrices from the repaired archive.
+    Two latent inject bugs surfaced (the tool now equals a from-scratch rebuild for every
+    row):
+    1. **Residual blown.** Rows the swept archive can no longer price — DFS-only / thin-market
+       player-games with no API re-quote, plus a few inverted-moderate rows the magnitude
+       sweep missed (archive's latest line ≠ the point-in-time line) — kept their blown cached
+       EV. `_resolve_row` now synthesizes any *resolved* `EV > 5×line` to the honest 0.5 a
+       rebuild produces, regardless of source.
+    2. **NaN-EV fit crash.** Synthesized rows were first written `EV=NaN, Odds=0.5`; with no
+       `Odds_synthetic` column on most matrices, `pipeline._step_synthesize_odds` missed them
+       and the NaN crashed the LightGBMLSS fit (NBA + NFL, pass 1). Fixed: synthesized rows now
+       carry the `Odds==0` sentinel (caught regardless of the optional column) with `EV=NaN`
+       for the pipeline to fill canonically, and `Odds_synthetic` is always written. Verified:
+       0 blown and every NaN-EV row flagged for synthesis across all 9 matrices.
+  - Retrained all 9 cells with `meditate --force`, Optuna **warm-started** from each pickle's
+    prior HPs (150 trials / 5 min, best trial 0 throughout). Honest before→after on the real book:
+
+    | cell | book brier | brier skill | ship |
+    |---|---|---|---|
+    | NBA BLK | 0.245 → 0.233 | +0.134 → +0.080 | devel (5/5 pass) |
+    | NBA STL | 0.251 → 0.255 | +0.027 → +0.058 | devel (5/5 pass) |
+    | NBA FG3M | 0.253 → 0.238 | +0.117 → +0.074 | devel (5/5 pass) |
+    | NFL tds | 0.770 → 0.147 | +0.809 → −0.024 | devel (5/5 pass) |
+    | WNBA FG3M | 0.253 → 0.251 | +0.136 → +0.147 | **withheld** (g4 iqr 0.50) |
+    | NFL carries | 0.342 → 0.259 | +0.227 → −0.010 | **withheld** (g1) |
+    | NFL rushing yards | 0.320 → 0.257 | +0.210 → +0.022 | **withheld** (g1) |
+    | NFL receiving yards | 0.247 → 0.251 | −0.025 → −0.009 | **withheld** (g1) |
+    | NFL interceptions | 0.318 → 0.269 | +0.179 → +0.064 | **withheld** (g1) |
+
+  - The blown book had inflated apparent skill — NFL `tds` book brier 0.77 meant the book was
+    confidently *wrong*, so the +0.81 skill was a broken-strawman artifact. On the real book the
+    skill compresses and 5 cells no longer clear their gates. This is the correct outcome: a
+    sharper book makes the gate harder to pass. The 5 are flipped `devel → withheld` in
+    `stat_meta.json`; `g1_oracle` stays strongly negative (−0.25 … −0.56) so the headroom is
+    real — they are re-ship candidates once training is strengthened. NBA `BLK/STL/FG3M` and
+    NFL `tds` still pass all five gates and stay `devel`.
