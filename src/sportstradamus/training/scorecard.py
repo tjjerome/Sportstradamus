@@ -49,7 +49,7 @@ from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.io import read_history
 from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.ship_config import load_ship_config, resolve_cell_strategy
+from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
 # ---------------------------------------------------------------------------
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -549,8 +549,8 @@ _RATIO_LIKE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr"})
 def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, np.ndarray]:
     """Decode raw SkewNormal ``loc`` / ``scale`` to EV-space per strategy.
 
-    Mirrors ``training.baselines.TargetStrategy.decode_loc`` / ``decode_scale``
-    for the strategies wired in ``_STRATEGIES`` there. ``ratio_meanyr``
+    Mirrors ``training.baselines.TargetNormalization.decode_loc`` / ``decode_scale``
+    for the strategies wired in ``_TARGET_NORMALIZATIONS`` there. ``ratio_meanyr``
     multiplies both by ``MeanYr.clip(_SN_DENOM_FLOOR)``; the
     ``centered_additive_*`` strategies leave ``scale`` alone (location decode
     is irrelevant for IQR, which is location-free for SkewNormal).
@@ -677,7 +677,7 @@ def _gate4_iqr_spread(
     """
     iqr_true = _iqr(actual)
     if df is not None and dist is not None:
-        iqr_pred = _iqr_pred_analytical(df, dist, strategy=strategy or "ratio_meanyr")
+        iqr_pred = _iqr_pred_analytical(df, dist, strategy=strategy or _DECODE_FALLBACK_STRATEGY)
     else:
         iqr_pred = _iqr(pred)
     if iqr_true == 0:  # noqa: SIM108 — doubly-nested ternary is unreadable here
@@ -790,26 +790,50 @@ def _round_gate_value(v: float | None) -> float | None:
 
 
 @functools.lru_cache(maxsize=1)
-def _cached_ship_config() -> dict:
-    """Memoize the parsed stat_meta ship policy so a full-audit loop hits disk once."""
-    return load_ship_config()
+def _cached_stat_meta() -> dict:
+    """Memoize raw stat_meta so a full-audit loop hits disk once."""
+    return load_stat_meta(Path(str(STAT_META_PATH)))
 
 
 def _resolve_decode_strategy(league: str, market_stem: str) -> str:
     """Look up the per-cell training strategy for a SkewNormal decode mirror.
 
     ``market_stem`` is the file-slug form (e.g. ``fantasy-points-prizepicks``)
-    that lives in the test_set CSV name; ``stat_meta.json`` keys are the
-    raw market names with spaces, so we reverse the hyphenation done by
-    :func:`helpers.io.market_file_slug` (line 81). Falls back to
-    ``ratio_meanyr`` when the cell isn't shipped (un-shipped cells
-    were trained under the ``--target-strategy`` default, which is
-    ``ratio_meanyr``).
+    that lives in the test_set CSV name; ``stat_meta.json`` keys are the raw
+    market names with spaces, so we reverse the hyphenation done by
+    :func:`helpers.io.market_file_slug`.
+
+    Reads the strategy straight from ``stat_meta.json`` rather than the
+    ship-config projection: :func:`load_ship_config` collapses every withheld
+    cell to the ``WITHHELD`` sentinel, which hides the ``ratio_meanyr``
+    transform the cell actually trained under and leaves the g4 IQR decode in
+    normalized ratio-units. A ``none`` value means the cell took the
+    ``--target-normalization`` default — ``ratio_meanyr``.
     """
     market_with_spaces = market_stem.replace("-", " ")
-    return resolve_cell_strategy(
-        league, market_with_spaces, _DECODE_FALLBACK_STRATEGY, _cached_ship_config()
+    target_norm = (
+        _cached_stat_meta()
+        .get(league, {})
+        .get(market_with_spaces, {})
+        .get("target_normalization", TARGET_NORM_NONE)
     )
+    return _DECODE_FALLBACK_STRATEGY if target_norm == TARGET_NORM_NONE else target_norm
+
+
+def _zero_inflated_mean(df: pd.DataFrame, pred: np.ndarray) -> np.ndarray:
+    """Recover E[Y] = (1 - π)·μ for the bias gates on zero-inflated count cells.
+
+    ZINB/ZAGamma store the BASE-distribution mean in ``EV``: the betting path factors
+    the zero-inflation gate out of EV and reapplies it only when pricing over/under
+    probabilities (``get_odds``). Gates 2/3 compare the predicted mean against the
+    zero-INCLUSIVE empirical mean, so they must reapply the gate too — otherwise the
+    prediction is overstated by ``1/(1-π)``, inflating the bias most where the gate is
+    large (bench players; star goal-line backs). SkewNormal ``EV`` is already the full
+    mean and is returned unchanged.
+    """
+    if _infer_dist_from_columns(df) in ("ZINB", "ZAGamma"):
+        return pred * (1.0 - df["Gate"].to_numpy(dtype=float))
+    return pred
 
 
 def gate_row(
@@ -835,12 +859,13 @@ def gate_row(
     """
     actual = df[ACTUAL_COL].to_numpy()
     pred = df[pred_col].to_numpy()
+    bias_pred = _zero_inflated_mean(df, pred)
     star_mask, bench_mask = _segment_masks(df)
 
     # Gates 2/3 — model; the oracle (pred = actual) zeroes abs_diff / z, sigma unchanged.
-    g2_pred, g2_true, g2_abs, g2_sigma, g2_z = _gate23_segment_match(pred, actual, star_mask)
+    g2_pred, g2_true, g2_abs, g2_sigma, g2_z = _gate23_segment_match(bias_pred, actual, star_mask)
     _, _, _, _, g2_z_oracle = _gate23_segment_match(actual, actual, star_mask)
-    g3_pred, g3_true, g3_abs, g3_sigma, g3_z = _gate23_segment_match(pred, actual, bench_mask)
+    g3_pred, g3_true, g3_abs, g3_sigma, g3_z = _gate23_segment_match(bias_pred, actual, bench_mask)
     _, _, _, _, g3_z_oracle = _gate23_segment_match(actual, actual, bench_mask)
 
     # Gate 4 — IQR spread; the oracle (pred = actual) gives ratio 1.0 via the
@@ -942,6 +967,20 @@ def gate_row(
     }
 
 
+def _below_zero_ci_bound(hi: float | None) -> bool:
+    """Gate-1 pass test: the bootstrap CI upper bound must sit below 0.
+
+    ``hi`` is stored rounded to 4 dp and round() keeps the sign bit, so a
+    genuinely-negative bound in (-5e-5, 0) — e.g. receiving-yards' -0.00004 —
+    lands on -0.0, where a plain ``-0.0 < 0.0`` is False. A negative-signed zero
+    still beat the book, so treat it as below the bound. A blank bound (no
+    ``Odds``) auto-passes — there is no book to beat.
+    """
+    if hi is None:
+        return True
+    return hi < _GATE1_CI_HI_MAX or (hi == 0.0 and bool(np.signbit(hi)))
+
+
 def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     """Augment a :func:`gate_row` row with per-gate ``*_pass`` flags + overall ``ship``.
 
@@ -957,8 +996,7 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
       binary markets, flagged in ``docs/operation_ship_75.md`` Step 0.4 for revisit.
     """
     out = dict(row)
-    g1_hi = out.get("g1_brier_diff_ci_hi")
-    g1_pass = g1_hi is None or g1_hi < _GATE1_CI_HI_MAX
+    g1_pass = _below_zero_ci_bound(out.get("g1_brier_diff_ci_hi"))
     g2 = out.get("g2_star_z")
     g2_pass = g2 is not None and g2 < _GATE2_STAR_Z_MAX
     g3 = out.get("g3_bench_z")

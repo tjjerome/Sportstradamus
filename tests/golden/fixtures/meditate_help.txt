@@ -22,8 +22,8 @@ Options:
                                   the compression eval harness. NEVER publish a
                                   model trained with this flag — it is
                                   deliberately low quality.
-  --target-strategy [ratio_meanyr|centered_additive_eb_meanyr_k10|centered_additive_mean10]
-                                  Target/baseline strategy for SkewNormal
+  --target-normalization [ratio_meanyr|centered_additive_eb_meanyr_k10|centered_additive_mean10]
+                                  Target-normalization transform for SkewNormal
                                   markets. Non-default values are A/B
                                   experiments (run under --deterministic); the
                                   default 'ratio_meanyr' is current production
@@ -50,10 +50,11 @@ Options:
                                   One-shot escape from the ship gate: train
                                   EVERY market in the registry regardless of
                                   shipped status. Withheld SkewNormal cells fall
-                                  back to --target-strategy; non-SkewNormal
-                                  cells fall back to STRATEGY_NONE (count-branch
-                                  ignores the slug). Lets internal projection
-                                  markets (NFL attempts/carries/targets) train
-                                  so their pickles feed proj_* features into
-                                  downstream training matrices.
+                                  back to --target-normalization; non-SkewNormal
+                                  cells fall back to TARGET_NORM_NONE (count-
+                                  branch ignores the slug). Lets internal
+                                  projection markets (NFL
+                                  attempts/carries/targets) train so their
+                                  pickles feed proj_* features into downstream
+                                  training matrices.
   --help                          Show this message and exit.

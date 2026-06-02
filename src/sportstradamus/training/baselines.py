@@ -95,7 +95,7 @@ def compute_eb_prior(
 
 
 @dataclass(frozen=True)
-class TargetStrategy:
+class TargetNormalization:
     """Bundle of forward/inverse transforms for one target/baseline choice."""
 
     slug: str
@@ -240,8 +240,8 @@ def _centered_mean10_offset_meta(global_mean: float, denom_col: str) -> dict:
     }
 
 
-_STRATEGIES: dict[str, TargetStrategy] = {
-    "ratio_meanyr": TargetStrategy(
+_TARGET_NORMALIZATIONS: dict[str, TargetNormalization] = {
+    "ratio_meanyr": TargetNormalization(
         slug="ratio_meanyr",
         start_mode_flag="normalized",
         _forward=_ratio_forward,
@@ -249,7 +249,7 @@ _STRATEGIES: dict[str, TargetStrategy] = {
         _decode_scale=_ratio_decode_scale,
         _offset_meta=_ratio_offset_meta,
     ),
-    "centered_additive_eb_meanyr_k10": TargetStrategy(
+    "centered_additive_eb_meanyr_k10": TargetNormalization(
         slug="centered_additive_eb_meanyr_k10",
         start_mode_flag="offset",
         _forward=_centered_eb_forward,
@@ -257,7 +257,7 @@ _STRATEGIES: dict[str, TargetStrategy] = {
         _decode_scale=_centered_eb_decode_scale,
         _offset_meta=_centered_eb_offset_meta,
     ),
-    "centered_additive_mean10": TargetStrategy(
+    "centered_additive_mean10": TargetNormalization(
         slug="centered_additive_mean10",
         start_mode_flag="offset",
         _forward=_centered_mean10_forward,
@@ -268,15 +268,15 @@ _STRATEGIES: dict[str, TargetStrategy] = {
 }
 
 
-# Public list of slugs accepted by the ``meditate --target-strategy`` flag.
-STRATEGY_SLUGS: tuple[str, ...] = tuple(_STRATEGIES.keys())
+# Public list of slugs accepted by the ``meditate --target-normalization`` flag.
+TARGET_NORMALIZATION_SLUGS: tuple[str, ...] = tuple(_TARGET_NORMALIZATIONS.keys())
 
 
-def get_strategy(slug: str) -> TargetStrategy:
-    """Resolve a target-strategy slug to a :class:`TargetStrategy`.
+def get_target_normalization(slug: str) -> TargetNormalization:
+    """Resolve a target-strategy slug to a :class:`TargetNormalization`.
 
     Args:
-        slug: One of :data:`STRATEGY_SLUGS`.
+        slug: One of :data:`TARGET_NORMALIZATION_SLUGS`.
 
     Returns:
         The registered strategy.
@@ -284,6 +284,6 @@ def get_strategy(slug: str) -> TargetStrategy:
     Raises:
         ValueError: If ``slug`` is not a registered strategy.
     """
-    if slug not in _STRATEGIES:
-        raise ValueError(f"Unknown target strategy {slug!r}; valid: {STRATEGY_SLUGS}")
-    return _STRATEGIES[slug]
+    if slug not in _TARGET_NORMALIZATIONS:
+        raise ValueError(f"Unknown target strategy {slug!r}; valid: {TARGET_NORMALIZATION_SLUGS}")
+    return _TARGET_NORMALIZATIONS[slug]

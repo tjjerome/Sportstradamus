@@ -66,13 +66,19 @@ def save_distribution_config(config: dict) -> None:
 
     Overwrites the ``dist`` field on every (league, market) in ``config``;
     cells absent from ``config`` are untouched. Other fields on existing
-    cells (``shipped``, ``strategy``) are preserved.
+    cells (``shipped``, ``target_normalization``, ``posthoc``) are preserved.
     """
     meta = _load(_STAT_META_PATH)
     for league, markets in config.items():
         for market, dist in markets.items():
             cell = meta.setdefault(league, {}).setdefault(
-                market, {"dist": "Gamma", "shipped": "withheld", "strategy": "none"}
+                market,
+                {
+                    "dist": "Gamma",
+                    "shipped": "withheld",
+                    "target_normalization": "none",
+                    "posthoc": "none",
+                },
             )
             cell["dist"] = dist
     _write(_STAT_META_PATH, meta)

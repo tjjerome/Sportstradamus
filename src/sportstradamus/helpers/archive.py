@@ -119,6 +119,10 @@ def _safe_date(d: str | datetime.date | None) -> datetime.date | None:
         return None
 
 
+def _dfs_under_boost(over, boost_under):
+    return boost_under if boost_under and boost_under > 0 else over
+
+
 def clean_archive(cutoff_date: datetime.date | None = None) -> None:
     """Drop stale dates and combo/matchup pseudo-entities from the archive.
 
@@ -759,18 +763,29 @@ class Archive:
         entity: str,
         book: str,
         ev: float,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
-        """Buffer a per-book EV observation; flushed by :meth:`write`."""
+        """Buffer a per-book EV observation; flushed by :meth:`write`.
+
+        ``observed_at`` defaults to now; the historical backfill passes the
+        snapshot's as-of time so point-in-time training reads pick it up.
+        """
         self._pending_odds.append(
-            (league, market, date, entity, book, float(ev), datetime.datetime.utcnow())
+            (league, market, date, entity, book, float(ev), observed_at or datetime.datetime.utcnow())
         )
 
     def _stage_line(
-        self, league: str, market: str, date: datetime.date, entity: str, line: float
+        self,
+        league: str,
+        market: str,
+        date: datetime.date,
+        entity: str,
+        line: float,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
         """Buffer a line observation; flushed by :meth:`write`."""
         self._pending_lines.append(
-            (league, market, date, entity, float(line), datetime.datetime.utcnow())
+            (league, market, date, entity, float(line), observed_at or datetime.datetime.utcnow())
         )
 
     def add_dfs(self, offers, platform, key):
@@ -819,7 +834,9 @@ class Archive:
             line = float(o["Line"])
 
             over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
-            odds = no_vig_odds(over, o.get("Boost_Under"))
+            # A missing/zero under side fabricated a ~6.5%-vig under in no_vig_odds
+            # that inverts to a blown count-cell ev; DFS picks are symmetric instead.
+            odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
             ev = get_ev(line, odds[1], cv, dist=dist, gate=gate or None)
 
             self._stage_book_ev(league, market, d, player, platform, ev)
@@ -833,12 +850,14 @@ class Archive:
         player: str,
         book_evs: dict[str, float],
         lines: list[float] | None = None,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
         """Append per-book EVs and any new lines for one player entry.
 
         Append-only under the time-series schema: every call adds new
         ``observed_at`` rows; the latest-per-book reader returns the
-        freshest observations.
+        freshest observations. ``observed_at`` defaults to now; the
+        historical backfill passes the snapshot's as-of time.
         """
         d = _safe_date(date)
         if d is None:
@@ -847,11 +866,11 @@ class Archive:
         for book, ev in book_evs.items():
             if ev is None:
                 continue
-            self._stage_book_ev(league, market, d, player, book, ev)
+            self._stage_book_ev(league, market, d, player, book, ev, observed_at)
         for line in lines or []:
             if line is None:
                 continue
-            self._stage_line(league, market, d, player, line)
+            self._stage_line(league, market, d, player, line, observed_at)
 
     def set_team_books(
         self,

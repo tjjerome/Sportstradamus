@@ -41,7 +41,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.training import baselines
+from sportstradamus.training import baselines, posthoc
 from sportstradamus.training.calibration import fit_book_weights, fit_model_weight
 from sportstradamus.training.config import (
     load_distribution_config,
@@ -1009,6 +1009,22 @@ def _step_compute_mode_stats(
     }
 
 
+def _zero_inflated_outcome_mean(
+    base_mean: np.ndarray, dist: str, gate: np.ndarray | None
+) -> np.ndarray:
+    """E[Y] = (1-π)·μ for zero-inflated count cells; the base mean otherwise.
+
+    ZINB/ZAGamma store the base-distribution mean — the betting convention factors
+    the gate out and reapplies it in ``get_odds``. The EV/bias diagnostics compare
+    against zero-INCLUSIVE outcomes (Result, Line), so they must reapply it. SkewNormal
+    EV is already a full mean and NegBin/Gamma carry no gate — both pass through. Mirrors
+    ``training.scorecard._zero_inflated_mean``.
+    """
+    if dist in ("ZINB", "ZAGamma") and gate is not None:
+        return base_mean * (1.0 - gate)
+    return base_mean
+
+
 def _step_compute_diagnostics(
     splits: dict,
     prob_params: pd.DataFrame,
@@ -1069,17 +1085,22 @@ def _step_compute_diagnostics(
         diag_shape_label = "r"
 
     diag_start_mean = float(test_mean_yr)
-    diag_model_ev = float(weighted_mean.mean())
+    # E[Y] = (1-π)·μ — the EV/bias diagnostics below compare against zero-INCLUSIVE
+    # outcomes (Result, Line), so zero-inflated count cells reapply the gate that
+    # weighted_mean (base-μ betting convention) factors out. The get_odds/cf path
+    # further down keeps using weighted_mean and reapplies the gate itself.
+    ev_full = _zero_inflated_outcome_mean(weighted_mean, dist, gate_blend_test)
+    diag_model_ev = float(ev_full.mean())
     diag_mean_line = float(B_test["Line"].mean())
-    diag_ev_minus_line = float((weighted_mean - B_test["Line"].to_numpy()).mean())
+    diag_ev_minus_line = float((ev_full - B_test["Line"].to_numpy()).mean())
     diag_result_mean = float(y_test["Result"].mean())
 
     _meanyr_arr = X_test["MeanYr"].to_numpy()
     _result_arr = y_test["Result"].to_numpy()
-    diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, weighted_mean - _meanyr_arr)[0, 1])
+    diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, ev_full - _meanyr_arr)[0, 1])
     diag_result_meanyr_corr = float(np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1])
 
-    ev_minus_line_arr = weighted_mean - B_test["Line"].to_numpy()
+    ev_minus_line_arr = ev_full - B_test["Line"].to_numpy()
     diag_median_ev_diff = float(np.median(ev_minus_line_arr))
     diag_frac_ev_gt_line = float((ev_minus_line_arr > 0).mean())
 
@@ -1193,7 +1214,9 @@ def _build_filedict(
     strategy,
     global_mean,
     denom_col: str,
-    target_strategy: str,
+    target_normalization: str,
+    posthoc_slug: str,
+    posthoc_blob: dict | None,
     zinb_mode: str,
     X,
 ) -> dict:
@@ -1252,7 +1275,9 @@ def _build_filedict(
         "shape_ceiling": shape_ceiling,
         "normalized": normalize,
         "offset_meta": strategy.offset_meta(global_mean, denom_col),
-        "target_strategy": target_strategy,
+        "target_normalization": target_normalization,
+        "posthoc": posthoc_slug,
+        "posthoc_blob": posthoc_blob,
         "zinb_mode": zinb_mode,
         "is_hurdle": bool(getattr(model, "is_hurdle", False)),
         "expected_columns": list(X.columns),
@@ -1271,7 +1296,7 @@ def _step_persist_artifacts(
     hist_gate: float,
     filename: str,
     deterministic: bool,
-    target_strategy: str,
+    target_normalization: str,
     zinb_mode: str,
 ) -> None:
     """Write the test-set CSV and the model pickle.
@@ -1323,7 +1348,7 @@ def _step_persist_artifacts(
     # never carries the research artifacts.
     if deterministic:
         suffix = "_hurdle" if zinb_mode == "hurdle" else ""
-        strategy_subdir = f"{target_strategy}{suffix}"
+        strategy_subdir = f"{target_normalization}{suffix}"
         csv_subdir = f"deterministic/{strategy_subdir}/"
         mdl_dir = _DETERMINISTIC_MODEL_ROOT / strategy_subdir
     else:
@@ -1886,7 +1911,7 @@ def _step_select_distribution(
     stat_data,
     market: str,
     league: str,
-    target_strategy: str,
+    target_normalization: str,
     zinb_mode: str,
     *,
     deterministic: bool,
@@ -1907,7 +1932,7 @@ def _step_select_distribution(
         stat_data: Stats instance (gamelog + log_strings).
         market: Market name.
         league: League slug.
-        target_strategy: Slug for ``baselines.get_strategy``.
+        target_normalization: Slug for ``baselines.get_target_normalization``.
         deterministic: If True, skip persisting cv/zi to stat_calibration.json.
 
     Returns:
@@ -1945,7 +1970,7 @@ def _step_select_distribution(
     normalize = False
     offset_mode = False
     denom_col = "MeanYr"
-    strategy = baselines.get_strategy(target_strategy)
+    strategy = baselines.get_target_normalization(target_normalization)
     dist_obj = None
 
     if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
@@ -2024,7 +2049,7 @@ def _step_select_distribution(
         "normalize": normalize,
         "offset_mode": offset_mode,
         "denom_col": denom_col,
-        "strategy": strategy,
+        "target_normalization": strategy,
         "hist_gate": hist_gate,
         "player_stats": player_stats,
         "global_mean": global_mean,
@@ -2040,7 +2065,8 @@ def train_market(
     *,
     force: bool,
     deterministic: bool = False,
-    target_strategy: str = "ratio_meanyr",
+    target_normalization: str = "ratio_meanyr",
+    posthoc_slug: str = "none",
     zinb_mode: str = "joint",
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
@@ -2066,11 +2092,15 @@ def train_market(
             bit-identical re-runs. Writes go to
             ``research/models/deterministic/{strategy}/`` at the repo root.
             Debug/offline-eval only — never publish such a model.
-        target_strategy: Slug from
-            :data:`sportstradamus.training.baselines.STRATEGY_SLUGS`. Selects
+        target_normalization: Slug from
+            :data:`sportstradamus.training.baselines.TARGET_NORMALIZATION_SLUGS`. Selects
             the SkewNormal forward target transform and the matching decode.
             Default ``"ratio_meanyr"`` reproduces legacy production behavior
             byte-for-byte.
+        posthoc_slug: Post-hoc corrector from
+            :data:`sportstradamus.training.posthoc.POSTHOC_SLUGS`. A
+            probability-stage slug recalibrates the over-probability after
+            temperature scaling; ``"none"`` (default) is a no-op.
         zinb_mode: Either ``"joint"`` (legacy LightGBMLSS ZINB; the default) or
             ``"hurdle"`` (use ``HurdleZINB`` from ``sportstradamus.hurdle`` — a
             two-stage model with a derived-π gate; see
@@ -2111,7 +2141,7 @@ def train_market(
 
     splits = _step_build_splits(M, stat_data, market)
     dist_info = _step_select_distribution(
-        splits, stat_data, market, league, target_strategy, zinb_mode, deterministic=deterministic
+        splits, stat_data, market, league, target_normalization, zinb_mode, deterministic=deterministic
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2163,7 +2193,7 @@ def train_market(
         splits["X_test"],
         splits["X_validation"],
         dist,
-        dist_info["strategy"],
+        dist_info["target_normalization"],
         dist_info["global_mean"],
         dist_info["denom_col"],
         hist_gate,
@@ -2187,10 +2217,22 @@ def train_market(
         fused, calibrated, splits, decoded, dist, step
     )
 
+    # Post-hoc probability recalibration (orthogonal to target_normalization):
+    # fit on the temperature-calibrated validation over-probs, then layer it onto
+    # both the validation probs (so skill reflects it) and the persisted test
+    # probs (so the offline ship gates see the corrected cell). No-op when the
+    # cell's posthoc slug is "none" or not a probability-stage corrector.
+    posthoc_blob = None
+    if posthoc_slug in posthoc.PROB_STAGE:
+        posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
+        val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
+
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
     skill = _step_compute_skill_metrics(val_calibrated, y_class_val, val_book_proba, league, market)
 
     test_calibrated_over = expit(logit(np.clip(y_proba_no_filt[:, 1], 1e-6, 1 - 1e-6)) / T_opt)
+    if posthoc_slug in posthoc.PROB_STAGE:
+        test_calibrated_over = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, test_calibrated_over)
     y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
 
     y_class = np.ravel(
@@ -2231,10 +2273,12 @@ def train_market(
         model_calib=model_calib,
         hist_gate=hist_gate,
         normalize=dist_info["normalize"],
-        strategy=dist_info["strategy"],
+        strategy=dist_info["target_normalization"],
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
-        target_strategy=target_strategy,
+        target_normalization=target_normalization,
+        posthoc_slug=posthoc_slug,
+        posthoc_blob=posthoc_blob,
         zinb_mode=zinb_mode,
         X=splits["X"],
     )
@@ -2250,7 +2294,7 @@ def train_market(
         hist_gate=hist_gate,
         filename=filename,
         deterministic=deterministic,
-        target_strategy=target_strategy,
+        target_normalization=target_normalization,
         zinb_mode=zinb_mode,
     )
 

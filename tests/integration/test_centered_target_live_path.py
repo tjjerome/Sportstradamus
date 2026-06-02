@@ -1,7 +1,7 @@
 """Live-path verification for the centered_additive_eb_meanyr_k10 strategy.
 
 Trains a deterministic SkewNormal model on cached NBA_FGA features, builds a
-pickle-shaped filedict with offset_meta + target_strategy, and drives it
+pickle-shaped filedict with offset_meta + target_normalization, and drives it
 through model_prob._decode_skewnormal. Asserts Model Skew is finite for
 every row (the FGA NaN dead end from docs/OVERCONFIDENCE_INVESTIGATION.md
 3.4 must not recur) and Model EV matches the EB-additive formula.
@@ -25,7 +25,7 @@ from sportstradamus.stats import StatsNBA
 from sportstradamus.training.baselines import (
     EB_SHRINKAGE_K,
     compute_eb_prior,
-    get_strategy,
+    get_target_normalization,
 )
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
@@ -64,7 +64,7 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
 
     global_mean = float(np.ravel(y_train.to_numpy()).mean())
     denom_col = "MeanYr"
-    strategy = get_strategy("centered_additive_eb_meanyr_k10")
+    strategy = get_target_normalization("centered_additive_eb_meanyr_k10")
 
     y_train_labels = np.ravel(y_train.to_numpy()).astype(float)
     y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
@@ -111,7 +111,7 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
         X_test,
         hist_gate=0.0,
         offset_meta=offset_meta,
-        target_strategy="centered_additive_eb_meanyr_k10",
+        target_normalization="centered_additive_eb_meanyr_k10",
     )
 
     # Assertion 1: Model Skew finite for every row (FGA NaN guard).

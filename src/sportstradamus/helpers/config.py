@@ -8,9 +8,9 @@ load cost per call site.
 
 Per-cell training metadata is split across two files:
 
-* ``stat_meta.json`` — **committed.** Per-cell ``{dist, shipped, strategy}``:
+* ``stat_meta.json`` — **committed.** Per-cell ``{dist, shipped, target_normalization, posthoc}``:
   the semi-stable ML config humans curate (distribution family, release
-  state, training strategy slug).
+  state, target-normalization slug, post-hoc corrector slug).
 * ``stat_calibration.json`` — **gitignored.** Per-cell ``{cv, std, zi}``:
   the calibration values that meditate recomputes every run.
 
@@ -71,7 +71,8 @@ for _league, _markets in _stat_meta_committed.items():
         stat_meta[_league][_market] = {
             "dist": _meta_cell["dist"],
             "shipped": _meta_cell["shipped"],
-            "strategy": _meta_cell["strategy"],
+            "target_normalization": _meta_cell["target_normalization"],
+            "posthoc": _meta_cell.get("posthoc", "none"),
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
