@@ -38,3 +38,27 @@ def count_sum_over_prob(line: float, pmf1: np.ndarray, pmf2: np.ndarray) -> floa
     total = np.convolve(np.asarray(pmf1, dtype=float), np.asarray(pmf2, dtype=float))
     threshold = int(np.ceil(line))
     return float(total[threshold:].sum())
+
+
+def derived_book_under_prob_row(row: dict, market: str, rho: float) -> float | None:
+    """Archive ``Odds`` (book UNDER-probability) for one combined-market offer, or
+    ``None`` when a component book is missing (caller skips the row, never fabricates).
+
+    ``row`` carries the offer ``line`` and the two component book params: ``pass`` /
+    ``rush`` dicts with Normal ``mu`` / ``sd`` for ``qb-yards`` or count ``pmf``
+    arrays for ``qb-tds``.
+    ``rho`` applies only to ``qb-yards``; it is accepted but unused for ``qb-tds``
+    (independence is the documented approximation at low TD counts).
+    """
+    pass_params, rush_params = row.get("pass"), row.get("rush")
+    if pass_params is None or rush_params is None:
+        return None
+    if market == "qb-yards":
+        over = normal_sum_over_prob(
+            row["line"], pass_params["mu"], pass_params["sd"], rush_params["mu"], rush_params["sd"], rho
+        )
+    elif market == "qb-tds":
+        over = count_sum_over_prob(row["line"], pass_params["pmf"], rush_params["pmf"])
+    else:
+        raise ValueError(f"derived book undefined for market {market!r}")
+    return float(1.0 - over)

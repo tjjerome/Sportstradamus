@@ -2,6 +2,7 @@ import numpy as np
 
 from sportstradamus.helpers.combined_markets import (
     count_sum_over_prob,
+    derived_book_under_prob_row,
     normal_sum_over_prob,
 )
 
@@ -38,3 +39,27 @@ def test_count_sum_matches_independent_convolution():
     conv = np.convolve([0.5, 0.3, 0.2], [0.6, 0.4])
     expected = conv[2:].sum()  # P(total >= 2)
     assert abs(p - expected) < 1e-9
+
+
+def test_derived_book_returns_none_when_component_missing():
+    # No rushing component available => cannot synthesize; must return None so the
+    # caller skips the row rather than fabricating.
+    row = {"line": 250.0, "pass": {"mu": 220, "sd": 40}, "rush": None}
+    assert derived_book_under_prob_row(row, market="qb-yards", rho=-0.3) is None
+
+
+def test_derived_book_under_prob_convention():
+    # Odds stores book UNDER-probability; book over = 1 - Odds. Combined mean 245,
+    # line 245 => over 0.5 => under 0.5.
+    row = {"line": 245.0, "pass": {"mu": 220, "sd": 40}, "rush": {"mu": 25, "sd": 20}}
+    under = derived_book_under_prob_row(row, market="qb-yards", rho=0.0)
+    assert abs(under - 0.5) < 1e-6
+
+
+def test_derived_book_qb_tds_dispatch():
+    # Exercise the qb-tds branch through the adapter: count_sum dispatch, the
+    # ["pmf"] key extraction, and the 1-over inversion. conv([.3,.7],[.4,.6]) =
+    # [.12,.46,.42]; line 0.5 => P(total>=1)=.88 over => under .12.
+    row = {"line": 0.5, "pass": {"pmf": np.array([0.3, 0.7])}, "rush": {"pmf": np.array([0.4, 0.6])}}
+    under = derived_book_under_prob_row(row, market="qb-tds", rho=0.0)
+    assert abs(under - 0.12) < 1e-9
