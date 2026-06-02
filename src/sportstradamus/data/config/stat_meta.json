@@ -282,14 +282,8 @@
         },
         "carries": {
             "dist": "SkewNormal",
-            "shipped": "devel",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
-        },
-        "completion percentage": {
-            "dist": "SkewNormal",
             "shipped": "withheld",
-            "target_normalization": "none",
+            "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "completions": {
@@ -310,38 +304,8 @@
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
-        "first downs": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "fumbles lost": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
         "interceptions": {
             "dist": "ZINB",
-            "shipped": "devel",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "longest completion": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "longest reception": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "longest rush": {
-            "dist": "SkewNormal",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
@@ -384,7 +348,7 @@
         },
         "receiving yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -402,7 +366,7 @@
         },
         "rushing yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -556,7 +520,7 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
