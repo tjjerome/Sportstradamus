@@ -22,8 +22,6 @@ training matrix's per-player historical moments; kept here because it
 shares the distribution-family dispatch with the inversion code.
 """
 
-import warnings
-
 import numpy as np
 from scipy.optimize import brentq, minimize
 from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
@@ -73,6 +71,48 @@ def no_vig_odds(over, under=None):
     return [o / juice, u / juice]
 
 
+# Cap the SkewNormal implied mean at this multiple of the line — the archive's
+# own blown-row threshold (``BLOWN_LINE_FACTOR``). Below the corresponding
+# under-prob the inversion would exceed it, so the line is used instead.
+SN_MAX_MEAN_FACTOR = 5.0
+
+
+def _skewnormal_ev(line, under, cv, skew_alpha):
+    """Solve for the SkewNormal mean reproducing the book's ``under`` at ``line``.
+
+    The scale grows with the mean, so ``cdf(line, mean)`` asymptotes to
+    ``Phi(-1/cv)`` as ``mean → ∞`` rather than to 0. An under-prob near that floor
+    inverts to a mean many times the line — and can hand ``brentq`` a same-sign
+    bracket — so an under that would imply a mean above ``SN_MAX_MEAN_FACTOR ×
+    line`` collapses to the neutral line. The cutoff ``Phi((1-F)/(F·cv))`` is the
+    under-prob at which ``cdf(line, F·line) = under``.
+    """
+    line = float(line)
+    a = float(skew_alpha) if skew_alpha is not None else 0.0
+    f = SN_MAX_MEAN_FACTOR
+    if a == 0.0 and under <= norm.cdf((1 - f) / (f * cv)):
+        return line
+
+    def _sn_residual(mean):
+        sigma = mean * cv
+        delta = a / np.sqrt(1 + a**2)
+        loc_sn = mean - sigma * delta * np.sqrt(2 / np.pi)
+        try:
+            return float(skewnorm.cdf(line, a, loc=loc_sn, scale=sigma)) - under
+        except (ValueError, RuntimeWarning):
+            return np.nan
+
+    lo = 1e-6
+    hi = max(2 * line / max(1 - under, 0.01), 1.0)
+    while hi < 1e8 and _sn_residual(hi) > 0:
+        hi = min(hi * 2, 1e8)
+    # brentq needs endpoints straddling zero; if they don't (``a != 0`` asymptote
+    # or a numerical edge) the bracket is degenerate. nan-safe chained compare.
+    if not (_sn_residual(lo) > 0 > _sn_residual(hi)):
+        return line
+    return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
+
+
 def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     """Invert the book's (line, under-prob) to recover the implied mean.
 
@@ -95,16 +135,19 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     Returns:
         The base-distribution mean that reproduces the book's ``under``.
     """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-
     under = np.clip(under, 1e-6, 1 - 1e-6)
 
     # For ZI distributions, strip out the zero-inflation component so we solve
     # for the base distribution mean: gate + (1-gate)*base_CDF = under
     # ⇒ base_CDF = (under - gate) / (1 - gate)
     if gate is not None and gate > 0 and dist in ("ZINB", "ZAGamma", "SkewNormal"):
-        under = np.clip((under - gate) / (1 - gate), 1e-6, 1 - 1e-6)
+        base_cdf = (under - gate) / (1 - gate)
+        # An under-prob at or below the zero-inflation mass leaves no room for the
+        # base distribution below the line, so the inversion runs away to a huge
+        # mean (the book and the model's zero rate disagree). Use the neutral line.
+        if base_cdf <= 0:
+            return float(line)
+        under = np.clip(base_cdf, 1e-6, 1 - 1e-6)
 
     # CDF is monotonically decreasing in mean (1→0), so a bracket is always valid:
     #   at lo≈0 the CDF≈1 > under, at hi→∞ the CDF→0 < under.
@@ -132,27 +175,7 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
         return float(brentq(_nb_residual, lo, hi, xtol=1e-8))
 
     if dist == "SkewNormal":
-        line = float(line)
-        a = float(skew_alpha) if skew_alpha is not None else 0.0
-
-        def _sn_residual(mean):
-            sigma = mean * cv
-            delta = a / np.sqrt(1 + a**2)
-            loc_sn = mean - sigma * delta * np.sqrt(2 / np.pi)
-            try:
-                return float(skewnorm.cdf(line, a, loc=loc_sn, scale=sigma)) - under
-            except (ValueError, RuntimeWarning):
-                return np.nan
-
-        # Expand hi until residual becomes negative, with safety cap.
-        max_hi = 1e8
-        while hi < max_hi and _sn_residual(hi) > 0:
-            hi = min(hi * 2, max_hi)
-        # If we hit the cap and residual is still positive, the bracket is
-        # degenerate — fall back to returning the line itself as the mean.
-        if _sn_residual(hi) > 0 or np.isnan(_sn_residual(hi)):
-            return float(line)
-        return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
+        return _skewnormal_ev(line, under, cv, skew_alpha)
 
     # Gamma / ZAGamma (default for all continuous distributions)
     line = float(line)

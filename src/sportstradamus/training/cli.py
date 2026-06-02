@@ -20,11 +20,11 @@ from sportstradamus.training.pipeline import train_market
 from sportstradamus.training.ship_config import (
     SKEW_NORMAL_DIST,
     STAT_META_PATH,
-    STRATEGY_NONE,
+    TARGET_NORM_NONE,
     WITHHELD,
     load_ship_config,
     load_stat_meta,
-    resolve_cell_strategy,
+    resolve_cell_target_normalization,
 )
 
 warnings.simplefilter("ignore", UserWarning)
@@ -73,12 +73,12 @@ _RNG_SEED: int = 69
     ),
 )
 @click.option(
-    "--target-strategy",
-    type=click.Choice(list(baselines.STRATEGY_SLUGS)),
+    "--target-normalization",
+    type=click.Choice(list(baselines.TARGET_NORMALIZATION_SLUGS)),
     default="ratio_meanyr",
     show_default=True,
     help=(
-        "Target/baseline strategy for SkewNormal markets. "
+        "Target-normalization transform for SkewNormal markets. "
         "Non-default values are A/B experiments (run under --deterministic); "
         "the default 'ratio_meanyr' is current production behavior."
     ),
@@ -123,8 +123,8 @@ _RNG_SEED: int = 69
     help=(
         "One-shot escape from the ship gate: train EVERY market in the "
         "registry regardless of shipped status. Withheld SkewNormal cells "
-        "fall back to --target-strategy; non-SkewNormal cells fall back to "
-        "STRATEGY_NONE (count-branch ignores the slug). Lets internal "
+        "fall back to --target-normalization; non-SkewNormal cells fall back to "
+        "TARGET_NORM_NONE (count-branch ignores the slug). Lets internal "
         "projection markets (NFL attempts/carries/targets) train so their "
         "pickles feed proj_* features into downstream training matrices."
     ),
@@ -135,7 +135,7 @@ def meditate(
     rebuild_correlations,
     log_level,
     deterministic,
-    target_strategy,
+    target_normalization,
     zinb_mode,
     market,
     branch,
@@ -157,7 +157,7 @@ def meditate(
             "league": league,
             "rebuild_correlations": rebuild_correlations,
             "deterministic": deterministic,
-            "target_strategy": target_strategy,
+            "target_normalization": target_normalization,
             "zinb_mode": zinb_mode,
             "market": market,
             "branch": branch,
@@ -176,14 +176,14 @@ def meditate(
     # train with which strategy and which are withheld (skipped + pruned).
     # Validated here so a bad entry fails before the expensive gamelog loads
     # below. Deterministic A/B runs ignore it: they target an explicit
-    # --market with an explicit --target-strategy and must never mutate
+    # --market with an explicit --target-normalization and must never mutate
     # production pickles. See docs/gbdt_mean_regression_plan.md "Ship
     # mechanism — per-cell strategy".
     ship_config = {} if deterministic else load_ship_config(branch=branch)
-    # Raw stat_meta is consulted only by --bypass-withholding to recover the
-    # ``dist`` field that ``load_ship_config`` collapses out, so the bypass
-    # can substitute a SkewNormal-vs-count-branch-appropriate strategy.
-    stat_meta_full = load_stat_meta(STAT_META_PATH) if bypass_withholding else {}
+    # Raw stat_meta carries the per-cell ``posthoc`` slug (read in the market
+    # loop) and the ``dist`` field that ``load_ship_config`` collapses out
+    # (used by --bypass-withholding to pick a branch-appropriate normalization).
+    stat_meta_full = load_stat_meta(STAT_META_PATH)
 
     nba = StatsNBA()
     nfl = StatsNFL()
@@ -264,31 +264,34 @@ def meditate(
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
-            cell_strategy = resolve_cell_strategy(lg, market, target_strategy, ship_config)
-            if cell_strategy == WITHHELD:
+            cell_target_norm = resolve_cell_target_normalization(
+                lg, market, target_normalization, ship_config
+            )
+            if cell_target_norm == WITHHELD:
                 if bypass_withholding:
                     cell_dist = stat_meta_full.get(lg, {}).get(market, {}).get("dist")
                     # SkewNormal needs a real strategy slug; count-branch
                     # families (ZINB/NegBin/Gamma/ZAGamma) ignore the slug,
-                    # so STRATEGY_NONE is fine and the next clause will
+                    # so TARGET_NORM_NONE is fine and the next clause will
                     # substitute the run-wide default for the pipeline call.
-                    cell_strategy = (
-                        target_strategy if cell_dist == SKEW_NORMAL_DIST else STRATEGY_NONE
+                    cell_target_norm = (
+                        target_normalization if cell_dist == SKEW_NORMAL_DIST else TARGET_NORM_NONE
                     )
                     click.echo(
                         f"[{lg}] {market}: BYPASS withhold "
-                        f"(dist={cell_dist!r}, strategy={cell_strategy!r})"
+                        f"(dist={cell_dist!r}, strategy={cell_target_norm!r})"
                     )
                 else:
                     prune_model_pickle(lg, market)
                     click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
                     continue
-            # STRATEGY_NONE marks count-branch cells that don't opt into a
+            # TARGET_NORM_NONE marks count-branch cells that don't opt into a
             # SkewNormal strategy slug. The pipeline's count branch ignores
             # the slug anyway, so substitute the CLI default — the run-wide
-            # target_strategy — to keep baselines.get_strategy() satisfied.
-            if cell_strategy == STRATEGY_NONE:
-                cell_strategy = target_strategy
+            # target_normalization — to keep baselines.get_target_normalization() satisfied.
+            if cell_target_norm == TARGET_NORM_NONE:
+                cell_target_norm = target_normalization
+            cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
             train_market(
                 lg,
                 market,
@@ -297,6 +300,7 @@ def meditate(
                 league_start_date,
                 force=force,
                 deterministic=deterministic,
-                target_strategy=cell_strategy,
+                target_normalization=cell_target_norm,
+                posthoc_slug=cell_posthoc,
                 zinb_mode=zinb_mode,
             )

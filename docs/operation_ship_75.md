@@ -22,18 +22,43 @@ goes to production once it proves it — Tier-0 gate offline → 14-day
 Gate-2 soak live → graduate. A cell promoted but still in 14-day soak
 counts toward the 75% numerator (ship-incrementally).
 
-## Current state (scorecard snapshot 2026-05-23, post-Step-0.5 audit)
+## Current state (count/yardage archive repair 2026-06-02; supersedes May-30 retrain + Step 0.7/0.8)
 
 | League | Shipped | Markets | % | 75% target | Gap |
 |---|---|---|---|---|---|
-| NBA | 18 | 21 | 86% | 16 | **+2** |
-| NFL | 11 | 20 | 55% | 15 | **−4** |
-| WNBA | 12 | 18 | 67% | 14 | **−2** |
+| NBA | 18 | 21 | 86% | 16 | **+2 ✓** |
+| NFL | 9 | 20 | 45% | 15 | **−6** |
+| WNBA | 14 | 18 | 78% | 14 | **✓** |
 
-Source: [`data/training/tier0_scorecard.csv`](../src/sportstradamus/data/training/tier0_scorecard.csv),
-strategy `ship75-step0-g4audit-2026-05-23`. `ship = g1_pass AND g2_pass AND
-g3_pass AND g4_pass AND g5_pass`
-([compression_eval.py:653](../src/sportstradamus/scripts/compression_eval.py)).
+Total 41/59 = 69%. Source: `data/training/model_stats.parquet` (owned by
+`training.report.report()`); `ship = g1_pass AND … AND g5_pass` via
+[`training/scorecard.py`](../src/sportstradamus/training/scorecard.py)
+`compute_gates`. The offline harness moved from the old
+`scripts/compression_eval.py` to `training/scorecard.py`.
+
+The 2026-06-02 count/yardage archive repair (**Step 0.9** below) retrained 9 cells
+against a real re-fetched book and flipped **5 false passes** `devel→withheld` —
+WNBA `FG3M` (g4) and NFL `carries` / `rushing yards` / `receiving yards` /
+`interceptions` (g1). They had shipped only because the corrupt coin-flip/blown
+seed was trivial to "beat"; on the honest book the model no longer clears the gate.
+WNBA now clears its 75% target and NBA stays clear; NFL drops to 9/20 (the broken
+book had propped up those four). The 5 are **re-ship candidates** once training is
+strengthened, not kills (`g1_oracle` stays −0.25…−0.56 — real headroom). NBA
+`BLK/STL/FG3M` and NFL `tds` survive on the real book and stay `devel`.
+
+> **Reconciliation note (2026-05-31).** The 2026-05-23 snapshot this section
+> used to show (NFL 11, WNBA 12 → 41/59) was scored off *re-scored old test
+> CSVs* and was optimistic. The May-30 fresh retrain (commit `50e5dce`)
+> regressed WNBA 12→10 and NFL 11→8 (36/59 = 61%) — the doc's "ready" cells
+> didn't survive a real retrain. Step 0.7 (g4 decode fix, below) then flipped
+> +4 NFL / +2 WNBA back to 42/59 = 71% with **no retrain**, and Step 0.8
+> (EV-gate + g1-rounding fixes, below) flipped a further +3 to 45/59 = 76% —
+> also no retrain. The 2026-06-02 archive repair (Step 0.9) then retrained the 9
+> count/yardage cells against a real re-fetched book and removed 5 false passes →
+> **41/59 = 69%**. The per-cell lifecycle tables further down still reflect the
+> stale 2026-05-23 view and do NOT show the Step 0.7/0.8/0.9 flips — for the
+> repaired count/yardage cells the authoritative current status is the Step 0.9
+> table; a full lifecycle-table refresh is still pending.
 
 **Step 0 verdict: G4 was measuring a measurement artifact.** The old
 gate `_iqr(point_pred) / _iqr(actual)` compared point-prediction spread
@@ -424,6 +449,180 @@ Risk: count-branch ECE can be worse where the SkewNormal tail was
 capturing real over-dispersion; existing BSS guardrail rejects the swap
 per cell. Counts as one lever attempt on the per-cell budget for the
 *initial* run only (per the reentry rule above).
+
+### Step 0.7 — G4 decode-strategy fix on withheld SkewNormal cells (DONE 2026-05-31)
+
+Step-0-class gate artifact, found while reconciling the May-30 retrain.
+`training/scorecard.py:_resolve_decode_strategy` resolved the per-cell decode
+strategy through `resolve_cell_strategy` → `load_ship_config`, which collapses
+every **withheld** cell's strategy to the `WITHHELD` sentinel. The g4
+analytical-IQR decode for a withheld SkewNormal cell therefore skipped the
+`× MeanYr` step the cell trained under (`ratio_meanyr`), leaving `SN_Scale` in
+normalized ratio-units → predicted IQR 10–250× too small → false g4 failure
+(e.g. NFL `carries` g4-ratio 0.072 with Brier-skill **+0.227** — a
+contradiction that gave it away). The docstring claimed a `ratio_meanyr`
+fallback for un-shipped cells; the code never reached it (`mapped` was never
+`None`). Training substitutes the `--target-strategy` default for the `none`
+slug; the offline g4 scorer did not — that asymmetry was the whole bug.
+
+**Fix:** `_resolve_decode_strategy` now reads the strategy straight from
+`stat_meta.json` (new lru-cached `_cached_stat_meta`) and substitutes
+`_DECODE_FALLBACK_STRATEGY` (`ratio_meanyr`) for the `none` slug. A withheld
+cell's real per-cell slug (e.g. a `centered_additive_*`) is preserved rather
+than collapsed. `compute_gates` (the function `report()` uses to write
+`model_stats.parquet`) calls the same resolver, so the parquet self-heals on
+the next `meditate`; the May-30 models were re-scored offline (no retrain) to
+realize the fix immediately.
+
+**Recovery (6 cells ship, 0 break, no retrain):**
+
+- NFL flips (4): `carries` (0.072→0.951), `rushing yards` (0.020→0.832),
+  `sacks taken` (0.384→0.738), `targets` (0.257→0.968) — all g4-only fails.
+- WNBA flips (2): `AST` (0.249→0.720), `PRA` (0.049→0.831).
+- 6 more cells drop their g4 failure but still kill on another gate
+  (NBA `FGA`, NBA `fantasy points prizepicks` — both g2; NFL `attempts` /
+  `completions` / `passing first downs` / `qb yards` — g1, and qb-yards g3).
+
+Promoted in `stat_meta.json` (withheld→devel, `strategy: none`→`ratio_meanyr`
+to satisfy the SkewNormal invariant). Tie-out check confirmed g1/g2/g3/g5
+verdicts unchanged on all 59 cells — the fix moves only g4. **Counts: NBA
+18/21, NFL 12/20, WNBA 12/18 → 42/59 = 71%.**
+
+**Implication for Step 0.6.** The "low-mean count SkewNormal under-disperses"
+premise is **disproven** for `carries` / `targets` / `attempts` — their
+predictive dispersion was fine; the gate misread it. Step 0.6 family-swap
+candidates shrink to cells still failing a dispersion gate after 0.7. After
+0.7 the residual NFL wall is **g1 (Brier paired-CI) on small-n cells**
+(`attempts`/`completions`/`passing first downs`/`receiving yards`, n≈313–378)
+— audit g1 for a small-n CI-width artifact (Step 4.1) before retraining, given
+g4 and g5 both turned out to be artifacts.
+
+### Step 0.8 — Bias-gate EV representation + g1-rounding fixes (DONE 2026-05-31)
+
+Two more gate-representation artifacts in the same family as Step 0.7's g4
+decode bug — the gate read a quantity that did not mean what it assumed. Both
+are scorer-side; no model change, no retrain.
+
+**g2/g3 EV-gate (the dominant fix).** ZINB/ZAGamma cells store the
+**base-distribution mean** μ in the test-set `EV` column
+([pipeline.py](../src/sportstradamus/training/pipeline.py) `_step_persist_artifacts`,
+`EV = total_count·probs/(1−probs)`, with `Gate` = π a *separate* column). This is
+the deliberate betting convention: `get_ev` factors the zero-inflation gate π out
+of EV and `get_odds` reapplies it only when pricing over/under probabilities — so
+g1 (Brier) and g5 (ECE), which run through the probability path, were always
+correct. But the **bias gates g2/g3 compared the base μ directly against the
+zero-INCLUSIVE empirical segment mean**, never reapplying π — overstating the
+prediction by `1/(1−π)`, worst where the gate is large (bench players; star
+goal-line backs). The model was fine; the gate misread it.
+
+Fix: `scorecard.py:_zero_inflated_mean(df, pred)` returns `pred·(1−π)` for
+ZINB/ZAGamma (dist inferred from the `Gate` column + NB/Gamma params) and is used
+for the g2/g3 segment means only — g4 keeps the raw base μ. SkewNormal is
+**excluded**: its `EV` is already a full mean, and gating it would re-break shipped
+cells (e.g. WNBA `AST` g2 0.20→0.57). The same convention is mirrored in
+`pipeline.py:_zero_inflated_outcome_mean` so the informational EV/line
+**diagnostics** (`model_ev`, `mean_ev_diff`, `median_ev_diff`, `frac_ev_gt_line`,
+`over_pct_ev_gt/lt`, `ev_meanyr_corr`) report E[Y] = (1−π)·μ rather than the
+overstated base μ. Diagnostics do not feed the ship gates, so this is a
+read-accuracy fix, not a gate flip.
+
+**g1 negative-zero rounding.** Gate values store rounded to 4 dp, and Python's
+`round()` preserves the sign bit, so a genuinely-negative paired-Brier CI upper
+bound in (−5e-5, 0) lands on `-0.0` — where the strict `g1_ci_hi < 0` test reads
+`-0.0 < 0.0` as False and **false-fails** a cell that beat the book. NFL
+`receiving yards` (true `g1_ci_hi` ≈ −0.0000429) was the boundary cell.
+`scorecard.py:_below_zero_ci_bound` now counts a negative-signed zero as below the
+bound (via `np.signbit`); the change is monotonic (only adds g1 passes), so no
+shipped cell can regress.
+
+**Recovery (3 cells ship, 0 break, no retrain), verified on the full 59-cell
+offline sweep:**
+
+- NFL `rushing tds` (ZINB) — g2 star_z 0.638→0.292 (EV-gate).
+- WNBA `FG3M` (ZINB) — g3 bench_z 0.645→0.015 (EV-gate); WNBA `BLK` g3 also drops
+  (0.555→0.028) but still kills on g4.
+- NFL `receiving yards` (SkewNormal) — g1 `-0.0` now passes (rounding fix).
+
+Promoted in `stat_meta.json` (withheld→devel). **Counts: NBA 18/21, NFL 14/20,
+WNBA 13/18 → 45/59 = 76%.** The r-misfit hypothesis for ZINB TDs is **refuted** —
+extracted per-row params show r≈50 (near-Poisson, well-fit); the dispersion was
+never the problem. NFL `attempts` stays withheld and is **accept-killed** — a
+standing decision, not re-derived here. NFL `completions` and `passing first downs`
+also stay withheld but remain **live** g1 candidates: their g1 fail has not been
+shown to be a real wall (it may be a small-n CI-width artifact, the same class
+Steps 0/0.5/0.7/0.8 kept finding), so they are NOT killed. The previously cited
+oracle Brier-ceiling estimate (0.0012 vs ~0.012) was proven faulty last season and
+is **not** used as evidence anywhere.
+
+**Backfill resolution (2026-06-01) — the passing-family g1 was graded against a
+fabricated book.** The archived per-book `ev` for the passing family was a legacy
+klepto-era seed (every book = the consensus median line → `p_book ≡ 0.5`, a coin
+flip), not a real price — confirmed from the archive and a live-parser replay (the
+live confer path is clean). Fix: re-fetched real two-sided historical prices via the
+Odds API (`scripts/backfill_historical_odds.py`, 253 NFL game-dates), injected them
+into the cached training matrices without a feature rebuild
+(`scripts/inject_backfilled_odds.py`), and retrained the five cells against the
+honest book. The result splits the family:
+
+- **Continuous (`passing yards`, `attempts`, `completions`) — the wall is REAL.**
+  With real two-sided prices `brier_book` stays ≈0.25: a sharp continuous market
+  sets the line at the median, so `p_book ≈ 0.5` by construction. The model ties at
+  best (`passing yards` g1 −0.0009) and loses on attempts/completions — a genuine
+  efficient-market wall, now proven with real data rather than asserted from the
+  degenerate seed. They need a better model, not better book data.
+- **`passing tds` was a FALSE PASS — demoted devel→withheld.** Its book was the
+  corrupt low-count flavor (`brier_book` 0.466, worse than a coin flip); the honest
+  book (0.268) collapses the model's apparent edge from −0.31 to −0.017 and the g1 CI
+  crosses 0 → fails. It shipped on devel only because the broken book was trivial to
+  beat.
+- **`interceptions` survives but is now marginal** — g1 CI upper −0.163 → −0.007.
+
+**Counts: NFL 14/20 → 13/20** (passing tds demoted). The backfill added no ship; it
+removed a false one and confirmed the continuous-family wall is real.
+
+### Step 0.9 — Count/yardage archive repair (DONE 2026-06-02)
+
+Completes the backfill the 06-01 passing-family fix began, for the remaining
+consumed count/yardage cells carrying the same corrupt legacy klepto seed (count/ZINB
+cells priced through the wrong SkewNormal default → blown or coin-flip `ev`). Flow:
+re-fetch real two-sided prices (Odds API historical) → `delete_corrupt_seed
+--blown-all-layers` → `inject_backfilled_odds` → `meditate --force` (Optuna
+warm-started from each pickle's prior HPs). Two latent `inject_backfilled_odds` bugs
+were fixed so it now equals a from-scratch rebuild per row: (1) it synthesizes any
+*resolved* `ev > 5×line` to the honest 0.5 a rebuild produces (residual blown the
+magnitude sweep missed — DFS-only/thin-market rows the API can't re-quote, or
+inverted-moderate where the archive's latest line ≠ the point-in-time line); (2)
+synthesized rows carry an `Odds == 0` sentinel with `EV` NaN-then-filled by
+`pipeline._step_synthesize_odds`, where the prior `Odds=0.5`/NaN form slipped the
+mask and crashed the LightGBMLSS fit on NaN.
+
+Honest before→after on the repaired book (9 cells):
+
+| cell | book brier | brier skill | ship |
+|---|---|---|---|
+| NBA `BLK` | 0.245 → 0.233 | +0.134 → +0.080 | devel (5/5) |
+| NBA `STL` | 0.251 → 0.255 | +0.027 → +0.058 | devel (5/5) |
+| NBA `FG3M` | 0.253 → 0.238 | +0.117 → +0.074 | devel (5/5) |
+| NFL `tds` | 0.770 → 0.147 | +0.809 → −0.024 | devel (5/5) |
+| WNBA `FG3M` | 0.253 → 0.251 | +0.136 → +0.147 | **withheld** (g4 0.50) |
+| NFL `carries` | 0.342 → 0.259 | +0.227 → −0.010 | **withheld** (g1) |
+| NFL `rushing yards` | 0.320 → 0.257 | +0.210 → +0.022 | **withheld** (g1) |
+| NFL `receiving yards` | 0.247 → 0.251 | −0.025 → −0.009 | **withheld** (g1) |
+| NFL `interceptions` | 0.318 → 0.269 | +0.179 → +0.064 | **withheld** (g1) |
+
+The blown book inflated apparent skill — NFL `tds` book brier 0.770 meant the book was
+confidently *wrong*, so the +0.81 "skill" was a broken-strawman artifact. On the real
+book skill compresses and **5 cells lose their gate pass**: a sharper book makes g1/g4
+harder, which is the correct signal, not a regression. They flip `devel → withheld`;
+`g1_oracle` stays strongly negative (−0.25…−0.56) so the headroom is real — re-ship
+candidates once training is strengthened (the owner's call: capture honestly, re-ship
+after strengthening). NBA `BLK/STL/FG3M` and NFL `tds` still pass all five gates and
+stay `devel`. **Supersedes** the 06-01 note's "`interceptions` survives but marginal" —
+on the full count/yardage retrain it fails g1 and is withheld.
+
+**Counts: NBA 18/21, NFL 9/20, WNBA 14/18 → 41/59 = 69%.** The repair removed 5 false
+passes; none are killed. Deferred per the repair plan: MLB/NHL and deep history
+(2022–24) — see [`docs/archive_repair_plan.md`](archive_repair_plan.md).
 
 ### Step 1 — Post-hoc mean-bias correction (1–2 weeks)
 

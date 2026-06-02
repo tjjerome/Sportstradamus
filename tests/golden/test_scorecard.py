@@ -403,6 +403,41 @@ def test_iqr_pred_analytical_gamma_recovers_rate_from_ev():
     assert iqr == pytest.approx(q75 - q25, abs=1e-6)
 
 
+def test_resolve_decode_strategy_substitutes_default_for_none(monkeypatch):
+    """Withheld SkewNormal cells trained under the ``--target-strategy``
+    default (the ``none`` slug) must decode with ``ratio_meanyr``, not the
+    ``WITHHELD`` sentinel the ship-config projection collapses them to —
+    otherwise the g4 IQR stays in normalized ratio-units and false-fails.
+    """
+    import sportstradamus.training.scorecard as sc
+
+    fake_meta = {
+        "NFL": {
+            "carries": {
+                "dist": "SkewNormal",
+                "shipped": "withheld",
+                "target_normalization": "none",
+            },
+            "receptions": {
+                "dist": "SkewNormal",
+                "shipped": "withheld",
+                "target_normalization": "centered_additive_mean10",
+            },
+            "passing yards": {
+                "dist": "SkewNormal",
+                "shipped": "devel",
+                "target_normalization": "ratio_meanyr",
+            },
+        }
+    }
+    monkeypatch.setattr(sc, "_cached_stat_meta", lambda: fake_meta)
+
+    assert sc._resolve_decode_strategy("NFL", "carries") == "ratio_meanyr"
+    # A real per-cell slug survives while withheld (not collapsed to WITHHELD).
+    assert sc._resolve_decode_strategy("NFL", "receptions") == "centered_additive_mean10"
+    assert sc._resolve_decode_strategy("NFL", "passing-yards") == "ratio_meanyr"
+
+
 def test_gate4_iqr_spread_back_compat_point_iqr_without_df():
     """Old signature (no df / dist / strategy) keeps point-IQR semantics — the
     oracle row (pred = actual) still returns ratio = 1.0 so existing assertions

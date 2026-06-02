@@ -30,6 +30,8 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
+from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.posthoc import PROB_STAGE, apply_posthoc
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -63,14 +65,14 @@ def _decode_skewnormal(
     playerStats: pd.DataFrame,
     hist_gate: float,
     offset_meta: dict | None,
-    target_strategy: str,
+    target_normalization: str,
 ) -> pd.DataFrame:
     """Decode raw SkewNormal model outputs into absolute EV / sigma / skew.
 
     Dispatches the ``loc`` and ``scale`` inverse transforms through the
     :mod:`sportstradamus.training.baselines` registry so the prediction-side
     decode mirrors the training-side forward transform exactly. Legacy
-    pickles without ``offset_meta`` / ``target_strategy`` keys decode
+    pickles without ``offset_meta`` / ``target_normalization`` keys decode
     through the ``ratio_meanyr`` strategy, which is bit-identical to the
     pre-Task-5 hand-rolled ``loc * MeanYr_clipped`` formula.
 
@@ -84,7 +86,7 @@ def _decode_skewnormal(
         offset_meta: Pickle-persisted baseline metadata, or ``None`` for
             legacy / ratio-strategy models. The ``global_mean`` snapshot
             inside drives the EB prior at decode time.
-        target_strategy: Slug of the baseline strategy the model was
+        target_normalization: Slug of the baseline strategy the model was
             trained against; defaults to ``"ratio_meanyr"``.
 
     Returns:
@@ -92,9 +94,7 @@ def _decode_skewnormal(
         ``Model EV``, ``Model Sigma``, ``Model Skew``, and optional
         ``Model Gate`` columns set.
     """
-    from sportstradamus.training.baselines import get_strategy
-
-    strategy = get_strategy(target_strategy)
+    strategy = get_target_normalization(target_normalization)
     denom_col = (
         "MeanYr_nonzero"
         if (hist_gate > _NONZERO_DENOM_GATE and "MeanYr_nonzero" in playerStats.columns)
@@ -120,6 +120,20 @@ def _decode_skewnormal(
     if hist_gate > _GATE_PUBLISH_THRESHOLD:
         prob_params["Model Gate"] = hist_gate
     return prob_params
+
+
+def _apply_prob_posthoc(
+    cal_over: np.ndarray, posthoc_slug: str, posthoc_blob: dict | None
+) -> np.ndarray:
+    """Apply a probability-stage post-hoc corrector to the calibrated over-prob.
+
+    Mirrors the training-side seam in ``pipeline.train_market`` so the live
+    probability matches the offline-gated one. No-op for mean-stage slugs and
+    legacy pickles (slug ``"none"`` / blob ``None``).
+    """
+    if posthoc_slug in PROB_STAGE:
+        return apply_posthoc(posthoc_slug, posthoc_blob, cal_over)
+    return cal_over
 
 
 def model_prob(
@@ -195,9 +209,14 @@ def model_prob(
         normalized = filedict.get("normalized", False)
         # Task 5: read baseline metadata. Defaults preserve byte-identical
         # behavior for legacy pickles written before P1 (no offset_meta /
-        # target_strategy keys) — they decode through the ratio path.
+        # target_normalization keys) — they decode through the ratio path.
         offset_meta = filedict.get("offset_meta")
-        target_strategy = filedict.get("target_strategy", "ratio_meanyr")
+        # Legacy pickles (pre-rename) persisted this under "target_strategy".
+        target_normalization = filedict.get(
+            "target_normalization", filedict.get("target_strategy", "ratio_meanyr")
+        )
+        posthoc_slug = filedict.get("posthoc", "none")
+        posthoc_blob = filedict.get("posthoc_blob", None)
         hist_gate = (
             stat_zi.get(league, {}).get(market, 0)
             if dist in ("ZINB", "ZAGamma", "SkewNormal")
@@ -299,7 +318,7 @@ def model_prob(
                 playerStats,
                 hist_gate,
                 offset_meta,
-                target_strategy,
+                target_normalization,
             )
 
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
@@ -496,9 +515,10 @@ def model_prob(
         if temperature is not None:
             _raw_over_clipped = np.clip(_raw_over, 1e-6, 1 - 1e-6)
             _cal_over = expit(logit(_raw_over_clipped) / temperature)
-            offer_df["Model Under"] = 1 - _cal_over
         else:
-            offer_df["Model Under"] = _raw_under
+            _cal_over = _raw_over
+        _cal_over = _apply_prob_posthoc(_cal_over, posthoc_slug, posthoc_blob)
+        offer_df["Model Under"] = 1 - _cal_over
 
         offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
