@@ -4,17 +4,26 @@ over-threshold function complexity, length, or nesting.
 
 Design — a ratchet that only tightens:
   - Only functions you actually changed since HEAD are checked.
-  - A function is blocked only if your edit made the metric WORSE, or the
-    function is new. Pre-existing debt never blocks an unrelated edit.
+  - Length and nesting block only if your edit made the metric WORSE, or the
+    function is new. Pre-existing length/nesting debt never blocks an
+    unrelated edit.
+  - Complexity is stricter (policy): any touched function over CC_MAX must be
+    refactored to <= CC_MAX or carry a `# style: allow-complexity` tag, even
+    if your edit did not worsen it — touching grandfathered complexity debt
+    forces you to tag-or-fix it. And nothing may exceed CC_HARD_MAX, tag or no
+    tag.
 
 Thresholds map to docs/STYLE_GUIDE.md:
-  - cyclomatic complexity  > 10   (§10, "single digits, ~10 ceiling")
+  - cyclomatic complexity  > 10   (§10, "single digits, ~10 ceiling"); tag required
+  - cyclomatic complexity  > 49   hard ceiling — no tag waives it
   - function source lines  > 200  (§2.8 / §10 mandatory-refactor line; no monoliths)
   - control-flow nesting   > 4    (§10, ">4 levels is a refactor signal")
 
 Escape hatch: put `# style: allow-complexity` (or -length, -nesting, -all)
-inside a function to skip that check for it — the documented-suppression
-posture of §19. Pair it with a one-line reason.
+inside a function to waive that check — the documented-suppression posture of
+§19. Pair it with a one-line reason. `allow-complexity` waives 11..CC_HARD_MAX
+only; it does NOT waive complexity over CC_HARD_MAX. Keep complexity tags
+minimal — mostly high-level orchestrators.
 
 Exit 0 = pass (silent). Exit 2 = block; the report is sent to Claude on
 stderr. Any internal error fails OPEN (exit 0) so a hook bug can never wedge
@@ -32,6 +41,9 @@ import sys
 
 # --- Tunables ---------------------------------------------------------------
 CC_MAX = 10
+# Hard complexity ceiling no `# style: allow-complexity` tag can waive: a
+# touched function over it always blocks and must be refactored down (policy).
+CC_HARD_MAX = 49
 LEN_MAX = 200
 NEST_MAX = 4
 
@@ -276,7 +288,28 @@ def main():
         b = base.get(qn)
         for key, limit, label, fix in CHECKS:
             val = m[key]
-            if val <= limit or key in m["allow"]:
+            tagged = key in m["allow"]
+
+            if key == "complexity":
+                # Stricter than the ratchet (policy): a tag does NOT waive the
+                # hard ceiling, and every touched over-limit function must be
+                # tagged + justified even if this edit did not worsen it — that
+                # is how grandfathered complexity debt burns down.
+                if val > CC_HARD_MAX:
+                    problems.append(
+                        f"  {qn}()  cyclomatic complexity: {val}  (hard ceiling "
+                        f"{CC_HARD_MAX} — no `# style: allow-complexity` tag waives "
+                        f"this; refactor)\n      → {fix}")
+                elif val > limit and not tagged:
+                    origin = "new" if b is None else f"was {b[key]}"
+                    problems.append(
+                        f"  {qn}()  cyclomatic complexity: {val}  (limit {limit}, "
+                        f"{origin} — refactor to ≤ {limit}, or add `# style: "
+                        f"allow-complexity` + a one-line reason per §19)\n"
+                        f"      → {fix}")
+                continue
+
+            if val <= limit or tagged:
                 continue
             prior = b[key] if b else None
             if prior is not None and val <= prior:
@@ -290,12 +323,14 @@ def main():
         return 0
 
     sys.stderr.write(
-        f"[style-gate] Blocked: in {rel}, functions you changed exceed the "
-        f"docs/STYLE_GUIDE.md limits and are new or got worse:\n"
+        f"[style-gate] Blocked: in {rel}, functions you changed violate "
+        f"docs/STYLE_GUIDE.md limits:\n"
         + "\n".join(problems)
-        + "\n\nFix the functions you touched. If the complexity is genuinely "
-        "irreducible (e.g. a numeric kernel), add `# style: allow-<check>` "
-        "inside the function with a one-line reason, per §19.\n")
+        + f"\n\nFix the functions you touched. Complexity over the hard ceiling "
+        f"({CC_HARD_MAX}) must be refactored; complexity over {CC_MAX} that is "
+        "genuinely a high-level orchestrator may carry `# style: allow-complexity` "
+        "+ a one-line reason (§19), kept minimal. Length/nesting: add "
+        "`# style: allow-<check>` if irreducible.\n")
     return 2
 
 
