@@ -93,6 +93,10 @@ _MARGINAL_SHAPE_QUANTILE: float = 0.95
 # Floor on the marginal shape prior — avoids a degenerate shape_ceiling of ~0
 # when the market has near-zero variance across all players.
 _MARGINAL_SHAPE_FLOOR: float = 0.5
+# Minimum nonzero-game count for a player to inform a cell's distribution-shape
+# estimate. Per-league because season lengths differ; default for unlisted leagues.
+_MIN_PLAYER_NONZERO_OBS: dict[str, int] = {"NBA": 60, "NFL": 10, "NHL": 60, "WNBA": 40, "MLB": 60}
+_MIN_PLAYER_NONZERO_OBS_DEFAULT: int = 60
 # Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
 # headroom to exceed the prior while preventing runaway over-dispersion.
 _SHAPE_CEILING_MULTIPLIER: float = 2.0
@@ -670,7 +674,6 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     for c in categories:
         X[c] = X[c].astype("category")
 
-    # Temporal split: earliest _TRAIN_FRACTION to train, remainder to test
     M_sorted = M.sort_values("Date")
     n = len(M_sorted)
     n_train = int(n * _TRAIN_FRACTION)
@@ -1942,9 +1945,7 @@ def _step_select_distribution(
     y_train_labels = splits["y_train_labels"]
     X_train = splits["X_train"]
 
-    # Distribution selection: mean < 2 → NegBin, mean >= 2 → SkewNormal
-    threshold_dict = {"NBA": 60, "NFL": 10, "NHL": 60, "WNBA": 40, "MLB": 60}
-    threshold = threshold_dict.get(league, 60)
+    threshold = _MIN_PLAYER_NONZERO_OBS.get(league, _MIN_PLAYER_NONZERO_OBS_DEFAULT)
     player_stats = (
         stat_data.gamelog.groupby(stat_data.log_strings.get("player"))
         .filter(lambda x: x[market].gt(0).sum() > threshold)
@@ -2019,9 +2020,6 @@ def _step_select_distribution(
             _MARGINAL_SHAPE_FLOOR,
         )
         shape_ceiling = marginal_shape * _SHAPE_CEILING_MULTIPLIER
-
-        cv = (1 / per_player_r * player_stats.count() / player_stats.count().sum()).sum()
-        cv = max(cv, 1 / shape_ceiling)
 
         cv = (
             player_stats.std()
