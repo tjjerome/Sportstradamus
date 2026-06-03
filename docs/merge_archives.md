@@ -14,6 +14,26 @@ The source archive is opened read-only and never modified. The target is rebuilt
 place — with a timestamped `.bak-<epoch>` written first — unless `--output` sends the
 union to a new file instead.
 
+## One-command dev sync
+
+From the dev machine, `scripts/sync_from_prod.sh` automates the whole pull: it snapshots
+prod's archive under prod's flock, rsync's the snapshot and the `data/runtime/` outputs
+down, then runs `merge-archives` to fold them in. Every ssh/rsync carries a connect
+timeout, so a powered-off prod fails fast instead of hanging.
+
+```bash
+scripts/sync_from_prod.sh             # full sync
+scripts/sync_from_prod.sh --dry-run   # preview the commands without running them
+```
+
+It defaults to `sportstradamus@192.168.1.84:/home/sportstradamus/Sportstradamus`;
+override with the `PROD_SSH` / `PROD_DIR` environment variables. The `data/runtime/`
+pull is update-only (never deletes dev-only files), and the archive merge backs dev's
+archive up to `.bak-<epoch>` first, so the local backfill is never lost.
+
+The steps below are what the script runs under the hood — and the manual path if you'd
+rather drive it yourself.
+
 ## Pull production into dev
 
 This is the usual direction: fold the server's live rows into the dev machine.
@@ -35,7 +55,7 @@ This is the usual direction: fold the server's live rows into the dev machine.
 2. **Ship it to dev:**
 
    ```bash
-   scp prod:/tmp/prod_archive_snapshot.duckdb /tmp/
+   scp sportstradamus@192.168.1.84:/tmp/prod_archive_snapshot.duckdb /tmp/
    ```
 
 3. **Dry-run, then merge.** The target defaults to dev's `archive/archive.duckdb`, and a
