@@ -1714,3 +1714,37 @@ class Stats:
         ].copy()
 
         return last_training_day
+
+    def _convert_to_market_dist(self, v, subline, sub_cv, sub_dist, dist, cv):
+        if sub_dist != dist and not np.isnan(v):
+            return get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
+        return v
+
+    def _submarket_ev(self, submarket, date, player, dist, cv):
+        sub_cv = stat_cv[self.league].get(submarket, 1)
+        sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
+        v = archive.get_ev(self.league, submarket, date, player)
+        subline = archive.get_line(self.league, submarket, date, player)
+        v = self._convert_to_market_dist(v, subline, sub_cv, sub_dist, dist, cv)
+        return v, subline, sub_cv, sub_dist
+
+    def _combo_market_ev(self, market, date, player, dist, cv):
+        ev = 0
+        for submarket in combo_props.get(market, []):
+            v, _, _, _ = self._submarket_ev(submarket, date, player, dist, cv)
+            if np.isnan(v) or v == 0:
+                return 0
+            ev += v
+        return ev
+
+    def _fantasy_default_contribution(
+        self, submarket, weight, v, subline, sub_cv, sub_dist, player_games
+    ):
+        if not (np.isnan(v) or v == 0):
+            return v * weight, True
+        if subline == 0 and not player_games.empty:
+            subline = np.floor(player_games.iloc[-10:][submarket].median()) + 0.5
+        if subline != 0:
+            under = (player_games[submarket] < subline).mean()
+            return get_ev(subline, under, sub_cv, dist=sub_dist) * weight, False
+        return 0, False
