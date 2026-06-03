@@ -14,11 +14,14 @@ import pickle
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit, logit
 
 from sportstradamus.helpers import (
+    GATE_PUBLISH_THRESHOLD,
+    NONZERO_DENOM_GATE,
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
+    apply_temperature,
+    decode_predictive_mean,
     fused_loc,
     get_ev,
     get_odds,
@@ -40,15 +43,6 @@ archive = LazyArchive()
 
 # Maximum allowed model confidence before applying a boost.
 _MAX_CONFIDENCE = 0.90
-
-# Hist-gate threshold above which the ``MeanYr_nonzero`` denom column is used
-# instead of ``MeanYr`` when decoding SkewNormal predictions. Mirrors the
-# legacy decode constant; kept module-level per STYLE_GUIDE §8.
-_NONZERO_DENOM_GATE = 0.05
-
-# Hist-gate threshold above which ``Model Gate`` is materialized on the
-# SkewNormal prediction frame for downstream gate-aware blending.
-_GATE_PUBLISH_THRESHOLD = 0.02
 
 # Minimum bookmaker line for a "yards" market to be scored. Combo legs ("vs.")
 # are exempt; single-player yards lines at or below this are too low to model
@@ -118,28 +112,24 @@ def _decode_skewnormal(
     strategy = get_target_normalization(target_normalization)
     denom_col = (
         "MeanYr_nonzero"
-        if (hist_gate > _NONZERO_DENOM_GATE and "MeanYr_nonzero" in playerStats.columns)
+        if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in playerStats.columns)
         else "MeanYr"
     )
     # global_mean snapshot lives in offset_meta for centered strategies; the
     # ratio strategy ignores it (uses MeanYr from features directly).
     global_mean = float((offset_meta or {}).get("global_mean", 0.0))
 
-    loc = prob_params["loc"].values
-    scale = prob_params["scale"].values
-    alpha_sn = prob_params["alpha"].values
+    ev_loc = strategy.decode_loc(prob_params["loc"].values, playerStats, global_mean, denom_col)
+    ev_scale = strategy.decode_scale(prob_params["scale"].values, playerStats, denom_col)
 
-    ev_loc = strategy.decode_loc(loc, playerStats, global_mean, denom_col)
-    ev_scale = strategy.decode_scale(scale, playerStats, denom_col)
-
-    delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
-    base_ev = ev_loc + ev_scale * delta * np.sqrt(2 / np.pi)
-
-    prob_params["Model EV"] = base_ev
-    prob_params["Model Sigma"] = ev_scale
-    prob_params["Model Skew"] = alpha_sn
-    if hist_gate > _GATE_PUBLISH_THRESHOLD:
-        prob_params["Model Gate"] = hist_gate
+    decoded = decode_predictive_mean(
+        prob_params, "SkewNormal", sn_loc=ev_loc, sn_scale=ev_scale, hist_gate=hist_gate
+    )
+    prob_params["Model EV"] = decoded.ev
+    prob_params["Model Sigma"] = decoded.sigma
+    prob_params["Model Skew"] = decoded.skew
+    if decoded.gate is not None:
+        prob_params["Model Gate"] = decoded.gate
     return prob_params
 
 
@@ -547,31 +537,26 @@ def model_prob(
         playerStats["Books EV"] = evs
         playerStats["Books STD"] = cv * np.array(evs)
 
-        # NegBin/ZINB: mean = r * probs / (1 - probs) (PyTorch convention)
+        # Decode raw LightGBMLSS params -> Model EV + shape. The column guards
+        # skip the volume_stats branch above, which already set Model EV from
+        # the player profile rather than a fitted distribution.
         if dist in ("NegBin", "ZINB") and "total_count" in prob_params.columns:
-            base_ev = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
-            prob_params["Model EV"] = base_ev
-            if dist == "ZINB":
-                prob_params["Model Gate"] = prob_params["gate"]
-            prob_params["Model R"] = prob_params["total_count"]
-
-        # Gamma/ZAGamma: mean = concentration / rate
-        if dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
-            base_ev = prob_params["concentration"] / prob_params["rate"]
-            prob_params["Model EV"] = base_ev
-            if dist == "ZAGamma":
-                prob_params["Model Gate"] = prob_params["gate"]
-            prob_params["Model Alpha"] = prob_params["concentration"]
-
-        # SkewNormal: dispatch decode through the baselines registry so the
-        # train-side forward transform and predict-side inverse cannot drift.
-        if dist == "SkewNormal" and "loc" in prob_params.columns:
+            decoded = decode_predictive_mean(prob_params, dist)
+            prob_params["Model EV"] = decoded.ev
+            prob_params["Model R"] = decoded.r
+            if decoded.gate is not None:
+                prob_params["Model Gate"] = decoded.gate
+        elif dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
+            decoded = decode_predictive_mean(prob_params, dist)
+            prob_params["Model EV"] = decoded.ev
+            prob_params["Model Alpha"] = decoded.alpha
+            if decoded.gate is not None:
+                prob_params["Model Gate"] = decoded.gate
+        elif dist == "SkewNormal" and "loc" in prob_params.columns:
+            # Dispatch SkewNormal loc/scale through the baselines registry so the
+            # train-side forward transform and predict-side inverse cannot drift.
             _decode_skewnormal(
-                prob_params,
-                playerStats,
-                hist_gate,
-                offset_meta,
-                target_normalization,
+                prob_params, playerStats, hist_gate, offset_meta, target_normalization
             )
 
         offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
@@ -597,7 +582,7 @@ def model_prob(
 
         # Blend model and book distributions via fused_loc
         if dist == "SkewNormal":
-            _zi_kw = {"gate_book": hist_gate} if hist_gate > _GATE_PUBLISH_THRESHOLD else {}
+            _zi_kw = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
             blended_base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
                 model_weight,
                 offer_df["Model EV"].to_numpy(),
@@ -745,11 +730,7 @@ def model_prob(
         )
         offer_df["Push P"] = np.asarray(_push, dtype=float)
 
-        if temperature is not None:
-            _raw_over_clipped = np.clip(_raw_over, 1e-6, 1 - 1e-6)
-            _cal_over = expit(logit(_raw_over_clipped) / temperature)
-        else:
-            _cal_over = _raw_over
+        _cal_over = apply_temperature(_raw_over, temperature)
         _cal_over = _apply_prob_posthoc(_cal_over, posthoc_slug, posthoc_blob)
         offer_df["Model Under"] = 1 - _cal_over
 

@@ -10,13 +10,14 @@ Split into submodules by concern:
   ``get_trends``, ``get_mlb_pitchers``).
 * :mod:`sportstradamus.helpers.distributions` — the distributional math
   that the model/bookmaker fusion runs on: ``get_ev``, ``get_odds``,
-  ``fused_loc``, ``set_model_start_values``, plus the smaller odds-conversion
-  and ``no_vig_odds`` helpers.
+  ``fused_loc``, ``set_model_start_values``, ``decode_predictive_mean``,
+  ``apply_temperature``, plus the smaller odds-conversion and ``no_vig_odds``
+  helpers.
 * :mod:`sportstradamus.helpers.scraping` — the ``Scrape`` HTTP client with
   ScrapeOps-managed header rotation.
 * :mod:`sportstradamus.helpers.archive` — the ``Archive`` singleton that
-  persists odds/EV data to klepto HDF archives, plus the ``clean_archive``
-  migration helper.
+  persists odds/EV data to a DuckDB archive, plus the ``clean_archive``
+  housekeeping helper.
 
 Every legacy ``from sportstradamus.helpers import <name>`` keeps working
 because this module re-exports the full public surface below. Prefer the
@@ -45,6 +46,11 @@ from sportstradamus.helpers.config import (
     underdog_payouts,
 )
 from sportstradamus.helpers.distributions import (
+    GATE_PUBLISH_THRESHOLD,
+    NONZERO_DENOM_GATE,
+    DecodedParams,
+    apply_temperature,
+    decode_predictive_mean,
     fit_distro,
     fused_loc,
     get_ev,
@@ -74,17 +80,22 @@ from sportstradamus.helpers.text import (
 UNDERDOG_BOOST_BASELINE: float = 1.78
 
 __all__ = [
+    "GATE_PUBLISH_THRESHOLD",
+    "NONZERO_DENOM_GATE",
     "UNDERDOG_BOOST_BASELINE",
     "Archive",
+    "DecodedParams",
     "JsonFormatter",
     "LazyArchive",
     "Scrape",
     "abbreviations",
+    "apply_temperature",
     "banned",
     "book_weights",
     "books",
     "clean_archive",
     "combo_props",
+    "decode_predictive_mean",
     "feature_filter",
     "fit_distro",
     "fused_loc",
