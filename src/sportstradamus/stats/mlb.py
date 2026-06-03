@@ -763,116 +763,83 @@ class StatsMLB(Stats):
             date = date.strftime("%Y-%m-%d")
         ev = 0
         if market in combo_props:
-            for submarket in combo_props.get(market, []):
-                sub_cv = stat_cv[self.league].get(submarket, 1)
-                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
-                v = archive.get_ev(self.league, submarket, date, player)
-                subline = archive.get_line(self.league, submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    ev = 0
-                    break
-                ev += v
-
+            ev = self._combo_market_ev(market, date, player, dist, cv)
         elif "fantasy" in market:
-            book_odds = False
-            if "pitcher" in market:
-                if "underdog" in market:
-                    fantasy_props = [
-                        ("pitcher win", 5),
-                        ("pitcher strikeouts", 3),
-                        ("runs allowed", -3),
-                        ("pitching outs", 1),
-                        ("quality start", 5),
-                    ]
-                else:
-                    fantasy_props = [
-                        ("pitcher win", 6),
-                        ("pitcher strikeouts", 3),
-                        ("runs allowed", -3),
-                        ("pitching outs", 1),
-                        ("quality start", 4),
-                    ]
-            elif "underdog" in market:
-                fantasy_props = [
-                    ("singles", 3),
-                    ("doubles", 6),
-                    ("triples", 8),
-                    ("home runs", 10),
-                    ("walks", 3),
-                    ("rbi", 2),
-                    ("runs", 2),
-                    ("stolen bases", 4),
-                ]
-            else:
-                fantasy_props = [
-                    ("singles", 3),
-                    ("doubles", 5),
-                    ("triples", 8),
-                    ("home runs", 10),
-                    ("walks", 2),
-                    ("rbi", 2),
-                    ("runs", 2),
-                    ("stolen bases", 5),
-                ]
-
-            v_outs = 0
-            v_runs = 0
-            for submarket, weight in fantasy_props:
-                sub_cv = stat_cv["MLB"].get(submarket, 1)
-                sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
-                v = archive.get_ev("MLB", submarket, date, player)
-                subline = archive.get_line("MLB", submarket, date, player)
-                if submarket == "pitcher win":
-                    p = 1 - get_odds(subline, v, sub_dist, cv=sub_cv)
-                    ev += p * weight
-                elif submarket == "quality start":
-                    if v_outs > 0:
-                        std = stat_cv["MLB"].get(submarket, 1) * v_outs
-                        p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
-                        p *= poisson.cdf(3, v_runs) if v_runs > 0 else 0.5
-                        ev += p * weight
-                elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
-                    _hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
-                    _hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
-                    v = archive.get_ev("MLB", "hits", date, player)
-                    subline = archive.get_line("MLB", "hits", date, player)
-                    v = get_ev(
-                        subline, get_odds(subline, v, _hits_dist, cv=_hits_cv), cv=cv, dist=dist
-                    )
-                    v *= (
-                        (player_games[submarket].sum() / player_games["hits"].sum())
-                        if player_games["hits"].sum()
-                        else 0
-                    )
-                    ev += v * weight
-                else:
-                    if sub_dist != dist and not np.isnan(v):
-                        v = get_ev(
-                            subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist
-                        )
-
-                    if np.isnan(v) or v == 0:
-                        if subline == 0 and not player_games.empty:
-                            subline = np.floor(player_games.iloc[-10:][submarket].median()) + 0.5
-
-                        if subline != 0:
-                            under = (player_games[submarket] < subline).mean()
-                            ev += get_ev(subline, under, sub_cv, dist=sub_dist) * weight
-                    else:
-                        book_odds = True
-                        ev += v * weight
-
-                if submarket == "runs allowed":
-                    v_runs = v if not np.isnan(v) and v > 0 else v_runs
-                if submarket == "pitching outs":
-                    v_outs = v if not np.isnan(v) and v > 0 else v_outs
-
-            if not book_odds:
-                ev = 0
-
+            ev = self._check_mlb_fantasy(market, date, player, dist, cv, player_games)
         return 0 if np.isnan(ev) else ev
+
+    @staticmethod
+    def _mlb_fantasy_props(market):
+        if "pitcher" in market:
+            if "underdog" in market:
+                return [("pitcher win", 5), ("pitcher strikeouts", 3), ("runs allowed", -3),
+                        ("pitching outs", 1), ("quality start", 5)]
+            return [("pitcher win", 6), ("pitcher strikeouts", 3), ("runs allowed", -3),
+                    ("pitching outs", 1), ("quality start", 4)]
+        if "underdog" in market:
+            return [("singles", 3), ("doubles", 6), ("triples", 8), ("home runs", 10),
+                    ("walks", 3), ("rbi", 2), ("runs", 2), ("stolen bases", 4)]
+        return [("singles", 3), ("doubles", 5), ("triples", 8), ("home runs", 10),
+                ("walks", 2), ("rbi", 2), ("runs", 2), ("stolen bases", 5)]
+
+    @staticmethod
+    def _keep_positive(new, old):
+        return new if not np.isnan(new) and new > 0 else old
+
+    @staticmethod
+    def _mlb_quality_start_ev(v_outs, v_runs, weight):
+        if v_outs <= 0:
+            return 0
+        std = stat_cv["MLB"].get("quality start", 1) * v_outs
+        p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
+        p *= poisson.cdf(3, v_runs) if v_runs > 0 else 0.5
+        return p * weight
+
+    def _mlb_hits_proportional_ev(self, submarket, date, player, dist, cv, player_games, weight):
+        hits_cv = stat_cv.get("MLB", {}).get("hits", 1)
+        hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
+        v = archive.get_ev("MLB", "hits", date, player)
+        subline = archive.get_line("MLB", "hits", date, player)
+        v = get_ev(subline, get_odds(subline, v, hits_dist, cv=hits_cv), cv=cv, dist=dist)
+        share = (
+            player_games[submarket].sum() / player_games["hits"].sum()
+            if player_games["hits"].sum()
+            else 0
+        )
+        return v * share * weight
+
+    def _check_mlb_fantasy(self, market, date, player, dist, cv, player_games):
+        ev = 0
+        book_odds = False
+        v_outs = 0
+        v_runs = 0
+        for submarket, weight in self._mlb_fantasy_props(market):
+            sub_cv = stat_cv["MLB"].get(submarket, 1)
+            sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
+            v = archive.get_ev("MLB", submarket, date, player)
+            subline = archive.get_line("MLB", submarket, date, player)
+            if submarket == "pitcher win":
+                ev += (1 - get_odds(subline, v, sub_dist, cv=sub_cv)) * weight
+            elif submarket == "quality start":
+                ev += self._mlb_quality_start_ev(v_outs, v_runs, weight)
+            elif submarket in ["singles", "doubles", "triples", "home runs"] and np.isnan(v):
+                ev += self._mlb_hits_proportional_ev(
+                    submarket, date, player, dist, cv, player_games, weight
+                )
+            else:
+                v = self._convert_to_market_dist(v, subline, sub_cv, sub_dist, dist, cv)
+                contribution, from_book = self._fantasy_default_contribution(
+                    submarket, weight, v, subline, sub_cv, sub_dist, player_games
+                )
+                ev += contribution
+                book_odds |= from_book
+
+            if submarket == "runs allowed":
+                v_runs = self._keep_positive(v, v_runs)
+            if submarket == "pitching outs":
+                v_outs = self._keep_positive(v, v_outs)
+
+        return ev if book_odds else 0
 
     def get_depth(self, offers, date=datetime.today().date()):
         if isinstance(offers, dict):
