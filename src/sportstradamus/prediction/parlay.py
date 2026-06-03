@@ -1,10 +1,4 @@
-"""Beam-search parlay enumeration and push-aware EV evaluation.
-
-:func:`beam_search_parlays` is the parlay constructor consumed by
-:func:`sportstradamus.prediction.correlation.find_correlation`; the helpers
-:func:`_payout_curve_for`, :func:`_expected_payout_with_pushes`, and
-:func:`_nearest_psd` live alongside it.
-"""
+"""Beam-search parlay enumeration and push-aware EV evaluation."""
 
 from __future__ import annotations
 
@@ -21,7 +15,7 @@ from tqdm import tqdm
 
 from sportstradamus.helpers import stat_cv, stat_std, underdog_payouts
 
-# --- Beam-search constants (audit §2.3 — promoted from inline magic numbers) -
+# --- Beam-search constants --------------------------------------------------
 
 # Beam width: max parlay candidates carried between sizes. Empirically large
 # enough that the survivors at sizes 5/6 don't get pruned by ranking jitter.
@@ -337,6 +331,147 @@ def _expected_payout_with_pushes(
     return float(np.clip(boost, 0.0, _PAYOUT_CLIP_HI) * payouts.mean())
 
 
+def _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, k):
+    next_candidates = []
+    for parlay in candidates:
+        used_players = {leg_players[i] for i in parlay}
+        last_idx = parlay[-1]
+        for new_leg in leg_indices:
+            if new_leg <= last_idx:
+                continue
+            new_player = leg_players[new_leg]
+            if new_player in used_players:
+                continue
+            if any(new_player in p or p in new_player for p in used_players):
+                continue
+            extended = (*parlay, new_leg)
+            n_pairs = target_size * (target_size - 1) // 2
+            ev_prod = np.prod(EV[np.ix_(extended, extended)][np.triu_indices(target_size, 1)])
+            geo_mean = ev_prod ** (1 / n_pairs)
+            if geo_mean < _PARLAY_GEO_MEAN_FLOOR:
+                continue
+            next_candidates.append((extended, geo_mean))
+    next_candidates.sort(key=lambda x: x[1], reverse=True)
+    return [parlay for parlay, _ in next_candidates[:k]]
+
+
+def _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_boost):
+    covers_team = any(team in leg_teams[i] for i in bet_id)
+    covers_opp = any(opp in leg_teams[i] for i in bet_id)
+    if not (covers_team and covers_opp):
+        return None
+    boost = np.prod(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]) * np.prod(
+        boosts[np.ix_(bet_id)]
+    )
+    if boost <= _MIN_PRODUCT_BOOST or boost > max_boost:
+        return None
+    return boost
+
+
+def _psd_or_none(SIG, legacy):
+    min_eig = np.min(np.linalg.eigvalsh(SIG))
+    if legacy:
+        return None if min_eig < _PSD_EIG_TOLERANCE else SIG
+    if min_eig < _PSD_EIG_TOLERANCE:
+        return _nearest_psd(SIG)
+    return SIG
+
+
+def _parlay_payout_prob(p, push_legs, SIG, bet_size, boost, payout, full_payouts, payout_base, legacy):
+    has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
+    # Curves with payouts at multiple miss-counts (e.g. Underdog flex and
+    # insurance) need the MC path even with zero pushes — the analytical
+    # mvn.cdf only gives P(all hit), discarding the partial-hit tiers.
+    curve = full_payouts.get(bet_size, [payout_base, 0.0])
+    multi_tier = sum(1 for v in curve if v > 0) > 1
+    if (has_pushes or multi_tier) and not legacy:
+        return _expected_payout_with_pushes(
+            p, push_legs, SIG, bet_size, boost=boost, payout_curve=full_payouts
+        )
+    return payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
+
+
+def _parlay_fun(bet, league):
+    """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count."""
+    return np.sum(
+        [
+            3 - (np.abs(leg["Line"]) / stat_std.get(league, {}).get(leg["Market"], 1))
+            if ("H2H" in leg["Desc"])
+            else 2
+            - 1 / stat_cv.get(league, {}).get(leg["Market"], 1)
+            + leg["Line"] / stat_std.get(league, {}).get(leg["Market"], 1)
+            for leg in bet
+            if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])
+        ]
+    )
+
+
+def _evaluate_parlay(
+    bet_id, bet_size, payout_base, C, M, p_model, p_books, p_push, boosts,
+    full_payouts, max_boost, bet_df, info, team, opp, leg_teams, legacy,
+):
+    """Score one parlay candidate; return its row dict, or None if it fails a gate."""
+    boost = _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_boost)
+    if boost is None:
+        return None
+
+    pb = p_books[np.ix_(bet_id)]
+    prev_pb = np.prod(pb) * boost * payout_base
+    if prev_pb < _BOOKS_EV_FLOOR:
+        return None
+
+    p = p_model[np.ix_(bet_id)]
+    prev_p = np.prod(p) * boost * payout_base
+    if prev_p < _MODEL_EV_PRECHECK_FLOOR:
+        return None
+
+    SIG = _psd_or_none(C[np.ix_(bet_id, bet_id)], legacy)
+    if SIG is None:
+        return None
+
+    payout = np.clip(payout_base * boost, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
+    p = _parlay_payout_prob(
+        p, p_push[np.ix_(bet_id)], SIG, bet_size, boost, payout, full_payouts, payout_base, legacy
+    )
+    pb = p / prev_p * prev_pb
+    units = (p - 1) / (payout - 1) / _KELLY_BANKROLL_FRACTION
+
+    if units < _KELLY_UNITS_FLOOR or p < _MODEL_EV_FINAL_FLOOR or pb < _BOOKS_EV_FLOOR:
+        return None
+
+    bet = itemgetter(*bet_id)(bet_df)
+    # Display Boost: under legacy, the bare modifier product (the post-search
+    # line-498 overwrite multiplies by per-size payout); otherwise the
+    # payout-inclusive value so the column matches the EV that drove ranking.
+    display_boost = boost if legacy else payout
+    parlay_dict = info | {
+        "Model EV": p,
+        "Books EV": pb,
+        "Boost": display_boost,
+        "Rec Bet": units,
+        "Leg 1": "",
+        "Leg 2": "",
+        "Leg 3": "",
+        "Leg 4": "",
+        "Leg 5": "",
+        "Leg 6": "",
+        "Legs": ", ".join([leg["Desc"] for leg in bet]),
+        "Bet ID": bet_id,
+        "P": prev_p,
+        "PB": prev_pb,
+        "Fun": _parlay_fun(bet, info["League"]),
+        "Bet Size": bet_size,
+        "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id),
+        "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
+        "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
+        "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),
+        "Indep PB": float(np.prod(p_books[np.ix_(bet_id)]) * payout),
+    }
+    for j, leg in enumerate(bet, 1):
+        parlay_dict["Leg " + str(j)] = leg["Desc"]
+    return parlay_dict
+
+
 def beam_search_parlays(
     idx,
     EV,
@@ -403,149 +538,15 @@ def beam_search_parlays(
     for target_size in tqdm(
         range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
     ):
-        next_candidates = []
-
-        for parlay in candidates:
-            used_players = {leg_players[i] for i in parlay}
-            last_idx = parlay[-1]
-
-            for new_leg in leg_indices:
-                if new_leg <= last_idx:
-                    continue
-                new_player = leg_players[new_leg]
-                if new_player in used_players:
-                    continue
-                if any(new_player in p or p in new_player for p in used_players):
-                    continue
-
-                extended = (*parlay, new_leg)
-
-                n_pairs = target_size * (target_size - 1) // 2
-                ev_prod = np.prod(EV[np.ix_(extended, extended)][np.triu_indices(target_size, 1)])
-                geo_mean = ev_prod ** (1 / n_pairs)
-                if geo_mean < _PARLAY_GEO_MEAN_FLOOR:
-                    continue
-
-                next_candidates.append((extended, geo_mean))
-
-        next_candidates.sort(key=lambda x: x[1], reverse=True)
-        top_candidates = next_candidates[:K]
-
+        top_candidates = _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, K)
         payout_base = payouts[target_size - 2]
-
-        for parlay, _ in top_candidates:
-            bet_id = parlay
-            bet_size = target_size
-
-            covers_team = any(team in leg_teams[i] for i in bet_id)
-            covers_opp = any(opp in leg_teams[i] for i in bet_id)
-            if not (covers_team and covers_opp):
-                continue
-
-            boost = np.prod(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]) * np.prod(
-                boosts[np.ix_(bet_id)]
+        for parlay in top_candidates:
+            result = _evaluate_parlay(
+                parlay, target_size, payout_base, C, M, p_model, p_books, p_push, boosts,
+                full_payouts, max_boost, bet_df, info, team, opp, leg_teams, legacy,
             )
-            if boost <= _MIN_PRODUCT_BOOST or boost > max_boost:
-                continue
-
-            pb = p_books[np.ix_(bet_id)]
-            prev_pb = np.prod(pb) * boost * payout_base
-            if prev_pb < _BOOKS_EV_FLOOR:
-                continue
-
-            p = p_model[np.ix_(bet_id)]
-            prev_p = np.prod(p) * boost * payout_base
-            if prev_p < _MODEL_EV_PRECHECK_FLOOR:
-                continue
-
-            SIG = C[np.ix_(bet_id, bet_id)]
-            min_eig = np.min(np.linalg.eigvalsh(SIG))
-            if legacy:
-                # Legacy: drop non-PSD subsets instead of repairing.
-                if min_eig < _PSD_EIG_TOLERANCE:
-                    continue
-            elif min_eig < _PSD_EIG_TOLERANCE:
-                SIG = _nearest_psd(SIG)
-
-            payout = np.clip(payout_base * boost, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
-
-            push_legs = p_push[np.ix_(bet_id)]
-            has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
-
-            # Curves with payouts at multiple miss-counts (e.g. Underdog flex
-            # and insurance) need the MC path even with zero pushes — the
-            # analytical mvn.cdf only gives P(all hit), which discards the
-            # partial-hit tiers. Pure all-hit curves (power, rivals, legacy
-            # platform tables) keep the fast analytical path.
-            curve = full_payouts.get(bet_size, [payout_base, 0.0])
-            multi_tier = sum(1 for v in curve if v > 0) > 1
-
-            if (has_pushes or multi_tier) and not legacy:
-                p = _expected_payout_with_pushes(
-                    p,
-                    push_legs,
-                    SIG,
-                    bet_size,
-                    boost=boost,
-                    payout_curve=full_payouts,
-                )
-            else:
-                p = payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
-
-            pb = p / prev_p * prev_pb
-            units = (p - 1) / (payout - 1) / _KELLY_BANKROLL_FRACTION
-
-            if units < _KELLY_UNITS_FLOOR or p < _MODEL_EV_FINAL_FLOOR or pb < _BOOKS_EV_FLOOR:
-                continue
-
-            bet = itemgetter(*bet_id)(bet_df)
-            # Display Boost: under legacy, return the bare modifier product
-            # (the post-search line-498 overwrite multiplies by per-size
-            # payout). Under the new path, return the payout-inclusive value
-            # so the column reflects the same EV that drove ranking.
-            display_boost = boost if legacy else payout
-            parlay_dict = info | {
-                "Model EV": p,
-                "Books EV": pb,
-                "Boost": display_boost,
-                "Rec Bet": units,
-                "Leg 1": "",
-                "Leg 2": "",
-                "Leg 3": "",
-                "Leg 4": "",
-                "Leg 5": "",
-                "Leg 6": "",
-                "Legs": ", ".join([leg["Desc"] for leg in bet]),
-                "Bet ID": bet_id,
-                "P": prev_p,
-                "PB": prev_pb,
-                "Fun": np.sum(
-                    [
-                        3
-                        - (
-                            np.abs(leg["Line"])
-                            / stat_std.get(info["League"], {}).get(leg["Market"], 1)
-                        )
-                        if ("H2H" in leg["Desc"])
-                        else 2
-                        - 1 / stat_cv.get(info["League"], {}).get(leg["Market"], 1)
-                        + leg["Line"] / stat_std.get(info["League"], {}).get(leg["Market"], 1)
-                        for leg in bet
-                        if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])
-                    ]
-                ),
-                "Bet Size": bet_size,
-                "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id),
-                "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
-                "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
-                "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),
-                "Indep PB": float(np.prod(p_books[np.ix_(bet_id)]) * payout),
-            }
-            for j in range(bet_size):
-                parlay_dict["Leg " + str(j + 1)] = bet[j]["Desc"]
-
-            all_results.append(parlay_dict)
-
-        candidates = [p for p, _ in top_candidates]
+            if result is not None:
+                all_results.append(result)
+        candidates = top_candidates
 
     return all_results
