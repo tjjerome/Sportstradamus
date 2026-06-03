@@ -148,7 +148,7 @@
     "NBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -166,13 +166,13 @@
         },
         "DREB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "FG3A": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -190,19 +190,19 @@
         },
         "FGM": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "FTM": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "MIN": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -244,7 +244,7 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -256,13 +256,13 @@
         },
         "STL": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "TOV": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -294,13 +294,13 @@
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -318,7 +318,7 @@
         },
         "passing tds": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "roe_mean"
         },
@@ -354,7 +354,7 @@
         },
         "receptions": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
@@ -372,7 +372,7 @@
         },
         "sacks taken": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -390,7 +390,7 @@
         },
         "yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         }
@@ -496,7 +496,7 @@
     "WNBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -508,13 +508,13 @@
         },
         "BLST": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "prob_recal_isotonic"
         },
         "DREB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
@@ -532,7 +532,7 @@
         },
         "FTM": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -544,7 +544,7 @@
         },
         "OREB": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -568,19 +568,19 @@
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_isotonic"
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "REB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -598,7 +598,7 @@
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         }
