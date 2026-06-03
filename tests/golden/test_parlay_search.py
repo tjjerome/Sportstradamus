@@ -15,17 +15,17 @@ Covers the four targets from ``docs/PARLAY_AUDIT.md`` remediation:
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
-from sportstradamus.prediction.correlation import (
+from sportstradamus.prediction.parlay import (
     _PSD_EIG_TOLERANCE,
     _expected_payout_with_pushes,
     _nearest_psd,
     _payout_curve_for,
+    assign_parlay_families,
+    beam_search_parlays,
 )
-import pandas as pd
-
-from sportstradamus.prediction.parlay import assign_parlay_families, beam_search_parlays
 
 
 def _grouped_c(groups: list[list[int]], intra: float, cross: float) -> np.ndarray:
