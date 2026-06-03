@@ -25,25 +25,11 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
-    _PSD_EIG_TOLERANCE,
-    _expected_payout_with_pushes,
-    _nearest_psd,
     _payout_curve_for,
     assign_parlay_families,
     beam_search_parlays,
 )
 from sportstradamus.spiderLogger import logger
-
-# Re-exported for backward-compat with downstream imports / tests; canonical
-# definitions live in ``prediction/parlay.py``.
-__all__ = [
-    "_PSD_EIG_TOLERANCE",
-    "_expected_payout_with_pushes",
-    "_nearest_psd",
-    "_payout_curve_for",
-    "beam_search_parlays",
-    "find_correlation",
-]
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
 # (where the team is the offensive actor) are weighted higher than the
@@ -152,6 +138,384 @@ def _build_game_corr_map(
     return c_map
 
 
+def _leg_bets(player: str, bet: str, n_markets: int) -> list[str]:
+    """Per-cMarket Over/Under labels for a leg; the 2nd flips for ``vs.`` props."""
+    bets = [bet] * n_markets
+    if "vs." in player:
+        bets[1] = "Under" if bet == "Over" else "Over"
+    return bets
+
+
+def _leg_pair_corr_boost(leg1, leg2, c_map, team_mod_map, opp_mod_map):
+    """Correlation and boost modifier for one leg pair (the cm1×cm2 inner loops).
+
+    Returns ``(rho, boost)`` with ``rho`` already averaged over the two cMarket
+    lists, ready to drop symmetrically into the game's C and M matrices.
+    """
+    cm1 = leg1["cMarket"]
+    cm2 = leg2["cMarket"]
+    b1 = _leg_bets(leg1["Player"], leg1["Bet"], len(cm1))
+    b2 = _leg_bets(leg2["Player"], leg2["Bet"], len(cm2))
+    n1 = leg1["Player"]
+    n2 = leg2["Player"]
+
+    rho = 0
+    boost = 0 if (n1 in n2 or n2 in n1) else 1
+    for xi, x in enumerate(cm1):
+        for yi, y in enumerate(cm2):
+            increment = c_map.get((x, y), c_map.get((y, x), 0))
+            if b1[xi] != b2[yi]:
+                increment = -increment
+            rho += increment
+
+            mod_map = team_mod_map if ("_OPP_" in x) == ("_OPP_" in y) else opp_mod_map
+
+            x_key = re.sub(r"[0-9]", "", x).replace("_OPP_", "")
+            y_key = re.sub(r"[0-9]", "", y).replace("_OPP_", "")
+
+            modifier = mod_map.get(frozenset([x_key, y_key]), [1, 1])
+            boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
+
+    return rho / len(cm1) / len(cm2), boost
+
+
+def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts):
+    """Per-game leg×leg correlation (C) / boost (M) matrices and EV grids.
+
+    Returns ``(C, M, EV, EVb, V, p_model, p_books, p_push, boosts)``: ``C``/``M``
+    symmetric leg matrices, ``EV``/``EVb`` the model/book pairwise expected
+    values, ``V`` the model std-dev outer product, and the per-leg probability /
+    boost vectors beam search consumes.
+    """
+    C = np.eye(len(game_dict))
+    M = np.zeros([len(game_dict), len(game_dict)])
+    p_model = game_df["Model P"].to_numpy()
+    p_books = game_df["Books P"].to_numpy()
+    # ``Push P`` is added by :func:`model_prob` for integer-line discrete markets;
+    # missing for combo legs etc. — fill 0.0 so the analytical mvn.cdf path runs.
+    if "Push P" in game_df.columns:
+        p_push = game_df["Push P"].fillna(0.0).to_numpy()
+    else:
+        p_push = np.zeros(len(game_df), dtype=float)
+    boosts = game_df["Boost"].to_numpy()
+    V = p_model * (1 - p_model)
+    V = V.reshape(len(game_dict), 1) * V
+    V = np.sqrt(V)
+    P = p_model.reshape(len(p_model), 1) * p_model
+    Vb = p_books * (1 - p_books)
+    Vb = Vb.reshape(len(game_dict), 1) * Vb
+    Vb = np.sqrt(Vb)
+    Pb = p_books.reshape(len(p_books), 1) * p_books
+    for i, j in combinations(range(len(game_dict)), 2):
+        rho, boost = _leg_pair_corr_boost(
+            game_dict[i], game_dict[j], c_map, team_mod_map, opp_mod_map
+        )
+        C[i, j] = C[j, i] = rho
+        M[i, j] = M[j, i] = boost
+
+    EV = (
+        np.multiply(
+            np.multiply(np.exp(np.multiply(C, V)), P),
+            boosts.reshape(len(boosts), 1) * M * boosts,
+        )
+        * search_payouts[0]
+    )
+    EVb = (
+        np.multiply(
+            np.multiply(np.exp(np.multiply(C, Vb)), Pb),
+            boosts.reshape(len(boosts), 1) * M * boosts,
+        )
+        * search_payouts[0]
+    )
+    return C, M, EV, EVb, V, p_model, p_books, p_push, boosts
+
+
+def _resolve_player_positions(league_df, league, stat_data, usage_str, tiebreaker_str, positions):
+    """Map each leg's numeric depth-chart slot to a position+rank label.
+
+    Non-MLB: drop combo / ``vs.`` legs, rank players within (team, position) by
+    the league's usage profile, and suffix the rank (``G1``/``G2``/...). MLB:
+    batting order to ``B{n}`` (or ``P`` for pitchers). Returns the updated
+    ``league_df`` (the non-MLB branch drops rows, so the caller must rebind).
+    """
+    if league != "MLB":
+        league_df["Player position"] = league_df["Player position"].apply(
+            lambda x: (
+                positions[league][x - 1]
+                if isinstance(x, int)
+                else [positions[league][i - 1] for i in x]
+            )
+        )
+        combo_df = league_df.loc[league_df.Player.str.contains(r"\+|vs.")]
+        league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
+        player_df = league_df[["Player", "Team", "Player position"]]
+        player_df.drop_duplicates(inplace=True)
+        stat_data.profile_market(usage_str[league])
+        usage = pd.DataFrame(
+            stat_data.playerProfile[[usage_str[league] + " short", tiebreaker_str[league]]]
+        )
+        usage.reset_index(inplace=True)
+        usage.rename(
+            columns={
+                "player display name": "Player",
+                "playerName": "Player",
+                "PLAYER_NAME": "Player",
+            },
+            inplace=True,
+        )
+        player_df = player_df.merge(usage, how="left").fillna(0).infer_objects(copy=False)
+        ranks = (
+            player_df.sort_values(tiebreaker_str[league], ascending=False)
+            .groupby(["Team", "Player position"])
+            .rank(ascending=False, method="first")[usage_str[league] + " short"]
+            .astype(int)
+        )
+        player_df["Player position"] = player_df["Player position"] + ranks.astype(str)
+        player_df.index = player_df.Player
+        player_df = player_df["Player position"].to_dict()
+        league_df["Player position"] = league_df.Player.map(player_df)
+    else:
+        league_df["Player position"] = league_df["Player position"].apply(
+            lambda x: (
+                ("B" + str(x) if x > 0 else "P")
+                if isinstance(x, int)
+                else ["B" + str(i) if i > 0 else "P" for i in x]
+            )
+        )
+    return league_df
+
+
+def _build_cmarket_desc(league_df, league, new_map):
+    """Add the ``cMarket`` (position.corr-name) and ``Desc`` display columns.
+
+    Mutates the shared ``new_map`` with the league's correlation-name overrides
+    (accumulating across leagues, matching the legacy single-dict behavior), then
+    builds one ``position.market`` token per leg — a list, for multi-position
+    combo legs.
+    """
+    if league == "NHL":
+        new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
+    if league in ("NBA", "WNBA"):
+        new_map.update({"Fantasy Points": "fantasy points prizepicks"})
+
+    league_df["cMarket"] = league_df.apply(
+        lambda x: (
+            [
+                x["Player position"]
+                + "."
+                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
+            ]
+            if isinstance(x["Player position"], str)
+            else [
+                p
+                + "."
+                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
+                for p in x["Player position"]
+            ]
+        ),
+        axis=1,
+    )
+
+    league_df["Desc"] = (
+        league_df[["Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
+    )
+    league_df["Desc"] = (
+        league_df["Desc"]
+        + " - "
+        + league_df["Model P"].multiply(100).round(1).astype(str)
+        + "%, "
+        + league_df["Boost"].round(2).astype(str)
+        + "x"
+    )
+    return league_df
+
+
+def _assemble_game_frame(league_df, team):
+    """Concatenate a team's legs with its opponent's and any split (combo) legs.
+
+    Opponent and split legs get their ``cMarket`` tokens ``_OPP_``-prefixed so
+    the correlation lookup can tell the two sides of the matchup apart. Returns
+    ``(game_df, opp, date)``.
+    """
+    team_df = league_df.loc[league_df["Team"] == team]
+    opp = team_df.Opponent.mode().values[0]
+    date = team_df.Date.mode().values[0]
+    opp_df = league_df.loc[league_df["Team"] == opp]
+    if not opp_df.empty:
+        opp_df["cMarket"] = opp_df.apply(lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1)
+    split_df = league_df.loc[
+        league_df["Team"].str.contains("/")
+        & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))
+    ]
+    if not split_df.empty:
+        split_df["cMarket"] = split_df.apply(
+            lambda x: [
+                ("_OPP_" + c) if (x["Team"].split("/")[d] == opp) else c
+                for d, c in enumerate(x["cMarket"])
+            ],
+            axis=1,
+        )
+    game_df = pd.concat([team_df, opp_df, split_df])
+    game_df.drop_duplicates(subset="Desc", inplace=True)
+    return game_df, opp, date
+
+
+def _select_bet_offers(game_df):
+    """Pre-filter and cap the legs that enter the beam search.
+
+    Keep only book-supported, model-favored legs, dedup, then bound the candidate
+    set per player / team / game so the cartesian parlay enumeration stays
+    tractable.
+    """
+    idx = game_df.loc[
+        (game_df["Books"] > _OFFER_BOOKS_EV_FLOOR)
+        & (game_df["Books P"] >= _OFFER_BOOKS_PROB_FLOOR)
+        & (game_df["Model"] > _OFFER_MODEL_EV_FLOOR)
+        & (game_df["Model P"] >= _OFFER_MODEL_PROB_FLOOR)
+    ].sort_values("K", ascending=False)
+    idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
+    idx = idx.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
+    idx = (
+        idx.sort_values(["Model", "Books"], ascending=False)
+        .groupby("Team")
+        .head(_MAX_OFFERS_PER_TEAM)
+        .sort_values(["Team", "Player"])
+    )
+    return (
+        idx.sort_values(["Model", "Books"], ascending=False)
+        .head(_MAX_OFFERS_PER_GAME)
+        .sort_values(["Team", "Player"])
+    )
+
+
+def _annotate_correlation_columns(df, game_df, EV, EVb, C, V):
+    """Fill each offer's ``Team`` / ``Opp Correlation`` display columns in ``df``.
+
+    For every leg, surface its top correlated same-team and opponent partners
+    (one per player) that clear the display EV / correlation gates.
+    """
+    for i, offer in game_df.iterrows():
+        indices = (
+            (EV[:, i] > _DISPLAY_MODEL_EV_FLOOR)
+            & (C[:, i] > _DISPLAY_CORR_FLOOR)
+            & (EVb[:, i] > _DISPLAY_BOOKS_EV_FLOOR)
+        )
+        corr = game_df.loc[indices].copy()
+        corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
+        corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
+        same = corr.loc[corr["Team"] == offer["Team"]]
+        other = corr.loc[corr["Team"] != offer["Team"]]
+        df.loc[
+            (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
+            "Team Correlation",
+        ] = ", ".join(
+            (same["Desc"] + " (" + same["Corr Mult"].round(2).astype(str) + "x)").to_list()
+        )
+        df.loc[
+            (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
+            "Opp Correlation",
+        ] = ", ".join(
+            (other["Desc"] + " (" + other["Corr Mult"].round(2).astype(str) + "x)").to_list()
+        )
+
+
+def _append_parlay_rows(parlay_df, best_bets, C):
+    """Dedup beam-search bets across the three sort views, label families, append.
+
+    Keeps the top ``_PARLAY_TOP_N_PER_SORT`` by Model EV / Rec Bet / Fun, dedups
+    the union, assigns parlay families, and concatenates onto ``parlay_df``.
+    """
+    bets = pd.DataFrame(best_bets)
+    df5 = (
+        pd.concat(
+            [
+                bets.sort_values("Model EV", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
+                bets.sort_values("Rec Bet", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
+                bets.sort_values("Fun", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
+            ]
+        )
+        .drop_duplicates()
+        .sort_values("Model EV", ascending=False)
+    )
+    df5["Family"] = assign_parlay_families(df5["Bet ID"].to_list(), C)
+    return pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
+
+
+def _process_league_games(
+    df,
+    league_df,
+    league,
+    platform,
+    c_same,
+    c_opp,
+    team_mod_map,
+    opp_mod_map,
+    search_payouts,
+    full_payouts,
+    parlay_df,
+    contest_variant,
+    legacy,
+):
+    """Annotate correlations and beam-search parlays for every game in a league.
+
+    For each (team, opponent) pairing: assemble the game frame, build the
+    correlation / boost matrices, annotate ``df``'s display columns, and — unless
+    the platform/league is parlay-ineligible — beam-search parlays onto
+    ``parlay_df`` (returned).
+    """
+    checked_teams = []
+    teams = [team for team in league_df.Team.unique() if "/" not in team]
+    for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
+        if team in checked_teams:
+            continue
+        game_df, opp, date = _assemble_game_frame(league_df, team)
+        checked_teams.append(team)
+        checked_teams.append(opp)
+
+        c_map = _build_game_corr_map(team, opp, c_same, c_opp)
+        game_df.reset_index(drop=True, inplace=True)
+        game_dict = game_df.to_dict("index")
+        idx = _select_bet_offers(game_df)
+        bet_df = idx.to_dict("index")
+
+        C, M, EV, EVb, V, p_model, p_books, p_push, boosts = _build_correlation_matrices(
+            game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts
+        )
+        _annotate_correlation_columns(df, game_df, EV, EVb, C, V)
+
+        if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
+            continue
+        info = {
+            "Game": "/".join(sorted([team, opp])),
+            "Date": date,
+            "League": league,
+            "Platform": platform,
+        }
+        max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
+        best_bets = beam_search_parlays(
+            idx,
+            EV,
+            C,
+            M,
+            p_model,
+            p_books,
+            p_push,
+            boosts,
+            search_payouts,
+            full_payouts,
+            max_boost,
+            bet_df,
+            info,
+            team,
+            opp,
+            contest_variant=contest_variant,
+            legacy=legacy,
+        )
+        if len(best_bets) > 0:
+            parlay_df = _append_parlay_rows(parlay_df, best_bets, C)
+    return parlay_df
+
+
 @line_profiler.profile
 def find_correlation(
     offers,
@@ -163,7 +527,7 @@ def find_correlation(
 ):
     """Annotate offers with correlation info and build parlay candidates.
 
-    Groups scored offers by game, loads the league correlation CSV, computes
+    Groups scored offers by game, loads the league correlation parquets, computes
     pairwise boost modifiers, fills ``Team Correlation`` / ``Opp Correlation``
     columns, and calls :func:`beam_search_parlays` for each game.
 
@@ -176,8 +540,8 @@ def find_correlation(
             the single-variant names are accepted for the ``pickem-build``
             path. Ignored for non-Underdog platforms.
         legacy: When True, reproduce the pre-2026.05 pipeline verbatim — no
-            PSD repair, no push-aware EV, mixed insurance/power Boost
-            overwrite at line 498. Removed next release.
+            PSD repair, no push-aware EV, mixed insurance/power Boost overwrite.
+            Removed next release.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
@@ -241,11 +605,9 @@ def find_correlation(
         "NHL": ["C", "W", "D", "G"],
         "WNBA": ["G", "F", "C"],
     }
-    # Search-list and full payout curve come from data/underdog_payouts.json
-    # (Underdog) or the per-platform legacy table. ``search_payouts`` is the
-    # single-multiplier-per-size list used inside the beam-search ranking;
-    # ``full_payouts`` is the per-(size, miss-count) lookup driving push-aware
-    # EV and the display Boost column.
+    # ``search_payouts`` is the single-multiplier-per-size list used inside the
+    # beam-search ranking; ``full_payouts`` is the per-(size, miss-count) lookup
+    # driving push-aware EV and the display Boost column.
     search_payouts, full_payouts = _payout_curve_for(platform, contest_variant, legacy=legacy)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
@@ -265,302 +627,30 @@ def find_correlation(
         if platform == "Underdog":
             league_df["Boost"] = league_df["Boost"] / UNDERDOG_BOOST_BASELINE
 
-        if league != "MLB":
-            league_df["Player position"] = league_df["Player position"].apply(
-                lambda x: (
-                    positions[league][x - 1]
-                    if isinstance(x, int)
-                    else [positions[league][i - 1] for i in x]
-                )
-            )
-            combo_df = league_df.loc[league_df.Player.str.contains(r"\+|vs.")]
-            league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
-            player_df = league_df[["Player", "Team", "Player position"]]
-            player_df.drop_duplicates(inplace=True)
-            stat_data.profile_market(usage_str[league])
-            usage = pd.DataFrame(
-                stat_data.playerProfile[[usage_str[league] + " short", tiebreaker_str[league]]]
-            )
-            usage.reset_index(inplace=True)
-            usage.rename(
-                columns={
-                    "player display name": "Player",
-                    "playerName": "Player",
-                    "PLAYER_NAME": "Player",
-                },
-                inplace=True,
-            )
-            player_df = player_df.merge(usage, how="left").fillna(0).infer_objects(copy=False)
-            ranks = (
-                player_df.sort_values(tiebreaker_str[league], ascending=False)
-                .groupby(["Team", "Player position"])
-                .rank(ascending=False, method="first")[usage_str[league] + " short"]
-                .astype(int)
-            )
-            player_df["Player position"] = player_df["Player position"] + ranks.astype(str)
-            player_df.index = player_df.Player
-            player_df = player_df["Player position"].to_dict()
-            league_df["Player position"] = league_df.Player.map(player_df)
-        else:
-            league_df["Player position"] = league_df["Player position"].apply(
-                lambda x: (
-                    ("B" + str(x) if x > 0 else "P")
-                    if isinstance(x, int)
-                    else ["B" + str(i) if i > 0 else "P" for i in x]
-                )
-            )
-
-        if league == "NHL":
-            new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
-        if league in ("NBA", "WNBA"):
-            new_map.update({"Fantasy Points": "fantasy points prizepicks"})
-
-        league_df["cMarket"] = league_df.apply(
-            lambda x: (
-                [
-                    x["Player position"]
-                    + "."
-                    + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
-                ]
-                if isinstance(x["Player position"], str)
-                else [
-                    p
-                    + "."
-                    + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
-                    for p in x["Player position"]
-                ]
-            ),
-            axis=1,
+        league_df = _resolve_player_positions(
+            league_df, league, stat_data, usage_str, tiebreaker_str, positions
         )
-
-        league_df["Desc"] = (
-            league_df[["Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
+        league_df = _build_cmarket_desc(league_df, league, new_map)
+        parlay_df = _process_league_games(
+            df,
+            league_df,
+            league,
+            platform,
+            c_same,
+            c_opp,
+            team_mod_map,
+            opp_mod_map,
+            search_payouts,
+            full_payouts,
+            parlay_df,
+            contest_variant,
+            legacy,
         )
-
-        league_df["Desc"] = (
-            league_df["Desc"]
-            + " - "
-            + league_df["Model P"].multiply(100).round(1).astype(str)
-            + "%, "
-            + league_df["Boost"].round(2).astype(str)
-            + "x"
-        )
-
-        checked_teams = []
-        teams = [team for team in league_df.Team.unique() if "/" not in team]
-        for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
-            if team in checked_teams:
-                continue
-            team_df = league_df.loc[league_df["Team"] == team]
-            opp = team_df.Opponent.mode().values[0]
-            date = team_df.Date.mode().values[0]
-            opp_df = league_df.loc[league_df["Team"] == opp]
-            if not opp_df.empty:
-                opp_df["cMarket"] = opp_df.apply(
-                    lambda x: ["_OPP_" + c for c in x["cMarket"]], axis=1
-                )
-            split_df = league_df.loc[
-                league_df["Team"].str.contains("/")
-                & (league_df["Team"].str.contains(team) | league_df["Team"].str.contains(opp))
-            ]
-            if not split_df.empty:
-                split_df["cMarket"] = split_df.apply(
-                    lambda x: [
-                        ("_OPP_" + c) if (x["Team"].split("/")[d] == opp) else c
-                        for d, c in enumerate(x["cMarket"])
-                    ],
-                    axis=1,
-                )
-            game_df = pd.concat([team_df, opp_df, split_df])
-            game_df.drop_duplicates(subset="Desc", inplace=True)
-            checked_teams.append(team)
-            checked_teams.append(opp)
-
-            c_map = _build_game_corr_map(team, opp, c_same, c_opp)
-
-            game_df.reset_index(drop=True, inplace=True)
-            game_dict = game_df.to_dict("index")
-
-            idx = game_df.loc[
-                (game_df["Books"] > _OFFER_BOOKS_EV_FLOOR)
-                & (game_df["Books P"] >= _OFFER_BOOKS_PROB_FLOOR)
-                & (game_df["Model"] > _OFFER_MODEL_EV_FLOOR)
-                & (game_df["Model P"] >= _OFFER_MODEL_PROB_FLOOR)
-            ].sort_values("K", ascending=False)
-            idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
-            idx = idx.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
-            idx = (
-                idx.sort_values(["Model", "Books"], ascending=False)
-                .groupby("Team")
-                .head(_MAX_OFFERS_PER_TEAM)
-                .sort_values(["Team", "Player"])
-            )
-            idx = (
-                idx.sort_values(["Model", "Books"], ascending=False)
-                .head(_MAX_OFFERS_PER_GAME)
-                .sort_values(["Team", "Player"])
-            )
-            bet_df = idx.to_dict("index")
-
-            C = np.eye(len(game_dict))
-            M = np.zeros([len(game_dict), len(game_dict)])
-            p_model = game_df["Model P"].to_numpy()
-            p_books = game_df["Books P"].to_numpy()
-            # ``Push P`` is added by :func:`model_prob` for integer-line discrete
-            # markets; missing for combo legs etc. — fill 0.0 so the analytical
-            # mvn.cdf path still runs for those legs.
-            if "Push P" in game_df.columns:
-                p_push = game_df["Push P"].fillna(0.0).to_numpy()
-            else:
-                p_push = np.zeros(len(game_df), dtype=float)
-            boosts = game_df["Boost"].to_numpy()
-            V = p_model * (1 - p_model)
-            V = V.reshape(len(game_dict), 1) * V
-            V = np.sqrt(V)
-            P = p_model.reshape(len(p_model), 1) * p_model
-            Vb = p_books * (1 - p_books)
-            Vb = Vb.reshape(len(game_dict), 1) * Vb
-            Vb = np.sqrt(Vb)
-            Pb = p_books.reshape(len(p_books), 1) * p_books
-            for i, j in combinations(range(len(game_dict)), 2):
-                leg1 = game_dict[i]
-                leg2 = game_dict[j]
-                cm1 = leg1["cMarket"]
-                cm2 = leg2["cMarket"]
-                b1 = [leg1["Bet"]] * len(cm1)
-                b2 = [leg2["Bet"]] * len(cm2)
-                n1 = leg1["Player"]
-                n2 = leg2["Player"]
-
-                if "vs." in n1:
-                    b1[1] = "Under" if b1[0] == "Over" else "Over"
-
-                if "vs." in n2:
-                    b2[1] = "Under" if b2[0] == "Over" else "Over"
-
-                rho = 0
-                boost = 0 if (n1 in n2 or n2 in n1) else 1
-                for xi, x in enumerate(cm1):
-                    for yi, y in enumerate(cm2):
-                        increment = c_map.get((x, y), c_map.get((y, x), 0))
-                        if b1[xi] != b2[yi]:
-                            increment = -increment
-                        rho += increment
-
-                        mod_map = team_mod_map if ("_OPP_" in x) == ("_OPP_" in y) else opp_mod_map
-
-                        x_key = re.sub(r"[0-9]", "", x)
-                        y_key = re.sub(r"[0-9]", "", y)
-                        x_key = x_key.replace("_OPP_", "")
-                        y_key = y_key.replace("_OPP_", "")
-
-                        modifier = mod_map.get(frozenset([x_key, y_key]), [1, 1])
-                        boost *= modifier[0] if b1[xi] == b2[yi] else modifier[1]
-
-                C[i, j] = C[j, i] = rho / len(cm1) / len(cm2)
-                M[i, j] = M[j, i] = boost
-
-            EV = (
-                np.multiply(
-                    np.multiply(np.exp(np.multiply(C, V)), P),
-                    boosts.reshape(len(boosts), 1) * M * boosts,
-                )
-                * search_payouts[0]
-            )
-            EVb = (
-                np.multiply(
-                    np.multiply(np.exp(np.multiply(C, Vb)), Pb),
-                    boosts.reshape(len(boosts), 1) * M * boosts,
-                )
-                * search_payouts[0]
-            )
-
-            for i, offer in game_df.iterrows():
-                indices = (
-                    (EV[:, i] > _DISPLAY_MODEL_EV_FLOOR)
-                    & (C[:, i] > _DISPLAY_CORR_FLOOR)
-                    & (EVb[:, i] > _DISPLAY_BOOKS_EV_FLOOR)
-                )
-                corr = game_df.loc[indices].copy()
-                corr["Corr Mult"] = np.exp(C[indices, i] * V[indices, i])
-                corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
-                same = corr.loc[corr["Team"] == offer["Team"]]
-                other = corr.loc[corr["Team"] != offer["Team"]]
-                df.loc[
-                    (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
-                    "Team Correlation",
-                ] = ", ".join(
-                    (same["Desc"] + " (" + same["Corr Mult"].round(2).astype(str) + "x)").to_list()
-                )
-                df.loc[
-                    (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
-                    "Opp Correlation",
-                ] = ", ".join(
-                    (
-                        other["Desc"] + " (" + other["Corr Mult"].round(2).astype(str) + "x)"
-                    ).to_list()
-                )
-
-            info = {
-                "Game": "/".join(sorted([team, opp])),
-                "Date": date,
-                "League": league,
-                "Platform": platform,
-            }
-            best_bets = []
-            if not (platform in ["Chalkboard", "ParlayPlay"] and league == "MLB"):
-                max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
-                best_bets = beam_search_parlays(
-                    idx,
-                    EV,
-                    C,
-                    M,
-                    p_model,
-                    p_books,
-                    p_push,
-                    boosts,
-                    search_payouts,
-                    full_payouts,
-                    max_boost,
-                    bet_df,
-                    info,
-                    team,
-                    opp,
-                    contest_variant=contest_variant,
-                    legacy=legacy,
-                )
-
-                if len(best_bets) > 0:
-                    bets = pd.DataFrame(best_bets)
-
-                    df5 = (
-                        pd.concat(
-                            [
-                                bets.sort_values("Model EV", ascending=False).head(
-                                    _PARLAY_TOP_N_PER_SORT
-                                ),
-                                bets.sort_values("Rec Bet", ascending=False).head(
-                                    _PARLAY_TOP_N_PER_SORT
-                                ),
-                                bets.sort_values("Fun", ascending=False).head(
-                                    _PARLAY_TOP_N_PER_SORT
-                                ),
-                            ]
-                        )
-                        .drop_duplicates()
-                        .sort_values("Model EV", ascending=False)
-                    )
-
-                    df5["Family"] = assign_parlay_families(df5["Bet ID"].to_list(), C)
-
-                    parlay_df = pd.concat(
-                        [parlay_df, df5.drop(columns="Bet ID")], ignore_index=True
-                    )
 
     if legacy and platform == "Underdog":
         # Legacy line-498 overwrite (audit §2.4): mixed insurance/power
-        # multipliers indexed by bet size. Preserved verbatim under
-        # ``legacy=True`` so historical exports stay reproducible.
+        # multipliers indexed by bet size, preserved so historical exports stay
+        # reproducible under ``legacy=True``.
         legacy_overwrite = _legacy_underdog_overwrite_payouts()
         parlay_df["Boost"] = (
             parlay_df["Bet Size"].apply(lambda x: legacy_overwrite.get(int(x), 0.0))
