@@ -11,11 +11,13 @@ import pytest
 
 from sportstradamus.training.scorecard import (
     _GATE1_CI_HI_MAX,
+    _GATE1_NONINF_MARGIN,
     _GATE2_STAR_Z_MAX,
     _GATE3_BENCH_Z_MAX,
     _GATE4_IQR_RATIO_MIN,
     _GATE5_ECE_MAX,
     _SUPERSEDE_S3_Z_MIN,
+    _dispersion_diagnostics,
     _ece_debias_offset,
     _gate1_brier_ci,
     _gate4_iqr_spread,
@@ -25,6 +27,8 @@ from sportstradamus.training.scorecard import (
     _infer_dist_from_columns,
     _iqr_pred_analytical,
     _memmel_sharpe_z,
+    _pred_midpit,
+    _pred_ppf,
     _segment_masks,
     _supersede_paired_brier_ci,
     _supersede_paired_sharpe,
@@ -755,6 +759,7 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g1_brier_diff_ci_lo_oracle",
         "g1_brier_diff_ci_hi_oracle",
         "g1_clustered_ci_hi",
+        "g1_brier_diff_ci_hi_standalone",
         "g1_brier_skill_score",
         "g2_star_pred_mean",
         "g2_star_true_mean",
@@ -772,6 +777,9 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g4_iqr_true",
         "g4_iqr_ratio",
         "g4_iqr_ratio_oracle",
+        "pit_ks_d",
+        "central50_coverage",
+        "central80_coverage",
         "g5_ece",
         "g5_ece_oracle",
         "g5_ece_null_bias",
@@ -887,7 +895,7 @@ def test_apply_thresholds_clean_cell_ships():
 
 def test_apply_thresholds_each_gate_fails_when_threshold_exceeded():
     fails = {
-        "g1": _clean_row(g1_brier_diff_ci_hi=0.001),  # CI doesn't exclude 0 below
+        "g1": _clean_row(g1_brier_diff_ci_hi=0.01),  # beyond the 0.005 tie margin (mild-worse)
         "g2": _clean_row(g2_star_z=0.51),  # over the 0.5 cap
         "g3": _clean_row(g3_bench_z=0.51),
         "g4": _clean_row(g4_iqr_ratio=0.49),  # below the 0.5 floor
@@ -897,6 +905,19 @@ def test_apply_thresholds_each_gate_fails_when_threshold_exceeded():
         out = apply_thresholds(row)
         assert not out[f"{gate}_pass"], f"{gate} should have failed"
         assert not out["ship"]
+
+
+def test_apply_thresholds_g1_non_inferiority_margin():
+    """G1 ships on the tie margin; ``g1_has_edge`` flags provable superiority separately."""
+    # Clear win (ci_hi < 0): ships and has edge.
+    win = apply_thresholds(_clean_row(g1_brier_diff_ci_hi=-0.03))
+    assert win["g1_pass"] and win["g1_has_edge"]
+    # Tight tie (0 <= ci_hi < margin): at least as good as the book ⇒ ships, but no edge.
+    tie = apply_thresholds(_clean_row(g1_brier_diff_ci_hi=0.002))
+    assert tie["g1_pass"] and not tie["g1_has_edge"] and tie["ship"]
+    # Mild-worse beyond the margin: fails, no edge.
+    worse = apply_thresholds(_clean_row(g1_brier_diff_ci_hi=0.01))
+    assert not worse["g1_pass"] and not worse["g1_has_edge"] and not worse["ship"]
 
 
 def test_apply_thresholds_g1_no_odds_auto_passes():
@@ -930,6 +951,7 @@ def test_apply_thresholds_g5_blank_fails():
 
 def test_strict_thresholds_are_pinned():
     """Lock the strict starter combo so an accidental tweak fails CI."""
+    assert _GATE1_NONINF_MARGIN == 0.005
     assert _GATE1_CI_HI_MAX == 0.0
     assert _GATE2_STAR_Z_MAX == 0.5
     assert _GATE3_BENCH_Z_MAX == 0.5
@@ -1405,3 +1427,117 @@ def test_live_window_cli_rejects_conflicting_flags(monkeypatch, tmp_path):
     )
     assert result.exit_code != 0
     assert "cannot combine" in result.output.lower()
+
+
+def _skewnormal_frame(pred_scale: float, *, true_scale: float = 4.0, n: int = 8000, seed: int = 3) -> pd.DataFrame:
+    """SkewNormal (α=0 ⇒ Normal) frame whose predictive scale may differ from truth.
+
+    Truth ~ Normal(0, ``true_scale``); the per-row predictive is Normal(0,
+    ``pred_scale``). ``pred_scale == true_scale`` is calibrated; smaller is
+    under-dispersed (intervals too narrow), larger is over-dispersed. No
+    ``MeanYr`` column, so the decode leaves ``SN_Scale`` untouched.
+    """
+    rng = np.random.default_rng(seed)
+    actual = rng.normal(0.0, true_scale, n)
+    return pd.DataFrame(
+        {
+            "Result": actual,
+            "EV": np.zeros(n),
+            "SN_Loc": np.zeros(n),
+            "SN_Scale": np.full(n, pred_scale),
+            "SN_Alpha": np.zeros(n),
+        }
+    )
+
+
+def test_pred_ppf_reconstructs_iqr_pred_analytical():
+    """`_iqr_pred_analytical` must equal `_iqr` of the concatenated `_pred_ppf` bag.
+
+    Guards the refactor that split the per-family quantile inversion out of the
+    pooled-IQR helper — the two must stay numerically identical.
+    """
+    df = _skewnormal_frame(pred_scale=4.0)
+    q25 = _pred_ppf(df, "SkewNormal", 0.25, strategy="baseline")
+    q75 = _pred_ppf(df, "SkewNormal", 0.75, strategy="baseline")
+    expected = np.percentile(np.concatenate([q25, q75]), 75) - np.percentile(
+        np.concatenate([q25, q75]), 25
+    )
+    assert _iqr_pred_analytical(df, "SkewNormal", strategy="baseline") == pytest.approx(expected)
+
+
+def test_dispersion_diagnostics_calibrated_is_near_nominal():
+    """A correctly-scaled predictive covers at its nominal rate with a tiny PIT-KS."""
+    df = _skewnormal_frame(pred_scale=4.0)
+    pit_ks, cov50, cov80 = _dispersion_diagnostics(
+        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
+    )
+    assert cov50 == pytest.approx(0.50, abs=0.04)
+    assert cov80 == pytest.approx(0.80, abs=0.04)
+    assert pit_ks < 0.05
+
+
+def test_dispersion_diagnostics_flags_underdispersion():
+    """Too-narrow predictive (half scale) → central coverage collapses, PIT-KS spikes.
+
+    This is the NFL-receptions pathology: actuals fall *outside* the central
+    interval far more than nominal, so coverage drops well below 0.50/0.80.
+    """
+    df = _skewnormal_frame(pred_scale=2.0)
+    pit_ks, cov50, cov80 = _dispersion_diagnostics(
+        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
+    )
+    assert cov50 < 0.35
+    assert cov80 < 0.60
+    assert pit_ks > 0.15
+
+
+def test_dispersion_diagnostics_flags_overdispersion():
+    """Too-wide predictive (double scale) → actuals cluster inside, coverage overshoots."""
+    df = _skewnormal_frame(pred_scale=8.0)
+    _, cov50, cov80 = _dispersion_diagnostics(
+        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
+    )
+    assert cov50 > 0.65
+    assert cov80 > 0.90
+
+
+def test_dispersion_diagnostics_zinb_is_finite_and_bounded():
+    """The count branch (ZINB mid-PIT + integer-quantile coverage) stays well-formed."""
+    rng = np.random.default_rng(11)
+    n = 3000
+    df = pd.DataFrame(
+        {
+            "Result": rng.poisson(0.7, n).astype(float),
+            "EV": np.full(n, 0.7),
+            "R": np.full(n, 1.5),
+            "NB_P": np.full(n, 0.4),
+            "Gate": np.full(n, 0.3),
+        }
+    )
+    assert _infer_dist_from_columns(df) == "ZINB"
+    pit_ks, cov50, cov80 = _dispersion_diagnostics(
+        df, "ZINB", df["Result"].to_numpy(), strategy="baseline"
+    )
+    for v in (pit_ks, cov50, cov80):
+        assert np.isfinite(v) and 0.0 <= v <= 1.0
+    pit = _pred_midpit(df, "ZINB", df["Result"].to_numpy(), strategy="baseline")
+    assert np.all((pit >= 0.0) & (pit <= 1.0))
+
+
+def test_standalone_g1_column_scores_preblend_probs():
+    """`g1_brier_diff_ci_hi_standalone` scores `P_standalone` on the fused rows.
+
+    Blank when the column is absent; present and distinct when supplied. With a
+    coin-flip standalone model and the frame's random (0.5) book, the standalone
+    paired-Brier ties the book (upper bound 0), while the sharp fused model beats
+    it (upper bound < 0) — so the standalone bound sits strictly above the fused.
+    """
+    df = _priced_frame()
+    base = gate_row(df, "EV", league="NBA", market="PTS", strategy="t")
+    assert base["g1_brier_diff_ci_hi_standalone"] is None
+
+    df_sa = df.copy()
+    df_sa["P_standalone"] = 0.5
+    row = gate_row(df_sa, "EV", league="NBA", market="PTS", strategy="t")
+    assert row["g1_brier_diff_ci_hi_standalone"] is not None
+    assert row["g1_brier_diff_ci_hi_standalone"] > row["g1_brier_diff_ci_hi"]

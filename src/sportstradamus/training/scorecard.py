@@ -96,12 +96,18 @@ _ECE_BINS: int = 10
 # Strict starter thresholds for the research->devel set-baseline gate (see
 # docs/ship_gate.md). The 5-gate row carries the raw measurements; these set
 # pass/fail. A cell ships (research -> devel) iff all five pass.
-#   G1 ci_hi  < 0    : 95% CI strictly excludes 0 below (model Brier < book's at 95%)
+#   G1 ci_hi  < δ    : non-inferiority — 95% CI upper bound below the statistical-tie
+#                      margin δ (ensemble Brier at most δ worse than the book: a tight
+#                      tie or a win passes; wildly-worse and underpowered-wide-CI fail)
 #   G2 star  z < 0.5 : top-mean-decile bias under half the segment's stdev of outcomes
 #   G3 bench z < 0.5 : bottom-quartile bias under half the segment's stdev of outcomes
 #   G4 iqr_ratio > 0.5: prediction IQR at least half the truth's (<= 50% compression)
 #   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5% (Roelofs-debiased: raw - null bias offset)
-_GATE1_CI_HI_MAX: float = 0.0
+# G1 ships on the tie margin (intent: "ensemble at least as good as the book"); the
+# stricter ci_hi < 0 (model provably beats the book) is retained as the reported,
+# non-decisive ``g1_has_edge`` flag for sizing/prioritization.
+_GATE1_NONINF_MARGIN: float = 0.005  # ~2% of the ~0.25 book Brier (~1 SE): max ensemble-vs-book Brier degradation called a tie
+_GATE1_CI_HI_MAX: float = 0.0  # reported-only g1_has_edge threshold (provable superiority)
 _GATE2_STAR_Z_MAX: float = 0.5
 _GATE3_BENCH_Z_MAX: float = 0.5
 _GATE4_IQR_RATIO_MIN: float = 0.5
@@ -241,7 +247,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         raise ValueError(f"{path.name} missing required columns: {sorted(missing)}")
     # Opportunistically keep brier-skill inputs when present; older CSVs without
     # them stay loadable and just skip the third gate downstream.
-    optional = {"P", "Odds", "Line", "Player", "Date"} & set(df.columns)
+    optional = {"P", "P_standalone", "Odds", "Line", "Player", "Date"} & set(df.columns)
     # Per-row distribution params (Operation Ship 75 Step 0.2 G4 audit).
     # ``training/pipeline.py::_step_persist_artifacts`` dumps these at lines
     # 1191-1212; older CSVs predating that dump simply leave them out and the
@@ -381,6 +387,23 @@ def _brier_skill_score(df: pd.DataFrame) -> float | None:
     if brier_book <= 0:
         return None
     return 1.0 - brier_model / brier_book
+
+
+def _standalone_g1_hi(
+    df: pd.DataFrame, p_book: np.ndarray, y: np.ndarray, index: pd.Index
+) -> float | None:
+    """Gate-1 CI upper bound for the *pre-blend* model probabilities (``P_standalone``).
+
+    Scored on the same priced rows as the fused gate (``index`` from
+    :func:`_brier_inputs`) against the same book, so the two upper bounds are
+    directly comparable: it shows whether the standalone model or the book
+    carries the fused pass. Report-only — never a ship term. ``None`` when the
+    column is absent (CSVs predating the dump).
+    """
+    if "P_standalone" not in df.columns:
+        return None
+    p_sa = np.clip(df.loc[index, "P_standalone"].to_numpy(), _PROBA_CLIP, 1 - _PROBA_CLIP)
+    return _gate1_brier_ci(p_sa, p_book, y, np.random.default_rng(_GATE1_SEED))[2]
 
 
 def _segment_masks(df: pd.DataFrame, n_deciles: int = N_DECILES) -> tuple[np.ndarray, np.ndarray]:
@@ -618,53 +641,125 @@ def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, n
     return raw_loc, raw_scale
 
 
-def _iqr_pred_analytical(df: pd.DataFrame, dist: str, *, strategy: str) -> float:
-    """Pooled analytical IQR of the predicted distribution across all rows.
+def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
+    """Per-row inverse CDF ``F⁻¹(q)`` of the predictive distribution.
 
-    Per-row ``q25 = F⁻¹(0.25)`` and ``q75 = F⁻¹(0.75)`` are evaluated via
-    ``scipy.stats.<dist>.ppf`` (custom inversion for the ZINB / ZAGamma
-    mixtures). The arrays are concatenated and the bag's
-    ``percentile(75) − percentile(25)`` is the pooled IQR — a discrete
-    approximation to the mixture-predictive IQR, validated against
-    sample-based pooled IQR to ≤ 0.001 on count families.
+    Shared by the Gate-4 pooled IQR and the PIT / coverage over-dispersion
+    diagnostics so both read the same per-row params the training pipeline
+    dumped into the test-set CSV. ``q`` is a scalar in ``(0, 1)``; the ZINB /
+    ZAGamma mixtures invert through the custom routines (a quantile at or below
+    the zero gate lands on 0).
     """
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
-        q25 = _scipy_skewnorm.ppf(0.25, alpha, loc=loc, scale=scale)
-        q75 = _scipy_skewnorm.ppf(0.75, alpha, loc=loc, scale=scale)
-    elif dist == "NegBin":
+        return _scipy_skewnorm.ppf(q, alpha, loc=loc, scale=scale)
+    if dist == "NegBin":
         r = df["R"].to_numpy(dtype=float)
         p = df["NB_P"].to_numpy(dtype=float)
-        q25 = _scipy_nbinom.ppf(0.25, r, 1.0 - p)
-        q75 = _scipy_nbinom.ppf(0.75, r, 1.0 - p)
-    elif dist == "ZINB":
+        return _scipy_nbinom.ppf(q, r, 1.0 - p)
+    if dist == "ZINB":
         r = df["R"].to_numpy(dtype=float)
         p = df["NB_P"].to_numpy(dtype=float)
         gate = df["Gate"].to_numpy(dtype=float)
-        q25 = _zinb_ppf(0.25, r, p, gate)
-        q75 = _zinb_ppf(0.75, r, p, gate)
-    elif dist == "Gamma":
+        return _zinb_ppf(q, r, p, gate)
+    if dist == "Gamma":
         # rate = concentration / EV; scale = 1 / rate = EV / concentration.
         a = df["Alpha"].to_numpy(dtype=float)
         ev = df["EV"].to_numpy(dtype=float)
-        scale = ev / np.maximum(a, 1e-12)
-        q25 = _scipy_gamma.ppf(0.25, a, scale=scale)
-        q75 = _scipy_gamma.ppf(0.75, a, scale=scale)
-    elif dist == "ZAGamma":
+        return _scipy_gamma.ppf(q, a, scale=ev / np.maximum(a, 1e-12))
+    if dist == "ZAGamma":
         # Mixture of point-mass at 0 (gate) + Gamma on Y>0. Per-row inversion
         # mirrors _zinb_ppf: q ≤ π → 0, else rescaled Gamma quantile.
         a = df["Alpha"].to_numpy(dtype=float)
         ev = df["EV"].to_numpy(dtype=float)
         gate = df["Gate"].to_numpy(dtype=float)
         scale = ev / np.maximum(a, 1e-12)
-        rescaled_25 = np.where(gate >= 0.25, 0.0, (0.25 - gate) / np.maximum(1 - gate, 1e-12))
-        rescaled_75 = np.where(gate >= 0.75, 0.0, (0.75 - gate) / np.maximum(1 - gate, 1e-12))
-        q25 = np.where(gate >= 0.25, 0.0, _scipy_gamma.ppf(rescaled_25, a, scale=scale))
-        q75 = np.where(gate >= 0.75, 0.0, _scipy_gamma.ppf(rescaled_75, a, scale=scale))
-    else:
-        raise ValueError(f"Unknown distribution family for analytical IQR: {dist!r}")
+        rescaled = np.where(gate >= q, 0.0, (q - gate) / np.maximum(1 - gate, 1e-12))
+        return np.where(gate >= q, 0.0, _scipy_gamma.ppf(rescaled, a, scale=scale))
+    raise ValueError(f"Unknown distribution family for analytical IQR: {dist!r}")
+
+
+def _iqr_pred_analytical(df: pd.DataFrame, dist: str, *, strategy: str) -> float:
+    """Pooled analytical IQR of the predicted distribution across all rows.
+
+    Per-row ``q25 = F⁻¹(0.25)`` and ``q75 = F⁻¹(0.75)`` (via :func:`_pred_ppf`)
+    are concatenated and the bag's ``percentile(75) − percentile(25)`` is the
+    pooled IQR — a discrete approximation to the mixture-predictive IQR,
+    validated against sample-based pooled IQR to ≤ 0.001 on count families.
+    """
+    q25 = _pred_ppf(df, dist, 0.25, strategy=strategy)
+    q75 = _pred_ppf(df, dist, 0.75, strategy=strategy)
     return _iqr(np.concatenate([q25, q75]))
+
+
+def _pred_midpit(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str) -> np.ndarray:
+    """Per-row (mid-)PIT ``F(y) − ½·P(Y=y)`` of the actual outcome ``y``.
+
+    Continuous families (SkewNormal, Gamma) have ``P(Y=y)=0`` so this is the
+    ordinary PIT ``F(y)``; the count / zero-inflated families use the
+    non-randomized mid-PIT (Czado-Gneiting-Held 2009) so a calibrated model
+    yields ~Uniform(0, 1) PITs without discrete-lattice spikes.
+    """
+    y = np.asarray(y, dtype=float)
+    if dist == "SkewNormal":
+        loc, scale = _decode_sn_loc_scale(df, strategy)
+        alpha = df["SN_Alpha"].to_numpy(dtype=float)
+        return _scipy_skewnorm.cdf(y, alpha, loc=loc, scale=scale)
+    if dist in ("NegBin", "ZINB"):
+        r = df["R"].to_numpy(dtype=float)
+        p = df["NB_P"].to_numpy(dtype=float)
+        cdf = _scipy_nbinom.cdf(y, r, 1.0 - p)
+        pmf = _scipy_nbinom.pmf(y, r, 1.0 - p)
+        if dist == "ZINB":
+            gate = df["Gate"].to_numpy(dtype=float)
+            cdf = gate + (1.0 - gate) * cdf
+            pmf = np.where(y == 0, gate + (1.0 - gate) * pmf, (1.0 - gate) * pmf)
+        return cdf - 0.5 * pmf
+    if dist in ("Gamma", "ZAGamma"):
+        a = df["Alpha"].to_numpy(dtype=float)
+        ev = df["EV"].to_numpy(dtype=float)
+        cdf = _scipy_gamma.cdf(y, a, scale=ev / np.maximum(a, 1e-12))
+        if dist == "ZAGamma":
+            gate = df["Gate"].to_numpy(dtype=float)
+            cdf = np.where(y == 0, gate, gate + (1.0 - gate) * cdf)
+            return cdf - 0.5 * np.where(y == 0, gate, 0.0)
+        return cdf
+    raise ValueError(f"Unknown distribution family for PIT: {dist!r}")
+
+
+def _ks_uniform(values: np.ndarray) -> float:
+    u = np.sort(np.clip(values, 0.0, 1.0))
+    n = len(u)
+    if n == 0:
+        return float("nan")
+    idx = np.arange(1, n + 1)
+    d_plus = float(np.max(idx / n - u))
+    d_minus = float(np.max(u - (idx - 1) / n))
+    return max(d_plus, d_minus)
+
+
+def _dispersion_diagnostics(
+    df: pd.DataFrame, dist: str, actual: np.ndarray, *, strategy: str
+) -> tuple[float, float, float]:
+    """Report-only over-dispersion triple ``(pit_ks_d, central50, central80)``.
+
+    PIT-KS gauges whole-distribution calibration; the two central-interval
+    coverages gauge dispersion directly — a coverage materially above its
+    nominal level (0.50 / 0.80) means the predictive interval is too wide
+    (over-dispersed), below means too narrow. None of the three is a ship gate;
+    they route the NFL SkewNormal over-dispersion to the model owners. Coverage
+    is nominal-lumpy on the discrete count families (the interval endpoints are
+    integer quantiles), exact on the continuous SkewNormal cells the audit targets.
+    """
+    pit = _pred_midpit(df, dist, actual, strategy=strategy)
+    lo50 = _pred_ppf(df, dist, 0.25, strategy=strategy)
+    hi50 = _pred_ppf(df, dist, 0.75, strategy=strategy)
+    lo80 = _pred_ppf(df, dist, 0.10, strategy=strategy)
+    hi80 = _pred_ppf(df, dist, 0.90, strategy=strategy)
+    cov50 = float(np.mean((actual >= lo50) & (actual <= hi50)))
+    cov80 = float(np.mean((actual >= lo80) & (actual <= hi80)))
+    return _ks_uniform(pit), cov50, cov80
 
 
 def _gate1_brier_ci(
@@ -930,11 +1025,18 @@ def gate_row(
     # in the golden tests). ``decode_strategy`` is the per-cell training
     # strategy (stat_meta lookup); ``strategy`` is just the run label kept
     # for the row.
+    # Report-only over-dispersion diagnostics (PIT uniformity + central-interval
+    # coverage) ride the same per-row params as the analytical IQR, so they share
+    # the g4 branch — blank on the legacy/synthetic frames that lack those params.
     g4_dist = _infer_dist_from_columns(df)
     decode_for_g4 = decode_strategy or strategy
+    g_pit_ks = g_cov50 = g_cov80 = None
     if g4_dist is not None:
         g4_iqr_pred, g4_iqr_true, g4_ratio = _gate4_iqr_spread(
             actual, pred, df=df, dist=g4_dist, strategy=decode_for_g4
+        )
+        g_pit_ks, g_cov50, g_cov80 = _dispersion_diagnostics(
+            df, g4_dist, actual, strategy=decode_for_g4
         )
     else:
         g4_iqr_pred, g4_iqr_true, g4_ratio = _gate4_iqr_spread(actual, pred)
@@ -946,7 +1048,7 @@ def gate_row(
     brier_in = _brier_inputs(df)
     if brier_in is None:
         g1_mean = g1_lo = g1_hi = g1_mean_o = g1_lo_o = g1_hi_o = bss = None
-        g1_clustered_hi = None
+        g1_clustered_hi = g1_standalone_hi = None
     else:
         p_model_b, p_book, y_b, priced_index = brier_in
         g1_mean, g1_lo, g1_hi = _gate1_brier_ci(
@@ -963,6 +1065,7 @@ def gate_row(
                 df.loc[priced_index, "Player"].to_numpy(),
                 np.random.default_rng(_GATE1_SEED),
             )[2]
+        g1_standalone_hi = _standalone_g1_hi(df, p_book, y_b, priced_index)
 
     # Gate 5 — model-only calibration. Needs P + Line (NOT Odds) — Gate 5 checks the
     # model's probabilities against outcomes; the book doesn't enter. Blank only if
@@ -1006,6 +1109,7 @@ def gate_row(
         "g1_brier_diff_ci_lo_oracle": r(g1_lo_o),
         "g1_brier_diff_ci_hi_oracle": r(g1_hi_o),
         "g1_clustered_ci_hi": r(g1_clustered_hi),
+        "g1_brier_diff_ci_hi_standalone": r(g1_standalone_hi),
         "g1_brier_skill_score": r(bss),
         "g2_star_pred_mean": r(g2_pred),
         "g2_star_true_mean": r(g2_true),
@@ -1023,6 +1127,9 @@ def gate_row(
         "g4_iqr_true": r(g4_iqr_true),
         "g4_iqr_ratio": r(g4_ratio),
         "g4_iqr_ratio_oracle": r(g4_ratio_oracle),
+        "pit_ks_d": r(g_pit_ks),
+        "central50_coverage": r(g_cov50),
+        "central80_coverage": r(g_cov80),
         "g5_ece": r(g5_ece),
         "g5_ece_oracle": r(g5_ece_o),
         "g5_ece_null_bias": r(g5_ece_bias),
@@ -1031,14 +1138,26 @@ def gate_row(
     }
 
 
+def _g1_within_tie_margin(hi: float | None) -> bool:
+    """Gate-1 ship test (non-inferiority): the paired-Brier CI upper bound sits below
+    the statistical-tie margin :data:`_GATE1_NONINF_MARGIN` — i.e. we are 95%
+    confident the fused ensemble's Brier is at most ``δ`` worse than the book's. A
+    tight tie or a win passes; a wildly-worse or underpowered (wide-CI) cell fails. A
+    blank bound (no ``Odds``) auto-passes — there is no book to beat.
+    """
+    return hi is None or hi < _GATE1_NONINF_MARGIN
+
+
 def _below_zero_ci_bound(hi: float | None) -> bool:
-    """Gate-1 pass test: the bootstrap CI upper bound must sit below 0.
+    """Reported ``g1_has_edge`` flag: the CI upper bound is below 0 (the model
+    *provably* beats the book), not merely within the tie margin. Non-decisive — the
+    ship gate is :func:`_g1_within_tie_margin`.
 
     ``hi`` is stored rounded to 4 dp and round() keeps the sign bit, so a
-    genuinely-negative bound in (-5e-5, 0) — e.g. receiving-yards' -0.00004 —
-    lands on -0.0, where a plain ``-0.0 < 0.0`` is False. A negative-signed zero
-    still beat the book, so treat it as below the bound. A blank bound (no
-    ``Odds``) auto-passes — there is no book to beat.
+    genuinely-negative bound in (-5e-5, 0) — e.g. receiving-yards' -0.00004 — lands on
+    -0.0, where a plain ``-0.0 < 0.0`` is False. A negative-signed zero still beat the
+    book, so treat it as below the bound. A blank bound (no ``Odds``) is True — no
+    book to beat.
     """
     if hi is None:
         return True
@@ -1048,7 +1167,8 @@ def _below_zero_ci_bound(hi: float | None) -> bool:
 def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     """Augment a :func:`gate_row` row with per-gate ``*_pass`` flags + overall ``ship``.
 
-    Applies the strict starter thresholds (:data:`_GATE1_CI_HI_MAX` etc.). Blank-cell
+    Gate 1 is a non-inferiority test (:data:`_GATE1_NONINF_MARGIN`); ``g1_has_edge``
+    reports the stricter provable-superiority result without gating on it. Blank-cell
     semantics — distinct because the gates fail for different structural reasons:
 
     * Gate 1 blank (no ``Odds``): **auto-pass** — no book to beat, model wins by
@@ -1060,7 +1180,7 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
       binary markets, flagged in ``docs/operation_ship_75.md`` Step 0.4 for revisit.
     """
     out = dict(row)
-    g1_pass = _below_zero_ci_bound(out.get("g1_brier_diff_ci_hi"))
+    g1_pass = _g1_within_tie_margin(out.get("g1_brier_diff_ci_hi"))
     g2 = out.get("g2_star_z")
     g2_pass = g2 is not None and g2 < _GATE2_STAR_Z_MAX
     g3 = out.get("g3_bench_z")
@@ -1072,6 +1192,7 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     g5 = out.get("g5_ece_debiased", out.get("g5_ece"))
     g5_pass = g5 is not None and g5 < _GATE5_ECE_MAX
     out["g1_pass"] = g1_pass
+    out["g1_has_edge"] = _below_zero_ci_bound(out.get("g1_brier_diff_ci_hi"))
     out["g2_pass"] = g2_pass
     out["g3_pass"] = g3_pass
     out["g4_pass"] = g4_pass

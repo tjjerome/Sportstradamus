@@ -62,6 +62,17 @@ calibration one), so the live tracks are a **stronger model** (which g1 ships
 automatically once whole-set Brier-skill turns positive — no gate change needed) or a
 **closing-line-value gate** once the test-CSV schema upgrade lands (Step 0.10).
 
+**Step 6 — Gate 1 non-inferiority (2026-06-02, branch `ship75-nfl-calibration-integrity`).**
+Gate 1 became a statistical-tie test (`ci_hi < 0.005`) instead of strict superiority
+(`ci_hi < 0`); strict superiority survives as the reported `g1_has_edge` flag. Of the
+six g1-only-fail SkewNormal cells above, exactly one is a genuine tie that flips:
+`passing-yards` (`ci_hi ≈ 0.0022`, `g1_has_edge = False`). The other five lean
+mildly-worse (CIs past δ) and correctly stay withheld. **NFL 11 → 12 once the operator
+promotes `passing-yards` `withheld → devel`** (one-line `stat_meta.json` edit; table
+above still shows the pre-promotion 11). New report-only diagnostics confirm the five
+non-flippers are an under-coverage (predictive-shape) problem, not a gate one — see
+Step 6 below. No previously shipped cell regresses.
+
 > **Reconciliation note (2026-05-31).** The 2026-05-23 snapshot this section
 > used to show (NFL 11, WNBA 12 → 41/59) was scored off *re-scored old test
 > CSVs* and was optimistic. The May-30 fresh retrain (commit `50e5dce`)
@@ -802,12 +813,17 @@ lever count 3, eligible for Step 4.
 For cells failing 3+ levers (user policy: push until ships OR fails
 ≥ 4 levers).
 
-**4.1 — Targeted gate audit.** Example: G1 fails on small-sample NFL
-(carries 895 rows, interceptions 383 rows) — wide CI is a sample
-issue. Widen `_GATE1_CI_HI_MAX` from `0.0` to `+0.005` only for
-small-n (< 1000) cells, AND only after demonstrating profitability in a
-14-day live A/B. Document every widening in this doc with rationale and
-flag for Gate-2.
+**4.1 — Targeted gate audit. ✅ CLOSED — superseded by the non-inferiority Gate 1
+(Step 5.1).** The original idea was to widen `_GATE1_CI_HI_MAX` from `0.0` to `+0.005`
+only for small-n (< 1000) cells, gated behind a 14-day live A/B. That was reframed to
+first principles: intent #3 is "*at least as good as* the book," so a statistical tie
+should pass at **any** N, not just small-n, and not behind a live gate (the live soak
+already owns the +EV question downstream). The fix is the **universal non-inferiority
+margin** `ci_hi < _GATE1_NONINF_MARGIN = 0.005` — see Step 6. It flips the genuine
+ties (`passing-yards`, `ci_hi ≈ 0.002`) on merit while still failing the mild-worse
+cells (`carries`/`completions`/etc., positive point estimates with CIs past δ), which
+remain a **model** problem (predictive over-/under-dispersion — Step 6 diagnostics),
+not a gate one. No per-cell `_GATE1_CI_HI_MAX` widenings were applied.
 
 **4.2 — Strategy A/B per cell.** If `ratio_meanyr` fails, try
 `centered_additive_eb_meanyr_k10` or `centered_additive_mean10`. P1
@@ -892,6 +908,55 @@ Re-entry condition (per cell): still kills after Steps 0–4 **AND**
 conditional Dunn–Smyth RQR variance < 0.70 **AND** Poisson GBM tracks
 top decile while NB compresses. Score only on cells reaching Step 5;
 if zero qualify (likely), family build stays parked.
+
+### Step 6 — Gate 1 as a non-inferiority test (DONE 2026-06-02)
+
+**The change.** Gate 1 was strict superiority (`ci_hi < 0` — the 95% paired-Brier CI
+had to sit *entirely below* 0). That over-specifies intent #3, which is "the deployed
+ensemble is *at least as good as* the book." Gate 1 is now a one-sided
+**non-inferiority** test: `g1_pass ⇔ ci_hi < _GATE1_NONINF_MARGIN = 0.005` — 95%
+confident the fused ensemble's Brier is at most δ worse than the book's. A tight tie or
+a win passes; a mild-worse-beyond-δ or an underpowered (wide-CI) cell still fails.
+`δ = 0.005 ≈ 2% of the ≈0.25 book Brier ≈ one SE` — a tie tolerance, not a degradation
+allowance. The strict-superiority test survives as a **reported** flag,
+`g1_has_edge` (`ci_hi < 0`), never in the `ship` AND.
+
+**Effect (offline, re-scored).** NFL `11 → 12`: only `passing-yards` flips
+(`ci_hi ≈ 0.0022`, a genuine dead-even tie; `g1_has_edge = False`). The other six
+g1-fails (`carries`, `attempts`, `completions`, `receiving-yards`, `rushing-yards`,
+`passing-first-downs`) lean **mildly worse** (positive point estimates, CIs past δ) and
+correctly stay withheld — reaching them would need δ ≈ 5% (real degradation), which was
+declined. **This intentionally does not hit 75% by gate change alone.** Promotion of
+`passing-yards` (`withheld → devel`) is the operator's one-line `stat_meta.json` edit;
+the 14-day soak then watches it. No previously shipped cell regresses (non-inferiority
+only *adds* ties).
+
+**Why a tie is safe to ship.** The gate certifies **deployable** (calibrated +
+uncompressed + tie-or-better). Whether it's **+EV to bet** — and how much — is owned
+downstream by the EV calc, the Kelly sizer (`kelly_shrinkage = clip(brier_skill_score,
+0, 1)` → a tie cell is sized to ~0 until it earns live edge), and the Gate-2 soak. New
+legibility column `betting_active = ship AND kelly_shrinkage > 0` surfaces the
+deployable-vs-staking split (e.g. NFL `receptions`/`tds` ship but stake 0).
+
+**The honest breadth lever is model work, not a looser gate.** New **report-only**
+diagnostics (`pit_ks_d`, `central50_coverage`, `central80_coverage`) measure predictive
+*shape*, which Gates 2/3 (segment means) and Gate 4 (marginal IQR, between/within-player
+confounded) miss. Re-audit finding: the withheld NFL SkewNormal cells are **under-covered**,
+not "over-dispersed" as previously written — NFL `receptions` reads `central50_coverage
+≈ 0.24` (vs nominal 0.50: actuals fall *outside* the central interval far too often →
+predictive too narrow / mislocated), and Gate 4's own ratio agrees (0.68 < 1) but its
+lenient 0.5 threshold waves it through. Fixing that predictive shape turns the six
+mild-worse cells into ties/wins that pass δ=0.005 **on merit**. Routed to the model
+owners (this is a diagnostic, not a gate). Companion `g1_brier_diff_ci_hi_standalone`
+(pre-blend `P_standalone`) attributes the pass to model vs book; both populate on the
+next `meditate` (their columns are dumped by the training pipeline).
+
+**Deferred.** Persisting `Player`/`Date` on combined-stat cells (`receptions`,
+`targets`, `tds`, `yards`) to activate the player-clustered Gate-1 recheck on them —
+the pooled PIT/coverage diagnostics do **not** need it (they are per-row), and a summed
+combined row has no single owning player/date, so this needs the training-data join
+resolved first. Single-stat cells (e.g. `passing-yards`) already carry both and run the
+clustered recheck today.
 
 ## Tier-1 supersession (preserves shipped cells)
 
