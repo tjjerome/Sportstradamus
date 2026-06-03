@@ -26,7 +26,7 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers import LazyArchive, stat_map
 from sportstradamus.prediction.correlation import find_correlation
-from sportstradamus.prediction.model_prob import model_prob
+from sportstradamus.prediction.model_prob import book_fallback_prob, model_prob, normalize_market
 from sportstradamus.spiderLogger import logger
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
@@ -86,15 +86,8 @@ def process_offers(offer_dict, book, stats, *, contest_variant="pooled", legacy=
 
                 for market, offers in markets.items():
                     archive.add_dfs(offers, book, stat_map[book])
-                    playerStats = match_offers(offers, league, market, book, stat_data)
                     pbar.update(len(offers))
-                    if len(playerStats) == 0:
-                        logger.info(f"{league}, {market} offers not matched")
-                    else:
-                        modeled_offers = model_prob(
-                            offers, league, market, book, stat_data, playerStats
-                        )
-                        new_offers.extend(modeled_offers)
+                    new_offers.extend(_score_market(offers, league, market, book, stat_data))
 
     offer_df, parlays = find_correlation(
         new_offers, stats, book, contest_variant=contest_variant, legacy=legacy
@@ -102,6 +95,22 @@ def process_offers(offer_dict, book, stats, *, contest_variant="pooled", legacy=
 
     logger.info(str(len(offer_df)) + " offers processed")
     return offer_df, parlays
+
+
+def _score_market(offers, league, market, book, stat_data):
+    """Score one market's offers — trained model when present, else book odds.
+
+    Builds the feature matrix; when it comes back empty (no model pickle, or no
+    player matched) falls back to :func:`book_fallback_prob`, which devigs the
+    composite book odds into the model slot. Returns the scored offer records.
+    """
+    playerStats = match_offers(offers, league, market, book, stat_data)
+    if len(playerStats) == 0:
+        modeled = book_fallback_prob(offers, league, market, book, stat_data)
+        if not modeled:
+            logger.info(f"{league}, {market} offers not matched")
+        return modeled
+    return model_prob(offers, league, market, book, stat_data, playerStats)
 
 
 @line_profiler.profile
@@ -124,11 +133,7 @@ def match_offers(offers, league, market, platform, stat_data):
             DataFrame when the market is not in the gamelog or no model
             file exists.
     """
-    market = stat_map[platform].get(market, market)
-    if league == "NHL":
-        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
-    if league in ("NBA", "WNBA"):
-        market = market.replace("underdog", "prizepicks")
+    market = normalize_market(league, market, platform)
     if market in stat_data.gamelog.columns:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
