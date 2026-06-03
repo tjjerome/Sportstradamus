@@ -790,7 +790,7 @@ class StatsMLB(Stats):
     def _mlb_quality_start_ev(v_outs, v_runs, weight):
         if v_outs <= 0:
             return 0
-        std = stat_cv["MLB"].get("quality start", 1) * v_outs
+        std = stat_cv.get("MLB", {}).get("quality start", 1) * v_outs
         p = norm.sf(18, v_outs, std) + norm.pdf(18, v_outs, std)
         p *= poisson.cdf(3, v_runs) if v_runs > 0 else 0.5
         return p * weight
@@ -814,7 +814,7 @@ class StatsMLB(Stats):
         v_outs = 0
         v_runs = 0
         for submarket, weight in self._mlb_fantasy_props(market):
-            sub_cv = stat_cv["MLB"].get(submarket, 1)
+            sub_cv = stat_cv.get("MLB", {}).get(submarket, 1)
             sub_dist = stat_dist.get("MLB", {}).get(submarket, "Gamma")
             v = archive.get_ev("MLB", submarket, date, player)
             subline = archive.get_line("MLB", submarket, date, player)

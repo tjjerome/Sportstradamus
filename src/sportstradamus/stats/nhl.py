@@ -865,7 +865,7 @@ class StatsNHL(Stats):
 
         else:
             team = player_games[self.log_strings["team"]].iloc[-1]
-            opponent = self.upcoming_games[team][self.log_strings["opponent"]]
+            opponent = self.upcoming_games[team]["Opponent"]
 
         date = date.strftime("%Y-%m-%d")
         ev = 0

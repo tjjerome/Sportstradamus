@@ -1721,7 +1721,7 @@ class Stats:
         return v
 
     def _submarket_ev(self, submarket, date, player, dist, cv):
-        sub_cv = stat_cv[self.league].get(submarket, 1)
+        sub_cv = stat_cv.get(self.league, {}).get(submarket, 1)
         sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
         v = archive.get_ev(self.league, submarket, date, player)
         subline = archive.get_line(self.league, submarket, date, player)
