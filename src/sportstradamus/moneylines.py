@@ -174,6 +174,122 @@ def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
     logger.info("Success!")
 
 
+def _moneyline_sports(apikey, sport, key, historical):
+    """Resolve ``[(odds_api_sport_key, league), ...]`` and the low-credit flag.
+
+    Returns ``(None, False)`` to signal the caller to bail without touching the
+    archive. ``sport="All"`` enumerates active leagues from the Odds API sports
+    index filtered to ``LEAGUES_OF_INTEREST``; an explicit ``sport`` requires the
+    caller to pass the Odds API ``key`` directly (used by the backfill script).
+    """
+    if sport != "All":
+        if key is None:
+            logger.warning("Key needed for sports other than All")
+            return None, False
+        return [(key, sport)], False
+    if historical:
+        logger.warning("All sports only supported if date is today")
+        return None, False
+    res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey["odds_api"]})
+    if res.status_code != HTTPStatus.OK:
+        return None, False
+    low_on_credits = int(res.headers.get("X-Requests-Remaining")) < _LOW_API_CREDITS_THRESHOLD
+    sports = [
+        (s["key"], s["title"])
+        for s in res.json()
+        if s["title"] in LEAGUES_OF_INTEREST and s["active"]
+    ]
+    return sports, low_on_credits
+
+
+def _moneyline_request(apikey, date, historical, low_on_credits):
+    markets = ["h2h", "totals", "spreads"]
+    if historical:
+        return ODDS_API_HISTORICAL_ODDS_URL, 1, {
+            "apiKey": apikey["odds_api_plus"],
+            "regions": "us",
+            "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "markets": ",".join(markets),
+        }
+    return ODDS_API_ODDS_URL, 6, {
+        "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
+        "regions": "us",
+        "markets": ",".join(markets),
+    }
+
+
+def _parse_market_books(game):
+    """Parse one game's bookmakers into per-book no-vig EV dicts.
+
+    Returns ``(moneyline_home, moneyline_away, totals, spread_home,
+    spread_away)``, each keyed by book; the caller blends ``totals`` with the
+    spreads into the archive's ``Totals`` bucket.
+    """
+    moneyline_home, moneyline_away = {}, {}
+    totals = {}
+    spread_home, spread_away = {}, {}
+    for book in game["bookmakers"]:
+        for market in book["markets"]:
+            if market["key"] == "h2h":
+                odds = no_vig_odds(
+                    market["outcomes"][0]["price"], market["outcomes"][1]["price"]
+                )
+                if market["outcomes"][0]["name"] == game["home_team"]:
+                    moneyline_home[book["key"]] = odds[0]
+                    moneyline_away[book["key"]] = odds[1]
+                else:
+                    moneyline_home[book["key"]] = odds[1]
+                    moneyline_away[book["key"]] = odds[0]
+            elif market["key"] == "totals":
+                outcomes = sorted(market["outcomes"], key=itemgetter("name"))
+                odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
+                totals[book["key"]] = get_ev(outcomes[1]["point"], odds[1])
+            elif market["key"] == "spreads" and market["outcomes"][0].get("point"):
+                outcomes = sorted(market["outcomes"], key=itemgetter("point"))
+                odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
+                spread = get_ev(outcomes[1]["point"], odds[1])
+                if outcomes[0]["name"] == game["home_team"]:
+                    spread_home[book["key"]] = spread
+                    spread_away[book["key"]] = -spread
+                else:
+                    spread_home[book["key"]] = -spread
+                    spread_away[book["key"]] = spread
+    return moneyline_home, moneyline_away, totals, spread_home, spread_away
+
+
+def _store_game_moneylines(archive, game, league, date, dayDelta):
+    """Resolve one game's date + teams and write its moneyline/totals books."""
+    gameDate = datetime.fromisoformat(game["commence_time"]).astimezone(
+        pytz.timezone("America/Chicago")
+    )
+    if gameDate > date + timedelta(days=dayDelta):
+        return
+    gameDate = gameDate.strftime("%Y-%m-%d")
+
+    homeTeam = abbreviations[league].get(remove_accents(game["home_team"]))
+    awayTeam = abbreviations[league].get(remove_accents(game["away_team"]))
+    if homeTeam is None or awayTeam is None:
+        return
+
+    moneyline_home, moneyline_away, totals, spread_home, spread_away = _parse_market_books(game)
+    archive.set_team_books(league, "Moneyline", gameDate, awayTeam, moneyline_away)
+    archive.set_team_books(league, "Moneyline", gameDate, homeTeam, moneyline_home)
+    archive.set_team_books(
+        league,
+        "Totals",
+        gameDate,
+        awayTeam,
+        {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals.items()},
+    )
+    archive.set_team_books(
+        league,
+        "Totals",
+        gameDate,
+        homeTeam,
+        {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals.items()},
+    )
+
+
 def get_moneylines(
     archive,
     apikey,
@@ -190,117 +306,18 @@ def get_moneylines(
     for backfills).
     """
     historical = date.date() != datetime.today().date()
-    low_on_credits = 0
-
-    if sport == "All":
-        if historical:
-            logger.warning("All sports only supported if date is today")
-            return archive
-        res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey["odds_api"]})
-        if res.status_code != HTTPStatus.OK:
-            return archive
-
-        low_on_credits = int(res.headers.get("X-Requests-Remaining")) < _LOW_API_CREDITS_THRESHOLD
-        res = res.json()
-
-        sports = [
-            (s["key"], s["title"]) for s in res if s["title"] in LEAGUES_OF_INTEREST and s["active"]
-        ]
-    elif key is None:
-        logger.warning("Key needed for sports other than All")
+    sports, low_on_credits = _moneyline_sports(apikey, sport, key, historical)
+    if sports is None:
         return archive
-    else:
-        sports = [(key, sport)]
 
-    markets = ["h2h", "totals", "spreads"]
-
-    if historical:
-        url_template = ODDS_API_HISTORICAL_ODDS_URL
-        dayDelta = 1
-        params = {
-            "apiKey": apikey["odds_api_plus"],
-            "regions": "us",
-            "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "markets": ",".join(markets),
-        }
-    else:
-        url_template = ODDS_API_ODDS_URL
-        dayDelta = 6
-        params = {
-            "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
-            "regions": "us",
-            "markets": ",".join(markets),
-        }
-
+    url_template, dayDelta, params = _moneyline_request(apikey, date, historical, low_on_credits)
     for sport, league in sports:
         res = _get_with_retry(url_template.format(sport=sport), params=params)
         if res.status_code != HTTPStatus.OK:
             continue
-
-        res = res.json()["data"] if historical else res.json()
-
-        for game in tqdm(res, desc=f"Getting {league} Game Data", unit="game"):
-            gameDate = datetime.fromisoformat(game["commence_time"]).astimezone(
-                pytz.timezone("America/Chicago")
-            )
-            if gameDate > date + timedelta(days=dayDelta):
-                continue
-            gameDate = gameDate.strftime("%Y-%m-%d")
-
-            homeTeam = abbreviations[league].get(remove_accents(game["home_team"]))
-            awayTeam = abbreviations[league].get(remove_accents(game["away_team"]))
-            if homeTeam is None or awayTeam is None:
-                continue
-
-            moneyline_home = {}
-            moneyline_away = {}
-            totals = {}
-            spread_home = {}
-            spread_away = {}
-
-            for book in game["bookmakers"]:
-                for market in book["markets"]:
-                    if market["key"] == "h2h":
-                        odds = no_vig_odds(
-                            market["outcomes"][0]["price"], market["outcomes"][1]["price"]
-                        )
-                        if market["outcomes"][0]["name"] == game["home_team"]:
-                            moneyline_home[book["key"]] = odds[0]
-                            moneyline_away[book["key"]] = odds[1]
-                        else:
-                            moneyline_home[book["key"]] = odds[1]
-                            moneyline_away[book["key"]] = odds[0]
-                    elif market["key"] == "totals":
-                        outcomes = sorted(market["outcomes"], key=itemgetter("name"))
-                        odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-                        totals[book["key"]] = get_ev(outcomes[1]["point"], odds[1])
-                    elif market["key"] == "spreads" and market["outcomes"][0].get("point"):
-                        outcomes = sorted(market["outcomes"], key=itemgetter("point"))
-                        odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-                        spread = get_ev(outcomes[1]["point"], odds[1])
-                        if outcomes[0]["name"] == game["home_team"]:
-                            spread_home[book["key"]] = spread
-                            spread_away[book["key"]] = -spread
-                        else:
-                            spread_home[book["key"]] = -spread
-                            spread_away[book["key"]] = spread
-
-            archive.set_team_books(league, "Moneyline", gameDate, awayTeam, moneyline_away)
-            archive.set_team_books(league, "Moneyline", gameDate, homeTeam, moneyline_home)
-            archive.set_team_books(
-                league,
-                "Totals",
-                gameDate,
-                awayTeam,
-                {k: (v + spread_away.get(k, 0)) / 2 for k, v in totals.items()},
-            )
-            archive.set_team_books(
-                league,
-                "Totals",
-                gameDate,
-                homeTeam,
-                {k: (v + spread_home.get(k, 0)) / 2 for k, v in totals.items()},
-            )
+        games = res.json()["data"] if historical else res.json()
+        for game in tqdm(games, desc=f"Getting {league} Game Data", unit="game"):
+            _store_game_moneylines(archive, game, league, date, dayDelta)
 
     return archive
 
