@@ -22,8 +22,11 @@ training matrix's per-player historical moments; kept here because it
 shares the distribution-family dispatch with the inversion code.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.optimize import brentq, minimize
+from scipy.special import expit, logit
 from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
 
 # Weight on the lower-bound tail violation in ``fit_distro``'s objective: the
@@ -34,6 +37,20 @@ LOWER_TAIL_PENALTY = 100
 # Above this raw value softplus(x) ≈ x to machine precision; ``_softplus_inv``
 # returns x directly past it to dodge expm1 overflow.
 SOFTPLUS_LINEAR_THRESHOLD = 20
+
+# Historical zero rate above which a cell is treated as zero-inflated: the
+# SkewNormal gate is published, NegBin escalates to ZINB, and the book gate
+# joins the blend. Below it the zero mass is noise. Shared by the training and
+# prediction decode paths so the two cannot drift on this cutoff.
+GATE_PUBLISH_THRESHOLD = 0.02
+
+# Historical zero rate above which a SkewNormal cell trains on nonzero rows and
+# decodes its location/scale against ``MeanYr_nonzero`` instead of ``MeanYr``.
+# Shared by both pipelines for the same reason as GATE_PUBLISH_THRESHOLD.
+NONZERO_DENOM_GATE = 0.05
+
+# Logit-space clip keeping temperature scaling clear of the 0/1 singularities.
+LOGIT_CLIP_EPS = 1e-6
 
 
 def odds_to_prob(odds):
@@ -310,6 +327,84 @@ def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=Non
         return np.zeros_like(line_arr)
 
     return np.where(is_integer & nonneg, pmf, 0.0)
+
+
+@dataclass
+class DecodedParams:
+    """Base-distribution mean plus the shape parameters ``get_odds`` consumes.
+
+    Only the fields relevant to the family are populated: ``r`` for
+    NegBin/ZINB, ``alpha`` for Gamma/ZAGamma, ``sigma``/``skew`` for SkewNormal.
+    ``gate`` is the per-row zero-inflation gate (ZINB/ZAGamma) or the broadcast
+    historical gate (SkewNormal), and is ``None`` when the cell is not gated.
+    """
+
+    ev: np.ndarray
+    r: np.ndarray | None = None
+    alpha: np.ndarray | None = None
+    sigma: np.ndarray | None = None
+    skew: np.ndarray | None = None
+    gate: np.ndarray | None = None
+
+
+def decode_predictive_mean(prob_params, dist, *, sn_loc=None, sn_scale=None, hist_gate=0.0):
+    """Decode raw LightGBMLSS ``predict(pred_type="parameters")`` output.
+
+    Single source of truth for the train-side and predict-side decode of a
+    distribution's base mean and shape, so the two pipelines cannot drift on the
+    parameterization. ``get_odds`` consumes the returned shape directly.
+
+    SkewNormal requires ``sn_loc``/``sn_scale`` already run through the
+    ``training.baselines`` registry by the caller — ``helpers`` must not import
+    ``training`` — and publishes the gate from ``hist_gate`` above
+    :data:`GATE_PUBLISH_THRESHOLD`. The count families carry their own per-row
+    gate column and ignore ``hist_gate``.
+
+    Args:
+        prob_params: Frame/dict-like with the raw distribution columns:
+            ``total_count``/``probs``/``gate`` (NegBin/ZINB),
+            ``concentration``/``rate``/``gate`` (Gamma/ZAGamma), or ``alpha``
+            (SkewNormal skewness).
+        dist: Distribution family name.
+        sn_loc: SkewNormal decoded location (required for SkewNormal).
+        sn_scale: SkewNormal decoded scale (required for SkewNormal).
+        hist_gate: SkewNormal historical zero rate; published as the gate when
+            above the threshold. Ignored for count families.
+
+    Returns:
+        DecodedParams with ``ev`` plus the family's shape fields populated.
+    """
+    if dist in ("NegBin", "ZINB"):
+        r = np.asarray(prob_params["total_count"], dtype=float)
+        p = np.asarray(prob_params["probs"], dtype=float)
+        gate = np.asarray(prob_params["gate"], dtype=float) if dist == "ZINB" else None
+        return DecodedParams(ev=r * p / (1 - p), r=r, gate=gate)
+
+    if dist in ("Gamma", "ZAGamma"):
+        alpha = np.asarray(prob_params["concentration"], dtype=float)
+        beta = np.asarray(prob_params["rate"], dtype=float)
+        gate = np.asarray(prob_params["gate"], dtype=float) if dist == "ZAGamma" else None
+        return DecodedParams(ev=alpha / beta, alpha=alpha, gate=gate)
+
+    sn_loc = np.asarray(sn_loc, dtype=float)
+    sn_scale = np.asarray(sn_scale, dtype=float)
+    skew = np.asarray(prob_params["alpha"], dtype=float)
+    delta = skew / np.sqrt(1 + skew**2)
+    ev = sn_loc + sn_scale * delta * np.sqrt(2 / np.pi)
+    gate = np.full_like(ev, float(hist_gate)) if hist_gate > GATE_PUBLISH_THRESHOLD else None
+    return DecodedParams(ev=ev, sigma=sn_scale, skew=skew, gate=gate)
+
+
+def apply_temperature(p_over, temperature):
+    """Temperature-scale an over-probability in logit space.
+
+    Shared by the prediction and training calibration paths. Returns ``p_over``
+    unchanged when ``temperature`` is ``None`` (no calibration fitted).
+    """
+    if temperature is None:
+        return p_over
+    clipped = np.clip(p_over, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS)
+    return expit(logit(clipped) / temperature)
 
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=0.1, upper_tol=0.001):

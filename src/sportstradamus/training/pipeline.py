@@ -30,6 +30,10 @@ from sklearn.model_selection import train_test_split
 
 from sportstradamus import data
 from sportstradamus.helpers import (
+    GATE_PUBLISH_THRESHOLD,
+    NONZERO_DENOM_GATE,
+    apply_temperature,
+    decode_predictive_mean,
     fused_loc,
     get_ev,
     get_logger,
@@ -73,17 +77,10 @@ _MIN_DIAGNOSTIC_ROWS: int = 10
 # training, latest 30% is held out for evaluation.  Temporal ordering (not
 # random split) prevents look-ahead leakage of player form.
 _TRAIN_FRACTION: float = 0.7
-# Minimum historical zero rate (hist_gate) to activate the zero-inflation gate
-# component during SkewNormal training and blending.  Below 2% the gate adds
-# more noise than signal — the model treats the stat as effectively continuous.
-_HIST_GATE_THRESHOLD: float = 0.02
 # Mean threshold separating SkewNormal (continuous, high-mean) from count
 # distributions (NegBin/ZINB).  Stats with global_mean < 2 are integer-like
 # enough that a count family fits better than SkewNormal.
 _SKEWNORMAL_MEAN_THRESHOLD: float = 2.0
-# hist_gate level above which the SkewNormal path filters to nonzero rows only.
-# Below this, zeros are rare enough to model directly without an offset pass.
-_SKEWNORMAL_HIST_GATE_THRESHOLD: float = 0.05
 # Minimum coefficient of variation for the SkewNormal branch.  Prevents
 # degenerate near-zero CV when all players have nearly identical outcomes.
 _SKEWNORMAL_CV_FLOOR: float = 0.05
@@ -1328,23 +1325,23 @@ def _step_persist_artifacts(
     X_test["Line"] = B_test["Line"].values
     X_test["Blended_EV"] = weighted_mean
     X_test["Odds"] = B_test["Odds"].values
+    # EV is the base mean the blend used, mean-corrected when a mean-stage
+    # corrector is active, so the bias gates (Gate 2/3) read the corrected value.
+    # The native shape columns below stay uncorrected — Gate 4 reads them and
+    # measures dispersion, which the corrector intentionally leaves alone.
+    X_test["EV"] = ev
     if dist == "SkewNormal":
-        X_test["EV"] = ev
         X_test["SN_Loc"] = prob_params["loc"]
         X_test["SN_Scale"] = prob_params["scale"]
         X_test["SN_Alpha"] = prob_params["alpha"]
-        if hist_gate > _HIST_GATE_THRESHOLD:
+        if hist_gate > GATE_PUBLISH_THRESHOLD:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
-        base_ev = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
-        X_test["EV"] = base_ev
         if dist == "ZINB":
             X_test["Gate"] = prob_params["gate"]
         X_test["R"] = prob_params["total_count"]
         X_test["NB_P"] = prob_params["probs"]
     elif dist in ("Gamma", "ZAGamma"):
-        base_ev = prob_params["concentration"] / prob_params["rate"]
-        X_test["EV"] = base_ev
         if dist == "ZAGamma":
             X_test["Gate"] = prob_params["gate"]
         X_test["Alpha"] = prob_params["concentration"]
@@ -1487,7 +1484,7 @@ def _step_calibrate_dispersion(
             "SkewNormal",
             sigma=decoded["sn_sigma_val"],
             skew_alpha=decoded["sn_alpha_val"],
-            **({"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}),
+            **({"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}),
         )
         out["val_weighted_mean_val"] = val_weighted_mean_val
         return out
@@ -1617,7 +1614,7 @@ def _step_calibrate_temperature(
         method="bounded",
     )
     T_opt = result_ts.x
-    val_calibrated = expit(val_logits / T_opt)
+    val_calibrated = apply_temperature(1 - val_raw_under, T_opt)
     model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
     return T_opt, val_calibrated, model_calib, y_class_val
 
@@ -1638,7 +1635,7 @@ def _step_decode_predictions(
     SkewNormal: applies the strategy's decode_loc/decode_scale then adds the
     skew-normal mean adjustment ``delta * sqrt(2/pi)``. NegBin/ZINB: EV = r·p/(1−p).
     Gamma/ZAGamma: EV = α/β. Synthesizes a constant ``gate_*`` vector for
-    SkewNormal when ``hist_gate > _HIST_GATE_THRESHOLD`` (no per-row gate from the model).
+    SkewNormal when ``hist_gate > GATE_PUBLISH_THRESHOLD`` (no per-row gate from the model).
 
     Returns:
         Dict with: ``ev``, ``ev_validation``, ``gate_test``, ``gate_validation``,
@@ -1665,62 +1662,49 @@ def _step_decode_predictions(
         "beta_validation": None,
     }
     if dist == "SkewNormal":
-        loc = prob_params["loc"].to_numpy()
-        scale = prob_params["scale"].to_numpy()
-        alpha_sn = prob_params["alpha"].to_numpy()
-        loc_v = prob_params_validation["loc"].to_numpy()
-        scale_v = prob_params_validation["scale"].to_numpy()
-        alpha_sn_val = prob_params_validation["alpha"].to_numpy()
-
-        ev_loc = strategy.decode_loc(loc, X_test, global_mean, denom_col)
-        ev_scale = strategy.decode_scale(scale, X_test, denom_col)
-        ev_loc_val = strategy.decode_loc(loc_v, X_validation, global_mean, denom_col)
-        ev_scale_val = strategy.decode_scale(scale_v, X_validation, denom_col)
-
-        delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
-        ev = ev_loc + ev_scale * delta * np.sqrt(2 / np.pi)
-        delta_val = alpha_sn_val / np.sqrt(1 + alpha_sn_val**2)
-        ev_validation = ev_loc_val + ev_scale_val * delta_val * np.sqrt(2 / np.pi)
-
-        out["ev"] = ev
-        out["ev_validation"] = ev_validation
-        out["sn_sigma_test"] = ev_scale
-        out["sn_sigma_val"] = ev_scale_val
-        out["sn_alpha_test"] = alpha_sn
-        out["sn_alpha_val"] = alpha_sn_val
-
-        if hist_gate > _HIST_GATE_THRESHOLD:
-            out["gate_test"] = np.full_like(ev, hist_gate)
-            out["gate_validation"] = np.full_like(ev_validation, hist_gate)
-
+        # Location/scale come from the baselines registry (feature/strategy
+        # dependent); the shared kernel applies the skew mean-adjustment and gate.
+        ev_loc = strategy.decode_loc(prob_params["loc"].to_numpy(), X_test, global_mean, denom_col)
+        ev_scale = strategy.decode_scale(prob_params["scale"].to_numpy(), X_test, denom_col)
+        ev_loc_val = strategy.decode_loc(
+            prob_params_validation["loc"].to_numpy(), X_validation, global_mean, denom_col
+        )
+        ev_scale_val = strategy.decode_scale(
+            prob_params_validation["scale"].to_numpy(), X_validation, denom_col
+        )
+        decoded_test = decode_predictive_mean(
+            prob_params, dist, sn_loc=ev_loc, sn_scale=ev_scale, hist_gate=hist_gate
+        )
+        decoded_val = decode_predictive_mean(
+            prob_params_validation,
+            dist,
+            sn_loc=ev_loc_val,
+            sn_scale=ev_scale_val,
+            hist_gate=hist_gate,
+        )
+        out["sn_sigma_test"] = decoded_test.sigma
+        out["sn_sigma_val"] = decoded_val.sigma
+        out["sn_alpha_test"] = decoded_test.skew
+        out["sn_alpha_val"] = decoded_val.skew
     elif dist in ("NegBin", "ZINB"):
-        r = prob_params["total_count"].to_numpy()
-        p = prob_params["probs"].to_numpy()
-        out["ev"] = r * p / (1 - p)
-        r_validation = prob_params_validation["total_count"].to_numpy()
-        p_validation = prob_params_validation["probs"].to_numpy()
-        out["ev_validation"] = r_validation * p_validation / (1 - p_validation)
-        out["r"] = r
-        out["p"] = p
-        out["r_validation"] = r_validation
-        out["p_validation"] = p_validation
-        if dist == "ZINB":
-            out["gate_test"] = prob_params["gate"].to_numpy()
-            out["gate_validation"] = prob_params_validation["gate"].to_numpy()
-    elif dist in ("Gamma", "ZAGamma"):
-        alpha = prob_params["concentration"].to_numpy()
-        beta = prob_params["rate"].to_numpy()
-        out["ev"] = alpha / beta
-        alpha_validation = prob_params_validation["concentration"].to_numpy()
-        beta_validation = prob_params_validation["rate"].to_numpy()
-        out["ev_validation"] = alpha_validation / beta_validation
-        out["alpha"] = alpha
-        out["beta"] = beta
-        out["alpha_validation"] = alpha_validation
-        out["beta_validation"] = beta_validation
-        if dist == "ZAGamma":
-            out["gate_test"] = prob_params["gate"].to_numpy()
-            out["gate_validation"] = prob_params_validation["gate"].to_numpy()
+        decoded_test = decode_predictive_mean(prob_params, dist)
+        decoded_val = decode_predictive_mean(prob_params_validation, dist)
+        out["r"] = decoded_test.r
+        out["p"] = prob_params["probs"].to_numpy()
+        out["r_validation"] = decoded_val.r
+        out["p_validation"] = prob_params_validation["probs"].to_numpy()
+    else:
+        decoded_test = decode_predictive_mean(prob_params, dist)
+        decoded_val = decode_predictive_mean(prob_params_validation, dist)
+        out["alpha"] = decoded_test.alpha
+        out["beta"] = prob_params["rate"].to_numpy()
+        out["alpha_validation"] = decoded_val.alpha
+        out["beta_validation"] = prob_params_validation["rate"].to_numpy()
+
+    out["ev"] = decoded_test.ev
+    out["ev_validation"] = decoded_val.ev
+    out["gate_test"] = decoded_test.gate
+    out["gate_validation"] = decoded_val.gate
     return out
 
 
@@ -1779,7 +1763,7 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        _zi_kwargs = {"gate_book": hist_gate} if hist_gate > _HIST_GATE_THRESHOLD else {}
+        _zi_kwargs = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
         model_weight = fit_model_weight(
             ev_validation,
             book_ev_val,
@@ -1933,8 +1917,8 @@ def _step_select_distribution(
     """Choose distribution family + apply target transform + compute shape priors.
 
     Branch logic: ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, otherwise
-    NegBin (escalated to ZINB when ``hist_gate > _HIST_GATE_THRESHOLD``). For SkewNormal,
-    drops zero rows when ``hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD`` and applies the
+    NegBin (escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``). For SkewNormal,
+    drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the
     strategy's forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
@@ -2003,7 +1987,7 @@ def _step_select_distribution(
         # float(None) raises TypeError in _wide_row's _diag() helper.
         marginal_shape = float("nan")
 
-        if hist_gate > _SKEWNORMAL_HIST_GATE_THRESHOLD:
+        if hist_gate > NONZERO_DENOM_GATE:
             nonzero_mask = y_train_labels > 0
             X_train = X_train[nonzero_mask]
             y_train_labels = y_train_labels[nonzero_mask]
@@ -2016,7 +2000,7 @@ def _step_select_distribution(
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
     else:
         dist = "NegBin"
-        if hist_gate > _HIST_GATE_THRESHOLD:
+        if hist_gate > GATE_PUBLISH_THRESHOLD:
             dist = "ZINB"
         if dist == "NegBin":
             dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
@@ -2244,7 +2228,7 @@ def train_market(
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
     skill = _step_compute_skill_metrics(val_calibrated, y_class_val, val_book_proba, league, market)
 
-    test_calibrated_over = expit(logit(np.clip(y_proba_no_filt[:, 1], 1e-6, 1 - 1e-6)) / T_opt)
+    test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
     if posthoc_slug in posthoc.PROB_STAGE:
         test_calibrated_over = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, test_calibrated_over)
     y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
