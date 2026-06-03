@@ -46,10 +46,10 @@ more than stars).
 
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
-| 1 | **Brier vs book, paired bootstrap** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0` — the 95% CI strictly excludes 0 from below (model Brier strictly under book's) | `_GATE1_CI_HI_MAX = 0.0` |
+| 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
 | 2 | **Star σ-match** | `z = |mean(EV) − mean(Result)| / std(Result)` on the top-mean decile | `z < 0.5` — bias under half the segment's spread | `_GATE2_STAR_Z_MAX = 0.5` |
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
-| 4 | **IQR spread (compression)** | `iqr_ratio = IQR(EV) / IQR(Result)` over all events | `iqr_ratio > 0.5` — predictions keep at least half the truth's IQR | `_GATE4_IQR_RATIO_MIN = 0.5` |
+| 4 | **PIT-KS calibration** | `pit_ks = KS(randomized-PIT, Uniform)` of the predictive CDF (seeded draws, averaged) | `pit_ks < max(δ, 1.358/√n)`, `δ = 0.05` — whole-CDF mispricing under the larger of the vig-scale effect floor and the cell's KS α=0.05 noise floor | `_GATE4_PIT_KS_DELTA = 0.05` |
 | 5 | **Equal-mass ECE** | 10 equal-mass `p_model` bins; `ece = Σ (n_b/N)·|mean(p_model) − mean(y)|` | `ece < 0.075` | `_GATE5_ECE_MAX = 0.075` |
 
 **Denominators are σ, not σ/√N.** Gates 2/3 use the segment's **standard deviation**
@@ -58,6 +58,71 @@ near-zero on low-variance bench segments and the gate fires on a negligible bias
 σ keeps the yardstick at "what a typical event in the segment looks like" regardless
 of N.
 
+**Gate 1 is non-inferiority, not superiority.** Intent #3 is "the deployed ensemble
+is *at least as good as* the book," so a statistical **tie passes** — we do not demand
+the model *provably beat* the book offline. The ship test is `ci_hi < δ` with
+`δ = _GATE1_NONINF_MARGIN = 0.005` (≈ 2% of the ≈0.25 book Brier ≈ one SE of these
+estimates): the largest ensemble-vs-book Brier degradation we still call a tie. This
+is a **tie tolerance, not a degradation allowance** — it admits genuine ties and wins,
+still rejects provably-worse and mild-worse-beyond-δ cells, and the "don't loosen the
+gate to chase the 75% breadth target" rule is unchanged (δ was set to the tie scale,
+not to manufacture ships; more breadth comes from model work, not a looser δ).
+
+Whether it is then **+EV to bet** the cell — and how much — is *not* the gate's job:
+that is owned downstream by the EV calc, the Kelly sizer (`kelly_shrinkage =
+clip(brier_skill_score, 0, 1)`, so a tie cell is sized to ~0 until it earns edge), and
+the 14-day live Gate-2 soak. The gate certifies **deployable** (calibrated +
+uncompressed + tie-or-better); the sizer + soak certify **profitable**. That split is
+what makes shipping a tie safe.
+
+**Gate 4 is whole-CDF calibration (PIT-KS), not IQR spread.** `pit_ks =
+sup|F_model − F_true|` over the predictive CDF *is* the worst-case alt-line probability
+mispricing: an alt line at quantile `q` is +EV exactly to the degree `F_model(q)`
+matches the truth there, so the KS supremum bounds how wrong any alt line can be. The
+PIT is **randomized** (each integer's probability jump spread by `V ~ U(0,1)`) so it is
+exactly Uniform under calibration for count *and* continuous families — one threshold
+spans both; the non-randomized mid-PIT is lattice-inflated on low counts and would fail
+calibrated count cells on discreteness alone. The threshold is `max(δ, 1.358/√n)`:
+`δ = 0.05` is the effect-size floor (worst-case mispricing at most ≈ the house vig, the
+scale below which the model's own error is smaller than the edge it hunts), and
+`1.358/√n` is the cell's KS α=0.05 critical value (never fail a cell below the
+miscalibration its sample size can resolve). The old `IQR(EV)/IQR(Result)` compression
+proxy was retired here — it conflated between- vs within-player spread and was
+fiat-blind on count cells (`IQR(Result) = 0` ⇒ ratio 1.0 by definition); it rides along
+as the reported `g4_iqr_ratio`.
+
+**Reported, not gated** (legibility columns on `model_stats.parquet`; never in the
+`ship` AND):
+
+- `g1_has_edge` — the old strict-superiority test (`ci_hi < 0`). True ⇔ the cell
+  *provably* beats the book, distinct from merely tying it. Lets dashboards/sizing see
+  which passers carry a real offline edge.
+- `betting_active = ship AND kelly_shrinkage > 0` — the deployable-and-staking subset.
+  Breadth has two honest readings: **deployable** (`ship`) and **betting-active**.
+- `g1_brier_diff_ci_hi_standalone` — the same paired-Brier upper bound on the
+  *pre-blend* model probabilities (`P_standalone`), so each cell shows whether the
+  standalone model or the book drives the fused pass. Populated on the next `meditate`
+  (the column is dumped by the training pipeline).
+- `g4_tail_pit_ks` — the Gate-4 KS restricted to the over-tail (`u ≥ 0.80` of the same
+  randomized PIT), the worst-case **alt-OVER** mispricing where boosted parlay legs
+  live. It is a sub-supremum of `pit_ks` (so always ≤ it): it localizes *where* the
+  deviation sits. The whole-CDF `pit_ks` is a sup that **nets compensating directional
+  errors** — a cell can pass Gate 4 while over-pricing the alt-over tail and
+  under-pricing the standard line that cancel globally (NFL `receiving-tds`: −4% at
+  Over 0.5, +2% at Over 1.5, `pit_ks ≈ 0.04` but `g4_tail_pit_ks ≈ 0.037`, i.e. ~90% of
+  its deviation is in the over-tail). It is **not** a gate — the deep tail is too
+  sample-starved per cell to threshold without gaming the cutoff — but it flags the
+  alt-over wobblers for the fix-queue and the live soak.
+- `central50_coverage`, `central80_coverage` — central predictive-interval coverage of
+  the per-row distribution; names the *direction* a KS scalar cannot. Coverage
+  materially below nominal (0.50 / 0.80) ⇒ the predictive is too narrow / mislocated
+  (under-dispersed); above ⇒ too wide. A cell can win Gate 1 (binary over/under Brier)
+  while its predictive is badly shaped — e.g. NFL `receptions` passes g1 yet reads
+  `central50_coverage ≈ 0.24` — so these are the route to fixing the NFL SkewNormal
+  cells *on merit* rather than loosening a gate.
+- `g4_iqr_ratio` (+ `_oracle`) — the retired `IQR(EV)/IQR(Result)` compression proxy,
+  kept for back-comparison only; superseded as the Gate-4 statistic by `pit_ks`.
+
 **Auto-pass / fail conventions for blank metrics:**
 
 - **Gate 1 blank** (no book `Odds` in the dump): **auto-pass** — no book to beat,
@@ -65,10 +130,11 @@ of N.
 - **Gate 5 blank** (no `P` or no `Line`): **fail** — the cell couldn't compute
   calibration; that's a model artifact, not a free pass. Gate 5 only needs `P` +
   `Line`, NOT `Odds`, so unpriced-but-lined markets still get a real ECE.
-- **Gate 4 blank** (sparse "tds"-style markets where `IQR(Result) = 0`): **fail**
-  under strict — the compression yardstick is structurally undefined. Flagged in
-  `docs/operation_ship_75.md` Step 0.4 for revisit (binary markets likely need a
-  different spread gate).
+- **Gate 4 blank** (no per-row distribution params in the dump ⇒ no `pit_ks`): **fail**
+  — no credit for absent calibration evidence. The PIT statistic resolves the old
+  `IQR(Result) = 0` degeneracy that made sparse "tds"-style markets undefined under the
+  retired IQR gate (randomized-PIT is well-defined on count cells), so that Step 0.4
+  blank-pass workaround is closed.
 - **Gates 2/3 blank**: fail (couldn't compute).
 
 **Oracle columns.** Every gate emits a sibling "oracle" value computed under the
@@ -148,11 +214,17 @@ green for every league with cached parquets
 
 ## How to tighten / loosen later
 
-- **Coverage too low** → loosen Gate 4 (lower `_GATE4_IQR_RATIO_MIN` toward 0.3) or
-  Gate 5 (raise `_GATE5_ECE_MAX` to 0.10–0.15). G4 is the binding constraint at the
-  strict bar; G2/G3 are gentle by default under σ-norm.
-- **Quality too low** → tighten G4 (`> 0.6`) or G2/G3 (`< 0.3`).
-- **NFL low-N false KILLs on Gate 1** — the 95% CI is naturally wide on cells with
-  < 1000 events, so a real-edge thin-N cell can straddle 0 and KILL. Tracked as an
-  open item in `docs/operation_ship_75.md` Step 4 (gate-widening); consider a one-sided test or an
-  N-aware floor on Gate 1 once breadth becomes the binding decision.
+- **Too many cells fail Gate 4** → raise `_GATE4_PIT_KS_DELTA` toward the next
+  effect-size tier (0.06–0.075) or loosen Gate 5 (raise `_GATE5_ECE_MAX` to 0.10–0.15).
+  G4 is the binding constraint at the strict bar (most NBA/WNBA skill-stat cells fail it
+  on under-dispersion); G2/G3 are gentle by default under σ-norm. Do **not** tune δ to a
+  cell's own KS to manufacture a pass — δ is the worst-case-mispricing-we-call-a-tie, a
+  vig-scale tolerance, not a knob to hit a breadth target.
+- **Quality too low** → tighten G4 (lower `_GATE4_PIT_KS_DELTA` toward `1.358/√n`, the
+  pure-noise floor) or G2/G3 (`< 0.3`).
+- **NFL low-N false KILLs on Gate 1** — *resolved* by the non-inferiority margin. The
+  95% CI is naturally wide on cells with < 1000 events, so under the old strict
+  `ci_hi < 0` a real-tie thin-N cell would straddle 0 and KILL. `ci_hi < 0.005` admits
+  the genuine ties (e.g. NFL `passing-yards`, `ci_hi ≈ 0.002`) while still failing a
+  wide CI that reaches past δ. This is a principled tie tolerance, **not** an N-aware
+  floor that would silently widen with small N — degradation past δ still fails at any N.
