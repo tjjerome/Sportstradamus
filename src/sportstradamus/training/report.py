@@ -42,12 +42,17 @@ from sportstradamus.training.config import (
     save_zi_config,
 )
 from sportstradamus.training.scorecard import (
-    DEFAULT_PRED_COL,
     compute_gates,
     load_test_set,
 )
 
 logger = get_logger(__name__)
+
+# Ship gates score the FUSED mean — the parlay drafts ``Blended_EV``, not the raw model
+# ``EV`` — so Gates 2/3 see the number that's actually bet (the raw-EV compression view
+# rides along as the reported ``*_z_raw`` columns). Distinct from the scorecard CLI's
+# ``--pred-col`` default, which stays ``EV`` for the model-only compression A/B.
+_SHIP_PRED_COL = "Blended_EV"
 
 # Tri-state ship-gate columns. Cast at the parquet boundary to the pandas
 # nullable BooleanDtype so a missing scorecard run round-trips as pd.NA
@@ -208,11 +213,15 @@ def _wide_row(
         "g1_brier_diff_ci_hi_standalone": float("nan"),
         "g2_star_z": float("nan"),
         "g2_star_z_oracle": float("nan"),
+        "g2_star_z_raw": float("nan"),
         "g3_bench_z": float("nan"),
         "g3_bench_z_oracle": float("nan"),
+        "g3_bench_z_raw": float("nan"),
+        "g4_pit_ks": float("nan"),
+        "g4_pit_ks_max": float("nan"),
+        "g4_tail_pit_ks": float("nan"),
         "g4_iqr_ratio": float("nan"),
         "g4_iqr_ratio_oracle": float("nan"),
-        "pit_ks_d": float("nan"),
         "central50_coverage": float("nan"),
         "central80_coverage": float("nan"),
         "g5_ece_debiased": float("nan"),
@@ -247,13 +256,13 @@ def _layer_gates_from_test_set(row: dict, league: str, market: str) -> None:
     if not test_set_path.is_file():
         return
     try:
-        df = load_test_set(test_set_path, DEFAULT_PRED_COL)
+        df = load_test_set(test_set_path, _SHIP_PRED_COL)
     except (ValueError, KeyError) as e:
         logger.warning("scorecard skip %s/%s: %s", league, market, e)
         return
     if df.empty:
         return
-    row.update(compute_gates(df, league=league, market=market))
+    row.update(compute_gates(df, league=league, market=market, pred_col=_SHIP_PRED_COL))
 
 
 def write_model_stats(

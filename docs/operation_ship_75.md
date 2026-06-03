@@ -938,18 +938,19 @@ downstream by the EV calc, the Kelly sizer (`kelly_shrinkage = clip(brier_skill_
 legibility column `betting_active = ship AND kelly_shrinkage > 0` surfaces the
 deployable-vs-staking split (e.g. NFL `receptions`/`tds` ship but stake 0).
 
-**The honest breadth lever is model work, not a looser gate.** New **report-only**
-diagnostics (`pit_ks_d`, `central50_coverage`, `central80_coverage`) measure predictive
-*shape*, which Gates 2/3 (segment means) and Gate 4 (marginal IQR, between/within-player
-confounded) miss. Re-audit finding: the withheld NFL SkewNormal cells are **under-covered**,
-not "over-dispersed" as previously written — NFL `receptions` reads `central50_coverage
-≈ 0.24` (vs nominal 0.50: actuals fall *outside* the central interval far too often →
-predictive too narrow / mislocated), and Gate 4's own ratio agrees (0.68 < 1) but its
-lenient 0.5 threshold waves it through. Fixing that predictive shape turns the six
-mild-worse cells into ties/wins that pass δ=0.005 **on merit**. Routed to the model
-owners (this is a diagnostic, not a gate). Companion `g1_brier_diff_ci_hi_standalone`
-(pre-blend `P_standalone`) attributes the pass to model vs book; both populate on the
-next `meditate` (their columns are dumped by the training pipeline).
+**The honest breadth lever is model work, not a looser gate.** Gate 4 is now the
+PIT-KS calibration test itself (Step 6) — the former marginal-IQR proxy retired to a
+report-only column. The withheld NFL SkewNormal cells are **under-dispersed**: NFL
+`receptions` reads `central50_coverage ≈ 0.24` (vs nominal 0.50: actuals fall *outside*
+the central interval far too often → predictive too narrow / mislocated), which the new
+Gate 4 now **fails directly** (`pit_ks ≈ 0.43 ≫ 0.05`) instead of waving through on the
+lenient 0.5 IQR ratio. The `central50_coverage` / `central80_coverage` columns stay
+report-only to name the *direction* (too narrow vs too wide) the KS scalar can't. Fixing
+the predictive shape turns the mild-worse cells into ties/wins that pass δ=0.005 g1
+**and** the PIT g4 on merit. Routed to the model owners. Companion
+`g1_brier_diff_ci_hi_standalone` (pre-blend `P_standalone`) attributes the pass to model
+vs book; both populate on the next `meditate` (their columns are dumped by the training
+pipeline).
 
 **Deferred.** Persisting `Player`/`Date` on combined-stat cells (`receptions`,
 `targets`, `tds`, `yards`) to activate the player-clustered Gate-1 recheck on them —
@@ -957,6 +958,61 @@ the pooled PIT/coverage diagnostics do **not** need it (they are per-row), and a
 combined row has no single owning player/date, so this needs the training-data join
 resolved first. Single-stat cells (e.g. `passing-yards`) already carry both and run the
 clustered recheck today.
+
+## Step 6 — Gate 4 becomes whole-CDF PIT-KS; Gates 2/3 score the fused EV
+
+**The change.** Gate 4 is now `pit_ks < max(δ=0.05, 1.358/√n)` — the KS distance of the
+randomized PIT from Uniform — replacing the `IQR(EV)/IQR(Result) > 0.5` compression
+proxy. `pit_ks = sup|F_model − F_true|` **is** the worst-case alt-line probability
+mispricing: an alt line at quantile `q` is +EV exactly to the degree `F_model(q)` is
+right, so the KS supremum bounds how wrong any alt line can be — which is precisely the
+property the operator wanted certified ("alt lines being +EV is correlated with
+calibration as you move away from the mean"). The PIT is **randomized** (each integer's
+probability jump spread by `V ~ U(0,1)`, Brockwell 2007) so it is exactly Uniform under
+calibration for count *and* continuous families: one threshold spans both. `δ = 0.05` is
+the vig-scale effect floor; `1.358/√n` the KS α=0.05 noise floor; threshold is the
+larger. The retired IQR proxy conflated between- vs within-player spread and was
+fiat-blind on count cells (`IQR(Result)=0` ⇒ ratio 1.0), so it now rides along as the
+reported `g4_iqr_ratio`. Gates 2/3 also moved from raw `EV` to the **fused
+`Blended_EV`** (what the parlay actually drafts); the raw-EV model-compression view is
+kept as reported `g2_star_z_raw` / `g3_bench_z_raw`.
+
+**Consequence (re-scored on the test-set CSVs; applied).** The swap **de-certifies 24 of
+43 `devel` cells**, almost all under-dispersed continuous skill-stats (NBA/WNBA
+pts/reb/ast, `pit_ks` 0.05–0.12; `receptions` 0.43, `DREB` 0.50). Those 24 were demoted
+`devel → withheld` in `stat_meta.json`, leaving **`devel` = 19** (NBA 9 / NFL 5 / WNBA 5;
+NFL = `interceptions`, `receiving-tds`, `rushing-tds`, `targets`, `tds`). They are not
+dead — they are the model-track fix-queue (predictive too narrow), and the
+`central50/80_coverage` columns name the direction. A real tightening accepted on merit,
+not a breadth regression to paper over.
+
+**The tds-family verdict (operator's "biggest parlay polluter" question).** Re-scored on
+the *current* models (the analyst's realized losses were the stale vintage):
+
+| cell | `pit_ks` | g4 | A-D\* | per-line gaps | verdict |
+|---|---|---|---|---|---|
+| `tds` | 0.017 | pass | 0.81 | ±0.01 | genuinely calibrated |
+| `rushing-tds` | 0.029 | pass | 1.12 | −0.02 / +0.03(n=0) | genuinely calibrated |
+| `interceptions` | 0.045 | pass | 0.96 | — | genuinely calibrated |
+| `receiving-tds` | 0.041 | **pass (borderline)** | 6.67 | **−0.042 @0.5, +0.020 @1.5** | sub-vig alt-over wobble |
+| `passing-tds` | 0.073 | **fail** | 3.48 | −0.073 / −0.049 / −0.012 | de-certified by new g4 |
+
+The new g4 **gates off `passing-tds`** directly (KS 0.073 > vig; it had been promoted to
+`devel` last commit under the old IQR g4 — the PIT swap reverses that). Three cells are
+genuinely clean. `receiving-tds` is the one that sneaks the gate: its errors are
+**directional and compensating** (under-prices the standard over, over-prices the deep
+alt-over) so the whole-CDF KS nets them to 0.041 < 0.05 — *but both gaps sit at or under
+the vig*, so by the δ=vig principle it is a borderline tie, not a kill.
+
+**New report-only diagnostic `g4_tail_pit_ks`** (the over-tail `u ≥ 0.80` KS) surfaces
+exactly that netting blind spot: `receiving-tds` reads 0.037 (≈ 90% of its global KS is
+in the alt-over tail) vs clean `tds` 0.008. It is **not** a gate — the deep alt-over tail
+is too sample-starved per cell to threshold without gaming — it flags the wobblers for the
+fix-queue and the live soak arbitrates. **Anderson-Darling was evaluated as the gate and
+rejected:** at n≈2000 its α=0.05 null (2.492) is a pure significance test with unbounded
+√n power, failing 54/59 cells (all 38 continuous; NBA_PTS A-D 16.8) — effect-size-blind,
+the exact failure the δ floor prevents on KS. It survives only as the corroborating
+diagnostic above.
 
 ## Tier-1 supersession (preserves shipped cells)
 

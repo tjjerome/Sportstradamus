@@ -14,24 +14,29 @@ from sportstradamus.training.scorecard import (
     _GATE1_NONINF_MARGIN,
     _GATE2_STAR_Z_MAX,
     _GATE3_BENCH_Z_MAX,
-    _GATE4_IQR_RATIO_MIN,
+    _GATE4_KS_NOISE_COEF,
+    _GATE4_PIT_KS_DELTA,
     _GATE5_ECE_MAX,
     _SUPERSEDE_S3_Z_MIN,
     _dispersion_diagnostics,
     _ece_debias_offset,
     _gate1_brier_ci,
     _gate4_iqr_spread,
+    _gate4_pit_ks_threshold,
     _gate5_ece_debiased,
     _gate5_ece_equal_mass,
     _gate23_segment_match,
     _infer_dist_from_columns,
     _iqr_pred_analytical,
+    _ks_uniform,
     _memmel_sharpe_z,
     _pred_midpit,
     _pred_ppf,
+    _randomized_pit_ks,
     _segment_masks,
     _supersede_paired_brier_ci,
     _supersede_paired_sharpe,
+    _tail_ks_uniform,
     _test_set_to_bet_frame,
     _zinb_ppf,
     apply_thresholds,
@@ -767,17 +772,21 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g2_star_sigma",
         "g2_star_z",
         "g2_star_z_oracle",
+        "g2_star_z_raw",
         "g3_bench_pred_mean",
         "g3_bench_true_mean",
         "g3_bench_abs_diff",
         "g3_bench_sigma",
         "g3_bench_z",
         "g3_bench_z_oracle",
+        "g3_bench_z_raw",
+        "g4_pit_ks",
+        "g4_pit_ks_max",
+        "g4_tail_pit_ks",
         "g4_iqr_pred",
         "g4_iqr_true",
         "g4_iqr_ratio",
         "g4_iqr_ratio_oracle",
-        "pit_ks_d",
         "central50_coverage",
         "central80_coverage",
         "g5_ece",
@@ -875,6 +884,8 @@ def _clean_row(**overrides) -> dict[str, object]:
         "g3_bench_sigma": 1.5,
         "g3_bench_z": 0.07,
         "g3_bench_z_oracle": 0.0,
+        "g4_pit_ks": 0.03,
+        "g4_pit_ks_max": 0.05,
         "g4_iqr_pred": 8.0,
         "g4_iqr_true": 12.0,
         "g4_iqr_ratio": 0.67,
@@ -898,7 +909,7 @@ def test_apply_thresholds_each_gate_fails_when_threshold_exceeded():
         "g1": _clean_row(g1_brier_diff_ci_hi=0.01),  # beyond the 0.005 tie margin (mild-worse)
         "g2": _clean_row(g2_star_z=0.51),  # over the 0.5 cap
         "g3": _clean_row(g3_bench_z=0.51),
-        "g4": _clean_row(g4_iqr_ratio=0.49),  # below the 0.5 floor
+        "g4": _clean_row(g4_pit_ks=0.06),  # PIT-KS over the 0.05 threshold
         "g5": _clean_row(g5_ece=0.076),  # over the 0.075 cap
     }
     for gate, row in fails.items():
@@ -935,9 +946,9 @@ def test_apply_thresholds_g1_no_odds_auto_passes():
     assert out["ship"]
 
 
-def test_apply_thresholds_g4_nan_fails_under_strict():
-    """G4 blank (binary tds markets, IQR(Result)=0) fails under strict — flagged for revisit."""
-    out = apply_thresholds(_clean_row(g4_iqr_pred=None, g4_iqr_true=None, g4_iqr_ratio=None))
+def test_apply_thresholds_g4_blank_pit_fails():
+    """G4 blank (no per-row dist params ⇒ no g4_pit_ks) fails — no credit for absent evidence."""
+    out = apply_thresholds(_clean_row(g4_pit_ks=None, g4_pit_ks_max=None))
     assert not out["g4_pass"]
     assert not out["ship"]
 
@@ -955,7 +966,8 @@ def test_strict_thresholds_are_pinned():
     assert _GATE1_CI_HI_MAX == 0.0
     assert _GATE2_STAR_Z_MAX == 0.5
     assert _GATE3_BENCH_Z_MAX == 0.5
-    assert _GATE4_IQR_RATIO_MIN == 0.5
+    assert _GATE4_PIT_KS_DELTA == 0.05
+    assert _GATE4_KS_NOISE_COEF == 1.358
     assert _GATE5_ECE_MAX == 0.075
 
 
@@ -1014,51 +1026,39 @@ def _supersede_pair(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build (baseline, candidate) test-set frames sharing the same events.
 
-    Set-up: the **book** is flat (over-prob = 0.5 for every event) — half the
-    rows are real over-edges (``p_true > 0.5``), half are real under-edges. The
-    **candidate** has correctly-sided ``EV`` (over-edge ⇒ EV above line; under-
-    edge ⇒ EV below) and probability ``p_true``. The **baseline** has the same
-    EVs perturbed by Gaussian noise (so it picks the wrong side sometimes) and a
-    mid-regressed probability. ``candidate_calibration_noise > 0`` injects noise
-    into the candidate's ``EV`` instead — used to invert the win condition.
+    Set-up: outcomes are continuous ``Result ~ Normal(MeanYr, scale)`` (a SkewNormal with
+    ``alpha=0``), so the frames carry the per-row distribution params real test-set CSVs do
+    and Gate 4's randomized PIT can score predictive shape. The **line** sits at the
+    ``1 − p_true`` quantile, making the book's flat over-prob 0.5 wrong by ``p_true − 0.5``.
+    The **candidate** predicts the true distribution (calibrated: ``EV = MeanYr``,
+    ``P = p_true``, params matching the draw) so it clears all five gates. The **baseline**
+    perturbs ``EV`` (bets the wrong side sometimes) and mid-regresses ``P``.
+    ``candidate_calibration_noise > 0`` swamps the candidate's ``P`` to invert the win.
     """
+    from scipy.stats import norm
+
     rng = np.random.default_rng(seed)
     meanyr = rng.uniform(2, 30, n)
-    line = meanyr.copy()
+    scale = 4.0
     p_true = rng.uniform(0.20, 0.80, n)
-    outcomes = rng.uniform(size=n) < p_true
-    result = np.where(outcomes, line + 1.0, line - 1.0)
+    result = rng.normal(meanyr, scale)
+    line = norm.ppf(1.0 - p_true, loc=meanyr, scale=scale)  # ⇒ P(Result > line) = p_true
     odds = np.full(n, 0.5)
-    # Correctly-sided EV — bet side aligns with the truth.
-    correct_ev = np.where(p_true > 0.5, line + 1.0, line - 1.0)
-    # Baseline EV is the correct side perturbed by enough noise that ~25% of
-    # rows flip sides → baseline bets the wrong side on those events.
-    baseline_ev = correct_ev + rng.normal(0, 1.2, n)
+    # Baseline bets the wrong side of the line on ~30% of rows (uniformly, not just the
+    # low-edge ones) → its Kelly stakes lose there → lower Sharpe than the candidate, which
+    # always sides with MeanYr. ``2·line − MeanYr`` reflects MeanYr across the line.
+    flip = rng.random(n) < 0.30
+    baseline_ev = np.where(flip, 2.0 * line - meanyr, meanyr) + rng.normal(0, 0.5, n)
     baseline_p = 0.5 + 0.4 * (p_true - 0.5)  # mid-regressed prob
-    # Candidate gets correctly-sided EV and tracks p_true exactly. Rejection
-    # scenarios swamp its probability with Gaussian noise — large noise makes
-    # the candidate's P uninformative and its Brier worse than baseline's.
-    candidate_ev = correct_ev.copy()
     candidate_p = np.clip(p_true + rng.normal(0, candidate_calibration_noise, n), 1e-3, 1.0 - 1e-3)
+    dist_cols = {"SN_Loc": meanyr, "SN_Scale": np.full(n, scale), "SN_Alpha": np.zeros(n)}
     b_df = pd.DataFrame(
-        {
-            "MeanYr": meanyr,
-            "Result": result.astype(float),
-            "EV": baseline_ev,
-            "Line": line,
-            "Odds": odds,
-            "P": baseline_p,
-        }
+        {"MeanYr": meanyr, "Result": result, "EV": baseline_ev, "Line": line,
+         "Odds": odds, "P": baseline_p, **dist_cols}
     )
     c_df = pd.DataFrame(
-        {
-            "MeanYr": meanyr,
-            "Result": result.astype(float),
-            "EV": candidate_ev,
-            "Line": line,
-            "Odds": odds,
-            "P": candidate_p,
-        }
+        {"MeanYr": meanyr, "Result": result, "EV": meanyr.copy(), "Line": line,
+         "Odds": odds, "P": candidate_p, **dist_cols}
     )
     return b_df, c_df
 
@@ -1468,12 +1468,13 @@ def test_pred_ppf_reconstructs_iqr_pred_analytical():
 def test_dispersion_diagnostics_calibrated_is_near_nominal():
     """A correctly-scaled predictive covers at its nominal rate with a tiny PIT-KS."""
     df = _skewnormal_frame(pred_scale=4.0)
-    pit_ks, cov50, cov80 = _dispersion_diagnostics(
+    pit_ks, tail_pit_ks, cov50, cov80 = _dispersion_diagnostics(
         df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
     )
     assert cov50 == pytest.approx(0.50, abs=0.04)
     assert cov80 == pytest.approx(0.80, abs=0.04)
     assert pit_ks < 0.05
+    assert tail_pit_ks <= pit_ks  # over-tail sub-supremum of the whole-CDF KS
 
 
 def test_dispersion_diagnostics_flags_underdispersion():
@@ -1483,7 +1484,7 @@ def test_dispersion_diagnostics_flags_underdispersion():
     interval far more than nominal, so coverage drops well below 0.50/0.80.
     """
     df = _skewnormal_frame(pred_scale=2.0)
-    pit_ks, cov50, cov80 = _dispersion_diagnostics(
+    pit_ks, _tail, cov50, cov80 = _dispersion_diagnostics(
         df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
     )
     assert cov50 < 0.35
@@ -1494,7 +1495,7 @@ def test_dispersion_diagnostics_flags_underdispersion():
 def test_dispersion_diagnostics_flags_overdispersion():
     """Too-wide predictive (double scale) → actuals cluster inside, coverage overshoots."""
     df = _skewnormal_frame(pred_scale=8.0)
-    _, cov50, cov80 = _dispersion_diagnostics(
+    _, _, cov50, cov80 = _dispersion_diagnostics(
         df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
     )
     assert cov50 > 0.65
@@ -1515,13 +1516,63 @@ def test_dispersion_diagnostics_zinb_is_finite_and_bounded():
         }
     )
     assert _infer_dist_from_columns(df) == "ZINB"
-    pit_ks, cov50, cov80 = _dispersion_diagnostics(
+    pit_ks, tail_pit_ks, cov50, cov80 = _dispersion_diagnostics(
         df, "ZINB", df["Result"].to_numpy(), strategy="baseline"
     )
-    for v in (pit_ks, cov50, cov80):
+    for v in (pit_ks, tail_pit_ks, cov50, cov80):
         assert np.isfinite(v) and 0.0 <= v <= 1.0
+    assert tail_pit_ks <= pit_ks
     pit = _pred_midpit(df, "ZINB", df["Result"].to_numpy(), strategy="baseline")
     assert np.all((pit >= 0.0) & (pit <= 1.0))
+
+
+def test_randomized_pit_ks_collapses_count_lattice():
+    """On a calibrated low-count NegBin frame the mid-PIT KS is lattice-inflated while the
+    randomized PIT KS is small — the fix that lets one Gate-4 threshold span count and
+    continuous families (a continuous-tuned 0.05 would otherwise fail calibrated counts)."""
+    from scipy.stats import nbinom
+
+    rng = np.random.default_rng(7)
+    r, nb_p = 1.5, 0.4  # scipy nbinom(r, 1 - nb_p); mean 1.0 — deep in the lattice regime
+    y = nbinom.rvs(r, 1.0 - nb_p, size=6000, random_state=rng).astype(float)
+    df = pd.DataFrame({"Result": y, "EV": np.full_like(y, 1.0), "R": np.full_like(y, r), "NB_P": np.full_like(y, nb_p)})
+    assert _infer_dist_from_columns(df) == "NegBin"
+    mid_ks = _ks_uniform(_pred_midpit(df, "NegBin", y, strategy="baseline"))
+    rand_ks = _randomized_pit_ks(df, "NegBin", y, strategy="baseline")
+    assert rand_ks < mid_ks - 0.02  # randomization removes the discreteness inflation
+    assert rand_ks < 0.05  # calibrated cell clears the gate on the fixed statistic
+
+
+def test_randomized_pit_ks_continuous_is_deterministic_ordinary_pit():
+    """Continuous families have no point mass, so the randomized KS is the deterministic
+    ``KS(F(y))`` — no draw dependence."""
+    df = _skewnormal_frame(pred_scale=4.0)
+    y = df["Result"].to_numpy()
+    expected = _ks_uniform(_pred_midpit(df, "SkewNormal", y, strategy="baseline"))
+    assert _randomized_pit_ks(df, "SkewNormal", y, strategy="baseline") == pytest.approx(expected)
+
+
+def test_gate4_pit_ks_threshold_takes_larger_of_delta_and_noise_floor():
+    """Per-cell bound = max(δ=0.05, 1.358/√n): δ binds at large n, the KS noise floor at small."""
+    assert _gate4_pit_ks_threshold(2000) == pytest.approx(_GATE4_PIT_KS_DELTA)  # floor ~0.030 < δ
+    assert _gate4_pit_ks_threshold(100) == pytest.approx(_GATE4_KS_NOISE_COEF / 10.0)  # 0.1358 > δ
+    assert np.isnan(_gate4_pit_ks_threshold(0))
+
+
+def test_tail_ks_localizes_over_tail_miscalibration():
+    """The reported over-tail KS is a sub-supremum of the whole-CDF KS (so always ≤ it):
+    it localizes *where* the deviation lives. A self-correcting bulk bump leaves the
+    over-tail clean (tail-KS ≈ 0 ≪ global); a deficit confined to the over-tail puts the
+    global supremum in the tail (tail-KS ≈ global) — the alt-OVER mispricing that the
+    whole-CDF gate nets away."""
+    bulk = np.linspace(0.0, 1.0, 1000, endpoint=False)
+    bulk[(bulk >= 0.4) & (bulk < 0.6)] = 0.4  # pile the middle fifth; CDF rejoins uniform by u=0.6
+    assert _ks_uniform(bulk) > 0.15
+    assert _tail_ks_uniform(bulk) < 0.01  # over-tail is undisturbed
+
+    tail = np.linspace(0.0, 0.88, 1000, endpoint=False)  # no PIT mass above 0.88
+    assert _tail_ks_uniform(tail) == pytest.approx(_ks_uniform(tail))  # global sup is in the tail
+    assert _tail_ks_uniform(tail) > 0.1
 
 
 def test_standalone_g1_column_scores_preblend_probs():
