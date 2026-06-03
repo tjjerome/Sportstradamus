@@ -386,12 +386,12 @@ def _finalize_records(
 
 def _odds_from_boost(o: dict) -> np.ndarray:
     p = [
-        0.5 / o.get("Boost_Under", 1)
+        _BOOK_PRIOR_PROB / o.get("Boost_Under", 1)
         if o.get("Boost_Under", 1) > 0
-        else 1 - 0.5 / o.get("Boost_Over", 1),
-        0.5 / o.get("Boost_Over", 1)
+        else 1 - _BOOK_PRIOR_PROB / o.get("Boost_Over", 1),
+        _BOOK_PRIOR_PROB / o.get("Boost_Over", 1)
         if o.get("Boost_Over", 1) > 0
-        else 1 - 0.5 / o.get("Boost_Under", 1),
+        else 1 - _BOOK_PRIOR_PROB / o.get("Boost_Under", 1),
     ]
     return p / np.sum(p)
 
