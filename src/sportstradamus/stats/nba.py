@@ -1162,7 +1162,7 @@ class StatsNBA(Stats):
         self.playerProfile.fillna(0, inplace=True)
         return None
 
-    def check_combo_markets(self, market, player, date=datetime.today().date()):  # style: allow-complexity — pre-existing CC 21; combo/DREB/fantasy branches are each a distinct market family
+    def check_combo_markets(self, market, player, date=datetime.today().date()):
         """Return an EV estimate for derived markets (combo, OREB/DREB split, fantasy) from archive."""
         player_games = self.short_gamelog.loc[
             self.short_gamelog[self.log_strings["player"]] == player
@@ -1172,62 +1172,28 @@ class StatsNBA(Stats):
         if not isinstance(date, str):
             date = date.strftime("%Y-%m-%d")
         if market in combo_props:
-            ev = 0
-            for submarket in combo_props.get(market, []):
-                sub_cv = stat_cv[self.league].get(submarket, 1)
-                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
-                v = archive.get_ev(self.league, submarket, date, player)
-                subline = archive.get_line(self.league, submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    ev = 0
-                    break
-                ev += v
-
+            ev = self._combo_market_ev(market, date, player, dist, cv)
         elif market in ["DREB", "OREB"]:
             ev = (
-                (
-                    archive.get_ev(self.league, "REB", date, player)
-                    * player_games[market].sum()
-                    / player_games["REB"].sum()
-                )
-                if player_games["REB"].sum()
-                else 0
-            )
-
+                archive.get_ev(self.league, "REB", date, player)
+                * player_games[market].sum()
+                / player_games["REB"].sum()
+            ) if player_games["REB"].sum() else 0
         elif "fantasy" in market:
             ev = 0
             book_odds = False
             fantasy_props = [
-                ("PTS", 1),
-                ("REB", 1.2),
-                ("AST", 1.5),
-                ("BLK", 3),
-                ("STL", 3),
-                ("TOV", -1),
+                ("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1),
             ]
             for submarket, weight in fantasy_props:
-                sub_cv = stat_cv[self.league].get(submarket, 1)
-                sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
-                v = archive.get_ev(self.league, submarket, date, player)
-                subline = archive.get_line(self.league, submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    if subline == 0 and not player_games.empty:
-                        subline = np.floor(player_games.iloc[-10:][submarket].median()) + 0.5
-
-                    if subline != 0:
-                        under = (player_games[submarket] < subline).mean()
-                        ev += get_ev(subline, under, sub_cv, dist=sub_dist) * weight
-                else:
-                    book_odds = True
-                    ev += v * weight
-
+                v, subline, sub_cv, sub_dist = self._submarket_ev(submarket, date, player, dist, cv)
+                contribution, from_book = self._fantasy_default_contribution(
+                    submarket, weight, v, subline, sub_cv, sub_dist, player_games
+                )
+                ev += contribution
+                book_odds |= from_book
             if not book_odds:
                 ev = 0
         else:
             ev = 0
-
         return 0 if np.isnan(ev) else ev
