@@ -25,6 +25,7 @@ from sportstradamus.helpers import (
     get_push_prob,
     set_model_start_values,
     stat_cv,
+    stat_dist,
     stat_map,
     stat_zi,
 )
@@ -58,6 +59,26 @@ _MIN_YARDS_LINE = 8
 # Above this the promo is an outlier (e.g. a discounted special) that distorts
 # the per-player distance ranking, so it is filtered out.
 _MAX_UNDERDOG_BOOST = 3.65
+
+# Coin-flip prior used when no bookmaker price is available for an offer.
+_BOOK_PRIOR_PROB: float = 0.5
+
+# Maximum scored offers retained per player after boost-distance deduplication.
+_MAX_OFFERS_PER_PLAYER: int = 3
+
+
+def normalize_market(league: str, market: str, platform: str) -> str:
+    """Canonicalize a platform's market label to the league gamelog/model key.
+
+    Applies the per-platform ``stat_map`` alias plus the NHL and NBA/WNBA
+    fixups shared by ``match_offers``, ``model_prob``, and ``book_fallback_prob``.
+    """
+    market = stat_map[platform].get(market, market)
+    if league == "NHL":
+        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
+    if league in ("NBA", "WNBA"):
+        market = market.replace("underdog", "prizepicks")
+    return market
 
 
 def _decode_skewnormal(
@@ -136,6 +157,229 @@ def _apply_prob_posthoc(
     return cal_over
 
 
+def _book_cell_params(league: str, market: str) -> tuple[str | None, float | None, float | None, float | None]:
+    """Resolve ``(dist, cv, gate, step)`` for a cell from config, no pickle.
+
+    Mirrors the pickle metadata ``model_prob`` reads, sourced instead from the
+    committed ``stat_meta`` / runtime calibration. ``dist`` is ``None`` when the
+    cell is unknown. ``step`` is approximated by family (the trained value is
+    empirical and not recoverable without the pickle).
+    """
+    dist = stat_dist.get(league, {}).get(market)
+    if dist is None:
+        return None, None, None, None
+    cv = stat_cv[league].get(market, 1)
+    gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
+    step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
+    return dist, cv, gate, step
+
+
+def _book_over_prob(
+    offer_df: pd.DataFrame, dist: str, cv: float, step: float, gate: float | None
+) -> pd.Series:
+    """Devigged book probability of the over per row, inverted from ``Books EV``.
+
+    Inverts the composite book EV through the cell distribution at each row's
+    line. Shared by :func:`model_prob` and :func:`book_fallback_prob`.
+    """
+    if dist == "SkewNormal":
+        return offer_df.apply(
+            lambda x: 1
+            - get_odds(
+                x["Line"],
+                x["Books EV"],
+                dist,
+                cv=cv,
+                step=step,
+                sigma=x["Books EV"] * cv,
+                skew_alpha=0,
+                gate=gate,
+            ),
+            axis=1,
+        )
+    return offer_df.apply(
+        lambda x: 1 - get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=gate),
+        axis=1,
+    )
+
+
+def _composite_book_evs(players, league: str, market: str, date_map: dict, stat_data) -> dict:
+    """Composite (book-weighted, vig-free) EV per player, with combo fallback.
+
+    Reads ``archive.get_ev`` for each player; when the archive has no direct
+    price, falls back to the convolved consensus from ``check_combo_markets``
+    (qb-yards / qb-tds). Players with no book price carry NaN.
+    """
+    evs = {}
+    for player in players:
+        date = date_map.get(player, "")
+        ev = archive.get_ev(league, market, date, player)
+        if np.isnan(ev):
+            ev = stat_data.check_combo_markets(market, player, date)
+        evs[player] = ev
+    return evs
+
+
+def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
+    """Set the display-only ``Model Param`` and ``Model STD`` columns in place.
+
+    Reads the distribution-shape parameters the model emitted (``Model R`` /
+    ``Model Sigma`` / ``Model Alpha``); falls back to NaN when they are absent,
+    as on a book-fallback record. These columns feed the dashboard detail popup
+    only — no scoring path reads them.
+    """
+    # style: allow-complexity  flat per-distribution-family dispatch of closed-form
+    # display variances; splitting duplicates the family/param-present guards.
+    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+        offer_df["Model Param"] = offer_df["Model R"]
+    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        offer_df["Model Param"] = offer_df["Model Sigma"]
+    elif "Model Alpha" in offer_df.columns:
+        offer_df["Model Param"] = offer_df["Model Alpha"]
+    else:
+        offer_df["Model Param"] = np.nan
+
+    _m = offer_df["Model EV"].to_numpy(dtype=float)
+    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+        _r = offer_df["Model R"].to_numpy(dtype=float)
+        offer_df["Model STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
+    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
+        _sk = (
+            offer_df["Model Skew"].to_numpy(dtype=float)
+            if "Model Skew" in offer_df.columns
+            else np.zeros_like(_sg)
+        )
+        _delta = _sk / np.sqrt(1 + _sk**2)
+        offer_df["Model STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
+    elif "Model Alpha" in offer_df.columns:
+        _a = offer_df["Model Alpha"].to_numpy(dtype=float)
+        offer_df["Model STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
+    else:
+        offer_df["Model STD"] = np.nan
+
+
+def _finalize_records(
+    offer_df: pd.DataFrame,
+    league: str,
+    platform: str,
+    dist: str,
+    cv: float,
+    step: float,
+    temperature: float | None,
+    dispersion_cal: float,
+) -> list[dict]:
+    """Resolve the bet side, apply boosts, and project the export schema.
+
+    Shared tail of :func:`model_prob` and :func:`book_fallback_prob`. Expects
+    ``offer_df`` to already carry ``Model Over`` / ``Model Under`` (win
+    probabilities for each side), the raw ``Books`` over-probability, ``Push P``,
+    ``Model EV`` and ``Books EV``. Feature-derived passenger columns absent on a
+    book-fallback record (built without a feature matrix) are filled neutral so
+    correlation and the dashboard read sane values — ``Player position`` in
+    particular must stay an int, never NaN, or correlation's position map breaks.
+    """
+    totals_map = archive.default_totals
+    for _col in ("Avg5", "AvgH2H", "H2HPlayed", "Total", "Defense position", "Moneyline"):
+        if _col not in offer_df.columns:
+            offer_df[_col] = np.nan
+
+    offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
+    offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
+
+    offer_df["Model P"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
+    offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
+
+    if "Boost" in offer_df.columns:
+        offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
+    offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(
+        0
+    ).infer_objects(copy=False) * (UNDERDOG_BOOST_BASELINE if platform == "Underdog" else 1)
+    offer_df["Boost"] = offer_df.apply(
+        lambda x: (
+            (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
+            if not np.isnan(x["Boost_Over"])
+            else x["Boost"]
+        ),
+        axis=1,
+    )
+
+    offer_df["Model"] = offer_df["Model P"] * offer_df["Boost"]
+    offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (
+        1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"]
+    )
+    offer_df["Books P"] = offer_df["Books"].fillna(_BOOK_PRIOR_PROB)
+    offer_df["Books"] = offer_df["Books P"] * offer_df["Boost"]
+    offer_df["K"] = (offer_df["Model"] - 1) / (offer_df["Boost"] - 1)
+    offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
+    offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
+        1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
+    )
+    offer_df = (
+        offer_df.loc[offer_df["Boost"] <= _MAX_UNDERDOG_BOOST]
+        .sort_values("Distance", ascending=True)
+        .groupby("Player")
+        .head(_MAX_OFFERS_PER_PLAYER)
+    )
+
+    offer_df["Avg 5"] = offer_df["Avg5"] - offer_df["Line"]
+    offer_df["Avg H2H"] = offer_df["AvgH2H"] - offer_df["Line"]
+    offer_df.loc[offer_df["H2HPlayed"] == 0, "Avg H2H"] = 0
+    offer_df["O/U"] = offer_df["Total"] / totals_map.get(league, 1)
+    offer_df["DVPOA"] = offer_df["Defense position"]
+    if "Player position" not in offer_df:
+        offer_df["Player position"] = -1
+
+    offer_df["Player position"] = offer_df["Player position"].astype("category")
+    offer_df["Player position"] = (
+        offer_df["Player position"].cat.set_categories(range(-1, 5)).fillna(-1).astype(int)
+    )
+    _annotate_display_shape(offer_df, dist)
+
+    offer_df["Dist"] = dist
+    offer_df["CV"] = cv
+    offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
+    offer_df["Temperature"] = temperature
+    offer_df["Disp Cal"] = dispersion_cal
+    offer_df["Step"] = step
+
+    return offer_df[
+        [
+            "League",
+            "Date",
+            "Team",
+            "Opponent",
+            "Player",
+            "Market",
+            "Line",
+            "Boost",
+            "Bet",
+            "Books",
+            "Model",
+            "Avg 5",
+            "Avg H2H",
+            "Moneyline",
+            "O/U",
+            "DVPOA",
+            "Player position",
+            "Model EV",
+            "Model Param",
+            "Model STD",
+            "Model P",
+            "Push P",
+            "Books EV",
+            "Books P",
+            "K",
+            "Dist",
+            "CV",
+            "Gate",
+            "Temperature",
+            "Disp Cal",
+            "Step",
+        ]
+    ].to_dict("records")
+
+
 def model_prob(
     offers: list[dict],
     league: str,
@@ -180,14 +424,9 @@ def model_prob(
         ]
         return p / np.sum(p)
 
-    totals_map = archive.default_totals
     dateMap = {x["Player"]: x["Date"] for x in offers}
 
-    market = stat_map[platform].get(market, market)
-    if league == "NHL":
-        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
-    if league in ("NBA", "WNBA"):
-        market = market.replace("underdog", "prizepicks")
+    market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
     offer_df = pd.DataFrame(offers)
@@ -326,34 +565,7 @@ def model_prob(
         if offer_df.empty:
             return []
 
-        # Book-side probability
-        if dist == "SkewNormal":
-            offer_df["Books"] = offer_df.apply(
-                lambda x: (
-                    1
-                    - get_odds(
-                        x["Line"],
-                        x["Books EV"],
-                        dist,
-                        cv=cv,
-                        step=step,
-                        sigma=x["Books EV"] * cv,
-                        skew_alpha=0,
-                        gate=hist_gate or None,
-                    )
-                ),
-                axis=1,
-            )
-        else:
-            offer_df["Books"] = offer_df.apply(
-                lambda x: (
-                    1
-                    - get_odds(
-                        x["Line"], x["Books EV"], dist, cv, step=step, gate=hist_gate or None
-                    )
-                ),
-                axis=1,
-            )
+        offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
 
         # Clamp model shape to training-time ceiling
         if shape_ceiling is not None:
@@ -522,127 +734,76 @@ def model_prob(
 
         offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
-        offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
-        offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
-
-        offer_df["Model P"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
-        offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
-
-        if "Boost" in offer_df.columns:
-            offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
-        offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(
-            0
-        ).infer_objects(copy=False) * (UNDERDOG_BOOST_BASELINE if platform == "Underdog" else 1)
-        offer_df["Boost"] = offer_df.apply(
-            lambda x: (
-                (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
-                if not np.isnan(x["Boost_Over"])
-                else x["Boost"]
-            ),
-            axis=1,
+        return _finalize_records(
+            offer_df, league, platform, dist, cv, step, temperature, dispersion_cal
         )
-
-        offer_df["Model"] = offer_df["Model P"] * offer_df["Boost"]
-        offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (
-            1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"]
-        )
-        offer_df["Books P"] = offer_df["Books"].fillna(0.5)
-        offer_df["Books"] = offer_df["Books P"] * offer_df["Boost"]
-        offer_df["K"] = (offer_df["Model"] - 1) / (offer_df["Boost"] - 1)
-        offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
-        offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
-            1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
-        )
-        offer_df = (
-            offer_df.loc[offer_df["Boost"] <= _MAX_UNDERDOG_BOOST]
-            .sort_values("Distance", ascending=True)
-            .groupby("Player")
-            .head(3)
-        )
-
-        offer_df["Avg 5"] = offer_df["Avg5"] - offer_df["Line"]
-        offer_df["Avg H2H"] = offer_df["AvgH2H"] - offer_df["Line"]
-        offer_df.loc[offer_df["H2HPlayed"] == 0, "Avg H2H"] = 0
-        offer_df["O/U"] = offer_df["Total"] / totals_map.get(league, 1)
-        offer_df["DVPOA"] = offer_df["Defense position"]
-        if "Player position" not in offer_df:
-            offer_df["Player position"] = -1
-
-        offer_df["Player position"] = offer_df["Player position"].astype("category")
-        offer_df["Player position"] = (
-            offer_df["Player position"].cat.set_categories(range(-1, 5)).fillna(-1).astype(int)
-        )
-        if dist in ("NegBin", "ZINB"):
-            offer_df["Model Param"] = offer_df["Model R"]
-        elif dist == "SkewNormal":
-            offer_df["Model Param"] = offer_df["Model Sigma"]
-        else:
-            offer_df["Model Param"] = offer_df["Model Alpha"]
-
-        # Display-only standard deviation of the blended model distribution.
-        # Approximations on the overall mean are sufficient for the dashboard
-        # detail popup; they do not feed any scoring path.
-        _m = offer_df["Model EV"].to_numpy(dtype=float)
-        if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-            _r = offer_df["Model R"].to_numpy(dtype=float)
-            offer_df["Model STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
-        elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-            _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
-            _sk = (
-                offer_df["Model Skew"].to_numpy(dtype=float)
-                if "Model Skew" in offer_df.columns
-                else np.zeros_like(_sg)
-            )
-            _delta = _sk / np.sqrt(1 + _sk**2)
-            offer_df["Model STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
-        elif "Model Alpha" in offer_df.columns:
-            _a = offer_df["Model Alpha"].to_numpy(dtype=float)
-            offer_df["Model STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
-        else:
-            offer_df["Model STD"] = np.nan
-
-        offer_df["Dist"] = dist
-        offer_df["CV"] = cv
-        offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
-        offer_df["Temperature"] = temperature
-        offer_df["Disp Cal"] = dispersion_cal
-        offer_df["Step"] = step
-
-        return offer_df[
-            [
-                "League",
-                "Date",
-                "Team",
-                "Opponent",
-                "Player",
-                "Market",
-                "Line",
-                "Boost",
-                "Bet",
-                "Books",
-                "Model",
-                "Avg 5",
-                "Avg H2H",
-                "Moneyline",
-                "O/U",
-                "DVPOA",
-                "Player position",
-                "Model EV",
-                "Model Param",
-                "Model STD",
-                "Model P",
-                "Push P",
-                "Books EV",
-                "Books P",
-                "K",
-                "Dist",
-                "CV",
-                "Gate",
-                "Temperature",
-                "Disp Cal",
-                "Step",
-            ]
-        ].to_dict("records")
 
     logger.warning(f"{filename} missing")
     return []
+
+
+def book_fallback_prob(
+    offers: list[dict],
+    league: str,
+    market: str,
+    platform: str,
+    stat_data,
+) -> list[dict]:
+    """Score offers from book odds when no trained model exists for the cell.
+
+    Routed to by :func:`process_offers` whenever model scoring would otherwise
+    be empty (missing model pickle, or a model that matched no players). Treats
+    the composite, vig-free book probability — ``archive.get_ev`` inverted
+    through the cell's configured distribution — as the model prediction, so the
+    leg still flows through correlation, parlay search, and the export with no
+    claimed edge (``Model`` mirrors ``Books``). Returns an empty list when the
+    market is unknown to ``stat_meta`` (no distribution to devig with) or no leg
+    has book odds.
+    """
+    market = normalize_market(league, market, platform)
+    dist, cv, hist_gate, step = _book_cell_params(league, market)
+    if dist is None:
+        return []
+    gate_arg = hist_gate or None
+
+    date_map = {x["Player"]: x["Date"] for x in offers}
+    offer_df = pd.DataFrame(offers)
+    offer_df.index = offer_df.Player
+    if "yards" in market:
+        offer_df = offer_df.loc[
+            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
+        ]
+    if offer_df.empty:
+        return []
+
+    evs = _composite_book_evs(offer_df.index.unique(), league, market, date_map, stat_data)
+    offer_df["Books EV"] = offer_df.index.map(evs)
+    offer_df = offer_df.loc[offer_df["Books EV"].notna() & (offer_df["Books EV"] > 0)]
+    if offer_df.empty:
+        return []
+
+    playerStats = stat_data.get_stats(market, offers)
+    if not playerStats.empty:
+        playerStats = (
+            playerStats[~playerStats.index.duplicated(keep="first")]
+            .fillna(0)
+            .infer_objects(copy=False)
+        )
+        offer_df = offer_df.join(playerStats)
+    offer_df = offer_df.reset_index(drop=True)
+
+    offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, gate_arg)
+    _base_ev = offer_df["Books EV"].to_numpy()
+    offer_df["Push P"] = np.asarray(
+        get_push_prob(offer_df["Line"].to_numpy(), _base_ev, dist, cv=cv, gate=gate_arg),
+        dtype=float,
+    )
+    if hist_gate:
+        offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
+
+    _over = offer_df["Books"].to_numpy()
+    offer_df["Model Over"] = _over
+    offer_df["Model Under"] = 1 - _over
+    offer_df["Model EV"] = offer_df["Books EV"]
+
+    return _finalize_records(offer_df, league, platform, dist, cv, step, None, 1.0)
