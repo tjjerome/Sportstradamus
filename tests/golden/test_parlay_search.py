@@ -23,7 +23,9 @@ from sportstradamus.prediction.correlation import (
     _nearest_psd,
     _payout_curve_for,
 )
-from sportstradamus.prediction.parlay import assign_parlay_families
+import pandas as pd
+
+from sportstradamus.prediction.parlay import assign_parlay_families, beam_search_parlays
 
 
 def _grouped_c(groups: list[list[int]], intra: float, cross: float) -> np.ndarray:
@@ -262,3 +264,74 @@ def test_psd_repair_keeps_correlation_units_diagonal() -> None:
     assert np.allclose(np.diag(repaired), 1.0, atol=1e-9)
     # Off-diagonal must be in [-1, 1] for a correlation matrix.
     assert -1.0 - 1e-9 <= repaired[0, 1] <= 1.0 + 1e-9
+
+
+def _beam_inputs() -> dict:
+    """A 4-leg / 2-team game whose legs clear every beam-search EV gate.
+
+    Identity correlation (PSD, analytical mvn.cdf path) + zero pushes + a
+    single-tier power curve keep the output fully deterministic, so it pins
+    ``beam_search_parlays`` end-to-end without touching the stochastic
+    push-aware Monte-Carlo branch (covered separately above).
+    """
+    n = 4
+    p_model = np.array([0.82, 0.82, 0.82, 0.82])
+    p_books = np.array([0.62, 0.62, 0.62, 0.62])
+    boosts = np.ones(n)
+    C = np.eye(n)
+    M = np.ones((n, n))
+    P = p_model.reshape(n, 1) * p_model
+    var = p_model * (1 - p_model)
+    V = np.sqrt(var.reshape(n, 1) * var)
+    payouts = [3.0, 6.0, 10.0]
+    EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts) * payouts[0]
+    bet_df = {
+        i: {
+            "Player": f"P{i}",
+            "Team": "A" if i < 2 else "B",
+            "Desc": f"P{i} Over 1.5 Market{i}",
+            "Line": 1.5,
+            "Market": f"Market{i}",
+            "Bet": "Over",
+            "Model P": p_model[i],
+        }
+        for i in range(n)
+    }
+    idx = pd.DataFrame(
+        [{"Player": f"P{i}", "Team": bet_df[i]["Team"]} for i in range(n)], index=range(n)
+    )
+    return {
+        "idx": idx, "EV": EV, "C": C, "M": M, "p_model": p_model, "p_books": p_books,
+        "p_push": np.zeros(n), "boosts": boosts, "payouts": payouts,
+        "full_payouts": {2: [3.0, 0.0], 3: [6.0, 0.0], 4: [10.0, 0.0]}, "max_boost": 10.0,
+        "bet_df": bet_df, "info": {"Game": "A/B", "Date": "2026-01-01",
+                                   "League": "NBA", "Platform": "Underdog"},
+        "team": "A", "opp": "B",
+    }
+
+
+def test_beam_search_characterization() -> None:
+    """Pin beam_search_parlays output on a deterministic slate (decomposition guard)."""
+    res = beam_search_parlays(**_beam_inputs())
+
+    def sig(r):
+        return (
+            r["Bet Size"],
+            round(r["Model EV"], 6), round(r["Books EV"], 6), round(r["Rec Bet"], 6),
+            round(r["P"], 6), round(r["PB"], 6), round(r["Boost"], 6),
+        )
+
+    expected = (
+        [(2, 2.0172, 1.1532, 10.172, 2.0172, 1.1532, 3.0)] * 4
+        + [(3, 3.308208, 1.429968, 9.232832, 3.308208, 1.429968, 6.0)] * 4
+        + [(4, 4.521218, 1.477634, 7.824928, 4.521218, 1.477634, 10.0)]
+    )
+    assert sorted(map(sig, res)) == sorted(expected)
+    # Each size-2 parlay must span both teams (covers-team/opp gate).
+    legs2 = {r["Legs"] for r in res if r["Bet Size"] == 2}
+    assert legs2 == {
+        "P0 Over 1.5 Market0, P2 Over 1.5 Market2",
+        "P0 Over 1.5 Market0, P3 Over 1.5 Market3",
+        "P1 Over 1.5 Market1, P2 Over 1.5 Market2",
+        "P1 Over 1.5 Market1, P3 Over 1.5 Market3",
+    }
