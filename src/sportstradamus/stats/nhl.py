@@ -870,68 +870,41 @@ class StatsNHL(Stats):
         date = date.strftime("%Y-%m-%d")
         ev = 0
         if market in combo_props:
-            for submarket in combo_props.get(market, []):
-                sub_cv = stat_cv["NHL"].get(submarket, 1)
-                sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
-                v = archive.get_ev("NHL", submarket, date, player)
-                subline = archive.get_line("NHL", submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    ev = 0
-                    break
-
-                ev += v
-
+            ev = self._combo_market_ev(market, date, player, dist, cv)
         elif market == "goalsAgainst":
             ev = archive.get_total("NHL", date, opponent)
-
         elif "fantasy" in market:
-            ev = 0
-            book_odds = False
-            if "prizepicks" in market:
-                fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
-            elif ("underdog" in market) and ("skater" in market):
-                fantasy_props = [
-                    ("goals", 6),
-                    ("assists", 4),
-                    ("shots", 1),
-                    ("blocked", 1),
-                    ("hits", 0.5),
-                    ("powerPlayPoints", 0.5),
-                ]
-            else:
-                fantasy_props = [("saves", 0.6), ("goalsAgainst", -3), ("Moneyline", 6)]
-            for submarket, weight in fantasy_props:
-                sub_cv = stat_cv["NHL"].get(submarket, 1)
-                sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
-                v = archive.get_ev("NHL", submarket, date, player)
-                subline = archive.get_line("NHL", submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    if submarket == "Moneyline":
-                        p = archive.get_moneyline("NHL", date, team)
-                        ev += p * weight
-                    elif submarket == "goalsAgainst":
-                        v = archive.get_total("NHL", date, opponent)
-                        subline = np.floor(v) + 0.5
-                        v = get_ev(
-                            subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist
-                        )
-                        ev += v * weight
-                    else:
-                        if subline == 0 and not player_games.empty:
-                            subline = np.floor(player_games.iloc[-10:][submarket].median()) + 0.5
-
-                        if subline != 0:
-                            under = (player_games[submarket] < subline).mean()
-                            ev += get_ev(subline, under, sub_cv, dist=sub_dist) * weight
-                else:
-                    book_odds = True
-                    ev += v * weight
-
-            if not book_odds:
-                ev = 0
-
+            ev = self._check_nhl_fantasy(market, date, player, team, opponent, dist, cv, player_games)
         return 0 if np.isnan(ev) else ev
+
+    def _check_nhl_fantasy(self, market, date, player, team, opponent, dist, cv, player_games):
+        if "prizepicks" in market:
+            fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
+        elif ("underdog" in market) and ("skater" in market):
+            fantasy_props = [
+                ("goals", 6), ("assists", 4), ("shots", 1),
+                ("blocked", 1), ("hits", 0.5), ("powerPlayPoints", 0.5),
+            ]
+        else:
+            fantasy_props = [("saves", 0.6), ("goalsAgainst", -3), ("Moneyline", 6)]
+
+        ev = 0
+        book_odds = False
+        for submarket, weight in fantasy_props:
+            v, subline, sub_cv, sub_dist = self._submarket_ev(submarket, date, player, dist, cv)
+            if not (np.isnan(v) or v == 0):
+                book_odds = True
+                ev += v * weight
+            elif submarket == "Moneyline":
+                ev += archive.get_moneyline("NHL", date, team) * weight
+            elif submarket == "goalsAgainst":
+                v = archive.get_total("NHL", date, opponent)
+                subline = np.floor(v) + 0.5
+                v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
+                ev += v * weight
+            else:
+                contribution, _ = self._fantasy_default_contribution(
+                    submarket, weight, v, subline, sub_cv, sub_dist, player_games
+                )
+                ev += contribution
+        return ev if book_odds else 0
