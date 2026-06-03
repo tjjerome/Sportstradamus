@@ -54,6 +54,16 @@ def test_submarket_ev_missing_is_nan(stats, monkeypatch):
     assert subline == 0
 
 
+def test_submarket_ev_missing_league_no_keyerror(stats, monkeypatch):
+    # cv lookup must fall back to 1 when the league is absent from stat_cv,
+    # not raise KeyError (regression: stat_cv[self.league] subscript).
+    monkeypatch.setattr(base, "stat_cv", {})
+    monkeypatch.setattr(base, "archive", _FakeArchive({"A": 1.5}, {"A": 0.5}))
+    v, subline, sub_cv, sub_dist = stats._submarket_ev("A", "2026-01-01", "P", "Gamma", 1)
+    assert sub_cv == 1
+    assert v == 1.5
+
+
 def test_combo_market_ev_sums_legs(stats, monkeypatch):
     monkeypatch.setattr(base, "archive", _FakeArchive({"A": 1.5, "B": 2.0}))
     assert stats._combo_market_ev("COMBO", "2026-01-01", "P", "Gamma", 1) == pytest.approx(3.5)
@@ -93,3 +103,33 @@ def test_fantasy_default_contribution_no_line_no_history(stats):
     )
     assert contribution == 0
     assert from_book is False
+
+
+def test_nhl_combo_opponent_uses_upcoming_games_key(monkeypatch):
+    # Regression: the upcoming-game branch must read upcoming_games[team]["Opponent"]
+    # (capital, as the dict is built), not log_strings["opponent"] ("opponent").
+    from datetime import datetime, timedelta
+
+    from sportstradamus.stats import nhl
+
+    s = nhl.StatsNHL.__new__(nhl.StatsNHL)
+    s.league = "NHL"
+    s.log_strings = {"player": "playerName", "team": "team",
+                     "opponent": "opponent", "date": "gameDate"}
+    s.short_gamelog = pd.DataFrame({"playerName": ["P"], "team": ["BOS"]})
+    s.gamelog = pd.DataFrame({"playerName": [], "gameDate": []})
+    s.upcoming_games = {"BOS": {"Opponent": "TOR", "Home": True}}
+
+    captured = {}
+
+    class _Arch:
+        def get_total(self, league, date, opponent):
+            captured["opponent"] = opponent
+            return 5.5
+
+    monkeypatch.setattr(nhl, "archive", _Arch())
+    future = datetime.today().date() + timedelta(days=1)
+    ev = s.check_combo_markets("goalsAgainst", "P", future)
+
+    assert ev == 5.5
+    assert captured["opponent"] == "TOR"
