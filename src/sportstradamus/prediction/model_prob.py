@@ -384,6 +384,196 @@ def _finalize_records(
     ].to_dict("records")
 
 
+def _odds_from_boost(o: dict) -> np.ndarray:
+    p = [
+        0.5 / o.get("Boost_Under", 1)
+        if o.get("Boost_Under", 1) > 0
+        else 1 - 0.5 / o.get("Boost_Over", 1),
+        0.5 / o.get("Boost_Over", 1)
+        if o.get("Boost_Over", 1) > 0
+        else 1 - 0.5 / o.get("Boost_Under", 1),
+    ]
+    return p / np.sum(p)
+
+
+def _col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray | None:
+    return df[col].to_numpy() if active and col in df.columns else None
+
+
+def _build_prob_params(
+    filedict: dict, market: str, stat_data, playerStats: pd.DataFrame, dist: str,
+    offset_meta, normalized: bool,
+) -> pd.DataFrame:
+    if market in stat_data.volume_stats:
+        prob_params = pd.DataFrame(index=playerStats.index)
+        prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} mean"])
+        if f"proj {market} std" in stat_data.playerProfile.columns:
+            prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
+        prob_params.rename(
+            columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model Param"},
+            inplace=True,
+        )
+        return prob_params
+
+    model = filedict["model"]
+    categories = ["Home", "Player position"]
+    if "Player position" not in playerStats.columns:
+        categories.remove("Player position")
+    for c in categories:
+        playerStats[c] = playerStats[c].astype("category")
+
+    if getattr(model, "is_hurdle", False):
+        # HurdleZINB seeds its internal NegBin from its own X; the external
+        # set_model_start_values would treat it as a plain LSS and fail.
+        model.set_model_start_values(playerStats)
+    else:
+        set_model_start_values(
+            model, dist, playerStats, normalized=normalized,
+            offset_mode=bool(offset_meta and offset_meta.get("method") == "eb_additive"),
+        )
+    prob_params = model.predict(playerStats, pred_type="parameters")
+    prob_params.index = playerStats.index
+    return prob_params
+
+
+def _book_evs_for_players(
+    playerStats: pd.DataFrame, offer_df: pd.DataFrame, market: str, dist: str, cv: float,
+    hist_gate: float, dateMap: dict, stat_data,
+) -> list:
+    evs = []
+    for player in playerStats.index:
+        date = dateMap.get(player, "")
+        ev = archive.get_ev(stat_data.league, market, date, player)
+        line = archive.get_line(stat_data.league, market, date, player)
+        if np.isnan(ev):
+            ev = stat_data.check_combo_markets(market, player, date)
+        if line <= 0:
+            line = np.max([playerStats.loc[player, "Avg10"], 0.5])
+        if (ev <= 0 or np.isnan(ev)) and player in offer_df.index:
+            o = offer_df.loc[player]
+            if isinstance(o, pd.DataFrame):
+                o = o.iloc[0]
+            ev = get_ev(
+                line,
+                _odds_from_boost(o.to_dict())[0],
+                stat_cv[stat_data.league].get(market, 1),
+                dist=dist,
+                gate=hist_gate or None,
+            )
+        evs.append(ev)
+    return evs
+
+
+def _set_decoded(prob_params: pd.DataFrame, decoded, shape_col: str, shape_val) -> None:
+    prob_params["Model EV"] = decoded.ev
+    prob_params[shape_col] = shape_val
+    if decoded.gate is not None:
+        prob_params["Model Gate"] = decoded.gate
+
+
+def _decode_model_params(
+    prob_params: pd.DataFrame, dist: str, playerStats: pd.DataFrame, hist_gate: float,
+    offset_meta, target_normalization: str,
+) -> None:
+    # The column guards skip the volume_stats branch, which already set Model EV
+    # from the player profile rather than a fitted distribution.
+    if dist in ("NegBin", "ZINB") and "total_count" in prob_params.columns:
+        decoded = decode_predictive_mean(prob_params, dist)
+        _set_decoded(prob_params, decoded, "Model R", decoded.r)
+    elif dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
+        decoded = decode_predictive_mean(prob_params, dist)
+        _set_decoded(prob_params, decoded, "Model Alpha", decoded.alpha)
+    elif dist == "SkewNormal" and "loc" in prob_params.columns:
+        # Dispatch SkewNormal loc/scale through the baselines registry so the
+        # train-side forward transform and predict-side inverse cannot drift.
+        _decode_skewnormal(prob_params, playerStats, hist_gate, offset_meta, target_normalization)
+
+
+def _clamp_shape_ceiling(offer_df: pd.DataFrame, dist: str, shape_ceiling) -> None:
+    if shape_ceiling is None:
+        return
+    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+        offer_df["Model R"] = np.minimum(offer_df["Model R"], shape_ceiling)
+    elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
+        offer_df["Model Alpha"] = np.minimum(offer_df["Model Alpha"], shape_ceiling)
+
+
+def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
+    if dist == "SkewNormal":
+        return {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
+    if dist in ("ZINB", "ZAGamma") and "Model Gate" in offer_df.columns:
+        return {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
+    return {}
+
+
+def _blend_with_book(
+    offer_df: pd.DataFrame, dist: str, model_weight: float, cv: float, hist_gate: float
+):
+    model_ev = offer_df["Model EV"].to_numpy()
+    books_ev = offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy()
+    zi = _zi_kwargs(offer_df, dist, hist_gate)
+    if dist == "SkewNormal":
+        base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
+            model_weight, model_ev, books_ev, cv, "SkewNormal",
+            sigma=_col_or_none(offer_df, "Model Sigma"),
+            skew_alpha=_col_or_none(offer_df, "Model Skew"),
+            **zi,
+        )
+        offer_df["Model Sigma"] = sigma_blend
+        offer_df["Model Skew"] = skew_blend
+    elif dist in ("NegBin", "ZINB"):
+        r_blend, p_blend, gate_blend = fused_loc(
+            model_weight, model_ev, books_ev, cv, "NegBin",
+            r=_col_or_none(offer_df, "Model R"), **zi,
+        )
+        base_mean = r_blend * (1 - p_blend) / p_blend
+        offer_df["Model R"] = r_blend
+    else:
+        alpha_blend, beta_blend, gate_blend = fused_loc(
+            model_weight, model_ev, books_ev, cv, "Gamma",
+            alpha=_col_or_none(offer_df, "Model Alpha"), **zi,
+        )
+        base_mean = alpha_blend / beta_blend
+        offer_df["Model Alpha"] = alpha_blend
+    if gate_blend is not None:
+        offer_df["Model EV"] = (1 - gate_blend) * base_mean
+        offer_df["Model Gate"] = gate_blend
+    else:
+        offer_df["Model EV"] = base_mean
+    return base_mean
+
+
+def _dispersion_calibrate(offer_df: pd.DataFrame, dist: str, dispersion_cal: float) -> None:
+    # SkewNormal calibrates via CRPS, not a shape multiplier — skip it.
+    if dispersion_cal == 1.0 or dist == "SkewNormal":
+        return
+    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+        offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
+    elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
+        offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
+
+
+def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
+    r = _col_or_none(offer_df, "Model R", dist in ("NegBin", "ZINB"))
+    alpha = _col_or_none(offer_df, "Model Alpha", dist in ("Gamma", "ZAGamma"))
+    sigma = _col_or_none(offer_df, "Model Sigma", dist == "SkewNormal")
+    skew = _col_or_none(offer_df, "Model Skew", dist == "SkewNormal")
+    gate = _col_or_none(offer_df, "Model Gate", dist in ("ZINB", "ZAGamma", "SkewNormal"))
+    line = offer_df["Line"].to_numpy()
+    if dist == "SkewNormal":
+        raw_under = get_odds(
+            line, base_mean, dist, cv=cv, step=step, sigma=sigma, skew_alpha=skew, gate=gate
+        )
+    else:
+        raw_under = get_odds(line, base_mean, dist, cv, alpha=alpha, step=step, r=r, gate=gate)
+    # Push prob for integer-line discrete markets (continuous dists return zero);
+    # correlation.py uses it for the Underdog "push drops one leg" rule.
+    push = get_push_prob(
+        line, base_mean, dist, cv=cv, r=r, sigma=sigma, skew_alpha=skew, gate=gate
+    )
+    return 1 - raw_under, push
+
+
 def model_prob(
     offers: list[dict],
     league: str,
@@ -402,346 +592,95 @@ def model_prob(
 
     Returns an empty list when no model file exists or when the joined
     DataFrame is empty after filtering.
-
-    Args:
-        offers: Raw offer dicts from the scraper.
-        league: League key (e.g. ``"NBA"``).
-        market: Canonical market name.
-        platform: DFS platform name (e.g. ``"Underdog"``).
-        stat_data: Loaded ``Stats`` instance for ``league``.
-        playerStats: Feature DataFrame from ``match_offers``.
-
-    Returns:
-        list[dict]: Scored offer records, or ``[]`` on failure.
     """
-    # style: allow-length  pre-existing distribution-decode orchestrator
-    # (§2.8/§18.9): flag, don't split. Already over the limit before this edit.
-
-    def odds_from_boost(o):
-        p = [
-            0.5 / o.get("Boost_Under", 1)
-            if o.get("Boost_Under", 1) > 0
-            else 1 - 0.5 / o.get("Boost_Over", 1),
-            0.5 / o.get("Boost_Over", 1)
-            if o.get("Boost_Over", 1) > 0
-            else 1 - 0.5 / o.get("Boost_Under", 1),
-        ]
-        return p / np.sum(p)
-
     dateMap = {x["Player"]: x["Date"] for x in offers}
-
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
+    if not os.path.isfile(filepath):
+        logger.warning(f"{filename} missing")
+        return []
+
     offer_df = pd.DataFrame(offers)
     offer_df.index = offer_df.Player
     if "yards" in market:
         offer_df = offer_df.loc[
             (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
         ]
-    if os.path.isfile(filepath):
-        with open(filepath, "rb") as infile:
-            filedict = pickle.load(infile)
-        cv = filedict["cv"]
-        model_weight = filedict["weight"]
-        temperature = filedict.get("temperature", None)
-        dispersion_cal = filedict.get("dispersion_cal", 1.0)
-        shape_ceiling = filedict.get("shape_ceiling")
-        dist = filedict["distribution"]
-        step = filedict["step"]
-        normalized = filedict.get("normalized", False)
-        # Task 5: read baseline metadata. Defaults preserve byte-identical
-        # behavior for legacy pickles written before P1 (no offset_meta /
-        # target_normalization keys) — they decode through the ratio path.
-        offset_meta = filedict.get("offset_meta")
-        # Legacy pickles (pre-rename) persisted this under "target_strategy".
-        target_normalization = filedict.get(
-            "target_normalization", filedict.get("target_strategy", "ratio_meanyr")
-        )
-        posthoc_slug = filedict.get("posthoc", "none")
-        posthoc_blob = filedict.get("posthoc_blob", None)
-        hist_gate = (
-            stat_zi.get(league, {}).get(market, 0)
-            if dist in ("ZINB", "ZAGamma", "SkewNormal")
-            else 0
-        )
 
-        if market in stat_data.volume_stats:
-            prob_params = pd.DataFrame(index=playerStats.index)
-            prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} mean"])
-            if f"proj {market} std" in stat_data.playerProfile.columns:
-                prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
+    with open(filepath, "rb") as infile:
+        filedict = pickle.load(infile)
+    cv = filedict["cv"]
+    model_weight = filedict["weight"]
+    temperature = filedict.get("temperature", None)
+    dispersion_cal = filedict.get("dispersion_cal", 1.0)
+    shape_ceiling = filedict.get("shape_ceiling")
+    dist = filedict["distribution"]
+    step = filedict["step"]
+    normalized = filedict.get("normalized", False)
+    # Defaults keep legacy pickles (pre-P1, no offset_meta / target_normalization)
+    # byte-identical; "target_strategy" is the pre-rename key.
+    offset_meta = filedict.get("offset_meta")
+    target_normalization = filedict.get(
+        "target_normalization", filedict.get("target_strategy", "ratio_meanyr")
+    )
+    posthoc_slug = filedict.get("posthoc", "none")
+    posthoc_blob = filedict.get("posthoc_blob", None)
+    hist_gate = (
+        stat_zi.get(league, {}).get(market, 0)
+        if dist in ("ZINB", "ZAGamma", "SkewNormal")
+        else 0
+    )
 
-            prob_params.rename(
-                columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model Param"},
-                inplace=True,
-            )
+    prob_params = _build_prob_params(
+        filedict, market, stat_data, playerStats, dist, offset_meta, normalized
+    )
+    prob_params.sort_index(inplace=True)
+    playerStats.sort_index(inplace=True)
+    if "Defense position" not in playerStats:
+        playerStats["Defense position"] = playerStats["Defense avg"]
 
-        else:
-            model = filedict["model"]
+    evs = _book_evs_for_players(
+        playerStats, offer_df, market, dist, cv, hist_gate, dateMap, stat_data
+    )
+    playerStats["Books EV"] = evs
+    playerStats["Books STD"] = cv * np.array(evs)
 
-            categories = ["Home", "Player position"]
-            if "Player position" not in playerStats.columns:
-                categories.remove("Player position")
-            for c in categories:
-                playerStats[c] = playerStats[c].astype("category")
+    _decode_model_params(
+        prob_params, dist, playerStats, hist_gate, offset_meta, target_normalization
+    )
 
-            if getattr(model, "is_hurdle", False):
-                # HurdleZINB: composite of binary clf + NegBin LSS. The wrapper
-                # seeds the internal NegBin from its own X. Going through the
-                # external set_model_start_values would treat it as a plain LSS
-                # and fail since hurdle has no top-level start_values attribute.
-                model.set_model_start_values(playerStats)
-            else:
-                set_model_start_values(
-                    model,
-                    dist,
-                    playerStats,
-                    normalized=normalized,
-                    offset_mode=bool(offset_meta and offset_meta.get("method") == "eb_additive"),
-                )
+    offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
+    offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
+    if offer_df.empty:
+        return []
 
-            prob_params = model.predict(playerStats, pred_type="parameters")
-            prob_params.index = playerStats.index
+    offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
+    _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
+    # Mean-stage post-hoc correction before blending, mirroring train_market so
+    # live predictions match the offline test CSV event-for-event.
+    offer_df["Model EV"] = _apply_mean_posthoc(
+        offer_df["Model EV"].to_numpy(), posthoc_slug, posthoc_blob
+    )
 
-        prob_params.sort_index(inplace=True)
-        playerStats.sort_index(inplace=True)
+    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate)
 
-        if "Defense position" not in playerStats:
-            playerStats["Defense position"] = playerStats["Defense avg"]
+    # ZI dists: book reports the non-zero component EV; scale to marginal EV.
+    if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
+        offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
+    _dispersion_calibrate(offer_df, dist, dispersion_cal)
 
-        evs = []
-        for player in playerStats.index:
-            ev = archive.get_ev(stat_data.league, market, dateMap.get(player, ""), player)
-            line = archive.get_line(stat_data.league, market, dateMap.get(player, ""), player)
-            if np.isnan(ev):
-                ev = stat_data.check_combo_markets(market, player, dateMap.get(player, ""))
-            if line <= 0:
-                line = np.max([playerStats.loc[player, "Avg10"], 0.5])
-            if (ev <= 0 or np.isnan(ev)) and player in offer_df.index:
-                o = offer_df.loc[player]
-                if isinstance(o, pd.DataFrame):
-                    o = o.iloc[0]
-                ev = get_ev(
-                    line,
-                    odds_from_boost(o.to_dict())[0],
-                    stat_cv[stat_data.league].get(market, 1),
-                    dist=dist,
-                    gate=hist_gate or None,
-                )
-            elif hist_gate and ev > 0:
-                pass  # archive EVs are already base means
+    raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
+    offer_df["Push P"] = np.asarray(push, dtype=float)
 
-            evs.append(ev)
+    cal_over = apply_temperature(raw_over, temperature)
+    cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
+    offer_df["Model Under"] = 1 - cal_over
+    offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
-        playerStats["Books EV"] = evs
-        playerStats["Books STD"] = cv * np.array(evs)
-
-        # Decode raw LightGBMLSS params -> Model EV + shape. The column guards
-        # skip the volume_stats branch above, which already set Model EV from
-        # the player profile rather than a fitted distribution.
-        if dist in ("NegBin", "ZINB") and "total_count" in prob_params.columns:
-            decoded = decode_predictive_mean(prob_params, dist)
-            prob_params["Model EV"] = decoded.ev
-            prob_params["Model R"] = decoded.r
-            if decoded.gate is not None:
-                prob_params["Model Gate"] = decoded.gate
-        elif dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
-            decoded = decode_predictive_mean(prob_params, dist)
-            prob_params["Model EV"] = decoded.ev
-            prob_params["Model Alpha"] = decoded.alpha
-            if decoded.gate is not None:
-                prob_params["Model Gate"] = decoded.gate
-        elif dist == "SkewNormal" and "loc" in prob_params.columns:
-            # Dispatch SkewNormal loc/scale through the baselines registry so the
-            # train-side forward transform and predict-side inverse cannot drift.
-            _decode_skewnormal(
-                prob_params, playerStats, hist_gate, offset_meta, target_normalization
-            )
-
-        offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
-        offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
-        if offer_df.empty:
-            return []
-
-        offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
-
-        # Clamp model shape to training-time ceiling
-        if shape_ceiling is not None:
-            if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-                offer_df["Model R"] = np.minimum(offer_df["Model R"], shape_ceiling)
-            elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
-                offer_df["Model Alpha"] = np.minimum(offer_df["Model Alpha"], shape_ceiling)
-
-        # Mean-stage post-hoc correction of the model EV before blending, mirroring
-        # pipeline.train_market so live predictions match the offline test CSV
-        # event-for-event.
-        offer_df["Model EV"] = _apply_mean_posthoc(
-            offer_df["Model EV"].to_numpy(), posthoc_slug, posthoc_blob
-        )
-
-        # Blend model and book distributions via fused_loc
-        if dist == "SkewNormal":
-            _zi_kw = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
-            blended_base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
-                model_weight,
-                offer_df["Model EV"].to_numpy(),
-                offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
-                cv,
-                "SkewNormal",
-                sigma=offer_df["Model Sigma"].to_numpy()
-                if "Model Sigma" in offer_df.columns
-                else None,
-                skew_alpha=offer_df["Model Skew"].to_numpy()
-                if "Model Skew" in offer_df.columns
-                else None,
-                **_zi_kw,
-            )
-            if gate_blend is not None:
-                offer_df["Model EV"] = (1 - gate_blend) * blended_base_mean
-                offer_df["Model Gate"] = gate_blend
-            else:
-                offer_df["Model EV"] = blended_base_mean
-            offer_df["Model Sigma"] = sigma_blend
-            offer_df["Model Skew"] = skew_blend
-
-        elif dist in ("NegBin", "ZINB"):
-            _zi_kw = (
-                {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
-                if dist == "ZINB" and "Model Gate" in offer_df.columns
-                else {}
-            )
-            r_blend, p_blend, gate_blend = fused_loc(
-                model_weight,
-                offer_df["Model EV"].to_numpy(),
-                offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
-                cv,
-                "NegBin",
-                r=offer_df["Model R"].to_numpy() if "Model R" in offer_df.columns else None,
-                **_zi_kw,
-            )
-            blended_base_mean = r_blend * (1 - p_blend) / p_blend
-            if gate_blend is not None:
-                offer_df["Model EV"] = (1 - gate_blend) * blended_base_mean
-                offer_df["Model Gate"] = gate_blend
-            else:
-                offer_df["Model EV"] = blended_base_mean
-            offer_df["Model R"] = r_blend
-        else:
-            _zi_kw = (
-                {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
-                if dist == "ZAGamma" and "Model Gate" in offer_df.columns
-                else {}
-            )
-            alpha_blend, beta_blend, gate_blend = fused_loc(
-                model_weight,
-                offer_df["Model EV"].to_numpy(),
-                offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy(),
-                cv,
-                "Gamma",
-                alpha=offer_df["Model Alpha"].to_numpy()
-                if "Model Alpha" in offer_df.columns
-                else None,
-                **_zi_kw,
-            )
-            blended_base_mean = alpha_blend / beta_blend
-            if gate_blend is not None:
-                offer_df["Model EV"] = (1 - gate_blend) * blended_base_mean
-                offer_df["Model Gate"] = gate_blend
-            else:
-                offer_df["Model EV"] = blended_base_mean
-            offer_df["Model Alpha"] = alpha_blend
-
-        # Convert Books EV from base mean to overall mean for ZI/hurdle dists
-        if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
-            offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
-
-        # Dispersion calibration (SkewNormal uses CRPS — skip)
-        if dispersion_cal != 1.0 and dist != "SkewNormal":
-            if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-                offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
-            elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
-                offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
-
-        # Raw distributional probability
-        _r = (
-            offer_df["Model R"].to_numpy()
-            if (dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns)
-            else None
-        )
-        _alpha = (
-            offer_df["Model Alpha"].to_numpy()
-            if (dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns)
-            else None
-        )
-        _sigma = (
-            offer_df["Model Sigma"].to_numpy()
-            if (dist == "SkewNormal" and "Model Sigma" in offer_df.columns)
-            else None
-        )
-        _skew = (
-            offer_df["Model Skew"].to_numpy()
-            if (dist == "SkewNormal" and "Model Skew" in offer_df.columns)
-            else None
-        )
-        _gate = (
-            offer_df["Model Gate"].to_numpy()
-            if (dist in ("ZINB", "ZAGamma", "SkewNormal") and "Model Gate" in offer_df.columns)
-            else None
-        )
-        _model_ev = blended_base_mean  # base mean (gate handled separately inside get_odds)
-
-        if dist == "SkewNormal":
-            _raw_under = get_odds(
-                offer_df["Line"].to_numpy(),
-                _model_ev,
-                dist,
-                cv=cv,
-                step=step,
-                sigma=_sigma,
-                skew_alpha=_skew,
-                gate=_gate,
-            )
-        else:
-            _raw_under = get_odds(
-                offer_df["Line"].to_numpy(),
-                _model_ev,
-                dist,
-                cv,
-                alpha=_alpha,
-                step=step,
-                r=_r,
-                gate=_gate,
-            )
-        _raw_over = 1 - _raw_under
-
-        # Push probability for integer-line discrete-distribution markets. Used
-        # by :mod:`sportstradamus.prediction.correlation` to apply the Underdog
-        # "push drops one leg" rule. Continuous distributions return zero.
-        _push = get_push_prob(
-            offer_df["Line"].to_numpy(),
-            _model_ev,
-            dist,
-            cv=cv,
-            r=_r,
-            sigma=_sigma,
-            skew_alpha=_skew,
-            gate=_gate,
-        )
-        offer_df["Push P"] = np.asarray(_push, dtype=float)
-
-        _cal_over = apply_temperature(_raw_over, temperature)
-        _cal_over = _apply_prob_posthoc(_cal_over, posthoc_slug, posthoc_blob)
-        offer_df["Model Under"] = 1 - _cal_over
-
-        offer_df["Model Over"] = 1 - offer_df["Model Under"]
-
-        return _finalize_records(
-            offer_df, league, platform, dist, cv, step, temperature, dispersion_cal
-        )
-
-    logger.warning(f"{filename} missing")
-    return []
+    return _finalize_records(
+        offer_df, league, platform, dist, cv, step, temperature, dispersion_cal
+    )
 
 
 def book_fallback_prob(
