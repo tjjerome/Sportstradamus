@@ -1,0 +1,656 @@
+{
+ "game_date": "2023-08-22",
+ "away_team_data": {
+  "abbreviation": "CHC"
+ },
+ "home_team_data": {
+  "abbreviation": "DET"
+ },
+ "away_pitcher_lineup": [
+  592767
+ ],
+ "home_pitcher_lineup": [
+  681857
+ ],
+ "scoreboard": {
+  "linescore": {
+   "innings": [
+    {
+     "num": 1,
+     "ordinalNum": "1st",
+     "home": {
+      "runs": 2,
+      "hits": 2,
+      "errors": 0,
+      "leftOnBase": 1
+     },
+     "away": {
+      "runs": 0,
+      "hits": 0,
+      "errors": 0,
+      "leftOnBase": 0
+     }
+    }
+   ]
+  }
+ },
+ "boxscore": {
+  "teams": {
+   "away": {
+    "players": {
+     "ID592767": {
+      "person": {
+       "id": 592767,
+       "fullName": "Drew Smyly"
+      },
+      "position": {
+       "code": "1",
+       "name": "Pitcher",
+       "type": "Pitcher",
+       "abbreviation": "P"
+      },
+      "stats": {
+       "batting": {},
+       "pitching": {
+        "note": "(L, 9-9)",
+        "summary": "3.2 IP, 7 ER, 4 K, 3 BB",
+        "gamesPlayed": 1,
+        "gamesStarted": 1,
+        "flyOuts": 4,
+        "groundOuts": 1,
+        "airOuts": 6,
+        "runs": 7,
+        "doubles": 2,
+        "triples": 0,
+        "homeRuns": 2,
+        "strikeOuts": 4,
+        "baseOnBalls": 3,
+        "intentionalWalks": 0,
+        "hits": 8,
+        "hitByPitch": 0,
+        "atBats": 18,
+        "caughtStealing": 0,
+        "stolenBases": 0,
+        "stolenBasePercentage": ".---",
+        "numberOfPitches": 82,
+        "inningsPitched": "3.2",
+        "wins": 0,
+        "losses": 1,
+        "saves": 0,
+        "saveOpportunities": 0,
+        "holds": 0,
+        "blownSaves": 0,
+        "earnedRuns": 7,
+        "battersFaced": 22,
+        "outs": 11,
+        "gamesPitched": 1,
+        "completeGames": 0,
+        "shutouts": 0,
+        "pitchesThrown": 82,
+        "balls": 34,
+        "strikes": 48,
+        "strikePercentage": ".590",
+        "hitBatsmen": 0,
+        "balks": 0,
+        "wildPitches": 1,
+        "pickoffs": 0,
+        "rbi": 6,
+        "gamesFinished": 0,
+        "runsScoredPer9": "17.18",
+        "homeRunsPer9": "4.91",
+        "inheritedRunners": 0,
+        "inheritedRunnersScored": 0,
+        "catchersInterference": 0,
+        "sacBunts": 0,
+        "sacFlies": 1,
+        "passedBall": 0,
+        "popOuts": 1,
+        "lineOuts": 1
+       }
+      }
+     },
+     "ID666624": {
+      "person": {
+       "id": 666624,
+       "fullName": "Christopher Morel"
+      },
+      "position": {
+       "code": "10",
+       "name": "Designated Hitter",
+       "type": "Hitter",
+       "abbreviation": "DH"
+      },
+      "stats": {
+       "batting": {
+        "summary": "0-4 | K",
+        "gamesPlayed": 1,
+        "flyOuts": 1,
+        "groundOuts": 1,
+        "airOuts": 2,
+        "runs": 0,
+        "doubles": 0,
+        "triples": 0,
+        "homeRuns": 0,
+        "strikeOuts": 1,
+        "baseOnBalls": 0,
+        "intentionalWalks": 0,
+        "hits": 0,
+        "hitByPitch": 0,
+        "atBats": 4,
+        "caughtStealing": 0,
+        "stolenBases": 0,
+        "stolenBasePercentage": ".---",
+        "groundIntoDoublePlay": 0,
+        "groundIntoTriplePlay": 0,
+        "plateAppearances": 4,
+        "totalBases": 0,
+        "rbi": 0,
+        "leftOnBase": 4,
+        "sacBunts": 0,
+        "sacFlies": 0,
+        "catchersInterference": 0,
+        "pickoffs": 0,
+        "atBatsPerHomeRun": "-.--",
+        "popOuts": 1,
+        "lineOuts": 0
+       },
+       "pitching": {}
+      },
+      "battingOrder": "800"
+     },
+     "ID664023": {
+      "person": {
+       "id": 664023,
+       "fullName": "Ian Happ"
+      },
+      "position": {
+       "code": "7",
+       "name": "Outfielder",
+       "type": "Outfielder",
+       "abbreviation": "LF"
+      },
+      "stats": {
+       "batting": {
+        "summary": "0-4 | BB, 2 K, R",
+        "gamesPlayed": 1,
+        "flyOuts": 1,
+        "groundOuts": 1,
+        "airOuts": 1,
+        "runs": 1,
+        "doubles": 0,
+        "triples": 0,
+        "homeRuns": 0,
+        "strikeOuts": 2,
+        "baseOnBalls": 1,
+        "intentionalWalks": 0,
+        "hits": 0,
+        "hitByPitch": 0,
+        "atBats": 4,
+        "caughtStealing": 0,
+        "stolenBases": 0,
+        "stolenBasePercentage": ".---",
+        "groundIntoDoublePlay": 0,
+        "groundIntoTriplePlay": 0,
+        "plateAppearances": 5,
+        "totalBases": 0,
+        "rbi": 0,
+        "leftOnBase": 2,
+        "sacBunts": 0,
+        "sacFlies": 0,
+        "catchersInterference": 0,
+        "pickoffs": 0,
+        "atBatsPerHomeRun": "-.--",
+        "popOuts": 0,
+        "lineOuts": 0
+       },
+       "pitching": {}
+      },
+      "battingOrder": "300"
+     },
+     "ID640470": {
+      "person": {
+       "id": 640470,
+       "fullName": "Adbert Alzolay"
+      },
+      "position": {
+       "code": "1",
+       "name": "Pitcher",
+       "type": "Pitcher",
+       "abbreviation": "P"
+      },
+      "stats": {
+       "batting": {},
+       "pitching": {}
+      }
+     }
+    },
+    "teamStats": {
+     "batting": {
+      "flyOuts": 9,
+      "groundOuts": 7,
+      "airOuts": 12,
+      "runs": 6,
+      "doubles": 2,
+      "triples": 0,
+      "homeRuns": 2,
+      "strikeOuts": 9,
+      "baseOnBalls": 3,
+      "intentionalWalks": 0,
+      "hits": 8,
+      "hitByPitch": 0,
+      "avg": ".254",
+      "atBats": 36,
+      "obp": ".330",
+      "slg": ".420",
+      "ops": ".750",
+      "caughtStealing": 0,
+      "stolenBases": 1,
+      "stolenBasePercentage": "1.000",
+      "groundIntoDoublePlay": 0,
+      "groundIntoTriplePlay": 0,
+      "plateAppearances": 39,
+      "totalBases": 16,
+      "rbi": 6,
+      "leftOnBase": 11,
+      "sacBunts": 0,
+      "sacFlies": 0,
+      "catchersInterference": 0,
+      "pickoffs": 0,
+      "atBatsPerHomeRun": "18.00",
+      "popOuts": 2,
+      "lineOuts": 1
+     },
+     "pitching": {
+      "flyOuts": 4,
+      "groundOuts": 4,
+      "airOuts": 9,
+      "runs": 8,
+      "doubles": 2,
+      "triples": 1,
+      "homeRuns": 2,
+      "strikeOuts": 10,
+      "baseOnBalls": 7,
+      "intentionalWalks": 1,
+      "hits": 9,
+      "hitByPitch": 2,
+      "atBats": 31,
+      "obp": ".439",
+      "caughtStealing": 0,
+      "stolenBases": 1,
+      "stolenBasePercentage": "1.000",
+      "caughtStealingPercentage": ".000",
+      "numberOfPitches": 162,
+      "era": "4.20",
+      "inningsPitched": "8.0",
+      "saveOpportunities": 0,
+      "earnedRuns": 8,
+      "whip": "1.29",
+      "battersFaced": 41,
+      "outs": 24,
+      "completeGames": 0,
+      "shutouts": 0,
+      "pitchesThrown": 162,
+      "balls": 72,
+      "strikes": 90,
+      "strikePercentage": ".560",
+      "hitBatsmen": 2,
+      "balks": 0,
+      "wildPitches": 2,
+      "pickoffs": 0,
+      "groundOutsToAirouts": "0.44",
+      "rbi": 7,
+      "pitchesPerInning": "20.25",
+      "runsScoredPer9": "9.00",
+      "homeRunsPer9": "2.25",
+      "inheritedRunners": 0,
+      "inheritedRunnersScored": 0,
+      "catchersInterference": 0,
+      "sacBunts": 0,
+      "sacFlies": 1,
+      "passedBall": 0,
+      "popOuts": 2,
+      "lineOuts": 3
+     },
+     "fielding": {
+      "caughtStealing": 0,
+      "stolenBases": 1,
+      "stolenBasePercentage": "1.000",
+      "caughtStealingPercentage": ".---",
+      "assists": 5,
+      "putOuts": 24,
+      "errors": 2,
+      "chances": 31,
+      "passedBall": 0,
+      "pickoffs": 0
+     }
+    }
+   },
+   "home": {
+    "players": {
+     "ID681857": {
+      "person": {
+       "id": 681857,
+       "fullName": "Reese Olson"
+      },
+      "position": {
+       "code": "1",
+       "name": "Pitcher",
+       "type": "Pitcher",
+       "abbreviation": "P"
+      },
+      "stats": {
+       "batting": {},
+       "pitching": {
+        "summary": "4.2 IP, 6 ER, 7 K, 3 BB",
+        "gamesPlayed": 1,
+        "gamesStarted": 1,
+        "flyOuts": 4,
+        "groundOuts": 2,
+        "airOuts": 6,
+        "runs": 6,
+        "doubles": 1,
+        "triples": 0,
+        "homeRuns": 2,
+        "strikeOuts": 7,
+        "baseOnBalls": 3,
+        "intentionalWalks": 0,
+        "hits": 4,
+        "hitByPitch": 0,
+        "atBats": 19,
+        "caughtStealing": 0,
+        "stolenBases": 0,
+        "stolenBasePercentage": ".---",
+        "numberOfPitches": 97,
+        "inningsPitched": "4.2",
+        "wins": 0,
+        "losses": 0,
+        "saves": 0,
+        "saveOpportunities": 0,
+        "holds": 0,
+        "blownSaves": 0,
+        "earnedRuns": 6,
+        "battersFaced": 22,
+        "outs": 14,
+        "gamesPitched": 1,
+        "completeGames": 0,
+        "shutouts": 0,
+        "pitchesThrown": 97,
+        "balls": 36,
+        "strikes": 61,
+        "strikePercentage": ".630",
+        "hitBatsmen": 0,
+        "balks": 0,
+        "wildPitches": 0,
+        "pickoffs": 0,
+        "rbi": 4,
+        "gamesFinished": 0,
+        "runsScoredPer9": "11.57",
+        "homeRunsPer9": "3.86",
+        "inheritedRunners": 0,
+        "inheritedRunnersScored": 0,
+        "catchersInterference": 0,
+        "sacBunts": 0,
+        "sacFlies": 0,
+        "passedBall": 0,
+        "popOuts": 1,
+        "lineOuts": 1
+       }
+      }
+     },
+     "ID656716": {
+      "person": {
+       "id": 656716,
+       "fullName": "Zach McKinstry"
+      },
+      "position": {
+       "code": "4",
+       "name": "Second Base",
+       "type": "Infielder",
+       "abbreviation": "2B"
+      },
+      "stats": {
+       "batting": {
+        "summary": "1-2 | HBP, K, RBI",
+        "gamesPlayed": 1,
+        "flyOuts": 1,
+        "groundOuts": 0,
+        "airOuts": 1,
+        "runs": 2,
+        "doubles": 0,
+        "triples": 0,
+        "homeRuns": 0,
+        "strikeOuts": 1,
+        "baseOnBalls": 0,
+        "intentionalWalks": 0,
+        "hits": 1,
+        "hitByPitch": 1,
+        "atBats": 2,
+        "caughtStealing": 0,
+        "stolenBases": 1,
+        "stolenBasePercentage": "1.000",
+        "groundIntoDoublePlay": 0,
+        "groundIntoTriplePlay": 0,
+        "plateAppearances": 4,
+        "totalBases": 1,
+        "rbi": 1,
+        "leftOnBase": 1,
+        "sacBunts": 0,
+        "sacFlies": 1,
+        "catchersInterference": 0,
+        "pickoffs": 0,
+        "atBatsPerHomeRun": "-.--",
+        "popOuts": 0,
+        "lineOuts": 0
+       },
+       "pitching": {}
+      },
+      "battingOrder": "900"
+     },
+     "ID681481": {
+      "person": {
+       "id": 681481,
+       "fullName": "Kerry Carpenter"
+      },
+      "position": {
+       "code": "9",
+       "name": "Outfielder",
+       "type": "Outfielder",
+       "abbreviation": "RF"
+      },
+      "stats": {
+       "batting": {
+        "summary": "1-2 | 2 BB, HBP, K",
+        "gamesPlayed": 1,
+        "flyOuts": 0,
+        "groundOuts": 0,
+        "airOuts": 0,
+        "runs": 0,
+        "doubles": 0,
+        "triples": 0,
+        "homeRuns": 0,
+        "strikeOuts": 1,
+        "baseOnBalls": 2,
+        "intentionalWalks": 1,
+        "hits": 1,
+        "hitByPitch": 1,
+        "atBats": 2,
+        "caughtStealing": 0,
+        "stolenBases": 0,
+        "stolenBasePercentage": ".---",
+        "groundIntoDoublePlay": 0,
+        "groundIntoTriplePlay": 0,
+        "plateAppearances": 5,
+        "totalBases": 1,
+        "rbi": 2,
+        "leftOnBase": 0,
+        "sacBunts": 0,
+        "sacFlies": 0,
+        "catchersInterference": 0,
+        "pickoffs": 0,
+        "atBatsPerHomeRun": "-.--",
+        "popOuts": 0,
+        "lineOuts": 0
+       },
+       "pitching": {}
+      },
+      "battingOrder": "400"
+     },
+     "ID593958": {
+      "person": {
+       "id": 593958,
+       "fullName": "Eduardo Rodriguez"
+      },
+      "position": {
+       "code": "1",
+       "name": "Pitcher",
+       "type": "Pitcher",
+       "abbreviation": "P"
+      },
+      "stats": {
+       "batting": {},
+       "pitching": {}
+      }
+     }
+    },
+    "teamStats": {
+     "batting": {
+      "flyOuts": 4,
+      "groundOuts": 4,
+      "airOuts": 9,
+      "runs": 8,
+      "doubles": 2,
+      "triples": 1,
+      "homeRuns": 2,
+      "strikeOuts": 10,
+      "baseOnBalls": 7,
+      "intentionalWalks": 1,
+      "hits": 9,
+      "hitByPitch": 2,
+      "avg": ".236",
+      "atBats": 31,
+      "obp": ".301",
+      "slg": ".381",
+      "ops": ".682",
+      "caughtStealing": 0,
+      "stolenBases": 1,
+      "stolenBasePercentage": "1.000",
+      "groundIntoDoublePlay": 1,
+      "groundIntoTriplePlay": 0,
+      "plateAppearances": 41,
+      "totalBases": 19,
+      "rbi": 7,
+      "leftOnBase": 17,
+      "sacBunts": 0,
+      "sacFlies": 1,
+      "catchersInterference": 0,
+      "pickoffs": 0,
+      "atBatsPerHomeRun": "15.50",
+      "popOuts": 2,
+      "lineOuts": 3
+     },
+     "pitching": {
+      "flyOuts": 9,
+      "groundOuts": 7,
+      "airOuts": 12,
+      "runs": 6,
+      "doubles": 2,
+      "triples": 0,
+      "homeRuns": 2,
+      "strikeOuts": 9,
+      "baseOnBalls": 3,
+      "intentionalWalks": 0,
+      "hits": 8,
+      "hitByPitch": 0,
+      "atBats": 36,
+      "obp": ".282",
+      "caughtStealing": 0,
+      "stolenBases": 1,
+      "stolenBasePercentage": "1.000",
+      "caughtStealingPercentage": ".000",
+      "numberOfPitches": 160,
+      "era": "4.43",
+      "inningsPitched": "9.0",
+      "saveOpportunities": 0,
+      "earnedRuns": 6,
+      "whip": "1.27",
+      "battersFaced": 39,
+      "outs": 27,
+      "completeGames": 0,
+      "shutouts": 0,
+      "pitchesThrown": 160,
+      "balls": 53,
+      "strikes": 107,
+      "strikePercentage": ".670",
+      "hitBatsmen": 0,
+      "balks": 0,
+      "wildPitches": 0,
+      "pickoffs": 0,
+      "groundOutsToAirouts": "0.58",
+      "rbi": 6,
+      "pitchesPerInning": "17.78",
+      "runsScoredPer9": "6.00",
+      "homeRunsPer9": "2.00",
+      "inheritedRunners": 0,
+      "inheritedRunnersScored": 0,
+      "catchersInterference": 0,
+      "sacBunts": 0,
+      "sacFlies": 0,
+      "passedBall": 0,
+      "popOuts": 2,
+      "lineOuts": 1
+     },
+     "fielding": {
+      "caughtStealing": 0,
+      "stolenBases": 1,
+      "stolenBasePercentage": "1.000",
+      "caughtStealingPercentage": ".---",
+      "assists": 8,
+      "putOuts": 27,
+      "errors": 1,
+      "chances": 36,
+      "passedBall": 0,
+      "pickoffs": 0
+     }
+    }
+   }
+  }
+ },
+ "away_pitchers": {
+  "592767": [
+   {
+    "p_throws": "L"
+   }
+  ]
+ },
+ "away_batters": {
+  "666624": [
+   {
+    "stand": "R"
+   }
+  ],
+  "664023": [
+   {
+    "stand": "L"
+   }
+  ]
+ },
+ "home_pitchers": {
+  "681857": [
+   {
+    "p_throws": "R"
+   }
+  ]
+ },
+ "home_batters": {
+  "656716": [
+   {
+    "stand": "L"
+   }
+  ],
+  "681481": [
+   {
+    "stand": "L"
+   }
+  ]
+ }
+}
