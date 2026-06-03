@@ -22,18 +22,14 @@ def test_beam_search_parlays_package_reexport() -> None:
     assert callable(beam_search_parlays)
 
 
-def test_correlation_backcompat_reexports() -> None:
-    """Tests and downstream callers still import the helpers from correlation."""
-    from sportstradamus.prediction.correlation import (
+def test_parlay_helpers_canonical_import() -> None:
+    """Parlay helpers live in parlay.py — correlation.py is not their home."""
+    from sportstradamus.prediction.parlay import (
         _expected_payout_with_pushes,
         _nearest_psd,
         _payout_curve_for,
-        beam_search_parlays,
-        find_correlation,
     )
 
-    assert callable(beam_search_parlays)
-    assert callable(find_correlation)
     assert callable(_payout_curve_for)
     assert callable(_nearest_psd)
     assert callable(_expected_payout_with_pushes)
