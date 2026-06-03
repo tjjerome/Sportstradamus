@@ -39,6 +39,10 @@ from sportstradamus.stats.base import Stats, archive, clean_data, scraper
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
 _COMP_MATCH_SCORE_THRESHOLD: float = 0.6
+# League-average ERA floor in the FIP formula (Fielding Independent Pitching).
+# FIP = (13*HR + 3*(BB+HBP) - 2*K) / IP + FIP_CONSTANT, where the constant
+# normalizes the scale so FIP ≈ ERA league-wide each season.
+_FIP_CONSTANT: float = 3.2
 # Minimum hit rate for a market across a player's game log for them to be
 # included in the profiling group.  Filters out players with too few non-zero
 # occurrences to provide meaningful signal.
@@ -90,687 +94,326 @@ class StatsMLB(Stats):
         self._volume_model_cache = None
 
     def parse_game(self, gameId):
-        """Parses the game data for a given game ID.
-
-        Args:
-            gameId (int): The ID of the game to parse.
-        """
-        # game = mlb.boxscore_data(gameId)
+        """Fetch a baseballsavant box score and append rows to gamelog and teamlog."""
         game = scraper.get(f"https://baseballsavant.mlb.com/gf?game_pk={gameId}")
-        new_games = []
-        if game:
-            linescore = game["scoreboard"]["linescore"]
-            boxscore = game["boxscore"]
-            awayTeam = (
-                game["away_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
-            )
-            homeTeam = (
-                game["home_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
-            )
-            bpf = self.park_factors[homeTeam]
-            awayPitcherId = game["away_pitcher_lineup"][0]
-            awayPitcher = remove_accents(
-                boxscore["teams"]["away"]["players"]["ID" + str(awayPitcherId)]["person"][
-                    "fullName"
-                ]
-            )
-            if awayPitcherId in self.players and "throws" in self.players[awayPitcherId]:
-                awayPitcherHand = self.players[awayPitcherId]["throws"]
-            else:
-                if str(awayPitcherId) not in game["away_pitchers"]:
-                    return
-                awayPitcherHand = game["away_pitchers"][str(awayPitcherId)][0]["p_throws"]
-                if awayPitcherId not in self.players:
-                    self.players[awayPitcherId] = {"name": awayPitcher, "throws": awayPitcherHand}
-                else:
-                    self.players[awayPitcherId]["throws"] = awayPitcherHand
-            homePitcherId = game["home_pitcher_lineup"][0]
-            homePitcher = remove_accents(
-                boxscore["teams"]["home"]["players"]["ID" + str(homePitcherId)]["person"][
-                    "fullName"
-                ]
-            )
-            if homePitcherId in self.players and "throws" in self.players[homePitcherId]:
-                homePitcherHand = self.players[homePitcherId]["throws"]
-            else:
-                if str(homePitcherId) not in game["home_pitchers"]:
-                    return
-                homePitcherHand = game["home_pitchers"][str(homePitcherId)][0]["p_throws"]
-                if homePitcherId not in self.players:
-                    self.players[homePitcherId] = {"name": homePitcher, "throws": homePitcherHand}
-                else:
-                    self.players[homePitcherId]["throws"] = homePitcherHand
-            awayInning1Runs = linescore["innings"][0]["away"]["runs"]
-            homeInning1Runs = linescore["innings"][0]["home"]["runs"]
-            awayInning1Hits = linescore["innings"][0]["away"]["hits"]
-            homeInning1Hits = linescore["innings"][0]["home"]["hits"]
+        if not game:
+            return
 
-            away_bullpen = dict.fromkeys(
-                [
-                    "pitches thrown",
-                    "pitcher strikeouts",
-                    "pitching outs",
-                    "batters faced",
-                    "walks allowed",
-                    "hits allowed",
-                    "home runs allowed",
-                    "runs allowed",
-                ],
-                0,
-            )
-            for v in boxscore["teams"]["away"]["players"].values():
-                if v["person"]["id"] == awayPitcherId or v.get("battingOrder"):
-                    n = {
-                        "gameId": gameId,
-                        "gameDate": game["game_date"],
-                        "playerId": v["person"]["id"],
-                        "playerName": remove_accents(v["person"]["fullName"]),
-                        "position": v.get("position", {"abbreviation": ""})["abbreviation"],
-                        "team": awayTeam,
-                        "opponent": homeTeam,
-                        "opponent pitcher": homePitcher,
-                        "opponent pitcher id": homePitcherId,
-                        "opponent pitcher hand": homePitcherHand,
-                        "home": False,
-                        "starting pitcher": v["person"]["id"] == awayPitcherId,
-                        "starting batter": int(v.get("battingOrder", "001")[2]) == 0,
-                        "battingOrder": int(v.get("battingOrder", "000")[0]),
-                        "hits": v["stats"]["batting"].get("hits", 0),
-                        "total bases": v["stats"]["batting"].get("hits", 0)
-                        + v["stats"]["batting"].get("doubles", 0)
-                        + 2 * v["stats"]["batting"].get("triples", 0)
-                        + 3 * v["stats"]["batting"].get("homeRuns", 0),
-                        "singles": v["stats"]["batting"].get("hits", 0)
-                        - v["stats"]["batting"].get("doubles", 0)
-                        - v["stats"]["batting"].get("triples", 0)
-                        - v["stats"]["batting"].get("homeRuns", 0),
-                        "doubles": v["stats"]["batting"].get("doubles", 0),
-                        "triples": v["stats"]["batting"].get("triples", 0),
-                        "home runs": v["stats"]["batting"].get("homeRuns", 0),
-                        "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
-                        "runs": v["stats"]["batting"].get("runs", 0),
-                        "rbi": v["stats"]["batting"].get("rbi", 0),
-                        "hits+runs+rbi": v["stats"]["batting"].get("hits", 0)
-                        + v["stats"]["batting"].get("runs", 0)
-                        + v["stats"]["batting"].get("rbi", 0),
-                        "walks": v["stats"]["batting"].get("baseOnBalls", 0)
-                        + v["stats"]["batting"].get("hitByPitch", 0),
-                        "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
-                        "atBats": v["stats"]["batting"].get("atBats", 0),
-                        "plateAppearances": v["stats"]["batting"].get("plateAppearances", 0),
-                        "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
-                        "pitcher win": v["stats"]["pitching"].get("wins", 0),
-                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0)
-                        + v["stats"]["pitching"].get("hitByPitch", 0),
-                        "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
-                        "runs allowed": v["stats"]["pitching"].get("runs", 0),
-                        "hits allowed": v["stats"]["pitching"].get("hits", 0),
-                        "home runs allowed": v["stats"]["pitching"].get("homeRuns", 0),
-                        "pitching outs": 3
-                        * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1]),
-                        "batters faced": v["stats"]["pitching"].get("battersFaced", 0),
-                        "1st inning runs allowed": homeInning1Runs
-                        if v["person"]["id"] == game["away_pitcher_lineup"][0]
-                        else 0,
-                        "1st inning hits allowed": homeInning1Hits
-                        if v["person"]["id"] == game["away_pitcher_lineup"][0]
-                        else 0,
-                        "hitter fantasy score": 3 * v["stats"]["batting"].get("hits", 0)
-                        + 2 * v["stats"]["batting"].get("doubles", 0)
-                        + 5 * v["stats"]["batting"].get("triples", 0)
-                        + 7 * v["stats"]["batting"].get("homeRuns", 0)
-                        + 2 * v["stats"]["batting"].get("runs", 0)
-                        + 2 * v["stats"]["batting"].get("rbi", 0)
-                        + 2 * v["stats"]["batting"].get("baseOnBalls", 0)
-                        + 2 * v["stats"]["batting"].get("hitByPitch", 0)
-                        + 5 * v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy score": 6 * v["stats"]["pitching"].get("wins", 0)
-                        + 3 * v["stats"]["pitching"].get("strikeOuts", 0)
-                        - 3 * v["stats"]["pitching"].get("earnedRuns", 0)
-                        + 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1])
-                        + (
-                            4
-                            if int(
-                                v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]
-                            )
-                            > 5
-                            and v["stats"]["pitching"].get("earnedRuns", 0) < 4
-                            else 0
-                        ),
-                        "hitter fantasy points underdog": 3 * v["stats"]["batting"].get("hits", 0)
-                        + 3 * v["stats"]["batting"].get("doubles", 0)
-                        + 5 * v["stats"]["batting"].get("triples", 0)
-                        + 7 * v["stats"]["batting"].get("homeRuns", 0)
-                        + 2 * v["stats"]["batting"].get("runs", 0)
-                        + 2 * v["stats"]["batting"].get("rbi", 0)
-                        + 3 * v["stats"]["batting"].get("baseOnBalls", 0)
-                        + 3 * v["stats"]["batting"].get("hitByPitch", 0)
-                        + 4 * v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points underdog": 5 * v["stats"]["pitching"].get("wins", 0)
-                        + 3 * v["stats"]["pitching"].get("strikeOuts", 0)
-                        - 3 * v["stats"]["pitching"].get("earnedRuns", 0)
-                        + 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + (
-                            5
-                            if int(
-                                v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]
-                            )
-                            > 5
-                            and v["stats"]["pitching"].get("earnedRuns", 0) < 4
-                            else 0
-                        ),
-                        "hitter fantasy points parlay": 3 * v["stats"]["batting"].get("hits", 0)
-                        + 3 * v["stats"]["batting"].get("doubles", 0)
-                        + 6 * v["stats"]["batting"].get("triples", 0)
-                        + 9 * v["stats"]["batting"].get("homeRuns", 0)
-                        + 3 * v["stats"]["batting"].get("runs", 0)
-                        + 3 * v["stats"]["batting"].get("rbi", 0)
-                        + 3 * v["stats"]["batting"].get("baseOnBalls", 0)
-                        + 3 * v["stats"]["batting"].get("hitByPitch", 0)
-                        + 6 * v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points parlay": 6 * v["stats"]["pitching"].get("wins", 0)
-                        + 3 * v["stats"]["pitching"].get("strikeOuts", 0)
-                        - 3 * v["stats"]["pitching"].get("earnedRuns", 0)
-                        + 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1]),
-                    }
+        linescore = game["scoreboard"]["linescore"]
+        boxscore = game["boxscore"]
+        awayTeam = game["away_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
+        homeTeam = game["home_team_data"]["abbreviation"].replace("AZ", "ARI").replace("WSH", "WAS")
+        bpf = self.park_factors[homeTeam]
+        game_date = game["game_date"]
 
-                    if n["starting batter"]:
-                        if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
-                            batSide = self.players[n["playerId"]]["bats"]
-                        elif str(n["playerId"]) in game["away_batters"]:
-                            batSide = game["away_batters"][str(n["playerId"])][0]["stand"]
-                            if n["playerId"] not in self.players:
-                                self.players[n["playerId"]] = {
-                                    "name": n["playerName"],
-                                    "bats": batSide,
-                                }
-                            else:
-                                self.players[n["playerId"]]["bats"] = batSide
-                        else:
-                            continue
+        awayPitcherId = game["away_pitcher_lineup"][0]
+        awayPitcher = remove_accents(
+            boxscore["teams"]["away"]["players"]["ID" + str(awayPitcherId)]["person"]["fullName"]
+        )
+        awayPitcherHand = self._resolve_pitcher_hand(awayPitcherId, awayPitcher, game, "away")
+        if awayPitcherHand is None:
+            return
+        homePitcherId = game["home_pitcher_lineup"][0]
+        homePitcher = remove_accents(
+            boxscore["teams"]["home"]["players"]["ID" + str(homePitcherId)]["person"]["fullName"]
+        )
+        homePitcherHand = self._resolve_pitcher_hand(homePitcherId, homePitcher, game, "home")
+        if homePitcherHand is None:
+            return
 
-                    adj = {
-                        "R": n["runs"] / bpf["R"],
-                        "RBI": n["rbi"] / bpf["R"],
-                        "H": n["hits"] / bpf["H"],
-                        "1B": n["singles"] / bpf["1B"],
-                        "2B": v["stats"]["batting"].get("doubles", 0) / bpf["2B"],
-                        "3B": v["stats"]["batting"].get("triples", 0) / bpf["3B"],
-                        "HR": n["home runs"] / bpf["HR"],
-                        "W": n["walks"] / bpf["BB"],
-                        "SO": n["batter strikeouts"] / bpf["K"],
-                        "RA": n["runs allowed"] / bpf["R"],
-                        "HA": n["hits allowed"] / bpf["H"],
-                        "HRA": n["home runs allowed"] / bpf["HR"],
-                        "BB": n["walks allowed"] / bpf["BB"],
-                        "K": n["pitcher strikeouts"] / bpf["K"],
-                    }
+        away1 = linescore["innings"][0]["away"]
+        home1 = linescore["innings"][0]["home"]
 
-                    BIP = (
-                        n["atBats"]
-                        - n["batter strikeouts"]
-                        - n["home runs"]
-                        - v["stats"]["batting"].get("sacFlies", 0)
-                    )
-                    n.update(
-                        {
-                            "FIP": (
-                                3
-                                * (13 * adj["HRA"] + 3 * adj["BB"] - 2 * adj["K"])
-                                / n["pitching outs"]
-                                + 3.2
-                            )
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "WHIP": (3 * (adj["BB"] + adj["HA"]) / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "ERA": (9 * adj["RA"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "K9": (27 * adj["K"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "BB9": (27 * adj["BB"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "PA9": (27 * n["batters faced"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
-                            "OBP": ((n["hits"] + n["walks"]) / n["atBats"] / bpf["OBP"])
-                            if n["atBats"] > 0
-                            else 0,
-                            "AVG": (n["hits"] / n["atBats"]) if n["atBats"] > 0 else 0,
-                            "SLG": (n["total bases"] / n["atBats"]) if n["atBats"] > 0 else 0,
-                            "PASO": (n["plateAppearances"] / adj["SO"])
-                            if (n["starting batter"] and adj["SO"])
-                            else n["plateAppearances"],
-                            "BABIP": ((n["hits"] - n["home runs"]) / BIP)
-                            if (n["starting batter"] and BIP)
-                            else 0,
-                            "batSide": batSide if n["starting batter"] else 0,
-                        }
-                    )
+        # The away pitcher's "1st inning allowed" stats are the home team's first
+        # inning, and vice versa.
+        away_rows, away_bullpen = self._team_player_rows(
+            boxscore["teams"]["away"]["players"], side="away", team=awayTeam, opponent=homeTeam,
+            opp_pitcher=homePitcher, opp_pitcher_id=homePitcherId, opp_pitcher_hand=homePitcherHand,
+            starting_pitcher_id=awayPitcherId, inning1_runs=home1["runs"], inning1_hits=home1["hits"],
+            gameId=gameId, game_date=game_date, game=game, bpf=bpf,
+        )
+        home_rows, home_bullpen = self._team_player_rows(
+            boxscore["teams"]["home"]["players"], side="home", team=homeTeam, opponent=awayTeam,
+            opp_pitcher=awayPitcher, opp_pitcher_id=awayPitcherId, opp_pitcher_hand=awayPitcherHand,
+            starting_pitcher_id=homePitcherId, inning1_runs=away1["runs"], inning1_hits=away1["hits"],
+            gameId=gameId, game_date=game_date, game=game, bpf=bpf,
+        )
 
-                    new_games.append(n)
-
-                elif v.get("position", {}).get("type", "") == "Pitcher":
-                    away_bullpen["pitches thrown"] += v["stats"]["pitching"].get(
-                        "numberOfPitches", 0
-                    )
-                    away_bullpen["pitcher strikeouts"] += v["stats"]["pitching"].get(
-                        "strikeOuts", 0
-                    )
-                    away_bullpen["pitching outs"] += 3 * int(
-                        v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]
-                    ) + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1])
-                    away_bullpen["batters faced"] += v["stats"]["pitching"].get("battersFaced", 0)
-                    away_bullpen["walks allowed"] += v["stats"]["pitching"].get(
-                        "baseOnBalls", 0
-                    ) + v["stats"]["pitching"].get("hitByPitch", 0)
-                    away_bullpen["hits allowed"] += v["stats"]["pitching"].get("hits", 0)
-                    away_bullpen["home runs allowed"] += v["stats"]["pitching"].get("homeRuns", 0)
-                    away_bullpen["runs allowed"] += v["stats"]["pitching"].get("runs", 0)
-
-            home_bullpen = dict.fromkeys(
-                [
-                    "pitches thrown",
-                    "pitcher strikeouts",
-                    "pitching outs",
-                    "batters faced",
-                    "walks allowed",
-                    "hits allowed",
-                    "home runs allowed",
-                    "runs allowed",
-                ],
-                0,
-            )
-            for v in boxscore["teams"]["home"]["players"].values():
-                if v["person"]["id"] == homePitcherId or v.get("battingOrder"):
-                    n = {
-                        "gameId": gameId,
-                        "gameDate": game["game_date"],
-                        "playerId": v["person"]["id"],
-                        "playerName": remove_accents(v["person"]["fullName"]),
-                        "position": v.get("position", {"abbreviation": ""})["abbreviation"],
-                        "team": homeTeam,
-                        "opponent": awayTeam,
-                        "opponent pitcher": awayPitcher,
-                        "opponent pitcher id": awayPitcherId,
-                        "opponent pitcher hand": awayPitcherHand,
-                        "home": True,
-                        "starting pitcher": v["person"]["id"] == homePitcherId,
-                        "starting batter": int(v.get("battingOrder", "001")[2]) == 0,
-                        "battingOrder": int(v.get("battingOrder", "000")[0]),
-                        "hits": v["stats"]["batting"].get("hits", 0),
-                        "total bases": v["stats"]["batting"].get("hits", 0)
-                        + v["stats"]["batting"].get("doubles", 0)
-                        + 2 * v["stats"]["batting"].get("triples", 0)
-                        + 3 * v["stats"]["batting"].get("homeRuns", 0),
-                        "singles": v["stats"]["batting"].get("hits", 0)
-                        - v["stats"]["batting"].get("doubles", 0)
-                        - v["stats"]["batting"].get("triples", 0)
-                        - v["stats"]["batting"].get("homeRuns", 0),
-                        "doubles": v["stats"]["batting"].get("doubles", 0),
-                        "triples": v["stats"]["batting"].get("triples", 0),
-                        "home runs": v["stats"]["batting"].get("homeRuns", 0),
-                        "batter strikeouts": v["stats"]["batting"].get("strikeOuts", 0),
-                        "runs": v["stats"]["batting"].get("runs", 0),
-                        "rbi": v["stats"]["batting"].get("rbi", 0),
-                        "hits+runs+rbi": v["stats"]["batting"].get("hits", 0)
-                        + v["stats"]["batting"].get("runs", 0)
-                        + v["stats"]["batting"].get("rbi", 0),
-                        "walks": v["stats"]["batting"].get("baseOnBalls", 0)
-                        + v["stats"]["batting"].get("hitByPitch", 0),
-                        "stolen bases": v["stats"]["batting"].get("stolenBases", 0),
-                        "atBats": v["stats"]["batting"].get("atBats", 0),
-                        "plateAppearances": v["stats"]["batting"].get("plateAppearances", 0),
-                        "pitcher strikeouts": v["stats"]["pitching"].get("strikeOuts", 0),
-                        "pitcher win": v["stats"]["pitching"].get("wins", 0),
-                        "walks allowed": v["stats"]["pitching"].get("baseOnBalls", 0)
-                        + v["stats"]["pitching"].get("hitByPitch", 0),
-                        "pitches thrown": v["stats"]["pitching"].get("numberOfPitches", 0),
-                        "runs allowed": v["stats"]["pitching"].get("runs", 0),
-                        "hits allowed": v["stats"]["pitching"].get("hits", 0),
-                        "home runs allowed": v["stats"]["pitching"].get("homeRuns", 0),
-                        "pitching outs": 3
-                        * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1]),
-                        "batters faced": v["stats"]["pitching"].get("battersFaced", 0),
-                        "1st inning runs allowed": awayInning1Runs
-                        if v["person"]["id"] == game["home_pitcher_lineup"][0]
-                        else 0,
-                        "1st inning hits allowed": awayInning1Hits
-                        if v["person"]["id"] == game["home_pitcher_lineup"][0]
-                        else 0,
-                        "hitter fantasy score": 3 * v["stats"]["batting"].get("hits", 0)
-                        + 2 * v["stats"]["batting"].get("doubles", 0)
-                        + 5 * v["stats"]["batting"].get("triples", 0)
-                        + 7 * v["stats"]["batting"].get("homeRuns", 0)
-                        + 2 * v["stats"]["batting"].get("runs", 0)
-                        + 2 * v["stats"]["batting"].get("rbi", 0)
-                        + 2 * v["stats"]["batting"].get("baseOnBalls", 0)
-                        + 2 * v["stats"]["batting"].get("hitByPitch", 0)
-                        + 5 * v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy score": 6 * v["stats"]["pitching"].get("wins", 0)
-                        + 3 * v["stats"]["pitching"].get("strikeOuts", 0)
-                        - 3 * v["stats"]["pitching"].get("earnedRuns", 0)
-                        + 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1])
-                        + (
-                            4
-                            if int(
-                                v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]
-                            )
-                            > 5
-                            and v["stats"]["pitching"].get("earnedRuns", 0) < 4
-                            else 0
-                        ),
-                        "hitter fantasy points underdog": 3 * v["stats"]["batting"].get("hits", 0)
-                        + 3 * v["stats"]["batting"].get("doubles", 0)
-                        + 5 * v["stats"]["batting"].get("triples", 0)
-                        + 7 * v["stats"]["batting"].get("homeRuns", 0)
-                        + 2 * v["stats"]["batting"].get("runs", 0)
-                        + 2 * v["stats"]["batting"].get("rbi", 0)
-                        + 3 * v["stats"]["batting"].get("baseOnBalls", 0)
-                        + 3 * v["stats"]["batting"].get("hitByPitch", 0)
-                        + 4 * v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points underdog": 5 * v["stats"]["pitching"].get("wins", 0)
-                        + 3 * v["stats"]["pitching"].get("strikeOuts", 0)
-                        - 3 * v["stats"]["pitching"].get("earnedRuns", 0)
-                        + 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + (
-                            5
-                            if int(
-                                v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]
-                            )
-                            > 5
-                            and v["stats"]["pitching"].get("earnedRuns", 0) < 4
-                            else 0
-                        ),
-                        "hitter fantasy points parlay": 3 * v["stats"]["batting"].get("hits", 0)
-                        + 3 * v["stats"]["batting"].get("doubles", 0)
-                        + 6 * v["stats"]["batting"].get("triples", 0)
-                        + 9 * v["stats"]["batting"].get("homeRuns", 0)
-                        + 3 * v["stats"]["batting"].get("runs", 0)
-                        + 3 * v["stats"]["batting"].get("rbi", 0)
-                        + 3 * v["stats"]["batting"].get("baseOnBalls", 0)
-                        + 3 * v["stats"]["batting"].get("hitByPitch", 0)
-                        + 6 * v["stats"]["batting"].get("stolenBases", 0),
-                        "pitcher fantasy points parlay": 6 * v["stats"]["pitching"].get("wins", 0)
-                        + 3 * v["stats"]["pitching"].get("strikeOuts", 0)
-                        - 3 * v["stats"]["pitching"].get("earnedRuns", 0)
-                        + 3 * int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0])
-                        + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1]),
-                    }
-
-                    if n["starting batter"]:
-                        if n["playerId"] in self.players and "bats" in self.players[n["playerId"]]:
-                            batSide = self.players[n["playerId"]]["bats"]
-                        elif str(n["playerId"]) in game["home_batters"]:
-                            batSide = game["home_batters"][str(n["playerId"])][0]["stand"]
-                            if n["playerId"] not in self.players:
-                                self.players[n["playerId"]] = {
-                                    "name": n["playerName"],
-                                    "bats": batSide,
-                                }
-                            else:
-                                self.players[n["playerId"]]["bats"] = batSide
-                        else:
-                            continue
-
-                    adj = {
-                        "R": n["runs"] / bpf["R"],
-                        "RBI": n["rbi"] / bpf["R"],
-                        "H": n["hits"] / bpf["H"],
-                        "1B": n["singles"] / bpf["1B"],
-                        "2B": v["stats"]["batting"].get("doubles", 0) / bpf["2B"],
-                        "3B": v["stats"]["batting"].get("triples", 0) / bpf["3B"],
-                        "HR": n["home runs"] / bpf["HR"],
-                        "W": n["walks"] / bpf["BB"],
-                        "SO": n["batter strikeouts"] / bpf["K"],
-                        "RA": n["runs allowed"] / bpf["R"],
-                        "HA": n["hits allowed"] / bpf["H"],
-                        "HRA": n["home runs allowed"] / bpf["HR"],
-                        "BB": n["walks allowed"] / bpf["BB"],
-                        "K": n["pitcher strikeouts"] / bpf["K"],
-                    }
-
-                    BIP = (
-                        n["atBats"]
-                        - n["batter strikeouts"]
-                        - n["home runs"]
-                        - v["stats"]["batting"].get("sacFlies", 0)
-                    )
-                    n.update(
-                        {
-                            "FIP": (
-                                3
-                                * (13 * adj["HRA"] + 3 * adj["BB"] - 2 * adj["K"])
-                                / n["pitching outs"]
-                                + 3.2
-                            )
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "WHIP": (3 * (adj["BB"] + adj["HA"]) / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "ERA": (9 * adj["RA"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "K9": (27 * adj["K"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "BB9": (27 * adj["BB"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "PA9": (27 * n["batters faced"] / n["pitching outs"])
-                            if (n["starting pitcher"] and n["pitching outs"])
-                            else 0,
-                            "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
-                            "OBP": ((n["hits"] + n["walks"]) / n["atBats"] / bpf["OBP"])
-                            if n["atBats"] > 0
-                            else 0,
-                            "AVG": (n["hits"] / n["atBats"]) if n["atBats"] > 0 else 0,
-                            "SLG": (n["total bases"] / n["atBats"]) if n["atBats"] > 0 else 0,
-                            "PASO": (n["plateAppearances"] / adj["SO"])
-                            if (n["starting batter"] and adj["SO"])
-                            else n["plateAppearances"],
-                            "BABIP": ((n["hits"] - n["home runs"]) / BIP)
-                            if (n["starting batter"] and BIP)
-                            else 0,
-                            "batSide": batSide if n["starting batter"] else 0,
-                        }
-                    )
-
-                    new_games.append(n)
-
-                elif v.get("position", {}).get("type", "") == "Pitcher":
-                    home_bullpen["pitches thrown"] += v["stats"]["pitching"].get(
-                        "numberOfPitches", 0
-                    )
-                    home_bullpen["pitcher strikeouts"] += v["stats"]["pitching"].get(
-                        "strikeOuts", 0
-                    )
-                    home_bullpen["pitching outs"] += 3 * int(
-                        v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[0]
-                    ) + int(v["stats"]["pitching"].get("inningsPitched", "0.0").split(".")[1])
-                    home_bullpen["batters faced"] += v["stats"]["pitching"].get("battersFaced", 0)
-                    home_bullpen["walks allowed"] += v["stats"]["pitching"].get(
-                        "baseOnBalls", 0
-                    ) + v["stats"]["pitching"].get("hitByPitch", 0)
-                    home_bullpen["hits allowed"] += v["stats"]["pitching"].get("hits", 0)
-                    home_bullpen["home runs allowed"] += v["stats"]["pitching"].get("homeRuns", 0)
-                    home_bullpen["runs allowed"] += v["stats"]["pitching"].get("runs", 0)
-
-        home_adj = {
-            "RA": home_bullpen["runs allowed"] / bpf["R"],
-            "HA": home_bullpen["hits allowed"] / bpf["H"],
-            "HRA": home_bullpen["home runs allowed"] / bpf["HR"],
-            "BB": home_bullpen["walks allowed"] / bpf["BB"],
-            "K": home_bullpen["pitcher strikeouts"] / bpf["K"],
-        }
-
-        away_adj = {
-            "RA": away_bullpen["runs allowed"] / bpf["R"],
-            "HA": away_bullpen["hits allowed"] / bpf["H"],
-            "HRA": away_bullpen["home runs allowed"] / bpf["HR"],
-            "BB": away_bullpen["walks allowed"] / bpf["BB"],
-            "K": away_bullpen["pitcher strikeouts"] / bpf["K"],
-        }
-
-        new_games = pd.DataFrame.from_records(new_games)
+        new_games = pd.DataFrame.from_records(away_rows + home_rows)
         self._enrich_team_markets(new_games, date_col="gameDate", team_col="team")
         self.gamelog = pd.concat([self.gamelog, new_games], ignore_index=True)
 
+        home_adj = self._bullpen_adj(home_bullpen, bpf)
+        away_adj = self._bullpen_adj(away_bullpen, bpf)
         teams = [
-            {
-                "team": homeTeam,
-                "opponent": awayTeam,
-                "gameId": gameId,
-                "gameDate": game["game_date"],
-                "WL": "W"
-                if float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"])
-                > float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"])
-                else "L",
-                "runs": float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"]),
-                "OBP": float(boxscore["teams"]["home"]["teamStats"]["batting"]["obp"]) / bpf["OBP"],
-                "AVG": float(boxscore["teams"]["home"]["teamStats"]["batting"]["avg"]),
-                "SLG": float(boxscore["teams"]["home"]["teamStats"]["batting"]["slg"]),
-                "PASO": (
-                    boxscore["teams"]["home"]["teamStats"]["batting"]["plateAppearances"]
-                    / boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]
-                )
-                if boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]
-                else boxscore["teams"]["home"]["teamStats"]["batting"]["plateAppearances"],
-                "BABIP": (
-                    boxscore["teams"]["home"]["teamStats"]["batting"]["hits"]
-                    - boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"]
-                )
-                / (
-                    boxscore["teams"]["home"]["teamStats"]["batting"]["atBats"]
-                    - boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]
-                    - boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"]
-                    - boxscore["teams"]["home"]["teamStats"]["batting"]["sacFlies"]
-                ),
-                "DER": 1
-                - (
-                    (
-                        boxscore["teams"]["away"]["teamStats"]["batting"]["hits"]
-                        + boxscore["teams"]["home"]["teamStats"]["fielding"]["errors"]
-                        - boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"]
-                    )
-                    / (
-                        boxscore["teams"]["away"]["teamStats"]["batting"]["plateAppearances"]
-                        - boxscore["teams"]["away"]["teamStats"]["batting"]["baseOnBalls"]
-                        - boxscore["teams"]["away"]["teamStats"]["batting"]["hitByPitch"]
-                        - boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"]
-                        - boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]
-                    )
-                ),
-                "FIP": (
-                    3
-                    * (13 * home_adj["HRA"] + 3 * home_adj["BB"] - 2 * home_adj["K"])
-                    / home_bullpen["pitching outs"]
-                    + 3.2
-                )
-                if home_bullpen["pitching outs"]
-                else 0,
-                "WHIP": (3 * (home_adj["BB"] + home_adj["HA"]) / home_bullpen["pitching outs"])
-                if home_bullpen["pitching outs"]
-                else 0,
-                "ERA": (9 * home_adj["RA"] / home_bullpen["pitching outs"])
-                if home_bullpen["pitching outs"]
-                else 0,
-                "K9": (27 * home_adj["K"] / home_bullpen["pitching outs"])
-                if home_bullpen["pitching outs"]
-                else 0,
-                "BB9": (27 * home_adj["BB"] / home_bullpen["pitching outs"])
-                if home_bullpen["pitching outs"]
-                else 0,
-                "IP": home_bullpen["pitching outs"] / 3,
-                "PA9": (27 * home_bullpen["batters faced"] / home_bullpen["pitching outs"])
-                if home_bullpen["pitching outs"]
-                else 0,
-            },
-            {
-                "team": awayTeam,
-                "opponent": homeTeam,
-                "gameId": gameId,
-                "gameDate": game["game_date"],
-                "WL": "W"
-                if float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"])
-                > float(boxscore["teams"]["home"]["teamStats"]["batting"]["runs"])
-                else "L",
-                "runs": float(boxscore["teams"]["away"]["teamStats"]["batting"]["runs"]),
-                "OBP": float(boxscore["teams"]["away"]["teamStats"]["batting"]["obp"]) / bpf["OBP"],
-                "AVG": float(boxscore["teams"]["away"]["teamStats"]["batting"]["avg"]),
-                "SLG": float(boxscore["teams"]["away"]["teamStats"]["batting"]["slg"]),
-                "PASO": (
-                    boxscore["teams"]["away"]["teamStats"]["batting"]["plateAppearances"]
-                    / boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]
-                )
-                if boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]
-                else boxscore["teams"]["away"]["teamStats"]["batting"]["plateAppearances"],
-                "BABIP": (
-                    boxscore["teams"]["away"]["teamStats"]["batting"]["hits"]
-                    - boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"]
-                )
-                / (
-                    boxscore["teams"]["away"]["teamStats"]["batting"]["atBats"]
-                    - boxscore["teams"]["away"]["teamStats"]["batting"]["strikeOuts"]
-                    - boxscore["teams"]["away"]["teamStats"]["batting"]["homeRuns"]
-                    - boxscore["teams"]["away"]["teamStats"]["batting"]["sacFlies"]
-                ),
-                "DER": 1
-                - (
-                    (
-                        boxscore["teams"]["home"]["teamStats"]["batting"]["hits"]
-                        + boxscore["teams"]["away"]["teamStats"]["fielding"]["errors"]
-                        - boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"]
-                    )
-                    / (
-                        boxscore["teams"]["home"]["teamStats"]["batting"]["plateAppearances"]
-                        - boxscore["teams"]["home"]["teamStats"]["batting"]["baseOnBalls"]
-                        - boxscore["teams"]["home"]["teamStats"]["batting"]["hitByPitch"]
-                        - boxscore["teams"]["home"]["teamStats"]["batting"]["homeRuns"]
-                        - boxscore["teams"]["home"]["teamStats"]["batting"]["strikeOuts"]
-                    )
-                ),
-                "FIP": (
-                    3
-                    * (13 * away_adj["HRA"] + 3 * away_adj["BB"] - 2 * away_adj["K"])
-                    / away_bullpen["pitching outs"]
-                    + 3.2
-                )
-                if away_bullpen["pitching outs"]
-                else 0,
-                "WHIP": (3 * (away_adj["BB"] + away_adj["HA"]) / away_bullpen["pitching outs"])
-                if away_bullpen["pitching outs"]
-                else 0,
-                "ERA": (9 * away_adj["RA"] / away_bullpen["pitching outs"])
-                if away_bullpen["pitching outs"]
-                else 0,
-                "K9": (27 * away_adj["K"] / away_bullpen["pitching outs"])
-                if away_bullpen["pitching outs"]
-                else 0,
-                "BB9": (27 * away_adj["BB"] / away_bullpen["pitching outs"])
-                if away_bullpen["pitching outs"]
-                else 0,
-                "IP": away_bullpen["pitching outs"] / 3,
-                "PA9": (27 * away_bullpen["batters faced"] / away_bullpen["pitching outs"])
-                if away_bullpen["pitching outs"]
-                else 0,
-            },
+            self._team_row(homeTeam, awayTeam, gameId, game_date, boxscore, bpf,
+                           home_bullpen, home_adj, me="home", opp="away"),
+            self._team_row(awayTeam, homeTeam, gameId, game_date, boxscore, bpf,
+                           away_bullpen, away_adj, me="away", opp="home"),
         ]
-
         self.teamlog = pd.concat(
             [self.teamlog, pd.DataFrame.from_records(teams)], ignore_index=True
         )
+
+    def _team_player_rows(
+        self, players, *, side, team, opponent, opp_pitcher, opp_pitcher_id, opp_pitcher_hand,
+        starting_pitcher_id, inning1_runs, inning1_hits, gameId, game_date, game, bpf,
+    ):
+        """Build the per-player gamelog rows for one team and tally its bullpen.
+
+        Returns ``(rows, bullpen)``; the away and home calls are identical apart
+        from the team-context arguments threaded through here.
+        """
+        is_home = side == "home"
+        rows = []
+        bullpen = dict.fromkeys(
+            ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced",
+             "walks allowed", "hits allowed", "home runs allowed", "runs allowed"], 0
+        )
+        for v in players.values():
+            if v["person"]["id"] == starting_pitcher_id or v.get("battingOrder"):
+                n = self._player_game_row(
+                    v, gameId=gameId, game_date=game_date, team=team, opponent=opponent,
+                    opp_pitcher=opp_pitcher, opp_pitcher_id=opp_pitcher_id,
+                    opp_pitcher_hand=opp_pitcher_hand, is_home=is_home,
+                    starting_pitcher_id=starting_pitcher_id,
+                    inning1_runs=inning1_runs, inning1_hits=inning1_hits,
+                )
+                bat_side = 0
+                if n["starting batter"]:
+                    bat_side = self._resolve_bat_side(n, game, side)
+                    if bat_side is None:
+                        continue
+                adj = self._park_adjusted(n, v, bpf)
+                bip = (
+                    n["atBats"] - n["batter strikeouts"] - n["home runs"]
+                    - v["stats"]["batting"].get("sacFlies", 0)
+                )
+                n.update(self._pitching_rates(n, adj))
+                n.update(self._batting_rates(n, adj, bip, bat_side, bpf))
+                rows.append(n)
+            elif v.get("position", {}).get("type", "") == "Pitcher":
+                self._accumulate_bullpen(bullpen, v)
+        return rows, bullpen
+
+    @staticmethod
+    def _player_game_row(
+        v, *, gameId, game_date, team, opponent, opp_pitcher, opp_pitcher_id, opp_pitcher_hand,
+        is_home, starting_pitcher_id, inning1_runs, inning1_hits,
+    ):
+        """Base gamelog row (batting + pitching counting stats) for one player."""
+        bat = v["stats"]["batting"]
+        pit = v["stats"]["pitching"]
+        ip_whole = int(pit.get("inningsPitched", "0.0").split(".")[0])
+        ip_frac = int(pit.get("inningsPitched", "0.0").split(".")[1])
+        is_sp = v["person"]["id"] == starting_pitcher_id
+        return {
+            "gameId": gameId,
+            "gameDate": game_date,
+            "playerId": v["person"]["id"],
+            "playerName": remove_accents(v["person"]["fullName"]),
+            "position": v.get("position", {"abbreviation": ""})["abbreviation"],
+            "team": team,
+            "opponent": opponent,
+            "opponent pitcher": opp_pitcher,
+            "opponent pitcher id": opp_pitcher_id,
+            "opponent pitcher hand": opp_pitcher_hand,
+            "home": is_home,
+            "starting pitcher": is_sp,
+            "starting batter": int(v.get("battingOrder", "001")[2]) == 0,
+            "battingOrder": int(v.get("battingOrder", "000")[0]),
+            "hits": bat.get("hits", 0),
+            "total bases": bat.get("hits", 0) + bat.get("doubles", 0)
+            + 2 * bat.get("triples", 0) + 3 * bat.get("homeRuns", 0),
+            "singles": bat.get("hits", 0) - bat.get("doubles", 0)
+            - bat.get("triples", 0) - bat.get("homeRuns", 0),
+            "doubles": bat.get("doubles", 0),
+            "triples": bat.get("triples", 0),
+            "home runs": bat.get("homeRuns", 0),
+            "batter strikeouts": bat.get("strikeOuts", 0),
+            "runs": bat.get("runs", 0),
+            "rbi": bat.get("rbi", 0),
+            "hits+runs+rbi": bat.get("hits", 0) + bat.get("runs", 0) + bat.get("rbi", 0),
+            "walks": bat.get("baseOnBalls", 0) + bat.get("hitByPitch", 0),
+            "stolen bases": bat.get("stolenBases", 0),
+            "atBats": bat.get("atBats", 0),
+            "plateAppearances": bat.get("plateAppearances", 0),
+            "pitcher strikeouts": pit.get("strikeOuts", 0),
+            "pitcher win": pit.get("wins", 0),
+            "walks allowed": pit.get("baseOnBalls", 0) + pit.get("hitByPitch", 0),
+            "pitches thrown": pit.get("numberOfPitches", 0),
+            "runs allowed": pit.get("runs", 0),
+            "hits allowed": pit.get("hits", 0),
+            "home runs allowed": pit.get("homeRuns", 0),
+            "pitching outs": 3 * ip_whole + ip_frac,
+            "batters faced": pit.get("battersFaced", 0),
+            "1st inning runs allowed": inning1_runs if is_sp else 0,
+            "1st inning hits allowed": inning1_hits if is_sp else 0,
+            "hitter fantasy score": 3 * bat.get("hits", 0) + 2 * bat.get("doubles", 0)
+            + 5 * bat.get("triples", 0) + 7 * bat.get("homeRuns", 0) + 2 * bat.get("runs", 0)
+            + 2 * bat.get("rbi", 0) + 2 * bat.get("baseOnBalls", 0) + 2 * bat.get("hitByPitch", 0)
+            + 5 * bat.get("stolenBases", 0),
+            "pitcher fantasy score": 6 * pit.get("wins", 0) + 3 * pit.get("strikeOuts", 0)
+            - 3 * pit.get("earnedRuns", 0) + 3 * ip_whole + ip_frac
+            + (4 if ip_whole > 5 and pit.get("earnedRuns", 0) < 4 else 0),
+            "hitter fantasy points underdog": 3 * bat.get("hits", 0) + 3 * bat.get("doubles", 0)
+            + 5 * bat.get("triples", 0) + 7 * bat.get("homeRuns", 0) + 2 * bat.get("runs", 0)
+            + 2 * bat.get("rbi", 0) + 3 * bat.get("baseOnBalls", 0) + 3 * bat.get("hitByPitch", 0)
+            + 4 * bat.get("stolenBases", 0),
+            "pitcher fantasy points underdog": 5 * pit.get("wins", 0) + 3 * pit.get("strikeOuts", 0)
+            - 3 * pit.get("earnedRuns", 0) + 3 * ip_whole
+            + (5 if ip_whole > 5 and pit.get("earnedRuns", 0) < 4 else 0),
+            "hitter fantasy points parlay": 3 * bat.get("hits", 0) + 3 * bat.get("doubles", 0)
+            + 6 * bat.get("triples", 0) + 9 * bat.get("homeRuns", 0) + 3 * bat.get("runs", 0)
+            + 3 * bat.get("rbi", 0) + 3 * bat.get("baseOnBalls", 0) + 3 * bat.get("hitByPitch", 0)
+            + 6 * bat.get("stolenBases", 0),
+            "pitcher fantasy points parlay": 6 * pit.get("wins", 0) + 3 * pit.get("strikeOuts", 0)
+            - 3 * pit.get("earnedRuns", 0) + 3 * ip_whole + ip_frac,
+        }
+
+    def _resolve_pitcher_hand(self, pid, name, game, side):
+        """Throwing hand for a starting pitcher, caching it on ``self.players``.
+
+        Returns ``None`` when the pitcher is absent from the feed's lineup, which
+        signals ``parse_game`` to skip the whole game (the box score is unusable).
+        """
+        if pid in self.players and "throws" in self.players[pid]:
+            return self.players[pid]["throws"]
+        if str(pid) not in game[f"{side}_pitchers"]:
+            return None
+        hand = game[f"{side}_pitchers"][str(pid)][0]["p_throws"]
+        if pid not in self.players:
+            self.players[pid] = {"name": name, "throws": hand}
+        else:
+            self.players[pid]["throws"] = hand
+        return hand
+
+    def _resolve_bat_side(self, n, game, side):
+        """Batting side for a starting batter, caching it on ``self.players``.
+
+        Returns ``None`` when the batter is absent from the feed's lineup, which
+        signals the caller to skip that player's row.
+        """
+        pid = n["playerId"]
+        if pid in self.players and "bats" in self.players[pid]:
+            return self.players[pid]["bats"]
+        if str(pid) not in game[f"{side}_batters"]:
+            return None
+        bat_side = game[f"{side}_batters"][str(pid)][0]["stand"]
+        if pid not in self.players:
+            self.players[pid] = {"name": n["playerName"], "bats": bat_side}
+        else:
+            self.players[pid]["bats"] = bat_side
+        return bat_side
+
+    @staticmethod
+    def _park_adjusted(n, v, bpf):
+        """Park-factor-normalized counting stats used by the rate metrics."""
+        bat = v["stats"]["batting"]
+        return {
+            "R": n["runs"] / bpf["R"],
+            "RBI": n["rbi"] / bpf["R"],
+            "H": n["hits"] / bpf["H"],
+            "1B": n["singles"] / bpf["1B"],
+            "2B": bat.get("doubles", 0) / bpf["2B"],
+            "3B": bat.get("triples", 0) / bpf["3B"],
+            "HR": n["home runs"] / bpf["HR"],
+            "W": n["walks"] / bpf["BB"],
+            "SO": n["batter strikeouts"] / bpf["K"],
+            "RA": n["runs allowed"] / bpf["R"],
+            "HA": n["hits allowed"] / bpf["H"],
+            "HRA": n["home runs allowed"] / bpf["HR"],
+            "BB": n["walks allowed"] / bpf["BB"],
+            "K": n["pitcher strikeouts"] / bpf["K"],
+        }
+
+    @staticmethod
+    def _pitching_rates(n, adj):
+        sp_outs = n["starting pitcher"] and n["pitching outs"]
+        return {
+            "FIP": (3 * (13 * adj["HRA"] + 3 * adj["BB"] - 2 * adj["K"]) / n["pitching outs"] + _FIP_CONSTANT)
+            if sp_outs else 0,
+            "WHIP": (3 * (adj["BB"] + adj["HA"]) / n["pitching outs"]) if sp_outs else 0,
+            "ERA": (9 * adj["RA"] / n["pitching outs"]) if sp_outs else 0,
+            "K9": (27 * adj["K"] / n["pitching outs"]) if sp_outs else 0,
+            "BB9": (27 * adj["BB"] / n["pitching outs"]) if sp_outs else 0,
+            "PA9": (27 * n["batters faced"] / n["pitching outs"]) if sp_outs else 0,
+            "IP": (n["pitching outs"] / 3) if n["starting pitcher"] else 0,
+        }
+
+    @staticmethod
+    def _batting_rates(n, adj, bip, bat_side, bpf):
+        has_ab = n["atBats"] > 0
+        return {
+            "OBP": ((n["hits"] + n["walks"]) / n["atBats"] / bpf["OBP"]) if has_ab else 0,
+            "AVG": (n["hits"] / n["atBats"]) if has_ab else 0,
+            "SLG": (n["total bases"] / n["atBats"]) if has_ab else 0,
+            "PASO": (n["plateAppearances"] / adj["SO"])
+            if (n["starting batter"] and adj["SO"]) else n["plateAppearances"],
+            "BABIP": ((n["hits"] - n["home runs"]) / bip)
+            if (n["starting batter"] and bip) else 0,
+            "batSide": bat_side if n["starting batter"] else 0,
+        }
+
+    @staticmethod
+    def _accumulate_bullpen(bullpen, v):
+        pit = v["stats"]["pitching"]
+        bullpen["pitches thrown"] += pit.get("numberOfPitches", 0)
+        bullpen["pitcher strikeouts"] += pit.get("strikeOuts", 0)
+        bullpen["pitching outs"] += 3 * int(pit.get("inningsPitched", "0.0").split(".")[0]) + int(
+            pit.get("inningsPitched", "0.0").split(".")[1]
+        )
+        bullpen["batters faced"] += pit.get("battersFaced", 0)
+        bullpen["walks allowed"] += pit.get("baseOnBalls", 0) + pit.get("hitByPitch", 0)
+        bullpen["hits allowed"] += pit.get("hits", 0)
+        bullpen["home runs allowed"] += pit.get("homeRuns", 0)
+        bullpen["runs allowed"] += pit.get("runs", 0)
+
+    @staticmethod
+    def _bullpen_adj(bullpen, bpf):
+        return {
+            "RA": bullpen["runs allowed"] / bpf["R"],
+            "HA": bullpen["hits allowed"] / bpf["H"],
+            "HRA": bullpen["home runs allowed"] / bpf["HR"],
+            "BB": bullpen["walks allowed"] / bpf["BB"],
+            "K": bullpen["pitcher strikeouts"] / bpf["K"],
+        }
+
+    @staticmethod
+    def _team_row(team, opponent, gameId, game_date, boxscore, bpf, bullpen, bullpen_adj, *, me, opp):
+        """One team-level teamlog row; ``me``/``opp`` select the box-score side."""
+        me_bat = boxscore["teams"][me]["teamStats"]["batting"]
+        opp_bat = boxscore["teams"][opp]["teamStats"]["batting"]
+        me_errors = boxscore["teams"][me]["teamStats"]["fielding"]["errors"]
+        outs = bullpen["pitching outs"]
+        return {
+            "team": team,
+            "opponent": opponent,
+            "gameId": gameId,
+            "gameDate": game_date,
+            "WL": "W" if float(me_bat["runs"]) > float(opp_bat["runs"]) else "L",
+            "runs": float(me_bat["runs"]),
+            "OBP": float(me_bat["obp"]) / bpf["OBP"],
+            "AVG": float(me_bat["avg"]),
+            "SLG": float(me_bat["slg"]),
+            "PASO": (me_bat["plateAppearances"] / me_bat["strikeOuts"])
+            if me_bat["strikeOuts"] else me_bat["plateAppearances"],
+            "BABIP": (me_bat["hits"] - me_bat["homeRuns"])
+            / (me_bat["atBats"] - me_bat["strikeOuts"] - me_bat["homeRuns"] - me_bat["sacFlies"]),
+            "DER": 1 - (
+                (opp_bat["hits"] + me_errors - opp_bat["homeRuns"])
+                / (opp_bat["plateAppearances"] - opp_bat["baseOnBalls"] - opp_bat["hitByPitch"]
+                   - opp_bat["homeRuns"] - opp_bat["strikeOuts"])
+            ),
+            "FIP": (3 * (13 * bullpen_adj["HRA"] + 3 * bullpen_adj["BB"] - 2 * bullpen_adj["K"])
+                    / outs + _FIP_CONSTANT) if outs else 0,
+            "WHIP": (3 * (bullpen_adj["BB"] + bullpen_adj["HA"]) / outs) if outs else 0,
+            "ERA": (9 * bullpen_adj["RA"] / outs) if outs else 0,
+            "K9": (27 * bullpen_adj["K"] / outs) if outs else 0,
+            "BB9": (27 * bullpen_adj["BB"] / outs) if outs else 0,
+            "IP": outs / 3,
+            "PA9": (27 * bullpen["batters faced"] / outs) if outs else 0,
+        }
 
     def load(self):
         """Read the MLB gamelog bundle and the auxiliary park-factor / comp tables.
