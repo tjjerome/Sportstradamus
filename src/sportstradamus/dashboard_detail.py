@@ -76,9 +76,6 @@ def init_detail_state() -> None:
         st.session_state.corr_nav = False
 
 
-# --- Helper functions for charts ---
-
-
 def _history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
     """Bar chart of recent games with a dotted betting-line rule.
 
@@ -181,9 +178,6 @@ def _render_corr_cards(
                 st.session_state.detail_stack.append(idx)
                 st.session_state.corr_nav = True
                 st.rerun()
-
-
-# --- Parlay-leg parsing & offer lookup (shared by legs + family names) ---
 
 
 def parse_leg(leg: str) -> dict | None:
@@ -357,34 +351,250 @@ def family_labels_for_game(game_group: pd.DataFrame) -> dict[float, str]:
     return labels
 
 
-@st.dialog("Offer detail", width="large")
-def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
-    """Render detailed view of a single offer with charts and correlations."""
-    # Navigation: always-visible close, plus back when the stack is deep.
-    nav = st.columns([1, 1, 6])
-    if nav[0].button("✕ Close"):
-        st.session_state.detail_stack = []
-        st.session_state.last_grid_key = None
-        st.rerun()
-    if len(st.session_state.detail_stack) > 1:
-        if nav[1].button("← Back"):
-            st.session_state.detail_stack.pop()
-            st.rerun()
+def _has_cols(df: pd.DataFrame, *cols: str | None) -> bool:
+    # schema.get() yields None for absent fields, so guard truthiness too.
+    return all(c and c in df.columns for c in cols)
 
-    # Header
-    st.subheader(f"{row.get('Player', '?')} — {row.get('Market', '?')}")
-    st.write(
-        f"**{row.get('Bet', '?')} {row.get('Line', '?')}** · "
-        f"{row.get('Team', '?')} vs {row.get('Opponent', '?')} · "
-        f"{row.get('League', '?')} · {row.get('Platform', '?')}"
+
+def _append_date_suffix(labels: pd.Series, games: pd.DataFrame, dcol: str | None) -> pd.Series:
+    if not _has_cols(games, dcol):
+        return labels
+    dates = pd.to_datetime(games[dcol]).dt.strftime("%m/%d")
+    return labels + ", " + dates
+
+
+def _history_frame(label_vals, stat_vals, line, opp_vals) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Label": label_vals,
+            "StatValue": stat_vals,
+            "Hit": stat_vals >= line,
+            "Opponent": opp_vals,
+        }
     )
 
-    # Context metrics: Moneyline (as American odds), O/U (raw total), DVPOA (as %)
+
+def _build_recent_history(
+    row: pd.Series, league: str, stat_key: str, line: float, schema: dict
+) -> pd.DataFrame:
+    gl = load_gamelog(league)
+    pcol, dcol = schema["player"], schema.get("date")
+    ocol, hcol = schema.get("opp"), schema.get("home")
+    if gl.empty or not _has_cols(gl, pcol, stat_key):
+        return pd.DataFrame()
+
+    pg = gl[gl[pcol] == row["Player"]].copy()
+    if _has_cols(pg, dcol):
+        pg = pg.sort_values(dcol)
+    pg = pg.tail(10)
+
+    # x-axis label: "@OPP, MM/DD" away, "OPP, MM/DD" home
+    if _has_cols(pg, ocol, hcol):
+        labels = np.where(pg[hcol].astype(bool), "", "@") + pg[ocol].astype(str)
+    elif _has_cols(pg, ocol):
+        labels = pg[ocol].astype(str)
+    elif _has_cols(pg, "week"):
+        labels = pd.Series([f"Wk {w}" for w in pg["week"]], index=pg.index)
+    else:
+        labels = pd.Series([str(i + 1) for i in range(len(pg))], index=pg.index)
+    labels = _append_date_suffix(labels, pg, dcol)
+
+    opp_vals = pg[ocol].values if _has_cols(pg, ocol) else ""
+    return _history_frame(labels.values, pg[stat_key].values, line, opp_vals)
+
+
+def _build_h2h_history(
+    row: pd.Series, league: str, stat_key: str, line: float, opponent: str, schema: dict
+) -> pd.DataFrame:
+    gl = load_gamelog(league)
+    pcol, dcol = schema["player"], schema.get("date")
+    ocol, hcol = schema.get("opp"), schema.get("home")
+    if gl.empty or not _has_cols(gl, pcol, ocol, stat_key):
+        return pd.DataFrame()
+
+    games = gl[(gl[pcol] == row["Player"]) & (gl[ocol] == opponent)].copy()
+    if _has_cols(games, dcol):
+        games = games.sort_values(dcol)
+    games = games.tail(10)
+    if games.empty:
+        return pd.DataFrame()
+
+    if _has_cols(games, hcol):
+        prefix = np.where(games[hcol].astype(bool), "", "@")
+        labels = pd.Series([f"{p}{opponent}" for p in prefix], index=games.index)
+    else:
+        labels = pd.Series([opponent] * len(games), index=games.index)
+    labels = _append_date_suffix(labels, games, dcol)
+
+    opp_vals = games[ocol].values if _has_cols(games, ocol) else opponent
+    return _history_frame(labels.values, games[stat_key].values, line, opp_vals)
+
+
+def _select_history_df(
+    hist_df: pd.DataFrame, h2h_df: pd.DataFrame, league: str, opponent: str, row_id: int
+) -> pd.DataFrame:
+    if hist_df.empty or league == "NFL" or h2h_df.empty:
+        return hist_df
+    filter_opt = st.radio(
+        "Filter by opponent:",
+        options=["All games", f"vs {opponent}"],
+        horizontal=True,
+        key=f"h2h_filter_{row_id}",
+    )
+    return h2h_df if filter_opt == f"vs {opponent}" else hist_df
+
+
+def _render_history_tab(row: pd.Series) -> None:
+    stat_key = row.get("Stat") or row.get("Market")
+    line = row.get("Line")
+    league = row.get("League", "")
+    opponent = row.get("Opponent", "")
+    schema = GAMELOG_SCHEMA.get(league, {})
+
+    hist_df = pd.DataFrame()
+    h2h_df = pd.DataFrame()
+    if stat_key and schema:
+        hist_df = _build_recent_history(row, league, stat_key, line, schema)
+        if league != "NFL" and opponent:
+            h2h_df = _build_h2h_history(row, league, stat_key, line, opponent, schema)
+
+    display_df = _select_history_df(hist_df, h2h_df, league, opponent, id(row))
+    if not display_df.empty:
+        st.altair_chart(_history_chart(display_df, line), use_container_width=True)
+    elif hist_df.empty:
+        st.caption("No history available for this player/stat.")
+
+
+# Offer columns -> distribution-parameter names the curve builders read.
+_DIST_PARAM_COLS = {
+    "Model R": "r",
+    "Model Alpha": "alpha",
+    "Model Sigma": "sigma",
+    "Model Skew": "skew_alpha",
+    "Gate": "gate",
+}
+
+
+def _continuous_curve(dist: str, ev: float, std: float, params: dict):
+    xs = np.linspace(max(0.0, ev - 4 * std), ev + 4 * std, 300)
+    if dist == "SkewNormal":
+        sigma = params.get("sigma")
+        if not sigma or sigma <= 0:
+            sigma = ev * 0.3
+        skew = params.get("skew_alpha") or 0
+        return xs, stats.skewnorm.pdf(xs, skew, loc=ev, scale=sigma)
+
+    alpha = params.get("alpha")
+    if not alpha or alpha <= 0:
+        raise ValueError(f"{dist} requires Model Alpha > 0")
+    pdf_vals = stats.gamma.pdf(xs, alpha, scale=ev / alpha)
+    if dist == "ZAGamma":
+        pdf_vals = (1 - (params.get("gate") or 0)) * pdf_vals
+    return xs, pdf_vals
+
+
+def _discrete_curve(dist: str, ev: float, std: float, params: dict):
+    hi = int(np.ceil(ev + 4 * std)) + 1
+    xs = np.arange(0, hi + 1, dtype=int)
+    if dist == "Poisson":
+        return xs, stats.poisson.pmf(xs, ev)
+    if dist not in ("NegBin", "ZINB"):
+        raise ValueError(f"Unknown discrete dist: {dist}")
+
+    r = params.get("r")
+    if not r or r <= 0:
+        raise ValueError(f"{dist} requires Model R > 0")
+    pmf = stats.nbinom.pmf(xs, r, r / (r + ev))
+    if dist == "ZINB":
+        gate = params.get("gate") or 0
+        pmf = np.where(xs == 0, gate + (1 - gate) * pmf, (1 - gate) * pmf)
+    return xs, pmf
+
+
+def _distribution_frame(dist: str, ev: float, std: float, params: dict, line: float):
+    is_continuous = dist in _CONTINUOUS
+    if is_continuous:
+        xs, vals = _continuous_curve(dist, ev, std, params)
+        y_title = "Density"
+    else:
+        xs, vals = _discrete_curve(dist, ev, std, params)
+        y_title = "Probability"
+    df_pdf = pd.DataFrame(
+        {
+            "x": xs,
+            "P": vals,
+            "Side": ["Over" if x >= line else "Under" for x in xs],
+        }
+    )
+    return df_pdf, y_title, is_continuous
+
+
+def _distribution_chart(
+    df_pdf: pd.DataFrame, is_continuous: bool, line: float, market: str, y_title: str
+) -> alt.Chart:
+    color_enc = alt.Color(
+        "Side:N",
+        scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
+        legend=alt.Legend(orient="top"),
+    )
+    if is_continuous:
+        x_enc = alt.X("x:Q", title=market)
+        y_enc = alt.Y("P:Q", title=y_title)
+        chart = alt.layer(
+            alt.Chart(df_pdf)
+            .mark_area(opacity=0.3)
+            .encode(x=x_enc, y=y_enc, color=color_enc, tooltip=["x:Q", "P:Q", "Side:N"]),
+            alt.Chart(df_pdf).mark_line(strokeWidth=2).encode(x=x_enc, y=y_enc, color=color_enc),
+        )
+    else:
+        # Discrete: touching bars via explicit half-integer boundaries.
+        df_pdf["x_start"] = df_pdf["x"] - 0.5
+        df_pdf["x_end"] = df_pdf["x"] + 0.5
+        chart = (
+            alt.Chart(df_pdf)
+            .mark_rect(stroke="#444", strokeWidth=1)
+            .encode(
+                x=alt.X("x_start:Q", title=market, axis=alt.Axis(tickMinStep=1)),
+                x2="x_end:Q",
+                y=alt.Y("P:Q", title=y_title),
+                color=color_enc,
+                tooltip=["x:Q", "P:Q", "Side:N"],
+            )
+        )
+    betting_line = (
+        alt.Chart(pd.DataFrame({"Line": [line]}))
+        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
+        .encode(x="Line:Q")
+    )
+    return chart + betting_line
+
+
+def _render_model_tab(row: pd.Series) -> None:
+    dist = row.get("Dist")
+    ev = row.get("Model EV")
+    cv = row.get("CV")
+    line = row.get("Line")
+    if not (pd.notna(dist) and pd.notna(ev) and pd.notna(cv)):
+        st.caption("Distribution parameters unavailable — re-run `prophecize` to refresh.")
+        return
+
+    params = {
+        param: row.get(col) for col, param in _DIST_PARAM_COLS.items() if pd.notna(row.get(col))
+    }
+    std = row.get("Model STD") or ev * 0.3
+    try:
+        df_pdf, y_title, is_continuous = _distribution_frame(dist, ev, std, params, line)
+        chart = _distribution_chart(df_pdf, is_continuous, line, row["Market"], y_title)
+        st.altair_chart(chart, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error computing distribution: {e}")
+
+
+def _render_context_metrics(row: pd.Series) -> None:
     col1, col2, col3 = st.columns(3)
     with col1:
         ml = row.get("Moneyline")
-        ml_str = _to_american(ml) if pd.notna(ml) else "N/A"
-        st.metric("Moneyline", ml_str)
+        st.metric("Moneyline", _to_american(ml) if pd.notna(ml) else "N/A")
     with col2:
         ou = row.get("O/U")
         ou_str = f"{ou:.1f}" if pd.notna(ou) and isinstance(ou, int | float) else "N/A"
@@ -396,259 +606,44 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
         )
         st.metric("DVPOA", dvpoa_str)
 
-    # Three tabs: History, Model Distribution, Correlated Bets
+
+def _render_nav() -> None:
+    nav = st.columns([1, 1, 6])
+    if nav[0].button("✕ Close"):
+        st.session_state.detail_stack = []
+        st.session_state.last_grid_key = None
+        st.rerun()
+    if len(st.session_state.detail_stack) > 1:
+        if nav[1].button("← Back"):
+            st.session_state.detail_stack.pop()
+            st.rerun()
+
+
+def _render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
+    same_items = _parse_corr(row.get("Team Correlation"))
+    opp_items = _parse_corr(row.get("Opp Correlation"))
+    _render_corr_cards(same_items, f"Same team — {row['Team']}", filtered, "corr_same")
+    _render_corr_cards(opp_items, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
+    if not same_items and not opp_items:
+        st.caption("No correlated legs cleared the display thresholds for this offer.")
+
+
+@st.dialog("Offer detail", width="large")
+def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
+    _render_nav()
+
+    st.subheader(f"{row.get('Player', '?')} — {row.get('Market', '?')}")
+    st.write(
+        f"**{row.get('Bet', '?')} {row.get('Line', '?')}** · "
+        f"{row.get('Team', '?')} vs {row.get('Opponent', '?')} · "
+        f"{row.get('League', '?')} · {row.get('Platform', '?')}"
+    )
+    _render_context_metrics(row)
+
     tab1, tab2, tab3 = st.tabs(["📈 History", "〜 Model", "🔗 Correlated"])
-
     with tab1:
-        stat_key = row.get("Stat") or row.get("Market")
-        line = row.get("Line")
-        league = row.get("League", "")
-        opponent = row.get("Opponent", "")
-        schema = GAMELOG_SCHEMA.get(league, {})
-
-        hist_df = pd.DataFrame()
-        if stat_key and schema:
-            gl = load_gamelog(league)
-            pcol = schema["player"]
-            dcol = schema.get("date")
-            ocol = schema.get("opp")
-            hcol = schema.get("home")
-
-            if not gl.empty and pcol in gl.columns and stat_key in gl.columns:
-                pg = gl[gl[pcol] == row["Player"]].copy()
-                if dcol and dcol in pg.columns:
-                    pg = pg.sort_values(dcol)
-                pg = pg.tail(10)
-
-                # Build x-axis label: "@OPP, MM/DD" away, "OPP, MM/DD" home
-                if ocol and hcol and ocol in pg.columns and hcol in pg.columns:
-                    opp_prefix = np.where(pg[hcol].astype(bool), "", "@")
-                    labels = opp_prefix + pg[ocol].astype(str)
-                elif ocol and ocol in pg.columns:
-                    labels = pg[ocol].astype(str)
-                else:
-                    labels = pd.Series(
-                        [f"Wk {w}" for w in pg["week"]]
-                        if "week" in pg.columns
-                        else [str(i + 1) for i in range(len(pg))],
-                        index=pg.index,
-                    )
-
-                if dcol and dcol in pg.columns:
-                    dates = pd.to_datetime(pg[dcol]).dt.strftime("%m/%d")
-                    labels = labels + ", " + dates
-
-                hist_df = pd.DataFrame(
-                    {
-                        "Label": labels.values,
-                        "StatValue": pg[stat_key].values,
-                        "Hit": pg[stat_key].values >= line,
-                        "Opponent": pg[ocol].values if ocol and ocol in pg.columns else "",
-                    }
-                )
-
-        # Radio filter for H2H if not NFL and opponent data exists
-        display_df = hist_df
-        h2h_df = pd.DataFrame()
-
-        if league != "NFL" and opponent and stat_key and schema:
-            # Precompute H2H data from full gamelog (not just last-10-games)
-            gl = load_gamelog(league)
-            pcol = schema["player"]
-            ocol = schema.get("opp")
-            dcol = schema.get("date")
-            hcol = schema.get("home")
-
-            if not gl.empty and all([pcol, ocol, stat_key]) and pcol in gl.columns:
-                h2h_games = gl[(gl[pcol] == row["Player"]) & (gl[ocol] == opponent)].copy()
-                if dcol and dcol in h2h_games.columns:
-                    h2h_games = h2h_games.sort_values(dcol)
-                h2h_games = h2h_games.tail(10)
-
-                if not h2h_games.empty:
-                    # Build labels
-                    if hcol and hcol in h2h_games.columns:
-                        opp_prefix = np.where(h2h_games[hcol].astype(bool), "", "@")
-                        h2h_labels = pd.Series(
-                            [f"{p}{opponent}" for p in opp_prefix], index=h2h_games.index
-                        )
-                    else:
-                        h2h_labels = pd.Series([opponent] * len(h2h_games), index=h2h_games.index)
-
-                    if dcol and dcol in h2h_games.columns:
-                        dates = pd.to_datetime(h2h_games[dcol]).dt.strftime("%m/%d")
-                        h2h_labels = h2h_labels + ", " + dates
-
-                    h2h_df = pd.DataFrame(
-                        {
-                            "Label": h2h_labels.values,
-                            "StatValue": h2h_games[stat_key].values,
-                            "Hit": h2h_games[stat_key].values >= line,
-                            "Opponent": h2h_games[ocol].values
-                            if ocol in h2h_games.columns
-                            else opponent,
-                        }
-                    )
-
-        if not hist_df.empty and league != "NFL" and not h2h_df.empty:
-            filter_opt = st.radio(
-                "Filter by opponent:",
-                options=["All games", f"vs {opponent}"],
-                horizontal=True,
-                key=f"h2h_filter_{id(row)}",
-            )
-            display_df = h2h_df if filter_opt == f"vs {opponent}" else hist_df
-
-        if not display_df.empty:
-            st.altair_chart(_history_chart(display_df, line), use_container_width=True)
-        elif hist_df.empty:
-            st.caption("No history available for this player/stat.")
-
+        _render_history_tab(row)
     with tab2:
-        dist = row.get("Dist")
-        ev = row.get("Model EV")
-        cv = row.get("CV")
-        line = row.get("Line")
-
-        if pd.notna(dist) and pd.notna(ev) and pd.notna(cv):
-            is_continuous = dist in _CONTINUOUS
-
-            _PARAM_MAP = {
-                "Model R": "r",
-                "Model Alpha": "alpha",
-                "Model Sigma": "sigma",
-                "Model Skew": "skew_alpha",
-                "Gate": "gate",
-            }
-            params = {
-                param: row.get(col) for col, param in _PARAM_MAP.items() if pd.notna(row.get(col))
-            }
-
-            try:
-                if is_continuous:
-                    # Continuous: use 300 linspace points and scipy PDF
-                    std = row.get("Model STD") or ev * 0.3
-                    lo = max(0.0, ev - 4 * std)
-                    hi = ev + 4 * std
-                    xs = np.linspace(lo, hi, 300)
-
-                    if dist == "Gamma":
-                        alpha = params.get("alpha")
-                        if not alpha or alpha <= 0:
-                            raise ValueError("Gamma requires Model Alpha > 0")
-                        scale = ev / alpha
-                        pdf_vals = stats.gamma.pdf(xs, alpha, scale=scale)
-                    elif dist == "ZAGamma":
-                        alpha = params.get("alpha")
-                        if not alpha or alpha <= 0:
-                            raise ValueError("ZAGamma requires Model Alpha > 0")
-                        gate = params.get("gate") or 0
-                        scale = ev / alpha
-                        pdf_vals = (1 - gate) * stats.gamma.pdf(xs, alpha, scale=scale)
-                    elif dist == "SkewNormal":
-                        sigma = params.get("sigma")
-                        if not sigma or sigma <= 0:
-                            sigma = ev * 0.3
-                        skew = params.get("skew_alpha") or 0
-                        pdf_vals = stats.skewnorm.pdf(xs, skew, loc=ev, scale=sigma)
-                    else:
-                        raise ValueError(f"Unknown continuous dist: {dist}")
-
-                    y_title = "Density"
-                else:
-                    # Discrete: only evaluate at integer values
-                    std = row.get("Model STD") or ev * 0.3
-                    hi = int(np.ceil(ev + 4 * std)) + 1
-                    xs = np.arange(0, hi + 1, dtype=int)
-
-                    if dist == "Poisson":
-                        pdf_vals = stats.poisson.pmf(xs, ev)
-                    elif dist == "NegBin":
-                        r = params.get("r")
-                        if not r or r <= 0:
-                            raise ValueError("NegBin requires Model R > 0")
-                        p = r / (r + ev)
-                        pdf_vals = stats.nbinom.pmf(xs, r, p)
-                    elif dist == "ZINB":
-                        r = params.get("r")
-                        if not r or r <= 0:
-                            raise ValueError("ZINB requires Model R > 0")
-                        gate = params.get("gate") or 0
-                        p = r / (r + ev)
-                        pmf = stats.nbinom.pmf(xs, r, p)
-                        pdf_vals = np.where(xs == 0, gate + (1 - gate) * pmf, (1 - gate) * pmf)
-                    else:
-                        raise ValueError(f"Unknown discrete dist: {dist}")
-
-                    y_title = "Probability"
-
-                df_pdf = pd.DataFrame(
-                    {
-                        "x": xs,
-                        "P": pdf_vals,
-                        "Side": ["Over" if x >= line else "Under" for x in xs],
-                    }
-                )
-
-                x_enc = alt.X("x:Q", title=row["Market"])
-                y_enc = alt.Y("P:Q", title=y_title)
-
-                if is_continuous:
-                    # Smooth PDF curve with line and area, colored by side of betting line
-                    color_enc = alt.Color(
-                        "Side:N",
-                        scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
-                        legend=alt.Legend(orient="top"),
-                    )
-                    chart = alt.layer(
-                        alt.Chart(df_pdf)
-                        .mark_area(opacity=0.3)
-                        .encode(
-                            x=x_enc, y=y_enc, color=color_enc, tooltip=["x:Q", "P:Q", "Side:N"]
-                        ),
-                        alt.Chart(df_pdf)
-                        .mark_line(strokeWidth=2)
-                        .encode(x=x_enc, y=y_enc, color=color_enc),
-                    )
-                else:
-                    # Discrete: bars at integer values, touching each other using explicit boundaries
-                    df_pdf["x_start"] = df_pdf["x"] - 0.5
-                    df_pdf["x_end"] = df_pdf["x"] + 0.5
-                    color_enc = alt.Color(
-                        "Side:N",
-                        scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
-                        legend=alt.Legend(orient="top"),
-                    )
-                    chart = (
-                        alt.Chart(df_pdf)
-                        .mark_rect(stroke="#444", strokeWidth=1)
-                        .encode(
-                            x=alt.X("x_start:Q", title=row["Market"], axis=alt.Axis(tickMinStep=1)),
-                            x2="x_end:Q",
-                            y=alt.Y("P:Q", title=y_title),
-                            color=color_enc,
-                            tooltip=["x:Q", "P:Q", "Side:N"],
-                        )
-                    )
-
-                betting_line = (
-                    alt.Chart(pd.DataFrame({"Line": [line]}))
-                    .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
-                    .encode(x="Line:Q")
-                )
-                combined = chart + betting_line
-                st.altair_chart(combined, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error computing distribution: {e}")
-        else:
-            st.caption("Distribution parameters unavailable — re-run `prophecize` to refresh.")
-
+        _render_model_tab(row)
     with tab3:
-        same_items = _parse_corr(row.get("Team Correlation"))
-        opp_items = _parse_corr(row.get("Opp Correlation"))
-
-        _render_corr_cards(same_items, f"Same team — {row['Team']}", filtered, "corr_same")
-        _render_corr_cards(opp_items, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
-
-        if not same_items and not opp_items:
-            st.caption("No correlated legs cleared the display thresholds for this offer.")
+        _render_corr_tab(row, filtered)
