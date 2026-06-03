@@ -1305,6 +1305,7 @@ def _step_persist_artifacts(
     decoded: dict,
     weighted_mean: np.ndarray,
     y_proba_filt: np.ndarray,
+    y_proba_raw: np.ndarray,
     dist: str,
     hist_gate: float,
     filename: str,
@@ -1355,6 +1356,9 @@ def _step_persist_artifacts(
         X_test["Alpha"] = prob_params["concentration"]
 
     X_test["P"] = y_proba_filt[:, 1]
+    # Pre-blend (model-only) over-probability — lets the offline scorecard report a
+    # standalone Gate-1 CI alongside the fused one, attributing the pass to model vs book.
+    X_test["P_standalone"] = y_proba_raw[:, 1]
     _persist_player_metadata(X_test, splits)
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
@@ -2331,6 +2335,7 @@ def train_market(
         decoded=decoded,
         weighted_mean=fused["weighted_mean"],
         y_proba_filt=y_proba_filt,
+        y_proba_raw=y_proba_raw,
         dist=dist,
         hist_gate=hist_gate,
         filename=filename,

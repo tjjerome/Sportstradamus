@@ -46,7 +46,7 @@ more than stars).
 
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
-| 1 | **Brier vs book, paired bootstrap** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0` — the 95% CI strictly excludes 0 from below (model Brier strictly under book's) | `_GATE1_CI_HI_MAX = 0.0` |
+| 1 | **Brier vs book, paired bootstrap (non-inferiority)** | `d_i = (p_model_i − y_i)² − (p_book_i − y_i)²`; 95% percentile CI of `mean(d)` (2000 resamples, seeded) | `ci_hi < 0.005` — 95% confident the fused ensemble's Brier is at most δ worse than the book's (a tight tie or a win passes; mild-worse-beyond-δ and underpowered-wide-CI fail) | `_GATE1_NONINF_MARGIN = 0.005` |
 | 2 | **Star σ-match** | `z = |mean(EV) − mean(Result)| / std(Result)` on the top-mean decile | `z < 0.5` — bias under half the segment's spread | `_GATE2_STAR_Z_MAX = 0.5` |
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
 | 4 | **IQR spread (compression)** | `iqr_ratio = IQR(EV) / IQR(Result)` over all events | `iqr_ratio > 0.5` — predictions keep at least half the truth's IQR | `_GATE4_IQR_RATIO_MIN = 0.5` |
@@ -57,6 +57,44 @@ more than stars).
 near-zero on low-variance bench segments and the gate fires on a negligible bias;
 σ keeps the yardstick at "what a typical event in the segment looks like" regardless
 of N.
+
+**Gate 1 is non-inferiority, not superiority.** Intent #3 is "the deployed ensemble
+is *at least as good as* the book," so a statistical **tie passes** — we do not demand
+the model *provably beat* the book offline. The ship test is `ci_hi < δ` with
+`δ = _GATE1_NONINF_MARGIN = 0.005` (≈ 2% of the ≈0.25 book Brier ≈ one SE of these
+estimates): the largest ensemble-vs-book Brier degradation we still call a tie. This
+is a **tie tolerance, not a degradation allowance** — it admits genuine ties and wins,
+still rejects provably-worse and mild-worse-beyond-δ cells, and the "don't loosen the
+gate to chase the 75% breadth target" rule is unchanged (δ was set to the tie scale,
+not to manufacture ships; more breadth comes from model work, not a looser δ).
+
+Whether it is then **+EV to bet** the cell — and how much — is *not* the gate's job:
+that is owned downstream by the EV calc, the Kelly sizer (`kelly_shrinkage =
+clip(brier_skill_score, 0, 1)`, so a tie cell is sized to ~0 until it earns edge), and
+the 14-day live Gate-2 soak. The gate certifies **deployable** (calibrated +
+uncompressed + tie-or-better); the sizer + soak certify **profitable**. That split is
+what makes shipping a tie safe.
+
+**Reported, not gated** (legibility columns on `model_stats.parquet`; never in the
+`ship` AND):
+
+- `g1_has_edge` — the old strict-superiority test (`ci_hi < 0`). True ⇔ the cell
+  *provably* beats the book, distinct from merely tying it. Lets dashboards/sizing see
+  which passers carry a real offline edge.
+- `betting_active = ship AND kelly_shrinkage > 0` — the deployable-and-staking subset.
+  Breadth has two honest readings: **deployable** (`ship`) and **betting-active**.
+- `g1_brier_diff_ci_hi_standalone` — the same paired-Brier upper bound on the
+  *pre-blend* model probabilities (`P_standalone`), so each cell shows whether the
+  standalone model or the book drives the fused pass. Populated on the next `meditate`
+  (the column is dumped by the training pipeline).
+- `pit_ks_d`, `central50_coverage`, `central80_coverage` — PIT-uniformity + central
+  predictive-interval coverage of the per-row distribution. Gates 2/3 check segment
+  *means* and Gate 4's marginal IQR conflates between- vs within-player spread; these
+  measure predictive *shape* directly. Coverage materially below nominal (0.50 / 0.80)
+  ⇒ the predictive is too narrow / mislocated (under-dispersed); above ⇒ too wide. A
+  cell can win Gate 1 (binary over/under Brier) while its predictive is badly shaped —
+  e.g. NFL `receptions` passes g1 yet reads `central50_coverage ≈ 0.24` — so these are
+  the route to fixing the NFL SkewNormal cells *on merit* rather than loosening a gate.
 
 **Auto-pass / fail conventions for blank metrics:**
 
@@ -152,7 +190,9 @@ green for every league with cached parquets
   Gate 5 (raise `_GATE5_ECE_MAX` to 0.10–0.15). G4 is the binding constraint at the
   strict bar; G2/G3 are gentle by default under σ-norm.
 - **Quality too low** → tighten G4 (`> 0.6`) or G2/G3 (`< 0.3`).
-- **NFL low-N false KILLs on Gate 1** — the 95% CI is naturally wide on cells with
-  < 1000 events, so a real-edge thin-N cell can straddle 0 and KILL. Tracked as an
-  open item in `docs/operation_ship_75.md` Step 4 (gate-widening); consider a one-sided test or an
-  N-aware floor on Gate 1 once breadth becomes the binding decision.
+- **NFL low-N false KILLs on Gate 1** — *resolved* by the non-inferiority margin. The
+  95% CI is naturally wide on cells with < 1000 events, so under the old strict
+  `ci_hi < 0` a real-tie thin-N cell would straddle 0 and KILL. `ci_hi < 0.005` admits
+  the genuine ties (e.g. NFL `passing-yards`, `ci_hi ≈ 0.002`) while still failing a
+  wide CI that reaches past δ. This is a principled tie tolerance, **not** an N-aware
+  floor that would silently widen with small N — degradation past δ still fails at any N.

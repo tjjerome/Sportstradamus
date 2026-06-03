@@ -52,7 +52,7 @@ logger = get_logger(__name__)
 # Tri-state ship-gate columns. Cast at the parquet boundary to the pandas
 # nullable BooleanDtype so a missing scorecard run round-trips as pd.NA
 # instead of decaying into False.
-_GATE_PASS_COLS = ("g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "ship")
+_GATE_PASS_COLS = ("g1_pass", "g1_has_edge", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "ship")
 
 # ``training.scorecard.compute_gates`` reads per-cell test-set CSVs from this
 # directory. ``meditate`` dumps them inside :class:`training.pipeline.train_market`
@@ -205,14 +205,19 @@ def _wide_row(
         "g1_brier_diff_mean_oracle": float("nan"),
         "g1_ci_lo_oracle": float("nan"),
         "g1_ci_hi_oracle": float("nan"),
+        "g1_brier_diff_ci_hi_standalone": float("nan"),
         "g2_star_z": float("nan"),
         "g2_star_z_oracle": float("nan"),
         "g3_bench_z": float("nan"),
         "g3_bench_z_oracle": float("nan"),
         "g4_iqr_ratio": float("nan"),
         "g4_iqr_ratio_oracle": float("nan"),
+        "pit_ks_d": float("nan"),
+        "central50_coverage": float("nan"),
+        "central80_coverage": float("nan"),
         "g5_ece_debiased": float("nan"),
         "g1_pass": pd.NA,
+        "g1_has_edge": pd.NA,
         "g2_pass": pd.NA,
         "g3_pass": pd.NA,
         "g4_pass": pd.NA,
@@ -281,6 +286,13 @@ def write_model_stats(
     for col in _GATE_PASS_COLS:
         if col in df.columns:
             df[col] = df[col].astype("boolean")
+    # Deployable (ship) vs actually-staking (kelly_shrinkage > 0). A non-inferiority
+    # tie cell ships but is sized to ~0 until it proves live edge, so breadth and
+    # betting volume diverge — surface both rather than conflate them.
+    if {"ship", "kelly_shrinkage"} <= set(df.columns):
+        df["betting_active"] = df["ship"].fillna(False).astype(bool) & (
+            df["kelly_shrinkage"].fillna(0.0) > 0
+        )
     _atomic_write_parquet(df, MODEL_STATS_PATH)
     _atomic_write_csv(df, MODEL_STATS_CSV_PATH)
 
