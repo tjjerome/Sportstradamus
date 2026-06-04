@@ -57,37 +57,9 @@ def process_offers(offer_dict, book, stats, *, contest_variant="pooled", legacy=
     logger.info(f"Processing {book} offers")
     if len(offer_dict) > 0:
         total = sum(sum(len(i) for i in v.values()) for v in offer_dict.values())
-
         with tqdm(total=total, desc=f"Matching {book} Offers", unit="offer") as pbar:
             for league, markets in offer_dict.items():
-                if league in stats:
-                    stat_data = stats.get(league)
-                    if (
-                        stat_data.season_start
-                        > datetime.datetime.today().date() - datetime.timedelta(days=14)
-                    ):
-                        logger.info(f"{league} season has not started, skipping stat matching")
-                        continue
-
-                    all_offers = {}
-                    for offers in markets.values():
-                        all_offers.update({v["Player"]: v for v in offers})
-
-                    all_offers = list(all_offers.values())
-                    stat_data.get_depth(all_offers)
-                    stat_data.get_volume_stats(all_offers)
-                    if league == "MLB":
-                        stat_data.get_volume_stats(all_offers, pitcher=True)
-                else:
-                    for market, offers in markets.items():
-                        archive.add_dfs(offers, book, stat_map[book])
-                        pbar.update(len(offers))
-                    continue
-
-                for market, offers in markets.items():
-                    archive.add_dfs(offers, book, stat_map[book])
-                    pbar.update(len(offers))
-                    new_offers.extend(_score_market(offers, league, market, book, stat_data))
+                new_offers.extend(_match_league_offers(league, markets, stats, book, pbar))
 
     offer_df, parlays = find_correlation(
         new_offers, stats, book, contest_variant=contest_variant, legacy=legacy
@@ -95,6 +67,41 @@ def process_offers(offer_dict, book, stats, *, contest_variant="pooled", legacy=
 
     logger.info(str(len(offer_df)) + " offers processed")
     return offer_df, parlays
+
+
+def _match_league_offers(league, markets, stats, book, pbar):
+    """Archive and score one league's markets; return its scored offer records.
+
+    A league with no active ``Stats`` object still has its DFS lines archived
+    (so the odds land in the archive) but is not scored; a league whose season
+    has not started is skipped entirely.
+    """
+    if league not in stats:
+        for offers in markets.values():
+            archive.add_dfs(offers, book, stat_map[book])
+            pbar.update(len(offers))
+        return []
+
+    stat_data = stats.get(league)
+    if stat_data.season_start > datetime.datetime.today().date() - datetime.timedelta(days=14):
+        logger.info(f"{league} season has not started, skipping stat matching")
+        return []
+
+    all_offers = {}
+    for offers in markets.values():
+        all_offers.update({v["Player"]: v for v in offers})
+    all_offers = list(all_offers.values())
+    stat_data.get_depth(all_offers)
+    stat_data.get_volume_stats(all_offers)
+    if league == "MLB":
+        stat_data.get_volume_stats(all_offers, pitcher=True)
+
+    scored = []
+    for market, offers in markets.items():
+        archive.add_dfs(offers, book, stat_map[book])
+        pbar.update(len(offers))
+        scored.extend(_score_market(offers, league, market, book, stat_data))
+    return scored
 
 
 def _score_market(offers, league, market, book, stat_data):
