@@ -101,28 +101,26 @@ def _filter_parlays(
     return df.reset_index(drop=True)
 
 
+def _rivals_row_covered(row: pd.Series, players: list[str]) -> bool:
+    legs = [row.get(f"Leg {i}", "") for i in range(1, int(row["Bet Size"]) + 1)]
+    for desc in legs:
+        if "vs." not in str(desc):
+            continue
+        sides = [s.strip() for s in str(desc).split("vs.")[:2]]
+        covered = sum(
+            1 for side in sides if any(side and side.split()[0] in p for p in players)
+        )
+        if covered < 2:
+            _logger.warning("rivals candidate dropped: one-sided (%s)", desc)
+            return False
+    return True
+
+
 def _validate_rivals_coverage(parlay_df: pd.DataFrame, offers: pd.DataFrame) -> pd.DataFrame:
-    """Drop Rivals candidates where one matchup side is missing from offers."""
     if parlay_df.empty or offers.empty:
         return parlay_df
     players = offers["Player"].astype(str).tolist() if "Player" in offers.columns else []
-    keep_rows = []
-    for _, row in parlay_df.iterrows():
-        legs = [row.get(f"Leg {i}", "") for i in range(1, int(row["Bet Size"]) + 1)]
-        ok = True
-        for desc in legs:
-            if "vs." not in str(desc):
-                continue
-            sides = [s.strip() for s in str(desc).split("vs.")[:2]]
-            covered = sum(
-                1 for side in sides if any(side and side.split()[0] in p for p in players)
-            )
-            if covered < 2:
-                _logger.warning("rivals candidate dropped: one-sided (%s)", desc)
-                ok = False
-                break
-        if ok:
-            keep_rows.append(row)
+    keep_rows = [row for _, row in parlay_df.iterrows() if _rivals_row_covered(row, players)]
     return pd.DataFrame(keep_rows).reset_index(drop=True) if keep_rows else parlay_df.iloc[0:0]
 
 
@@ -228,15 +226,27 @@ def construct_entries(
         parlays = _filter_parlays(parlays, variant, config.entry_sizes, config)
         if variant == "rivals":
             parlays = _validate_rivals_coverage(parlays, filtered_offers)
-        for _, row in parlays.iterrows():
-            league = str(row.get("League", ""))
-            market = ""
-            if not filtered_offers.empty and "Market" in filtered_offers.columns:
-                market = str(filtered_offers["Market"].iloc[0])
-            shrinkage_info = _resolve_market_shrinkage(league, market)
-            entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info))
+        entries.extend(_variant_entries(parlays, variant, filtered_offers, bankroll, config))
 
     return rank_and_dedupe(entries, config)
+
+
+def _variant_entries(
+    parlays: pd.DataFrame,
+    variant: str,
+    filtered_offers: pd.DataFrame,
+    bankroll: Decimal,
+    config: PickemConfig,
+) -> list[RecommendedEntry]:
+    entries: list[RecommendedEntry] = []
+    for _, row in parlays.iterrows():
+        league = str(row.get("League", ""))
+        market = ""
+        if not filtered_offers.empty and "Market" in filtered_offers.columns:
+            market = str(filtered_offers["Market"].iloc[0])
+        shrinkage_info = _resolve_market_shrinkage(league, market)
+        entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info))
+    return entries
 
 
 def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
