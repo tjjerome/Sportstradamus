@@ -1029,6 +1029,95 @@ def _zero_inflated_outcome_mean(
     return base_mean
 
 
+def _diag_shape(dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats):
+    """(shape_label, start_shape, model_shape, empirical_shape) for the cell's family."""
+    if dist == "SkewNormal":
+        diag_start_shape = float(cv)
+        scale_norm_mean = float(prob_params["scale"].mean())
+        diag_model_shape = scale_norm_mean * test_denom_mean
+        result_arr = y_test["Result"].to_numpy()
+        diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
+        diag_shape_label = "scale"
+    elif dist in ("Gamma", "ZAGamma"):
+        diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
+        diag_model_shape = float(prob_params["concentration"].mean())
+        per_player_emp_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01)) ** 2
+        diag_empirical_shape = float(np.median(per_player_emp_alpha))
+        diag_shape_label = "alpha"
+    elif dist in ("NegBin", "ZINB"):
+        diag_start_shape = float(
+            np.clip(
+                test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6),
+                1,
+                _COUNT_BRANCH_R_CAP,
+            )
+        )
+        diag_model_shape = float(prob_params["total_count"].mean())
+        per_player_emp_r = player_stats.mean() ** 2 / np.maximum(
+            player_stats.var() - player_stats.mean(), 0.01
+        )
+        per_player_emp_r = np.minimum(per_player_emp_r, _COUNT_BRANCH_R_CAP)
+        diag_empirical_shape = float(np.median(per_player_emp_r))
+        diag_shape_label = "r"
+    return diag_shape_label, diag_start_shape, diag_model_shape, diag_empirical_shape
+
+
+def _diag_over_pcts(y_class, ev_minus_line_arr, y_proba_no_filt):
+    """Realized over-rate among confident EV>line / EV<=line picks (NaN below the floor)."""
+    ev_gt_mask = ev_minus_line_arr > 0
+    ev_lt_mask = ev_minus_line_arr <= 0
+    conf_mask = np.max(y_proba_no_filt, axis=1) > _MODE_CONFIDENCE_THRESHOLD
+    over_pct_ev_gt = (
+        float(y_class[ev_gt_mask & conf_mask].mean())
+        if (ev_gt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
+        else float("nan")
+    )
+    over_pct_ev_lt = (
+        float(y_class[ev_lt_mask & conf_mask].mean())
+        if (ev_lt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
+        else float("nan")
+    )
+    return over_pct_ev_gt, over_pct_ev_lt
+
+
+def _diag_cf_over_pct(dist, diag_empirical_shape, weighted_mean, B_test, gate_blend_test, step):
+    """Counterfactual over-rate if the model used the empirical (not fitted) shape.
+
+    NaN for SkewNormal (no counterfactual shape) and when the empirical shape is
+    unusable (NaN or non-positive) or too few confident rows clear the floor.
+    """
+    if dist == "SkewNormal":
+        return float("nan")
+    if np.isnan(diag_empirical_shape) or diag_empirical_shape <= 0:
+        return float("nan")
+    emp_shape = np.full_like(weighted_mean, diag_empirical_shape)
+    if dist in ("NegBin", "ZINB"):
+        cf_under = get_odds(
+            B_test["Line"].to_numpy(),
+            weighted_mean,
+            dist,
+            r=emp_shape,
+            gate=gate_blend_test,
+        )
+    else:
+        cf_under = get_odds(
+            B_test["Line"].to_numpy(),
+            weighted_mean,
+            dist,
+            alpha=emp_shape,
+            step=step,
+            gate=gate_blend_test,
+        )
+    cf_over = 1 - cf_under
+    cf_pred = (cf_over > 0.5).astype(int)
+    cf_mask = np.maximum(cf_under, cf_over) > _MODE_CONFIDENCE_THRESHOLD
+    return (
+        float(cf_pred[cf_mask].mean() / cf_mask.mean())
+        if cf_mask.sum() > _MIN_DIAGNOSTIC_ROWS
+        else float("nan")
+    )
+
+
 def _step_compute_diagnostics(
     splits: dict,
     prob_params: pd.DataFrame,
@@ -1059,34 +1148,9 @@ def _step_compute_diagnostics(
     test_std_yr = X_test["STDYr"].mean()
     test_denom_mean = X_test[denom_col].mean() if dist == "SkewNormal" else test_mean_yr
 
-    if dist == "SkewNormal":
-        diag_start_shape = float(cv)
-        scale_norm_mean = float(prob_params["scale"].mean())
-        diag_model_shape = scale_norm_mean * test_denom_mean
-        result_arr = y_test["Result"].to_numpy()
-        diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
-        diag_shape_label = "scale"
-    elif dist in ("Gamma", "ZAGamma"):
-        diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
-        diag_model_shape = float(prob_params["concentration"].mean())
-        per_player_emp_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01)) ** 2
-        diag_empirical_shape = float(np.median(per_player_emp_alpha))
-        diag_shape_label = "alpha"
-    elif dist in ("NegBin", "ZINB"):
-        diag_start_shape = float(
-            np.clip(
-                test_mean_yr**2 / max(test_std_yr**2 - test_mean_yr, 1e-6),
-                1,
-                _COUNT_BRANCH_R_CAP,
-            )
-        )
-        diag_model_shape = float(prob_params["total_count"].mean())
-        per_player_emp_r = player_stats.mean() ** 2 / np.maximum(
-            player_stats.var() - player_stats.mean(), 0.01
-        )
-        per_player_emp_r = np.minimum(per_player_emp_r, _COUNT_BRANCH_R_CAP)
-        diag_empirical_shape = float(np.median(per_player_emp_r))
-        diag_shape_label = "r"
+    diag_shape_label, diag_start_shape, diag_model_shape, diag_empirical_shape = _diag_shape(
+        dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats
+    )
 
     diag_start_mean = float(test_mean_yr)
     # E[Y] = (1-π)·μ — the EV/bias diagnostics below compare against zero-INCLUSIVE
@@ -1108,51 +1172,12 @@ def _step_compute_diagnostics(
     diag_median_ev_diff = float(np.median(ev_minus_line_arr))
     diag_frac_ev_gt_line = float((ev_minus_line_arr > 0).mean())
 
-    ev_gt_mask = ev_minus_line_arr > 0
-    ev_lt_mask = ev_minus_line_arr <= 0
-    conf_mask = np.max(y_proba_no_filt, axis=1) > _MODE_CONFIDENCE_THRESHOLD
-    diag_over_pct_ev_gt = (
-        float(y_class[ev_gt_mask & conf_mask].mean())
-        if (ev_gt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
-        else float("nan")
+    diag_over_pct_ev_gt, diag_over_pct_ev_lt = _diag_over_pcts(
+        y_class, ev_minus_line_arr, y_proba_no_filt
     )
-    diag_over_pct_ev_lt = (
-        float(y_class[ev_lt_mask & conf_mask].mean())
-        if (ev_lt_mask & conf_mask).sum() > _MIN_DIAGNOSTIC_ROWS
-        else float("nan")
+    diag_cf_over_pct = _diag_cf_over_pct(
+        dist, diag_empirical_shape, weighted_mean, B_test, gate_blend_test, step
     )
-
-    if dist == "SkewNormal":
-        diag_cf_over_pct = float("nan")
-    elif not np.isnan(diag_empirical_shape) and diag_empirical_shape > 0:
-        emp_shape = np.full_like(weighted_mean, diag_empirical_shape)
-        if dist in ("NegBin", "ZINB"):
-            cf_under = get_odds(
-                B_test["Line"].to_numpy(),
-                weighted_mean,
-                dist,
-                r=emp_shape,
-                gate=gate_blend_test,
-            )
-        else:
-            cf_under = get_odds(
-                B_test["Line"].to_numpy(),
-                weighted_mean,
-                dist,
-                alpha=emp_shape,
-                step=step,
-                gate=gate_blend_test,
-            )
-        cf_over = 1 - cf_under
-        cf_pred = (cf_over > 0.5).astype(int)
-        cf_mask = np.maximum(cf_under, cf_over) > _MODE_CONFIDENCE_THRESHOLD
-        diag_cf_over_pct = (
-            float(cf_pred[cf_mask].mean() / cf_mask.mean())
-            if cf_mask.sum() > _MIN_DIAGNOSTIC_ROWS
-            else float("nan")
-        )
-    else:
-        diag_cf_over_pct = float("nan")
 
     return {
         "shape_label": diag_shape_label,
@@ -1715,114 +1740,72 @@ def _step_decode_predictions(
     return out
 
 
-def _step_fuse_predictions(
-    decoded: dict,
-    splits: dict,
-    dist: str,
-    cv: float,
-    hist_gate: float,
-    blending: str = calibration.DEFAULT_BLENDING,
-) -> dict:
-    """Fit model_weight, then fuse model+book predictions on test and validation.
-
-    Args:
-        decoded: Output of ``_step_decode_predictions``.
-        splits: Output of ``_step_build_splits`` (post-prediction sorted).
-        dist: Distribution name.
-        cv: Coefficient of variation from ``_step_select_distribution``.
-        hist_gate: Historical zero rate.
-
-    Returns:
-        Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,
-        ``gate_blend_val``, ``r_test``, ``r_blend_val``, ``p_test``, ``p_val``,
-        ``alpha_blend``, ``alpha_blend_val``, ``beta_blend``, ``beta_blend_val``,
-        ``sn_sigma_blend_test``, ``sn_sigma_blend_val``, ``sn_alpha_blend_test``,
-        ``sn_alpha_blend_val``. Unused fields are None.
-    """
+def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
+    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
 
-    base_dist = (
-        "SkewNormal"
-        if dist == "SkewNormal"
-        else ("NegBin" if dist in ("NegBin", "ZINB") else "Gamma")
+    _zi_kwargs = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
+    model_weight = calibration.fit_blend_weight(
+        blending,
+        ev_validation,
+        book_ev_val,
+        y_val_result,
+        "SkewNormal",
+        cv=cv,
+        model_sigma=decoded["sn_sigma_val"],
+        model_skew_alpha=decoded["sn_alpha_val"],
+        **_zi_kwargs,
     )
+    weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
+        model_weight,
+        ev,
+        book_ev_test,
+        cv,
+        "SkewNormal",
+        sigma=decoded["sn_sigma_test"],
+        skew_alpha=decoded["sn_alpha_test"],
+        **_zi_kwargs,
+    )
+    _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
+        model_weight,
+        ev_validation,
+        book_ev_val,
+        cv,
+        "SkewNormal",
+        sigma=decoded["sn_sigma_val"],
+        skew_alpha=decoded["sn_alpha_val"],
+        **_zi_kwargs,
+    )
+    out.update(
+        {
+            "model_weight": model_weight,
+            "weighted_mean": weighted_mean,
+            "gate_blend_test": gate_blend_test,
+            "gate_blend_val": gate_blend_val,
+            "sn_sigma_blend_test": sn_sigma_blend_test,
+            "sn_sigma_blend_val": sn_sigma_blend_val,
+            "sn_alpha_blend_test": sn_alpha_blend_test,
+            "sn_alpha_blend_val": sn_alpha_blend_val,
+        }
+    )
+    return out
 
-    out = {
-        "model_weight": None,
-        "weighted_mean": None,
-        "gate_blend_test": None,
-        "gate_blend_val": None,
-        "r_test": None,
-        "r_blend_val": None,
-        "p_test": None,
-        "p_val": None,
-        "alpha_blend": None,
-        "alpha_blend_val": None,
-        "beta_blend": None,
-        "beta_blend_val": None,
-        "sn_sigma_blend_test": None,
-        "sn_sigma_blend_val": None,
-        "sn_alpha_blend_test": None,
-        "sn_alpha_blend_val": None,
-    }
 
-    if dist == "SkewNormal":
-        _zi_kwargs = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
-        model_weight = calibration.fit_blend_weight(
-            blending,
-            ev_validation,
-            book_ev_val,
-            y_val_result,
-            "SkewNormal",
-            cv=cv,
-            model_sigma=decoded["sn_sigma_val"],
-            model_skew_alpha=decoded["sn_alpha_val"],
-            **_zi_kwargs,
-        )
-        weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
-            model_weight,
-            ev,
-            book_ev_test,
-            cv,
-            "SkewNormal",
-            sigma=decoded["sn_sigma_test"],
-            skew_alpha=decoded["sn_alpha_test"],
-            **_zi_kwargs,
-        )
-        _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
-            model_weight,
-            ev_validation,
-            book_ev_val,
-            cv,
-            "SkewNormal",
-            sigma=decoded["sn_sigma_val"],
-            skew_alpha=decoded["sn_alpha_val"],
-            **_zi_kwargs,
-        )
-        out.update(
-            {
-                "model_weight": model_weight,
-                "weighted_mean": weighted_mean,
-                "gate_blend_test": gate_blend_test,
-                "gate_blend_val": gate_blend_val,
-                "sn_sigma_blend_test": sn_sigma_blend_test,
-                "sn_sigma_blend_val": sn_sigma_blend_val,
-                "sn_alpha_blend_test": sn_alpha_blend_test,
-                "sn_alpha_blend_val": sn_alpha_blend_val,
-            }
-        )
-        return out
+def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blending):
+    """Fit model_weight for the NegBin / Gamma families (shared preamble)."""
+    book_ev_val = splits["B_validation"]["EV"].to_numpy()
+    y_val_result = splits["y_validation"]["Result"].to_numpy()
 
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
     model_weight = calibration.fit_blend_weight(
         blending,
-        ev_validation,
+        decoded["ev_validation"],
         book_ev_val,
         y_val_result,
         base_dist,
@@ -1832,48 +1815,63 @@ def _step_fuse_predictions(
         **_zi_kwargs,
     )
     out["model_weight"] = model_weight
+    return model_weight
 
-    if dist in ("NegBin", "ZINB"):
-        _zi_test = (
-            {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
-        )
-        _zi_val = (
-            {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-            if dist == "ZINB"
-            else {}
-        )
-        r_blend_test, p_test, gate_blend_test = fused_loc(
-            model_weight,
-            ev,
-            book_ev_test,
-            cv,
-            "NegBin",
-            r=decoded["r"],
-            **_zi_test,
-        )
-        r_blend_val, p_val, gate_blend_val = fused_loc(
-            model_weight,
-            ev_validation,
-            book_ev_val,
-            cv,
-            "NegBin",
-            r=decoded["r_validation"],
-            **_zi_val,
-        )
-        out.update(
-            {
-                "weighted_mean": r_blend_test * (1 - p_test) / p_test,
-                "r_test": r_blend_test,
-                "r_blend_val": r_blend_val,
-                "p_test": p_test,
-                "p_val": p_val,
-                "gate_blend_test": gate_blend_test,
-                "gate_blend_val": gate_blend_val,
-            }
-        )
-        return out
 
-    # Gamma / ZAGamma
+def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
+    """NegBin / ZINB branch: blend r + derive p on test + validation."""
+    ev = decoded["ev"]
+    ev_validation = decoded["ev_validation"]
+    book_ev_test = splits["B_test"]["EV"].to_numpy()
+    book_ev_val = splits["B_validation"]["EV"].to_numpy()
+
+    _zi_test = (
+        {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
+    )
+    _zi_val = (
+        {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
+        if dist == "ZINB"
+        else {}
+    )
+    r_blend_test, p_test, gate_blend_test = fused_loc(
+        model_weight,
+        ev,
+        book_ev_test,
+        cv,
+        "NegBin",
+        r=decoded["r"],
+        **_zi_test,
+    )
+    r_blend_val, p_val, gate_blend_val = fused_loc(
+        model_weight,
+        ev_validation,
+        book_ev_val,
+        cv,
+        "NegBin",
+        r=decoded["r_validation"],
+        **_zi_val,
+    )
+    out.update(
+        {
+            "weighted_mean": r_blend_test * (1 - p_test) / p_test,
+            "r_test": r_blend_test,
+            "r_blend_val": r_blend_val,
+            "p_test": p_test,
+            "p_val": p_val,
+            "gate_blend_test": gate_blend_test,
+            "gate_blend_val": gate_blend_val,
+        }
+    )
+    return out
+
+
+def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
+    """Gamma / ZAGamma branch: blend alpha + beta on test + validation."""
+    ev = decoded["ev"]
+    ev_validation = decoded["ev_validation"]
+    book_ev_test = splits["B_test"]["EV"].to_numpy()
+    book_ev_val = splits["B_validation"]["EV"].to_numpy()
+
     _zi_test = (
         {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZAGamma" else {}
     )
@@ -1912,6 +1910,64 @@ def _step_fuse_predictions(
         }
     )
     return out
+
+
+def _step_fuse_predictions(
+    decoded: dict,
+    splits: dict,
+    dist: str,
+    cv: float,
+    hist_gate: float,
+    blending: str = calibration.DEFAULT_BLENDING,
+) -> dict:
+    """Fit model_weight, then fuse model+book predictions on test and validation.
+
+    Args:
+        decoded: Output of ``_step_decode_predictions``.
+        splits: Output of ``_step_build_splits`` (post-prediction sorted).
+        dist: Distribution name.
+        cv: Coefficient of variation from ``_step_select_distribution``.
+        hist_gate: Historical zero rate.
+
+    Returns:
+        Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,
+        ``gate_blend_val``, ``r_test``, ``r_blend_val``, ``p_test``, ``p_val``,
+        ``alpha_blend``, ``alpha_blend_val``, ``beta_blend``, ``beta_blend_val``,
+        ``sn_sigma_blend_test``, ``sn_sigma_blend_val``, ``sn_alpha_blend_test``,
+        ``sn_alpha_blend_val``. Unused fields are None.
+    """
+    base_dist = (
+        "SkewNormal"
+        if dist == "SkewNormal"
+        else ("NegBin" if dist in ("NegBin", "ZINB") else "Gamma")
+    )
+
+    out = {
+        "model_weight": None,
+        "weighted_mean": None,
+        "gate_blend_test": None,
+        "gate_blend_val": None,
+        "r_test": None,
+        "r_blend_val": None,
+        "p_test": None,
+        "p_val": None,
+        "alpha_blend": None,
+        "alpha_blend_val": None,
+        "beta_blend": None,
+        "beta_blend_val": None,
+        "sn_sigma_blend_test": None,
+        "sn_sigma_blend_val": None,
+        "sn_alpha_blend_test": None,
+        "sn_alpha_blend_val": None,
+    }
+
+    if dist == "SkewNormal":
+        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending)
+
+    model_weight = _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blending)
+    if dist in ("NegBin", "ZINB"):
+        return _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist)
+    return _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist)
 
 
 def _step_select_distribution(
