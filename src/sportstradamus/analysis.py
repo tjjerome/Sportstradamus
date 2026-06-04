@@ -780,6 +780,22 @@ def compute_parlay_metrics(parlays, stats, stat_map):
 # ---------------------------------------------------------------------------
 
 
+def _dist_params(row):
+    """Extract (Dist, CV, Model EV, Model Param, Gate) from a saved-prediction row.
+
+    Gate is normalized to None when absent (NaN), matching how the reconstruct
+    and CRPS math treat "no zero-inflation gate".
+    """
+    gate = row.get("Gate")
+    return (
+        row["Dist"],
+        row["CV"],
+        row["Model EV"],
+        row.get("Model Param"),
+        None if pd.isna(gate) else gate,
+    )
+
+
 def reconstruct_prob(row, line=None):
     """Reconstruct P(outcome <= line) from saved distribution parameters.
 
@@ -788,23 +804,13 @@ def reconstruct_prob(row, line=None):
     """
     if pd.isna(row.get("Dist")):
         return np.nan
-
     if line is None:
         line = row["Line"]
 
-    dist = row["Dist"]
-    cv = row["CV"]
-    ev = row["Model EV"]
-    step = row.get("Step", 1)
-    gate = row.get("Gate")
-    if pd.isna(gate):
-        gate = None
-    param = row.get("Model Param")
-
+    dist, cv, ev, param, gate = _dist_params(row)
     r = param if dist in ("NegBin", "ZINB") else None
     alpha = param if dist in ("Gamma", "ZAGamma") else None
-
-    return get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, step=step)
+    return get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, step=row.get("Step", 1))
 
 
 def reconstruct_quantile(row, q):
@@ -815,32 +821,30 @@ def reconstruct_quantile(row, q):
     """
     if pd.isna(row.get("Dist")):
         return np.nan
-
-    dist = row["Dist"]
-    cv = row["CV"]
-    ev = row["Model EV"]
-    param = row.get("Model Param")
-    gate = row.get("Gate")
-    if pd.isna(gate):
-        gate = None
-
+    dist, cv, ev, param, gate = _dist_params(row)
     if dist in ("NegBin", "ZINB"):
-        r = param if param is not None and not np.isnan(param) else 1 / cv
-        p = r / (r + ev)
-        if gate is not None and dist == "ZINB":
-            # For ZI distributions: if q <= gate, quantile is 0
-            if q <= gate:
-                return 0.0
-            # Adjust quantile for the base distribution
-            q_adj = (q - gate) / (1 - gate)
-            return nbinom.ppf(q_adj, r, p)
-        return nbinom.ppf(q, r, p)
+        return _negbin_quantile(q, ev, param, cv, gate, dist)
+    return _gamma_quantile(q, ev, param, cv, gate, dist)
+
+
+def _negbin_quantile(q, ev, param, cv, gate, dist):
+    """q-th quantile of the (zero-inflated) negative-binomial count model."""
+    r = param if param is not None and not np.isnan(param) else 1 / cv
+    p = r / (r + ev)
+    if gate is not None and dist == "ZINB":
+        if q <= gate:
+            return 0.0
+        q = (q - gate) / (1 - gate)
+    return nbinom.ppf(q, r, p)
+
+
+def _gamma_quantile(q, ev, param, cv, gate, dist):
+    """q-th quantile of the (zero-augmented) gamma continuous model."""
     alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
     if gate is not None and dist == "ZAGamma":
         if q <= gate:
             return 0.0
-        q_adj = (q - gate) / (1 - gate)
-        return gamma_dist.ppf(q_adj, alpha, scale=ev / alpha)
+        q = (q - gate) / (1 - gate)
     return gamma_dist.ppf(q, alpha, scale=ev / alpha)
 
 
