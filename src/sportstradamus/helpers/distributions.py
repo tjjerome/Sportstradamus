@@ -130,6 +130,42 @@ def _skewnormal_ev(line, under, cv, skew_alpha):
     return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
 
 
+def _solve_ev(residual_fn, lo, hi):
+    # Expand the upper bracket until the residual crosses zero, then bisect.
+    # CDF is monotone decreasing in mean, so residual(hi) starts positive and
+    # eventually goes negative; the loop always terminates for valid inputs.
+    while residual_fn(hi) > 0:
+        hi *= 2
+    return float(brentq(residual_fn, lo, hi, xtol=1e-8))
+
+
+def _negbin_poisson_ev(line, under, cv, lo, hi):
+    line = np.ceil(float(line) - 1)
+    if cv == 1:
+
+        def _pois_residual(mean):
+            return float(poisson.cdf(line, mean)) - under
+
+        return _solve_ev(_pois_residual, lo, hi)
+    r = 1.0 / cv
+
+    def _nb_residual(mean):
+        p = r / (r + mean)
+        return float(nbinom.cdf(line, r, p)) - under
+
+    return _solve_ev(_nb_residual, lo, hi)
+
+
+def _gamma_ev(line, under, cv, lo, hi):
+    line = float(line)
+    alpha = 1.0 / (cv**2)
+
+    def _gamma_residual(mean):
+        return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
+
+    return _solve_ev(_gamma_residual, lo, hi)
+
+
 def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     """Invert the book's (line, under-prob) to recover the implied mean.
 
@@ -172,38 +208,51 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     hi = max(2 * line / max(1 - under, 0.01), 1.0)
 
     if dist in ("NegBin", "ZINB", "Poisson"):
-        line = np.ceil(float(line) - 1)
-        if cv == 1:
-
-            def _pois_residual(mean):
-                return float(poisson.cdf(line, mean)) - under
-
-            while _pois_residual(hi) > 0:
-                hi *= 2
-            return float(brentq(_pois_residual, lo, hi, xtol=1e-8))
-        r = 1.0 / cv
-
-        def _nb_residual(mean):
-            p = r / (r + mean)
-            return float(nbinom.cdf(line, r, p)) - under
-
-        while _nb_residual(hi) > 0:
-            hi *= 2
-        return float(brentq(_nb_residual, lo, hi, xtol=1e-8))
-
+        return _negbin_poisson_ev(line, under, cv, lo, hi)
     if dist == "SkewNormal":
         return _skewnormal_ev(line, under, cv, skew_alpha)
+    return _gamma_ev(line, under, cv, lo, hi)
 
-    # Gamma / ZAGamma (default for all continuous distributions)
-    line = float(line)
-    alpha = 1.0 / (cv**2)
 
-    def _gamma_residual(mean):
-        return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
+def _negbin_odds(line, ev, cv, r, gate, dist):
+    if r is None:
+        r = 1 / cv
+    p = r / (r + ev)
+    base_cdf = nbinom.cdf(line, r, p)
+    base_pmf = nbinom.pmf(line, r, p)
+    if gate is not None and dist == "ZINB":
+        # ZI-CDF: gate + (1 - gate) * base_CDF
+        base_cdf = gate + (1 - gate) * base_cdf
+        base_pmf = (1 - gate) * base_pmf
+    return base_cdf - base_pmf / 2
 
-    while _gamma_residual(hi) > 0:
-        hi *= 2
-    return float(brentq(_gamma_residual, lo, hi, xtol=1e-8))
+
+def _skewnormal_odds(high, low, ev, cv, sigma, skew_alpha, gate):
+    sigma_val = sigma if sigma is not None else ev * cv
+    a = skew_alpha if skew_alpha is not None else 0.0
+    delta = a / np.sqrt(1 + a**2)
+    loc_sn = ev - sigma_val * delta * np.sqrt(2 / np.pi)
+    cdf_high = skewnorm.cdf(high, a, loc=loc_sn, scale=sigma_val)
+    cdf_low = skewnorm.cdf(low, a, loc=loc_sn, scale=sigma_val)
+    if gate is not None:
+        cdf_high = gate + (1 - gate) * cdf_high
+        cdf_low = gate + (1 - gate) * cdf_low
+    push = cdf_high - cdf_low
+    return cdf_high - push / 2
+
+
+def _gamma_odds(high, low, ev, cv, alpha, gate, dist):
+    if alpha is None:
+        alpha = 1 / cv**2
+
+    cdf_high = gamma.cdf(high, alpha, scale=ev / alpha)
+    cdf_low = gamma.cdf(low, alpha, scale=ev / alpha)
+    if gate is not None and dist == "ZAGamma":
+        # ZA-CDF: gate + (1 - gate) * base_CDF
+        cdf_high = gate + (1 - gate) * cdf_high
+        cdf_low = gate + (1 - gate) * cdf_low
+    push = cdf_high - cdf_low
+    return cdf_high - push / 2
 
 
 def get_odds(
@@ -236,46 +285,14 @@ def get_odds(
     # NegBin without model params falls back to Poisson only when cv==1 (old encoding);
     # when cv!=1 the archive EV was Gaussian-encoded by get_ev, so fall through to the
     # Gaussian/Gamma branch for a consistent round-trip.
+
     if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
         return poisson.cdf(line, ev) - poisson.pmf(line, ev) / 2
-
     if dist in ("NegBin", "ZINB"):
-        if r is None:
-            r = 1 / cv
-        p = r / (r + ev)
-        base_cdf = nbinom.cdf(line, r, p)
-        base_pmf = nbinom.pmf(line, r, p)
-        if gate is not None and dist == "ZINB":
-            # ZI-CDF: gate + (1 - gate) * base_CDF
-            base_cdf = gate + (1 - gate) * base_cdf
-            base_pmf = (1 - gate) * base_pmf
-        return base_cdf - base_pmf / 2
-
+        return _negbin_odds(line, ev, cv, r, gate, dist)
     if dist == "SkewNormal":
-        sigma_val = sigma if sigma is not None else ev * cv
-        a = skew_alpha if skew_alpha is not None else 0.0
-        delta = a / np.sqrt(1 + a**2)
-        loc_sn = ev - sigma_val * delta * np.sqrt(2 / np.pi)
-        cdf_high = skewnorm.cdf(high, a, loc=loc_sn, scale=sigma_val)
-        cdf_low = skewnorm.cdf(low, a, loc=loc_sn, scale=sigma_val)
-        if gate is not None:
-            cdf_high = gate + (1 - gate) * cdf_high
-            cdf_low = gate + (1 - gate) * cdf_low
-        push = cdf_high - cdf_low
-        return cdf_high - push / 2
-
-    if alpha is None:
-        alpha = 1 / cv**2
-
-    # Gamma / ZAGamma CDF
-    cdf_high = gamma.cdf(high, alpha, scale=ev / alpha)
-    cdf_low = gamma.cdf(low, alpha, scale=ev / alpha)
-    if gate is not None and dist == "ZAGamma":
-        # ZA-CDF: gate + (1 - gate) * base_CDF
-        cdf_high = gate + (1 - gate) * cdf_high
-        cdf_low = gate + (1 - gate) * cdf_low
-    push = cdf_high - cdf_low
-    return cdf_high - push / 2
+        return _skewnormal_odds(high, low, ev, cv, sigma, skew_alpha, gate)
+    return _gamma_odds(high, low, ev, cv, alpha, gate, dist)
 
 
 def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=None, skew_alpha=None):
@@ -544,6 +561,63 @@ def fused_loc(
     return blended_alpha, blended_beta, gate_blend
 
 
+def _softplus_inv(x):
+    x = np.asarray(x, dtype=float)
+    return np.where(
+        x > SOFTPLUS_LINEAR_THRESHOLD,
+        x,
+        np.log(np.expm1(np.clip(x, 1e-4, SOFTPLUS_LINEAR_THRESHOLD))),
+    )
+
+
+def _skewnormal_start_values(mu, std, n, offset_mode, normalized):
+    if offset_mode:
+        # Additive centered residual target (y - baseline): residual mean
+        # ≈ 0 per row; scale starts at per-player STDYr. Explicit per-row
+        # broadcast — must be (n,) not scalar (a degenerate scalar 0 was
+        # a confirmed seeding regression in the overconfidence
+        # investigation; the (n, 3) shape guard in the unit test pins
+        # this).
+        loc = np.zeros(n)
+        scale = std.copy()
+    elif normalized:
+        cv_player = np.clip(std / mu, 0.01, 10)
+        loc = np.ones(n)
+        scale = cv_player  # scale ≈ CV since mean ≈ 1.0.
+    else:
+        loc = mu.copy()
+        scale = std.copy()
+    alpha_skew = np.zeros(n)  # Start symmetric.
+    # loc: identity → raw = value.
+    # scale: exp → raw = log(value).
+    # alpha: identity → raw = value.
+    return np.column_stack([loc, np.log(np.clip(scale, 1e-6, None)), alpha_skew])
+
+
+def _negbin_start_values(mu, std, hist_gate, dist, _r_upper):
+    # r = mu² / (var - mu); ReLU response → raw = value (identity for r>0).
+    r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
+    # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs).
+    probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
+    if dist == "ZINB":
+        nb_zeros = nbinom.pmf(0, r_init, probs)
+        hist_gate = np.clip(hist_gate - nb_zeros, 0, 0.99)
+        mu = mu / (1 - hist_gate)
+        r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
+        probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
+    sv = np.column_stack([r_init, logit(probs)])
+    return sv, hist_gate
+
+
+def _gamma_start_values(mu, std, hist_gate, dist, _a_upper):
+    if dist == "ZAGamma":
+        mu = mu / (1 - hist_gate)
+    alpha = np.clip((mu / std) ** 2, 0.1, _a_upper)
+    beta = np.clip(alpha / np.clip(mu, 1e-6, None), 0.01, 50)
+    # softplus response → raw = softplus_inv(value).
+    return np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
+
+
 def set_model_start_values(
     model, dist, X_data, shape_ceiling=None, normalized=False, offset_mode=False
 ):
@@ -574,16 +648,6 @@ def set_model_start_values(
             dispersion ≈ per-player std). Mutually exclusive with
             ``normalized``; ignored for non-SkewNormal distributions.
     """
-    from scipy.special import logit
-
-    def _softplus_inv(x):
-        x = np.asarray(x, dtype=float)
-        return np.where(
-            x > SOFTPLUS_LINEAR_THRESHOLD,
-            x,
-            np.log(np.expm1(np.clip(x, 1e-4, SOFTPLUS_LINEAR_THRESHOLD))),
-        )
-
     sv = X_data[["MeanYr", "STDYr", "ZeroYr"]].to_numpy()
     n = len(sv)
 
@@ -595,49 +659,11 @@ def set_model_start_values(
     _a_upper = shape_ceiling if shape_ceiling is not None else 100
 
     if dist == "SkewNormal":
-        if offset_mode:
-            # Additive centered residual target (y - baseline): residual mean
-            # ≈ 0 per row; scale starts at per-player STDYr. Explicit per-row
-            # broadcast — must be (n,) not scalar (a degenerate scalar 0 was
-            # a confirmed seeding regression in the overconfidence
-            # investigation; the (n, 3) shape guard in the unit test pins
-            # this).
-            loc = np.zeros(n)
-            scale = std.copy()
-        elif normalized:
-            # Targets ≈ 1.0 for all players. Use global start values.
-            cv_player = np.clip(std / mu, 0.01, 10)
-            loc = np.ones(n)
-            scale = cv_player  # scale ≈ CV since mean ≈ 1.0.
-        else:
-            loc = mu.copy()
-            scale = std.copy()
-        alpha_skew = np.zeros(n)  # Start symmetric.
-        # loc: identity → raw = value.
-        # scale: exp → raw = log(value).
-        # alpha: identity → raw = value.
-        sv = np.column_stack([loc, np.log(np.clip(scale, 1e-6, None)), alpha_skew])
-
+        sv = _skewnormal_start_values(mu, std, n, offset_mode, normalized)
     elif dist in ["NegBin", "ZINB"]:
-        # r = mu² / (var - mu); ReLU response → raw = value (identity for r>0).
-        r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
-        # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs).
-        probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
-        if dist == "ZINB":
-            nb_zeros = nbinom.pmf(0, r_init, probs)
-            hist_gate = np.clip(hist_gate - nb_zeros, 0, 0.99)
-            mu = mu / (1 - hist_gate)
-            r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
-            probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
-        sv = np.column_stack([r_init, logit(probs)])
-
+        sv, hist_gate = _negbin_start_values(mu, std, hist_gate, dist, _r_upper)
     elif dist in ["Gamma", "ZAGamma"]:
-        if dist == "ZAGamma":
-            mu = mu / (1 - hist_gate)
-        alpha = np.clip((mu / std) ** 2, 0.1, _a_upper)
-        beta = np.clip(alpha / np.clip(mu, 1e-6, None), 0.01, 50)
-        # softplus response → raw = softplus_inv(value).
-        sv = np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
+        sv = _gamma_start_values(mu, std, hist_gate, dist, _a_upper)
 
     if dist in ["ZINB", "ZAGamma"]:
         gate_val = np.clip(hist_gate, 0.01, 0.99)
