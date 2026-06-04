@@ -8,6 +8,7 @@ heuristic — all token-free, derived at render time from data already on disk.
 
 import hashlib
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 
 import altair as alt
 import numpy as np
@@ -265,6 +266,20 @@ def _phrase(player: str, family: float, direction: str, category: str) -> str:
     return bank[idx].format(p=player)
 
 
+@dataclass
+class _GameLegStats:
+    """Per-game leg accumulation feeding the star-carousel family labels.
+
+    All four are built together by :func:`_collect_family_legs` and consumed
+    together by the stardom ranking and label-naming helpers.
+    """
+
+    fam_legs: dict[float, dict[str, list]]
+    player_markets: dict[str, set]
+    player_total: Counter
+    market_lines: dict[str, list]
+
+
 def family_labels_for_game(game_group: pd.DataFrame) -> dict[float, str]:
     """Map each family in one game's parlays to a fun, distinct headline.
 
@@ -281,7 +296,22 @@ def family_labels_for_game(game_group: pd.DataFrame) -> dict[float, str]:
     if not families:
         return {}
 
-    # Per (family, player): list of (bet, market, line) legs.
+    stats = _collect_family_legs(game_group, leg_cols, families)
+    if not stats.player_total:
+        return dict.fromkeys(families, "Mixed bag")
+
+    ranked = sorted(
+        stats.player_total, key=lambda p: _player_stardom(stats, families, p), reverse=True
+    )
+    labels, taken = _assign_stars_to_families(stats, families, ranked)
+    _fill_remaining_families(stats, families, labels, taken)
+    return labels
+
+
+def _collect_family_legs(
+    game_group: pd.DataFrame, leg_cols: list[str], families: list[float]
+) -> _GameLegStats:
+    """Tally per-(family, player) legs and per-player/-market breadth for one game."""
     fam_legs: dict[float, dict[str, list]] = {f: defaultdict(list) for f in families}
     player_markets: dict[str, set] = defaultdict(set)
     player_total: Counter = Counter()
@@ -300,55 +330,69 @@ def family_labels_for_game(game_group: pd.DataFrame) -> dict[float, str]:
             player_total[p["Player"]] += 1
             market_lines[p["Market"]].append(p["Line"])
 
-    if not player_total:
-        return dict.fromkeys(families, "Mixed bag")
+    return _GameLegStats(fam_legs, player_markets, player_total, market_lines)
 
-    def line_pct(market: str, line: float) -> float:
-        vals = market_lines[market]
-        return sum(1 for v in vals if v <= line) / len(vals) if vals else 0.0
 
-    # Stardom: distinct-market breadth, then biggest line vs its market,
-    # then raw volume — all free proxies for "this is a featured player".
-    def stardom(player: str) -> tuple:
-        best_pct = max(
-            (line_pct(mk, ln) for fam in families for _, mk, ln in fam_legs[fam].get(player, [])),
-            default=0.0,
-        )
-        return (len(player_markets[player]), best_pct, player_total[player], player)
+def _line_pct(stats: _GameLegStats, market: str, line: float) -> float:
+    """Fraction of this market's seen lines at or below ``line`` (0 if unseen)."""
+    vals = stats.market_lines[market]
+    return sum(1 for v in vals if v <= line) / len(vals) if vals else 0.0
 
-    ranked = sorted(player_total, key=stardom, reverse=True)
 
+def _player_stardom(stats: _GameLegStats, families: list[float], player: str) -> tuple:
+    """Stardom sort key: market breadth, biggest line-vs-market, volume, name.
+
+    All three numeric components are free proxies for "this is a featured player".
+    """
+    best_pct = max(
+        (_line_pct(stats, mk, ln)
+         for fam in families for _, mk, ln in stats.fam_legs[fam].get(player, [])),
+        default=0.0,
+    )
+    return (len(stats.player_markets[player]), best_pct, stats.player_total[player], player)
+
+
+def _family_label_name(stats: _GameLegStats, fam: float, player: str) -> str:
+    """Phrase-bank headline for ``player`` as the face of family ``fam``."""
+    legs = stats.fam_legs[fam][player]
+    over = sum(1 for b, _, _ in legs if b == "Over")
+    direction = "Over" if over * 2 >= len(legs) else "Under"
+    category = Counter(_stat_category(m) for _, m, _ in legs).most_common(1)[0][0]
+    return _phrase(player, fam, direction, category)
+
+
+def _assign_stars_to_families(
+    stats: _GameLegStats, families: list[float], ranked: list[str]
+) -> tuple[dict[float, str], set[str]]:
+    """#1 star -> family they most drive, #2 -> next family, ... Returns (labels, taken)."""
     labels: dict[float, str] = {}
     taken: set[str] = set()
-
-    def name(fam: float, player: str) -> str:
-        legs = fam_legs[fam][player]
-        over = sum(1 for b, _, _ in legs if b == "Over")
-        direction = "Over" if over * 2 >= len(legs) else "Under"
-        category = Counter(_stat_category(m) for _, m, _ in legs).most_common(1)[0][0]
-        return _phrase(player, fam, direction, category)
-
-    # #1 star → family they most drive, #2 → next family, ...
     for player in ranked:
         if len(labels) == len(families):
             break
-        cands = [f for f in families if f not in labels and player in fam_legs[f]]
+        cands = [f for f in families if f not in labels and player in stats.fam_legs[f]]
         if not cands:
             continue
-        fam = max(cands, key=lambda f: (len(fam_legs[f][player]), -f))
-        labels[fam] = name(fam, player)
+        fam = max(cands, key=lambda f: (len(stats.fam_legs[f][player]), -f))
+        labels[fam] = _family_label_name(stats, fam, player)
         taken.add(player)
+    return labels, taken
 
-    # Stars exhausted: give the family its own best remaining (then any) player.
+
+def _fill_remaining_families(
+    stats: _GameLegStats, families: list[float], labels: dict[float, str], taken: set[str]
+) -> None:
+    """Give each unlabeled family its own best-remaining (then any) player; mutates in place."""
     for fam in families:
         if fam in labels:
             continue
-        pool = sorted(fam_legs[fam], key=stardom, reverse=True)
+        pool = sorted(
+            stats.fam_legs[fam], key=lambda p: _player_stardom(stats, families, p), reverse=True
+        )
         pick = next((p for p in pool if p not in taken), pool[0] if pool else None)
-        labels[fam] = name(fam, pick) if pick else "Mixed bag"
+        labels[fam] = _family_label_name(stats, fam, pick) if pick else "Mixed bag"
         if pick:
             taken.add(pick)
-    return labels
 
 
 def _has_cols(df: pd.DataFrame, *cols: str | None) -> bool:
