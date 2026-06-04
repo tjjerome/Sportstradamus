@@ -357,6 +357,47 @@ def explode_offers(history):
     return _add_kelly_columns(pd.DataFrame(rows))
 
 
+def _player_date_value(gamelog, ls, player, market, date):
+    """Realized ``market`` value for one player on ``date``, or None.
+
+    None when the player has no game that date or the value is NaN. A missing
+    ``market`` column raises KeyError, which the caller turns into a skip.
+    """
+    g = gamelog.loc[
+        (gamelog[ls["player"]] == player)
+        & (pd.to_datetime(gamelog[ls["date"]]).dt.date == date)
+    ]
+    if g.empty or g[market].isna().any():
+        return None
+    return g.iloc[0][market]
+
+
+def _resolved_actual(gamelog, ls, row):
+    """Actual value for one history row, or None if it cannot be resolved.
+
+    Combo (``" + "``) sums the two players' market values; matchup (``" vs. "``)
+    subtracts; a plain player uses its own. None on an unavailable player /
+    value or a missing market column (KeyError).
+    """
+    player = row["Player"]
+    market = row["Market"]
+    date = pd.to_datetime(row["Date"]).date()
+    try:
+        if " + " in player:
+            players = player.split(" + ")
+            v1 = _player_date_value(gamelog, ls, players[0], market, date)
+            v2 = _player_date_value(gamelog, ls, players[1], market, date)
+            return None if v1 is None or v2 is None else v1 + v2
+        if " vs. " in player:
+            players = player.split(" vs. ")
+            v1 = _player_date_value(gamelog, ls, players[0], market, date)
+            v2 = _player_date_value(gamelog, ls, players[1], market, date)
+            return None if v1 is None or v2 is None else v1 - v2
+        return _player_date_value(gamelog, ls, player, market, date)
+    except KeyError:
+        return None
+
+
 def resolve_history(history, stats):
     """Fill in Actual column for predictions in history.parquet.
 
@@ -374,61 +415,10 @@ def resolve_history(history, stats):
     for i, row in tqdm(pending.iterrows(), desc="Checking history", total=len(pending)):
         if row["League"] not in stats:
             continue
-
         stat_obj = stats[row["League"]]
-        ls = stat_obj.log_strings
-        gamelog = stat_obj.gamelog
-        bet_date = pd.to_datetime(row["Date"]).date()
-
-        try:
-            if " + " in row["Player"]:
-                players = row["Player"].split(" + ")
-                g1 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[0])
-                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
-                ]
-                g2 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[1])
-                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
-                ]
-                if (
-                    g1.empty
-                    or g2.empty
-                    or g1[row["Market"]].isna().any()
-                    or g2[row["Market"]].isna().any()
-                ):
-                    continue
-                history.at[i, "Actual"] = g1.iloc[0][row["Market"]] + g2.iloc[0][row["Market"]]
-
-            elif " vs. " in row["Player"]:
-                players = row["Player"].split(" vs. ")
-                g1 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[0])
-                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
-                ]
-                g2 = gamelog.loc[
-                    (gamelog[ls["player"]] == players[1])
-                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
-                ]
-                if (
-                    g1.empty
-                    or g2.empty
-                    or g1[row["Market"]].isna().any()
-                    or g2[row["Market"]].isna().any()
-                ):
-                    continue
-                history.at[i, "Actual"] = g1.iloc[0][row["Market"]] - g2.iloc[0][row["Market"]]
-
-            else:
-                g = gamelog.loc[
-                    (gamelog[ls["player"]] == row["Player"])
-                    & (pd.to_datetime(gamelog[ls["date"]]).dt.date == bet_date)
-                ]
-                if g.empty or g[row["Market"]].isna().any():
-                    continue
-                history.at[i, "Actual"] = g.iloc[0][row["Market"]]
-        except KeyError:
-            continue
+        actual = _resolved_actual(stat_obj.gamelog, stat_obj.log_strings, row)
+        if actual is not None:
+            history.at[i, "Actual"] = actual
 
     return history
 
