@@ -40,20 +40,12 @@ _ZAGAMMA_ZERO_INFLATION_THRESHOLD: float = 0.05
 _MIN_SAMPLES_FOR_BOOK_FIT: int = 9
 
 
-def fit_book_weights(league: str, market: str, stat_data, archive, book_weights: dict) -> dict:
-    """Fit optimal weights for multiple sportsbooks using historical accuracy."""
-    warnings.simplefilter("ignore", UserWarning)
-    from sportstradamus.training.config import load_distribution_config
+def _extract_result_and_test_df(market, df, stat_data):
+    """Attach realized results to ``df`` and split off the per-book test frame.
 
-    logger.info("Fitting Book Weights - %s, %s", league, market)
-    df = archive.to_pandas(league, market)
-    df = df[[col for col in df.columns if col != "pinnacle"]]
-    if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
-        return {}
-    cv = stat_cv[league].get(market, 1)
-    stat_dist = load_distribution_config()
-    dist = stat_dist.get(league, {}).get(market, "Poisson")
-
+    Returns ``(result, test_df)`` — the realized outcome (win→{0,1} for
+    Moneyline, else float) and ``df`` with its ``Result`` column dropped.
+    """
     if market == "Moneyline":
         log = stat_data.teamlog[
             [
@@ -115,6 +107,16 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
         result = df["Result"].astype(float)
         test_df = df.drop(columns="Result")
 
+    return result, test_df
+
+
+def _make_book_objective(market, dist, cv):
+    """Build the per-observation negative-log-likelihood objective for the fit.
+
+    Moneyline uses log-loss over de-vigged win probabilities; count families
+    (NegBin/ZINB/Poisson) use the Poisson logpmf of a weighted geometric-mean
+    projection; everything else uses a precision-weighted Normal logpdf.
+    """
     if market == "Moneyline":
         from sklearn.metrics import log_loss
 
@@ -124,7 +126,9 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
             )
             return log_loss(y[~np.ma.getmask(prob)], np.ma.getdata(prob)[~np.ma.getmask(prob)])
 
-    elif dist in ["NegBin", "ZINB", "Poisson"]:
+        return objective
+
+    if dist in ["NegBin", "ZINB", "Poisson"]:
 
         def objective(w, x, y):
             proj = np.array(
@@ -134,19 +138,39 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
             )
             return -np.mean(poisson.logpmf(y.astype(int), proj))
 
-    else:
+        return objective
 
-        def objective(w, x, y):
-            s = np.ma.MaskedArray(x * cv, mask=np.isnan(x))
-            std = np.sqrt(1 / np.ma.average(np.power(s, -2), weights=w, axis=1))
-            proj = np.array(
-                np.ma.average(
-                    np.ma.MaskedArray(x * np.power(s, -2), mask=np.isnan(x)), weights=w, axis=1
-                )
-                * std
-                * std
+    def objective(w, x, y):
+        s = np.ma.MaskedArray(x * cv, mask=np.isnan(x))
+        std = np.sqrt(1 / np.ma.average(np.power(s, -2), weights=w, axis=1))
+        proj = np.array(
+            np.ma.average(
+                np.ma.MaskedArray(x * np.power(s, -2), mask=np.isnan(x)), weights=w, axis=1
             )
-            return -np.mean(norm.logpdf(y, proj, std))
+            * std
+            * std
+        )
+        return -np.mean(norm.logpdf(y, proj, std))
+
+    return objective
+
+
+def fit_book_weights(league: str, market: str, stat_data, archive, book_weights: dict) -> dict:
+    """Fit optimal weights for multiple sportsbooks using historical accuracy."""
+    warnings.simplefilter("ignore", UserWarning)
+    from sportstradamus.training.config import load_distribution_config
+
+    logger.info("Fitting Book Weights - %s, %s", league, market)
+    df = archive.to_pandas(league, market)
+    df = df[[col for col in df.columns if col != "pinnacle"]]
+    if len([col for col in df.columns if col not in ["Line", "Result", "Over"]]) == 0:
+        return {}
+    cv = stat_cv[league].get(market, 1)
+    stat_dist = load_distribution_config()
+    dist = stat_dist.get(league, {}).get(market, "Poisson")
+
+    result, test_df = _extract_result_and_test_df(market, df, stat_data)
+    objective = _make_book_objective(market, dist, cv)
 
     if "Line" in test_df.columns:
         test_df.drop(columns=["Line"], inplace=True)
