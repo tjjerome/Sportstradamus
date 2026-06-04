@@ -57,6 +57,9 @@ TIMEFRAMES = [
 _MODEL_PROB_PICK_FLOOR = 0.58
 _BOOK_PROB_PICK_FLOOR = 0.52
 
+# Model-probability cut points for the ROI threshold sweep (compute_individual_metrics).
+_ROI_THRESHOLDS = (0.55, 0.58, 0.60, 0.65, 0.70)
+
 
 def _leg_market_map(league, platform, stat_map):
     """Per-platform market-name map plus the league-specific leg-name overrides."""
@@ -440,59 +443,44 @@ def _compute_stats_row(subset, prob_col):
     }
 
 
-def compute_individual_metrics(history):
-    """Compute accuracy, calibration, and ROI metrics from resolved history.
+def _append_stats_row(rows, subset, prob_col, period, split):
+    """Append a hist-stats row for ``subset`` if it is non-empty."""
+    r = _compute_stats_row(subset, prob_col)
+    if r:
+        rows.append({"Period": period, "Split": split} | r)
 
-    Returns (hist_stats, daily, calibration, roi) DataFrames.
-    """
-    history = history.loc[history["Result"] != "Push"].copy()
-    if len(history) == 0:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    prob_col = (
-        "Model P" if "Model P" in history.columns and history["Model P"].notna().any() else "Model"
-    )
-    today = datetime.today().date()
-    history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
-    history = history.loc[history["_date"].notna()].copy()
-
+def _hist_stats_table(filtered, prob_col, today):
+    """Accuracy/calibration/ROI rows per timeframe x {All, Book, league, market}."""
     rows = []
-    filtered = history.loc[history["Model"] > _MODEL_PROB_PICK_FLOOR]
-
     for tf_label, tf_days in TIMEFRAMES:
         cutoff = today - timedelta(days=tf_days)
         tf_data = filtered.loc[filtered["_date"] >= cutoff]
-
-        # All
-        r = _compute_stats_row(tf_data, prob_col)
-        if r:
-            rows.append({"Period": tf_label, "Split": "All"} | r)
-
-        # Book filtered
-        r = _compute_stats_row(tf_data.loc[tf_data["Books"] > _BOOK_PROB_PICK_FLOOR], prob_col)
-        if r:
-            rows.append({"Period": tf_label, "Split": "All, Book Filtered"} | r)
-
-        # By league
+        _append_stats_row(rows, tf_data, prob_col, tf_label, "All")
+        _append_stats_row(
+            rows,
+            tf_data.loc[tf_data["Books"] > _BOOK_PROB_PICK_FLOOR],
+            prob_col,
+            tf_label,
+            "All, Book Filtered",
+        )
         for league in sorted(tf_data["League"].unique()):
             league_data = tf_data.loc[tf_data["League"] == league]
-            r = _compute_stats_row(league_data, prob_col)
-            if r:
-                rows.append({"Period": tf_label, "Split": league} | r)
-
-            # By market within league
+            _append_stats_row(rows, league_data, prob_col, tf_label, league)
             for market in sorted(league_data["Market"].unique()):
                 market_data = league_data.loc[league_data["Market"] == market]
-                r = _compute_stats_row(market_data, prob_col)
-                if r:
-                    rows.append({"Period": tf_label, "Split": f"{league} - {market}"} | r)
+                _append_stats_row(rows, market_data, prob_col, tf_label, f"{league} - {market}")
 
     hist_stats = pd.DataFrame(rows)
     if not hist_stats.empty:
         hist_stats = hist_stats[
             ["Period", "Split", "Accuracy", "Balance", "LogLoss", "Brier", "ROI", "Samples"]
         ]
+    return hist_stats
 
+
+def _daily_calibration_tables(filtered, prob_col, today):
+    """Daily per-(date, league, market) P&L and the model-probability calibration."""
     one_year = filtered.loc[filtered["_date"] >= today - timedelta(days=365)].copy()
     one_year["Hit"] = (one_year["Bet"] == one_year["Result"]).astype(int)
     one_year["Profit Unit"] = one_year["Hit"] * (100 / 110) - (1 - one_year["Hit"])
@@ -525,9 +513,13 @@ def compute_individual_metrics(history):
     )
     calibration["Bin"] = calibration["bin"].astype(str)
     calibration = calibration[["Bin", "Predicted", "Actual", "Count"]]
+    return daily, calibration
 
+
+def _roi_table(history, today):
+    """Win%/ROI by Model-probability threshold x timeframe x {All, Book Filtered}."""
     roi_rows = []
-    for threshold in [0.55, 0.58, 0.60, 0.65, 0.70]:
+    for threshold in _ROI_THRESHOLDS:
         for tf_label, tf_days in TIMEFRAMES:
             cutoff = today - timedelta(days=tf_days)
             for label_filter, subset in [
@@ -540,7 +532,7 @@ def compute_individual_metrics(history):
                 ),
             ]:
                 t_sub = subset.loc[subset["Model"] > threshold]
-                if len(t_sub) == 0:
+                if t_sub.empty:
                     continue
                 wins = (t_sub["Bet"] == t_sub["Result"]).sum()
                 profit = wins * (100 / 110) - (len(t_sub) - wins)
@@ -554,8 +546,29 @@ def compute_individual_metrics(history):
                         "ROI": round(profit / len(t_sub), 4),
                     }
                 )
-    roi = pd.DataFrame(roi_rows)
+    return pd.DataFrame(roi_rows)
 
+
+def compute_individual_metrics(history):
+    """Compute accuracy, calibration, and ROI metrics from resolved history.
+
+    Returns (hist_stats, daily, calibration, roi) DataFrames.
+    """
+    history = history.loc[history["Result"] != "Push"].copy()
+    if history.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    prob_col = (
+        "Model P" if "Model P" in history.columns and history["Model P"].notna().any() else "Model"
+    )
+    today = datetime.today().date()
+    history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
+    history = history.loc[history["_date"].notna()].copy()
+    filtered = history.loc[history["Model"] > _MODEL_PROB_PICK_FLOOR]
+
+    hist_stats = _hist_stats_table(filtered, prob_col, today)
+    daily, calibration = _daily_calibration_tables(filtered, prob_col, today)
+    roi = _roi_table(history, today)
     return hist_stats, daily, calibration, roi
 
 
