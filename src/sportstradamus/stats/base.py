@@ -545,6 +545,33 @@ class Stats:
         self._comps_by_week[target_key] = self.comps
         self._current_comps_key = target_key
 
+    @staticmethod
+    def _flatten_comp_records(comps: dict) -> list[tuple]:
+        """Flatten ``{position: {player: {comps, distances}}}`` to
+        (player, comp, position, dist, weight) records, weight = 1/(1+dist).
+
+        Skips non-dict levels and MLB-style list comp structures (which yield no
+        records here). The Python tuple-loop runs once per comp-pool swap via the
+        ``_comp_pairs`` cache, not once per gameday.
+        """
+        records = []
+        for position, pos_comps in comps.items():
+            if not isinstance(pos_comps, dict):
+                continue
+            for player, comp_data in pos_comps.items():
+                if not isinstance(comp_data, dict):
+                    continue
+                comps_list = comp_data.get("comps")
+                dist_list = comp_data.get("distances")
+                if not comps_list or dist_list is None:
+                    continue
+                for comp, dist in zip(comps_list, dist_list, strict=False):
+                    if comp == player:
+                        continue
+                    d = float(dist)
+                    records.append((player, comp, position, d, 1.0 / (1.0 + d)))
+        return records
+
     def _comp_pairs(self) -> pd.DataFrame:
         """Return the static (player, comp, position, dist, weight) pairs DataFrame.
 
@@ -563,23 +590,7 @@ class Stats:
         if cached is not None:
             return cached
 
-        records = []
-        for position, pos_comps in self.comps.items():
-            if not isinstance(pos_comps, dict):
-                continue
-            for player, comp_data in pos_comps.items():
-                if not isinstance(comp_data, dict):
-                    continue
-                comps_list = comp_data.get("comps")
-                dist_list = comp_data.get("distances")
-                if not comps_list or dist_list is None:
-                    continue
-                for comp, dist in zip(comps_list, dist_list, strict=False):
-                    if comp == player:
-                        continue
-                    d = float(dist)
-                    records.append((player, comp, position, d, 1.0 / (1.0 + d)))
-
+        records = self._flatten_comp_records(self.comps)
         if not records:
             pairs = pd.DataFrame(columns=["player", "comp", "position", "dist", "weight"])
         else:
@@ -659,6 +670,109 @@ class Stats:
         """
         return None
 
+    def _profile_stat_types(self):
+        if self.league in ("NBA", "WNBA"):
+            stat_types = self.stat_types
+            team_stat_types = self.team_stat_types
+        elif self.league == "NFL":
+            stat_types = (
+                self.stat_types["passing"]
+                + self.stat_types["rushing"]
+                + self.stat_types["receiving"]
+            )
+            team_stat_types = list(
+                set(self.stat_types["offense"]) | set(self.stat_types["defense"])
+            )
+        elif self.league == "MLB":
+            stat_types = self.stat_types["pitching"] + self.stat_types["batting"]
+            team_stat_types = (
+                self.stat_types["fielding"]
+                + self.stat_types["pitching"]
+                + self.stat_types["batting"]
+            )
+        elif self.league == "NHL":
+            stat_types = self.stat_types["skater"] + self.stat_types["goalie"]
+            team_stat_types = self.team_stat_types
+        return stat_types, team_stat_types
+
+    def _build_player_profile_stats(self, stat_types, date):
+        _filled_gl = self.short_gamelog.fillna(0).infer_objects(copy=False)
+        _player_col = self.log_strings["player"]
+        # Intersect stat_types with available gamelog columns so partial fixtures
+        # (e.g. tests/integration's cached parquets that don't reload the full
+        # gamelog) don't KeyError. Production runs have all expected columns
+        # after Stats.update(); this is purely defensive for fixture mode.
+        _avail_stats = [s for s in stat_types if s in _filled_gl.columns]
+        playerstats = _filled_gl.groupby(_player_col)[_avail_stats].mean(numeric_only=True)
+
+        _last5 = _filled_gl.groupby(_player_col).tail(5)
+        playershortstats = (
+            _last5.groupby(_last5[_player_col])[_avail_stats]
+            .mean()
+            .fillna(0)
+            .infer_objects(copy=False)
+            .add_suffix(" short", 1)
+        )
+
+        # slope = (N*Σ(rank*y) - Σrank*Σy) / (N*Σrank² - (Σrank)²)
+        _last5t = _last5.copy()
+        _last5t["_rank"] = _last5t.groupby(_player_col).cumcount()
+        _grp_t = _last5t.groupby(_player_col)
+        _n_t = _grp_t.size()
+        _sum_r = _grp_t["_rank"].sum()
+        _sum_r2 = (_last5t["_rank"] ** 2).groupby(_last5t[_player_col]).sum()
+        _denom_t = (_n_t * _sum_r2 - _sum_r**2).replace(0, np.nan)
+        _valid_stats = [s for s in stat_types if s in _last5t.columns]
+        _sum_y = _grp_t[_valid_stats].sum()
+        _iy = _last5t[_valid_stats].multiply(_last5t["_rank"], axis=0)
+        _sum_iy = _iy.groupby(_last5t[_player_col]).sum()
+        playertrends = (_sum_iy.multiply(_n_t, axis=0) - _sum_y.multiply(_sum_r, axis=0)).div(
+            _denom_t, axis=0
+        )
+        _total_games = _filled_gl.groupby(_player_col).size()
+        playertrends.loc[_total_games < _MIN_GAMES_FOR_TRENDS] = 0.0
+        playertrends = playertrends.fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
+
+        playerstats = playerstats.join(playershortstats)
+        playerstats = playerstats.join(playertrends)
+
+        # League hook: external player-grain feature source (e.g. NFL
+        # season-to-date FP aggregates from `load_through_one_year`). Override
+        # ``_join_fp_player_features`` to return a frame indexed by the same
+        # player-name key as ``playerstats``, with columns already prefixed
+        # ``Player {name}_asof`` — joined left so missing players degrade to
+        # NaN-then-zero downstream.
+        fp_player_features = self._join_fp_player_features(date)
+        if fp_player_features is not None and not fp_player_features.empty:
+            playerstats = playerstats.join(fp_player_features, how="left")
+        return playerstats
+
+    def _build_team_defense_profile(self, team_stat_types, date):
+        _team_col = self.log_strings["team"]
+        _team_last10 = self.short_teamlog.groupby(_team_col).tail(10)
+        teamstats = _team_last10.groupby(_team_last10[_team_col])[team_stat_types].mean()
+
+        # League hook: per-league augmentation of teamstats / defenseProfile with
+        # external-data-source features (e.g. NFL FP team-grain weekly snapshots).
+        # Default no-op returns ``None``; NFL overrides return abbreviation-indexed
+        # ``(team_features, defense_features)`` frames merged in below.
+        fp_team_features, fp_defense_features = self._join_fp_team_features(date)
+        if fp_team_features is not None and not fp_team_features.empty:
+            teamstats = teamstats.join(fp_team_features, how="left")
+
+        self.defenseProfile = (
+            self.defenseProfile.join(teamstats, how="right").fillna(0).infer_objects(copy=False)
+        )
+        self.defenseProfile.index.name = self.log_strings["opponent"]
+        if fp_defense_features is not None and not fp_defense_features.empty:
+            self.defenseProfile = (
+                self.defenseProfile.join(fp_defense_features, how="left")
+                .fillna(0)
+                .infer_objects(copy=False)
+            )
+
+        self.teamProfile = teamstats
+
     @line_profiler.profile
     def base_profile(self, date=datetime.today().date()):
         if isinstance(date, str):
@@ -704,113 +818,99 @@ class Stats:
         gameDates = pd.to_datetime(self.teamlog[self.log_strings["date"]]).dt.date
         self.short_teamlog = self.teamlog[(one_year_ago <= gameDates) & (gameDates < date)].copy()
 
-        if self.league in ("NBA", "WNBA"):
-            stat_types = self.stat_types
-            team_stat_types = self.team_stat_types
-        elif self.league == "NFL":
-            stat_types = (
-                self.stat_types["passing"]
-                + self.stat_types["rushing"]
-                + self.stat_types["receiving"]
-            )
-            team_stat_types = list(
-                set(self.stat_types["offense"]) | set(self.stat_types["defense"])
-            )
-        elif self.league == "MLB":
-            stat_types = self.stat_types["pitching"] + self.stat_types["batting"]
-            team_stat_types = (
-                self.stat_types["fielding"]
-                + self.stat_types["pitching"]
-                + self.stat_types["batting"]
-            )
-        elif self.league == "NHL":
-            stat_types = self.stat_types["skater"] + self.stat_types["goalie"]
-            team_stat_types = self.team_stat_types
-
-        _filled_gl = self.short_gamelog.fillna(0).infer_objects(copy=False)
-        _player_col = self.log_strings["player"]
-        # Intersect stat_types with available gamelog columns so partial fixtures
-        # (e.g. tests/integration's cached parquets that don't reload the full
-        # gamelog) don't KeyError. Production runs have all expected columns
-        # after Stats.update(); this is purely defensive for fixture mode.
-        _avail_stats = [s for s in stat_types if s in _filled_gl.columns]
-        playerstats = _filled_gl.groupby(_player_col)[_avail_stats].mean(numeric_only=True)
-
-        # Vectorized tail(5).mean() — avoids per-group .apply()
-        _last5 = _filled_gl.groupby(_player_col).tail(5)
-        playershortstats = (
-            _last5.groupby(_last5[_player_col])[_avail_stats]
-            .mean()
-            .fillna(0)
-            .infer_objects(copy=False)
-            .add_suffix(" short", 1)
-        )
-
-        # Vectorized trend (slope of last 5 games) — replaces per-group polyfit
-        # slope = (N*Σ(rank*y) - Σrank*Σy) / (N*Σrank² - (Σrank)²)
-        _last5t = _last5.copy()
-        _last5t["_rank"] = _last5t.groupby(_player_col).cumcount()
-        _grp_t = _last5t.groupby(_player_col)
-        _n_t = _grp_t.size()
-        _sum_r = _grp_t["_rank"].sum()
-        _sum_r2 = (_last5t["_rank"] ** 2).groupby(_last5t[_player_col]).sum()
-        _denom_t = (_n_t * _sum_r2 - _sum_r**2).replace(0, np.nan)
-        _valid_stats = [s for s in stat_types if s in _last5t.columns]
-        _sum_y = _grp_t[_valid_stats].sum()
-        _iy = _last5t[_valid_stats].multiply(_last5t["_rank"], axis=0)
-        _sum_iy = _iy.groupby(_last5t[_player_col]).sum()
-        playertrends = (_sum_iy.multiply(_n_t, axis=0) - _sum_y.multiply(_sum_r, axis=0)).div(
-            _denom_t, axis=0
-        )
-        _total_games = _filled_gl.groupby(_player_col).size()
-        playertrends.loc[_total_games < _MIN_GAMES_FOR_TRENDS] = 0.0
-        playertrends = playertrends.fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
-
-        playerstats = playerstats.join(playershortstats)
-        playerstats = playerstats.join(playertrends)
-
-        # League hook: external player-grain feature source (e.g. NFL
-        # season-to-date FP aggregates from `load_through_one_year`). Override
-        # ``_join_fp_player_features`` to return a frame indexed by the same
-        # player-name key as ``playerstats``, with columns already prefixed
-        # ``Player {name}_asof`` — joined left so missing players degrade to
-        # NaN-then-zero downstream.
-        fp_player_features = self._join_fp_player_features(date)
-        if fp_player_features is not None and not fp_player_features.empty:
-            playerstats = playerstats.join(fp_player_features, how="left")
-
-        # Vectorized tail(10).mean() for team stats
-        _team_col = self.log_strings["team"]
-        _team_last10 = self.short_teamlog.groupby(_team_col).tail(10)
-        teamstats = _team_last10.groupby(_team_last10[_team_col])[team_stat_types].mean()
-
-        # League hook: per-league augmentation of teamstats / defenseProfile with
-        # external-data-source features (e.g. NFL FP team-grain weekly snapshots).
-        # Default no-op returns ``None``; NFL overrides return abbreviation-indexed
-        # ``(team_features, defense_features)`` frames merged in below.
-        fp_team_features, fp_defense_features = self._join_fp_team_features(date)
-        if fp_team_features is not None and not fp_team_features.empty:
-            teamstats = teamstats.join(fp_team_features, how="left")
-
-        self.defenseProfile = (
-            self.defenseProfile.join(teamstats, how="right").fillna(0).infer_objects(copy=False)
-        )
-        self.defenseProfile.index.name = self.log_strings["opponent"]
-        if fp_defense_features is not None and not fp_defense_features.empty:
-            self.defenseProfile = (
-                self.defenseProfile.join(fp_defense_features, how="left")
-                .fillna(0)
-                .infer_objects(copy=False)
-            )
-
-        self.teamProfile = teamstats
+        stat_types, team_stat_types = self._profile_stat_types()
+        playerstats = self._build_player_profile_stats(stat_types, date)
+        self._build_team_defense_profile(team_stat_types, date)
 
         self.playerProfile = (
             self.playerProfile.join(playerstats, how="right").fillna(0).infer_objects(copy=False)
         )
         self.playerProfile.drop_duplicates(inplace=True)
 
-    @line_profiler.profile
+    def _apply_position_z(self, market):
+        for position in self.positions:
+            positionLogs = self.short_gamelog.loc[
+                self.short_gamelog[self.log_strings["position"]] == position
+            ]
+            positionGroups = positionLogs.groupby(self.log_strings["player"])
+            positionAvg = positionGroups[market].mean().mean()
+            positionStd = positionGroups[market].mean().std()
+            if positionAvg == 0 or positionStd == 0:
+                continue
+            idx = list(
+                set(positionGroups.groups.keys()).intersection(set(self.playerProfile.index))
+            )
+            self.playerProfile.loc[idx, "position z"] = (
+                (positionGroups[market].mean() - positionAvg).div(positionStd).astype(float)
+            )
+            positionGroups = positionLogs.groupby(
+                [self.log_strings["opponent"], self.log_strings["game"]]
+            )
+            positionGames = positionGroups[market].sum()
+            positionGroups = positionGames.groupby(self.log_strings["opponent"])
+            leagueavg = positionGroups.mean().mean()
+            if leagueavg == 0:
+                self.defenseProfile[position] = 0
+            else:
+                self.defenseProfile[position] = positionGroups.mean().div(leagueavg) - 1
+
+    def _apply_comp_features(self, date, _all_mean):
+        # Pass ``date`` so the training-matrix iteration rebuilds the comp
+        # pool whenever the advancing date crosses into a new Wednesday-keyed
+        # week (see :meth:`_ensure_comps`). The inference / cron path passes
+        # today() and hits the lazy-once snapshot path.
+        self._ensure_comps(date=date)
+        _pairs = self._comp_pairs()
+        if not _pairs.empty:
+            # Per-day dynamic step: bind market-specific ``_all_mean`` to the
+            # cached static pairs. The Python tuple-loop that flattens
+            # ``self.comps`` lives in ``_comp_pairs`` and only runs on
+            # comp-pool swap (per training week), not per gameday.
+            _cp_df_p = _pairs.loc[
+                _pairs["player"].isin(_all_mean.index), ["player", "comp", "weight"]
+            ].copy()
+            _cp_df_p["comp_mean"] = _cp_df_p["comp"].map(_all_mean)
+            _cp_df_p = _cp_df_p.dropna(subset=["comp_mean"])
+            if not _cp_df_p.empty:
+                _wsum_p = (
+                    (_cp_df_p["comp_mean"] * _cp_df_p["weight"]).groupby(_cp_df_p["player"]).sum()
+                )
+                _wcnt_p = _cp_df_p["weight"].groupby(_cp_df_p["player"]).sum()
+                _comp_wmean = (_wsum_p / _wcnt_p).reindex(self.playerProfile.index)
+                self.playerProfile["comps mean"] = _comp_wmean
+
+                # Empirical-Bayes shrinkage of the comp mean toward the
+                # position baseline. ``_comp_wmean`` is the distance-
+                # weighted estimator; ``n_eff`` (weight mass) substitutes
+                # for sample size in the K/(K+n) shrinkage factor. The
+                # baseline is the population mean of comp means rather
+                # than the global market mean -- that's the right anchor
+                # because the comp pool already filters on the position's
+                # usage band.
+                _baseline = float(_cp_df_p["comp_mean"].mean())
+                _shrinkage = _wcnt_p / (_wcnt_p + _COMP_EB_PRIOR_K)
+                _comp_eb = (_shrinkage * _comp_wmean + (1.0 - _shrinkage) * _baseline).reindex(
+                    self.playerProfile.index
+                )
+                self.playerProfile["comps mean (EB)"] = _comp_eb
+
+                # Distance-weighted comp p25 / p75: np.interp(q, cum_w_norm, sorted_vals)
+                # vectorized across all players via :meth:`_vectorized_weighted_quantiles`.
+                _sorted = (
+                    _cp_df_p[["player", "comp_mean", "weight"]]
+                    .sort_values(["player", "comp_mean"])
+                    .reset_index(drop=True)
+                )
+                _qs = self._vectorized_weighted_quantiles(
+                    _sorted, [_COMP_QUANTILE_LO, _COMP_QUANTILE_HI]
+                )
+                self.playerProfile["comps p25"] = _qs[_COMP_QUANTILE_LO].reindex(
+                    self.playerProfile.index
+                )
+                self.playerProfile["comps p75"] = _qs[_COMP_QUANTILE_HI].reindex(
+                    self.playerProfile.index
+                )
+
     def profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -877,7 +977,6 @@ class Stats:
         leaguestd = defenseGroups[market].mean().std()
         self.defenseProfile["avg"] = defenseGroups[market].mean().div(leagueavg) - 1
 
-        # Vectorized defense home split
         _def_home_mask = defenseGames[self.log_strings["home"]].astype(bool)
         _def_home_mean = (
             defenseGames.loc[_def_home_mask]
@@ -888,38 +987,12 @@ class Stats:
         _def_all_mean = defenseGroups[market].mean().clip(0.1)
         self.defenseProfile["home"] = _def_home_mean / _def_all_mean - 1
 
-        for position in self.positions:
-            positionLogs = self.short_gamelog.loc[
-                self.short_gamelog[self.log_strings["position"]] == position
-            ]
-            positionGroups = positionLogs.groupby(self.log_strings["player"])
-            positionAvg = positionGroups[market].mean().mean()
-            positionStd = positionGroups[market].mean().std()
-            if positionAvg == 0 or positionStd == 0:
-                continue
-            idx = list(
-                set(positionGroups.groups.keys()).intersection(set(self.playerProfile.index))
-            )
-            self.playerProfile.loc[idx, "position z"] = (
-                (positionGroups[market].mean() - positionAvg).div(positionStd).astype(float)
-            )
-            positionGroups = positionLogs.groupby(
-                [self.log_strings["opponent"], self.log_strings["game"]]
-            )
-            positionGames = positionGroups[market].sum()
-            positionGroups = positionGames.groupby(self.log_strings["opponent"])
-            leagueavg = positionGroups.mean().mean()
-            if leagueavg == 0:
-                self.defenseProfile[position] = 0
-            else:
-                self.defenseProfile[position] = positionGroups.mean().div(leagueavg) - 1
+        self._apply_position_z(market)
 
-        # Vectorized polyfit — replaces per-group np.polyfit with batch
         # slope = (N*Σ(X*Y) - ΣX*ΣY) / (N*ΣX² - (ΣX)²)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
-            # --- Player moneyline gain ---
             _ml_filled = _filtered["moneyline"].fillna(0.5).astype(float)
             _ml_mean_p = _ml_filled.groupby(_filtered[_pc]).transform("mean")
             _mkt_vals = _filtered[market].astype(float)
@@ -934,7 +1007,6 @@ class Stats:
             _denom = (_n_p * _SX2 - _SX**2).replace(0, np.nan)
             self.playerProfile["moneyline gain"] = (_n_p * _SXY - _SX * _SY) / _denom
 
-            # --- Player totals gain ---
             _tot_filled = _filtered["totals"].fillna(self.default_total).astype(float)
             _tot_mean_p = _tot_filled.groupby(_filtered[_pc]).transform("mean")
             _X_tot = _tot_filled / self.default_total - _tot_mean_p
@@ -944,7 +1016,6 @@ class Stats:
             _denom_t = (_n_p * _SX2_t - _SX_t**2).replace(0, np.nan)
             self.playerProfile["totals gain"] = (_n_p * _SXY_t - _SX_t * _SY) / _denom_t
 
-            # --- Defense moneyline gain ---
             _opp_col = self.log_strings["opponent"]
             _dg = defenseGames.reset_index()
             _def_ml = _dg["moneyline"].fillna(0.5).astype(float)
@@ -963,7 +1034,6 @@ class Stats:
                 _n_def * _SXY_def - _SX_def * _SY_def
             ) / _denom_def
 
-            # --- Defense totals gain ---
             _def_tot = _dg["totals"].fillna(self.default_total).astype(float)
             _def_tot_mean = _def_tot.groupby(_dg[_opp_col]).transform("mean")
             _X_def_tot = _def_tot / self.default_total - _def_tot_mean
@@ -973,95 +1043,13 @@ class Stats:
             _denom_dt = (_n_def * _SX2_dt - _SX_dt**2).replace(0, np.nan)
             self.defenseProfile["totals gain"] = (_n_def * _SXY_dt - _SX_dt * _SY_def) / _denom_dt
 
-        # Player comps mean: distance-weighted average of comps' market means.
-        # Player comps mean (EB): Efron-Morris shrinkage of comps mean toward
-        #   the position baseline. Reduces tail noise on low-sample players.
-        # Player comps p25 / p75: distance-weighted quantiles of comp means.
-        #   Lets the GBDT discriminate "tight cluster, confident estimate" vs
-        #   "wide cluster, uncertain estimate" without emitting a redundant std.
-        # The static ``comps z`` (player vs comp-pool level ranking) was
-        # removed -- it carries no matchup signal and is redundant with
-        # ``comps mean`` next to ``MeanYr`` for the GBDT. The matchup-conditional
-        # ``Player comps z`` is computed per-prediction in ``get_stats``.
-        # Pass ``date`` so the training-matrix iteration rebuilds the comp
-        # pool whenever the advancing date crosses into a new Wednesday-keyed
-        # week (see :meth:`_ensure_comps`). The inference / cron path passes
-        # today() and hits the lazy-once snapshot path.
-        self._ensure_comps(date=date)
-        _pairs = self._comp_pairs()
-        if not _pairs.empty:
-            # Per-day dynamic step: bind market-specific ``_all_mean`` to the
-            # cached static pairs. The Python tuple-loop that flattens
-            # ``self.comps`` lives in ``_comp_pairs`` and only runs on
-            # comp-pool swap (per training week), not per gameday.
-            _cp_df_p = _pairs.loc[
-                _pairs["player"].isin(_all_mean.index), ["player", "comp", "weight"]
-            ].copy()
-            _cp_df_p["comp_mean"] = _cp_df_p["comp"].map(_all_mean)
-            _cp_df_p = _cp_df_p.dropna(subset=["comp_mean"])
-            if not _cp_df_p.empty:
-                _wsum_p = (
-                    (_cp_df_p["comp_mean"] * _cp_df_p["weight"]).groupby(_cp_df_p["player"]).sum()
-                )
-                _wcnt_p = _cp_df_p["weight"].groupby(_cp_df_p["player"]).sum()
-                _comp_wmean = (_wsum_p / _wcnt_p).reindex(self.playerProfile.index)
-                self.playerProfile["comps mean"] = _comp_wmean
-
-                # Empirical-Bayes shrinkage of the comp mean toward the
-                # position baseline. ``_comp_wmean`` is the distance-
-                # weighted estimator; ``n_eff`` (weight mass) substitutes
-                # for sample size in the K/(K+n) shrinkage factor. The
-                # baseline is the population mean of comp means rather
-                # than the global market mean -- that's the right anchor
-                # because the comp pool already filters on the position's
-                # usage band.
-                _baseline = float(_cp_df_p["comp_mean"].mean())
-                _shrinkage = _wcnt_p / (_wcnt_p + _COMP_EB_PRIOR_K)
-                _comp_eb = (_shrinkage * _comp_wmean + (1.0 - _shrinkage) * _baseline).reindex(
-                    self.playerProfile.index
-                )
-                self.playerProfile["comps mean (EB)"] = _comp_eb
-
-                # Distance-weighted comp p25 / p75: numpy's standard weighted-
-                # quantile recipe (np.interp(q, cum_w_norm, sorted_vals))
-                # vectorized across all players in a single sort + cumsum pass
-                # via :meth:`_vectorized_weighted_quantiles`. Replaces the
-                # per-group ``DataFrame.groupby.apply`` recipe that dominated
-                # the per-gameday cost on training matrix generation.
-                _sorted = (
-                    _cp_df_p[["player", "comp_mean", "weight"]]
-                    .sort_values(["player", "comp_mean"])
-                    .reset_index(drop=True)
-                )
-                _qs = self._vectorized_weighted_quantiles(
-                    _sorted, [_COMP_QUANTILE_LO, _COMP_QUANTILE_HI]
-                )
-                self.playerProfile["comps p25"] = _qs[_COMP_QUANTILE_LO].reindex(
-                    self.playerProfile.index
-                )
-                self.playerProfile["comps p75"] = _qs[_COMP_QUANTILE_HI].reindex(
-                    self.playerProfile.index
-                )
+        self._apply_comp_features(date, _all_mean)
 
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
 
-    def get_depth(self, offers, date=datetime.today().date()):
-        players = list(offers.keys()) if isinstance(offers, dict) else [x["Player"] for x in offers]
-
-        for player in players:
-            if " + " in player.replace(" vs. ", " + "):
-                split_players = player.replace(" vs. ", " + ").split(" + ")
-                players.append(split_players[0])
-                players.append(split_players[1])
-
-        players = set(players)
-        season = (
-            date.year
-            if ((date.month >= _SEASON_ROLLOVER_MONTH) or (self.league in ["WNBA", "MLB"]))
-            else date.year - 1
-        )
+    def _roster_player_df(self, season):
         if self.league == "NBA":
             season = "-".join([str(season), str(season - 1999)])
 
@@ -1086,6 +1074,25 @@ class Stats:
             player_df = self.players.reset_index().rename(columns={"name": "player display name"})
         else:
             player_df = self.players
+        return player_df
+
+    def get_depth(self, offers, date=datetime.today().date()):
+        players = list(offers.keys()) if isinstance(offers, dict) else [x["Player"] for x in offers]
+
+        for player in players:
+            if " + " in player.replace(" vs. ", " + "):
+                split_players = player.replace(" vs. ", " + ").split(" + ")
+                players.append(split_players[0])
+                players.append(split_players[1])
+
+        players = set(players)
+        season = (
+            date.year
+            if ((date.month >= _SEASON_ROLLOVER_MONTH) or (self.league in ["WNBA", "MLB"]))
+            else date.year - 1
+        )
+
+        player_df = self._roster_player_df(season)
 
         if date < datetime.today().date():
             old_player_df = self.gamelog.loc[
@@ -1618,6 +1625,54 @@ class Stats:
         """
         return gamelog
 
+    def _dispatch_volume_stats(self, offers, gameDate, market):
+        if market in self.volume_stats:
+            self.get_depth(offers, gameDate)
+        elif self.league == "MLB":
+            self.get_volume_stats(
+                offers,
+                gameDate,
+                pitcher=any(string in market for string in ["allowed", "pitch"]),
+            )
+        elif self.league == "NHL":
+            self.get_volume_stats(
+                offers,
+                gameDate,
+                pitcher=any(string in market for string in ["Against", "saves", "goalie"]),
+            )
+        else:
+            self.get_volume_stats(offers, gameDate)
+
+    def _resolve_player_market_odds(self, stats, market, date, target_at):
+        evs = []
+        lines = []
+        odds = []
+        archived = []
+        for player in stats.index:
+            a = True
+            ev = archive.get_ev(self.league, market, date, player, at=target_at)
+            line = archive.get_line(self.league, market, date, player, at=target_at)
+            if np.isnan(ev):
+                ev = self.check_combo_markets(market, player, date)
+            if line <= 0:
+                a = False
+                line = np.max([stats.loc[player, "Avg10"], 0.5])
+            if ev <= 0:
+                ev = get_ev(
+                    line,
+                    0.5,
+                    stat_cv[self.league].get(market, 1),
+                    dist=stat_dist.get(self.league, {}).get(market, "Gamma"),
+                )
+
+            lines.append(line)
+            _cv = stat_cv[self.league].get(market, 1)
+            _dist = stat_dist.get(self.league, {}).get(market, "Gamma")
+            odds.append(1 - get_odds(line, ev, _dist, cv=_cv))
+            evs.append(ev)
+            archived.append(a)
+        return lines, odds, evs, archived
+
     def get_training_matrix(self, market, cutoff_date=None):
         """Retrieves the training data matrix and target labels for a specified market.
 
@@ -1665,22 +1720,7 @@ class Stats:
             offers_df = offers_df.loc[~offers_df.index.duplicated()]
             offers = offers_df.to_dict("records")
 
-            if market in self.volume_stats:
-                self.get_depth(offers, gameDate)
-            elif self.league == "MLB":
-                self.get_volume_stats(
-                    offers,
-                    gameDate,
-                    pitcher=any(string in market for string in ["allowed", "pitch"]),
-                )
-            elif self.league == "NHL":
-                self.get_volume_stats(
-                    offers,
-                    gameDate,
-                    pitcher=any(string in market for string in ["Against", "saves", "goalie"]),
-                )
-            else:
-                self.get_volume_stats(offers, gameDate)
+            self._dispatch_volume_stats(offers, gameDate, market)
 
             stats = self.get_stats(market, offers, gameDate)
             if self.league != "MLB":
@@ -1699,33 +1739,9 @@ class Stats:
             game_time = datetime.combine(gameDate, datetime.min.time()) + timedelta(hours=20)
             target_at = game_time - TRAINING_LOOKBACK
 
-            evs = []
-            lines = []
-            odds = []
-            archived = []
-            for player in stats.index:
-                a = True
-                ev = archive.get_ev(self.league, market, date, player, at=target_at)
-                line = archive.get_line(self.league, market, date, player, at=target_at)
-                if np.isnan(ev):
-                    ev = self.check_combo_markets(market, player, date)
-                if line <= 0:
-                    a = False
-                    line = np.max([stats.loc[player, "Avg10"], 0.5])
-                if ev <= 0:
-                    ev = get_ev(
-                        line,
-                        0.5,
-                        stat_cv[self.league].get(market, 1),
-                        dist=stat_dist.get(self.league, {}).get(market, "Gamma"),
-                    )
-
-                lines.append(line)
-                _cv = stat_cv[self.league].get(market, 1)
-                _dist = stat_dist.get(self.league, {}).get(market, "Gamma")
-                odds.append(1 - get_odds(line, ev, _dist, cv=_cv))
-                evs.append(ev)
-                archived.append(a)
+            lines, odds, evs, archived = self._resolve_player_market_odds(
+                stats, market, date, target_at
+            )
 
             stats["Line"] = lines
             stats["Odds"] = odds
