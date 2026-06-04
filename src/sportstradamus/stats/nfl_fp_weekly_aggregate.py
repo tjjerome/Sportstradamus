@@ -919,53 +919,8 @@ def load_multi_window_one_year(
     if by_player_id.empty:
         return pd.DataFrame()
 
-    sep_routes = _aggregate_separation_by_routes(windows)
-    if not sep_routes.empty:
-        by_player_id = by_player_id.combine_first(sep_routes)
-
-    coverage_yprr = _aggregate_per_coverage_yprr(windows)
-    if not coverage_yprr.empty:
-        by_player_id = by_player_id.combine_first(coverage_yprr)
-
-    sep_coverage = _aggregate_separation_by_coverage(windows)
-    if not sep_coverage.empty:
-        by_player_id = by_player_id.combine_first(sep_coverage)
-
-    sep_alignment = _aggregate_separation_by_alignment_bucket(windows)
-    if not sep_alignment.empty:
-        by_player_id = by_player_id.combine_first(sep_alignment)
-
-    mz_buckets = _aggregate_man_vs_zone_bucket(windows)
-    if not mz_buckets.empty:
-        by_player_id = by_player_id.combine_first(mz_buckets)
-
-    metadata = _player_metadata(windows)
-    if metadata.empty:
-        return pd.DataFrame()
-    by_player_id = by_player_id.join(metadata, how="left")
-
-    games_played = _player_game_counts(windows)
-    if not games_played.empty:
-        by_player_id["G"] = games_played
-
-    by_player_id = _project_to_name_index(by_player_id)
-    if by_player_id.empty:
-        return by_player_id
-
-    by_player_id = _derive_aggregate_metrics(by_player_id)
-    if "POS" in by_player_id.columns:
-        by_player_id.loc[by_player_id["POS"].isin(_RB_ROLE_ALIASES), "POS"] = "RB"
-        by_player_id = by_player_id.loc[by_player_id["POS"].isin(_COMP_POSITIONS)]
-    by_player_id = by_player_id.rename(columns={"POS": "position", "G": "player_game_count"})
-    by_player_id = _broadcast_team_coverage(by_player_id, windows)
-    by_player_id = derive_comp_metrics(by_player_id)
-
-    target_season = max(w[0] for w in windows)
-    pbp = _load_pbp_named_by_player(target_season)
-    if pbp is not None and not by_player_id.empty:
-        by_player_id = by_player_id.combine_first(pbp)
-
-    return _join_nfl_players(by_player_id)
+    by_player_id = _combine_bucket_aggregates(by_player_id, windows)
+    return _finalize_player_frame(by_player_id, windows)
 
 
 def _broadcast_team_coverage(
@@ -1092,6 +1047,155 @@ def _iter_bucket_payloads(df: pd.DataFrame) -> Iterator[tuple[object, dict[str, 
             yield player_id, payload
 
 
+def _weighted_mean_wide(long_rows: list[dict], bucket_col: str) -> pd.DataFrame:
+    """Volume-weighted mean of (value, weight) per (player, bucket_col), pivoted wide."""
+    work = pd.DataFrame(long_rows)
+    work["value"] = pd.to_numeric(work["value"], errors="coerce")
+    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
+    work = work.dropna(subset=["value", "weight"])
+    if work.empty:
+        return pd.DataFrame()
+    grouped = work.groupby([PLAYER_GROUP_COL, bucket_col], dropna=False)
+    weighted_num = grouped.apply(
+        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
+        include_groups=False,
+    )
+    weighted_den = grouped["weight"].sum(min_count=1)
+    per_bucket = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
+    return per_bucket.unstack(bucket_col)
+
+
+def _explode_scheme_long_rows(df, schemes, value_key, weight_key, bucket_col):
+    """Long-form (player, bucket_col, value, weight) rows from a JSON ``bucket``
+    column, reading each named scheme's inner dict by key. Skips non-dict inners
+    and rows missing the value or weight key.
+    """
+    long_rows: list[dict[str, object]] = []
+    for player_id, payload in _iter_bucket_payloads(df):
+        for bucket_name, key in schemes.items():
+            inner = payload.get(key)
+            if not isinstance(inner, dict):
+                continue
+            value = inner.get(value_key)
+            weight = inner.get(weight_key)
+            if value is None or weight is None:
+                continue
+            long_rows.append(
+                {PLAYER_GROUP_COL: player_id, bucket_col: bucket_name,
+                 "value": value, "weight": weight}
+            )
+    return long_rows
+
+
+def _explode_route_long_rows(df, value_key, weight_key):
+    """Long-form (player, route_bucket, value, weight) rows from a JSON ``bucket``
+    column whose top-level keys are route names (not a fixed scheme map).
+    """
+    long_rows: list[dict[str, object]] = []
+    for player_id, payload in _iter_bucket_payloads(df):
+        for route_key, route_payload in payload.items():
+            if not isinstance(route_payload, dict):
+                continue
+            value = route_payload.get(value_key)
+            weight = route_payload.get(weight_key)
+            if value is None or weight is None:
+                continue
+            long_rows.append(
+                {PLAYER_GROUP_COL: player_id, "route_bucket": route_key,
+                 "value": value, "weight": weight}
+            )
+    return long_rows
+
+
+def _order_and_suffix_routes(wide: pd.DataFrame) -> pd.DataFrame:
+    """Match the season-CSV's ``.0``, ``.1`` ... ``.N`` auto-suffix scheme.
+
+    Order by ``_ROUTE_BUCKET_ORDER`` first so suffix N maps to the same route both
+    here and in the legacy season-CSV path. Unknown route keys (not in the canonical
+    tuple) append after, in observation order, so a new route bucket grows the family
+    rather than silently dropping data.
+    """
+    known = [b for b in _ROUTE_BUCKET_ORDER if b in wide.columns]
+    unknown = [b for b in wide.columns if b not in _ROUTE_BUCKET_ORDER]
+    ordered = known + unknown
+    wide = wide.reindex(ordered, axis=1)
+    rename: dict[object, str] = {ordered[0]: "rec_sep_route_SEP_SCORE"}
+    for i, bucket in enumerate(ordered[1:], start=1):
+        rename[bucket] = f"rec_sep_route_SEP_SCORE.{i}"
+    return wide.rename(columns=rename)
+
+
+def _fold_coverage_schemes(df, schemes):
+    """Pattern-A numerator/denominator (YPR*Routes, Routes) summed across the given
+    coverage schemes' per-game columns. Returns ``(num, den)`` Series, or
+    ``(None, None)`` when no scheme column is present.
+    """
+    num = None
+    den = None
+    for scheme in schemes:
+        ypr_col = f"playerStatsCoverageScheme{scheme}ReceivingYardsPerRoute"
+        routes_col = f"playerStatsCoverageScheme{scheme}ReceivingRoutesTotal"
+        if ypr_col not in df.columns or routes_col not in df.columns:
+            continue
+        ypr = pd.to_numeric(df[ypr_col], errors="coerce")
+        routes = pd.to_numeric(df[routes_col], errors="coerce")
+        contrib_num = (ypr * routes).where(routes > 0, other=0)
+        contrib_den = routes.where(routes > 0, other=0)
+        num = contrib_num if num is None else num.add(contrib_num, fill_value=0)
+        den = contrib_den if den is None else den.add(contrib_den, fill_value=0)
+    return num, den
+
+
+def _combine_bucket_aggregates(by_player_id: pd.DataFrame, windows) -> pd.DataFrame:
+    """combine_first the five per-bucket aggregate frames (each a disjoint column
+    family) onto the recipe base, in their fixed precedence order.
+    """
+    for aggregate in (
+        _aggregate_separation_by_routes,
+        _aggregate_per_coverage_yprr,
+        _aggregate_separation_by_coverage,
+        _aggregate_separation_by_alignment_bucket,
+        _aggregate_man_vs_zone_bucket,
+    ):
+        frame = aggregate(windows)
+        if not frame.empty:
+            by_player_id = by_player_id.combine_first(frame)
+    return by_player_id
+
+
+def _finalize_player_frame(by_player_id: pd.DataFrame, windows) -> pd.DataFrame:
+    """Join metadata + game counts, project to the name index, derive metrics, filter
+    to comp positions, broadcast team coverage, and combine the PBP frame.
+    """
+    metadata = _player_metadata(windows)
+    if metadata.empty:
+        return pd.DataFrame()
+    by_player_id = by_player_id.join(metadata, how="left")
+
+    games_played = _player_game_counts(windows)
+    if not games_played.empty:
+        by_player_id["G"] = games_played
+
+    by_player_id = _project_to_name_index(by_player_id)
+    if by_player_id.empty:
+        return by_player_id
+
+    by_player_id = _derive_aggregate_metrics(by_player_id)
+    if "POS" in by_player_id.columns:
+        by_player_id.loc[by_player_id["POS"].isin(_RB_ROLE_ALIASES), "POS"] = "RB"
+        by_player_id = by_player_id.loc[by_player_id["POS"].isin(_COMP_POSITIONS)]
+    by_player_id = by_player_id.rename(columns={"POS": "position", "G": "player_game_count"})
+    by_player_id = _broadcast_team_coverage(by_player_id, windows)
+    by_player_id = derive_comp_metrics(by_player_id)
+
+    target_season = max(w[0] for w in windows)
+    pbp = _load_pbp_named_by_player(target_season)
+    if pbp is not None and not by_player_id.empty:
+        by_player_id = by_player_id.combine_first(pbp)
+
+    return _join_nfl_players(by_player_id)
+
+
 def _aggregate_separation_by_routes(
     windows: Sequence[tuple[int, int, int]],
 ) -> pd.DataFrame:
@@ -1117,58 +1221,13 @@ def _aggregate_separation_by_routes(
     df = _load_kind_multi(windows, _SEP_BY_ROUTES_KIND)
     if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
-
-    long_rows: list[dict[str, object]] = []
-    for player_id, payload in _iter_bucket_payloads(df):
-        for route_key, route_payload in payload.items():
-            if not isinstance(route_payload, dict):
-                continue
-            value = route_payload.get(_SEP_BY_ROUTES_VALUE_KEY)
-            weight = route_payload.get(_SEP_BY_ROUTES_WEIGHT_KEY)
-            if value is None or weight is None:
-                continue
-            long_rows.append(
-                {
-                    PLAYER_GROUP_COL: player_id,
-                    "route_bucket": route_key,
-                    "value": value,
-                    "weight": weight,
-                }
-            )
+    long_rows = _explode_route_long_rows(df, _SEP_BY_ROUTES_VALUE_KEY, _SEP_BY_ROUTES_WEIGHT_KEY)
     if not long_rows:
         return pd.DataFrame()
-
-    work = pd.DataFrame(long_rows)
-    work["value"] = pd.to_numeric(work["value"], errors="coerce")
-    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
-    work = work.dropna(subset=["value", "weight"])
-    if work.empty:
-        return pd.DataFrame()
-
-    grouped = work.groupby([PLAYER_GROUP_COL, "route_bucket"], dropna=False)
-    weighted_num = grouped.apply(
-        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
-        include_groups=False,
-    )
-    weighted_den = grouped["weight"].sum(min_count=1)
-    per_bucket = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
-    wide = per_bucket.unstack("route_bucket")
+    wide = _weighted_mean_wide(long_rows, "route_bucket")
     if wide.empty:
         return wide
-
-    # Match the season-CSV's ``.0``, ``.1`` ... ``.N`` auto-suffix scheme.
-    # Order by ``_ROUTE_BUCKET_ORDER`` first so suffix N maps to the same
-    # route both here and in the legacy season-CSV path. Unknown route keys
-    # (not in the canonical tuple) append after, in observation order, so
-    # a new route bucket grows the family rather than silently dropping data.
-    known = [b for b in _ROUTE_BUCKET_ORDER if b in wide.columns]
-    unknown = [b for b in wide.columns if b not in _ROUTE_BUCKET_ORDER]
-    ordered = known + unknown
-    wide = wide.reindex(ordered, axis=1)
-    rename: dict[object, str] = {ordered[0]: "rec_sep_route_SEP_SCORE"}
-    for i, bucket in enumerate(ordered[1:], start=1):
-        rename[bucket] = f"rec_sep_route_SEP_SCORE.{i}"
-    return wide.rename(columns=rename)
+    return _order_and_suffix_routes(wide)
 
 
 def _aggregate_per_coverage_yprr(
@@ -1198,19 +1257,7 @@ def _aggregate_per_coverage_yprr(
 
     pieces: dict[str, pd.Series] = {}
     for bucket_name, schemes in _COVERAGE_YPRR_SCHEMES.items():
-        num = None
-        den = None
-        for scheme in schemes:
-            ypr_col = f"playerStatsCoverageScheme{scheme}ReceivingYardsPerRoute"
-            routes_col = f"playerStatsCoverageScheme{scheme}ReceivingRoutesTotal"
-            if ypr_col not in df.columns or routes_col not in df.columns:
-                continue
-            ypr = pd.to_numeric(df[ypr_col], errors="coerce")
-            routes = pd.to_numeric(df[routes_col], errors="coerce")
-            contrib_num = (ypr * routes).where(routes > 0, other=0)
-            contrib_den = routes.where(routes > 0, other=0)
-            num = contrib_num if num is None else num.add(contrib_num, fill_value=0)
-            den = contrib_den if den is None else den.add(contrib_den, fill_value=0)
+        num, den = _fold_coverage_schemes(df, schemes)
         if num is None or den is None:
             continue
         work = pd.DataFrame(
@@ -1248,43 +1295,13 @@ def _aggregate_separation_by_coverage(
     df = _load_kind_multi(windows, _SEP_BY_COVERAGE_KIND)
     if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
-
-    long_rows: list[dict[str, object]] = []
-    for player_id, payload in _iter_bucket_payloads(df):
-        for bucket_name, key in _SEP_BY_COVERAGE_SCHEMES.items():
-            inner = payload.get(key)
-            if not isinstance(inner, dict):
-                continue
-            value = inner.get(_SEP_BY_COVERAGE_VALUE_KEY)
-            weight = inner.get(_SEP_BY_COVERAGE_WEIGHT_KEY)
-            if value is None or weight is None:
-                continue
-            long_rows.append(
-                {
-                    PLAYER_GROUP_COL: player_id,
-                    "scheme": bucket_name,
-                    "value": value,
-                    "weight": weight,
-                }
-            )
+    long_rows = _explode_scheme_long_rows(
+        df, _SEP_BY_COVERAGE_SCHEMES, _SEP_BY_COVERAGE_VALUE_KEY,
+        _SEP_BY_COVERAGE_WEIGHT_KEY, "scheme",
+    )
     if not long_rows:
         return pd.DataFrame()
-
-    work = pd.DataFrame(long_rows)
-    work["value"] = pd.to_numeric(work["value"], errors="coerce")
-    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
-    work = work.dropna(subset=["value", "weight"])
-    if work.empty:
-        return pd.DataFrame()
-
-    grouped = work.groupby([PLAYER_GROUP_COL, "scheme"], dropna=False)
-    weighted_num = grouped.apply(
-        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
-        include_groups=False,
-    )
-    weighted_den = grouped["weight"].sum(min_count=1)
-    per_scheme = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
-    wide = per_scheme.unstack("scheme")
+    wide = _weighted_mean_wide(long_rows, "scheme")
     if wide.empty:
         return wide
     return wide.rename(columns={name: f"rec_sep_vs_{name}" for name in _SEP_BY_COVERAGE_SCHEMES})
@@ -1389,43 +1406,12 @@ def _aggregate_man_vs_zone_bucket(
     df = _load_kind_multi(windows, _MZ_BUCKET_KIND)
     if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
-
-    long_rows: list[dict[str, object]] = []
-    for player_id, payload in _iter_bucket_payloads(df):
-        for shell_name, key in _MZ_BUCKETS.items():
-            inner = payload.get(key)
-            if not isinstance(inner, dict):
-                continue
-            value = inner.get(_MZ_VALUE_KEY)
-            weight = inner.get(_MZ_WEIGHT_KEY)
-            if value is None or weight is None:
-                continue
-            long_rows.append(
-                {
-                    PLAYER_GROUP_COL: player_id,
-                    "shell": shell_name,
-                    "value": value,
-                    "weight": weight,
-                }
-            )
+    long_rows = _explode_scheme_long_rows(
+        df, _MZ_BUCKETS, _MZ_VALUE_KEY, _MZ_WEIGHT_KEY, "shell",
+    )
     if not long_rows:
         return pd.DataFrame()
-
-    work = pd.DataFrame(long_rows)
-    work["value"] = pd.to_numeric(work["value"], errors="coerce")
-    work["weight"] = pd.to_numeric(work["weight"], errors="coerce")
-    work = work.dropna(subset=["value", "weight"])
-    if work.empty:
-        return pd.DataFrame()
-
-    grouped = work.groupby([PLAYER_GROUP_COL, "shell"], dropna=False)
-    weighted_num = grouped.apply(
-        lambda g: (g["value"] * g["weight"]).sum(min_count=1),
-        include_groups=False,
-    )
-    weighted_den = grouped["weight"].sum(min_count=1)
-    per_shell = weighted_num.divide(weighted_den).where(weighted_den != 0, other=np.nan)
-    wide = per_shell.unstack("shell")
+    wide = _weighted_mean_wide(long_rows, "shell")
     if wide.empty:
         return wide
     return wide.rename(columns={s: f"rec_mz_YPRR_{s}" for s in _MZ_BUCKETS})
