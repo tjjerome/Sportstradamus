@@ -25,6 +25,28 @@ from sportstradamus.stats.base import archive, clean_data, fetch_upcoming_games
 from sportstradamus.stats.nba import StatsNBA
 from sportstradamus.stats.nba_client import NBAStatsError
 
+# stats.wnba.com abbreviations differ from our canonical set; remapped wherever a
+# team code enters (player index, player logs, team logs).
+_WNBA_TEAM_ABBR_MAP = {
+    "CONN": "CON",
+    "NY": "NYL",
+    "LA": "LAS",
+    "LV": "LVA",
+    "PHO": "PHX",
+    "WSH": "WAS",
+}
+
+def _remap_abbr(series: pd.Series) -> pd.Series:
+    return series.map(lambda x: _WNBA_TEAM_ABBR_MAP.get(x, x))
+
+
+# Days since season start before triggering a full gamelog re-enrichment pass.
+_STALE_SEASON_DAYS = 300
+# Calendar month (inclusive) at which playoff logs are fetched in addition to regular season.
+_PLAYOFF_MONTH = 9
+# Days between latest_date and today that also triggers a playoff-log fetch mid-season.
+_PLAYOFF_LAG_DAYS = 150
+
 
 class StatsWNBA(StatsNBA):
     """WNBA player statistics, routed to stats.wnba.com via nba_client."""
@@ -50,17 +72,64 @@ class StatsWNBA(StatsNBA):
 
     def update(self) -> None:
         """Fetch new WNBA game logs from stats.wnba.com and merge into stored data."""
-        team_abbr_map = {
-            "CONN": "CON",
-            "NY": "NYL",
-            "LA": "LAS",
-            "LV": "LVA",
-            "PHO": "PHX",
-            "WSH": "WAS",
-        }
+        player_df = self._fetch_player_index()
+        playerBios, shotData = self._fetch_player_bios()
+        player_df = self._build_wnba_player_profiles(player_df, playerBios, shotData)
 
+        today = datetime.today().date()
+
+        # Drop records with incomplete advanced stats so they can be re-fetched
+        if "OFF_RATING" in self.gamelog.columns:
+            self.gamelog = self.gamelog.dropna(subset=["OFF_RATING"])
+
+        latest_date = self.season_start
+        if not self.gamelog.empty:
+            latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
+            latest_date = max(latest_date, self.season_start)
+
+        self.upcoming_games = fetch_upcoming_games("10", self.season_start.year, today)
+
+        (nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog,
+         adv_teamlog) = self._fetch_wnba_logs(latest_date, today)
+
+        stat_df = self._assemble_wnba_player_rows(nba_gamelog, adv_gamelog, usg_gamelog, player_df)
+        if not stat_df.empty:
+            self._enrich_team_markets(
+                stat_df,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
+            )
+            self.gamelog = (
+                pd.concat([stat_df[self.gamelog.columns], self.gamelog])
+                .sort_values(self.log_strings["date"])
+                .reset_index(drop=True)
+            )
+
+        team_df = self._assemble_wnba_team_rows(teamlog, sco_teamlog, adv_teamlog)
+        if not team_df.empty:
+            self.teamlog = (
+                pd.concat([team_df[self.teamlog.columns], self.teamlog])
+                .sort_values(self.log_strings["date"])
+                .reset_index(drop=True)
+            )
+
+        self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
+        self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
+
+        if self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS) or clean_data:
+            self._enrich_team_markets(
+                self.gamelog,
+                date_col=self.log_strings["date"],
+                team_col="TEAM_ABBREVIATION",
+            )
+            self.gamelog["GAME_DATE"] = self.gamelog["GAME_DATE"].astype(str)
+            self.teamlog["GAME_DATE"] = self.teamlog["GAME_DATE"].astype(str)
+
+        write_gamelog("wnba", self.gamelog, self.teamlog, self.players)
+
+    def _fetch_player_index(self) -> pd.DataFrame:
+        """Player index (id, name, team, position) from the WNBA stats endpoint."""
         pos_map = {"G-F": "G", "F-G": "F", "F-C": "C"}
-
         try:
             player_df = nba_client.fetch(
                 nba.playerindex.PlayerIndex,
@@ -72,15 +141,16 @@ class StatsWNBA(StatsNBA):
             player_df = pd.DataFrame(player_df).rename(
                 columns={"POSITION": "POS", "Position": "POS", "PERSON_ID": "PLAYER_ID"}
             )
-            player_df.TEAM_ABBREVIATION = player_df.TEAM_ABBREVIATION.apply(
-                lambda x: team_abbr_map.get(x, x)
-            )
+            player_df.TEAM_ABBREVIATION = _remap_abbr(player_df.TEAM_ABBREVIATION)
             player_df.POS = player_df.POS.apply(lambda x: pos_map.get(x, x))
         except NBAStatsError:
             player_df = pd.DataFrame(
                 columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "POS"]
             )
+        return player_df
 
+    def _fetch_player_bios(self):
+        """Player bio stats and per-zone shot locations (empty stubs on API error)."""
         try:
             playerBios = nba_client.fetch(
                 nba.leaguedashplayerbiostats.LeagueDashPlayerBioStats,
@@ -107,7 +177,14 @@ class StatsWNBA(StatsNBA):
                 "TEAM_ABBREVIATION": [],
             }
             shotData = {"rowSet": []}
+        return playerBios, shotData
 
+    def _build_wnba_player_profiles(self, player_df, playerBios, shotData) -> pd.DataFrame:
+        """Merge bios + shot-zone shares into per-team player profiles in self.players.
+
+        Returns the player frame augmented with profile columns (or unchanged when
+        the bios endpoint returned nothing).
+        """
         playerBios = pd.DataFrame(playerBios)
         if not playerBios.empty:
             playerBios.PLAYER_NAME = playerBios.PLAYER_NAME.apply(remove_accents)
@@ -168,36 +245,20 @@ class StatsWNBA(StatsNBA):
                 }
             else:
                 self.players[self.season_start.year] = player_dict
+        return player_df
 
-        today = datetime.today().date()
+    def _fetch_wnba_logs(self, latest_date, today):
+        """Fetch player + team game logs (regular + conditional playoffs) as six lists.
 
-        # Drop records with incomplete advanced stats so they can be re-fetched
-        if "OFF_RATING" in self.gamelog.columns:
-            self.gamelog = self.gamelog.dropna(subset=["OFF_RATING"])
-
-        latest_date = self.season_start
-        if not self.gamelog.empty:
-            latest_date = pd.to_datetime(self.gamelog[self.log_strings["date"]]).max().date()
-            latest_date = max(latest_date, self.season_start)
-
-        self.upcoming_games = fetch_upcoming_games("10", self.season_start.year, today)
-
+        All-or-nothing: any endpoint failure yields six empty lists, never a
+        partial mix of populated and empty logs.
+        """
         params = {
             "season_nullable": self.season_start.year,
             "league_id_nullable": "10",
             "date_from_nullable": latest_date.strftime("%m/%d/%Y"),
             "date_to_nullable": today.strftime("%m/%d/%Y"),
         }
-
-        # Pre-init so the except-NBAStatsError branch and the empty-list guard
-        # below have defined names even if the first fetch raises. Mirrors the
-        # NBA pattern in stats/nba.py around the identical gamelog fetch.
-        nba_gamelog: list = []
-        adv_gamelog: list = []
-        usg_gamelog: list = []
-        teamlog: list = []
-        sco_teamlog: list = []
-        adv_teamlog: list = []
 
         def _player_logs(measure: str | None = None) -> list:
             extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
@@ -219,8 +280,7 @@ class StatsWNBA(StatsNBA):
             sco_teamlog = _team_logs("Scoring")
             adv_teamlog = _team_logs("Advanced")
 
-            # Fetch playoffs game logs
-            if (today.month >= 9) or (today - latest_date).days > 150:
+            if (today.month >= _PLAYOFF_MONTH) or (today - latest_date).days > _PLAYOFF_LAG_DAYS:
                 params.update({"season_type_nullable": "Playoffs"})
                 nba_gamelog.extend(_player_logs())
                 adv_gamelog.extend(_player_logs("Advanced"))
@@ -229,155 +289,121 @@ class StatsWNBA(StatsNBA):
                 sco_teamlog.extend(_team_logs("Scoring"))
                 adv_teamlog.extend(_team_logs("Advanced"))
         except NBAStatsError:
-            # All-or-nothing: a partial pull would mix populated and empty logs.
-            nba_gamelog = []
-            adv_gamelog = []
-            usg_gamelog = []
-            teamlog = []
-            sco_teamlog = []
-            adv_teamlog = []
+            return [], [], [], [], [], []
+        return nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog, adv_teamlog
 
-        if nba_gamelog and adv_gamelog and usg_gamelog:
-            nba_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
-            adv_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
-            usg_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
+    def _assemble_wnba_player_rows(self, nba_gamelog, adv_gamelog, usg_gamelog, player_df):
+        """Merge base + advanced + usage player logs into the gamelog-shaped frame."""
+        if not (nba_gamelog and adv_gamelog and usg_gamelog):
+            return pd.DataFrame()
 
-            stat_df = (
-                pd.DataFrame(nba_gamelog)
-                .merge(
-                    pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"]
-                )
-                .merge(
-                    pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"]
-                )
+        nba_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
+        adv_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
+        usg_gamelog.sort(key=lambda x: (x["GAME_ID"], x["PLAYER_ID"]))
+
+        stat_df = (
+            pd.DataFrame(nba_gamelog)
+            .merge(
+                pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"]
             )
-            stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
-            stat_df.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
-            stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
-            stat_df = stat_df.loc[stat_df["MIN"] > 1]
-            stat_df = stat_df.loc[~stat_df.TEAM_ABBREVIATION.isna()]
-            # Filter out games already in the gamelog
-            if not self.gamelog.empty:
-                existing = set(
-                    self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None)
-                )
-                stat_df = stat_df[
-                    ~stat_df.apply(lambda x: (x["PLAYER_ID"], x["GAME_ID"]) in existing, axis=1)
-                ]
-
-            stat_df["HOME"] = stat_df.MATCHUP.str.contains(" vs. ")
-            stat_df = stat_df.merge(player_df[["PLAYER_ID", "POS"]], on="PLAYER_ID")
-            stat_df["OPP"] = stat_df.MATCHUP.apply(lambda x: x[x.rfind(" ") :].strip())
-
-            stat_df["PRA"] = stat_df["PTS"] + stat_df["REB"] + stat_df["AST"]
-            stat_df["PR"] = stat_df["PTS"] + stat_df["REB"]
-            stat_df["PA"] = stat_df["PTS"] + stat_df["AST"]
-            stat_df["RA"] = stat_df["REB"] + stat_df["AST"]
-            stat_df["BLST"] = stat_df["BLK"] + stat_df["STL"]
-            stat_df["fantasy points prizepicks"] = (
-                stat_df["PTS"]
-                + stat_df["REB"] * 1.2
-                + stat_df["AST"] * 1.5
-                + stat_df["BLST"] * 3
-                - stat_df["TOV"]
+            .merge(
+                pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"]
             )
-            stat_df["fantasy points underdog"] = (
-                stat_df["PTS"]
-                + stat_df["REB"] * 1.2
-                + stat_df["AST"] * 1.5
-                + stat_df["BLST"] * 3
-                - stat_df["TOV"]
+        )
+        stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
+        stat_df.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
+        stat_df.PLAYER_NAME = stat_df.PLAYER_NAME.apply(remove_accents)
+        stat_df = stat_df.loc[stat_df["MIN"] > 1]
+        stat_df = stat_df.loc[~stat_df.TEAM_ABBREVIATION.isna()]
+        if not self.gamelog.empty:
+            existing = set(
+                self.gamelog[["PLAYER_ID", "GAME_ID"]].itertuples(index=False, name=None)
             )
-            stat_df["fantasy points parlay"] = stat_df["PRA"] + stat_df["BLST"] * 2 - stat_df["TOV"]
-            stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
-            stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-            stat_df["BLK_PCT"] = (
-                (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
-            )
-            stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
-            stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
-            stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
-            stat_df["OREB_40"] = stat_df["OREB"] / stat_df["MIN"] * 40
-            stat_df["DREB_40"] = stat_df["DREB"] / stat_df["MIN"] * 40
-            stat_df["AST_40"] = stat_df["AST"] / stat_df["MIN"] * 40
-            stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
-            stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
-            stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
-            stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
-            stat_df.TEAM_ABBREVIATION = stat_df.TEAM_ABBREVIATION.apply(
-                lambda x: team_abbr_map.get(x, x)
-            )
-            stat_df.OPP = stat_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
+            stat_df = stat_df[
+                ~stat_df.apply(lambda x: (x["PLAYER_ID"], x["GAME_ID"]) in existing, axis=1)
+            ]
 
-            stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
+        stat_df["HOME"] = stat_df.MATCHUP.str.contains(" vs. ")
+        stat_df = stat_df.merge(player_df[["PLAYER_ID", "POS"]], on="PLAYER_ID")
+        stat_df["OPP"] = stat_df.MATCHUP.apply(lambda x: x[x.rfind(" ") :].strip())
 
-            if not stat_df.empty:
-                self._enrich_team_markets(
-                    stat_df,
-                    date_col=self.log_strings["date"],
-                    team_col="TEAM_ABBREVIATION",
-                )
-                self.gamelog = (
-                    pd.concat([stat_df[self.gamelog.columns], self.gamelog])
-                    .sort_values(self.log_strings["date"])
-                    .reset_index(drop=True)
-                )
+        stat_df["PRA"] = stat_df["PTS"] + stat_df["REB"] + stat_df["AST"]
+        stat_df["PR"] = stat_df["PTS"] + stat_df["REB"]
+        stat_df["PA"] = stat_df["PTS"] + stat_df["AST"]
+        stat_df["RA"] = stat_df["REB"] + stat_df["AST"]
+        stat_df["BLST"] = stat_df["BLK"] + stat_df["STL"]
+        stat_df["fantasy points prizepicks"] = (
+            stat_df["PTS"]
+            + stat_df["REB"] * 1.2
+            + stat_df["AST"] * 1.5
+            + stat_df["BLST"] * 3
+            - stat_df["TOV"]
+        )
+        stat_df["fantasy points underdog"] = (
+            stat_df["PTS"]
+            + stat_df["REB"] * 1.2
+            + stat_df["AST"] * 1.5
+            + stat_df["BLST"] * 3
+            - stat_df["TOV"]
+        )
+        stat_df["fantasy points parlay"] = stat_df["PRA"] + stat_df["BLST"] * 2 - stat_df["TOV"]
+        stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
+        stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
+        stat_df["BLK_PCT"] = (
+            (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
+        )
+        stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
+        stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
+        stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40
+        stat_df["OREB_40"] = stat_df["OREB"] / stat_df["MIN"] * 40
+        stat_df["DREB_40"] = stat_df["DREB"] / stat_df["MIN"] * 40
+        stat_df["AST_40"] = stat_df["AST"] / stat_df["MIN"] * 40
+        stat_df["TOV_40"] = stat_df["TOV"] / stat_df["MIN"] * 40
+        stat_df["BLKA_40"] = stat_df["BLKA"] / stat_df["MIN"] * 40
+        stat_df["STL_40"] = stat_df["STL"] / stat_df["MIN"] * 40
+        stat_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+        stat_df.TEAM_ABBREVIATION = _remap_abbr(stat_df.TEAM_ABBREVIATION)
+        stat_df.OPP = _remap_abbr(stat_df.OPP)
 
-        if teamlog and sco_teamlog and adv_teamlog:
-            teamlog.sort(key=lambda x: (x["GAME_ID"], x["TEAM_ID"]))
-            sco_teamlog.sort(key=lambda x: (x["GAME_ID"], x["TEAM_ID"]))
-            adv_teamlog.sort(key=lambda x: (x["GAME_ID"], x["TEAM_ID"]))
+        stat_df["GAME_DATE"] = pd.to_datetime(stat_df["GAME_DATE"]).astype(str)
+        return stat_df
 
-            team_df = (
-                pd.DataFrame(teamlog)
-                .merge(pd.DataFrame(adv_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None, "_y"])
-                .merge(pd.DataFrame(sco_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None, "_y"])
-            )
-            team_df = team_df[[col for col in team_df.columns if "_y" not in col]]
-            team_df = team_df.loc[~team_df.TEAM_ABBREVIATION.isna()]
+    def _assemble_wnba_team_rows(self, teamlog, sco_teamlog, adv_teamlog):
+        """Merge base + scoring + advanced team logs and pair home/away OPP_ columns."""
+        if not (teamlog and sco_teamlog and adv_teamlog):
+            return pd.DataFrame()
 
-            team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
-            team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" ") :].strip())
-            team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
-            team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
-            team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
-            team_df.TEAM_ABBREVIATION = team_df.TEAM_ABBREVIATION.apply(
-                lambda x: team_abbr_map.get(x, x)
-            )
-            team_df.OPP = team_df.OPP.apply(lambda x: team_abbr_map.get(x, x))
+        teamlog.sort(key=lambda x: (x["GAME_ID"], x["TEAM_ID"]))
+        sco_teamlog.sort(key=lambda x: (x["GAME_ID"], x["TEAM_ID"]))
+        adv_teamlog.sort(key=lambda x: (x["GAME_ID"], x["TEAM_ID"]))
 
-            stats = [stat for stat in self.teamlog.columns if "OPP_" in stat]
-            home_teams = team_df.loc[team_df.HOME]
-            home_teams.index = home_teams.GAME_ID
-            away_teams = team_df.loc[~team_df.HOME]
-            away_teams.index = away_teams.GAME_ID
-            home_teams = home_teams.join(away_teams.add_prefix("OPP_")[stats])
-            away_teams = away_teams.join(home_teams.add_prefix("OPP_")[stats])
-            team_df = pd.concat([home_teams, away_teams], ignore_index=True)
+        team_df = (
+            pd.DataFrame(teamlog)
+            .merge(pd.DataFrame(adv_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None, "_y"])
+            .merge(pd.DataFrame(sco_teamlog), on=["TEAM_ID", "GAME_ID"], suffixes=[None, "_y"])
+        )
+        team_df = team_df[[col for col in team_df.columns if "_y" not in col]]
+        team_df = team_df.loc[~team_df.TEAM_ABBREVIATION.isna()]
 
-            team_df["GAME_DATE"] = pd.to_datetime(team_df["GAME_DATE"]).astype(str)
+        team_df["HOME"] = team_df.MATCHUP.str.contains(" vs. ")
+        team_df["OPP"] = team_df.MATCHUP.apply(lambda x: x[x.rfind(" ") :].strip())
+        team_df["FTR"] = team_df["FTM"] / team_df["FGA"]
+        team_df["BLK_RATIO"] = team_df["BLK"] / team_df["BLKA"]
+        team_df.fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
+        team_df.TEAM_ABBREVIATION = _remap_abbr(team_df.TEAM_ABBREVIATION)
+        team_df.OPP = _remap_abbr(team_df.OPP)
 
-            if not team_df.empty:
-                self.teamlog = (
-                    pd.concat([team_df[self.teamlog.columns], self.teamlog])
-                    .sort_values(self.log_strings["date"])
-                    .reset_index(drop=True)
-                )
+        stats = [stat for stat in self.teamlog.columns if "OPP_" in stat]
+        home_teams = team_df.loc[team_df.HOME]
+        home_teams.index = home_teams.GAME_ID
+        away_teams = team_df.loc[~team_df.HOME]
+        away_teams.index = away_teams.GAME_ID
+        home_teams = home_teams.join(away_teams.add_prefix("OPP_")[stats])
+        away_teams = away_teams.join(home_teams.add_prefix("OPP_")[stats])
+        team_df = pd.concat([home_teams, away_teams], ignore_index=True)
 
-        self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
-        self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
-
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
-            self._enrich_team_markets(
-                self.gamelog,
-                date_col=self.log_strings["date"],
-                team_col="TEAM_ABBREVIATION",
-            )
-            self.gamelog["GAME_DATE"] = self.gamelog["GAME_DATE"].astype(str)
-            self.teamlog["GAME_DATE"] = self.teamlog["GAME_DATE"].astype(str)
-
-        # Save the updated player data
-        write_gamelog("wnba", self.gamelog, self.teamlog, self.players)
+        team_df["GAME_DATE"] = pd.to_datetime(team_df["GAME_DATE"]).astype(str)
+        return team_df
 
     def build_comp_profile(self, playerList=None):
         """Build merged player profile DataFrame for comp computation.
