@@ -1737,7 +1737,6 @@ def _step_decode_predictions(
 
 
 def _fuse_skewnormal(out, decoded, splits, cv, hist_gate):
-    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1791,7 +1790,6 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate):
 
 
 def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate):
-    """Fit model_weight for the NegBin / Gamma families (shared preamble)."""
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
 
@@ -1813,7 +1811,6 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate):
 
 
 def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
-    """NegBin / ZINB branch: blend r + derive p on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1860,7 +1857,6 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
 
 
 def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
-    """Gamma / ZAGamma branch: blend alpha + beta on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
