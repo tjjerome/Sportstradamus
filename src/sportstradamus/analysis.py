@@ -164,16 +164,41 @@ def _migrate_flat_history(history):
     CloseBooksP, MarketCLV, ModelCLV). The trailing three are NaN-padded for
     pre-CLV rows; ``reflect`` populates them from the archive on resolution.
     """
-    pred_key = ["Player", "League", "Date", "Market"]
+    pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
+    _prep_legacy_columns(history)
+
+    rows = []
+    for key, grp in history.groupby(["Player", "League", "Date", "Market"], dropna=False):
+        player, league, date, market = key
+        # Prediction-level cols come from the most recent row (last in group).
+        latest = grp.iloc[-1]
+        row = {
+            "Player": player,
+            "League": league,
+            "Date": date,
+            "Market": market,
+            "Offers": _group_offers(grp),
+        }
+        for col in pred_cols:
+            row[col] = latest.get(col, np.nan)
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def _prep_legacy_columns(history):
+    """Ensure offer/prediction columns exist and back-fill Model P / Books P.
+
+    The legacy flat schema stored boosted ``Model`` / ``Books``; the normalized
+    schema wants de-boosted per-offer ``Model P`` / ``Books P``. Mutates
+    ``history`` in place.
+    """
     offer_cols = OFFER_FIELDS[:LEGACY_OFFER_ARITY]
     pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
-
-    # Ensure columns exist
     for col in offer_cols + pred_cols + ["Actual"]:
         if col not in history.columns:
             history[col] = np.nan
 
-    # If old schema had "Model" and "Books" (boosted values), derive Model P / Books P
     if "Model P" not in history.columns or history["Model P"].isna().all():
         if "Model" in history.columns:
             history["Model P"] = history["Model"] / history.get("Boost", 1)
@@ -181,47 +206,33 @@ def _migrate_flat_history(history):
         if "Books" in history.columns:
             history["Books P"] = history["Books"] / history.get("Boost", 1)
 
-    rows = []
-    for key, grp in history.groupby(pred_key, dropna=False):
-        player, league, date, market = key
-        # Take prediction-level cols from the most recent row (last in group)
-        latest = grp.iloc[-1]
 
-        offers = []
-        for _, r in grp.iterrows():
-            line = r.get("Line")
-            if pd.isna(line):
-                continue
-            offers.append(
-                (
-                    float(line),
-                    float(r.get("Boost", 1)),
-                    str(r.get("Platform", "")),
-                    str(r.get("Bet", "")),
-                    float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
-                    float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
-                    np.nan,  # Close Books P — populated by reflect.
-                    np.nan,  # Market CLV
-                    np.nan,  # Model CLV
-                )
-            )
+def _offer_tuple(r):
+    """Build one normalized 9-tuple offer from a legacy flat row, or None.
 
-        # Dedup offers by (Line, Platform)
-        offers = _dedup_offers(offers)
+    Returns None when the row has no line (NaN). The trailing closing trio
+    (Close Books P, Market CLV, Model CLV) is NaN-padded; ``reflect`` fills it.
+    """
+    line = r.get("Line")
+    if pd.isna(line):
+        return None
+    return (
+        float(line),
+        float(r.get("Boost", 1)),
+        str(r.get("Platform", "")),
+        str(r.get("Bet", "")),
+        float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
+        float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
+        np.nan,  # Close Books P — populated by reflect.
+        np.nan,  # Market CLV
+        np.nan,  # Model CLV
+    )
 
-        row = {
-            "Player": player,
-            "League": league,
-            "Date": date,
-            "Market": market,
-            "Offers": offers,
-        }
-        for col in pred_cols:
-            row[col] = latest.get(col, np.nan)
 
-        rows.append(row)
-
-    return pd.DataFrame(rows)
+def _group_offers(grp):
+    """Collect a prediction group's rows into a deduped Offers list."""
+    offers = [t for _, r in grp.iterrows() if (t := _offer_tuple(r)) is not None]
+    return _dedup_offers(offers)
 
 
 def _dedup_offers(offers):
