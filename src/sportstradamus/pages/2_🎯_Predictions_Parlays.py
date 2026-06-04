@@ -101,40 +101,50 @@ st.caption(
 
 def _render_parlay(row: pd.Series, offers: pd.DataFrame) -> None:
     with st.container(border=True):
-        indep_p = row.get("Indep P")
-        show_indep = pd.notna(indep_p)
-        meta_cols = st.columns(6 if show_indep else 5)
-        meta_cols[0].metric("Model EV", f"{row['Model EV']:.2f}")
-        meta_cols[1].metric("Books EV", f"{row.get('Books EV', float('nan')):.2f}")
-        meta_cols[2].metric("Boost", f"{row.get('Boost', float('nan')):.2f}x")
-        meta_cols[3].metric("Bet Size", row.get("Bet Size", "—"))
-        meta_cols[4].metric("Fun", f"{row.get('Fun', float('nan')):.2f}")
-        if show_indep:
-            # Indep P is the no-correlation joint; comparing it to the joint P
-            # reveals how much correlation lifted (or sank) the row.
-            joint_p = row.get("P", float("nan"))
-            delta = (joint_p - indep_p) if pd.notna(joint_p) else None
-            meta_cols[5].metric(
-                "Joint vs Indep",
-                f"{joint_p:.3f}" if pd.notna(joint_p) else "—",
-                f"{delta:+.3f}" if delta is not None else None,
-                help="Correlation-aware joint P vs independence-assumption Indep P.",
-            )
-        legs = [row.get(c) for c in LEG_COLS if isinstance(row.get(c), str) and row.get(c)]
-        for leg_i, leg in enumerate(legs):
-            if st.button(
-                f"  • {leg}",
-                key=f"plyleg::{row.name}::{leg_i}",
-                use_container_width=True,
-            ):
-                idx = find_offer_idx(parse_leg(leg), offers, row.get("Platform"))
-                if idx is not None:
-                    st.session_state.detail_stack = [idx]
-                    st.rerun()
-                else:
-                    st.toast("Detail unavailable — line moved since this parlay was built.")
+        _render_parlay_metrics(row)
+        _render_parlay_legs(row, offers)
         if pd.notna(row.get("Rec Bet")):
             st.caption(f"Recommended bet: {row['Rec Bet']:.2f} units")
+
+
+def _render_parlay_metrics(row: pd.Series) -> None:
+    """Top metric row; a sixth column appears only when Indep P is present."""
+    indep_p = row.get("Indep P")
+    show_indep = pd.notna(indep_p)
+    meta_cols = st.columns(6 if show_indep else 5)
+    meta_cols[0].metric("Model EV", f"{row['Model EV']:.2f}")
+    meta_cols[1].metric("Books EV", f"{row.get('Books EV', float('nan')):.2f}")
+    meta_cols[2].metric("Boost", f"{row.get('Boost', float('nan')):.2f}x")
+    meta_cols[3].metric("Bet Size", row.get("Bet Size", "—"))
+    meta_cols[4].metric("Fun", f"{row.get('Fun', float('nan')):.2f}")
+    if show_indep:
+        # Indep P is the no-correlation joint; comparing it to the joint P
+        # reveals how much correlation lifted (or sank) the row.
+        joint_p = row.get("P", float("nan"))
+        delta = (joint_p - indep_p) if pd.notna(joint_p) else None
+        meta_cols[5].metric(
+            "Joint vs Indep",
+            f"{joint_p:.3f}" if pd.notna(joint_p) else "—",
+            f"{delta:+.3f}" if delta is not None else None,
+            help="Correlation-aware joint P vs independence-assumption Indep P.",
+        )
+
+
+def _render_parlay_legs(row: pd.Series, offers: pd.DataFrame) -> None:
+    """Per-leg buttons; a click opens the leg's detail dialog if the line still exists."""
+    legs = [row.get(c) for c in LEG_COLS if isinstance(row.get(c), str) and row.get(c)]
+    for leg_i, leg in enumerate(legs):
+        if st.button(
+            f"  • {leg}",
+            key=f"plyleg::{row.name}::{leg_i}",
+            use_container_width=True,
+        ):
+            idx = find_offer_idx(parse_leg(leg), offers, row.get("Platform"))
+            if idx is not None:
+                st.session_state.detail_stack = [idx]
+                st.rerun()
+            else:
+                st.toast("Detail unavailable — line moved since this parlay was built.")
 
 
 for game, group in view.groupby("Game", sort=False):
