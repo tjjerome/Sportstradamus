@@ -81,6 +81,11 @@ ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/
 # season-long token budget doesn't silently run dry mid-slate.
 _LOW_API_CREDITS_THRESHOLD = 50
 
+# How many days ahead of the run date to ingest games for. Live runs sweep a
+# multi-day slate; historical backfill is anchored to a single day.
+_LIVE_DAY_WINDOW = 6
+_HIST_DAY_WINDOW = 1
+
 
 class OddsAPIAuthError(RuntimeError):
     """Raised on an Odds API ``401`` — out of usage credits or a bad key.
@@ -206,13 +211,13 @@ def _moneyline_sports(apikey, sport, key, historical):
 def _moneyline_request(apikey, date, historical, low_on_credits):
     markets = ["h2h", "totals", "spreads"]
     if historical:
-        return ODDS_API_HISTORICAL_ODDS_URL, 1, {
+        return ODDS_API_HISTORICAL_ODDS_URL, _HIST_DAY_WINDOW, {
             "apiKey": apikey["odds_api_plus"],
             "regions": "us",
             "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "markets": ",".join(markets),
         }
-    return ODDS_API_ODDS_URL, 6, {
+    return ODDS_API_ODDS_URL, _LIVE_DAY_WINDOW, {
         "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
         "regions": "us",
         "markets": ",".join(markets),
@@ -362,12 +367,12 @@ def _props_request(apikey, date, historical):
         return _PropsRequest(
             ODDS_API_HISTORICAL_EVENTS_URL,
             ODDS_API_HISTORICAL_EVENT_ODDS_URL,
-            1,
+            _HIST_DAY_WINDOW,
             {"apiKey": apikey, "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
             historical,
         )
     return _PropsRequest(
-        ODDS_API_EVENTS_URL, ODDS_API_EVENT_ODDS_URL, 6, {"apiKey": apikey}, historical
+        ODDS_API_EVENTS_URL, ODDS_API_EVENT_ODDS_URL, _LIVE_DAY_WINDOW, {"apiKey": apikey}, historical
     )
 
 
@@ -643,7 +648,7 @@ def _get_props_from_fixtures(archive, props, fixture_dir: Path, date):
             gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
                 pytz.timezone("America/Chicago")
             )
-            if gameDate > date + timedelta(days=6):
+            if gameDate > date + timedelta(days=_LIVE_DAY_WINDOW):
                 continue
             gameDate_str = gameDate.strftime("%Y-%m-%d")
 
