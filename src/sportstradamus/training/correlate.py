@@ -508,7 +508,6 @@ def _residualize_gamelog(
                 .mean()
             )
         )
-        # Align back to the original index order.
         out.loc[sort_idx, stat] = (sorted_view[stat] - prior_mean).to_numpy()
     return out
 
@@ -785,6 +784,17 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     training_data_dir = pkg_resources.files(data) / "training_data"
     training_data_dir.mkdir(parents=True, exist_ok=True)
     raw_filepath = training_data_dir / f"{league}_corr.parquet"
+
+    matrix, latest_date = _load_or_warmstart_matrix(raw_filepath, force)
+    matrix = _append_new_records(league, log, matrix, latest_date, raw_filepath)
+    matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
+
+    same_team_blocks, opposing_blocks, per_team_obs = _correlate_teams(matrix_for_corr)
+    _write_corr_outputs(league, same_team_blocks, opposing_blocks)
+    _write_corr_metadata(league, matrix, per_team_obs, cache_key)
+
+
+def _load_or_warmstart_matrix(raw_filepath, force):
     if raw_filepath.is_file() and not force:
         matrix = pd.read_parquet(raw_filepath)
         if "DATE" in matrix.columns:
@@ -797,7 +807,10 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     else:
         matrix = pd.DataFrame()
         latest_date = datetime.today() - timedelta(days=LOOKBACK_DAYS)
+    return matrix, latest_date
 
+
+def _append_new_records(league, log, matrix, latest_date, raw_filepath):
     new_records = _build_team_game_records(league, log, latest_date)
     matrix = pd.concat([matrix, pd.json_normalize(new_records)], ignore_index=True)
     if "DATE" in matrix.columns:
@@ -805,9 +818,10 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
         # pyarrow versions/environments.
         matrix["DATE"] = pd.to_datetime(matrix["DATE"], errors="coerce")
     matrix.to_parquet(raw_filepath, compression="zstd")
+    return matrix
 
-    matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
 
+def _correlate_teams(matrix_for_corr):
     same_team_blocks: dict = {}
     opposing_blocks: dict = {}
     per_team_obs: dict[str, int] = {}
@@ -824,9 +838,6 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
 
         per_team_obs[str(team)] = len(team_matrix)
 
-        # Vectorized Spearman + pairwise overlap in one pass — the prior
-        # ``team_matrix.corr(method='spearman')`` was the dominant per-team
-        # cost and is numerically equivalent to this matmul formulation.
         c_spearman, overlap = _pairwise_spearman_with_overlap(team_matrix)
         c_remap = 2 * np.sin(np.pi / 6 * c_spearman)
         c_shrunk = _shrink_correlations(c_remap, overlap)
@@ -840,7 +851,10 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
             same_team_blocks[team] = same
         if not opposing.empty:
             opposing_blocks[team] = opposing
+    return same_team_blocks, opposing_blocks, per_team_obs
 
+
+def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
     league_dir = pkg_resources.files(data) / "leagues" / league.lower()
     league_dir.mkdir(parents=True, exist_ok=True)
     same_path = league_dir / "corr_same_team.parquet"
@@ -854,6 +868,9 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     else:
         pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
 
+
+def _write_corr_metadata(league, matrix, per_team_obs, cache_key):
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
     metadata_path = league_dir / "corr_metadata.json"
     dates = (
         pd.to_datetime(matrix.DATE)
