@@ -415,30 +415,21 @@ def backfill(
     with tqdm(total=total, desc="fp-backfill", unit="call") as bar:
         for season in seasons:
             for week in weeks:
-                week_key = (season, week)
-                for spec in specs:
-                    if not _would_skip(spec, season=season, week=week, mode=mode, refetch=refetch):
-                        _backfill_pause(
-                            prev_week_key,
-                            week_key,
-                            request_range=request_range,
-                            week_range=week_range,
-                            log=log,
-                        )
-                        prev_week_key = week_key
-                    results.append(
-                        _fetch_and_write_one(
-                            spec,
-                            client,
-                            season=season,
-                            week=week,
-                            mode=mode,
-                            log=log,
-                            use_cache=not no_cache,
-                            refetch=refetch,
-                        )
-                    )
-                    bar.update(1)
+                prev_week_key = _backfill_week(
+                    specs,
+                    client,
+                    season,
+                    week,
+                    prev_week_key,
+                    results,
+                    bar,
+                    mode=mode,
+                    log=log,
+                    use_cache=not no_cache,
+                    refetch=refetch,
+                    request_range=request_range,
+                    week_range=week_range,
+                )
     report_path = _write_run_report(
         results,
         command="backfill",
@@ -464,6 +455,54 @@ def backfill(
         raise click.ClickException(
             f"{len(failures)} of {len(results)} backfill calls failed — see {report_path}"
         )
+
+
+def _backfill_week(
+    specs,
+    client,
+    season,
+    week,
+    prev_week_key,
+    results,
+    bar,
+    *,
+    mode,
+    log,
+    use_cache,
+    refetch,
+    request_range,
+    week_range,
+):
+    """Fetch every spec for one (season, week); return the updated prev_week_key.
+
+    The pacing pause fires only for specs that aren't skipped, so a fully-cached
+    week resumes near-instantly. Appends each outcome to ``results`` and ticks ``bar``.
+    """
+    week_key = (season, week)
+    for spec in specs:
+        if not _would_skip(spec, season=season, week=week, mode=mode, refetch=refetch):
+            _backfill_pause(
+                prev_week_key,
+                week_key,
+                request_range=request_range,
+                week_range=week_range,
+                log=log,
+            )
+            prev_week_key = week_key
+        results.append(
+            _fetch_and_write_one(
+                spec,
+                client,
+                season=season,
+                week=week,
+                mode=mode,
+                log=log,
+                use_cache=use_cache,
+                refetch=refetch,
+            )
+        )
+        bar.update(1)
+    return prev_week_key
 
 
 @fp_fetch.command("list")
