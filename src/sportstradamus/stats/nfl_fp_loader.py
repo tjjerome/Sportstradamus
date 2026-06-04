@@ -170,13 +170,30 @@ def load_one_year(year: int) -> pd.DataFrame:
         logger.warning("no FP data directory found for %s", year)
         return pd.DataFrame()
 
-    per_year = pd.DataFrame()
+    per_year = _collect_season_sources(fp_dir, year)
+    if per_year.empty:
+        return per_year
+    return _finalize_comp_profile(per_year)
 
+
+def _combine_player_files(fp_dir: object) -> pd.DataFrame:
+    """``combine_first``-merge every per-player FP file, prefixed per file."""
+    per_year = pd.DataFrame()
     for filename, prefix in _PER_PLAYER_FILE_PREFIXES.items():
         df = _load_player_file(fp_dir, filename, prefix)
         if df is None:
             continue
         per_year = per_year.combine_first(df) if not per_year.empty else df
+    return per_year
+
+
+def _collect_season_sources(fp_dir: object, year: int) -> pd.DataFrame:
+    """Merge the per-player files with the QB-coverage, team-coverage, and PBP sources.
+
+    Returns an empty frame when no per-player file exists; the coverage and PBP
+    joins are skipped in that case (nothing to broadcast onto).
+    """
+    per_year = _combine_player_files(fp_dir)
 
     qb_cov = _load_qb_coverage_file(fp_dir)
     if qb_cov is not None and not per_year.empty:
@@ -191,12 +208,16 @@ def load_one_year(year: int) -> pd.DataFrame:
     if pbp is not None and not per_year.empty:
         per_year = per_year.combine_first(pbp)
 
-    if per_year.empty:
-        return per_year
+    return per_year
 
-    # Collapse HB/FB -> RB before the position filter and the canonical
-    # rename so downstream consumers (derive_comp_metrics, the Phase 1G
-    # stability diagnostic, build_comp_profile) see one taxonomy.
+
+def _finalize_comp_profile(per_year: pd.DataFrame) -> pd.DataFrame:
+    """Collapse RB roles, filter to comp positions, rename keys, derive + join.
+
+    HB/FB collapse to RB *before* the position filter and the canonical rename so
+    downstream consumers (derive_comp_metrics, the Phase 1G stability diagnostic,
+    build_comp_profile) see one taxonomy.
+    """
     if "POS" in per_year.columns:
         per_year.loc[per_year["POS"].isin(_RB_ROLE_ALIASES), "POS"] = "RB"
         per_year = per_year.loc[per_year["POS"].isin(_COMP_POSITIONS)]
