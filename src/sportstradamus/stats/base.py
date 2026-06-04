@@ -134,6 +134,19 @@ def _profile_rows_for_teams(profile: pd.DataFrame, team_keys: pd.Index | list[st
     return profile.reindex(team_keys)
 
 
+def _zscore_within_player(df: pd.DataFrame, player_col: str, market: str) -> pd.Series:
+    """Z-score each row's ``market`` value against that player's own mean and std.
+
+    Players with zero spread map to NaN before the divide and then fill 0, so a
+    player with a flat history contributes a neutral score rather than a divide-by-
+    zero. Casts ``df[market]`` to float in place; returns the z-scored series.
+    """
+    df[market] = df[market].astype(float)
+    groups = df.groupby(player_col)[market]
+    std = groups.transform("std").replace(0, np.nan)
+    return ((df[market] - groups.transform("mean")) / std).fillna(0)
+
+
 def scale_team_volume_to_budget(
     player_profile: pd.DataFrame,
     market: str,
@@ -1349,10 +1362,7 @@ class Stats:
             compGames = self._mlb_comp_games(player, market, is_pitch_market, stats)
             if compGames is None:
                 continue
-            compGames[market] = compGames[market].astype(float)
-            comp_groups = compGames.groupby(player_col)[market]
-            comp_std = comp_groups.transform("std").replace(0, np.nan)
-            scores = ((compGames[market] - comp_groups.transform("mean")) / comp_std).fillna(0)
+            scores = _zscore_within_player(compGames, player_col, market)
             scores.index = scores.index.droplevel(0)
             compGames[market] = scores
             opp_comp_games = compGames.loc[compGames[opp_col] == opponents[player], market]
@@ -1414,10 +1424,7 @@ class Stats:
         opp_col = self.log_strings["opponent"]
         player_col = self.log_strings["player"]
         gl_z = self.short_gamelog[[player_col, opp_col, market]].copy()
-        gl_z[market] = gl_z[market].astype(float)
-        gl_groups = gl_z.groupby(player_col)[market]
-        gl_std = gl_groups.transform("std").replace(0, np.nan)
-        gl_z["_mkt_zscore"] = ((gl_z[market] - gl_groups.transform("mean")) / gl_std).fillna(0)
+        gl_z["_mkt_zscore"] = _zscore_within_player(gl_z, player_col, market)
 
         pairs = self._comp_pairs()
         if pairs.empty:
