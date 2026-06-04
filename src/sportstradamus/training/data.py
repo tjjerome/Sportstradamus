@@ -39,6 +39,10 @@ _MIN_ARCHIVED_FOR_BALANCE: int = 10
 _MIN_POS_ARCHIVED_FOR_MEDIAN: int = 20
 _MIN_ARCHIVED_FOR_OVER_TARGET: int = 20
 
+# Minimum reference-set size before histogram-matching weights are trusted;
+# below this the reference is treated as empty and uniform weights are used.
+_MIN_HISTOGRAM_REFERENCE: int = 20
+
 
 def count_training_rows(stat_data, market, start_date, archive) -> int:
     """Estimate the number of training rows get_training_matrix would produce for
@@ -85,7 +89,7 @@ def count_training_rows(stat_data, market, start_date, archive) -> int:
     return total
 
 
-def _histogram_weights(values, reference_values, min_reference=20) -> np.ndarray:
+def _histogram_weights(values, reference_values, min_reference=_MIN_HISTOGRAM_REFERENCE) -> np.ndarray:
     """Compute removal probabilities via histogram matching.
 
     Returns probability array aligned to values. Rows whose bin density
@@ -111,16 +115,7 @@ def _histogram_weights(values, reference_values, min_reference=20) -> np.ndarray
     return p / np.sum(p)
 
 
-def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
-    """Remove data quality issues and prepare matrix for modeling.
-
-    Trims outlier results, clips lines to a realistic range, balances
-    the line distribution across positions, and balances over/under
-    proportions.  All removal steps respect min_rows so that sparse-
-    archive markets are not destroyed.
-    """
-    warnings.simplefilter("ignore", UserWarning)
-
+def _rebase_days_into_season(M: pd.DataFrame) -> pd.DataFrame:
     while any(M["DaysIntoSeason"] < 0) or any(M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING):
         M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] = (
             M.loc[M["DaysIntoSeason"] < 0, "DaysIntoSeason"] - M["DaysIntoSeason"].min()
@@ -129,20 +124,10 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
             M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"]
             - M.loc[M["DaysIntoSeason"] > _SEASON_DAY_WRAP_CEILING, "DaysIntoSeason"].min()
         )
+    return M
 
-    M = M.loc[
-        (
-            (M["Result"] >= M["Result"].quantile(_RESULT_OUTLIER_LOW))
-            & (M["Result"] <= M["Result"].quantile(_RESULT_OUTLIER_HIGH))
-        )
-        | (M["Archived"] == 1)
-    ].copy()
 
-    # Use archived range when coverage is good; otherwise fall back to
-    # full-data percentiles so sparse-archive markets keep their natural
-    # line distribution.
-    archived_mask = M["Archived"] == 1
-    n_archived = archived_mask.sum()
+def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int) -> pd.DataFrame:
     if (
         n_archived >= _MIN_ARCHIVED_FOR_CLIP
         and n_archived / len(M) > _MIN_ARCHIVED_FRACTION_FOR_CLIP
@@ -153,57 +138,46 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         line_floor = M["Line"].quantile(_LINE_CLIP_LOW)
         line_ceil = M["Line"].quantile(_LINE_CLIP_HIGH)
     M["Line"] = M["Line"].clip(line_floor, line_ceil)
+    return M
 
-    overall_target = (
-        M.loc[archived_mask, "Line"].median()
-        if n_archived >= _MIN_ARCHIVED_FOR_MEDIAN_LINE
-        else M["Line"].mean()
-    )
 
-    def _balance_lines(M, pos_mask):
-        budget = max(len(M) - min_rows, 0)
-        if budget == 0:
-            return M
-
-        pos_archived = archived_mask & pos_mask
-        n_pos_archived = pos_archived.sum()
-        target = (
-            M.loc[pos_archived, "Line"].median()
-            if n_pos_archived >= _MIN_POS_ARCHIVED_FOR_MEDIAN
-            else overall_target
-        )
-
-        non_arch = ~archived_mask & pos_mask
-        less = M.loc[non_arch & (M["Line"] < target), "Line"]
-        more = M.loc[non_arch & (M["Line"] > target), "Line"]
-
-        n = min(abs(len(less) - len(more)), budget)
-        if n == 0:
-            return M
-
-        if len(less) > len(more):
-            ref = M.loc[pos_archived & (M["Line"] < target), "Line"]
-            p = _histogram_weights(less.values, ref.values, min_reference=20)
-            chopping_block = less.index
-        else:
-            ref = M.loc[pos_archived & (M["Line"] > target), "Line"]
-            p = _histogram_weights(more.values, ref.values, min_reference=20)
-            chopping_block = more.index
-
-        n = min(n, len(chopping_block))
-        cut = np.random.choice(chopping_block, n, replace=False, p=p)
-        M.drop(cut, inplace=True)
+def _balance_lines(M, pos_mask, archived_mask, overall_target, min_rows):
+    budget = max(len(M) - min_rows, 0)
+    if budget == 0:
         return M
 
-    if "Player position" in M.columns:
-        for i in M["Player position"].unique():
-            M = _balance_lines(M, M["Player position"] == i)
+    pos_archived = archived_mask & pos_mask
+    n_pos_archived = pos_archived.sum()
+    target = (
+        M.loc[pos_archived, "Line"].median()
+        if n_pos_archived >= _MIN_POS_ARCHIVED_FOR_MEDIAN
+        else overall_target
+    )
+
+    non_arch = ~archived_mask & pos_mask
+    less = M.loc[non_arch & (M["Line"] < target), "Line"]
+    more = M.loc[non_arch & (M["Line"] > target), "Line"]
+
+    n = min(abs(len(less) - len(more)), budget)
+    if n == 0:
+        return M
+
+    if len(less) > len(more):
+        ref = M.loc[pos_archived & (M["Line"] < target), "Line"]
+        p = _histogram_weights(less.values, ref.values)
+        chopping_block = less.index
     else:
-        M = _balance_lines(M, pd.Series(True, index=M.index))
+        ref = M.loc[pos_archived & (M["Line"] > target), "Line"]
+        p = _histogram_weights(more.values, ref.values)
+        chopping_block = more.index
 
-    if n_archived < _MIN_ARCHIVED_FOR_BALANCE:
-        return M.sort_values("Date")
+    n = min(n, len(chopping_block))
+    cut = np.random.choice(chopping_block, n, replace=False, p=p)
+    M.drop(cut, inplace=True)
+    return M
 
+
+def _balance_over_under(M: pd.DataFrame, min_rows: int) -> pd.DataFrame:
     pushes = M.loc[M["Result"] == M["Line"]]
     push_rate = pushes["Archived"].sum() / M["Archived"].sum()
     M = M.loc[M["Result"] != M["Line"]]
@@ -240,3 +214,49 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
         pushes.drop(cut, inplace=True)
 
     return pd.concat([M, pushes]).sort_values("Date")
+
+
+def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
+    """Remove data quality issues and prepare matrix for modeling.
+
+    Trims outlier results, clips lines to a realistic range, balances
+    the line distribution across positions, and balances over/under
+    proportions.  All removal steps respect min_rows so that sparse-
+    archive markets are not destroyed.
+    """
+    warnings.simplefilter("ignore", UserWarning)
+
+    M = _rebase_days_into_season(M)
+
+    M = M.loc[
+        (
+            (M["Result"] >= M["Result"].quantile(_RESULT_OUTLIER_LOW))
+            & (M["Result"] <= M["Result"].quantile(_RESULT_OUTLIER_HIGH))
+        )
+        | (M["Archived"] == 1)
+    ].copy()
+
+    archived_mask = M["Archived"] == 1
+    n_archived = archived_mask.sum()
+    M = _clip_lines(M, archived_mask, n_archived)
+
+    overall_target = (
+        M.loc[archived_mask, "Line"].median()
+        if n_archived >= _MIN_ARCHIVED_FOR_MEDIAN_LINE
+        else M["Line"].mean()
+    )
+
+    if "Player position" in M.columns:
+        for i in M["Player position"].unique():
+            M = _balance_lines(
+                M, M["Player position"] == i, archived_mask, overall_target, min_rows
+            )
+    else:
+        M = _balance_lines(
+            M, pd.Series(True, index=M.index), archived_mask, overall_target, min_rows
+        )
+
+    if n_archived < _MIN_ARCHIVED_FOR_BALANCE:
+        return M.sort_values("Date")
+
+    return _balance_over_under(M, min_rows)
