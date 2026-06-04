@@ -394,17 +394,20 @@ def get_prediction_history(
 
 
 def _extract_platforms(history):
-    """Extract unique platform names from Offers column."""
-    platforms = set()
+    """Extract unique platform names from the Offers column (or legacy Platform)."""
     if "Offers" in history.columns:
-        for offers in history["Offers"].dropna():
-            if isinstance(offers, list):
-                for offer in offers:
-                    if len(offer) >= 3 and offer[2]:
-                        platforms.add(str(offer[2]))
-    elif "Platform" in history.columns:
-        platforms = set(history["Platform"].dropna().unique())
-    return sorted(platforms)
+        return sorted(
+            {
+                str(offer[2])
+                for offers in history["Offers"].dropna()
+                if isinstance(offers, list)
+                for offer in offers
+                if len(offer) >= 3 and offer[2]
+            }
+        )
+    if "Platform" in history.columns:
+        return sorted(set(history["Platform"].dropna().unique()))
+    return []
 
 
 def sidebar_filters(
