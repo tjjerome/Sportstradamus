@@ -250,6 +250,23 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _settled_offers(history: pd.DataFrame):
+    """Explode history to settled offers with a parsed ``_date``; None if none remain."""
+    if history.empty:
+        return None
+    exploded = explode_offers(history)
+    if exploded.empty or "Actual" not in exploded.columns:
+        return None
+    settled = exploded[exploded["Actual"].notna()].copy()
+    if settled.empty:
+        return None
+    settled["_date"] = pd.to_datetime(settled["Date"], errors="coerce")
+    settled = settled[settled["_date"].notna()]
+    if settled.empty:
+        return None
+    return settled
+
+
 def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None) -> pd.DataFrame:
     """Per-(league, market) Gate 2 metrics over 7- and 30-day rolling windows.
 
@@ -259,17 +276,8 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
     ``LIVE_METRICS_WINDOWS``). Cells with no offers in the 7-day window still
     emit a row with ``n_settled=0`` so downstream joins find every active cell.
     """
-    if history.empty:
-        return _empty_live_metrics_frame()
-    exploded = explode_offers(history)
-    if exploded.empty or "Actual" not in exploded.columns:
-        return _empty_live_metrics_frame()
-    settled = exploded[exploded["Actual"].notna()].copy()
-    if settled.empty:
-        return _empty_live_metrics_frame()
-    settled["_date"] = pd.to_datetime(settled["Date"], errors="coerce")
-    settled = settled[settled["_date"].notna()]
-    if settled.empty:
+    settled = _settled_offers(history)
+    if settled is None:
         return _empty_live_metrics_frame()
 
     now_ts = pd.Timestamp(now or datetime.now(UTC))
@@ -291,7 +299,6 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
             rows.append(_build_cell_row(cell, grp, now=now_ts, window_days=window_days))
 
     return _enforce_live_metrics_dtypes(pd.DataFrame(rows))
-
 
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
@@ -317,37 +324,50 @@ def run(league, skip_update, history_only, log_level):
         "reflect invoked",
         extra={"league": league, "skip_update": skip_update, "history_only": history_only},
     )
-    # ------------------------------------------------------------------
-    # 1. Load league Stats objects (optionally with update)
-    # ------------------------------------------------------------------
+    stats = _load_league_stats(league, skip_update)
+    history, n_resolved_hist = _resolve_and_clv_history(stats)
+    n_resolved_parl = _resolve_parlays(stats, history_only)
+    _write_resolve_meta(history, n_resolved_hist, n_resolved_parl)
+
+    metrics = _compute_live_metrics(history)
+    _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
+    logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
+
+
+def _load_one_league(lg, cls, skip_update):
+    """Load one league's Stats object (optionally update); None on failure / empty."""
+    try:
+        obj = cls()
+        obj.load()
+        if not skip_update:
+            try:
+                obj.update()
+                logger.info(f"{lg}: stats updated")
+            except Exception:
+                logger.warning(f"{lg}: update() failed, using cached gamelog")
+        if not obj.gamelog.empty:
+            return obj
+        logger.warning(f"{lg}: gamelog empty, skipping")
+        return None
+    except Exception:
+        logger.warning(f"{lg}: load() failed, skipping")
+        return None
+
+
+def _load_league_stats(league, skip_update):
     stats = {}
     leagues_to_load = [league] if league else list(LEAGUE_CLASSES.keys())
-
     for lg in tqdm(leagues_to_load, desc="Loading league stats"):
-        cls = LEAGUE_CLASSES[lg]
-        try:
-            obj = cls()
-            obj.load()
-            if not skip_update:
-                try:
-                    obj.update()
-                    logger.info(f"{lg}: stats updated")
-                except Exception:
-                    logger.warning(f"{lg}: update() failed, using cached gamelog")
-            if hasattr(obj, "gamelog") and not obj.gamelog.empty:
-                stats[lg] = obj
-            else:
-                logger.warning(f"{lg}: gamelog empty, skipping")
-        except Exception:
-            logger.warning(f"{lg}: load() failed, skipping")
-
+        obj = _load_one_league(lg, LEAGUE_CLASSES[lg], skip_update)
+        if obj is not None:
+            stats[lg] = obj
     if not stats:
         logger.error("No league stats loaded. Aborting.")
         raise SystemExit(1)
+    return stats
 
-    # ------------------------------------------------------------------
-    # 2. Resolve history (fill Actual column + CLV trio)
-    # ------------------------------------------------------------------
+
+def _resolve_and_clv_history(stats):
     history = read_history()
     if history.empty:
         logger.error("history.parquet is empty or missing. Aborting.")
@@ -368,9 +388,6 @@ def run(league, skip_update, history_only, log_level):
     n_resolved_hist = n_before_hist - int(history["Actual"].isna().sum())
     logger.info(f"History: resolved {n_resolved_hist} / {n_before_hist} pending rows")
 
-    # ------------------------------------------------------------------
-    # 3. Fill in Close Books P / Market CLV / Model CLV per offer
-    # ------------------------------------------------------------------
     archive = Archive()
     history = clv.fill_from_archive(history, archive)
     write_history(history)
@@ -393,10 +410,10 @@ def run(league, skip_update, history_only, log_level):
             )
     else:
         logger.info("CLV: no resolved legs with closing-line data")
+    return history, n_resolved_hist
 
-    # ------------------------------------------------------------------
-    # 4. Resolve parlay_hist (fill Legs/Misses columns)
-    # ------------------------------------------------------------------
+
+def _resolve_parlays(stats, history_only):
     n_resolved_parl = 0
     if not history_only:
         parlays = read_parlay_hist()
@@ -417,10 +434,10 @@ def run(league, skip_update, history_only, log_level):
                 1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
             )
             logger.info(f"Parlays: resolved {n_resolved_parl} / {n_before_parl} pending rows")
+    return n_resolved_parl
 
-    # ------------------------------------------------------------------
-    # 5. Write resolve_meta.json with last-run timestamp
-    # ------------------------------------------------------------------
+
+def _write_resolve_meta(history, n_resolved_hist, n_resolved_parl):
     meta = {
         "last_run": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "history_resolved": n_resolved_hist,
@@ -436,10 +453,3 @@ def run(league, skip_update, history_only, log_level):
         f"Parlays: {n_resolved_parl} resolved. "
         f"Last run: {meta['last_run']}"
     )
-
-    # ------------------------------------------------------------------
-    # 6. Compute and persist per-(league, market) live metrics (Gate 2)
-    # ------------------------------------------------------------------
-    metrics = _compute_live_metrics(history)
-    _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
-    logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
