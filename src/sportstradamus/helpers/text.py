@@ -22,6 +22,9 @@ from sportstradamus.helpers.config import name_map
 TREND_WINDOW = 5
 MIN_TREND_ROWS = 3
 
+# How far ahead to fetch MLB schedules when building the probable-pitcher dict.
+MLB_PITCHER_LOOKAHEAD_DAYS = 7
+
 
 def remove_accents(input_str):
     """Normalize a player name to the project's canonical spelling.
@@ -124,31 +127,43 @@ def get_mlb_pitchers():
     """
     mlb_games = mlb.schedule(
         start_date=datetime.date.today(),
-        end_date=(datetime.date.today() + datetime.timedelta(days=7)),
+        end_date=(datetime.date.today() + datetime.timedelta(days=MLB_PITCHER_LOOKAHEAD_DAYS)),
     )
     mlb_teams = mlb.get("teams", {"sportId": 1})
     pitchers = {}
     for game in mlb_games:
         if game["status"] in ["Pre-Game", "Scheduled"]:
-            away_team = [
-                team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["away_id"]
-            ]
-            home_team = [
-                team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["home_id"]
-            ]
-            if len(away_team) == 1 and len(home_team) == 1:
-                away_team = away_team[0]
-                home_team = home_team[0]
-            else:
+            abbrs = _resolve_team_abbrs(game, mlb_teams)
+            if abbrs is None:
                 continue
-            if game["game_num"] == 1:
-                if "away_probable_pitcher" in game and away_team not in pitchers:
-                    pitchers[away_team] = remove_accents(game["away_probable_pitcher"])
-                if "home_probable_pitcher" in game and home_team not in pitchers:
-                    pitchers[home_team] = remove_accents(game["home_probable_pitcher"])
+            away_team, home_team = abbrs
+            _assign_probable_pitchers(game, away_team, home_team, pitchers)
 
     pitchers["LA"] = pitchers.get("LAD", "")
     pitchers["ANA"] = pitchers.get("LAA", "")
     pitchers["ARI"] = pitchers.get("AZ", "")
     pitchers["WAS"] = pitchers.get("WSH", "")
     return pitchers
+
+
+def _resolve_team_abbrs(game, mlb_teams):
+    """Map a game's away/home ids to abbreviations; None if either is ambiguous."""
+    away_team = [
+        team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["away_id"]
+    ]
+    home_team = [
+        team["abbreviation"] for team in mlb_teams["teams"] if team["id"] == game["home_id"]
+    ]
+    if len(away_team) == 1 and len(home_team) == 1:
+        return away_team[0], home_team[0]
+    return None
+
+
+def _assign_probable_pitchers(game, away_team, home_team, pitchers):
+    """For game one of a series, record each side's probable starter (first seen wins)."""
+    if game["game_num"] != 1:
+        return
+    if "away_probable_pitcher" in game and away_team not in pitchers:
+        pitchers[away_team] = remove_accents(game["away_probable_pitcher"])
+    if "home_probable_pitcher" in game and home_team not in pitchers:
+        pitchers[home_team] = remove_accents(game["home_probable_pitcher"])
