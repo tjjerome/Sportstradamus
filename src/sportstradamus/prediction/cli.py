@@ -23,6 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import creds
+from sportstradamus.analysis import _merge_offers
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, LazyArchive, get_logger, stat_map
 from sportstradamus.helpers.io import (
@@ -204,7 +205,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
 
     archive.write()
     logger.info("Checking historical predictions")
-    from sportstradamus.analysis import _merge_offers, _migrate_flat_history, _offer_tuple
+    from sportstradamus.analysis import _migrate_flat_history, _offer_tuple
 
     history = read_history()
     if not history.empty:
@@ -246,20 +247,8 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     if not history.empty and not new_df.empty:
         history = history.set_index(pred_key)
         new_df = new_df.set_index(pred_key)
-
         for idx in new_df.index:
-            if idx in history.index:
-                old_offers = history.at[idx, "Offers"]
-                if not isinstance(old_offers, list):
-                    old_offers = []
-                history.at[idx, "Offers"] = _merge_offers(old_offers, new_df.at[idx, "Offers"])
-                for col in PREDICTION_LEVEL_COLS:
-                    val = new_df.at[idx, col]
-                    if pd.notna(val):
-                        history.at[idx, col] = val
-            else:
-                history.loc[idx] = new_df.loc[idx]
-
+            _merge_prediction_row(history, new_df, idx)
         history = history.reset_index()
     elif not new_df.empty:
         history = new_df
@@ -275,6 +264,26 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     write_history(history)
 
     logger.info("Success!")
+
+
+def _merge_prediction_row(history, new_df, idx):
+    """Merge one new prediction (both indexed by pred_key) into history at ``idx``.
+
+    Existing rows keep their Offers merged via ``_merge_offers`` and have their
+    prediction-level columns overwritten only where the new value is non-NaN; a
+    new ``idx`` inserts the whole row. Mutates ``history`` in place.
+    """
+    if idx not in history.index:
+        history.loc[idx] = new_df.loc[idx]
+        return
+    old_offers = history.at[idx, "Offers"]
+    if not isinstance(old_offers, list):
+        old_offers = []
+    history.at[idx, "Offers"] = _merge_offers(old_offers, new_df.at[idx, "Offers"])
+    for col in PREDICTION_LEVEL_COLS:
+        val = new_df.at[idx, col]
+        if pd.notna(val):
+            history.at[idx, col] = val
 
 
 if __name__ == "__main__":
