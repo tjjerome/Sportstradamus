@@ -123,6 +123,57 @@ def _dfs_under_boost(over, boost_under):
     return boost_under if boost_under and boost_under > 0 else over
 
 
+def _dedup_offers_by_boost(offers) -> list[dict]:
+    """Normalize ``offers`` to records, one per ``(Player, Market)``.
+
+    Accepts a single dict or a list. Duplicates are resolved in favor of the
+    offer whose ``Boost_Over`` is closest to a neutral 1.0 (filling ``Boost_Over``
+    from ``Boost`` when absent). Empty list when no offers survive.
+    """
+    if not isinstance(offers, list):
+        offers = [offers]
+    df = pd.DataFrame(offers)
+    if df.empty:
+        return []
+    if "Boost_Over" not in df.columns:
+        df["Boost_Over"] = np.nan
+    if "Boost" in df.columns:
+        df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
+    df["Boost Factor"] = np.abs(df["Boost_Over"] - 1)
+    df = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])]
+    return df.to_dict(orient="records")
+
+
+def _resolve_market(league: str, raw_market: str, key: dict) -> str:
+    """Rename a sportsbook-native market string to its canonical per-league name."""
+    market = raw_market.replace("H2H ", "")
+    market = key.get(market, market)
+    if league == "NHL":
+        market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
+    if league in ("NBA", "WNBA"):
+        market = market.replace("underdog", "prizepicks")
+    return market
+
+
+def _devig_over(line, evs, dist, cv) -> float:
+    """Mean no-vig implied over-probability across the books' EVs.
+
+    Each book EV inverts through ``get_odds`` to an under-probability; the
+    over side is ``1 - under``. None / NaN EVs and prices that fail to invert
+    are skipped; ``NaN`` when no book yields a usable probability.
+    """
+    over_probs = []
+    for ev in evs:
+        if ev is None or np.isnan(ev):
+            continue
+        try:
+            under_prob = get_odds(line, ev, dist, cv=cv)
+            over_probs.append(1.0 - under_prob)
+        except (ValueError, RuntimeError):
+            continue
+    return np.nan if not over_probs else float(np.mean(over_probs))
+
+
 def clean_archive(cutoff_date: datetime.date | None = None) -> None:
     """Drop stale dates and combo/matchup pseudo-entities from the archive.
 
@@ -595,18 +646,17 @@ class Archive:
         dist = stat_dist.get(league, {}).get(market, "Gamma")
         cv = stat_cv.get(league, {}).get(market, 1)
 
-        over_probs = []
-        for ev in evs:
-            if ev is None or np.isnan(ev):
-                continue
-            try:
-                under_prob = get_odds(line, ev, dist, cv=cv)
-                over_probs.append(1.0 - under_prob)
-            except (ValueError, RuntimeError):
-                continue
+        devig_over = _devig_over(line, evs, dist, cv)
+        sample_ts = self._latest_sample_ts(league, market, d, entity, at)
 
-        devig_over = np.nan if not over_probs else float(np.mean(over_probs))
+        return ClosingLine(
+            line=line,
+            devig_over=devig_over,
+            sample_ts=sample_ts,
+            book_set=book_set,
+        )
 
+    def _latest_sample_ts(self, league, market, d, entity, at):
         sample_sql = (
             "SELECT observed_at FROM odds WHERE league=? AND market=? AND game_date=? AND entity=?"
         )
@@ -616,14 +666,7 @@ class Archive:
             sample_params.append(at)
         sample_sql += " ORDER BY observed_at DESC LIMIT 1"
         sample_rows = self._connection.execute(sample_sql, sample_params).fetchall()
-        sample_ts = sample_rows[0][0] if sample_rows and sample_rows[0][0] is not None else None
-
-        return ClosingLine(
-            line=line,
-            devig_over=devig_over,
-            sample_ts=sample_ts,
-            book_set=book_set,
-        )
+        return sample_rows[0][0] if sample_rows and sample_rows[0][0] is not None else None
 
     # ------------------------------------------------------------------ #
     # History API
@@ -797,19 +840,7 @@ class Archive:
         market strings into the canonical per-league market names used
         elsewhere in the pipeline.
         """
-        if not isinstance(offers, list):
-            offers = [offers]
-
-        df = pd.DataFrame(offers)
-        if df.empty:
-            return
-        if "Boost_Over" not in df.columns:
-            df["Boost_Over"] = np.nan
-        if "Boost" in df.columns:
-            df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
-        df["Boost Factor"] = np.abs(df["Boost_Over"] - 1)
-        df = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])]
-        offers = df.to_dict(orient="records")
+        offers = _dedup_offers_by_boost(offers)
 
         for o in offers:
             if not o["Line"]:
@@ -819,12 +850,7 @@ class Archive:
                 continue
 
             league = o["League"]
-            market = o["Market"].replace("H2H ", "")
-            market = key.get(market, market)
-            if league == "NHL":
-                market = {"AST": "assists", "PTS": "points", "BLK": "blocked"}.get(market, market)
-            if league in ("NBA", "WNBA"):
-                market = market.replace("underdog", "prizepicks")
+            market = _resolve_market(league, o["Market"], key)
 
             cv = stat_cv.get(league, {}).get(market, 1)
             dist = stat_dist.get(league, {}).get(market, "Gamma")
