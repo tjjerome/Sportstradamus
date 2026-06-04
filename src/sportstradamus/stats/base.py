@@ -83,6 +83,31 @@ _SEASON_ROLLOVER_MONTH: int = 8
 # tip-offs.
 _SCHEDULE_LOOKAHEAD_DAYS: int = 3
 
+
+# Columns of the empty per-player feature frame get_stats seeds before populating
+# rows -- and the frame it returns when no requested player has game history.
+_BASE_STAT_COLUMNS = [
+    "Avg1",
+    "Avg3",
+    "Avg5",
+    "Avg10",
+    "AvgYr",
+    "AvgH2H",
+    "Mean10",
+    "MeanYr",
+    "MeanYr_nonzero",
+    "MeanH2H",
+    "STD10",
+    "STDYr",
+    "ZeroYr",
+    "DaysOff",
+    "DaysIntoSeason",
+    "GamesPlayed",
+    "H2HPlayed",
+    "Home",
+    "Moneyline",
+    "Total",
+]
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access so processes that merely import this module — most importantly
 # the long-lived Streamlit dashboard — do not hold the archive lock for
@@ -1094,30 +1119,32 @@ class Stats:
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
         self._ensure_comps(date=date)
-        stats = pd.DataFrame(
-            columns=[
-                "Avg1",
-                "Avg3",
-                "Avg5",
-                "Avg10",
-                "AvgYr",
-                "AvgH2H",
-                "Mean10",
-                "MeanYr",
-                "MeanYr_nonzero",
-                "MeanH2H",
-                "STD10",
-                "STDYr",
-                "ZeroYr",
-                "DaysOff",
-                "DaysIntoSeason",
-                "GamesPlayed",
-                "H2HPlayed",
-                "Home",
-                "Moneyline",
-                "Total",
-            ]
+        stats = pd.DataFrame(columns=_BASE_STAT_COLUMNS)
+
+        players, teams, opponents = self._resolve_offer_entities(offers)
+        playergames = self.short_gamelog.loc[
+            self.short_gamelog[self.log_strings["player"]].isin(players)
+        ]
+        if playergames.empty:
+            return stats
+
+        stats = self._rolling_features(stats, playergames, market, date)
+        stats, teams, opponents, pitchers = self._game_context(
+            stats, offers, market, date, teams, opponents
         )
+        self._h2h_features(stats, market, opponents, pitchers)
+        stats, defstats = self._join_profiles(stats, teams, opponents, pitchers)
+        self._comp_features(stats, defstats, market, opponents)
+        stats = self._join_defense_and_parks(stats, defstats, teams)
+        return stats.fillna(0).infer_objects(copy=False)
+
+    def _resolve_offer_entities(self, offers):
+        """Resolve an ``offers`` dict-or-list into deduped ``(players, teams, opponents)``.
+
+        Combo legs (``"A + B"`` / ``"A vs. B"``) are split into their two component
+        players, fanning out the ``"/"``-joined team/opponent strings; players with a
+        blank team or opponent are dropped.
+        """
         if isinstance(offers, dict):
             players = list(offers.keys())
             teams = {k: v["Team"] for k, v in offers.items()}
@@ -1154,52 +1181,57 @@ class Stats:
                 players.remove(player)
                 teams.pop(player)
                 opponents.pop(player)
+        return players, teams, opponents
 
-        playergames = self.short_gamelog.loc[
-            self.short_gamelog[self.log_strings["player"]].isin(players)
-        ]
-
-        if playergames.empty:
-            return stats
-
-        _player_col = self.log_strings["player"]
+    def _rolling_features(self, stats, playergames, market, date):
+        """Populate the tail-window rolling stats (Avg/Mean/STD/ratios) for each player."""
+        player_col = self.log_strings["player"]
 
         # Vectorized tail-based stats — avoids per-group .apply(lambda)
-        _pg_last10 = playergames.groupby(_player_col).tail(10)
-        _pg_last5 = playergames.groupby(_player_col).tail(5)
-        _pg_last3 = playergames.groupby(_player_col).tail(3)
-        _pg_last1 = playergames.groupby(_player_col).tail(1)
+        pg_last10 = playergames.groupby(player_col).tail(10)
+        pg_last5 = playergames.groupby(player_col).tail(5)
+        pg_last3 = playergames.groupby(player_col).tail(3)
+        pg_last1 = playergames.groupby(player_col).tail(1)
 
-        stats["Avg1"] = _pg_last1.groupby(_player_col)[market].median()
-        stats["Avg3"] = _pg_last3.groupby(_player_col)[market].median()
-        stats["Avg5"] = _pg_last5.groupby(_player_col)[market].median()
-        stats["Avg10"] = _pg_last10.groupby(_player_col)[market].median()
-        stats["AvgYr"] = playergames.groupby(_player_col)[market].median()
-        stats["Mean10"] = _pg_last10.groupby(_player_col)[market].mean()
-        stats["MeanYr"] = playergames.groupby(_player_col)[market].mean()
-        _nonzero_games = playergames.loc[playergames[market] > 0]
-        stats["MeanYr_nonzero"] = _nonzero_games.groupby(_player_col)[market].mean()
+        stats["Avg1"] = pg_last1.groupby(player_col)[market].median()
+        stats["Avg3"] = pg_last3.groupby(player_col)[market].median()
+        stats["Avg5"] = pg_last5.groupby(player_col)[market].median()
+        stats["Avg10"] = pg_last10.groupby(player_col)[market].median()
+        stats["AvgYr"] = playergames.groupby(player_col)[market].median()
+        stats["Mean10"] = pg_last10.groupby(player_col)[market].mean()
+        stats["MeanYr"] = playergames.groupby(player_col)[market].mean()
+        nonzero_games = playergames.loc[playergames[market] > 0]
+        stats["MeanYr_nonzero"] = nonzero_games.groupby(player_col)[market].mean()
         stats["MeanYr_nonzero"] = stats["MeanYr_nonzero"].fillna(stats["MeanYr"].clip(lower=0.5))
-        stats["STD10"] = _pg_last10.groupby(_player_col)[market].std()
-        stats["STDYr"] = playergames.groupby(_player_col)[market].std()
-        _last_date = pd.to_datetime(
-            playergames.groupby(_player_col)[self.log_strings["date"]].last()
+        stats["STD10"] = pg_last10.groupby(player_col)[market].std()
+        stats["STDYr"] = playergames.groupby(player_col)[market].std()
+        last_date = pd.to_datetime(
+            playergames.groupby(player_col)[self.log_strings["date"]].last()
         )
-        stats["DaysOff"] = (pd.Timestamp(date) - _last_date).dt.days
+        stats["DaysOff"] = (pd.Timestamp(date) - last_date).dt.days
         stats["DaysIntoSeason"] = (date - self.season_start).days
-        stats["GamesPlayed"] = playergames.groupby(_player_col)[market].count()
-        _zero_counts = playergames.loc[playergames[market] == 0].groupby(_player_col).size()
-        stats["ZeroYr"] = _zero_counts.reindex(stats.index, fill_value=0) / stats["GamesPlayed"]
+        stats["GamesPlayed"] = playergames.groupby(player_col)[market].count()
+        zero_counts = playergames.loc[playergames[market] == 0].groupby(player_col).size()
+        stats["ZeroYr"] = zero_counts.reindex(stats.index, fill_value=0) / stats["GamesPlayed"]
 
-        # Scale-invariant ratio features: relative to player baseline
-        _meanyr_safe = stats["MeanYr"].clip(lower=0.5)
-        stats["Avg5_Ratio"] = stats["Avg5"] / _meanyr_safe
-        stats["Avg10_Ratio"] = stats["Avg10"] / _meanyr_safe
-        stats["Mean10_Ratio"] = stats["Mean10"] / _meanyr_safe
-        stats["STD_Ratio"] = stats["STDYr"] / _meanyr_safe
+        meanyr_safe = stats["MeanYr"].clip(lower=0.5)
+        stats["Avg5_Ratio"] = stats["Avg5"] / meanyr_safe
+        stats["Avg10_Ratio"] = stats["Avg10"] / meanyr_safe
+        stats["Mean10_Ratio"] = stats["Mean10"] / meanyr_safe
+        stats["STD_Ratio"] = stats["STDYr"] / meanyr_safe
 
-        stats = stats.loc[~stats.index.duplicated()]
+        return stats.loc[~stats.index.duplicated()]
 
+    def _game_context(self, stats, offers, market, date, teams, opponents):
+        """Attach Home / Moneyline / Total and resolve the game-day matchup.
+
+        Historical (``date`` in the past) reads the realized ``gamelog`` row and
+        rebinds ``teams`` / ``opponents`` (and MLB ``pitchers``) from it; upcoming
+        reads ``upcoming_games`` plus the archived moneyline/total. Returns the
+        (possibly rebound) ``(stats, teams, opponents, pitchers)``; ``pitchers`` is
+        ``None`` for non-MLB leagues.
+        """
+        pitchers = None
         if date < datetime.today().date():
             todays_games = self.gamelog.loc[
                 pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date == date
@@ -1214,7 +1246,6 @@ class Stats:
             opponents = todays_games[self.log_strings["opponent"]].to_dict()
             if self.league == "MLB":
                 pitchers = todays_games["opponent pitcher"].to_dict()
-
         else:
             if self.league == "MLB":
                 pitchers = {
@@ -1244,7 +1275,10 @@ class Stats:
             stats["Total"] = [
                 archive.get_total(self.league, dates[x], teams[x]) for x in stats.index
             ]
+        return stats, teams, opponents, pitchers
 
+    def _h2h_features(self, stats, market, opponents, pitchers):
+        """Attach head-to-head Avg/Mean/Played against this opponent (MLB: vs the pitcher)."""
         if self.league == "MLB" and not any(string in market for string in ["allowed", "pitch"]):
             h2hgames = self.short_gamelog.loc[
                 self.short_gamelog["opponent pitcher"]
@@ -1259,6 +1293,12 @@ class Stats:
         stats["MeanH2H"] = h2hgames[market].mean()
         stats["H2HPlayed"] = h2hgames[market].count()
 
+    def _join_profiles(self, stats, teams, opponents, pitchers):
+        """Join player / team / defense profiles; return ``(stats, defstats)``.
+
+        Non-MLB drops players off the depth chart and projects the per-position
+        defense column; MLB overlays the opposing pitcher's profile onto defense.
+        """
         stats = stats.join(self.playerProfile.add_prefix("Player "))
         if self.league != "MLB":
             stats = stats.loc[stats["Player depth"] > 0]
@@ -1283,141 +1323,153 @@ class Stats:
             defstats.drop(columns=self.positions, inplace=True)
 
         defstats.index = stats.index
+        return stats, defstats
 
-        # The matchup-conditional residual signal now writes to
-        # ``stats["Player comps z"]`` (was the misnamed ``defstats["comps"]``
-        # under the ``Defense `` prefix). The count + uniqueness signals stay
-        # on the defstats side under their legacy names (``Defense comp n``,
-        # ``Defense comp distance``) so cached training matrices and the
-        # SHAP-rebuild filter survive without a regeneration pass.
-        #
-        # Pre-compute per-player zscore of market column for comps lookups.
-        _opp_col = self.log_strings["opponent"]
-        _player_col = self.log_strings["player"]
-        _gl_z = self.short_gamelog[[_player_col, _opp_col, market]].copy()
-        _gl_z[market] = _gl_z[market].astype(float)
-        _gl_groups = _gl_z.groupby(_player_col)[market]
-        _std = _gl_groups.transform("std").replace(0, np.nan)
-        _gl_z["_mkt_zscore"] = ((_gl_z[market] - _gl_groups.transform("mean")) / _std).fillna(0)
+    def _comp_features(self, stats, defstats, market, opponents):
+        """Attach the matchup-conditional comp signal to ``stats`` / ``defstats``.
+
+        The residual signal writes to ``stats["Player comps z"]`` (was the misnamed
+        ``defstats["comps"]`` under the ``Defense `` prefix). The count + uniqueness
+        signals stay on the defstats side under their legacy names (``Defense comp n``,
+        ``Defense comp distance``) so cached training matrices and the SHAP-rebuild
+        filter survive without a regeneration pass.
+        """
         stats["Player comps z"] = 0.0
-
         if self.league == "MLB":
-            _is_pitch_market = any(s in market for s in ["allowed", "pitch"])
-            for player, row in stats.iterrows():
-                playerGames = self.short_gamelog.loc[self.short_gamelog[_player_col] == player]
-                if playerGames.empty:
-                    continue
-                pid = playerGames["playerId"].mode()[0]
-                if _is_pitch_market:
-                    comps = self.comps["pitchers"].get(pid, [pid])
-                    compGames = self.short_gamelog.loc[
-                        self.short_gamelog["playerId"].isin(comps)
-                        & self.short_gamelog["starting pitcher"]
-                    ]
-                    if compGames.empty:
-                        continue
-                else:
-                    comps = self.comps["hitters"].get(pid, [pid])
-                    compGames = self.short_gamelog.loc[
-                        self.short_gamelog["playerId"].isin(comps)
-                        & self.short_gamelog["starting batter"]
-                    ]
-                    if compGames.empty:
-                        continue
-
-                    pitch_id = self.short_gamelog.loc[
-                        self.short_gamelog[_player_col] == player, "opponent pitcher id"
-                    ]
-                    if pitch_id.empty:
-                        continue
-
-                    pitch_id = pitch_id.mode()[0]
-                    pitchComps = self.comps["pitchers"].get(pitch_id, [pitch_id])
-                    pitchGames = playerGames.loc[
-                        playerGames["opponent pitcher id"].isin(pitchComps)
-                    ]
-                    if pitchGames.empty or pitchGames[market].mean() == 0:
-                        stats.loc[player, "Pitcher comps"] = 0
-                    else:
-                        stats.loc[player, "Pitcher comps"] = (
-                            playerGames[market].mean() / pitchGames[market].mean()
-                        )
-
-                compGames[market] = compGames[market].astype(float)
-                _comp_groups = compGames.groupby(_player_col)[market]
-                _comp_std = _comp_groups.transform("std").replace(0, np.nan)
-                scores = ((compGames[market] - _comp_groups.transform("mean")) / _comp_std).fillna(
-                    0
-                )
-
-                _gl_groups = _gl_z.groupby(_player_col)[market]
-                _gl_std = _gl_groups.transform("std").replace(0, np.nan)
-                _gl_z["_mkt_zscore"] = (
-                    (_gl_z[market] - _gl_groups.transform("mean")) / _gl_std
-                ).fillna(0)
-                scores.index = scores.index.droplevel(0)
-                compGames[market] = scores
-                opp_comp_games = compGames.loc[compGames[_opp_col] == opponents[player], market]
-                stats.loc[player, "Player comps z"] = opp_comp_games.mean()
-                defstats.loc[player, "comp n"] = opp_comp_games.count()
+            self._mlb_comp_features(stats, defstats, market, opponents)
         else:
-            # Non-MLB matchup-conditional comp lookup. The static
-            # ``(player, comp, position, dist, weight)`` table is built once
-            # per comp-pool swap by :meth:`_comp_pairs`; here we only attach
-            # the per-call opponent and merge against the per-day ``_gl_z``.
-            _pairs = self._comp_pairs()
-            if not _pairs.empty:
-                _pos_idx = stats["Player position"].astype(int) - 1
-                _valid = (_pos_idx >= 0) & (_pos_idx < len(self.positions))
-                if _valid.any():
-                    _expected_pos = pd.Series(
-                        np.asarray(self.positions)[_pos_idx[_valid].to_numpy()],
-                        index=stats.index[_valid],
-                        name="expected_pos",
-                    )
-                    # Keep only pairs whose position matches the stats-side
-                    # position assignment. Preserves the original lookup
-                    # semantics (``self.comps[stats_position].get(player, ...)``)
-                    # for players whose ``Player position`` disagrees with the
-                    # comp-pool assignment.
-                    _cp_df = _pairs.merge(
-                        _expected_pos.rename_axis("target_player").reset_index(),
-                        left_on="player",
-                        right_on="target_player",
-                        how="inner",
-                    )
-                    _cp_df = _cp_df[_cp_df["position"] == _cp_df["expected_pos"]]
-                    if not _cp_df.empty:
-                        _cp_df["opp"] = _cp_df["player"].map(opponents)
-                        # Mean distance to comps (player-side uniqueness signal --
-                        # not matchup-dependent). Carried on defstats only because
-                        # cached training matrices know it under the ``Defense `` prefix.
-                        defstats["comp distance"] = (
-                            _cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
-                        )
-                        # Inner-join comp games vs the opponent. The result is the
-                        # matchup-conditional residual signal: each comp's outcome
-                        # vs this opponent z-scored against the comp's own per-player
-                        # baseline, distance-weighted across the comp set.
-                        _merged = _cp_df.merge(
-                            _gl_z[[_player_col, _opp_col, "_mkt_zscore"]],
-                            left_on=["comp", "opp"],
-                            right_on=[_player_col, _opp_col],
-                            how="inner",
-                            suffixes=("", "_gl"),
-                        )
-                        _merged["weighted_z"] = _merged["_mkt_zscore"] * _merged["weight"]
-                        _comp_wsum = _merged.groupby("player")["weighted_z"].sum()
-                        _comp_wcount = _merged.groupby("player")["weight"].sum()
-                        _comp_means = _comp_wsum / _comp_wcount
-                        stats["Player comps z"] = _comp_means.reindex(stats.index).fillna(0.0)
-                        # Count of (comp, opponent) game observations backing each
-                        # ``Player comps z`` estimate. Stays on defstats for cached-
-                        # matrix compatibility.
-                        defstats["comp n"] = (
-                            _merged.groupby("player").size().reindex(defstats.index)
-                        )
+            self._nonmlb_comp_features(stats, defstats, market, opponents)
 
+    def _mlb_comp_features(self, stats, defstats, market, opponents):
+        """MLB per-player comp-z: z-score each comp's outcome vs this opponent."""
+        player_col = self.log_strings["player"]
+        opp_col = self.log_strings["opponent"]
+        is_pitch_market = any(s in market for s in ["allowed", "pitch"])
+        for player in stats.index:
+            compGames = self._mlb_comp_games(player, market, is_pitch_market, stats)
+            if compGames is None:
+                continue
+            compGames[market] = compGames[market].astype(float)
+            comp_groups = compGames.groupby(player_col)[market]
+            comp_std = comp_groups.transform("std").replace(0, np.nan)
+            scores = ((compGames[market] - comp_groups.transform("mean")) / comp_std).fillna(0)
+            scores.index = scores.index.droplevel(0)
+            compGames[market] = scores
+            opp_comp_games = compGames.loc[compGames[opp_col] == opponents[player], market]
+            stats.loc[player, "Player comps z"] = opp_comp_games.mean()
+            defstats.loc[player, "comp n"] = opp_comp_games.count()
+
+    def _mlb_comp_games(self, player, market, is_pitch_market, stats):
+        """Comp games backing one MLB player's comp-z, or ``None`` to skip the player.
+
+        For hitter markets also writes ``stats["Pitcher comps"]`` (the player's mean
+        vs their comparable opposing pitchers) before returning.
+        """
+        player_col = self.log_strings["player"]
+        playerGames = self.short_gamelog.loc[self.short_gamelog[player_col] == player]
+        if playerGames.empty:
+            return None
+        pid = playerGames["playerId"].mode()[0]
+        if is_pitch_market:
+            comps = self.comps["pitchers"].get(pid, [pid])
+            compGames = self.short_gamelog.loc[
+                self.short_gamelog["playerId"].isin(comps)
+                & self.short_gamelog["starting pitcher"]
+            ]
+            return None if compGames.empty else compGames
+
+        comps = self.comps["hitters"].get(pid, [pid])
+        compGames = self.short_gamelog.loc[
+            self.short_gamelog["playerId"].isin(comps)
+            & self.short_gamelog["starting batter"]
+        ]
+        if compGames.empty:
+            return None
+
+        pitch_id = self.short_gamelog.loc[
+            self.short_gamelog[player_col] == player, "opponent pitcher id"
+        ]
+        if pitch_id.empty:
+            return None
+
+        pitch_id = pitch_id.mode()[0]
+        pitchComps = self.comps["pitchers"].get(pitch_id, [pitch_id])
+        pitchGames = playerGames.loc[playerGames["opponent pitcher id"].isin(pitchComps)]
+        if pitchGames.empty or pitchGames[market].mean() == 0:
+            stats.loc[player, "Pitcher comps"] = 0
+        else:
+            stats.loc[player, "Pitcher comps"] = (
+                playerGames[market].mean() / pitchGames[market].mean()
+            )
+        return compGames
+
+    def _nonmlb_comp_features(self, stats, defstats, market, opponents):
+        """Non-MLB matchup-conditional comp lookup (vectorized).
+
+        The static ``(player, comp, position, dist, weight)`` table is built once per
+        comp-pool swap by :meth:`_comp_pairs`; here we attach the per-call opponent
+        and merge against the per-day z-scored gamelog to get each comp's outcome vs
+        this opponent, z-scored against the comp's own baseline and distance-weighted.
+        """
+        opp_col = self.log_strings["opponent"]
+        player_col = self.log_strings["player"]
+        gl_z = self.short_gamelog[[player_col, opp_col, market]].copy()
+        gl_z[market] = gl_z[market].astype(float)
+        gl_groups = gl_z.groupby(player_col)[market]
+        gl_std = gl_groups.transform("std").replace(0, np.nan)
+        gl_z["_mkt_zscore"] = ((gl_z[market] - gl_groups.transform("mean")) / gl_std).fillna(0)
+
+        pairs = self._comp_pairs()
+        if pairs.empty:
+            return
+        pos_idx = stats["Player position"].astype(int) - 1
+        valid = (pos_idx >= 0) & (pos_idx < len(self.positions))
+        if not valid.any():
+            return
+
+        expected_pos = pd.Series(
+            np.asarray(self.positions)[pos_idx[valid].to_numpy()],
+            index=stats.index[valid],
+            name="expected_pos",
+        )
+        # Keep only pairs whose position matches the stats-side position assignment.
+        # Preserves the original lookup semantics (``self.comps[stats_position].get(
+        # player, ...)``) for players whose ``Player position`` disagrees with the
+        # comp-pool assignment.
+        cp_df = pairs.merge(
+            expected_pos.rename_axis("target_player").reset_index(),
+            left_on="player",
+            right_on="target_player",
+            how="inner",
+        )
+        cp_df = cp_df[cp_df["position"] == cp_df["expected_pos"]]
+        if cp_df.empty:
+            return
+
+        cp_df["opp"] = cp_df["player"].map(opponents)
+        # Mean distance to comps (player-side uniqueness signal -- not matchup-
+        # dependent). Carried on defstats only because cached training matrices know
+        # it under the ``Defense `` prefix.
+        defstats["comp distance"] = (
+            cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
+        )
+        merged = cp_df.merge(
+            gl_z[[player_col, opp_col, "_mkt_zscore"]],
+            left_on=["comp", "opp"],
+            right_on=[player_col, opp_col],
+            how="inner",
+            suffixes=("", "_gl"),
+        )
+        merged["weighted_z"] = merged["_mkt_zscore"] * merged["weight"]
+        comp_wsum = merged.groupby("player")["weighted_z"].sum()
+        comp_wcount = merged.groupby("player")["weight"].sum()
+        stats["Player comps z"] = (comp_wsum / comp_wcount).reindex(stats.index).fillna(0.0)
+        # Count of (comp, opponent) game observations backing each ``Player comps z``
+        # estimate. Stays on defstats for cached-matrix compatibility.
+        defstats["comp n"] = merged.groupby("player").size().reindex(defstats.index)
+
+    def _join_defense_and_parks(self, stats, defstats, teams):
+        """Join the defense profile and, for MLB, the per-team park factors."""
         stats = stats.join(defstats.add_prefix("Defense "))
 
         if self.league == "MLB":
@@ -1433,7 +1485,7 @@ class Stats:
             )
             stats["Player depth"] = stats["Player position"]
 
-        return stats.fillna(0).infer_objects(copy=False)
+        return stats
 
     def load_volume_model_params(
         self, offers, market, date, rename_map, position_filter=None
