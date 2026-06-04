@@ -5,7 +5,7 @@ distribution family) and ``_step_compute_diagnostics`` (the diag_* values writte
 
 Both branch on the distribution family, so every branch group is pinned: SkewNormal /
 NegBin / ZINB / Gamma / ZAGamma. Inputs are synthetic (only the dict keys each helper
-reads). ``calibration.fit_blend_weight`` is monkeypatched to record its ``(base_dist,
+reads). ``fit_model_weight`` is monkeypatched to record its ``(base_dist,
 kwargs)`` and return a fixed 0.5 -- this freezes the per-family wiring without depending
 on the optimizer, while ``fused_loc`` / ``get_odds`` / ``_zero_inflated_outcome_mean``
 run for real. Expected values are literals captured from the pre-refactor code.
@@ -26,10 +26,10 @@ _N = 8
 
 @pytest.fixture
 def fit_calls(monkeypatch):
-    """Patch fit_blend_weight to record its call and return a fixed weight (0.5)."""
+    """Patch fit_model_weight to record its call and return a fixed weight (0.5)."""
     calls: list[dict] = []
 
-    def _fake(blending, *args, **kwargs):
+    def _fake(*args, **kwargs):
         calls.append(
             {
                 "base_dist": args[3] if len(args) > 3 else None,
@@ -41,7 +41,7 @@ def fit_calls(monkeypatch):
         )
         return 0.5
 
-    monkeypatch.setattr(pipe.calibration, "fit_blend_weight", _fake)
+    monkeypatch.setattr(pipe, "fit_model_weight", _fake)
     return calls
 
 
@@ -91,7 +91,7 @@ def _assert_fuse(out: dict, expected_means: dict):
 
 
 def test_fuse_skewnormal_no_gate(fit_calls):
-    out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.0, blending="logit")
+    out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "SkewNormal"
     assert fit_calls[0]["kwargs"] == {"cv": 0.9, "model_sigma": 3.1, "model_skew_alpha": 0.25}
     _assert_fuse(out, {
@@ -102,7 +102,7 @@ def test_fuse_skewnormal_no_gate(fit_calls):
 
 
 def test_fuse_skewnormal_with_gate(fit_calls):
-    out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.3, blending="logit")
+    out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.3)
     assert fit_calls[0]["kwargs"]["gate_book"] == 0.3
     _assert_fuse(out, {
         "model_weight": 0.5, "weighted_mean": 11.40086223,
@@ -113,7 +113,7 @@ def test_fuse_skewnormal_with_gate(fit_calls):
 
 
 def test_fuse_negbin(fit_calls):
-    out = pipe._step_fuse_predictions(_decoded(), _splits(), "NegBin", 0.9, 0.0, blending="logit")
+    out = pipe._step_fuse_predictions(_decoded(), _splits(), "NegBin", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "NegBin"
     assert fit_calls[0]["kwargs"] == {"model_alpha": 2.1, "model_r": 4.2, "cv": 0.9}
     _assert_fuse(out, {
@@ -123,7 +123,7 @@ def test_fuse_negbin(fit_calls):
 
 
 def test_fuse_zinb(fit_calls):
-    out = pipe._step_fuse_predictions(_decoded(), _splits(), "ZINB", 0.9, 0.3, blending="logit")
+    out = pipe._step_fuse_predictions(_decoded(), _splits(), "ZINB", 0.9, 0.3)
     assert fit_calls[0]["base_dist"] == "NegBin"
     assert fit_calls[0]["kwargs"]["gate_model"] == 0.32 and fit_calls[0]["kwargs"]["gate_book"] == 0.3
     _assert_fuse(out, {
@@ -134,7 +134,7 @@ def test_fuse_zinb(fit_calls):
 
 
 def test_fuse_gamma(fit_calls):
-    out = pipe._step_fuse_predictions(_decoded(), _splits(), "Gamma", 0.9, 0.0, blending="logit")
+    out = pipe._step_fuse_predictions(_decoded(), _splits(), "Gamma", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "Gamma"
     _assert_fuse(out, {
         "model_weight": 0.5, "weighted_mean": 11.49534129,
@@ -144,7 +144,7 @@ def test_fuse_gamma(fit_calls):
 
 
 def test_fuse_zagamma(fit_calls):
-    out = pipe._step_fuse_predictions(_decoded(), _splits(), "ZAGamma", 0.9, 0.3, blending="logit")
+    out = pipe._step_fuse_predictions(_decoded(), _splits(), "ZAGamma", 0.9, 0.3)
     assert fit_calls[0]["base_dist"] == "Gamma"
     assert fit_calls[0]["kwargs"]["gate_model"] == 0.32 and fit_calls[0]["kwargs"]["gate_book"] == 0.3
     _assert_fuse(out, {
