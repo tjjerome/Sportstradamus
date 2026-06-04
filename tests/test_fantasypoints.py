@@ -1067,6 +1067,20 @@ def test_expand_registry_handles_empty_or_malformed_payload():
     assert expand_registry({"content": {"tables": {"values": []}}}) == []
 
 
+def test_expand_registry_skips_published_table_missing_prop_or_contexts():
+    registry = {
+        "content": {
+            "tables": {
+                "values": [
+                    {"isPublished": True, "isPrivate": False, "property": "x", "context": []},
+                    {"isPublished": True, "isPrivate": False, "context": ["player"]},
+                ]
+            }
+        }
+    }
+    assert expand_registry(registry) == []
+
+
 def test_cli_discover_dry_run_lists_new_endpoints(monkeypatch, tmp_path):
     from sportstradamus.fantasypoints import client as client_mod
 
