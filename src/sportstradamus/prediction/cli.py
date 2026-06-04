@@ -78,6 +78,10 @@ _HISTORY_RETENTION_DAYS = 365
 @line_profiler.profile
 def main(progress, legacy_correlation, contest_variant, log_level):
     """Run the full prediction pipeline and write results to Google Sheets."""
+    # style: allow-complexity — prophecize entrypoint: a flat top-level pipeline
+    # (per-league load/update, per-platform fetch+score, snapshot + history
+    # persistence). The residual CC is sequential stages and per-platform/-league
+    # guards, not nested logic; decomposing it would only scatter the pipeline.
     cli_log = get_logger("prophecize")
     cli_log.setLevel(log_level)
     cli_log.info(
@@ -200,7 +204,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
 
     archive.write()
     logger.info("Checking historical predictions")
-    from sportstradamus.analysis import _merge_offers, _migrate_flat_history
+    from sportstradamus.analysis import _merge_offers, _migrate_flat_history, _offer_tuple
 
     history = read_history()
     if not history.empty:
@@ -225,25 +229,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         for key, grp in all_df.groupby(pred_key):
             player, league, date, market = key
             latest = grp.iloc[-1]
-            offers = []
-            for _, r in grp.iterrows():
-                if pd.isna(r.get("Line")):
-                    continue
-                offers.append(
-                    (
-                        float(r["Line"]),
-                        float(r.get("Boost", 1)),
-                        str(r.get("Platform", "")),
-                        str(r.get("Bet", "")),
-                        float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
-                        float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
-                        # Closing fields are filled by `reflect` once the game
-                        # locks; left NaN at prediction time.
-                        np.nan,
-                        np.nan,
-                        np.nan,
-                    )
-                )
+            offers = [t for _, r in grp.iterrows() if (t := _offer_tuple(r)) is not None]
             row = {
                 "Player": player,
                 "League": league,

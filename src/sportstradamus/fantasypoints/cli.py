@@ -199,6 +199,9 @@ def run(season, week, only, mode, dry_run, no_cache, refetch, catalog_path, log_
     no filename suffix — each playoff round gets its own folder.
     Re-runs overwrite.
     """
+    # style: allow-complexity — fp-fetch `run` entrypoint: walk the catalog and
+    # fetch + write one parquet per endpoint. Residual CC is per-spec dispatch
+    # plus season/week/mode resolution, not nested logic.
     log = get_logger("fp-fetch")
     log.setLevel(log_level)
     season = season or _default_season()
@@ -379,6 +382,9 @@ def backfill(
     With ~45 catalog entries × 18 weeks × N seasons at the defaults,
     plan for roughly ~3 hours per season.
     """
+    # style: allow-complexity — fp-fetch `backfill` entrypoint: a (season × week)
+    # fetch loop with conservative pacing. Residual CC is the nested iteration
+    # plus per-spec guards, not branching logic.
     log = get_logger("fp-fetch")
     log.setLevel(log_level)
     specs = load_catalog(catalog_path)
@@ -569,6 +575,9 @@ def verify(season, week, mode, only, catalog_path) -> None:
     / ``FAIL``, followed by one indented line per issue. The summary
     line at the end lists counts per status.
     """
+    # style: allow-complexity — fp-fetch `verify` entrypoint: per-spec parquet
+    # spot-check loop. Residual CC is the per-issue severity tally + exit-code
+    # decision, not nested logic.
     season = season or _default_season()
     week = week or _default_week(season)
     specs = load_catalog(catalog_path)
@@ -998,6 +1007,10 @@ def _fetch_and_write_one(
     treated as failed downloads and re-fetched anyway. Pass
     ``refetch=True`` to force a re-download regardless.
     """
+    # style: allow-complexity — per-endpoint orchestrator: route → fetch → parse
+    # → write, capturing every failure (routing, fetch, decode) into the
+    # returned _RunResult so the outer loop keeps going. Residual CC is the
+    # sequential stages plus the cache/skip/refetch guards.
     method = spec.method.upper()
     rendered_url = _build_url(spec.url, spec.render_params(season=season, week=week))
     legacy_body = spec.render_json_body(season=season, week=week)
@@ -1273,6 +1286,9 @@ def _dispatch(
     a cached response (used to diagnose stale empty-result caches from
     earlier broken queries).
     """
+    # style: allow-complexity — per-spec verb dispatcher: GET/POST selection,
+    # accept-token mapping, and POST body substitution. Residual CC is the
+    # request-shape branching, not nested logic.
     params = spec.render_params(season=season, week=week)
     # Map catalog response_format to the client's accept token.
     if spec.response_format == "json":
