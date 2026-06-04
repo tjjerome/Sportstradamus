@@ -60,6 +60,10 @@ _BOOK_PROB_PICK_FLOOR = 0.52
 # Model-probability cut points for the ROI threshold sweep (compute_individual_metrics).
 _ROI_THRESHOLDS = (0.55, 0.58, 0.60, 0.65, 0.70)
 
+# Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
+# well before this, so the cap only guards pathological (huge-EV) inputs.
+_CRPS_NEGBIN_SUM_CAP = 500
+
 
 def _leg_market_map(league, platform, stat_map):
     """Per-platform market-name map plus the league-specific leg-name overrides."""
@@ -859,66 +863,51 @@ def compute_crps_row(row):
     """
     if pd.isna(row.get("Dist")) or pd.isna(row.get("Actual")):
         return np.nan
-
     y = row["Actual"]
-    dist = row["Dist"]
-    cv = row["CV"]
-    ev = row["Model EV"]
-    param = row.get("Model Param")
-    gate = row.get("Gate")
-    if pd.isna(gate):
-        gate = None
-
+    dist, cv, ev, param, gate = _dist_params(row)
     if dist in ("NegBin", "ZINB"):
-        r = param if param is not None and not np.isnan(param) else 1 / cv
-        p_nb = r / (r + ev)  # scipy parameterization: p = success prob
+        return _negbin_crps(y, ev, param, cv, gate, dist)
+    return _gamma_crps(y, ev, param, cv, gate, dist)
 
-        # CRPS via finite sum for NegBin (Jordan et al. 2019)
-        # CRPS = E|X - y| - 0.5 * E|X - X'|
-        # Compute numerically up to a reasonable upper bound
-        upper = int(max(y, ev) * 3 + 10 * np.sqrt(ev * (1 + ev / r)))
-        upper = min(upper, 500)  # cap for performance
-        k = np.arange(0, upper + 1)
-        pmf = nbinom.pmf(k, r, p_nb)
-        cdf = np.cumsum(pmf)
 
-        if gate is not None and dist == "ZINB":
-            # ZI adjustment
-            pmf_zi = pmf.copy()
-            pmf_zi[0] = gate + (1 - gate) * pmf[0]
-            pmf_zi[1:] = (1 - gate) * pmf[1:]
-            cdf = np.cumsum(pmf_zi)
+def _zero_inflate_pmf(pmf, gate):
+    """Zero-inflate a PMF: add mass ``gate`` at 0, scale the rest by (1 - gate)."""
+    pmf_zi = pmf.copy()
+    pmf_zi[0] = gate + (1 - gate) * pmf[0]
+    pmf_zi[1:] = (1 - gate) * pmf[1:]
+    return pmf_zi
 
-        # CRPS = sum_k (F(k) - 1(k >= y))^2 for discrete distributions
-        indicator = (k >= y).astype(float)
-        return np.sum((cdf - indicator) ** 2)
 
+def _negbin_crps(y, ev, param, cv, gate, dist):
+    """CRPS of the (zero-inflated) negative-binomial via finite PMF sum (Jordan et al. 2019).
+
+    CRPS = sum_k (F(k) - 1(k >= y))^2 over a support truncated where the tail is
+    negligible (capped by _CRPS_NEGBIN_SUM_CAP).
+    """
+    r = param if param is not None and not np.isnan(param) else 1 / cv
+    p_nb = r / (r + ev)  # scipy parameterization: p = success prob
+    upper = int(max(y, ev) * 3 + 10 * np.sqrt(ev * (1 + ev / r)))
+    upper = min(upper, _CRPS_NEGBIN_SUM_CAP)
+    k = np.arange(0, upper + 1)
+    pmf = nbinom.pmf(k, r, p_nb)
+    if gate is not None and dist == "ZINB":
+        pmf = _zero_inflate_pmf(pmf, gate)
+    cdf = np.cumsum(pmf)
+    indicator = (k >= y).astype(float)
+    return np.sum((cdf - indicator) ** 2)
+
+
+def _gamma_crps(y, ev, param, cv, gate, dist):
+    """CRPS of the (zero-augmented) gamma model.
+
+    Closed-form for plain Gamma (Gneiting & Raftery 2007, eq. 21); the
+    zero-augmented mixture has no closed form, so integrate the squared CDF error.
+    """
     alpha = param if param is not None and not np.isnan(param) else 1 / cv**2
-    beta = alpha / ev  # rate parameter
-
+    beta = alpha / ev
     if gate is not None and dist == "ZAGamma":
-        # ZA-Gamma CRPS: gate * |y| + (1-gate) * CRPS_gamma
-        # plus cross term for the mixture
-        # Simplified: numerical integration
-        from scipy.integrate import quad
+        return _zagamma_crps(y, ev, alpha, beta, gate)
 
-        def _cdf(x):
-            if x < 0:
-                return 0.0
-            base = gamma_dist.cdf(x, alpha, scale=1 / beta)
-            return gate + (1 - gate) * base
-
-        def integrand(x):
-            return (_cdf(x) - (1 if x >= y else 0)) ** 2
-
-        crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
-        return crps
-
-    # Closed-form Gamma CRPS (Gneiting & Raftery 2007, eq. 21):
-    # CRPS(Gamma(alpha, beta), y) = y*(2*F(y) - 1) - alpha/beta*(2*F_a1(y) - 1)
-    #   - 1/(beta * B(0.5, alpha))
-    # where F is Gamma(alpha, beta) CDF, F_a1 is Gamma(alpha+1, beta) CDF,
-    # and B is the Beta function
     from scipy.special import beta as beta_fn
 
     scale = 1 / beta
@@ -927,6 +916,23 @@ def compute_crps_row(row):
     return (
         y * (2 * cdf_y - 1) - (alpha / beta) * (2 * cdf_y_a1 - 1) - 1 / (beta * beta_fn(0.5, alpha))
     )
+
+
+def _zagamma_crps(y, ev, alpha, beta, gate):
+    """ZA-Gamma CRPS via numerical integration of the squared CDF error."""
+    from scipy.integrate import quad
+
+    def _cdf(x):
+        if x < 0:
+            return 0.0
+        base = gamma_dist.cdf(x, alpha, scale=1 / beta)
+        return gate + (1 - gate) * base
+
+    def integrand(x):
+        return (_cdf(x) - (1 if x >= y else 0)) ** 2
+
+    crps, _ = quad(integrand, 0, max(y, ev) * 5 + 50, limit=200)
+    return crps
 
 
 def compute_brier_skill_score(subset, base_rate=0.5):
