@@ -24,14 +24,13 @@ keep the pinned digests stable regardless of gamelog appends:
   hashlib-derived stub (builtin ``hash`` is per-process salted) so the
   archive-sourced ``Moneyline`` / ``Total`` columns are reproducible.
 
-The MLB pin is a ``pytest.raises``: ``get_stats`` currently crashes in its MLB
-comp-z loop at ``scores.index = scores.index.droplevel(0)`` (a stale line left over
-from a pre-vectorization ``groupby().apply()`` — the current ``.transform()`` yields
-a single-level index, so ``droplevel(0)`` raises). This is a **pre-existing latent
-bug**, reachable on the core path with real data; per the refactor's
-behavior-preserving contract it is preserved as-is and pinned here, not fixed —
-fixing it is a separate targeted change. The pin still drives the MLB-specific
-game-context / h2h / profile branches (Phases D-F run before the crash).
+The MLB pin runs the comp-z loop end-to-end (MLB game-context / pitcher-h2h /
+pitcherProfile branches plus the per-player comp z-scoring). It previously
+``pytest.raises``-pinned a stale ``scores.index = scores.index.droplevel(0)`` line
+that crashed the loop — the vectorized ``_zscore_within_player`` returns a
+single-level index, so ``droplevel(0)`` raised. That line was deleted (and the comp
+frames copied to drop a ``SettingWithCopyWarning``), so the pin now asserts the
+produced feature frame.
 """
 
 from __future__ import annotations
@@ -205,17 +204,29 @@ def test_nba_upcoming_get_stats(monkeypatch):
     _assert_spot(out, _NBA_UP_SPOT)
 
 
-# --- MLB: pre-existing droplevel(0) crash in the comp-z loop, pinned as-is -----
+# --- MLB historical: comp-z loop populates Player comps z (droplevel(0) fix) ---
 
 _MLB_DATE = _date(2024, 7, 10)
+_MLB_SHAPE = (356, 114)
+_MLB_COL_HASH = "cc95b8214c1b993e"
+_MLB_DIGEST = 8015345811100554101
+_MLB_SPOT = {
+    "Aaron Judge": {"Player comps z": -0.290427, "Player z": 1.265389, "Home": False},
+    "Adam Duvall": {"Player comps z": 0.400125, "Player z": -0.492163, "Home": False},
+}
 
 
-def test_mlb_get_stats_raises_at_comp_droplevel():
+def test_mlb_historical_get_stats():
     stats = _load_or_skip(StatsMLB, _MLB_DATE)
     offers = _slate(stats, _MLB_DATE, _MLB_DATE.strftime("%Y-%m-%d"))
 
-    # MLB skips the non-MLB depth filter, so no get_depth precondition is needed;
-    # the MLB game-context / pitcher-h2h / pitcherProfile branches (Phases D-F)
-    # run before the comp loop raises.
-    with pytest.raises(ValueError, match="at least one level must be left"):
-        stats.get_stats("hits", list(offers), _MLB_DATE)
+    # MLB skips the non-MLB depth filter, so no get_depth precondition is needed.
+    # Regression pin: the comp-z loop used to crash on a stale droplevel(0); it now
+    # runs to completion and writes "Player comps z" for every comped player.
+    out = stats.get_stats("hits", list(offers), _MLB_DATE)
+
+    assert out.shape == _MLB_SHAPE
+    assert _col_hash(out) == _MLB_COL_HASH
+    assert str(out["Home"].dtype) == "bool"
+    assert _digest(out) == _MLB_DIGEST
+    _assert_spot(out, _MLB_SPOT)

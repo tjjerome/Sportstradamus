@@ -1370,7 +1370,6 @@ class Stats:
             if compGames is None:
                 continue
             scores = _zscore_within_player(compGames, player_col, market)
-            scores.index = scores.index.droplevel(0)
             compGames[market] = scores
             opp_comp_games = compGames.loc[compGames[opp_col] == opponents[player], market]
             stats.loc[player, "Player comps z"] = opp_comp_games.mean()
@@ -1392,14 +1391,14 @@ class Stats:
             compGames = self.short_gamelog.loc[
                 self.short_gamelog["playerId"].isin(comps)
                 & self.short_gamelog["starting pitcher"]
-            ]
+            ].copy()
             return None if compGames.empty else compGames
 
         comps = self.comps["hitters"].get(pid, [pid])
         compGames = self.short_gamelog.loc[
             self.short_gamelog["playerId"].isin(comps)
             & self.short_gamelog["starting batter"]
-        ]
+        ].copy()
         if compGames.empty:
             return None
 
