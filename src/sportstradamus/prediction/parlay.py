@@ -190,6 +190,35 @@ def _nearest_psd(sigma: np.ndarray, tol: float = _PSD_EIG_TOLERANCE) -> np.ndarr
     return repaired * diag_scale[:, None] * diag_scale[None, :]
 
 
+def _parlay_distance_matrix(idx, Cpsd, self_k, n):
+    """Pairwise RKHS-cosine distance between parlays; non-finite entries floored to 1."""
+    dist = np.zeros((n, n))
+    for i in range(n):
+        bi = idx[i]
+        for j in range(i + 1, n):
+            denom = np.sqrt(self_k[i] * self_k[j])
+            sim = Cpsd[np.ix_(bi, idx[j])].sum() / denom if denom > 0 else np.nan
+            d = 1.0 - np.clip(sim, -1.0, 1.0)
+            if not np.isfinite(d):
+                d = 1.0
+            dist[i, j] = dist[j, i] = d
+    return dist
+
+
+def _select_family_count(z, dist, n, max_families):
+    """Silhouette-select the family count k in [1, max_families], smallest k on ties."""
+    best_k, best_score = 1, -1.0
+    for k in range(2, min(max_families, n - 1) + 1):
+        labels = fcluster(z, k, criterion="maxclust")
+        if len(set(labels)) < 2:
+            continue
+        # Ascending k with strict-improvement keeps the smallest k on ties.
+        score = silhouette_score(dist, labels, metric="precomputed")
+        if score > best_score:
+            best_score, best_k = score, k
+    return best_k, best_score
+
+
 def assign_parlay_families(
     bet_ids: list[tuple[int, ...]],
     C: np.ndarray,
@@ -226,31 +255,14 @@ def assign_parlay_families(
     self_k = np.array([Cpsd[np.ix_(b, b)].sum() for b in idx])
     self_k = np.where(np.isfinite(self_k) & (self_k > _KERNEL_SELF_FLOOR), self_k, np.nan)
 
-    dist = np.zeros((n, n))
-    for i in range(n):
-        bi = idx[i]
-        for j in range(i + 1, n):
-            denom = np.sqrt(self_k[i] * self_k[j])
-            sim = Cpsd[np.ix_(bi, idx[j])].sum() / denom if denom > 0 else np.nan
-            d = 1.0 - np.clip(sim, -1.0, 1.0)
-            if not np.isfinite(d):
-                d = 1.0
-            dist[i, j] = dist[j, i] = d
+    dist = _parlay_distance_matrix(idx, Cpsd, self_k, n)
 
     condensed = squareform(dist, checks=False)
     if not np.all(np.isfinite(condensed)):
         return single
 
     z = linkage(condensed, method="average")
-    best_k, best_score = 1, -1.0
-    for k in range(2, min(max_families, n - 1) + 1):
-        labels = fcluster(z, k, criterion="maxclust")
-        if len(set(labels)) < 2:
-            continue
-        # Ascending k with strict-improvement keeps the smallest k on ties.
-        score = silhouette_score(dist, labels, metric="precomputed")
-        if score > best_score:
-            best_score, best_k = score, k
+    best_k, best_score = _select_family_count(z, dist, n, max_families)
 
     if best_k >= 2 and best_score >= _PARLAY_MIN_SILHOUETTE:
         return fcluster(z, best_k, criterion="maxclust").astype(int)
