@@ -2012,6 +2012,10 @@ def main(
     live_window: int | None,
 ) -> None:
     """Score compression on dumped test sets, diff two strategies, or score live data."""
+    # style: allow-complexity — scorecard entrypoint: a 3-mode dispatcher
+    # (live-window / baseline-candidate / test-set sweep), each a guarded
+    # sequential block. The residual CC is mode selection plus click UsageError
+    # input validation, not nested logic.
     log_path = Path(str(RUN_LOG_PATH))
 
     if live_window is not None:
