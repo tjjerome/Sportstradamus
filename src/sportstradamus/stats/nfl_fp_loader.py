@@ -206,16 +206,12 @@ def load_one_year(year: int) -> pd.DataFrame:
     return _join_nfl_players(per_year)
 
 
-def derive_comp_metrics(profile: pd.DataFrame) -> pd.DataFrame:
-    """Add FP-native rate / per-game derived comp features to a per-year profile."""
-    # ``position`` / ``player_game_count`` are the canonical post-rename
-    # names (load_one_year renames before calling us). The comp-filter
-    # aliases ``dropbacks`` / ``attempts`` / ``routes`` are added here too
-    # so they exist on every per-year frame the Phase 1G diagnostic and
-    # build_comp_profile see.
-    if "position" not in profile.columns:
-        return profile
+def _add_comp_aliases(profile: pd.DataFrame) -> pd.DataFrame:
+    """Add the comp-filter aliases (``dropbacks`` / ``attempts`` / ``routes``).
 
+    Added on every per-year frame so they exist for the Phase 1G diagnostic and
+    ``build_comp_profile`` regardless of which source columns a given season ships.
+    """
     aliases: dict[str, pd.Series] = {}
     if "pass_adv_DB" in profile.columns:
         aliases["dropbacks"] = profile["pass_adv_DB"]
@@ -224,124 +220,139 @@ def derive_comp_metrics(profile: pd.DataFrame) -> pd.DataFrame:
     if "rec_adv_RTE" in profile.columns:
         aliases["routes"] = profile["rec_adv_RTE"]
     if aliases:
-        profile = profile.assign(**aliases)
+        return profile.assign(**aliases)
+    return profile
+
+
+def _coverage_man_share(
+    profile: pd.DataFrame, qb_mask: pd.Series, non_qb_mask: pd.Series
+) -> pd.Series | None:
+    """Per-player man-coverage share, or ``None`` when neither source column exists.
+
+    QBs see their own ``qb_cov_QB_MAN_pct``; receivers and backs see the
+    opposing-coverage rate broadcast from the team file
+    ``coverageMatrixExportOffense`` (a proxy for "what coverage does this player's
+    offense face?").
+    """
+    qb_man = profile.get("qb_cov_QB_MAN_pct")
+    tm_man = profile.get("off_faced_man_pct")
+    if qb_man is None and tm_man is None:
+        return None
+    cov_share = pd.Series(np.nan, index=profile.index)
+    if qb_man is not None:
+        cov_share.loc[qb_mask] = qb_man.loc[qb_mask]
+    if tm_man is not None:
+        cov_share.loc[non_qb_mask] = tm_man.loc[non_qb_mask]
+    return cov_share
+
+
+def derive_comp_metrics(profile: pd.DataFrame) -> pd.DataFrame:
+    """Add FP-native rate / per-game derived comp features to a per-year profile.
+
+    Each metric is written only on its position mask (QB / RB / non-QB) and skipped
+    when any of its source columns is absent. The derived columns are appended in a
+    fixed order (the order of the ``add`` calls below), which is part of the frozen
+    output schema.
+    """
+    # ``position`` / ``player_game_count`` are the canonical post-rename names
+    # (load_one_year renames before calling us).
+    if "position" not in profile.columns:
+        return profile
+
+    profile = _add_comp_aliases(profile)
 
     qb_mask = profile["position"] == "QB"
     non_qb_mask = profile["position"] != "QB"
     rb_mask = profile["position"] == "RB"
     games = profile.get("player_game_count")
 
-    # In passingBasic, the second YDS column (auto-suffixed to ``YDS.1``)
-    # is total QB rushing yards; the third (``YDS.2``) is scramble yards.
-    # designed_yards_per_game uses the total -- the EXP-run share from
-    # rush_adv covers the designed/scramble split.
+    derived: dict[str, pd.Series] = {}
+
+    def add(name: str, mask: pd.Series, required: list, compute) -> None:
+        if any(r is None for r in required):
+            return
+        sized = pd.Series(np.nan, index=profile.index)
+        sized.loc[mask] = compute().loc[mask]
+        derived[name] = sized
+
+    # In passingBasic, the second YDS column (auto-suffixed to ``YDS.1``) is total
+    # QB rushing yards; the third (``YDS.2``) is scramble yards.
+    # designed_yards_per_game uses the total -- the EXP-run share from rush_adv
+    # covers the designed/scramble split.
     dropbacks = profile.get("pass_adv_DB")
     scrambles = profile.get("pass_adv_SCRM")
     qb_rush_yards = profile.get("pass_basic_YDS.1")
     rush_att = profile.get("rush_basic_ATT")
     receptions = profile.get("rec_basic_REC")
     ctgt_rate = profile.get("rec_adv_CTGT_pct")
-    # receivingSeparationByCoverage publishes 8 unlabeled coverage
-    # sub-strats (4 full RTE/SEP/YPRR/TPRR/WIN, 4 simpler RTE/SEP/WIN).
-    # The 5th sub-block (auto-suffixed ``.4``) is the first of the simpler
-    # set -- per Phase-1A spec we use it as the "deep contested" proxy.
+    # receivingSeparationByCoverage publishes 8 unlabeled coverage sub-strats (4
+    # full RTE/SEP/YPRR/TPRR/WIN, 4 simpler RTE/SEP/WIN). The 5th sub-block
+    # (auto-suffixed ``.4``) is the first of the simpler set -- per Phase-1A spec
+    # we use it as the "deep contested" proxy.
     deep_win = profile.get("rec_sep_cov_WIN_RATE.4")
-    # In receivingManVsZone header the sub-strat ordering is
-    # [Overall, Man, Zone, OneHi, TwoHi] -- man YPRR is ``YPRR.1``,
-    # zone YPRR is ``YPRR.2``.
+    # In receivingManVsZone header the sub-strat ordering is [Overall, Man, Zone,
+    # OneHi, TwoHi] -- man YPRR is ``YPRR.1``, zone YPRR is ``YPRR.2``.
     overall_yprr = profile.get("rec_adv_YPRR")
     man_yprr = profile.get("rec_mz_YPRR.1")
     zone_yprr = profile.get("rec_mz_YPRR.2")
     sep_overall = profile.get("rec_sep_align_SEP_SCORE")
     win_overall = profile.get("rec_sep_align_WIN_RATE")
-    # The route-level header in receivingSeparationByRoutes omits the
-    # WIN_RATE column for some bins, so SEP SCORE is the only metric
-    # guaranteed across every route. The per-route mean uses every
-    # ``SEP SCORE`` column (canonicalized + auto-suffixed).
+    # The route-level header in receivingSeparationByRoutes omits the WIN_RATE
+    # column for some bins, so SEP SCORE is the only metric guaranteed across every
+    # route. The per-route mean uses every ``SEP SCORE`` column.
     route_sep_cols = [c for c in profile.columns if c.startswith("rec_sep_route_SEP_SCORE")]
-    qb_man = profile.get("qb_cov_QB_MAN_pct")
-    tm_man = profile.get("off_faced_man_pct")
     rush_success = profile.get("rush_adv_Success_pct")
     exp_run = profile.get("rush_adv_EXP_RUN_pct")
     bell_att = profile.get("rush_bellcow_ATT_pct")
     bell_tgt = profile.get("rush_bellcow_TGT_pct")
 
-    derived: dict[str, pd.Series] = {}
+    add("dropbacks_per_game", qb_mask, [dropbacks, games], lambda: dropbacks / games)
+    add("scrambles_per_dropback", qb_mask, [dropbacks, scrambles], lambda: scrambles / dropbacks)
+    add("designed_yards_per_game", qb_mask, [qb_rush_yards, games], lambda: qb_rush_yards / games)
+    add(
+        "total_touches_per_game",
+        rb_mask,
+        [rush_att, receptions, games],
+        lambda: (rush_att.fillna(0) + receptions.fillna(0)) / games,
+    )
 
-    def _gated(name: str, mask: pd.Series, series: pd.Series) -> None:
-        """Write ``series`` into ``derived[name]`` masked by position."""
-        sized = pd.Series(np.nan, index=profile.index)
-        sized.loc[mask] = series.loc[mask]
-        derived[name] = sized
+    add("contested_target_rate", non_qb_mask, [ctgt_rate], lambda: ctgt_rate)
+    add("deep_contested_target_rate", non_qb_mask, [deep_win], lambda: deep_win)
 
-    if dropbacks is not None and games is not None:
-        _gated("dropbacks_per_game", qb_mask, dropbacks / games)
-    if dropbacks is not None and scrambles is not None:
-        _gated("scrambles_per_dropback", qb_mask, scrambles / dropbacks)
-    if qb_rush_yards is not None and games is not None:
-        _gated("designed_yards_per_game", qb_mask, qb_rush_yards / games)
-    if rush_att is not None and receptions is not None and games is not None:
-        _gated(
-            "total_touches_per_game",
-            rb_mask,
-            (rush_att.fillna(0) + receptions.fillna(0)) / games,
-        )
+    add("man_yprr_diff", non_qb_mask, [overall_yprr, man_yprr], lambda: man_yprr - overall_yprr)
+    add("zone_yprr_diff", non_qb_mask, [overall_yprr, zone_yprr], lambda: zone_yprr - overall_yprr)
 
-    # rec_adv carries CTGT_pct directly (contested target rate); the deep
-    # variant comes from the deep-coverage sub-strat in
-    # receivingSeparationByCoverage.
-    if ctgt_rate is not None:
-        _gated("contested_target_rate", non_qb_mask, ctgt_rate)
-    if deep_win is not None:
-        _gated("deep_contested_target_rate", non_qb_mask, deep_win)
+    # FP-exclusive aggregates from §1D. ``rec_sep_align_SEP_SCORE`` /
+    # ``rec_sep_align_WIN_RATE`` (no suffix == first / "Overall" stratum) are the
+    # receiver's season-wide separation and win-rate.
+    add("sep_overall", non_qb_mask, [sep_overall], lambda: sep_overall)
+    add("win_rate_overall", non_qb_mask, [win_overall], lambda: win_overall)
+    # ``route_sep_cols or None`` maps the empty-list (no route columns) case onto
+    # the same skip the other metrics get from an absent column.
+    add(
+        "sep_routes_mean",
+        non_qb_mask,
+        [route_sep_cols or None],
+        lambda: profile[route_sep_cols].mean(axis=1),
+    )
 
-    if overall_yprr is not None and man_yprr is not None:
-        _gated("man_yprr_diff", non_qb_mask, man_yprr - overall_yprr)
-    if overall_yprr is not None and zone_yprr is not None:
-        _gated("zone_yprr_diff", non_qb_mask, zone_yprr - overall_yprr)
-
-    # FP-exclusive aggregates from §1D. ``rec_sep_align_SEP_SCORE`` and
-    # ``rec_sep_align_WIN_RATE`` (no suffix == first / "Overall" stratum)
-    # are the receiver's season-wide separation and win-rate.
-    if sep_overall is not None:
-        _gated("sep_overall", non_qb_mask, sep_overall)
-    if win_overall is not None:
-        _gated("win_rate_overall", non_qb_mask, win_overall)
-    if route_sep_cols:
-        _gated(
-            "sep_routes_mean",
-            non_qb_mask,
-            profile[route_sep_cols].mean(axis=1),
-        )
-
-    # Coverage scheme share: QBs see their own MAN%; receivers and backs
-    # see the opposing-coverage rate via the team-broadcast file
-    # ``coverageMatrixExportOffense`` (proxy for "what coverage does this
-    # player's offense face?").
-    if qb_man is not None or tm_man is not None:
-        cov_share = pd.Series(np.nan, index=profile.index)
-        if qb_man is not None:
-            cov_share.loc[qb_mask] = qb_man.loc[qb_mask]
-        if tm_man is not None:
-            cov_share.loc[non_qb_mask] = tm_man.loc[non_qb_mask]
+    # Coverage scheme share (two masks, so it stays outside ``add``).
+    cov_share = _coverage_man_share(profile, qb_mask, non_qb_mask)
+    if cov_share is not None:
         derived["cov_man_share"] = cov_share
 
-    # First ``Success %`` column (total / overall bucket) for RB success
-    # rate -- not the PRO / GAP sub-buckets.
-    if rush_success is not None:
-        _gated("success_rate", rb_mask, rush_success)
-    if exp_run is not None:
-        _gated("exp_run_share", rb_mask, exp_run)
-
-    # Bellcow score == ground + air volume relative to the team. The sum
-    # produces a single 0-200 ranking number; downstream z-scoring
-    # normalizes the scale.
-    if bell_att is not None and bell_tgt is not None:
-        _gated(
-            "bellcow_score",
-            rb_mask,
-            bell_att.fillna(0) + bell_tgt.fillna(0),
-        )
+    # First ``Success %`` column (total / overall bucket) for RB success rate --
+    # not the PRO / GAP sub-buckets.
+    add("success_rate", rb_mask, [rush_success], lambda: rush_success)
+    add("exp_run_share", rb_mask, [exp_run], lambda: exp_run)
+    # Bellcow score == ground + air volume relative to the team. The sum produces a
+    # single 0-200 ranking number; downstream z-scoring normalizes the scale.
+    add(
+        "bellcow_score",
+        rb_mask,
+        [bell_att, bell_tgt],
+        lambda: bell_att.fillna(0) + bell_tgt.fillna(0),
+    )
 
     if not derived:
         return profile
