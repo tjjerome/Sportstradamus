@@ -109,15 +109,28 @@ def expand_registry(
         contexts = table.get("context") or []
         if not prop or not contexts:
             continue
-        for ctx in contexts:
-            if ctx not in _KNOWN_CONTEXTS:
-                continue
-            spec = _make_spec(prop, ctx, league=league, table=table)
-            if spec.name in existing_names:
-                continue
-            out.append(spec)
-            existing_names.add(spec.name)
+        out.extend(
+            _specs_for_table(prop, contexts, table, league=league, existing_names=existing_names)
+        )
     return out
+
+
+def _specs_for_table(
+    prop: str, contexts: list, table: dict, *, league: str, existing_names: set[str]
+) -> list[EndpointSpec]:
+    """Mutates ``existing_names`` so later tables in the same walk dedupe against
+    names this one just claimed.
+    """
+    specs: list[EndpointSpec] = []
+    for ctx in contexts:
+        if ctx not in _KNOWN_CONTEXTS:
+            continue
+        spec = _make_spec(prop, ctx, league=league, table=table)
+        if spec.name in existing_names:
+            continue
+        specs.append(spec)
+        existing_names.add(spec.name)
+    return specs
 
 
 def _should_include(table: dict, *, include_private: bool) -> bool:
