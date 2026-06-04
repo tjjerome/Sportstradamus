@@ -55,6 +55,69 @@ _MODEL_PROB_PICK_FLOOR = 0.58
 _BOOK_PROB_PICK_FLOOR = 0.52
 
 
+def _leg_market_map(league, platform, stat_map):
+    """Per-platform market-name map plus the league-specific leg-name overrides."""
+    new_map = stat_map.get(platform, {}).copy()
+    if league == "NHL":
+        new_map.update({"Points": "points", "Blocked Shots": "blocked", "Assists": "assists"})
+    if league in ("NBA", "WNBA"):
+        new_map.update({"Fantasy Points": "fantasy points prizepicks"})
+    return new_map
+
+
+def _bet_gameday_rows(gamelog, ls, bet):
+    game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
+    bet_date = pd.to_datetime(bet.Date).date()
+    return gamelog.loc[
+        (game_dates == bet_date) & (gamelog[ls["team"]].isin(bet.Game.split("/")))
+    ]
+
+
+def _leg_result_value(game, ls, player, market):
+    """Realized ``market`` value for a leg's player(s), or ``None`` if unavailable.
+
+    Combo (``" + "``) and matchup (``" vs. "``) legs sum the two players' values;
+    an absent player or market column yields ``None`` so the caller skips the leg.
+    """
+    try:
+        if " + " in player:
+            players = player.split(" + ")
+        elif " vs. " in player:
+            players = player.split(" vs. ")
+        else:
+            result = game.loc[game[ls["player"]] == player, market]
+            return None if result.empty else result.iat[0]
+        r1 = game.loc[game[ls["player"]] == players[0], market]
+        r2 = game.loc[game[ls["player"]] == players[1], market]
+        if r1.empty or r2.empty:
+            return None
+        return r1.iat[0] + r2.iat[0]
+    except KeyError:
+        return None
+
+
+def _resolve_leg(game, ls, new_map, leg):
+    """Resolve one leg string to ``1`` (miss), ``0`` (hit), or ``None`` (skip).
+
+    ``None`` covers an unparseable leg, an unavailable result, and a push
+    (``result == line``).
+    """
+    m = LEG_PATTERN.match(leg)
+    if not m:
+        return None
+    player, direction, line_str, market = m.groups()
+    over = direction == "Over"
+    line = float(line_str)
+    market = market.replace("H2H ", "")
+    market = new_map.get(market, market)
+
+    result_val = _leg_result_value(game, ls, player, market)
+    if result_val is None or result_val == line:
+        return None
+    missed = (over and result_val < line) or (not over and result_val > line)
+    return 1 if missed else 0
+
+
 def check_bet(bet, stats, stat_map):
     """Resolve a single parlay bet against actual game logs.
 
@@ -66,78 +129,23 @@ def check_bet(bet, stats, stat_map):
 
     stat_obj = stats[bet.League]
     ls = stat_obj.log_strings
+    new_map = _leg_market_map(bet.League, bet.Platform, stat_map)
 
-    new_map = stat_map.get(bet.Platform, {}).copy()
-    if bet.League == "NHL":
-        new_map.update(
-            {
-                "Points": "points",
-                "Blocked Shots": "blocked",
-                "Assists": "assists",
-            }
-        )
-    if bet.League in ("NBA", "WNBA"):
-        new_map.update(
-            {
-                "Fantasy Points": "fantasy points prizepicks",
-            }
-        )
-
-    gamelog = stat_obj.gamelog
-    game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
-    bet_date = pd.to_datetime(bet.Date).date()
-    game = gamelog.loc[(game_dates == bet_date) & (gamelog[ls["team"]].isin(bet.Game.split("/")))]
-
+    game = _bet_gameday_rows(stat_obj.gamelog, ls, bet)
     if game.empty:
         return np.nan, np.nan
 
     legs = 0
     misses = 0
-
     for col in [c for c in bet.index if c.startswith("Leg ") and c[4:].strip().isdigit()]:
         leg = bet[col]
         if not isinstance(leg, str) or leg == "":
             continue
-
-        m = LEG_PATTERN.match(leg)
-        if not m:
+        outcome = _resolve_leg(game, ls, new_map, leg)
+        if outcome is None:
             continue
-
-        player, direction, line_str, market = m.groups()
-        over = direction == "Over"
-        line = float(line_str)
-        market = market.replace("H2H ", "")
-        market = new_map.get(market, market)
-
-        try:
-            if " + " in player:
-                players = player.split(" + ")
-                r1 = game.loc[game[ls["player"]] == players[0], market]
-                r2 = game.loc[game[ls["player"]] == players[1], market]
-                if r1.empty or r2.empty:
-                    continue
-                result_val = r1.iat[0] + r2.iat[0]
-            elif " vs. " in player:
-                players = player.split(" vs. ")
-                r1 = game.loc[game[ls["player"]] == players[0], market]
-                r2 = game.loc[game[ls["player"]] == players[1], market]
-                if r1.empty or r2.empty:
-                    continue
-                result_val = r1.iat[0] + r2.iat[0]
-            else:
-                result = game.loc[game[ls["player"]] == player, market]
-                if result.empty:
-                    continue
-                result_val = result.iat[0]
-        except KeyError:
-            continue
-
-        if result_val == line:
-            continue  # push, skip leg
-
         legs += 1
-        if (over and result_val < line) or (not over and result_val > line):
-            misses += 1
+        misses += outcome
 
     return legs, misses
 
