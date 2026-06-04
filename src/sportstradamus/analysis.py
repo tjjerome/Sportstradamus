@@ -40,6 +40,9 @@ PAYOUT_TABLE = {
 # boosted entry that drops a leg pays the un-boosted table value instead.
 _UNDERDOG_PERFECT_BOOST_MULT = 2
 
+# Underdog platform caps per-entry payout at 100x stake regardless of parlay size.
+_UNDERDOG_PAYOUT_CAP = 100
+
 TIMEFRAMES = [
     ("7d", 7),
     ("30d", 30),
@@ -556,78 +559,74 @@ def compute_individual_metrics(history):
     return hist_stats, daily, calibration, roi
 
 
-def compute_parlay_metrics(parlays, stats, stat_map):
-    """Compute parlay P&L, hit rates, and correlation calibration.
-
-    Returns (profit_df, daily_parlays, size_stats, corr_cal) DataFrames.
-    """
-    tqdm.pandas()
-    today = datetime.today().date()
-
-    # Filter to last year
+def _prep_parlays(parlays, stats, stat_map, today):
+    """Date-filter to the last year, resolve unresolved bets, drop the rest."""
     parlays["_date"] = pd.to_datetime(parlays["Date"], errors="coerce").dt.date
     parlays = parlays.loc[parlays["_date"].notna()].copy()
     parlays = parlays.loc[parlays["_date"] >= today - timedelta(days=365)].copy()
 
-    # Resolve unresolved parlays
     unresolved = parlays.loc[parlays["Legs"].isna()]
-    if len(unresolved) > 0:
+    if not unresolved.empty:
         results = unresolved.progress_apply(
             lambda bet: check_bet(bet, stats, stat_map), axis=1
         ).to_list()
         parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
 
     parlays.dropna(subset=["Legs"], inplace=True)
-    if len(parlays) == 0:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    return parlays
 
-    parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
-    parlays["Hit"] = (parlays["Misses"] == 0).astype(int)
 
+def _parlay_profit_df(parlays, today):
+    """Underdog P&L by league x timeframe, EV-ranked and game-day averaged."""
     profit_rows = []
     ud_parlays = parlays.loc[parlays["Platform"] == "Underdog"].copy()
-    if len(ud_parlays) > 0:
-        ud_parlays["Profit"] = ud_parlays.apply(
-            lambda x: (
-                np.clip(
-                    PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
-                    * (x.Boost if x.Boost < _UNDERDOG_PERFECT_BOOST_MULT or x.Misses == 0 else 1),
-                    None,
-                    100,
-                )
-                - 1
-            ),
-            axis=1,
-        )
-        ud_parlays["Profit"] = ud_parlays["Profit"] * np.round(ud_parlays["Rec Bet"] * 2) / 2
+    if ud_parlays.empty:
+        return pd.DataFrame()
 
-        for league in ["All", *sorted(ud_parlays["League"].unique())]:
-            ldf = ud_parlays if league == "All" else ud_parlays.loc[ud_parlays["League"] == league]
-            if ldf.empty:
+    ud_parlays["Profit"] = ud_parlays.apply(
+        lambda x: (
+            np.clip(
+                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
+                * (x.Boost if x.Boost < _UNDERDOG_PERFECT_BOOST_MULT or x.Misses == 0 else 1),
+                None,
+                _UNDERDOG_PAYOUT_CAP,
+            )
+            - 1
+        ),
+        axis=1,
+    )
+    ud_parlays["Profit"] = ud_parlays["Profit"] * np.round(ud_parlays["Rec Bet"] * 2) / 2
+
+    for league in ["All", *sorted(ud_parlays["League"].unique())]:
+        ldf = ud_parlays if league == "All" else ud_parlays.loc[ud_parlays["League"] == league]
+        if ldf.empty:
+            continue
+        for tf_label, tf_days in TIMEFRAMES:
+            cutoff = today - timedelta(days=tf_days)
+            tf_df = ldf.loc[ldf["_date"] >= cutoff]
+            if tf_df.empty:
                 continue
-            for tf_label, tf_days in TIMEFRAMES:
-                cutoff = today - timedelta(days=tf_days)
-                tf_df = ldf.loc[ldf["_date"] >= cutoff]
-                if not tf_df.empty:
-                    p = (
-                        tf_df.sort_values("Model EV", ascending=False)
-                        .groupby(["Game", "Date"])
-                        .apply(lambda x: x.Profit.mean())
-                        .sum()
-                    )
-                    profit_rows.append(
-                        {
-                            "Platform": "Underdog",
-                            "League": league,
-                            "Period": tf_label,
-                            "Profit": round(p, 2),
-                            "Parlays": len(tf_df),
-                            "Hit Rate": round(tf_df["Hit"].mean(), 4),
-                        }
-                    )
+            p = (
+                tf_df.sort_values("Model EV", ascending=False)
+                .groupby(["Game", "Date"])
+                .apply(lambda x: x.Profit.mean())
+                .sum()
+            )
+            profit_rows.append(
+                {
+                    "Platform": "Underdog",
+                    "League": league,
+                    "Period": tf_label,
+                    "Profit": round(p, 2),
+                    "Parlays": len(tf_df),
+                    "Hit Rate": round(tf_df["Hit"].mean(), 4),
+                }
+            )
+    return pd.DataFrame(profit_rows)
 
-    profit_df = pd.DataFrame(profit_rows)
 
+def _parlay_daily_table(parlays):
+    """Per-platform daily parlay counts and miss-bucket breakdown."""
     daily_rows = []
     for platform in parlays["Platform"].unique():
         plat_df = parlays.loc[parlays["Platform"] == platform]
@@ -646,24 +645,54 @@ def compute_parlay_metrics(parlays, stats, stat_map):
         daily_plat.rename(columns={"_date": "Date"}, inplace=True)
         daily_rows.append(daily_plat)
 
-    if daily_rows:
-        daily_parlays = pd.concat(daily_rows, ignore_index=True)
-        daily_parlays["Date"] = daily_parlays["Date"].astype(str)
-        daily_parlays = daily_parlays[
-            [
-                "Date",
-                "Platform",
-                "League",
-                "Parlays",
-                "Hits",
-                "Misses_0",
-                "Misses_1",
-                "Misses_2_plus",
-            ]
-        ].sort_values(["Date", "Platform", "League"])
-    else:
-        daily_parlays = pd.DataFrame()
+    if not daily_rows:
+        return pd.DataFrame()
+    daily_parlays = pd.concat(daily_rows, ignore_index=True)
+    daily_parlays["Date"] = daily_parlays["Date"].astype(str)
+    return daily_parlays[
+        [
+            "Date",
+            "Platform",
+            "League",
+            "Parlays",
+            "Hits",
+            "Misses_0",
+            "Misses_1",
+            "Misses_2_plus",
+        ]
+    ].sort_values(["Date", "Platform", "League"])
 
+
+def _parlay_size_row(size_df, parlays, platform, tf_label, size):
+    """One parlay-size summary row for a (platform, period, size) cell.
+
+    ``Independent Rate`` prefers the stored ``Indep P``; absent that it falls
+    back to the product of each leg's probability in ``Leg Probs``.
+    """
+    row = {
+        "Platform": platform,
+        "Period": tf_label,
+        "Size": int(size),
+        "Actual Rate": round(size_df["Hit"].mean(), 4),
+        "Hit All": int((size_df["Misses"] == 0).sum()),
+        "Missed 1": int((size_df["Misses"] == 1).sum()),
+        "Missed 2+": int((size_df["Misses"] >= 2).sum()),
+        "Count": len(size_df),
+    }
+    if "P" in parlays.columns:
+        row["Predicted P"] = round(size_df["P"].mean(), 4)
+    if "Indep P" in parlays.columns and size_df["Indep P"].notna().any():
+        row["Independent Rate"] = round(size_df["Indep P"].mean(), 4)
+    elif "Leg Probs" in parlays.columns and size_df["Leg Probs"].notna().any():
+        indep = size_df["Leg Probs"].apply(
+            lambda lp: np.prod(lp) if isinstance(lp, list | tuple) and len(lp) > 0 else np.nan
+        )
+        row["Independent Rate"] = round(indep.mean(), 4)
+    return row
+
+
+def _parlay_size_stats(parlays, today):
+    """Hit-rate and independence calibration by platform / timeframe / size."""
     size_rows = []
     for platform in parlays["Platform"].unique():
         plat_parlays = parlays.loc[parlays["Platform"] == platform]
@@ -672,52 +701,53 @@ def compute_parlay_metrics(parlays, stats, stat_map):
             tf_parlays = plat_parlays.loc[plat_parlays["_date"] >= cutoff]
             for size in sorted(tf_parlays["Bet Size"].unique()):
                 size_df = tf_parlays.loc[tf_parlays["Bet Size"] == size]
-                if len(size_df) == 0:
+                if size_df.empty:
                     continue
-                row = {
-                    "Platform": platform,
-                    "Period": tf_label,
-                    "Size": int(size),
-                    "Actual Rate": round(size_df["Hit"].mean(), 4),
-                    "Hit All": int((size_df["Misses"] == 0).sum()),
-                    "Missed 1": int((size_df["Misses"] == 1).sum()),
-                    "Missed 2+": int((size_df["Misses"] >= 2).sum()),
-                    "Count": len(size_df),
-                }
-                if "P" in parlays.columns:
-                    row["Predicted P"] = round(size_df["P"].mean(), 4)
-                if "Indep P" in parlays.columns and size_df["Indep P"].notna().any():
-                    row["Independent Rate"] = round(size_df["Indep P"].mean(), 4)
-                elif "Leg Probs" in parlays.columns and size_df["Leg Probs"].notna().any():
-                    indep = size_df["Leg Probs"].apply(
-                        lambda lp: (
-                            np.prod(lp) if isinstance(lp, list | tuple) and len(lp) > 0 else np.nan
-                        )
-                    )
-                    row["Independent Rate"] = round(indep.mean(), 4)
-                size_rows.append(row)
-    size_stats = pd.DataFrame(size_rows)
+                size_rows.append(_parlay_size_row(size_df, parlays, platform, tf_label, size))
+    return pd.DataFrame(size_rows)
 
-    if "P" in parlays.columns and len(parlays) > 0:
-        cal_df = parlays.copy()
-        bins = np.linspace(0, 1, 11)
-        cal_df["p_bin"] = pd.cut(cal_df["P"], bins=bins)
-        corr_cal = (
-            cal_df.groupby("p_bin", observed=False)
-            .agg(
-                Predicted=("P", "mean"),
-                Actual=("Hit", "mean"),
-                Count=("Hit", "count"),
-            )
-            .reset_index()
+
+def _parlay_corr_cal(parlays):
+    """Correlation-probability calibration: predicted parlay P vs realized hit."""
+    if "P" not in parlays.columns or len(parlays) == 0:
+        return pd.DataFrame()
+    cal_df = parlays.copy()
+    bins = np.linspace(0, 1, 11)
+    cal_df["p_bin"] = pd.cut(cal_df["P"], bins=bins)
+    corr_cal = (
+        cal_df.groupby("p_bin", observed=False)
+        .agg(
+            Predicted=("P", "mean"),
+            Actual=("Hit", "mean"),
+            Count=("Hit", "count"),
         )
-        corr_cal["Bin"] = corr_cal["p_bin"].astype(str)
-        corr_cal = corr_cal[["Bin", "Predicted", "Actual", "Count"]]
-    else:
-        corr_cal = pd.DataFrame()
+        .reset_index()
+    )
+    corr_cal["Bin"] = corr_cal["p_bin"].astype(str)
+    return corr_cal[["Bin", "Predicted", "Actual", "Count"]]
+
+
+def compute_parlay_metrics(parlays, stats, stat_map):
+    """Compute parlay P&L, hit rates, and correlation calibration.
+
+    Returns (profit_df, daily_parlays, size_stats, corr_cal) DataFrames.
+    """
+    tqdm.pandas()
+    today = datetime.today().date()
+
+    parlays = _prep_parlays(parlays, stats, stat_map, today)
+    if len(parlays) == 0:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
+    parlays["Hit"] = (parlays["Misses"] == 0).astype(int)
+
+    profit_df = _parlay_profit_df(parlays, today)
+    daily_parlays = _parlay_daily_table(parlays)
+    size_stats = _parlay_size_stats(parlays, today)
+    corr_cal = _parlay_corr_cal(parlays)
 
     parlays.drop(columns=["_date", "Hit"], inplace=True, errors="ignore")
-
     return profit_df, daily_parlays, size_stats, corr_cal
 
 
