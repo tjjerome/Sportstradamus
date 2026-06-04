@@ -318,7 +318,6 @@ _RECIPES: tuple[_TeamRecipe, ...] = (
 
 
 def _rpr_bucket_recipes() -> tuple[_TeamRecipe, ...]:
-    """Synthesize run_pass_report per-bucket pass% recipes from :data:`_RPR_BUCKETS`."""
     return tuple(
         _TeamRecipe(
             output_col=f"rp_{suffix}_pass_pct",
@@ -439,6 +438,41 @@ def _pick_abbr_season(
     return pattern_b_snapshot[0]
 
 
+def _recipes_by_kind(grain: str) -> dict[str, list[_TeamRecipe]]:
+    by_kind: dict[str, list[_TeamRecipe]] = {}
+    for recipe in _ALL_RECIPES:
+        if recipe.grain != grain:
+            continue
+        by_kind.setdefault(recipe.file_kind, []).append(recipe)
+    return by_kind
+
+
+def _pool_windows(
+    pattern_a_windows: Sequence[tuple[int, int, int]], file_kind: str
+) -> pd.DataFrame:
+    """Pool before the per-team groupby so blended windows are treated as one sample.
+
+    Windows where ``start_week > end_week`` are skipped. Empty frame when no window
+    yields rows.
+    """
+    frames = []
+    for season, start_week, end_week in pattern_a_windows:
+        if start_week > end_week:
+            continue
+        df = _load_kind_window(season, start_week, end_week, file_kind)
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def _rekey_to_abbr(out: pd.DataFrame, abbr_map: pd.Series) -> pd.DataFrame:
+    mapping = abbr_map.to_dict()
+    out.index = [mapping.get(idx) for idx in out.index]
+    return out.loc[out.index.notna()] if isinstance(out.index, pd.Index) else out
+
+
 def _aggregate_pattern_a(
     pattern_a_windows: Sequence[tuple[int, int, int]],
     *,
@@ -465,24 +499,11 @@ def _aggregate_pattern_a(
     if not pattern_a_windows:
         return pd.DataFrame()
 
-    by_kind: dict[str, list[_TeamRecipe]] = {}
-    for recipe in _ALL_RECIPES:
-        if recipe.grain != grain:
-            continue
-        by_kind.setdefault(recipe.file_kind, []).append(recipe)
-
     out = pd.DataFrame()
-    for file_kind, recipes in by_kind.items():
-        frames = []
-        for season, start_week, end_week in pattern_a_windows:
-            if start_week > end_week:
-                continue
-            df = _load_kind_window(season, start_week, end_week, file_kind)
-            if not df.empty:
-                frames.append(df)
-        if not frames:
+    for file_kind, recipes in _recipes_by_kind(grain).items():
+        pooled = _pool_windows(pattern_a_windows, file_kind)
+        if pooled.empty:
             continue
-        pooled = pd.concat(frames, ignore_index=True)
         kind_frame = _apply_recipes(pooled, recipes)
         if kind_frame.empty:
             continue
@@ -490,10 +511,7 @@ def _aggregate_pattern_a(
 
     if out.empty:
         return out
-
-    mapping = abbr_map.to_dict()
-    out.index = [mapping.get(idx) for idx in out.index]
-    return out.loc[out.index.notna()] if isinstance(out.index, pd.Index) else out
+    return _rekey_to_abbr(out, abbr_map)
 
 
 def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataFrame:
@@ -519,21 +537,25 @@ def _apply_recipes(df: pd.DataFrame, recipes: Sequence[_TeamRecipe]) -> pd.DataF
     return out
 
 
+def _missing_cols(df: pd.DataFrame, cols: Sequence[str]) -> bool:
+    return any(c not in df.columns for c in cols)
+
+
 def _dispatch(df: pd.DataFrame, recipe: _TeamRecipe) -> pd.Series | None:
     """Route a recipe to the right helper -- skip if required columns missing."""
     if recipe.pattern == "weighted_rate":
         num_col, den_col = recipe.args
-        if num_col not in df.columns or den_col not in df.columns:
+        if _missing_cols(df, recipe.args):
             return None
         return weighted_rate(df, num_col, den_col, group_col=TEAM_GROUP_COL)
     if recipe.pattern == "weighted_mean":
         value_col, weight_col = recipe.args
-        if value_col not in df.columns or weight_col not in df.columns:
+        if _missing_cols(df, recipe.args):
             return None
         return weighted_mean(df, value_col, weight_col, group_col=TEAM_GROUP_COL)
     if recipe.pattern == "proe_formula":
         actual_col, expected_col = recipe.args
-        if actual_col not in df.columns or expected_col not in df.columns:
+        if _missing_cols(df, recipe.args):
             return None
         grouped = df.groupby(TEAM_GROUP_COL, dropna=False)
         actual = grouped[actual_col].sum(min_count=1)
