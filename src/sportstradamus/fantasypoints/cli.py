@@ -883,12 +883,7 @@ def parse_curl_to_spec(
     url_parts = urlsplit(parsed["url"])
     params = dict(parse_qsl(url_parts.query, keep_blank_values=True))
     bare_url = urlunsplit((url_parts.scheme, url_parts.netloc, url_parts.path, "", ""))
-    raw_body = parsed["body"]
-    try:
-        json_body = json.loads(raw_body) if raw_body is not None else None
-    except json.JSONDecodeError:
-        json_body = None
-    method = (parsed["method"] or ("POST" if json_body is not None else "GET")).upper()
+    json_body, method = _curl_body_and_method(parsed["body"], parsed["method"])
     return EndpointSpec(
         name=name,
         url=bare_url,
@@ -902,36 +897,51 @@ def parse_curl_to_spec(
     )
 
 
+def _curl_body_and_method(raw_body: str | None, declared_method: str | None) -> tuple:
+    """Parse the curl body as JSON (None on failure) and resolve the HTTP method.
+
+    Method precedence: an explicit ``-X`` wins; otherwise POST when a body is
+    present, else GET. Returns ``(json_body, method)``.
+    """
+    try:
+        json_body = json.loads(raw_body) if raw_body is not None else None
+    except json.JSONDecodeError:
+        json_body = None
+    method = (declared_method or ("POST" if json_body is not None else "GET")).upper()
+    return json_body, method
+
+
 def _parse_curl_tokens(tokens: list[str]) -> dict:
-    """Walk curl arg tokens; collect URL, method, headers, body."""
-    url: str | None = None
-    method: str | None = None
-    body: str | None = None
-    headers: dict[str, str] = {}
+    state: dict = {"url": None, "method": None, "headers": {}, "body": None}
     i = 0
     while i < len(tokens):
-        tok = tokens[i]
-        if tok in ("-H", "--header"):
-            i += 1
-            if i < len(tokens):
-                key, _, value = tokens[i].partition(":")
-                headers[key.strip()] = value.strip()
-        elif tok in ("-X", "--request"):
-            i += 1
-            if i < len(tokens):
-                method = tokens[i]
-        elif tok in ("-d", "--data", "--data-raw", "--data-binary", "--data-ascii"):
-            i += 1
-            if i < len(tokens):
-                body = tokens[i]
-        elif tok in _CURL_SKIP_VALUE_FLAGS:
-            i += 1  # Value irrelevant — UA/cookie come from keys.json.
-        elif tok.startswith("-"):
-            pass  # Flag without value (--compressed, --location, ...).
-        elif url is None:
-            url = tok
+        i = _apply_curl_token(tokens, i, state)
+    return state
+
+
+def _apply_curl_token(tokens: list[str], i: int, state: dict) -> int:
+    """Apply one curl token to ``state``; return the next index to read."""
+    tok = tokens[i]
+    if tok in ("-H", "--header"):
         i += 1
-    return {"url": url, "method": method, "headers": headers, "body": body}
+        if i < len(tokens):
+            key, _, value = tokens[i].partition(":")
+            state["headers"][key.strip()] = value.strip()
+    elif tok in ("-X", "--request"):
+        i += 1
+        if i < len(tokens):
+            state["method"] = tokens[i]
+    elif tok in ("-d", "--data", "--data-raw", "--data-binary", "--data-ascii"):
+        i += 1
+        if i < len(tokens):
+            state["body"] = tokens[i]
+    elif tok in _CURL_SKIP_VALUE_FLAGS:
+        i += 1  # Value irrelevant — UA/cookie come from keys.json.
+    elif tok.startswith("-"):
+        pass  # Flag without value (--compressed, --location, ...).
+    elif state["url"] is None:
+        state["url"] = tok
+    return i + 1
 
 
 def _filter_by_name(specs: list[EndpointSpec], names: tuple[str, ...]) -> list[EndpointSpec]:

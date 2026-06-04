@@ -297,6 +297,39 @@ def test_parse_curl_rejects_non_curl_input():
         parse_curl_to_spec("wget https://example/", name="x", output_subdir="x")
 
 
+def test_parse_curl_consumes_and_ignores_skip_value_flags():
+    # -A / -b take a value that must be consumed (UA/cookie come from
+    # keys.json), so the following value is not mistaken for the URL.
+    spec = parse_curl_to_spec(
+        "curl 'https://example/api/x' -A 'Mozilla/5.0' -b 'session=abc' "
+        "-H 'Accept: application/json'",
+        name="x",
+        output_subdir="x",
+    )
+    assert spec.url == "https://example/api/x"
+    assert spec.extra_headers == {"Accept": "application/json"}
+
+
+def test_parse_curl_invalid_json_body_yields_none():
+    spec = parse_curl_to_spec(
+        "curl 'https://example/api/x' -X POST --data-raw 'not-json'",
+        name="x",
+        output_subdir="x",
+    )
+    assert spec.json_body is None
+    assert spec.method == "POST"
+
+
+def test_parse_curl_defaults_to_post_when_body_present_without_method():
+    spec = parse_curl_to_spec(
+        'curl \'https://example/api/x\' --data-raw \'{"k":1}\'',
+        name="x",
+        output_subdir="x",
+    )
+    assert spec.method == "POST"
+    assert spec.json_body == {"k": 1}
+
+
 def test_catalog_round_trip(tmp_path):
     catalog_path = tmp_path / "catalog.json"
     specs = [
