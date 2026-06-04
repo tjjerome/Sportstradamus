@@ -119,21 +119,12 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
     df = offers.copy()
     df = df.replace([np.inf, -np.inf], np.nan)
 
-    # Drop rows with no signal (edge or boost).
     signal_cols = [c for c in _OFFER_SIGNAL_COLS if c in df.columns]
     if signal_cols:
         signal = df[signal_cols].fillna(0)
         df = df.loc[(signal != 0).any(axis=1)]
 
-    # Reshape distribution parameters for the dashboard. The scoring pipeline
-    # returns "Model Param" (the shape value) but the dashboard needs it split
-    # into distribution-specific columns (Model R, Model Alpha, etc.) for scipy.
-    if "Model Param" in df.columns and "Dist" in df.columns:
-        df["Model R"] = np.where(df["Dist"].isin(("NegBin", "ZINB")), df["Model Param"], np.nan)
-        df["Model Alpha"] = np.where(
-            df["Dist"].isin(("Gamma", "ZAGamma")), df["Model Param"], np.nan
-        )
-        df["Model Sigma"] = np.where(df["Dist"] == "SkewNormal", df["Model Param"], np.nan)
+    df = _split_dist_params(df)
 
     # Ensure Gate is present (zero-inflation probability for ZINB, ZAGamma).
     if "Gate" not in df.columns:
@@ -141,11 +132,23 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
     if "Model Skew" not in df.columns:
         df["Model Skew"] = np.nan
 
-    # Keep only columns the dashboard needs; drop internal scoring artifacts.
     keep = [c for c in _OFFER_KEEP_COLS if c in df.columns]
     df = df[keep]
     if "Model" in df.columns:
         df = df.sort_values("Model", ascending=False, ignore_index=True)
+    return df
+
+
+def _split_dist_params(df: pd.DataFrame) -> pd.DataFrame:
+    """Split the generic "Model Param" shape value into distribution-specific
+    columns (Model R / Model Alpha / Model Sigma) the dashboard's scipy calls
+    expect. No-op when the scoring pipeline didn't attach Model Param / Dist.
+    """
+    if "Model Param" not in df.columns or "Dist" not in df.columns:
+        return df
+    df["Model R"] = np.where(df["Dist"].isin(("NegBin", "ZINB")), df["Model Param"], np.nan)
+    df["Model Alpha"] = np.where(df["Dist"].isin(("Gamma", "ZAGamma")), df["Model Param"], np.nan)
+    df["Model Sigma"] = np.where(df["Dist"] == "SkewNormal", df["Model Param"], np.nan)
     return df
 
 
