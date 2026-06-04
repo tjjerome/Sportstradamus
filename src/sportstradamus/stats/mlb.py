@@ -49,6 +49,65 @@ _FIP_CONSTANT: float = 3.2
 _MARKET_HIT_RATE_MIN: float = 0.1
 
 
+def _mlb_team_abbr(mlb_teams, team_id):
+    return next(
+        team["abbreviation"].replace("AZ", "ARI")
+        for team in mlb_teams["teams"]
+        if team["id"] == team_id
+    )
+
+
+def _build_mlb_upcoming_games(mlb_games, mlb_teams):
+    mlb_upcoming_games = {}
+    for game in mlb_games:
+        if game["status"] in ["Pre-Game", "Scheduled"] and game["game_type"] not in ["A"]:
+            awayTeam = _mlb_team_abbr(mlb_teams, game["away_id"])
+            homeTeam = _mlb_team_abbr(mlb_teams, game["home_id"])
+            game_bs = mlb.boxscore_data(game["game_id"])
+            players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
+            if game["game_num"] == 1:
+                mlb_upcoming_games[awayTeam] = {
+                    "Pitcher": remove_accents(game["away_probable_pitcher"]),
+                    "Home": False,
+                    "Opponent": homeTeam,
+                    "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
+                    "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
+                }
+                mlb_upcoming_games[homeTeam] = {
+                    "Pitcher": remove_accents(game["home_probable_pitcher"]),
+                    "Home": True,
+                    "Opponent": awayTeam,
+                    "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
+                    "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
+                }
+            elif game["game_num"] > 1:
+                mlb_upcoming_games[awayTeam + str(game["game_num"])] = {
+                    "Pitcher": remove_accents(game["away_probable_pitcher"]),
+                    "Home": False,
+                    "Opponent": homeTeam,
+                    "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
+                    "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
+                }
+                mlb_upcoming_games[homeTeam + str(game["game_num"])] = {
+                    "Pitcher": remove_accents(game["home_probable_pitcher"]),
+                    "Home": True,
+                    "Opponent": awayTeam,
+                    "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
+                    "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
+                }
+    return mlb_upcoming_games
+
+
+def _mlb_final_game_ids(mlb_games, prev_game_ids):
+    return [
+        game["game_id"]
+        for game in mlb_games
+        if game["status"] == "Final"
+        and game["game_type"] not in ("E", "S", "A")
+        and game["game_id"] not in prev_game_ids
+    ]
+
+
 class StatsMLB(Stats):
     """A class for handling and analyzing MLB statistics.
     Inherits from the Stats parent class.
@@ -127,16 +186,36 @@ class StatsMLB(Stats):
         # The away pitcher's "1st inning allowed" stats are the home team's first
         # inning, and vice versa.
         away_rows, away_bullpen = self._team_player_rows(
-            boxscore["teams"]["away"]["players"], side="away", team=awayTeam, opponent=homeTeam,
-            opp_pitcher=homePitcher, opp_pitcher_id=homePitcherId, opp_pitcher_hand=homePitcherHand,
-            starting_pitcher_id=awayPitcherId, inning1_runs=home1["runs"], inning1_hits=home1["hits"],
-            gameId=gameId, game_date=game_date, game=game, bpf=bpf,
+            boxscore["teams"]["away"]["players"],
+            side="away",
+            team=awayTeam,
+            opponent=homeTeam,
+            opp_pitcher=homePitcher,
+            opp_pitcher_id=homePitcherId,
+            opp_pitcher_hand=homePitcherHand,
+            starting_pitcher_id=awayPitcherId,
+            inning1_runs=home1["runs"],
+            inning1_hits=home1["hits"],
+            gameId=gameId,
+            game_date=game_date,
+            game=game,
+            bpf=bpf,
         )
         home_rows, home_bullpen = self._team_player_rows(
-            boxscore["teams"]["home"]["players"], side="home", team=homeTeam, opponent=awayTeam,
-            opp_pitcher=awayPitcher, opp_pitcher_id=awayPitcherId, opp_pitcher_hand=awayPitcherHand,
-            starting_pitcher_id=homePitcherId, inning1_runs=away1["runs"], inning1_hits=away1["hits"],
-            gameId=gameId, game_date=game_date, game=game, bpf=bpf,
+            boxscore["teams"]["home"]["players"],
+            side="home",
+            team=homeTeam,
+            opponent=awayTeam,
+            opp_pitcher=awayPitcher,
+            opp_pitcher_id=awayPitcherId,
+            opp_pitcher_hand=awayPitcherHand,
+            starting_pitcher_id=homePitcherId,
+            inning1_runs=away1["runs"],
+            inning1_hits=away1["hits"],
+            gameId=gameId,
+            game_date=game_date,
+            game=game,
+            bpf=bpf,
         )
 
         new_games = pd.DataFrame.from_records(away_rows + home_rows)
@@ -146,18 +225,52 @@ class StatsMLB(Stats):
         home_adj = self._bullpen_adj(home_bullpen, bpf)
         away_adj = self._bullpen_adj(away_bullpen, bpf)
         teams = [
-            self._team_row(homeTeam, awayTeam, gameId, game_date, boxscore, bpf,
-                           home_bullpen, home_adj, me="home", opp="away"),
-            self._team_row(awayTeam, homeTeam, gameId, game_date, boxscore, bpf,
-                           away_bullpen, away_adj, me="away", opp="home"),
+            self._team_row(
+                homeTeam,
+                awayTeam,
+                gameId,
+                game_date,
+                boxscore,
+                bpf,
+                home_bullpen,
+                home_adj,
+                me="home",
+                opp="away",
+            ),
+            self._team_row(
+                awayTeam,
+                homeTeam,
+                gameId,
+                game_date,
+                boxscore,
+                bpf,
+                away_bullpen,
+                away_adj,
+                me="away",
+                opp="home",
+            ),
         ]
         self.teamlog = pd.concat(
             [self.teamlog, pd.DataFrame.from_records(teams)], ignore_index=True
         )
 
     def _team_player_rows(
-        self, players, *, side, team, opponent, opp_pitcher, opp_pitcher_id, opp_pitcher_hand,
-        starting_pitcher_id, inning1_runs, inning1_hits, gameId, game_date, game, bpf,
+        self,
+        players,
+        *,
+        side,
+        team,
+        opponent,
+        opp_pitcher,
+        opp_pitcher_id,
+        opp_pitcher_hand,
+        starting_pitcher_id,
+        inning1_runs,
+        inning1_hits,
+        gameId,
+        game_date,
+        game,
+        bpf,
     ):
         """Build the per-player gamelog rows for one team and tally its bullpen.
 
@@ -167,17 +280,33 @@ class StatsMLB(Stats):
         is_home = side == "home"
         rows = []
         bullpen = dict.fromkeys(
-            ["pitches thrown", "pitcher strikeouts", "pitching outs", "batters faced",
-             "walks allowed", "hits allowed", "home runs allowed", "runs allowed"], 0
+            [
+                "pitches thrown",
+                "pitcher strikeouts",
+                "pitching outs",
+                "batters faced",
+                "walks allowed",
+                "hits allowed",
+                "home runs allowed",
+                "runs allowed",
+            ],
+            0,
         )
         for v in players.values():
             if v["person"]["id"] == starting_pitcher_id or v.get("battingOrder"):
                 n = self._player_game_row(
-                    v, gameId=gameId, game_date=game_date, team=team, opponent=opponent,
-                    opp_pitcher=opp_pitcher, opp_pitcher_id=opp_pitcher_id,
-                    opp_pitcher_hand=opp_pitcher_hand, is_home=is_home,
+                    v,
+                    gameId=gameId,
+                    game_date=game_date,
+                    team=team,
+                    opponent=opponent,
+                    opp_pitcher=opp_pitcher,
+                    opp_pitcher_id=opp_pitcher_id,
+                    opp_pitcher_hand=opp_pitcher_hand,
+                    is_home=is_home,
                     starting_pitcher_id=starting_pitcher_id,
-                    inning1_runs=inning1_runs, inning1_hits=inning1_hits,
+                    inning1_runs=inning1_runs,
+                    inning1_hits=inning1_hits,
                 )
                 bat_side = 0
                 if n["starting batter"]:
@@ -186,7 +315,9 @@ class StatsMLB(Stats):
                         continue
                 adj = self._park_adjusted(n, v, bpf)
                 bip = (
-                    n["atBats"] - n["batter strikeouts"] - n["home runs"]
+                    n["atBats"]
+                    - n["batter strikeouts"]
+                    - n["home runs"]
                     - v["stats"]["batting"].get("sacFlies", 0)
                 )
                 n.update(self._pitching_rates(n, adj))
@@ -198,8 +329,19 @@ class StatsMLB(Stats):
 
     @staticmethod
     def _player_game_row(
-        v, *, gameId, game_date, team, opponent, opp_pitcher, opp_pitcher_id, opp_pitcher_hand,
-        is_home, starting_pitcher_id, inning1_runs, inning1_hits,
+        v,
+        *,
+        gameId,
+        game_date,
+        team,
+        opponent,
+        opp_pitcher,
+        opp_pitcher_id,
+        opp_pitcher_hand,
+        is_home,
+        starting_pitcher_id,
+        inning1_runs,
+        inning1_hits,
     ):
         """Base gamelog row (batting + pitching counting stats) for one player."""
         bat = v["stats"]["batting"]
@@ -223,10 +365,14 @@ class StatsMLB(Stats):
             "starting batter": int(v.get("battingOrder", "001")[2]) == 0,
             "battingOrder": int(v.get("battingOrder", "000")[0]),
             "hits": bat.get("hits", 0),
-            "total bases": bat.get("hits", 0) + bat.get("doubles", 0)
-            + 2 * bat.get("triples", 0) + 3 * bat.get("homeRuns", 0),
-            "singles": bat.get("hits", 0) - bat.get("doubles", 0)
-            - bat.get("triples", 0) - bat.get("homeRuns", 0),
+            "total bases": bat.get("hits", 0)
+            + bat.get("doubles", 0)
+            + 2 * bat.get("triples", 0)
+            + 3 * bat.get("homeRuns", 0),
+            "singles": bat.get("hits", 0)
+            - bat.get("doubles", 0)
+            - bat.get("triples", 0)
+            - bat.get("homeRuns", 0),
             "doubles": bat.get("doubles", 0),
             "triples": bat.get("triples", 0),
             "home runs": bat.get("homeRuns", 0),
@@ -249,26 +395,49 @@ class StatsMLB(Stats):
             "batters faced": pit.get("battersFaced", 0),
             "1st inning runs allowed": inning1_runs if is_sp else 0,
             "1st inning hits allowed": inning1_hits if is_sp else 0,
-            "hitter fantasy score": 3 * bat.get("hits", 0) + 2 * bat.get("doubles", 0)
-            + 5 * bat.get("triples", 0) + 7 * bat.get("homeRuns", 0) + 2 * bat.get("runs", 0)
-            + 2 * bat.get("rbi", 0) + 2 * bat.get("baseOnBalls", 0) + 2 * bat.get("hitByPitch", 0)
+            "hitter fantasy score": 3 * bat.get("hits", 0)
+            + 2 * bat.get("doubles", 0)
+            + 5 * bat.get("triples", 0)
+            + 7 * bat.get("homeRuns", 0)
+            + 2 * bat.get("runs", 0)
+            + 2 * bat.get("rbi", 0)
+            + 2 * bat.get("baseOnBalls", 0)
+            + 2 * bat.get("hitByPitch", 0)
             + 5 * bat.get("stolenBases", 0),
-            "pitcher fantasy score": 6 * pit.get("wins", 0) + 3 * pit.get("strikeOuts", 0)
-            - 3 * pit.get("earnedRuns", 0) + 3 * ip_whole + ip_frac
+            "pitcher fantasy score": 6 * pit.get("wins", 0)
+            + 3 * pit.get("strikeOuts", 0)
+            - 3 * pit.get("earnedRuns", 0)
+            + 3 * ip_whole
+            + ip_frac
             + (4 if ip_whole > 5 and pit.get("earnedRuns", 0) < 4 else 0),
-            "hitter fantasy points underdog": 3 * bat.get("hits", 0) + 3 * bat.get("doubles", 0)
-            + 5 * bat.get("triples", 0) + 7 * bat.get("homeRuns", 0) + 2 * bat.get("runs", 0)
-            + 2 * bat.get("rbi", 0) + 3 * bat.get("baseOnBalls", 0) + 3 * bat.get("hitByPitch", 0)
+            "hitter fantasy points underdog": 3 * bat.get("hits", 0)
+            + 3 * bat.get("doubles", 0)
+            + 5 * bat.get("triples", 0)
+            + 7 * bat.get("homeRuns", 0)
+            + 2 * bat.get("runs", 0)
+            + 2 * bat.get("rbi", 0)
+            + 3 * bat.get("baseOnBalls", 0)
+            + 3 * bat.get("hitByPitch", 0)
             + 4 * bat.get("stolenBases", 0),
-            "pitcher fantasy points underdog": 5 * pit.get("wins", 0) + 3 * pit.get("strikeOuts", 0)
-            - 3 * pit.get("earnedRuns", 0) + 3 * ip_whole
+            "pitcher fantasy points underdog": 5 * pit.get("wins", 0)
+            + 3 * pit.get("strikeOuts", 0)
+            - 3 * pit.get("earnedRuns", 0)
+            + 3 * ip_whole
             + (5 if ip_whole > 5 and pit.get("earnedRuns", 0) < 4 else 0),
-            "hitter fantasy points parlay": 3 * bat.get("hits", 0) + 3 * bat.get("doubles", 0)
-            + 6 * bat.get("triples", 0) + 9 * bat.get("homeRuns", 0) + 3 * bat.get("runs", 0)
-            + 3 * bat.get("rbi", 0) + 3 * bat.get("baseOnBalls", 0) + 3 * bat.get("hitByPitch", 0)
+            "hitter fantasy points parlay": 3 * bat.get("hits", 0)
+            + 3 * bat.get("doubles", 0)
+            + 6 * bat.get("triples", 0)
+            + 9 * bat.get("homeRuns", 0)
+            + 3 * bat.get("runs", 0)
+            + 3 * bat.get("rbi", 0)
+            + 3 * bat.get("baseOnBalls", 0)
+            + 3 * bat.get("hitByPitch", 0)
             + 6 * bat.get("stolenBases", 0),
-            "pitcher fantasy points parlay": 6 * pit.get("wins", 0) + 3 * pit.get("strikeOuts", 0)
-            - 3 * pit.get("earnedRuns", 0) + 3 * ip_whole + ip_frac,
+            "pitcher fantasy points parlay": 6 * pit.get("wins", 0)
+            + 3 * pit.get("strikeOuts", 0)
+            - 3 * pit.get("earnedRuns", 0)
+            + 3 * ip_whole
+            + ip_frac,
         }
 
     def _resolve_pitcher_hand(self, pid, name, game, side):
@@ -331,8 +500,12 @@ class StatsMLB(Stats):
     def _pitching_rates(n, adj):
         sp_outs = n["starting pitcher"] and n["pitching outs"]
         return {
-            "FIP": (3 * (13 * adj["HRA"] + 3 * adj["BB"] - 2 * adj["K"]) / n["pitching outs"] + _FIP_CONSTANT)
-            if sp_outs else 0,
+            "FIP": (
+                3 * (13 * adj["HRA"] + 3 * adj["BB"] - 2 * adj["K"]) / n["pitching outs"]
+                + _FIP_CONSTANT
+            )
+            if sp_outs
+            else 0,
             "WHIP": (3 * (adj["BB"] + adj["HA"]) / n["pitching outs"]) if sp_outs else 0,
             "ERA": (9 * adj["RA"] / n["pitching outs"]) if sp_outs else 0,
             "K9": (27 * adj["K"] / n["pitching outs"]) if sp_outs else 0,
@@ -349,9 +522,9 @@ class StatsMLB(Stats):
             "AVG": (n["hits"] / n["atBats"]) if has_ab else 0,
             "SLG": (n["total bases"] / n["atBats"]) if has_ab else 0,
             "PASO": (n["plateAppearances"] / adj["SO"])
-            if (n["starting batter"] and adj["SO"]) else n["plateAppearances"],
-            "BABIP": ((n["hits"] - n["home runs"]) / bip)
-            if (n["starting batter"] and bip) else 0,
+            if (n["starting batter"] and adj["SO"])
+            else n["plateAppearances"],
+            "BABIP": ((n["hits"] - n["home runs"]) / bip) if (n["starting batter"] and bip) else 0,
             "batSide": bat_side if n["starting batter"] else 0,
         }
 
@@ -380,7 +553,9 @@ class StatsMLB(Stats):
         }
 
     @staticmethod
-    def _team_row(team, opponent, gameId, game_date, boxscore, bpf, bullpen, bullpen_adj, *, me, opp):
+    def _team_row(
+        team, opponent, gameId, game_date, boxscore, bpf, bullpen, bullpen_adj, *, me, opp
+    ):
         """One team-level teamlog row; ``me``/``opp`` select the box-score side."""
         me_bat = boxscore["teams"][me]["teamStats"]["batting"]
         opp_bat = boxscore["teams"][opp]["teamStats"]["batting"]
@@ -397,16 +572,27 @@ class StatsMLB(Stats):
             "AVG": float(me_bat["avg"]),
             "SLG": float(me_bat["slg"]),
             "PASO": (me_bat["plateAppearances"] / me_bat["strikeOuts"])
-            if me_bat["strikeOuts"] else me_bat["plateAppearances"],
+            if me_bat["strikeOuts"]
+            else me_bat["plateAppearances"],
             "BABIP": (me_bat["hits"] - me_bat["homeRuns"])
             / (me_bat["atBats"] - me_bat["strikeOuts"] - me_bat["homeRuns"] - me_bat["sacFlies"]),
-            "DER": 1 - (
+            "DER": 1
+            - (
                 (opp_bat["hits"] + me_errors - opp_bat["homeRuns"])
-                / (opp_bat["plateAppearances"] - opp_bat["baseOnBalls"] - opp_bat["hitByPitch"]
-                   - opp_bat["homeRuns"] - opp_bat["strikeOuts"])
+                / (
+                    opp_bat["plateAppearances"]
+                    - opp_bat["baseOnBalls"]
+                    - opp_bat["hitByPitch"]
+                    - opp_bat["homeRuns"]
+                    - opp_bat["strikeOuts"]
+                )
             ),
-            "FIP": (3 * (13 * bullpen_adj["HRA"] + 3 * bullpen_adj["BB"] - 2 * bullpen_adj["K"])
-                    / outs + _FIP_CONSTANT) if outs else 0,
+            "FIP": (
+                3 * (13 * bullpen_adj["HRA"] + 3 * bullpen_adj["BB"] - 2 * bullpen_adj["K"]) / outs
+                + _FIP_CONSTANT
+            )
+            if outs
+            else 0,
             "WHIP": (3 * (bullpen_adj["BB"] + bullpen_adj["HA"]) / outs) if outs else 0,
             "ERA": (9 * bullpen_adj["RA"] / outs) if outs else 0,
             "K9": (27 * bullpen_adj["K"] / outs) if outs else 0,
@@ -479,8 +665,12 @@ class StatsMLB(Stats):
             outfile.write(res.text)
 
     def update(self):
-        """Updates the MLB player statistics."""
-        # Get the current MLB schedule
+        """Fetch and append new MLB game logs, then trim to the rolling 4-year window.
+
+        Queries a 60-day schedule window starting from the last logged date (or
+        season start if the gamelog is empty), parses each Final-status game, and
+        writes the updated gamelog/teamlog/players bundle to disk.
+        """
         today = datetime.today().date()
         if self.gamelog.empty:
             next_day = self.season_start
@@ -494,70 +684,23 @@ class StatsMLB(Stats):
             start_date=next_day.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
         )
         mlb_teams = mlb.get("teams", {"sportId": 1})
-        mlb_upcoming_games = {}
-        for game in mlb_games:
-            if game["status"] in ["Pre-Game", "Scheduled"] and game["game_type"] not in ["A"]:
-                awayTeam = next(
-                    team["abbreviation"].replace("AZ", "ARI")
-                    for team in mlb_teams["teams"]
-                    if team["id"] == game["away_id"]
-                )
-                homeTeam = next(
-                    team["abbreviation"].replace("AZ", "ARI")
-                    for team in mlb_teams["teams"]
-                    if team["id"] == game["home_id"]
-                )
-                game_bs = mlb.boxscore_data(game["game_id"])
-                players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
-                if game["game_num"] == 1:
-                    mlb_upcoming_games[awayTeam] = {
-                        "Pitcher": remove_accents(game["away_probable_pitcher"]),
-                        "Home": False,
-                        "Opponent": homeTeam,
-                        "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
-                        "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
-                    }
-                    mlb_upcoming_games[homeTeam] = {
-                        "Pitcher": remove_accents(game["home_probable_pitcher"]),
-                        "Home": True,
-                        "Opponent": awayTeam,
-                        "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
-                        "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
-                    }
-                elif game["game_num"] > 1:
-                    mlb_upcoming_games[awayTeam + str(game["game_num"])] = {
-                        "Pitcher": remove_accents(game["away_probable_pitcher"]),
-                        "Home": False,
-                        "Opponent": homeTeam,
-                        "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
-                        "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
-                    }
-                    mlb_upcoming_games[homeTeam + str(game["game_num"])] = {
-                        "Pitcher": remove_accents(game["home_probable_pitcher"]),
-                        "Home": True,
-                        "Opponent": awayTeam,
-                        "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
-                        "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
-                    }
-
-        self.upcoming_games = mlb_upcoming_games
+        self.upcoming_games = _build_mlb_upcoming_games(mlb_games, mlb_teams)
 
         prev_game_ids = [] if self.gamelog.empty else self.gamelog.gameId.unique()
-        mlb_game_ids = [
-            game["game_id"]
-            for game in mlb_games
-            if game["status"] == "Final"
-            and game["game_type"] != "E"
-            and game["game_type"] != "S"
-            and game["game_type"] != "A"
-            and game["game_id"] not in prev_game_ids
-        ]
+        mlb_game_ids = _mlb_final_game_ids(mlb_games, prev_game_ids)
 
-        # Parse the game stats
         for id in tqdm(mlb_game_ids, desc="Getting MLB Stats"):
             self.parse_game(id)
 
-        # Remove old games to prevent file bloat
+        self._trim_old_games(today)
+
+        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
+            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+            self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
+
+        write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
+
+    def _trim_old_games(self, today):
         four_years_ago = today - timedelta(days=1461)
         self.gamelog = self.gamelog[
             self.gamelog["gameDate"].apply(
@@ -572,13 +715,6 @@ class StatsMLB(Stats):
         ]
         self.gamelog.drop_duplicates(subset=["gameId", "playerId"], keep="last", inplace=True)
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
-
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
-            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
-
-        # Write to file
-        write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
 
     def profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
@@ -772,15 +908,41 @@ class StatsMLB(Stats):
     def _mlb_fantasy_props(market):
         if "pitcher" in market:
             if "underdog" in market:
-                return [("pitcher win", 5), ("pitcher strikeouts", 3), ("runs allowed", -3),
-                        ("pitching outs", 1), ("quality start", 5)]
-            return [("pitcher win", 6), ("pitcher strikeouts", 3), ("runs allowed", -3),
-                    ("pitching outs", 1), ("quality start", 4)]
+                return [
+                    ("pitcher win", 5),
+                    ("pitcher strikeouts", 3),
+                    ("runs allowed", -3),
+                    ("pitching outs", 1),
+                    ("quality start", 5),
+                ]
+            return [
+                ("pitcher win", 6),
+                ("pitcher strikeouts", 3),
+                ("runs allowed", -3),
+                ("pitching outs", 1),
+                ("quality start", 4),
+            ]
         if "underdog" in market:
-            return [("singles", 3), ("doubles", 6), ("triples", 8), ("home runs", 10),
-                    ("walks", 3), ("rbi", 2), ("runs", 2), ("stolen bases", 4)]
-        return [("singles", 3), ("doubles", 5), ("triples", 8), ("home runs", 10),
-                ("walks", 2), ("rbi", 2), ("runs", 2), ("stolen bases", 5)]
+            return [
+                ("singles", 3),
+                ("doubles", 6),
+                ("triples", 8),
+                ("home runs", 10),
+                ("walks", 3),
+                ("rbi", 2),
+                ("runs", 2),
+                ("stolen bases", 4),
+            ]
+        return [
+            ("singles", 3),
+            ("doubles", 5),
+            ("triples", 8),
+            ("home runs", 10),
+            ("walks", 2),
+            ("rbi", 2),
+            ("runs", 2),
+            ("stolen bases", 5),
+        ]
 
     @staticmethod
     def _keep_positive(new, old):
